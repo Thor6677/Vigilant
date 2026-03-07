@@ -5,6 +5,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import get_settings
 from app.db.models import init_db
 from app.db.cache import ESICache  # registers table with Base
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta  # registers SDE tables
+from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.chat import router as chat_router
@@ -37,3 +39,5 @@ app.include_router(chat_router)
 @app.on_event("startup")
 async def startup():
     await init_db()
+    import asyncio
+    asyncio.create_task(ensure_sde_loaded())

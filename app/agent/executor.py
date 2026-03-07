@@ -1,5 +1,6 @@
 """
 Executes tool calls from Claude against the ESI API.
+Uses local SDE lookups where possible, falls back to ESI.
 """
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,16 +14,7 @@ from app.esi import industry as esi_industry
 from app.esi import market as esi_market
 from app.esi import universe as esi_universe
 from app.esi import corporation as esi_corp
-
-# Stations known to have cloning services (NPC stations — simplified list of major hubs)
-# In production this would be seeded from the SDE (Static Data Export)
-CLONING_STATION_IDS = {
-    60003760,  # Jita IV - Moon 4 - Caldari Navy Assembly Plant
-    60008494,  # Amarr VIII (Oris) - Emperor Family Academy
-    60011866,  # Dodixie IX - Moon 20 - Federation Navy Assembly Plant
-    60004588,  # Rens VI - Moon 8 - Brutor Tribe Treasury
-    60005686,  # Hek VIII - Moon 12 - Boundless Creation Factory
-}
+from app.sde import lookup as sde
 
 
 async def _get_character(character_id: int, db: AsyncSession) -> tuple[Character, ESIClient]:
@@ -32,6 +24,12 @@ async def _get_character(character_id: int, db: AsyncSession) -> tuple[Character
         raise ValueError(f"Character {character_id} not found in database.")
     token = await refresh_token(char, db)
     return char, ESIClient(token, db=db)
+
+
+async def _any_client(db: AsyncSession) -> ESIClient:
+    result = await db.execute(select(Character).limit(1))
+    char = result.scalar_one_or_none()
+    return ESIClient(char.access_token if char else "", db=db)
 
 
 async def execute_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> str:
@@ -44,15 +42,30 @@ async def execute_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> st
 
 
 async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
+
     if tool_name == "get_character_location":
         char, client = await _get_character(inp["character_id"], db)
         location = await esi_char.get_location(client, inp["character_id"])
-        system = await esi_universe.get_system(client, location["solar_system_id"])
-        result = {
-            "solar_system_id": location["solar_system_id"],
-            "solar_system_name": system.get("name"),
-            "security_status": round(system.get("security_status", 0), 2),
-        }
+        system_id = location["solar_system_id"]
+
+        # SDE lookup first, fall back to ESI
+        sys_info = await sde.system_info(db, system_id)
+        if sys_info:
+            result = {
+                "solar_system_id": system_id,
+                "solar_system_name": sys_info["system_name"],
+                "security_status": sys_info["security"],
+                "constellation": sys_info.get("constellation"),
+                "region": sys_info.get("region"),
+            }
+        else:
+            system = await esi_universe.get_system(client, system_id)
+            result = {
+                "solar_system_id": system_id,
+                "solar_system_name": system.get("name"),
+                "security_status": round(system.get("security_status", 0), 2),
+            }
+
         if "station_id" in location:
             station = await esi_universe.get_station(client, location["station_id"])
             result["station_id"] = location["station_id"]
@@ -69,15 +82,33 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
     elif tool_name == "get_character_assets":
         char, client = await _get_character(inp["character_id"], db)
         assets = await esi_assets.get_character_assets(client, inp["character_id"])
-        # Resolve location names for top 20 unique locations to keep response manageable
+
+        # Resolve type names via SDE first
+        type_ids = list({a["type_id"] for a in assets[:200]})
+        sde_names = await sde.type_ids_to_names(db, type_ids)
+
+        # For any not in SDE, fall back to ESI resolve
+        missing_ids = [tid for tid in type_ids if tid not in sde_names]
+        if missing_ids:
+            try:
+                esi_names = await esi_universe.resolve_ids(client, missing_ids)
+                for n in esi_names:
+                    sde_names[n["id"]] = n["name"]
+            except Exception:
+                pass
+
+        # Resolve location names
         location_ids = list({a["location_id"] for a in assets[:100]})[:20]
         try:
-            names = await esi_universe.resolve_ids(client, location_ids)
-            name_map = {n["id"]: n["name"] for n in names}
+            loc_names_raw = await esi_universe.resolve_ids(client, location_ids)
+            loc_map = {n["id"]: n["name"] for n in loc_names_raw}
         except Exception:
-            name_map = {}
+            loc_map = {}
+
         for asset in assets:
-            asset["location_name"] = name_map.get(asset["location_id"], str(asset["location_id"]))
+            asset["type_name"] = sde_names.get(asset["type_id"], f"Type {asset['type_id']}")
+            asset["location_name"] = loc_map.get(asset["location_id"], str(asset["location_id"]))
+
         return {"total_items": len(assets), "assets": assets[:200]}
 
     elif tool_name == "get_industry_jobs":
@@ -85,6 +116,14 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         jobs = await esi_industry.get_character_jobs(
             client, inp["character_id"], inp.get("include_completed", False)
         )
+        # Enrich job blueprint/product names from SDE
+        for job in jobs:
+            if "blueprint_type_id" in job:
+                name = await sde.type_id_to_name(db, job["blueprint_type_id"])
+                job["blueprint_name"] = name or f"Type {job['blueprint_type_id']}"
+            if "product_type_id" in job:
+                name = await sde.type_id_to_name(db, job["product_type_id"])
+                job["product_name"] = name or f"Type {job['product_type_id']}"
         return {"jobs": jobs}
 
     elif tool_name == "get_corporation_industry_jobs":
@@ -94,38 +133,52 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         jobs = await esi_industry.get_corporation_jobs(
             client, char.corporation_id, inp.get("include_completed", False)
         )
+        for job in jobs:
+            if "blueprint_type_id" in job:
+                name = await sde.type_id_to_name(db, job["blueprint_type_id"])
+                job["blueprint_name"] = name or f"Type {job['blueprint_type_id']}"
+            if "product_type_id" in job:
+                name = await sde.type_id_to_name(db, job["product_type_id"])
+                job["product_name"] = name or f"Type {job['product_type_id']}"
         return {"jobs": jobs}
 
     elif tool_name == "get_market_prices":
-        char_result = await db.execute(select(Character).limit(1))
-        any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "", db=db)
-
+        client = await _any_client(db)
         item_name = inp["item_name"]
         region_name = inp.get("region_name", "The Forge").lower()
         region_id = esi_market.REGIONS.get(region_name, 10000002)
 
-        search = await esi_universe.search_universe(client, item_name, ["inventory_type"])
-        type_ids = search.get("inventory_type", [])
-        if not type_ids:
-            return {"error": f"Item '{item_name}' not found."}
+        # Try SDE lookup first
+        type_id = await sde.type_name_to_id(db, item_name)
+        if type_id is None:
+            # Partial SDE search
+            matches = await sde.search_types(db, item_name, limit=5)
+            if matches:
+                type_id = matches[0]["type_id"]
+                item_name = matches[0]["type_name"]
+        if type_id is None:
+            # Fall back to ESI search
+            search = await esi_universe.search_universe(client, item_name, ["inventory_type"])
+            type_ids = search.get("inventory_type", [])
+            if not type_ids:
+                return {"error": f"Item '{item_name}' not found."}
+            type_id = type_ids[0]
+            type_info = await esi_universe.get_type(client, type_id)
+            item_name = type_info.get("name", item_name)
+        else:
+            confirmed_name = await sde.type_id_to_name(db, type_id)
+            item_name = confirmed_name or item_name
 
-        type_id = type_ids[0]
-        type_info = await esi_universe.get_type(client, type_id)
         orders = await esi_market.get_market_orders(client, region_id, type_id=type_id)
-
         buy_orders = [o for o in orders if o["is_buy_order"]]
         sell_orders = [o for o in orders if not o["is_buy_order"]]
 
-        best_buy = max((o["price"] for o in buy_orders), default=0)
-        best_sell = min((o["price"] for o in sell_orders), default=0)
-
         return {
-            "item_name": type_info.get("name", item_name),
+            "item_name": item_name,
             "type_id": type_id,
             "region": region_name.title(),
-            "best_buy_price": best_buy,
-            "best_sell_price": best_sell,
+            "best_buy_price": max((o["price"] for o in buy_orders), default=0),
+            "best_sell_price": min((o["price"] for o in sell_orders), default=0),
             "buy_orders": len(buy_orders),
             "sell_orders": len(sell_orders),
         }
@@ -134,33 +187,16 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         char, client = await _get_character(inp["character_id"], db)
         location = await esi_char.get_location(client, inp["character_id"])
         current_system_id = location["solar_system_id"]
+        max_jumps = inp.get("max_jumps", 15)
 
-        # Check if already docked at cloning station
-        if location.get("station_id") in CLONING_STATION_IDS:
-            station = await esi_universe.get_station(client, location["station_id"])
-            return {"message": "You are already docked at a cloning facility.", "station": station.get("name")}
+        # Use full BFS via SDE if loaded
+        if await sde.sde_is_loaded(db):
+            results = await sde.nearest_cloning_facilities(db, current_system_id, max_jumps=max_jumps)
+            if results:
+                return {"nearest_cloning_facilities": results}
 
-        # Try routing to known cloning stations
-        max_jumps = inp.get("max_jumps", 10)
-        results = []
-        for station_id in CLONING_STATION_IDS:
-            try:
-                station = await esi_universe.get_station(client, station_id)
-                dest_system_id = station.get("system_id")
-                if dest_system_id:
-                    route = await esi_universe.get_route(client, current_system_id, dest_system_id)
-                    jumps = len(route) - 1
-                    if jumps <= max_jumps:
-                        results.append({
-                            "station_name": station.get("name"),
-                            "system_id": dest_system_id,
-                            "jumps": jumps,
-                        })
-            except Exception:
-                continue
-
-        results.sort(key=lambda x: x["jumps"])
-        return {"nearest_cloning_facilities": results[:5]}
+        # ESI fallback
+        return {"error": "SDE not loaded yet. Please try again in a few minutes while the database initialises."}
 
     elif tool_name == "get_character_clones":
         char, client = await _get_character(inp["character_id"], db)
@@ -168,31 +204,45 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         return clones
 
     elif tool_name == "get_route":
-        char_result = await db.execute(select(Character).limit(1))
-        any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "", db=db)
+        client = await _any_client(db)
 
-        origin_search = await esi_universe.search_universe(client, inp["origin"], ["solar_system"])
-        dest_search = await esi_universe.search_universe(client, inp["destination"], ["solar_system"])
+        # Resolve system names via SDE
+        origin_id = await sde.system_name_to_id(db, inp["origin"])
+        dest_id = await sde.system_name_to_id(db, inp["destination"])
 
-        origin_ids = origin_search.get("solar_system", [])
-        dest_ids = dest_search.get("solar_system", [])
-        if not origin_ids or not dest_ids:
+        # Fall back to ESI search if not found
+        if not origin_id:
+            s = await esi_universe.search_universe(client, inp["origin"], ["solar_system"])
+            ids = s.get("solar_system", [])
+            origin_id = ids[0] if ids else None
+        if not dest_id:
+            s = await esi_universe.search_universe(client, inp["destination"], ["solar_system"])
+            ids = s.get("solar_system", [])
+            dest_id = ids[0] if ids else None
+
+        if not origin_id or not dest_id:
             return {"error": "Could not find one or both systems."}
 
-        route = await esi_universe.get_route(client, origin_ids[0], dest_ids[0], inp.get("flag", "shortest"))
-        names = await esi_universe.resolve_ids(client, route)
-        name_map = {n["id"]: n["name"] for n in names}
-        return {
-            "jumps": len(route) - 1,
-            "route": [name_map.get(sid, str(sid)) for sid in route],
-        }
+        route = await esi_universe.get_route(client, origin_id, dest_id, inp.get("flag", "shortest"))
+
+        # Resolve system names from SDE
+        route_names = []
+        for sid in route:
+            info = await sde.system_info(db, sid)
+            route_names.append(info["system_name"] if info else str(sid))
+
+        return {"jumps": len(route) - 1, "route": route_names}
 
     elif tool_name == "get_system_info":
-        char_result = await db.execute(select(Character).limit(1))
-        any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "", db=db)
+        # Try SDE first
+        system_id = await sde.system_name_to_id(db, inp["system_name"])
+        if system_id:
+            info = await sde.system_info(db, system_id)
+            if info:
+                return info
 
+        # ESI fallback
+        client = await _any_client(db)
         search = await esi_universe.search_universe(client, inp["system_name"], ["solar_system"])
         ids = search.get("solar_system", [])
         if not ids:
@@ -205,7 +255,6 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
             "security_status": round(system["security_status"], 2),
             "constellation": constellation["name"],
             "region": region["name"],
-            "star_id": system.get("star_id"),
             "planets": len(system.get("planets", [])),
         }
 
@@ -214,6 +263,10 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         if not char.corporation_id:
             return {"error": "Character has no corporation."}
         assets = await esi_assets.get_corporation_assets(client, char.corporation_id)
+        type_ids = list({a["type_id"] for a in assets[:200]})
+        sde_names = await sde.type_ids_to_names(db, type_ids)
+        for asset in assets:
+            asset["type_name"] = sde_names.get(asset["type_id"], f"Type {asset['type_id']}")
         return {"total_items": len(assets), "assets": assets[:200]}
 
     elif tool_name == "get_wallet_balance":
@@ -222,11 +275,17 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         return {"balance_isk": balance, "formatted": f"{balance:,.2f} ISK"}
 
     elif tool_name == "resolve_type_names":
-        char_result = await db.execute(select(Character).limit(1))
-        any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "", db=db)
-        names = await esi_universe.resolve_ids(client, inp["type_ids"])
-        return {"names": names}
+        sde_names = await sde.type_ids_to_names(db, inp["type_ids"])
+        missing = [tid for tid in inp["type_ids"] if tid not in sde_names]
+        if missing:
+            client = await _any_client(db)
+            try:
+                esi_names = await esi_universe.resolve_ids(client, missing)
+                for n in esi_names:
+                    sde_names[n["id"]] = n["name"]
+            except Exception:
+                pass
+        return {"names": [{"id": tid, "name": sde_names.get(tid, f"Type {tid}")} for tid in inp["type_ids"]]}
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}
