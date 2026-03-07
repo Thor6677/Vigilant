@@ -111,6 +111,56 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
 
         return {"total_items": len(assets), "assets": assets[:200]}
 
+    elif tool_name == "find_item_in_assets":
+        char, client = await _get_character(inp["character_id"], db)
+        item_name = inp["item_name"]
+
+        # Find matching type_ids from SDE
+        matches = await sde.search_types(db, item_name, limit=20)
+        if not matches:
+            return {"error": f"No item type matching '{item_name}' found in SDE."}
+        matching_type_ids = {m["type_id"] for m in matches}
+
+        # Fetch ALL assets
+        assets = await esi_assets.get_character_assets(client, inp["character_id"])
+
+        # Filter to matching types
+        found = [a for a in assets if a["type_id"] in matching_type_ids]
+        if not found:
+            return {
+                "result": f"No '{item_name}' found in assets.",
+                "total_assets_searched": len(assets),
+                "matched_type_ids": list(matching_type_ids),
+            }
+
+        # Resolve type names
+        type_name_map = await sde.type_ids_to_names(db, list({a["type_id"] for a in found}))
+
+        # Resolve location names
+        location_ids = list({a["location_id"] for a in found})
+        try:
+            loc_names_raw = await esi_universe.resolve_ids(client, location_ids)
+            loc_map = {n["id"]: n["name"] for n in loc_names_raw}
+        except Exception:
+            loc_map = {}
+
+        results = []
+        for asset in found:
+            results.append({
+                "type_name": type_name_map.get(asset["type_id"], f"Type {asset['type_id']}"),
+                "quantity": asset.get("quantity", 1),
+                "location_name": loc_map.get(asset["location_id"], str(asset["location_id"])),
+                "location_id": asset["location_id"],
+                "location_flag": asset.get("location_flag"),
+            })
+
+        return {
+            "item_search": item_name,
+            "total_assets_searched": len(assets),
+            "found": len(results),
+            "results": results,
+        }
+
     elif tool_name == "get_industry_jobs":
         char, client = await _get_character(inp["character_id"], db)
         jobs = await esi_industry.get_character_jobs(

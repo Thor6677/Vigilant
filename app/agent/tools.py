@@ -20,9 +20,9 @@ TOOLS = [
     {
         "name": "get_character_assets",
         "description": (
-            "Get the full asset list for a character. Returns items with type_id, quantity, "
-            "location_id, and location_flag. Use resolve_type_names to get human-readable item names. "
-            "Use this to answer questions like 'where is my tritanium' or 'what ships do I have'."
+            "Get a summary of all assets for a character grouped by location. "
+            "Use this for general questions like 'what do I have' or 'show my assets'. "
+            "For finding a SPECIFIC item or ship by name, use find_item_in_assets instead."
         ),
         "input_schema": {
             "type": "object",
@@ -30,6 +30,23 @@ TOOLS = [
                 "character_id": {"type": "integer", "description": "The character ID to query."},
             },
             "required": ["character_id"],
+        },
+    },
+    {
+        "name": "find_item_in_assets",
+        "description": (
+            "Search all of a character's assets for a specific item or ship by name. "
+            "Searches ALL assets (not just the first 200) and returns every match with its location. "
+            "Use this when asked about a specific item, e.g. 'where is my Archon', 'where is my Tritanium', "
+            "'do I have any Dreads', 'find my mining barges'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "character_id": {"type": "integer", "description": "The character ID to query."},
+                "item_name": {"type": "string", "description": "The item or ship name to search for. Partial matches work."},
+            },
+            "required": ["character_id", "item_name"],
         },
     },
     {
