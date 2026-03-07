@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/capsuleerai.db
+    volumes:
+      - app_data:/data
+    networks:
+      - web
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/capsuleerai.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_certs:/etc/letsencrypt:ro
+      - nginx_webroot:/var/www/certbot:ro
+    networks:
+      - web
+    depends_on:
+      - app
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - nginx_certs:/etc/letsencrypt
+      - nginx_webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+volumes:
+  app_data:
+  nginx_certs:
+  nginx_webroot:
+
+networks:
+  web:
+    driver: bridge

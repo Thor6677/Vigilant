@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CapsuleerAI{% endblock %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-lg font-light tracking-widest text-white uppercase">Dashboard</h1>
+    <a href="/auth/login"
+       class="text-xs border border-eve-accent text-eve-accent hover:bg-eve-accent hover:text-eve-bg px-4 py-2 rounded tracking-widest uppercase transition-colors">
+        + Add Character
+    </a>
+</div>
+
+<!-- Character Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+{% for char in characters %}
+<div class="eve-border rounded p-4 bg-eve-surface {% if char.character_id == active_char.character_id %}eve-glow border-eve-accent{% endif %}">
+    <div class="flex items-start justify-between mb-3">
+        <div>
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+                 alt="{{ char.character_name }}"
+                 class="w-12 h-12 rounded border border-eve-border mb-2">
+            <div class="text-white font-medium text-sm">{{ char.character_name }}</div>
+            {% if char.corporation_name %}
+            <div class="text-eve-muted text-xs">{{ char.corporation_name }}</div>
+            {% endif %}
+            {% if char.alliance_name %}
+            <div class="text-eve-gold text-xs">{{ char.alliance_name }}</div>
+            {% endif %}
+        </div>
+        {% if char.character_id == active_char.character_id %}
+        <span class="text-xs bg-eve-accent text-eve-bg px-2 py-1 rounded">Active</span>
+        {% endif %}
+    </div>
+
+    <div class="text-xs text-eve-muted mb-3 space-y-1">
+        <div>ID: {{ char.character_id }}</div>
+        {% if char.corporation_id %}
+        <div>Corp ID: {{ char.corporation_id }}</div>
+        {% endif %}
+        <div>Last seen: {{ char.last_seen.strftime('%Y-%m-%d %H:%M') if char.last_seen else 'Unknown' }}</div>
+    </div>
+
+    <div class="flex gap-2">
+        {% if char.character_id != active_char.character_id %}
+        <form method="POST" action="/auth/switch/{{ char.character_id }}" class="flex-1">
+            <button type="submit"
+                    class="w-full text-xs border border-eve-border hover:border-eve-accent text-eve-muted hover:text-eve-accent py-1.5 rounded transition-colors">
+                Set Active
+            </button>
+        </form>
+        {% endif %}
+        <form method="POST" action="/auth/remove/{{ char.character_id }}"
+              onsubmit="return confirm('Remove {{ char.character_name }}?')">
+            <button type="submit"
+                    class="text-xs border border-eve-border hover:border-eve-danger text-eve-muted hover:text-eve-danger px-3 py-1.5 rounded transition-colors">
+                ✕
+            </button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Quick Actions -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <a href="/chat" class="eve-border rounded p-4 bg-eve-surface hover:border-eve-accent transition-colors group">
+        <div class="text-eve-accent text-2xl mb-2">◈</div>
+        <div class="text-white text-sm font-medium mb-1">AURA Chat</div>
+        <div class="text-eve-muted text-xs">Ask anything about your characters, assets, and the universe.</div>
+    </a>
+    <a href="/chat" class="eve-border rounded p-4 bg-eve-surface hover:border-eve-accent transition-colors group">
+        <div class="text-eve-accent text-2xl mb-2">⚙</div>
+        <div class="text-white text-sm font-medium mb-1">Industry Jobs</div>
+        <div class="text-eve-muted text-xs">Ask AURA about your active manufacturing and research jobs.</div>
+    </a>
+    <a href="/chat" class="eve-border rounded p-4 bg-eve-surface hover:border-eve-accent transition-colors group">
+        <div class="text-eve-accent text-2xl mb-2">◎</div>
+        <div class="text-white text-sm font-medium mb-1">Market Prices</div>
+        <div class="text-eve-muted text-xs">Check item prices across Jita, Amarr, Dodixie, and more.</div>
+    </a>
+</div>
+
+<!-- Active Character Quick Info -->
+{% if active_char %}
+<div class="eve-border rounded p-4 bg-eve-surface">
+    <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">Active Character</div>
+    <div class="flex items-center gap-4">
+        <img src="https://images.evetech.net/characters/{{ active_char.character_id }}/portrait?size=128"
+             alt="{{ active_char.character_name }}"
+             class="w-16 h-16 rounded border border-eve-border">
+        <div>
+            <div class="text-white text-lg">{{ active_char.character_name }}</div>
+            {% if active_char.corporation_name %}
+            <div class="text-eve-muted text-sm">{{ active_char.corporation_name }}</div>
+            {% endif %}
+            {% if active_char.alliance_name %}
+            <div class="text-eve-gold text-sm">{{ active_char.alliance_name }}</div>
+            {% endif %}
+            <div class="text-xs text-eve-muted mt-2">
+                {% if active_char.has_corp_roles %}
+                <span class="text-eve-success">✓ Corp access enabled</span>
+                {% else %}
+                <span class="text-eve-muted">Personal access only</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="mt-4">
+        <a href="/chat"
+           class="inline-block bg-eve-accent hover:bg-blue-400 text-eve-bg text-xs font-semibold px-6 py-2 rounded tracking-widest uppercase transition-colors">
+            Open AURA Chat →
+        </a>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

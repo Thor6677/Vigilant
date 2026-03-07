@@ -1,0 +1,8 @@
+{% for msg in new_messages %}
+<div class="rounded p-3 text-sm {% if msg.role == 'user' %}message-user{% else %}message-assistant{% endif %}">
+    <div class="text-xs {% if msg.role == 'user' %}text-eve-accent{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest">
+        {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
+    </div>
+    <div class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
+</div>
+{% endfor %}
