@@ -4,6 +4,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
 from app.db.models import init_db
+from app.db.cache import ESICache  # registers table with Base
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.chat import router as chat_router

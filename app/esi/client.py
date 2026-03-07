@@ -1,10 +1,12 @@
 import httpx
+import json
 import base64
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.config import get_settings
 from app.db.models import Character
+from app.db.cache import cache_get, cache_set
 
 settings = get_settings()
 
@@ -46,15 +48,17 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
 
 
 class ESIClient:
-    def __init__(self, token: str):
+    def __init__(self, token: str, db: AsyncSession = None):
         self.token = token
+        self.db = db
         self.base = settings.eve_esi_base
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
 
-    async def get(self, path: str, params: dict = None) -> dict | list:
+    async def get(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
+        """Authenticated GET — private character data, not cached."""
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{self.base}{path}",
@@ -64,7 +68,13 @@ class ESIClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_public(self, path: str, params: dict = None) -> dict | list:
+    async def get_public(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
+        """Public GET — cached when db session is available."""
+        if self.db and not bypass_cache:
+            cached = await cache_get(self.db, path, params)
+            if cached is not None:
+                return cached
+
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{self.base}{path}",
@@ -72,4 +82,31 @@ class ESIClient:
                 params=params or {},
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+
+        if self.db and not bypass_cache:
+            await cache_set(self.db, path, data, params)
+
+        return data
+
+    async def post_public(self, path: str, body: list | dict) -> dict | list:
+        """Public POST with cache (used for name resolution)."""
+        cache_key_params = {"_body": json.dumps(body, sort_keys=True)}
+        if self.db:
+            cached = await cache_get(self.db, path, cache_key_params)
+            if cached is not None:
+                return cached
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{self.base}{path}",
+                json=body,
+                headers={"Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        if self.db:
+            await cache_set(self.db, path, data, cache_key_params)
+
+        return data

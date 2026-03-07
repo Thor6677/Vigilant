@@ -31,7 +31,7 @@ async def _get_character(character_id: int, db: AsyncSession) -> tuple[Character
     if not char:
         raise ValueError(f"Character {character_id} not found in database.")
     token = await refresh_token(char, db)
-    return char, ESIClient(token)
+    return char, ESIClient(token, db=db)
 
 
 async def execute_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> str:
@@ -99,7 +99,7 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
     elif tool_name == "get_market_prices":
         char_result = await db.execute(select(Character).limit(1))
         any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token) if any_char else ESIClient("")
+        client = ESIClient(any_char.access_token if any_char else "", db=db)
 
         item_name = inp["item_name"]
         region_name = inp.get("region_name", "The Forge").lower()
@@ -170,7 +170,7 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
     elif tool_name == "get_route":
         char_result = await db.execute(select(Character).limit(1))
         any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "")
+        client = ESIClient(any_char.access_token if any_char else "", db=db)
 
         origin_search = await esi_universe.search_universe(client, inp["origin"], ["solar_system"])
         dest_search = await esi_universe.search_universe(client, inp["destination"], ["solar_system"])
@@ -191,7 +191,7 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
     elif tool_name == "get_system_info":
         char_result = await db.execute(select(Character).limit(1))
         any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "")
+        client = ESIClient(any_char.access_token if any_char else "", db=db)
 
         search = await esi_universe.search_universe(client, inp["system_name"], ["solar_system"])
         ids = search.get("solar_system", [])
@@ -224,7 +224,7 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
     elif tool_name == "resolve_type_names":
         char_result = await db.execute(select(Character).limit(1))
         any_char = char_result.scalar_one_or_none()
-        client = ESIClient(any_char.access_token if any_char else "")
+        client = ESIClient(any_char.access_token if any_char else "", db=db)
         names = await esi_universe.resolve_ids(client, inp["type_ids"])
         return {"names": names}
 

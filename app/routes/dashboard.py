@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.models import get_db, Character
+from app.db.cache import cache_stats
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -32,9 +33,11 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     characters = result.scalars().all()
 
     active_char = next((c for c in characters if c.character_id == active_id), None)
+    stats = await cache_stats(db)
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "characters": characters,
         "active_char": active_char,
+        "cache_stats": stats,
     })

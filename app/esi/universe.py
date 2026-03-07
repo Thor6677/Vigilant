@@ -24,14 +24,16 @@ async def get_route(client: ESIClient, origin: int, destination: int, flag: str 
 
 async def resolve_ids(client: ESIClient, ids: list[int]) -> list:
     """Bulk resolve IDs to names."""
-    async with __import__("httpx").AsyncClient(timeout=30) as http:
-        resp = await http.post(
-            "https://esi.evetech.net/latest/universe/names/",
-            json=ids,
-            headers={"Accept": "application/json"},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    if not ids:
+        return []
+    # Deduplicate and chunk to 1000 max per ESI limit
+    ids = list(set(ids))
+    results = []
+    for i in range(0, len(ids), 1000):
+        chunk = ids[i:i+1000]
+        data = await client.post_public("/universe/names/", chunk)
+        results.extend(data)
+    return results
 
 
 async def search_universe(client: ESIClient, query: str, categories: list[str]) -> dict:

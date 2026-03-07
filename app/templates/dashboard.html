@@ -80,6 +80,25 @@
     </a>
 </div>
 
+<!-- Cache Stats -->
+<div class="eve-border rounded p-4 bg-eve-surface mb-4">
+    <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">ESI Cache</div>
+    <div class="grid grid-cols-3 gap-4 text-center">
+        <div>
+            <div class="text-eve-accent text-xl font-light">{{ cache_stats.active_entries }}</div>
+            <div class="text-eve-muted text-xs">Active</div>
+        </div>
+        <div>
+            <div class="text-gray-400 text-xl font-light">{{ cache_stats.total_entries }}</div>
+            <div class="text-eve-muted text-xs">Total</div>
+        </div>
+        <div>
+            <div class="text-eve-muted text-xl font-light">{{ cache_stats.expired_entries }}</div>
+            <div class="text-eve-muted text-xs">Expired</div>
+        </div>
+    </div>
+</div>
+
 <!-- Active Character Quick Info -->
 {% if active_char %}
 <div class="eve-border rounded p-4 bg-eve-surface">
