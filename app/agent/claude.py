@@ -58,7 +58,9 @@ async def chat(
         tool_uses = [b for b in response.content if b.type == "tool_use"]
         text_blocks = [b for b in response.content if b.type == "text"]
 
-        updated_messages.append({"role": "assistant", "content": response.content})
+        # Convert SDK content blocks to plain dicts so they survive JSON serialization
+        content_dicts = [block.model_dump() for block in response.content]
+        updated_messages.append({"role": "assistant", "content": content_dicts})
 
         if response.stop_reason == "end_turn" or not tool_uses:
             final_text = " ".join(b.text for b in text_blocks)
