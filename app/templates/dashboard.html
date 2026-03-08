@@ -2,17 +2,126 @@
 {% block title %}Dashboard — CapsuleerAI{% endblock %}
 {% block content %}
 
+{# ── Macros ──────────────────────────────────────────────────────────────── #}
+{% macro format_isk(amount) %}
+  {%- if amount >= 1000000000000 -%}
+    {{ "%.2f"|format(amount / 1000000000000) }}T ISK
+  {%- elif amount >= 1000000000 -%}
+    {{ "%.2f"|format(amount / 1000000000) }}B ISK
+  {%- elif amount >= 1000000 -%}
+    {{ "%.2f"|format(amount / 1000000) }}M ISK
+  {%- else -%}
+    {{ "%.0f"|format(amount) }} ISK
+  {%- endif %}
+{% endmacro %}
+
+{% macro sec_color(sec) %}
+  {%- if sec is none -%}text-eve-muted
+  {%- elif sec >= 0.5 -%}text-eve-success
+  {%- elif sec >= 0.1 -%}text-yellow-400
+  {%- else -%}text-eve-danger
+  {%- endif %}
+{% endmacro %}
+
+{# ── Server Status Bar ───────────────────────────────────────────────────── #}
+<div class="mb-4 rounded px-4 py-2 flex items-center justify-between text-xs
+    {% if server_status.online %}bg-green-950/40 border border-green-800/40{% else %}bg-red-950/40 border border-red-800/40{% endif %}">
+    <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full {% if server_status.online %}bg-eve-success animate-pulse{% else %}bg-eve-danger{% endif %}"></span>
+        <span class="{% if server_status.online %}text-eve-success{% else %}text-eve-danger{% endif %} font-medium uppercase tracking-widest">
+            Tranquility {% if server_status.online %}Online{% else %}Offline{% endif %}
+        </span>
+    </div>
+    {% if server_status.online and server_status.players %}
+    <span class="text-eve-muted">{{ "{:,}".format(server_status.players) }} pilots online</span>
+    {% endif %}
+</div>
+
+{# ── Header ──────────────────────────────────────────────────────────────── #}
 <div class="flex items-center justify-between mb-6">
-    <h1 class="text-lg font-light tracking-widest text-white uppercase">Dashboard</h1>
+    <div class="flex items-center gap-4">
+        <h1 class="text-lg font-light tracking-widest text-white uppercase">Dashboard</h1>
+        {% if any_syncing %}
+        <div id="sync-poller"
+             hx-get="/dashboard/sync-status"
+             hx-trigger="every 3s"
+             hx-swap="outerHTML"
+             class="flex items-center gap-2 text-xs text-eve-muted">
+            <svg class="w-3 h-3 animate-spin text-eve-accent flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
+            </svg>
+            Syncing...
+        </div>
+        {% else %}
+        <div id="sync-poller"></div>
+        {% endif %}
+    </div>
     <a href="/auth/login"
        class="text-xs border border-eve-accent text-eve-accent hover:bg-eve-accent hover:text-eve-bg px-4 py-2 rounded tracking-widest uppercase transition-colors">
         + Add Character
     </a>
 </div>
 
-<!-- Character Cards -->
+{# ── Summary Stats Row ───────────────────────────────────────────────────── #}
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+        <div class="text-eve-gold text-lg font-light">{{ format_isk(total_wallet) }}</div>
+        <div class="text-eve-muted text-xs uppercase tracking-wider mt-1">Total Wallet</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+        <div class="text-eve-accent text-lg font-light">{{ total_active_jobs }}</div>
+        <div class="text-eve-muted text-xs uppercase tracking-wider mt-1">Active Jobs</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+        <div class="text-eve-accent text-lg font-light">{{ total_active_orders }}</div>
+        <div class="text-eve-muted text-xs uppercase tracking-wider mt-1">Market Orders</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+        <div class="{% if total_unread_mail > 0 %}text-eve-gold{% else %}text-eve-accent{% endif %} text-lg font-light">
+            {{ total_unread_mail if not needs_mail_scope else "—" }}
+        </div>
+        <div class="text-eve-muted text-xs uppercase tracking-wider mt-1">Unread Mail</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+        <div class="{% if total_unread_notifs > 0 %}text-eve-gold{% else %}text-eve-accent{% endif %} text-lg font-light">
+            {{ total_unread_notifs if not needs_notif_scope else "—" }}
+        </div>
+        <div class="text-eve-muted text-xs uppercase tracking-wider mt-1">Notifications</div>
+    </div>
+</div>
+
+{# ── Re-auth Banner ──────────────────────────────────────────────────────── #}
+{% if needs_mail_scope or needs_notif_scope or needs_contracts_scope or needs_pi_scope %}
+<div class="eve-border border-yellow-700/50 rounded p-3 bg-yellow-950/20 mb-6 flex items-center justify-between gap-3">
+    <div class="text-xs text-yellow-300">
+        <span class="font-semibold">New features available —</span>
+        re-authorize your characters to unlock:
+        {% if needs_mail_scope %}<span class="ml-1 px-1.5 py-0.5 bg-yellow-900/40 rounded">Mail</span>{% endif %}
+        {% if needs_notif_scope %}<span class="ml-1 px-1.5 py-0.5 bg-yellow-900/40 rounded">Notifications</span>{% endif %}
+        {% if needs_contracts_scope %}<span class="ml-1 px-1.5 py-0.5 bg-yellow-900/40 rounded">Contracts</span>{% endif %}
+        {% if needs_pi_scope %}<span class="ml-1 px-1.5 py-0.5 bg-yellow-900/40 rounded">Planetary Industry</span>{% endif %}
+    </div>
+    <a href="/auth/login"
+       class="text-xs border border-yellow-600 text-yellow-300 hover:bg-yellow-700/30 px-3 py-1.5 rounded tracking-widest uppercase transition-colors flex-shrink-0">
+        Re-auth →
+    </a>
+</div>
+{% endif %}
+
+{# ── Character Cards ─────────────────────────────────────────────────────── #}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
 {% for char in characters %}
+{% set loc = locations.get(char.character_id) %}
+{% set wallet = wallets.get(char.character_id) %}
+{% set char_scopes = char.scopes or "" %}
+{% set char_warn = sync_warnings.get(char.character_id, {}) %}
+{% set char_needs_reauth = (
+    "esi-mail.read_mail.v1" not in char_scopes or
+    "esi-characters.read_notifications.v1" not in char_scopes or
+    "esi-contracts.read_character_contracts.v1" not in char_scopes or
+    "esi-planets.manage_planets.v1" not in char_scopes
+) %}
 <div class="eve-border rounded p-4 bg-eve-surface {% if char.character_id == active_char.character_id %}eve-glow border-eve-accent{% endif %}">
     <div class="flex items-start justify-between mb-3">
         <div>
@@ -32,12 +141,95 @@
         {% endif %}
     </div>
 
-    <div class="text-xs text-eve-muted mb-3 space-y-1">
-        <div>ID: {{ char.character_id }}</div>
-        {% if char.corporation_id %}
-        <div>Corp ID: {{ char.corporation_id }}</div>
+    {# Location #}
+    {% if loc %}
+    <div class="text-xs mb-2 flex items-center gap-1.5">
+        <span class="{{ sec_color(loc.security) }}">
+            {% if loc.security is not none %}[{{ "%.1f"|format(loc.security) }}]{% endif %}
+        </span>
+        <span class="text-white">{{ loc.system_name or "Unknown" }}</span>
+        {% if loc.region %}<span class="text-eve-muted">· {{ loc.region }}</span>{% endif %}
+    </div>
+    {% if loc.docked_at %}
+    <div class="text-xs text-eve-muted mb-2 truncate">⚓ {{ loc.docked_at }}</div>
+    {% else %}
+    <div class="text-xs text-yellow-500 mb-2">▶ In Space</div>
+    {% endif %}
+    {% elif char_warn.get("location") %}
+    <div class="text-xs text-yellow-500/80 mb-2 flex items-center gap-1.5">
+        <span title="{{ char_warn.location }}">⚠ location unavailable</span>
+        {% if "token_refresh_failed" in char_warn.location %}
+        <a href="/auth/login" class="text-eve-accent underline">Re-auth</a>
         {% endif %}
-        <div>Last seen: {{ char.last_seen.strftime('%Y-%m-%d %H:%M') if char.last_seen else 'Unknown' }}</div>
+    </div>
+    {% endif %}
+
+    {# Wallet #}
+    {% if wallet is not none %}
+    <div class="text-xs text-eve-gold mb-2">{{ format_isk(wallet) }}</div>
+    {% elif char_warn.get("wallet") %}
+    <div class="text-xs text-yellow-500/80 mb-2 flex items-center gap-1.5">
+        <span title="{{ char_warn.wallet }}">⚠ wallet unavailable</span>
+        {% if "token_refresh_failed" in char_warn.wallet %}
+        <a href="/auth/login" class="text-eve-accent underline">Re-auth</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# Missing scopes indicator #}
+    {% if char_needs_reauth %}
+    <div class="text-xs text-yellow-500/80 mb-2 flex items-center gap-1">
+        <span>⚠</span>
+        <span>Missing:
+            {% if "esi-mail.read_mail.v1" not in char_scopes %}Mail{% endif %}
+            {% if "esi-characters.read_notifications.v1" not in char_scopes %}Notifs{% endif %}
+            {% if "esi-contracts.read_character_contracts.v1" not in char_scopes %}Contracts{% endif %}
+            {% if "esi-planets.manage_planets.v1" not in char_scopes %}PI{% endif %}
+        </span>
+    </div>
+    {% endif %}
+
+    {# Sync status line #}
+    {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}
+    {% set char_stale = staleness.get(char.character_id, 'never') %}
+    {% set char_last_sync = last_synced_strs.get(char.character_id) %}
+    <div class="flex items-center justify-between mb-2 min-h-[1.25rem]">
+        {% if char_sync == 'syncing' %}
+        <div class="flex items-center gap-1.5 text-xs text-eve-muted">
+            <svg class="w-3 h-3 animate-spin text-eve-accent flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
+            </svg>
+            Syncing...
+        </div>
+        {% elif char_sync == 'error' %}
+        <div class="flex items-center gap-1 text-xs text-eve-danger">
+            <span>✕ Sync failed</span>
+        </div>
+        {% elif char_last_sync %}
+        <div class="flex items-center gap-1 text-xs
+            {% if char_stale == 'critical' %}text-orange-400
+            {% elif char_stale == 'warning' %}text-yellow-500
+            {% else %}text-eve-muted{% endif %}">
+            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
+                {% if char_stale == 'critical' %}bg-orange-400
+                {% elif char_stale == 'warning' %}bg-yellow-500
+                {% else %}bg-eve-success{% endif %}"></span>
+            {{ char_last_sync }}
+        </div>
+        {% else %}
+        <div class="text-xs text-eve-muted">Never synced</div>
+        {% endif %}
+
+        {# Show resync button when stale, errored, or never synced #}
+        {% if char_sync != 'syncing' and char_stale in ('critical', 'warning', 'never') or char_sync == 'error' %}
+        <form method="POST" action="/dashboard/sync/{{ char.character_id }}">
+            <button type="submit"
+                    class="text-xs border border-eve-border hover:border-eve-accent text-eve-muted hover:text-eve-accent px-2 py-0.5 rounded transition-colors">
+                ↺ Sync
+            </button>
+        </form>
+        {% endif %}
     </div>
 
     <div class="flex gap-2">
@@ -48,6 +240,12 @@
                 Set Active
             </button>
         </form>
+        {% endif %}
+        {% if char_needs_reauth %}
+        <a href="/auth/login"
+           class="text-xs border border-yellow-700 hover:border-yellow-500 text-yellow-500 hover:text-yellow-300 px-3 py-1.5 rounded transition-colors">
+            Re-auth
+        </a>
         {% endif %}
         <form method="POST" action="/auth/remove/{{ char.character_id }}"
               onsubmit="return confirm('Remove {{ char.character_name }}?')">
@@ -61,7 +259,7 @@
 {% endfor %}
 </div>
 
-<!-- Quick Actions -->
+{# ── Quick Actions ───────────────────────────────────────────────────────── #}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
     <a href="/chat" class="eve-border rounded p-4 bg-eve-surface hover:border-eve-accent transition-colors group">
         <div class="text-eve-accent text-2xl mb-2">◈</div>
@@ -80,57 +278,482 @@
     </a>
 </div>
 
-<!-- Cache Stats -->
-<div class="eve-border rounded p-4 bg-eve-surface mb-4">
-    <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">ESI Cache</div>
-    <div class="grid grid-cols-3 gap-4 text-center">
-        <div>
-            <div class="text-eve-accent text-xl font-light">{{ cache_stats.active_entries }}</div>
-            <div class="text-eve-muted text-xs">Active</div>
-        </div>
-        <div>
-            <div class="text-gray-400 text-xl font-light">{{ cache_stats.total_entries }}</div>
-            <div class="text-eve-muted text-xs">Total</div>
-        </div>
-        <div>
-            <div class="text-eve-muted text-xl font-light">{{ cache_stats.expired_entries }}</div>
-            <div class="text-eve-muted text-xs">Expired</div>
-        </div>
+{# ── Skill Queue ─────────────────────────────────────────────────────────── #}
+<div class="eve-border rounded bg-eve-surface mb-6 overflow-hidden">
+    <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+        <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Skill Queue</span>
+        <a href="/skills" class="text-eve-accent text-xs hover:underline">Full view →</a>
     </div>
+    {% set ns_all = namespace(all_ok=true) %}
+    {% for group_name, items in skill_groups.items() %}
+        {% set ns = namespace(any_training=false) %}
+        {% for item in items %}{% if item.warning in ('ok', 'warning', 'critical') %}{% set ns.any_training = true %}{% endif %}{% endfor %}
+        {% if not ns.any_training %}{% set ns_all.all_ok = false %}{% endif %}
+    {% endfor %}
+
+    {% if ns_all.all_ok %}
+    <div class="px-4 py-3 flex items-center gap-2">
+        <span class="text-eve-success text-sm">✓</span>
+        <span class="text-eve-muted text-sm">All accounts have active training</span>
+    </div>
+    {% else %}
+    <div class="divide-y divide-eve-border">
+    {% for group_name, items in skill_groups.items() %}
+        {% set ns = namespace(any_training=false) %}
+        {% for item in items %}{% if item.warning in ('ok', 'warning', 'critical') %}{% set ns.any_training = true %}{% endif %}{% endfor %}
+        <div class="px-4 py-3 {% if not ns.any_training %}bg-red-950/20{% endif %}">
+            <div class="flex items-center justify-between gap-3 mb-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    {% if ns.any_training %}
+                    <span class="w-2 h-2 rounded-full bg-eve-success flex-shrink-0"></span>
+                    {% else %}
+                    <span class="w-2 h-2 rounded-full bg-eve-danger flex-shrink-0 animate-pulse"></span>
+                    {% endif %}
+                    <span class="text-sm text-white font-medium">{{ group_name }}</span>
+                </div>
+                {% if not ns.any_training %}
+                <span class="text-xs bg-eve-danger text-white px-2 py-0.5 rounded font-bold flex-shrink-0">NO TRAINING</span>
+                {% else %}
+                {% set ns2 = namespace(worst='') %}
+                {% for item in items %}
+                    {% if item.warning == 'empty' and ns2.worst != 'critical' %}{% set ns2.worst = 'empty' %}{% endif %}
+                    {% if item.warning == 'critical' %}{% set ns2.worst = 'critical' %}{% endif %}
+                    {% if item.warning == 'warning' and ns2.worst not in ('critical', 'empty') %}{% set ns2.worst = 'warning' %}{% endif %}
+                {% endfor %}
+                {% if ns2.worst == 'critical' %}
+                <span class="text-xs bg-orange-600 text-white px-2 py-0.5 rounded font-bold flex-shrink-0">&lt;7d</span>
+                {% elif ns2.worst == 'warning' %}
+                <span class="text-xs bg-yellow-600 text-black px-2 py-0.5 rounded font-bold flex-shrink-0">&lt;14d</span>
+                {% endif %}
+                {% endif %}
+            </div>
+            <div class="space-y-2 ml-4">
+            {% for item in items %}
+            <div class="flex items-center gap-2">
+                <img src="https://images.evetech.net/characters/{{ item.char.character_id }}/portrait?size=32"
+                     class="w-5 h-5 rounded border {% if item.warning in ('ok','warning','critical') %}border-eve-border{% else %}border-eve-danger{% endif %} flex-shrink-0" alt="">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs text-white truncate">
+                            {{ item.char.character_name.split(' ')[0] }}
+                            {% if item.current_skill %}
+                            <span class="text-eve-muted">· {{ item.current_skill }} {{ item.current_level }}</span>
+                            {% endif %}
+                        </span>
+                        <span class="text-xs flex-shrink-0 {% if item.warning == 'empty' %}text-eve-danger{% elif item.warning == 'critical' %}text-orange-400{% elif item.warning == 'warning' %}text-yellow-400{% else %}text-eve-muted{% endif %}">
+                            {% if item.time_remaining_str %}{{ item.time_remaining_str }}{% elif item.warning == 'empty' %}empty{% endif %}
+                        </span>
+                    </div>
+                    {% if item.progress_pct > 0 %}
+                    <div class="mt-1 h-1 bg-eve-border rounded-full overflow-hidden">
+                        <div class="h-full rounded-full {% if item.warning == 'critical' %}bg-orange-500{% elif item.warning == 'warning' %}bg-yellow-500{% else %}bg-eve-accent{% endif %}"
+                             style="width: {{ item.progress_pct }}%"></div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+    {% endif %}
 </div>
 
-<!-- Active Character Quick Info -->
-{% if active_char %}
-<div class="eve-border rounded p-4 bg-eve-surface">
-    <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">Active Character</div>
-    <div class="flex items-center gap-4">
-        <img src="https://images.evetech.net/characters/{{ active_char.character_id }}/portrait?size=128"
-             alt="{{ active_char.character_name }}"
-             class="w-16 h-16 rounded border border-eve-border">
-        <div>
-            <div class="text-white text-lg">{{ active_char.character_name }}</div>
-            {% if active_char.corporation_name %}
-            <div class="text-eve-muted text-sm">{{ active_char.corporation_name }}</div>
-            {% endif %}
-            {% if active_char.alliance_name %}
-            <div class="text-eve-gold text-sm">{{ active_char.alliance_name }}</div>
-            {% endif %}
-            <div class="text-xs text-eve-muted mt-2">
-                {% if active_char.has_corp_roles %}
-                <span class="text-eve-success">✓ Corp access enabled</span>
-                {% else %}
-                <span class="text-eve-muted">Personal access only</span>
+{# ── Industry Jobs + Market Orders (side by side) ────────────────────────── #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+
+    {# Industry Jobs #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Industry Jobs</span>
+        </div>
+        {% set has_any_jobs = namespace(found=false) %}
+        {% for char in characters %}
+        {% set ind = industry.get(char.character_id) %}
+        {% if ind and ind.active_count > 0 %}{% set has_any_jobs.found = true %}{% endif %}
+        {% endfor %}
+
+        {% if has_any_jobs.found %}
+        <div class="divide-y divide-eve-border">
+        {% for char in characters %}
+        {% set ind = industry.get(char.character_id) %}
+        {% if ind and ind.active_count > 0 %}
+        <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 min-w-0">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                     class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+                <div class="min-w-0">
+                    <div class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</div>
+                    {% if ind.soonest_product %}
+                    <div class="text-xs text-eve-muted truncate">Next: {{ ind.soonest_product }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="text-right flex-shrink-0">
+                <div class="text-xs text-eve-accent">{{ ind.active_count }} active</div>
+                {% if ind.soonest_time_str %}
+                <div class="text-xs text-eve-muted">in {{ ind.soonest_time_str }}</div>
                 {% endif %}
             </div>
         </div>
+        {% endif %}
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">No active jobs</div>
+        {% endif %}
     </div>
-    <div class="mt-4">
-        <a href="/chat"
-           class="inline-block bg-eve-accent hover:bg-blue-400 text-eve-bg text-xs font-semibold px-6 py-2 rounded tracking-widest uppercase transition-colors">
-            Open AURA Chat →
-        </a>
+
+    {# Market Orders #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Market Orders</span>
+        </div>
+        {% set has_any_orders = namespace(found=false) %}
+        {% for char in characters %}
+        {% set ord = orders.get(char.character_id) %}
+        {% if ord and ord.active_count > 0 %}{% set has_any_orders.found = true %}{% endif %}
+        {% endfor %}
+
+        {% if has_any_orders.found %}
+        <div class="divide-y divide-eve-border">
+        {% for char in characters %}
+        {% set ord = orders.get(char.character_id) %}
+        {% if ord and ord.active_count > 0 %}
+        <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                     class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+                <span class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</span>
+            </div>
+            <div class="flex gap-3 text-xs">
+                <span class="text-eve-success">▲ {{ ord.sell_count }} sell</span>
+                <span class="text-eve-danger">▼ {{ ord.buy_count }} buy</span>
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">No active orders</div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Jump Clones + PI Extractors (side by side) ──────────────────────────── #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+
+    {# Jump Clone Timers #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Jump Clones</span>
+        </div>
+        <div class="divide-y divide-eve-border">
+        {% for char in characters %}
+        {% set cd = clones.get(char.character_id) %}
+        <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                     class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+                <div>
+                    <div class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</div>
+                    {% if cd %}
+                    <div class="text-xs text-eve-muted">{{ cd.jump_clones_count }} clone{% if cd.jump_clones_count != 1 %}s{% endif %}</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% if cd %}
+                {% if cd.jump_cooldown_str %}
+                <span class="text-xs text-orange-400">⏱ {{ cd.jump_cooldown_str }}</span>
+                {% else %}
+                <span class="text-xs text-eve-success">✓ Ready</span>
+                {% endif %}
+            {% else %}
+            <span class="text-xs text-eve-muted">—</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+    </div>
+
+    {# PI Extractors #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Planetary Industry</span>
+            {% if needs_pi_scope %}
+            <a href="/auth/login" class="text-xs text-yellow-400 hover:underline">Re-auth →</a>
+            {% endif %}
+        </div>
+        {% if needs_pi_scope %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">Re-authorize characters to view PI</div>
+        {% else %}
+        {% set has_pi = namespace(found=false) %}
+        {% for char in characters %}
+            {% set pi_list = pi.get(char.character_id) %}
+            {% if pi_list and pi_list is iterable and pi_list | length > 0 %}{% set has_pi.found = true %}{% endif %}
+        {% endfor %}
+
+        {% if has_pi.found %}
+        <div class="divide-y divide-eve-border max-h-64 overflow-y-auto">
+        {% for char in characters %}
+        {% set pi_list = pi.get(char.character_id) %}
+        {% if pi_list and pi_list is iterable and pi_list | length > 0 %}
+            {% for planet in pi_list %}
+            <div class="px-4 py-2 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                         class="w-4 h-4 rounded border border-eve-border flex-shrink-0" alt="">
+                    <div class="min-w-0">
+                        <span class="text-xs text-white capitalize">{{ planet.planet_type }}</span>
+                        {% if planet.system_name %}
+                        <span class="text-xs text-eve-muted"> · {{ planet.system_name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if planet.expiry_time_str %}
+                <span class="text-xs flex-shrink-0
+                    {% if planet.expiry_warning == 'expired' %}text-eve-danger
+                    {% elif planet.expiry_warning == 'critical' %}text-orange-400
+                    {% elif planet.expiry_warning == 'warning' %}text-yellow-400
+                    {% else %}text-eve-muted{% endif %}">
+                    {{ planet.expiry_time_str }}
+                </span>
+                {% else %}
+                <span class="text-xs text-eve-muted flex-shrink-0">no extractor</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">No PI planets found</div>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+{# ── Mail + Notifications (side by side) ─────────────────────────────────── #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+
+    {# Mail #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Mail</span>
+            {% if needs_mail_scope %}
+            <a href="/auth/login" class="text-xs text-yellow-400 hover:underline">Re-auth →</a>
+            {% endif %}
+        </div>
+        {% if needs_mail_scope %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">Re-authorize characters to view mail</div>
+        {% else %}
+        <div class="divide-y divide-eve-border">
+        {% for char in characters %}
+        {% set m = mail.get(char.character_id) %}
+        <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                     class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+                <span class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</span>
+            </div>
+            {% if m and m is mapping %}
+                {% if m.unread_count > 0 %}
+                <span class="text-xs bg-eve-gold text-eve-bg px-2 py-0.5 rounded font-bold">{{ m.unread_count }} unread</span>
+                {% else %}
+                <span class="text-xs text-eve-muted">No unread</span>
+                {% endif %}
+            {% else %}
+            <span class="text-xs text-eve-muted">—</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    {# Notifications #}
+    <div class="eve-border rounded bg-eve-surface overflow-hidden">
+        <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+            <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Notifications</span>
+            {% if needs_notif_scope %}
+            <a href="/auth/login" class="text-xs text-yellow-400 hover:underline">Re-auth →</a>
+            {% endif %}
+        </div>
+        {% if needs_notif_scope %}
+        <div class="px-4 py-4 text-eve-muted text-xs text-center">Re-authorize characters to view notifications</div>
+        {% else %}
+        <div class="divide-y divide-eve-border">
+        {% for char in characters %}
+        {% set n = notifications.get(char.character_id) %}
+        <div class="px-4 py-2.5">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                    <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                         class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+                    <span class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</span>
+                </div>
+                {% if n and n is mapping %}
+                    {% if n.unread_count > 0 %}
+                    <span class="text-xs bg-orange-600 text-white px-2 py-0.5 rounded font-bold">{{ n.unread_count }}</span>
+                    {% else %}
+                    <span class="text-xs text-eve-muted">None</span>
+                    {% endif %}
+                {% else %}
+                <span class="text-xs text-eve-muted">—</span>
+                {% endif %}
+            </div>
+            {% if n and n is mapping and n.recent_types %}
+            <div class="mt-1 ml-7 flex flex-wrap gap-1">
+                {% for t in n.recent_types %}
+                <span class="text-xs bg-eve-border text-eve-muted px-1.5 py-0.5 rounded">{{ t }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Contracts ───────────────────────────────────────────────────────────── #}
+{% set has_any_contracts = namespace(found=false) %}
+{% for char in characters %}
+    {% set con = contracts.get(char.character_id) %}
+    {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}{% set has_any_contracts.found = true %}{% endif %}
+{% endfor %}
+
+{% if has_any_contracts.found or needs_contracts_scope %}
+<div class="eve-border rounded bg-eve-surface mb-6 overflow-hidden">
+    <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+        <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Contracts</span>
+        {% if needs_contracts_scope %}
+        <a href="/auth/login" class="text-xs text-yellow-400 hover:underline">Re-auth →</a>
+        {% endif %}
+    </div>
+    {% if needs_contracts_scope %}
+    <div class="px-4 py-4 text-eve-muted text-xs text-center">Re-authorize characters to view contracts</div>
+    {% elif has_any_contracts.found %}
+    <div class="divide-y divide-eve-border">
+    {% for char in characters %}
+    {% set con = contracts.get(char.character_id) %}
+    {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}
+    <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+            <span class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</span>
+        </div>
+        <div class="flex gap-3 text-xs">
+            {% if con.outstanding_count > 0 %}
+            <span class="text-eve-accent">{{ con.outstanding_count }} outstanding</span>
+            {% endif %}
+            {% if con.in_progress_count > 0 %}
+            <span class="text-yellow-400">{{ con.in_progress_count }} in progress</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-4 text-eve-muted text-xs text-center">No active contracts</div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── zKillboard ──────────────────────────────────────────────────────────── #}
+{% set has_zkill = namespace(found=false) %}
+{% for char in characters %}
+    {% if zkill.get(char.character_id) %}{% set has_zkill.found = true %}{% endif %}
+{% endfor %}
+
+{% if has_zkill.found %}
+<div class="eve-border rounded bg-eve-surface mb-6 overflow-hidden">
+    <div class="px-4 py-3 border-b border-eve-border flex items-center justify-between">
+        <span class="text-eve-muted text-xs uppercase tracking-widest font-semibold">Recent Kills · zKillboard</span>
+    </div>
+    <div class="divide-y divide-eve-border">
+    {% for char in characters %}
+    {% set kills = zkill.get(char.character_id, []) %}
+    {% if kills %}
+    <div class="px-4 py-2.5 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 class="w-5 h-5 rounded border border-eve-border flex-shrink-0" alt="">
+            <span class="text-xs text-white">{{ char.character_name.split(' ')[0] }}</span>
+        </div>
+        <div class="flex gap-1.5">
+            {% for km in kills %}
+            <span class="text-xs px-1.5 py-0.5 rounded
+                {% if km.is_loss %}bg-red-900/50 text-eve-danger{% else %}bg-green-900/50 text-eve-success{% endif %}">
+                {% if km.is_loss %}✕{% else %}⚔{% endif %}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
     </div>
 </div>
 {% endif %}
+
+{# ── Bottom Row: Cache Stats + Active Character ──────────────────────────── #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    {# Cache Stats #}
+    <div class="eve-border rounded p-4 bg-eve-surface">
+        <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">ESI Cache</div>
+        <div class="grid grid-cols-3 gap-4 text-center">
+            <div>
+                <div class="text-eve-accent text-xl font-light">{{ cache_stats.active_entries }}</div>
+                <div class="text-eve-muted text-xs">Active</div>
+            </div>
+            <div>
+                <div class="text-gray-400 text-xl font-light">{{ cache_stats.total_entries }}</div>
+                <div class="text-eve-muted text-xs">Total</div>
+            </div>
+            <div>
+                <div class="text-eve-muted text-xl font-light">{{ cache_stats.expired_entries }}</div>
+                <div class="text-eve-muted text-xs">Expired</div>
+            </div>
+        </div>
+    </div>
+
+    {# Active Character #}
+    {% if active_char %}
+    <div class="eve-border rounded p-4 bg-eve-surface">
+        <div class="text-eve-muted text-xs uppercase tracking-widest mb-3">Active Character</div>
+        <div class="flex items-center gap-4">
+            <img src="https://images.evetech.net/characters/{{ active_char.character_id }}/portrait?size=64"
+                 alt="{{ active_char.character_name }}"
+                 class="w-12 h-12 rounded border border-eve-border">
+            <div>
+                <div class="text-white">{{ active_char.character_name }}</div>
+                {% if active_char.corporation_name %}
+                <div class="text-eve-muted text-sm">{{ active_char.corporation_name }}</div>
+                {% endif %}
+                {% if active_char.alliance_name %}
+                <div class="text-eve-gold text-sm">{{ active_char.alliance_name }}</div>
+                {% endif %}
+                <div class="text-xs text-eve-muted mt-1">
+                    {% if active_char.has_corp_roles %}
+                    <span class="text-eve-success">✓ Corp access</span>
+                    {% else %}
+                    <span class="text-eve-muted">Personal only</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="mt-3">
+            <a href="/chat"
+               class="inline-block bg-eve-accent hover:bg-blue-400 text-eve-bg text-xs font-semibold px-6 py-2 rounded tracking-widest uppercase transition-colors">
+                Open AURA Chat →
+            </a>
+        </div>
+    </div>
+    {% endif %}
+</div>
 
 {% endblock %}

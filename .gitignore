@@ -12,3 +12,5 @@ build/
 .pytest_cache/
 .mypy_cache/
 nginx/ssl/
+capsuleerai.pid
+capsuleerai.log

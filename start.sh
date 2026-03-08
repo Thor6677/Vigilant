@@ -111,6 +111,55 @@ fi
 # Launch
 # ---------------------------------------------------------------------------
 
+PIDFILE="$SCRIPT_DIR/capsuleerai.pid"
+LOGFILE="$SCRIPT_DIR/capsuleerai.log"
+
+# Stop any existing instance
+if [ -f "$PIDFILE" ]; then
+    old_pid=$(cat "$PIDFILE")
+    if kill -0 "$old_pid" 2>/dev/null; then
+        echo "Stopping existing instance (PID $old_pid)..."
+        kill "$old_pid"
+        sleep 1
+    fi
+    rm -f "$PIDFILE"
+fi
+
 echo ""
 echo "Starting CapsuleerAI at http://localhost:8000"
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+echo "Logs: $LOGFILE"
+echo "Stop: kill \$(cat capsuleerai.pid)  or  ./stop.sh"
+echo ""
+
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$LOGFILE" 2>&1 &
+echo $! > "$PIDFILE"
+APP_PID=$(cat "$PIDFILE")
+
+# Wait up to 10 seconds for the app to confirm it's listening
+echo -n "Waiting for app to start"
+for i in $(seq 1 20); do
+    sleep 0.5
+    if grep -q "Application startup complete" "$LOGFILE" 2>/dev/null; then
+        echo ""
+        echo "✓ CapsuleerAI is running — PID $APP_PID"
+        echo "  http://localhost:8000"
+        echo ""
+        echo "To watch logs:  tail -f $LOGFILE"
+        echo "To filter errors:  tail -f $LOGFILE | grep -i 'error\|warning\|critical'"
+        echo "To stop:  ./stop.sh"
+        exit 0
+    fi
+    # Check if the process already died
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo ""
+        echo "✗ App failed to start. Last log output:"
+        echo ""
+        tail -20 "$LOGFILE"
+        exit 1
+    fi
+    echo -n "."
+done
+
+echo ""
+echo "✗ App did not confirm startup within 10 seconds."
+echo "  Check the log for errors:  tail -30 $LOGFILE"

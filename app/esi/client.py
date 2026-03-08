@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import json
 import base64
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db.models import Character
 from app.db.cache import cache_get, cache_set
+from app.esi.rate_limit import rate_limit_tracker, log_event
 
 settings = get_settings()
 
@@ -57,16 +59,38 @@ class ESIClient:
             "Accept": "application/json",
         }
 
+    async def _throttle_if_needed(self) -> None:
+        delay = rate_limit_tracker.throttle_delay()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    async def _raw_get(self, url: str, req_headers: dict, params: dict):
+        async with httpx.AsyncClient(timeout=30) as client:
+            return await client.get(url, headers=req_headers, params=params)
+
     async def get(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
         """Authenticated GET — private character data, not cached."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{self.base}{path}",
-                headers=self.headers,
-                params=params or {},
-            )
-            resp.raise_for_status()
-            return resp.json()
+        await self._throttle_if_needed()
+        url = f"{self.base}{path}"
+        resp = await self._raw_get(url, self.headers, params or {})
+        events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        for e in events:
+            asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
+
+        if resp.status_code == 429:
+            retry_after = int(float(resp.headers.get("retry-after", "60")))
+            asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
+            await asyncio.sleep(retry_after)
+            resp = await self._raw_get(url, self.headers, params or {})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code == 420:
+            asyncio.create_task(log_event("420", path, dict(resp.headers)))
+            await asyncio.sleep(60)
+            resp = await self._raw_get(url, self.headers, params or {})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_public(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
         """Public GET — cached when db session is available."""
@@ -75,14 +99,28 @@ class ESIClient:
             if cached is not None:
                 return cached
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{self.base}{path}",
-                headers={"Accept": "application/json"},
-                params=params or {},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        await self._throttle_if_needed()
+        url = f"{self.base}{path}"
+        pub_headers = {"Accept": "application/json"}
+        resp = await self._raw_get(url, pub_headers, params or {})
+        events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        for e in events:
+            asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
+
+        if resp.status_code == 429:
+            retry_after = int(float(resp.headers.get("retry-after", "60")))
+            asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
+            await asyncio.sleep(retry_after)
+            resp = await self._raw_get(url, pub_headers, params or {})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code == 420:
+            asyncio.create_task(log_event("420", path, dict(resp.headers)))
+            await asyncio.sleep(60)
+            resp = await self._raw_get(url, pub_headers, params or {})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+
+        resp.raise_for_status()
+        data = resp.json()
 
         if self.db and not bypass_cache:
             await cache_set(self.db, path, data, params)
@@ -97,14 +135,30 @@ class ESIClient:
             if cached is not None:
                 return cached
 
+        await self._throttle_if_needed()
+        url = f"{self.base}{path}"
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{self.base}{path}",
-                json=body,
-                headers={"Accept": "application/json"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+        events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        for e in events:
+            asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
+
+        if resp.status_code == 429:
+            retry_after = int(float(resp.headers.get("retry-after", "60")))
+            asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
+            await asyncio.sleep(retry_after)
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code == 420:
+            asyncio.create_task(log_event("420", path, dict(resp.headers)))
+            await asyncio.sleep(60)
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+
+        resp.raise_for_status()
+        data = resp.json()
 
         if self.db:
             await cache_set(self.db, path, data, cache_key_params)

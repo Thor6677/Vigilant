@@ -35,3 +35,23 @@ async def get_corporation_roles(client: ESIClient, character_id: int) -> dict:
 
 async def get_skill_queue(client: ESIClient, character_id: int) -> list:
     return await client.get(f"/characters/{character_id}/skillqueue/")
+
+
+async def get_mail_headers(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/mail/")
+
+
+async def get_notifications(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/notifications/")
+
+
+async def get_contracts(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/contracts/")
+
+
+async def get_planets(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/planets/")
+
+
+async def get_planet_details(client: ESIClient, character_id: int, planet_id: int) -> dict:
+    return await client.get(f"/characters/{character_id}/planets/{planet_id}/")

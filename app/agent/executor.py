@@ -419,6 +419,72 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
             return {"result": f"No EVE item types match '{inp['query']}'."}
         return {"matches": matches}
 
+    elif tool_name == "get_character_skill_queue":
+        from datetime import datetime, timezone
+        char, client = await _get_character(inp["character_id"], db)
+        if "esi-skills.read_skillqueue.v1" not in (char.scopes or ""):
+            return {"error": "Character does not have the skill queue scope. Re-authorization required."}
+        queue = await esi_char.get_skill_queue(client, inp["character_id"])
+
+        if not queue:
+            return {
+                "character": char.character_name,
+                "queue_length": 0,
+                "current_skill": None,
+                "current_level": None,
+                "queue_end_date": None,
+                "days_remaining": None,
+                "warning_level": "empty",
+            }
+
+        # Resolve skill names
+        skill_ids = list({e.get("skill_id") for e in queue if e.get("skill_id")})
+        skill_names = await sde.type_ids_to_names(db, skill_ids)
+
+        now = datetime.now(timezone.utc)
+
+        # Active skill
+        active = None
+        for entry in queue:
+            start_raw = entry.get("start_date")
+            if start_raw:
+                start = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                if start <= now:
+                    active = entry
+                    break
+        if not active:
+            active = queue[0]
+
+        # Queue end
+        queue_end_date = None
+        days_remaining = None
+        finish_raw = queue[-1].get("finish_date")
+        if finish_raw:
+            queue_end_dt = datetime.fromisoformat(finish_raw.replace("Z", "+00:00"))
+            queue_end_date = queue_end_dt.strftime("%Y-%m-%d %H:%M UTC")
+            days_remaining = (queue_end_dt - now).days
+
+        # Warning level
+        if days_remaining is None:
+            warning_level = "empty"
+        elif days_remaining <= 7:
+            warning_level = "critical"
+        elif days_remaining <= 14:
+            warning_level = "warning"
+        else:
+            warning_level = "ok"
+
+        sid = active.get("skill_id")
+        return {
+            "character": char.character_name,
+            "queue_length": len(queue),
+            "current_skill": skill_names.get(sid, f"Type {sid}") if sid else None,
+            "current_level": active.get("finished_level"),
+            "queue_end_date": queue_end_date,
+            "days_remaining": days_remaining,
+            "warning_level": warning_level,
+        }
+
     elif tool_name == "resolve_type_names":
         sde_names = await sde.type_ids_to_names(db, inp["type_ids"])
         missing = [tid for tid in inp["type_ids"] if tid not in sde_names]

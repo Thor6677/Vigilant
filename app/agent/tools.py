@@ -203,6 +203,21 @@ TOOLS = [
         },
     },
     {
+        "name": "get_character_skill_queue",
+        "description": (
+            "Get the skill queue for a character. Returns the currently training skill, "
+            "queue end date, days remaining, and number of skills queued. "
+            "Use when asked about skill training, queue status, or when a skill finishes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "character_id": {"type": "integer", "description": "Character ID to query."},
+            },
+            "required": ["character_id"],
+        },
+    },
+    {
         "name": "resolve_type_names",
         "description": "Resolve EVE type IDs to human-readable item names.",
         "input_schema": {
