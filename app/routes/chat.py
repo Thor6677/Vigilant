@@ -184,7 +184,11 @@ async def stream_message(
                         current_session_id = new_sess.id
                         request.session["active_chat_session_id"] = new_sess.id
                     await db.commit()
-                    payload = {"type": "done", "stats": {**event["stats"], "elapsed_s": elapsed}}
+                    payload = {
+                        "type": "done",
+                        "stats": {**event["stats"], "elapsed_s": elapsed},
+                        "session": {"id": current_session_id, "title": title, "is_new": is_first_message},
+                    }
                 else:
                     payload = event
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
