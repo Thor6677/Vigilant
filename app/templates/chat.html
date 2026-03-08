@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}AURA Chat — CapsuleerAI{% endblock %}
 {% block head %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
     #chat-messages { scroll-behavior: smooth; }
     .bubble-user {
@@ -20,6 +21,14 @@
     .typing-dot:nth-child(3) { animation-delay: .4s; }
     @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
     pre { white-space: pre-wrap; word-break: break-word; }
+    .prose-eve p { margin: 0 0 0.5em; }
+    .prose-eve p:last-child { margin-bottom: 0; }
+    .prose-eve strong { color: #a8b8d8; font-weight: 600; }
+    .prose-eve em { color: #8fa8c8; }
+    .prose-eve ul, .prose-eve ol { padding-left: 1.25em; margin: 0.25em 0 0.5em; }
+    .prose-eve li { margin-bottom: 0.15em; }
+    .prose-eve code { background: #0a1628; border: 1px solid #1e3a5f; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.85em; }
+    .prose-eve pre { background: #0a1628; border: 1px solid #1e3a5f; border-radius: 6px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
 </style>
 {% endblock %}
 {% block content %}
@@ -121,7 +130,11 @@
                     <div class="text-xs {% if msg.role == 'user' %}text-eve-accent text-right{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest px-1">
                         {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
                     </div>
-                    <div class="{% if msg.role == 'user' %}bubble-user{% else %}bubble-assistant{% endif %} px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
+                    {% if msg.role == 'user' %}
+                    <div class="bubble-user px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
+                    {% else %}
+                    <div class="bubble-assistant px-4 py-3 text-sm text-gray-300 leading-relaxed prose-eve" data-markdown="{{ msg.text | e }}"></div>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -215,7 +228,7 @@ function createAuraBubble() {
     label.textContent = 'AURA';
 
     const textEl = document.createElement('div');
-    textEl.className = 'bubble-assistant px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap';
+    textEl.className = 'bubble-assistant px-4 py-3 text-sm text-gray-300 leading-relaxed prose-eve';
 
     const toolEl = document.createElement('div');
     toolEl.className = 'text-xs text-eve-muted px-1 mt-1 hidden';
@@ -266,6 +279,7 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     const { wrap: auraBubble, textEl: auraText, toolEl, tokenEl, statsEl } = createAuraBubble();
     auraBubble.classList.add('hidden');
     messages.insertBefore(auraBubble, typing);
+    let auraRawText = '';
 
     try {
         const formData = new FormData();
@@ -297,7 +311,8 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
                         hideTyping();
                         auraBubble.classList.remove('hidden');
                     }
-                    auraText.textContent += evt.content;
+                    auraRawText += evt.content;
+                    auraText.innerHTML = marked.parse(auraRawText);
                     if (evt.est_output_tokens) {
                         tokenEl.textContent = `~${evt.est_output_tokens} tokens`;
                     }
@@ -324,7 +339,7 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
                 } else if (evt.type === 'error') {
                     hideTyping();
                     auraBubble.classList.remove('hidden');
-                    auraText.textContent = '⚠ ' + evt.message;
+                    auraText.textContent = '⚠ ' + evt.message;  // plain text intentional for errors
                     scrollToBottom();
                 }
             }
@@ -332,7 +347,7 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     } catch (err) {
         hideTyping();
         auraBubble.classList.remove('hidden');
-        auraText.textContent = '⚠ ' + err.message;
+        auraText.textContent = '⚠ ' + err.message;  // plain text intentional for errors
         scrollToBottom();
     } finally {
         input.disabled = false;
@@ -342,8 +357,13 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     }
 });
 
-// Scroll to bottom on load
-window.addEventListener('load', scrollToBottom);
+// Render markdown in history messages and scroll to bottom on load
+window.addEventListener('load', () => {
+    document.querySelectorAll('[data-markdown]').forEach(el => {
+        el.innerHTML = marked.parse(el.dataset.markdown);
+    });
+    scrollToBottom();
+});
 </script>
 
 {% endblock %}
