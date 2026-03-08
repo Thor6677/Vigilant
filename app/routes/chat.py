@@ -41,19 +41,18 @@ def _make_title(message: str) -> str:
 
 
 async def _get_active_session(request: Request, active_id: int, db: AsyncSession):
-    """Return the current ChatSession based on session cookie, or None."""
+    """Return the current ChatSession based on session cookie, or None.
+    Returns None both when no session is set AND when 'new' sentinel is set."""
     session_id = request.session.get("active_chat_session_id")
-    if session_id:
-        result = await db.execute(
-            select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.character_id == active_id,
-            )
+    if not session_id or session_id == "new":
+        return None
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.character_id == active_id,
         )
-        session = result.scalar_one_or_none()
-        if session:
-            return session
-    return None
+    )
+    return result.scalar_one_or_none()
 
 
 @router.get("", response_class=HTMLResponse)
@@ -75,9 +74,11 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     )
     all_sessions = sessions_result.scalars().all()
 
-    # Active session
+    # Active session — only auto-select the most recent if no explicit choice has been made yet
+    cookie_val = request.session.get("active_chat_session_id")
     chat_session = await _get_active_session(request, active_id, db)
-    if not chat_session and all_sessions:
+    if not chat_session and cookie_val is None and all_sessions:
+        # First ever visit: load the most recent session
         chat_session = all_sessions[0]
         request.session["active_chat_session_id"] = chat_session.id
 
@@ -110,7 +111,7 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
 @router.post("/new")
 async def new_chat(request: Request):
     """Start a fresh chat session."""
-    request.session.pop("active_chat_session_id", None)
+    request.session["active_chat_session_id"] = "new"
     return RedirectResponse("/chat", status_code=303)
 
 
