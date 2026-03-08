@@ -44,6 +44,7 @@ class ChatSession(Base):
 
     id = Column(Integer, primary_key=True)
     character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False)
+    title = Column(String, nullable=False, default="New Chat")
     messages = Column(Text, nullable=False, default="[]")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

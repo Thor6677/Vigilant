@@ -60,6 +60,17 @@ class SDEConstellation(Base):
     region_id = Column(Integer, nullable=True)
 
 
+class SDEBlueprintMaterial(Base):
+    """industryActivityMaterials — materials required to manufacture an item."""
+    __tablename__ = "sde_blueprint_materials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)
+    activity_id = Column(Integer, nullable=False)   # 1 = manufacturing
+    material_type_id = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+
 class SDEMeta(Base):
     """Tracks SDE version and last update time."""
     __tablename__ = "sde_meta"

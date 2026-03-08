@@ -35,10 +35,10 @@ TOOLS = [
     {
         "name": "find_item_in_assets",
         "description": (
-            "Search all of a character's assets for a specific item or ship by name. "
-            "Searches ALL assets (not just the first 200) and returns every match with its location. "
-            "Use this when asked about a specific item, e.g. 'where is my Archon', 'where is my Tritanium', "
-            "'do I have any Dreads', 'find my mining barges'."
+            "Search all of a character's assets for any item, ship, or module by name (partial matches work). "
+            "Use this whenever the user asks about a specific named thing — ship, module, material, blueprint, "
+            "structure, or anything else — e.g. 'where is my Archon', 'do I have a Proteus', 'find my T2 guns', "
+            "'any dreads', 'near a [name]'. Prefer this over get_character_assets for any named lookup."
         ),
         "input_schema": {
             "type": "object",
@@ -168,6 +168,38 @@ TOOLS = [
                 "character_id": {"type": "integer", "description": "The character ID to query."},
             },
             "required": ["character_id"],
+        },
+    },
+    {
+        "name": "get_blueprint_materials",
+        "description": (
+            "Get the list of materials required to manufacture an item from its blueprint, "
+            "and optionally look up current Jita market prices for each material to estimate total build cost. "
+            "Use this when asked 'what does it cost to build X', 'what materials do I need to make X', "
+            "'how much to manufacture X from scratch'. Accepts either the ship/item name or blueprint name."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_name": {"type": "string", "description": "Name of the item or its blueprint (e.g. 'Proteus' or 'Proteus Blueprint')."},
+                "include_prices": {"type": "boolean", "description": "If true, fetch Jita sell prices for each material and sum the total build cost.", "default": True},
+            },
+            "required": ["item_name"],
+        },
+    },
+    {
+        "name": "search_item_types",
+        "description": (
+            "Search the EVE SDE for item types matching a name (ships, modules, materials, blueprints, structures, etc). "
+            "Use this to confirm whether a word is a real EVE item before saying it doesn't exist. "
+            "Returns matching type names and IDs. Partial matches work — 'proteus' will match 'Proteus'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Item name to search for. Partial matches work."},
+            },
+            "required": ["query"],
         },
     },
     {
