@@ -324,6 +324,12 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         balance = await esi_char.get_wallet(client, inp["character_id"])
         return {"balance_isk": balance, "formatted": f"{balance:,.2f} ISK"}
 
+    elif tool_name == "search_item_types":
+        matches = await sde.search_types(db, inp["query"], limit=10)
+        if not matches:
+            return {"result": f"No EVE item types match '{inp['query']}'."}
+        return {"matches": matches}
+
     elif tool_name == "resolve_type_names":
         sde_names = await sde.type_ids_to_names(db, inp["type_ids"])
         missing = [tid for tid in inp["type_ids"] if tid not in sde_names]

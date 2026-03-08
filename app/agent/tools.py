@@ -171,6 +171,21 @@ TOOLS = [
         },
     },
     {
+        "name": "search_item_types",
+        "description": (
+            "Search the EVE SDE for item types matching a name (ships, modules, materials, blueprints, structures, etc). "
+            "Use this to confirm whether a word is a real EVE item before saying it doesn't exist. "
+            "Returns matching type names and IDs. Partial matches work — 'proteus' will match 'Proteus'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Item name to search for. Partial matches work."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "resolve_type_names",
         "description": "Resolve EVE type IDs to human-readable item names.",
         "input_schema": {
