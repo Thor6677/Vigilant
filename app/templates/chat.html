@@ -111,8 +111,8 @@
                     "Show my jump clones"
                 ] %}
                 {% for prompt in prompts %}
-                <button onclick="setPrompt('{{ prompt }}')"
-                        class="w-full text-left text-xs text-eve-muted hover:text-eve-accent py-1 transition-colors">
+                <button type="button" data-prompt="{{ prompt }}"
+                        class="quick-prompt w-full text-left text-xs text-eve-muted hover:text-eve-accent py-1 transition-colors">
                     › {{ prompt }}
                 </button>
                 {% endfor %}
@@ -241,10 +241,12 @@ function switchCharacter(charId) {
     form.submit();
 }
 
-function setPrompt(text) {
-    document.getElementById('message-input').value = text;
-    document.getElementById('message-input').focus();
-}
+document.querySelectorAll('.quick-prompt').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('message-input').value = btn.dataset.prompt;
+        document.getElementById('message-input').focus();
+    });
+});
 
 function createUserBubble(text) {
     const wrap = document.createElement('div');
