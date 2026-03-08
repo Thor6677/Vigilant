@@ -63,76 +63,72 @@
           </thead>
           <tbody>
             {% for row in char_sync_rows %}
-              {%- set detail_id = "sync-detail-" ~ row.character_id -%}
-              {%- set has_detail = row.warn_count > 0 or row.sync_status == "error" -%}
-
-              <tr class="border-b border-eve-border/40 {% if has_detail %}hover:bg-eve-border/20 cursor-pointer{% else %}hover:bg-eve-border/20{% endif %}"
-                  {% if has_detail %}onclick="toggleDetail('{{ detail_id }}')"{% endif %}>
-                <td class="px-3 py-2 text-white whitespace-nowrap">
-                  {% if has_detail %}
-                    <span class="text-eve-muted mr-1 detail-arrow" id="{{ detail_id }}-arrow">▶</span>
-                  {% endif %}
-                  {{ row.character_name }}
-                </td>
-                <td class="px-3 py-2 text-eve-muted whitespace-nowrap">{{ row.last_synced_str }}</td>
-                <td class="px-3 py-2 whitespace-nowrap">
-                  {% if row.queued and row.sync_status != "syncing" %}
-                    <span class="px-1.5 py-0.5 rounded bg-eve-accent/20 text-eve-accent border border-eve-accent/30">queued</span>
-                  {% elif row.sync_status == "syncing" %}
-                    <span class="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1 w-fit">
-                      <svg class="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
-                      </svg>
-                      syncing
-                    </span>
-                  {% elif row.sync_status == "error" %}
-                    <span class="px-1.5 py-0.5 rounded bg-eve-danger/20 text-eve-danger border border-eve-danger/30">error ↓</span>
-                  {% else %}
-                    <span class="text-eve-muted">idle</span>
-                  {% endif %}
-                </td>
-                <td class="px-3 py-2">
-                  {% if row.stale_fields == 0 %}
-                    <span class="text-eve-success">0 / {{ row.total_fields }}</span>
-                  {% elif row.stale_fields == row.total_fields %}
-                    <span class="text-eve-danger">{{ row.stale_fields }} / {{ row.total_fields }}</span>
-                  {% else %}
-                    <span class="text-yellow-400">{{ row.stale_fields }} / {{ row.total_fields }}</span>
-                  {% endif %}
-                </td>
-                <td class="px-3 py-2">
-                  {% if row.warn_count > 0 %}
-                    <span class="text-yellow-400">⚠ {{ row.warn_count }} — click to expand</span>
-                  {% elif row.sync_status == "error" %}
-                    <span class="text-eve-danger">↓ click to expand</span>
-                  {% else %}
-                    <span class="text-eve-muted">—</span>
-                  {% endif %}
-                </td>
-              </tr>
-
-              {%- if has_detail %}
-              <tr id="{{ detail_id }}" class="hidden border-b border-eve-border/60 bg-eve-border/10">
-                <td colspan="5" class="px-6 py-3 space-y-2">
-                  {%- if row.sync_status == "error" and row.sync_error %}
-                  <div class="flex items-start gap-2">
-                    <span class="text-eve-danger font-semibold whitespace-nowrap">Sync Error</span>
-                    <span class="text-eve-muted break-all">{{ row.sync_error }}</span>
-                  </div>
-                  {%- endif %}
-                  {%- for field, reason in row.sync_warnings.items() %}
-                  <div class="flex items-start gap-2">
-                    <span class="text-yellow-400 font-semibold whitespace-nowrap w-28 flex-shrink-0">{{ field }}</span>
-                    <span class="text-eve-muted break-all">{{ reason }}</span>
-                    {%- if "token_refresh_failed" in reason %}
-                    <a href="/auth/login" class="text-eve-accent underline whitespace-nowrap flex-shrink-0">Re-auth →</a>
-                    {%- endif %}
-                  </div>
-                  {%- endfor %}
-                </td>
-              </tr>
-              {%- endif %}
+            <tr class="border-b border-eve-border/40 hover:bg-eve-border/20 align-top">
+              <td class="px-3 py-2 text-white whitespace-nowrap">{{ row.character_name }}</td>
+              <td class="px-3 py-2 text-eve-muted whitespace-nowrap">{{ row.last_synced_str }}</td>
+              <td class="px-3 py-2 whitespace-nowrap">
+                {% if row.queued and row.sync_status != "syncing" %}
+                  <span class="px-1.5 py-0.5 rounded bg-eve-accent/20 text-eve-accent border border-eve-accent/30">queued</span>
+                {% elif row.sync_status == "syncing" %}
+                  <span class="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1 w-fit">
+                    <svg class="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
+                    </svg>
+                    syncing
+                  </span>
+                {% elif row.sync_status == "error" %}
+                  <span class="px-1.5 py-0.5 rounded bg-eve-danger/20 text-eve-danger border border-eve-danger/30">error</span>
+                {% else %}
+                  <span class="text-eve-muted">idle</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2 whitespace-nowrap">
+                {% if row.stale_fields == 0 %}
+                  <span class="text-eve-success">0 / {{ row.total_fields }}</span>
+                {% elif row.stale_fields == row.total_fields %}
+                  <span class="text-eve-danger">{{ row.stale_fields }} / {{ row.total_fields }}</span>
+                {% else %}
+                  <span class="text-yellow-400">{{ row.stale_fields }} / {{ row.total_fields }}</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-2">
+                {% set has_warnings = row.warn_count > 0 %}
+                {% set has_error = row.sync_status == "error" and row.sync_error %}
+                {% if has_warnings or has_error %}
+                  <details>
+                    <summary class="cursor-pointer list-none flex items-center gap-1.5 w-fit">
+                      {% if has_warnings %}
+                        <span class="text-yellow-400">⚠ {{ row.warn_count }}</span>
+                      {% endif %}
+                      {% if has_error %}
+                        <span class="text-eve-danger">● error</span>
+                      {% endif %}
+                      <span class="text-eve-muted text-xs">▸</span>
+                    </summary>
+                    <div class="mt-2 pt-2 border-t border-eve-border space-y-1.5">
+                      {% if has_error %}
+                        <div class="flex items-start gap-2">
+                          <span class="text-eve-danger font-semibold whitespace-nowrap w-24 flex-shrink-0">sync error</span>
+                          <span class="text-eve-muted break-all">{{ row.sync_error }}</span>
+                        </div>
+                      {% endif %}
+                      {% for field, reason in row.sync_warnings.items() %}
+                        <div class="flex items-start gap-2">
+                          <span class="text-yellow-400 font-semibold whitespace-nowrap w-24 flex-shrink-0">{{ field }}</span>
+                          <span class="text-eve-muted break-all">{{ reason }}</span>
+                          {% if "token_refresh_failed" in reason %}
+                            <a href="/auth/login" class="text-eve-accent underline whitespace-nowrap flex-shrink-0 ml-1">Re-auth →</a>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}
+                  <span class="text-eve-muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
             {% endfor %}
           </tbody>
         </table>
