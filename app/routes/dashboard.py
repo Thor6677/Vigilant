@@ -579,6 +579,37 @@ async def _sync_all_task(character_ids: list[int]):
             _queued_sync.discard(cid)
 
 
+async def _background_scheduler():
+    """Runs forever. Every 60s, find all characters with stale fields and sync them.
+
+    This is the *only* place automatic syncs are triggered — the dashboard
+    route no longer spawns syncs on page load.
+    """
+    await asyncio.sleep(15)  # Allow app startup (SDE load, etc.) to settle first
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                char_result = await db.execute(select(Character))
+                characters = char_result.scalars().all()
+                if characters:
+                    cids = [c.character_id for c in characters]
+                    cache_result = await db.execute(
+                        select(CharacterDashboardCache).where(
+                            CharacterDashboardCache.character_id.in_(cids)
+                        )
+                    )
+                    char_caches = {c.character_id: c for c in cache_result.scalars().all()}
+                    stale_ids = _collect_stale(list(characters), char_caches)
+                    if stale_ids:
+                        for cid in stale_ids:
+                            _queued_sync.add(cid)
+                        asyncio.create_task(_sync_all_task(stale_ids))
+                        logger.info("Scheduler queued %d character(s) for sync: %s", len(stale_ids), stale_ids)
+        except Exception as e:
+            logger.warning("Background scheduler error: %s", e)
+        await asyncio.sleep(60)
+
+
 def _collect_stale(characters: list[Character], char_caches: dict) -> list[int]:
     """Return IDs of characters that have at least one stale field and are not
     already queued or actively syncing."""
@@ -663,23 +694,6 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(character_ids))
     )
     char_caches = {c.character_id: c for c in cache_result.scalars().all()}
-
-    # Queue stale characters into a single sequential background task
-    stale_ids = _collect_stale(list(characters), char_caches)
-    if stale_ids:
-        for cid in stale_ids:
-            _queued_sync.add(cid)
-        # Mark the first character syncing now so any_syncing=True activates the HTMX poller.
-        # The remaining characters will be marked syncing when their turn arrives in _sync_task.
-        first_cache = char_caches.get(stale_ids[0])
-        if first_cache is None:
-            first_cache = CharacterDashboardCache(character_id=stale_ids[0], sync_status="syncing")
-            db.add(first_cache)
-            char_caches[stale_ids[0]] = first_cache
-        else:
-            first_cache.sync_status = "syncing"
-        await db.commit()
-        asyncio.create_task(_sync_all_task(stale_ids))
 
     # Build data dicts from cache
     data = _build_data_from_caches(list(characters), char_caches)

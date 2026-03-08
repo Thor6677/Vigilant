@@ -8,7 +8,7 @@ from app.db.cache import ESICache  # registers table with Base
 from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
-from app.routes.dashboard import router as dashboard_router
+from app.routes.dashboard import router as dashboard_router, _background_scheduler
 from app.routes.chat import router as chat_router
 from app.routes.characters import router as characters_router
 from app.routes.skills import router as skills_router
@@ -59,3 +59,4 @@ async def startup():
         await db.commit()
     import asyncio
     asyncio.create_task(ensure_sde_loaded())
+    asyncio.create_task(_background_scheduler())

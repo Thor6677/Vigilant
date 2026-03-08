@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import base64
 import httpx
@@ -147,6 +148,13 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         request.session["character_ids"] = []
     if character_id not in request.session["character_ids"]:
         request.session["character_ids"].append(character_id)
+
+    # Trigger an immediate sync for this character (new add or re-auth).
+    # Import here to avoid module-level circular import risk.
+    from app.routes.dashboard import _sync_task, _queued_sync
+    if character_id not in _queued_sync:
+        _queued_sync.add(character_id)
+        asyncio.create_task(_sync_task(character_id))
 
     return RedirectResponse("/dashboard")
 
