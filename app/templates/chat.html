@@ -80,18 +80,24 @@
             </div>
             <div id="session-list" class="overflow-y-auto flex-1 px-2 pb-2 space-y-0.5 scrollbar-eve">
                 {% for session in all_sessions %}
-                <form method="POST" action="/chat/session/{{ session.id }}">
-                    <button type="submit"
-                            data-session-id="{{ session.id }}"
-                            class="w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors
-                                   {% if session.id == active_session_id %}
-                                   bg-eve-accent/10 text-eve-accent border border-eve-accent/30
-                                   {% else %}
-                                   text-eve-muted hover:text-white hover:bg-white/5
-                                   {% endif %}">
-                        {{ session.title }}
-                    </button>
-                </form>
+                <div class="flex items-center group gap-1">
+                    <form method="POST" action="/chat/session/{{ session.id }}" class="flex-1 min-w-0">
+                        <button type="submit"
+                                data-session-id="{{ session.id }}"
+                                class="w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors
+                                       {% if session.id == active_session_id %}
+                                       bg-eve-accent/10 text-eve-accent border border-eve-accent/30
+                                       {% else %}
+                                       text-eve-muted hover:text-white hover:bg-white/5
+                                       {% endif %}">
+                            {{ session.title }}
+                        </button>
+                    </form>
+                    <form method="POST" action="/chat/delete/{{ session.id }}" class="flex-shrink-0">
+                        <button type="submit" title="Delete chat"
+                                class="opacity-0 group-hover:opacity-100 text-eve-muted hover:text-eve-danger text-xs px-1 transition-all">✕</button>
+                    </form>
+                </div>
                 {% else %}
                 <div class="no-chats text-eve-muted text-xs px-2 py-2">No chats yet</div>
                 {% endfor %}
@@ -120,12 +126,6 @@
             </div>
         </div>
 
-        <form method="POST" action="/chat/clear">
-            <button type="submit"
-                    class="w-full text-xs border border-eve-border hover:border-eve-danger text-eve-muted hover:text-eve-danger py-2 rounded transition-colors">
-                Delete Chat
-            </button>
-        </form>
     </div>
 
     <!-- Chat Area -->
@@ -249,17 +249,34 @@ function updateSessionSidebar(session) {
     // Find existing entry or create new one
     let entry = list.querySelector(`[data-session-id="${session.id}"]`);
     if (!entry) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = `/chat/session/${session.id}`;
+        const wrap = document.createElement('div');
+        wrap.className = 'flex items-center group gap-1';
+
+        const selForm = document.createElement('form');
+        selForm.method = 'POST';
+        selForm.action = `/chat/session/${session.id}`;
+        selForm.className = 'flex-1 min-w-0';
         entry = document.createElement('button');
         entry.type = 'submit';
         entry.dataset.sessionId = session.id;
-        entry.classList.add('w-full', 'text-left', 'px-2', 'py-1.5', 'rounded', 'text-xs', 'truncate', 'transition-colors');
-        form.appendChild(entry);
-        list.prepend(form);
+        entry.className = 'w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors';
+        selForm.appendChild(entry);
 
-        // Remove the "No chats yet" placeholder if present
+        const delForm = document.createElement('form');
+        delForm.method = 'POST';
+        delForm.action = `/chat/delete/${session.id}`;
+        delForm.className = 'flex-shrink-0';
+        const delBtn = document.createElement('button');
+        delBtn.type = 'submit';
+        delBtn.title = 'Delete chat';
+        delBtn.className = 'opacity-0 group-hover:opacity-100 text-eve-muted hover:text-eve-danger text-xs px-1 transition-all';
+        delBtn.textContent = '✕';
+        delForm.appendChild(delBtn);
+
+        wrap.appendChild(selForm);
+        wrap.appendChild(delForm);
+        list.prepend(wrap);
+
         const placeholder = list.querySelector('.no-chats');
         if (placeholder) placeholder.remove();
     }

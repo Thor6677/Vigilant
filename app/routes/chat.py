@@ -151,44 +151,40 @@ async def stream_message(
 
     chat_session = await _get_active_session(request, active_id, db)
     history = json.loads(chat_session.messages) if chat_session else []
-    is_first_message = len(history) == 0
+    is_new_session = chat_session is None
+    title = _make_title(message) if is_new_session else chat_session.title
 
+    # Create session BEFORE streaming so the cookie is set in response headers
+    if is_new_session:
+        chat_session = ChatSession(
+            character_id=active_id,
+            title=title,
+            messages="[]",
+        )
+        db.add(chat_session)
+        await db.flush()
+        await db.commit()
+        request.session["active_chat_session_id"] = chat_session.id
+
+    session_id = chat_session.id
     history.append({"role": "user", "content": message})
     character_context = _build_character_context(list(characters), active_char)
 
-    # Capture session_id for use inside the generator (avoids session access in async gen)
-    current_session_id = chat_session.id if chat_session else None
-    title = _make_title(message) if is_first_message else (chat_session.title if chat_session else "New Chat")
-
     async def event_generator():
-        nonlocal current_session_id
         t_start = time.monotonic()
         try:
             async for event in stream_chat(history, character_context, db):
                 if event["type"] == "done":
                     elapsed = round(time.monotonic() - t_start, 1)
-                    final_messages = event["messages"]
-                    if current_session_id:
-                        upd = await db.execute(select(ChatSession).where(ChatSession.id == current_session_id))
-                        sess = upd.scalar_one_or_none()
-                        if sess:
-                            sess.messages = json.dumps(final_messages, default=str)
-                            sess.updated_at = datetime.now(timezone.utc)
-                    else:
-                        new_sess = ChatSession(
-                            character_id=active_id,
-                            title=title,
-                            messages=json.dumps(final_messages, default=str),
-                        )
-                        db.add(new_sess)
-                        await db.flush()
-                        current_session_id = new_sess.id
-                        request.session["active_chat_session_id"] = new_sess.id
-                    await db.commit()
+                    sess = await db.get(ChatSession, session_id)
+                    if sess:
+                        sess.messages = json.dumps(event["messages"], default=str)
+                        sess.updated_at = datetime.now(timezone.utc)
+                        await db.commit()
                     payload = {
                         "type": "done",
                         "stats": {**event["stats"], "elapsed_s": elapsed},
-                        "session": {"id": current_session_id, "title": title, "is_new": is_first_message},
+                        "session": {"id": session_id, "title": title, "is_new": is_new_session},
                     }
                 else:
                     payload = event
@@ -203,21 +199,21 @@ async def stream_message(
     )
 
 
-@router.post("/clear")
-async def clear_chat(request: Request, db: AsyncSession = Depends(get_db)):
-    """Delete the current active chat session only."""
+@router.post("/delete/{session_id}")
+async def delete_session(session_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete a specific chat session."""
     active_id = request.session.get("active_character_id")
-    session_id = request.session.get("active_chat_session_id")
-    if active_id and session_id:
-        result = await db.execute(
-            select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.character_id == active_id,
-            )
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.character_id == active_id,
         )
-        sess = result.scalar_one_or_none()
-        if sess:
-            await db.delete(sess)
-            await db.commit()
-    request.session.pop("active_chat_session_id", None)
+    )
+    sess = result.scalar_one_or_none()
+    if sess:
+        await db.delete(sess)
+        await db.commit()
+    # If deleted session was active, clear it
+    if request.session.get("active_chat_session_id") == session_id:
+        request.session["active_chat_session_id"] = "new"
     return RedirectResponse("/chat", status_code=303)
