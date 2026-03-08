@@ -35,10 +35,10 @@ TOOLS = [
     {
         "name": "find_item_in_assets",
         "description": (
-            "Search all of a character's assets for a specific item or ship by name. "
-            "Searches ALL assets (not just the first 200) and returns every match with its location. "
-            "Use this when asked about a specific item, e.g. 'where is my Archon', 'where is my Tritanium', "
-            "'do I have any Dreads', 'find my mining barges'."
+            "Search all of a character's assets for any item, ship, or module by name (partial matches work). "
+            "Use this whenever the user asks about a specific named thing — ship, module, material, blueprint, "
+            "structure, or anything else — e.g. 'where is my Archon', 'do I have a Proteus', 'find my T2 guns', "
+            "'any dreads', 'near a [name]'. Prefer this over get_character_assets for any named lookup."
         ),
         "input_schema": {
             "type": "object",
