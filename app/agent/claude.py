@@ -124,8 +124,9 @@ async def stream_chat(
     total_output = 0
     total_tool_calls = 0
     output_chars = 0
+    MAX_ITERATIONS = 10
 
-    while True:
+    for _iteration in range(MAX_ITERATIONS):
         current_tool_calls = []
         current_raw_content = []
         stop_reason = "end_turn"
@@ -178,6 +179,9 @@ async def stream_chat(
             total_tool_calls += 1
 
         updated_messages.append({"role": "user", "content": tool_results})
+    else:
+        # Hit iteration limit — yield a warning as a final text chunk
+        yield {"type": "text", "content": "\n\n⚠ Response truncated: too many tool calls.", "est_output_tokens": 0}
 
     yield {
         "type": "done",

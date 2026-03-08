@@ -372,6 +372,7 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     auraBubble.classList.add('hidden');
     messages.insertBefore(auraBubble, typing);
     let auraRawText = '';
+    let streamCompleted = false;
 
     try {
         const formData = new FormData();
@@ -418,6 +419,7 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
                     tokenEl.textContent = `↑${evt.input} ↓${evt.output} · ${evt.total} tokens`;
 
                 } else if (evt.type === 'done') {
+                    streamCompleted = true;
                     hideTyping();
                     toolEl.classList.add('hidden');
                     const s = evt.stats;
@@ -440,9 +442,17 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     } catch (err) {
         hideTyping();
         auraBubble.classList.remove('hidden');
-        auraText.textContent = '⚠ ' + err.message;  // plain text intentional for errors
+        auraText.textContent = '⚠ ' + err.message;
         scrollToBottom();
     } finally {
+        if (!streamCompleted) {
+            hideTyping();
+            auraBubble.classList.remove('hidden');
+            if (!auraRawText) {
+                auraText.textContent = '⚠ No response received. The request may have timed out — please try again.';
+                scrollToBottom();
+            }
+        }
         input.disabled = false;
         btn.disabled = false;
         btn.textContent = 'Send';
