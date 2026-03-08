@@ -171,6 +171,23 @@ TOOLS = [
         },
     },
     {
+        "name": "get_blueprint_materials",
+        "description": (
+            "Get the list of materials required to manufacture an item from its blueprint, "
+            "and optionally look up current Jita market prices for each material to estimate total build cost. "
+            "Use this when asked 'what does it cost to build X', 'what materials do I need to make X', "
+            "'how much to manufacture X from scratch'. Accepts either the ship/item name or blueprint name."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_name": {"type": "string", "description": "Name of the item or its blueprint (e.g. 'Proteus' or 'Proteus Blueprint')."},
+                "include_prices": {"type": "boolean", "description": "If true, fetch Jita sell prices for each material and sum the total build cost.", "default": True},
+            },
+            "required": ["item_name"],
+        },
+    },
+    {
         "name": "search_item_types",
         "description": (
             "Search the EVE SDE for item types matching a name (ships, modules, materials, blueprints, structures, etc). "

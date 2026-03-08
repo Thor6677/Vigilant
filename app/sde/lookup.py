@@ -6,7 +6,7 @@ from collections import deque
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEBlueprintMaterial
 
 
 async def type_name_to_id(db: AsyncSession, name: str) -> int | None:
@@ -132,6 +132,25 @@ async def nearest_cloning_facilities(
                 queue.append((neighbor, jumps + 1))
 
     return sorted(results, key=lambda x: x["jumps"])
+
+
+async def get_blueprint_materials(db: AsyncSession, blueprint_type_id: int) -> list[dict]:
+    """Return manufacturing materials for a blueprint type_id."""
+    result = await db.execute(
+        select(SDEBlueprintMaterial.material_type_id, SDEBlueprintMaterial.quantity)
+        .where(SDEBlueprintMaterial.blueprint_type_id == blueprint_type_id)
+        .where(SDEBlueprintMaterial.activity_id == 1)
+    )
+    rows = result.fetchall()
+    if not rows:
+        return []
+    # Resolve material names
+    material_ids = [r.material_type_id for r in rows]
+    names = await type_ids_to_names(db, material_ids)
+    return [
+        {"type_id": r.material_type_id, "name": names.get(r.material_type_id, f"Type {r.material_type_id}"), "quantity": r.quantity}
+        for r in rows
+    ]
 
 
 async def sde_is_loaded(db: AsyncSession) -> bool:

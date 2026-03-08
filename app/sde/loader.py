@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AsyncSessionLocal
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDEBlueprintMaterial
 
 log = logging.getLogger(__name__)
 
@@ -222,6 +222,29 @@ async def download_and_import(db: AsyncSession):
 
     count = await _import_table(db, SDEStation.__table__, station_rows())
     log.info(f"Imported {count} stations")
+
+    # --- industryActivityMaterials (manufacturing materials per blueprint) ---
+    log.info("Importing industryActivityMaterials...")
+    await db.execute(text("DELETE FROM sde_blueprint_materials"))
+    await db.commit()
+
+    async def material_rows():
+        async for r in _fetch_csv(f"{FUZZWORK_BASE}/industryActivityMaterials.csv.bz2"):
+            try:
+                activity_id = int(r["activityID"])
+                if activity_id != 1:  # 1 = manufacturing only
+                    continue
+                yield {
+                    "blueprint_type_id": int(r["typeID"]),
+                    "activity_id": activity_id,
+                    "material_type_id": int(r["materialTypeID"]),
+                    "quantity": int(r["quantity"]),
+                }
+            except (ValueError, KeyError):
+                continue
+
+    count = await _import_table(db, SDEBlueprintMaterial.__table__, material_rows())
+    log.info(f"Imported {count} blueprint material rows")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")

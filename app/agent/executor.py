@@ -365,6 +365,54 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         balance = await esi_char.get_wallet(client, inp["character_id"])
         return {"balance_isk": balance, "formatted": f"{balance:,.2f} ISK"}
 
+    elif tool_name == "get_blueprint_materials":
+        item_name = inp["item_name"]
+        include_prices = inp.get("include_prices", True)
+
+        # Find the blueprint type_id — try "<name> Blueprint" first, then the name itself
+        bp_name = item_name if "blueprint" in item_name.lower() else f"{item_name} Blueprint"
+        blueprint_type_id = await sde.type_name_to_id(db, bp_name)
+        if not blueprint_type_id:
+            matches = await sde.search_types(db, bp_name, limit=5)
+            if matches:
+                blueprint_type_id = matches[0]["type_id"]
+                bp_name = matches[0]["type_name"]
+        if not blueprint_type_id:
+            return {"error": f"No blueprint found for '{item_name}'."}
+
+        materials = await sde.get_blueprint_materials(db, blueprint_type_id)
+        if not materials:
+            return {"error": f"No manufacturing materials found for '{bp_name}' (may not be in SDE yet)."}
+
+        if not include_prices:
+            return {"blueprint": bp_name, "materials": materials}
+
+        # Fetch Jita sell prices for each material
+        client = await _any_client(db)
+        region_id = 10000002  # The Forge
+        total_cost = 0.0
+        for mat in materials:
+            try:
+                orders = await esi_market.get_market_orders(client, region_id, type_id=mat["type_id"])
+                sell_orders = [o for o in orders if not o["is_buy_order"]]
+                best_sell = min((o["price"] for o in sell_orders), default=None)
+                mat["jita_sell_price"] = best_sell
+                if best_sell:
+                    mat["line_cost"] = best_sell * mat["quantity"]
+                    total_cost += mat["line_cost"]
+                else:
+                    mat["jita_sell_price"] = None
+                    mat["line_cost"] = None
+            except Exception:
+                mat["jita_sell_price"] = None
+                mat["line_cost"] = None
+
+        return {
+            "blueprint": bp_name,
+            "materials": materials,
+            "estimated_total_build_cost_isk": round(total_cost, 2),
+        }
+
     elif tool_name == "search_item_types":
         matches = await sde.search_types(db, inp["query"], limit=10)
         if not matches:
