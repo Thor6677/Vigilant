@@ -128,33 +128,74 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
         found = [a for a in assets if a["type_id"] in matching_type_ids]
         if not found:
             return {
-                "result": f"No '{item_name}' found in assets.",
+                "result": f"No '{item_name}' found in assets for {char.character_name}.",
                 "total_assets_searched": len(assets),
-                "matched_type_ids": list(matching_type_ids),
             }
 
         # Resolve type names
         type_name_map = await sde.type_ids_to_names(db, list({a["type_id"] for a in found}))
 
-        # Resolve location names
+        # Resolve location names — NPC stations via resolve_ids, player structures via get_structure
         location_ids = list({a["location_id"] for a in found})
-        try:
-            loc_names_raw = await esi_universe.resolve_ids(client, location_ids)
-            loc_map = {n["id"]: n["name"] for n in loc_names_raw}
-        except Exception:
-            loc_map = {}
+        npc_ids = [lid for lid in location_ids if lid < 1_000_000_000_000]
+        structure_ids = [lid for lid in location_ids if lid >= 1_000_000_000_000]
+
+        loc_map: dict[int, dict] = {}
+
+        if npc_ids:
+            try:
+                raw = await esi_universe.resolve_ids(client, npc_ids)
+                for n in raw:
+                    loc_map[n["id"]] = {"name": n["name"]}
+            except Exception:
+                pass
+
+        for sid in structure_ids:
+            try:
+                struct = await esi_universe.get_structure(client, sid)
+                sys_info = await sde.system_info(db, struct.get("solar_system_id", 0))
+                loc_map[sid] = {
+                    "name": struct.get("name", f"Structure {sid}"),
+                    "system": sys_info["system_name"] if sys_info else None,
+                    "security": sys_info["security"] if sys_info else None,
+                    "region": sys_info.get("region") if sys_info else None,
+                }
+            except Exception:
+                loc_map[sid] = {"name": f"Unknown Structure ({sid})"}
+
+        # Enrich NPC station locations with system info from SDE
+        for lid in npc_ids:
+            if lid not in loc_map:
+                continue
+            try:
+                station = await esi_universe.get_station(client, lid)
+                sys_info = await sde.system_info(db, station.get("system_id", 0))
+                if sys_info:
+                    loc_map[lid]["system"] = sys_info["system_name"]
+                    loc_map[lid]["security"] = sys_info["security"]
+                    loc_map[lid]["region"] = sys_info.get("region")
+            except Exception:
+                pass
 
         results = []
         for asset in found:
-            results.append({
+            loc = loc_map.get(asset["location_id"], {})
+            entry = {
                 "type_name": type_name_map.get(asset["type_id"], f"Type {asset['type_id']}"),
                 "quantity": asset.get("quantity", 1),
-                "location_name": loc_map.get(asset["location_id"], str(asset["location_id"])),
-                "location_id": asset["location_id"],
+                "location_name": loc.get("name", str(asset["location_id"])),
                 "location_flag": asset.get("location_flag"),
-            })
+            }
+            if loc.get("system"):
+                entry["system"] = loc["system"]
+            if loc.get("security") is not None:
+                entry["security"] = loc["security"]
+            if loc.get("region"):
+                entry["region"] = loc["region"]
+            results.append(entry)
 
         return {
+            "character": char.character_name,
             "item_search": item_name,
             "total_assets_searched": len(assets),
             "found": len(results),
