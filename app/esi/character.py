@@ -31,3 +31,7 @@ async def get_public_info(client: ESIClient, character_id: int) -> dict:
 
 async def get_corporation_roles(client: ESIClient, character_id: int) -> dict:
     return await client.get(f"/characters/{character_id}/roles/")
+
+
+async def get_skill_queue(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/skillqueue/")

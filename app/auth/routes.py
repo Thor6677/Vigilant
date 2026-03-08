@@ -31,6 +31,7 @@ EVE_SCOPES = " ".join([
     "esi-assets.read_corporation_assets.v1",
     "esi-markets.read_character_orders.v1",
     "esi-wallet.read_character_wallet.v1",
+    "esi-skills.read_skillqueue.v1",
 ])
 
 
@@ -159,8 +160,18 @@ async def switch_character(character_id: int, request: Request):
     return RedirectResponse("/dashboard", status_code=303)
 
 
+@router.get("/reauth-all")
+async def reauth_all(request: Request):
+    """Redirect to login to re-authenticate (re-auth one character at a time via normal flow)."""
+    return RedirectResponse("/auth/login")
+
+
 @router.post("/remove/{character_id}")
 async def remove_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    # Only allow removing characters that belong to this session
+    if character_id not in request.session.get("character_ids", []):
+        return RedirectResponse("/dashboard", status_code=303)
+
     result = await db.execute(select(Character).where(Character.character_id == character_id))
     char = result.scalar_one_or_none()
     if char:

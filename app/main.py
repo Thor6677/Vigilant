@@ -10,6 +10,7 @@ from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.chat import router as chat_router
+from app.routes.characters import router as characters_router
 
 settings = get_settings()
 
@@ -37,6 +38,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(chat_router)
+app.include_router(characters_router)
 
 
 @app.on_event("startup")
