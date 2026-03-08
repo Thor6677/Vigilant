@@ -161,7 +161,7 @@ async def _dispatch(tool_name: str, inp: dict, db: AsyncSession):
                     "region": sys_info.get("region") if sys_info else None,
                 }
             except Exception:
-                loc_map[sid] = {"name": f"Unknown Structure ({sid})"}
+                loc_map[sid] = {"name": "Unknown Structure"}
 
         # Enrich NPC station locations with system info from SDE
         for lid in npc_ids:
