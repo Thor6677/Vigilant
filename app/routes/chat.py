@@ -1,7 +1,7 @@
 import json
 import time
 from fastapi import APIRouter, Request, Depends, Form
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -34,11 +34,32 @@ def _build_character_context(characters: list[Character], active_char: Character
     return "\n".join(lines)
 
 
+def _make_title(message: str) -> str:
+    """Generate a short title from the first user message."""
+    title = message.strip().split("\n")[0]
+    return title[:48] + "…" if len(title) > 48 else title
+
+
+async def _get_active_session(request: Request, active_id: int, db: AsyncSession):
+    """Return the current ChatSession based on session cookie, or None."""
+    session_id = request.session.get("active_chat_session_id")
+    if session_id:
+        result = await db.execute(
+            select(ChatSession).where(
+                ChatSession.id == session_id,
+                ChatSession.character_id == active_id,
+            )
+        )
+        session = result.scalar_one_or_none()
+        if session:
+            return session
+    return None
+
+
 @router.get("", response_class=HTMLResponse)
 async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     active_id = request.session.get("active_character_id")
     if not active_id:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse("/")
 
     character_ids = request.session.get("character_ids", [])
@@ -46,11 +67,20 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
 
-    session_result = await db.execute(
-        select(ChatSession).where(ChatSession.character_id == active_id)
+    # Load all sessions for this character (for history sidebar)
+    sessions_result = await db.execute(
+        select(ChatSession)
+        .where(ChatSession.character_id == active_id)
         .order_by(ChatSession.updated_at.desc())
     )
-    chat_session = session_result.scalar_one_or_none()
+    all_sessions = sessions_result.scalars().all()
+
+    # Active session
+    chat_session = await _get_active_session(request, active_id, db)
+    if not chat_session and all_sessions:
+        chat_session = all_sessions[0]
+        request.session["active_chat_session_id"] = chat_session.id
+
     history = json.loads(chat_session.messages) if chat_session else []
 
     display_messages = []
@@ -70,9 +100,33 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
         "characters": characters,
         "active_char": active_char,
         "messages": display_messages,
+        "all_sessions": all_sessions,
+        "active_session_id": chat_session.id if chat_session else None,
         "llm_model": _active_model(),
         "llm_provider": settings.llm_provider,
     })
+
+
+@router.post("/new")
+async def new_chat(request: Request):
+    """Start a fresh chat session."""
+    request.session.pop("active_chat_session_id", None)
+    return RedirectResponse("/chat", status_code=303)
+
+
+@router.post("/session/{session_id}")
+async def select_session(session_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Switch to a previous chat session."""
+    active_id = request.session.get("active_character_id")
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.character_id == active_id,
+        )
+    )
+    if result.scalar_one_or_none():
+        request.session["active_chat_session_id"] = session_id
+    return RedirectResponse("/chat", status_code=303)
 
 
 @router.post("/stream")
@@ -94,31 +148,41 @@ async def stream_message(
     if not active_char:
         return HTMLResponse("Character not found", status_code=404)
 
-    session_result = await db.execute(
-        select(ChatSession).where(ChatSession.character_id == active_id)
-        .order_by(ChatSession.updated_at.desc())
-    )
-    chat_session = session_result.scalar_one_or_none()
+    chat_session = await _get_active_session(request, active_id, db)
     history = json.loads(chat_session.messages) if chat_session else []
+    is_first_message = len(history) == 0
+
     history.append({"role": "user", "content": message})
     character_context = _build_character_context(list(characters), active_char)
 
+    # Capture session_id for use inside the generator (avoids session access in async gen)
+    current_session_id = chat_session.id if chat_session else None
+    title = _make_title(message) if is_first_message else (chat_session.title if chat_session else "New Chat")
+
     async def event_generator():
+        nonlocal current_session_id
         t_start = time.monotonic()
         try:
             async for event in stream_chat(history, character_context, db):
                 if event["type"] == "done":
-                    # Save full conversation to DB
                     elapsed = round(time.monotonic() - t_start, 1)
                     final_messages = event["messages"]
-                    if chat_session:
-                        chat_session.messages = json.dumps(final_messages, default=str)
-                        chat_session.updated_at = datetime.now(timezone.utc)
+                    if current_session_id:
+                        upd = await db.execute(select(ChatSession).where(ChatSession.id == current_session_id))
+                        sess = upd.scalar_one_or_none()
+                        if sess:
+                            sess.messages = json.dumps(final_messages, default=str)
+                            sess.updated_at = datetime.now(timezone.utc)
                     else:
-                        db.add(ChatSession(
+                        new_sess = ChatSession(
                             character_id=active_id,
+                            title=title,
                             messages=json.dumps(final_messages, default=str),
-                        ))
+                        )
+                        db.add(new_sess)
+                        await db.flush()
+                        current_session_id = new_sess.id
+                        request.session["active_chat_session_id"] = new_sess.id
                     await db.commit()
                     payload = {"type": "done", "stats": {**event["stats"], "elapsed_s": elapsed}}
                 else:
@@ -134,67 +198,21 @@ async def stream_message(
     )
 
 
-@router.post("/send", response_class=HTMLResponse)
-async def send_message(
-    request: Request,
-    message: str = Form(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """Non-streaming fallback endpoint (kept for compatibility)."""
-    active_id = request.session.get("active_character_id")
-    if not active_id:
-        return HTMLResponse("<p>Not authenticated.</p>", status_code=401)
-
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
-    characters = result.scalars().all()
-    active_char = next((c for c in characters if c.character_id == active_id), None)
-
-    if not active_char:
-        return HTMLResponse("<p>Character not found.</p>", status_code=404)
-
-    session_result = await db.execute(
-        select(ChatSession).where(ChatSession.character_id == active_id)
-        .order_by(ChatSession.updated_at.desc())
-    )
-    chat_session = session_result.scalar_one_or_none()
-    history = json.loads(chat_session.messages) if chat_session else []
-
-    history.append({"role": "user", "content": message})
-    character_context = _build_character_context(list(characters), active_char)
-
-    t_start = time.monotonic()
-    response_text, updated_history, stats = await chat(history, character_context, db)
-    elapsed = round(time.monotonic() - t_start, 1)
-
-    if chat_session:
-        chat_session.messages = json.dumps(updated_history, default=str)
-        chat_session.updated_at = datetime.now(timezone.utc)
-    else:
-        db.add(ChatSession(
-            character_id=active_id,
-            messages=json.dumps(updated_history, default=str),
-        ))
-    await db.commit()
-
-    return templates.TemplateResponse("partials/chat_messages.html", {
-        "request": request,
-        "new_messages": [
-            {"role": "user", "text": message},
-            {"role": "assistant", "text": response_text},
-        ],
-        "stats": {**stats, "elapsed_s": elapsed},
-    })
-
-
 @router.post("/clear")
 async def clear_chat(request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete the current active chat session only."""
     active_id = request.session.get("active_character_id")
-    if active_id:
-        result = await db.execute(select(ChatSession).where(ChatSession.character_id == active_id))
-        sessions = result.scalars().all()
-        for s in sessions:
-            await db.delete(s)
-        await db.commit()
-    from fastapi.responses import RedirectResponse
+    session_id = request.session.get("active_chat_session_id")
+    if active_id and session_id:
+        result = await db.execute(
+            select(ChatSession).where(
+                ChatSession.id == session_id,
+                ChatSession.character_id == active_id,
+            )
+        )
+        sess = result.scalar_one_or_none()
+        if sess:
+            await db.delete(sess)
+            await db.commit()
+    request.session.pop("active_chat_session_id", None)
     return RedirectResponse("/chat", status_code=303)

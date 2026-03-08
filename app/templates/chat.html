@@ -37,37 +37,67 @@
 
     <!-- Sidebar -->
     <div class="w-56 flex-shrink-0 flex flex-col gap-3">
+
+        <!-- Character selector -->
         <div class="eve-border rounded p-3 bg-eve-surface">
-            <div class="text-eve-muted text-xs uppercase tracking-widest mb-2">Active Character</div>
+            <div class="text-eve-muted text-xs uppercase tracking-widest mb-2">Character</div>
             {% if active_char %}
             <div class="flex items-center gap-2 mb-2">
                 <img src="https://images.evetech.net/characters/{{ active_char.character_id }}/portrait?size=32"
-                     class="w-8 h-8 rounded border border-eve-border">
-                <div>
-                    <div class="text-white text-xs font-medium">{{ active_char.character_name }}</div>
+                     class="w-8 h-8 rounded border border-eve-border flex-shrink-0">
+                <div class="min-w-0">
+                    <div class="text-white text-xs font-medium truncate">{{ active_char.character_name }}</div>
                     {% if active_char.corporation_name %}
-                    <div class="text-eve-muted text-xs truncate max-w-[120px]">{{ active_char.corporation_name }}</div>
+                    <div class="text-eve-muted text-xs truncate">{{ active_char.corporation_name }}</div>
                     {% endif %}
                 </div>
             </div>
-            {% endif %}
-        </div>
-
-        {% if characters|length > 1 %}
-        <div class="eve-border rounded p-3 bg-eve-surface">
-            <div class="text-eve-muted text-xs uppercase tracking-widest mb-2">Switch Character</div>
-            {% for char in characters %}
-            {% if char.character_id != active_char.character_id %}
-            <form method="POST" action="/auth/switch/{{ char.character_id }}" class="mb-1">
-                <button type="submit" class="w-full text-left text-xs text-eve-muted hover:text-white py-1 transition-colors truncate">
-                    → {{ char.character_name }}
-                </button>
+            {% if characters|length > 1 %}
+            <form id="switch-char-form" method="POST" action="">
+                <select id="char-select"
+                        name="char_id"
+                        onchange="switchCharacter(this.value)"
+                        class="w-full bg-eve-bg border border-eve-border text-eve-muted text-xs rounded px-2 py-1.5 focus:outline-none focus:border-eve-accent">
+                    {% for char in characters %}
+                    <option value="{{ char.character_id }}" {% if char.character_id == active_char.character_id %}selected{% endif %}>
+                        {{ char.character_name }}
+                    </option>
+                    {% endfor %}
+                </select>
             </form>
             {% endif %}
-            {% endfor %}
+            {% endif %}
         </div>
-        {% endif %}
 
+        <!-- Chat history -->
+        <div class="eve-border rounded bg-eve-surface flex flex-col min-h-0 flex-1">
+            <div class="flex items-center justify-between px-3 pt-3 pb-2">
+                <div class="text-eve-muted text-xs uppercase tracking-widest">Chats</div>
+                <form method="POST" action="/chat/new">
+                    <button type="submit" title="New chat"
+                            class="text-eve-muted hover:text-eve-accent text-lg leading-none transition-colors">+</button>
+                </form>
+            </div>
+            <div class="overflow-y-auto flex-1 px-2 pb-2 space-y-0.5 scrollbar-eve">
+                {% for session in all_sessions %}
+                <form method="POST" action="/chat/session/{{ session.id }}">
+                    <button type="submit"
+                            class="w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors
+                                   {% if session.id == active_session_id %}
+                                   bg-eve-accent/10 text-eve-accent border border-eve-accent/30
+                                   {% else %}
+                                   text-eve-muted hover:text-white hover:bg-white/5
+                                   {% endif %}">
+                        {{ session.title }}
+                    </button>
+                </form>
+                {% else %}
+                <div class="text-eve-muted text-xs px-2 py-2">No chats yet</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Quick Prompts -->
         <div class="eve-border rounded p-3 bg-eve-surface">
             <div class="text-eve-muted text-xs uppercase tracking-widest mb-2">Quick Prompts</div>
             <div class="space-y-1">
@@ -92,7 +122,7 @@
         <form method="POST" action="/chat/clear">
             <button type="submit"
                     class="w-full text-xs border border-eve-border hover:border-eve-danger text-eve-muted hover:text-eve-danger py-2 rounded transition-colors">
-                Clear History
+                Delete Chat
             </button>
         </form>
     </div>
@@ -201,6 +231,14 @@ function hideTyping() {
     document.getElementById('typing-indicator').classList.add('hidden');
     clearInterval(_thinkingTimer);
     _thinkingTimer = null;
+}
+
+function switchCharacter(charId) {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `/auth/switch/${charId}`;
+    document.body.appendChild(form);
+    form.submit();
 }
 
 function setPrompt(text) {
