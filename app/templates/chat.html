@@ -363,6 +363,16 @@ window.addEventListener('load', () => {
         el.innerHTML = marked.parse(el.dataset.markdown);
     });
     scrollToBottom();
+
+    // Auto-submit pre-filled question from ?q= param
+    const q = new URLSearchParams(window.location.search).get('q');
+    if (q) {
+        const input = document.getElementById('message-input');
+        input.value = q;
+        // Replace URL without the query param so refresh doesn't re-submit
+        history.replaceState(null, '', '/chat');
+        document.getElementById('chat-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }
 });
 </script>
 
