@@ -33,12 +33,24 @@ _queued_sync: set[int] = set()
 # regardless of how many coroutines have been created (manual syncs, etc.).
 _sync_lock: asyncio.Lock | None = None
 
+# Per-character locks for token refresh. Serialises concurrent _client_for()
+# calls for the same character so asyncio.gather() can't trigger two
+# simultaneous SSO refresh requests (EVE SSO rotates refresh tokens, so a
+# second concurrent request with the old token would fail).
+_token_locks: dict[int, asyncio.Lock] = {}
+
 
 def _get_sync_lock() -> asyncio.Lock:
     global _sync_lock
     if _sync_lock is None:
         _sync_lock = asyncio.Lock()
     return _sync_lock
+
+
+def _get_token_lock(character_id: int) -> asyncio.Lock:
+    if character_id not in _token_locks:
+        _token_locks[character_id] = asyncio.Lock()
+    return _token_locks[character_id]
 
 # ── ESI cache timers (seconds) — from ESI swagger Cache-Control: max-age ─────
 # https://esi.evetech.net/latest/swagger.json
@@ -156,12 +168,26 @@ def _any_field_stale(char: Character, cache: CharacterDashboardCache | None) -> 
 
 
 async def _client_for(char: Character, db: AsyncSession) -> tuple[ESIClient | None, str | None]:
-    try:
-        token = await refresh_token(char, db)
-        return ESIClient(token, db=db), None
-    except Exception as e:
-        logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
-        return None, f"token_refresh_failed: {type(e).__name__}"
+    """Return an authenticated ESI client for the character.
+
+    Uses a per-character lock + independent DB session so concurrent field
+    fetches inside asyncio.gather() don't race on the same SQLAlchemy session
+    or fire duplicate SSO refresh requests (EVE rotates refresh tokens).
+    """
+    async with _get_token_lock(char.character_id):
+        try:
+            async with AsyncSessionLocal() as token_db:
+                result = await token_db.execute(
+                    select(Character).where(Character.character_id == char.character_id)
+                )
+                char_fresh = result.scalar_one_or_none()
+                if char_fresh is None:
+                    return None, "character_not_found"
+                token = await refresh_token(char_fresh, token_db)
+            return ESIClient(token, db=db), None
+        except Exception as e:
+            logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
+            return None, f"token_refresh_failed: {type(e).__name__}"
 
 
 # ── ESI fetch functions ───────────────────────────────────────────────────────
