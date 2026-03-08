@@ -8,7 +8,7 @@ import logging
 from openai import AsyncOpenAI
 
 log = logging.getLogger(__name__)
-from app.agent.providers.base import BaseLLMProvider, LLMResponse, ToolCall
+from app.agent.providers.base import BaseLLMProvider, LLMResponse, StreamEvent, ToolCall
 from app.config import get_settings
 
 settings = get_settings()
@@ -134,7 +134,6 @@ class OllamaProvider(BaseLLMProvider):
         oai_messages = [{"role": "system", "content": system}] + _messages_to_openai(messages)
         oai_tools = _tools_to_openai(tools) if tools else None
 
-
         kwargs = {
             "model": self.model,
             "messages": oai_messages,
@@ -175,3 +174,92 @@ class OllamaProvider(BaseLLMProvider):
             input_tokens=usage.prompt_tokens if usage else 0,
             output_tokens=usage.completion_tokens if usage else 0,
         )
+
+    async def stream_message(self, messages, system, tools):
+        """Stream response from Ollama via OpenAI-compatible streaming API."""
+        oai_messages = [{"role": "system", "content": system}] + _messages_to_openai(messages)
+        oai_tools = _tools_to_openai(tools) if tools else None
+
+        kwargs = {
+            "model": self.model,
+            "messages": oai_messages,
+            "max_tokens": 4096,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if oai_tools:
+            kwargs["tools"] = oai_tools
+            kwargs["tool_choice"] = "auto"
+
+        # Accumulate tool call arguments across chunks (keyed by index)
+        tool_acc: dict[int, dict] = {}
+        accumulated_text = ""
+
+        try:
+            stream = await self.client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                # Usage chunk (final chunk from Ollama)
+                if chunk.usage:
+                    yield StreamEvent(
+                        type="usage",
+                        input_tokens=chunk.usage.prompt_tokens or 0,
+                        output_tokens=chunk.usage.completion_tokens or 0,
+                    )
+
+                if not chunk.choices:
+                    continue
+
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # Text delta — strip thinking blocks progressively
+                if delta.content:
+                    text = re.sub(r"<think>.*?</think>", "", delta.content, flags=re.DOTALL)
+                    if text:
+                        accumulated_text += text
+                        yield StreamEvent(type="text", content=text)
+
+                # Tool call deltas — accumulate arguments by index
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_acc:
+                            tool_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc_delta.id:
+                            tool_acc[idx]["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tool_acc[idx]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tool_acc[idx]["arguments"] += tc_delta.function.arguments
+
+        except Exception as e:
+            log.error("Ollama stream error: %s", e)
+            raise
+
+        # Yield complete tool calls
+        for idx in sorted(tool_acc.keys()):
+            tc = tool_acc[idx]
+            try:
+                inp = json.loads(tc["arguments"])
+            except json.JSONDecodeError:
+                inp = {}
+            yield StreamEvent(
+                type="tool_use",
+                tool_call=ToolCall(id=tc["id"], name=tc["name"], input=inp),
+            )
+
+        # Build raw_content in Anthropic format for history
+        raw_content = []
+        if accumulated_text:
+            raw_content.append({"type": "text", "text": accumulated_text})
+        for idx in sorted(tool_acc.keys()):
+            tc = tool_acc[idx]
+            try:
+                inp = json.loads(tc["arguments"])
+            except json.JSONDecodeError:
+                inp = {}
+            raw_content.append({"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": inp})
+
+        stop_reason = "tool_use" if tool_acc else "end_turn"
+        yield StreamEvent(type="stop", stop_reason=stop_reason, raw_content=raw_content)

@@ -29,18 +29,22 @@ When answering:
 The available characters are provided in each message context."""
 
 
+def _active_model() -> str:
+    settings = get_settings()
+    if settings.llm_provider.lower() == "anthropic":
+        return settings.anthropic_model
+    return settings.ollama_model
+
+
 async def chat(
     messages: list[dict],
     character_context: str,
     db: AsyncSession,
 ) -> tuple[str, list[dict], dict]:
     """
-    Run a conversation turn with tool use via the configured LLM provider.
-    Returns (assistant_text, updated_messages, stats).
-    stats keys: input_tokens, output_tokens, tool_calls, model
+    Non-streaming chat turn. Returns (assistant_text, updated_messages, stats).
     """
     provider = get_provider()
-    settings = get_settings()
     system = f"{SYSTEM_PROMPT}\n\n{character_context}"
     updated_messages = list(messages)
     total_input = 0
@@ -63,18 +67,13 @@ async def chat(
         })
 
         if not response.has_tool_calls or response.stop_reason == "end_turn":
-            model = (
-                settings.anthropic_model
-                if settings.llm_provider.lower() == "anthropic"
-                else settings.ollama_model
-            )
             stats = {
                 "input_tokens": total_input,
                 "output_tokens": total_output,
                 "total_tokens": total_input + total_output,
                 "tool_calls": total_tool_calls,
-                "model": model,
-                "provider": settings.llm_provider,
+                "model": _active_model(),
+                "provider": get_settings().llm_provider,
             }
             return response.text, updated_messages, stats
 
@@ -89,3 +88,94 @@ async def chat(
             total_tool_calls += 1
 
         updated_messages.append({"role": "user", "content": tool_results})
+
+
+async def stream_chat(
+    messages: list[dict],
+    character_context: str,
+    db: AsyncSession,
+):
+    """
+    Streaming chat turn. Async generator yielding SSE-ready dicts.
+
+    Event types:
+      {"type": "text",   "content": "...", "est_output_tokens": N}
+      {"type": "tool",   "name": "...", "status": "running"}
+      {"type": "tokens", "input": N, "output": N, "total": N}
+      {"type": "done",   "messages": [...], "stats": {...}}
+    """
+    provider = get_provider()
+    settings = get_settings()
+    system = f"{SYSTEM_PROMPT}\n\n{character_context}"
+    updated_messages = list(messages)
+    total_input = 0
+    total_output = 0
+    total_tool_calls = 0
+    output_chars = 0
+
+    while True:
+        current_tool_calls = []
+        current_raw_content = []
+        stop_reason = "end_turn"
+
+        async for event in provider.stream_message(updated_messages, system, TOOLS):
+            if event.type == "text":
+                output_chars += len(event.content)
+                yield {
+                    "type": "text",
+                    "content": event.content,
+                    "est_output_tokens": output_chars // 4,
+                }
+
+            elif event.type == "tool_use":
+                current_tool_calls.append(event.tool_call)
+
+            elif event.type == "usage":
+                total_input = event.input_tokens if event.input_tokens else total_input
+                if event.output_tokens:
+                    total_output = event.output_tokens
+                yield {
+                    "type": "tokens",
+                    "input": total_input,
+                    "output": total_output,
+                    "total": total_input + total_output,
+                }
+
+            elif event.type == "stop":
+                stop_reason = event.stop_reason
+                current_raw_content = event.raw_content
+
+        updated_messages.append({
+            "role": "assistant",
+            "content": current_raw_content,
+        })
+
+        if not current_tool_calls:
+            break
+
+        # Execute tools and stream status
+        tool_results = []
+        for tc in current_tool_calls:
+            yield {"type": "tool", "name": tc.name, "status": "running"}
+            result = await execute_tool(tc.name, tc.input, db)
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tc.id,
+                "content": result,
+            })
+            total_tool_calls += 1
+
+        updated_messages.append({"role": "user", "content": tool_results})
+
+    yield {
+        "type": "done",
+        "messages": updated_messages,
+        "stats": {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "tool_calls": total_tool_calls,
+            "model": _active_model(),
+            "provider": settings.llm_provider,
+        },
+    }

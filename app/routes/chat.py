@@ -1,14 +1,14 @@
 import json
 import time
 from fastapi import APIRouter, Request, Depends, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.db.models import get_db, Character, ChatSession
-from app.agent.claude import chat
+from app.agent.claude import chat, stream_chat
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -75,12 +75,72 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
+@router.post("/stream")
+async def stream_message(
+    request: Request,
+    message: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE streaming endpoint. Returns text/event-stream."""
+    active_id = request.session.get("active_character_id")
+    if not active_id:
+        return HTMLResponse("Not authenticated", status_code=401)
+
+    character_ids = request.session.get("character_ids", [])
+    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
+    characters = result.scalars().all()
+    active_char = next((c for c in characters if c.character_id == active_id), None)
+
+    if not active_char:
+        return HTMLResponse("Character not found", status_code=404)
+
+    session_result = await db.execute(
+        select(ChatSession).where(ChatSession.character_id == active_id)
+        .order_by(ChatSession.updated_at.desc())
+    )
+    chat_session = session_result.scalar_one_or_none()
+    history = json.loads(chat_session.messages) if chat_session else []
+    history.append({"role": "user", "content": message})
+    character_context = _build_character_context(list(characters), active_char)
+
+    async def event_generator():
+        t_start = time.monotonic()
+        try:
+            async for event in stream_chat(history, character_context, db):
+                if event["type"] == "done":
+                    # Save full conversation to DB
+                    elapsed = round(time.monotonic() - t_start, 1)
+                    final_messages = event["messages"]
+                    if chat_session:
+                        chat_session.messages = json.dumps(final_messages, default=str)
+                        chat_session.updated_at = datetime.now(timezone.utc)
+                    else:
+                        db.add(ChatSession(
+                            character_id=active_id,
+                            messages=json.dumps(final_messages, default=str),
+                        ))
+                    await db.commit()
+                    payload = {"type": "done", "stats": {**event["stats"], "elapsed_s": elapsed}}
+                else:
+                    payload = event
+                yield f"data: {json.dumps(payload, default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/send", response_class=HTMLResponse)
 async def send_message(
     request: Request,
     message: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
+    """Non-streaming fallback endpoint (kept for compatibility)."""
     active_id = request.session.get("active_character_id")
     if not active_id:
         return HTMLResponse("<p>Not authenticated.</p>", status_code=401)
@@ -101,7 +161,7 @@ async def send_message(
     history = json.loads(chat_session.messages) if chat_session else []
 
     history.append({"role": "user", "content": message})
-    character_context = _build_character_context(characters, active_char)
+    character_context = _build_character_context(list(characters), active_char)
 
     t_start = time.monotonic()
     response_text, updated_history, stats = await chat(history, character_context, db)
@@ -123,10 +183,7 @@ async def send_message(
             {"role": "user", "text": message},
             {"role": "assistant", "text": response_text},
         ],
-        "stats": {
-            **stats,
-            "elapsed_s": elapsed,
-        },
+        "stats": {**stats, "elapsed_s": elapsed},
     })
 
 
