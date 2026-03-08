@@ -1,0 +1,265 @@
+<div id="status-data"
+     hx-get="/status/data"
+     hx-trigger="every 5s"
+     hx-swap="outerHTML">
+
+  <!-- Summary stats -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+      <div class="text-2xl font-mono font-semibold text-white">{{ total_requests }}</div>
+      <div class="text-xs text-eve-muted mt-1">Requests (session)</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+      {% if success_rate >= 95 %}
+        <div class="text-2xl font-mono font-semibold text-eve-success">{{ success_rate }}%</div>
+      {% elif success_rate >= 80 %}
+        <div class="text-2xl font-mono font-semibold text-yellow-400">{{ success_rate }}%</div>
+      {% else %}
+        <div class="text-2xl font-mono font-semibold text-eve-danger">{{ success_rate }}%</div>
+      {% endif %}
+      <div class="text-xs text-eve-muted mt-1">Success Rate</div>
+      {% if error_count > 0 %}
+        <div class="text-xs text-eve-danger/70 mt-0.5">{{ error_count }} errors</div>
+      {% endif %}
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+      {% if syncing_count > 0 %}
+        <div class="text-2xl font-mono font-semibold text-eve-accent">{{ syncing_count }}</div>
+      {% else %}
+        <div class="text-2xl font-mono font-semibold text-eve-muted">0</div>
+      {% endif %}
+      <div class="text-xs text-eve-muted mt-1">Syncing / Queued</div>
+      <div class="text-xs text-eve-muted/60 mt-0.5">{{ char_sync_rows | length }} total chars</div>
+    </div>
+    <div class="eve-border rounded p-3 bg-eve-surface text-center">
+      {% if overall_status == "ok" %}
+        <div class="text-2xl font-mono font-semibold text-eve-success">OK</div>
+      {% elif overall_status == "warning" %}
+        <div class="text-2xl font-mono font-semibold text-yellow-400">WARN</div>
+      {% else %}
+        <div class="text-2xl font-mono font-semibold text-eve-danger">CRIT</div>
+      {% endif %}
+      <div class="text-xs text-eve-muted mt-1">ESI Health</div>
+    </div>
+  </div>
+
+  <!-- Background sync status -->
+  <div class="eve-border rounded bg-eve-surface mb-6">
+    <div class="px-3 py-2 border-b border-eve-border flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Background Sync</h2>
+      <span class="text-xs text-eve-muted font-mono">scheduler · 60s interval</span>
+    </div>
+    {% if char_sync_rows %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs font-mono">
+          <thead>
+            <tr class="text-eve-muted border-b border-eve-border">
+              <th class="px-3 py-2 text-left">Character</th>
+              <th class="px-3 py-2 text-left">Last Sync</th>
+              <th class="px-3 py-2 text-left">Status</th>
+              <th class="px-3 py-2 text-left">Stale Fields</th>
+              <th class="px-3 py-2 text-left">Warnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in char_sync_rows %}
+              <tr class="border-b border-eve-border/40 hover:bg-eve-border/20">
+                <td class="px-3 py-2 text-white whitespace-nowrap">{{ row.character_name }}</td>
+                <td class="px-3 py-2 text-eve-muted whitespace-nowrap">{{ row.last_synced_str }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                  {% if row.queued and row.sync_status != "syncing" %}
+                    <span class="px-1.5 py-0.5 rounded bg-eve-accent/20 text-eve-accent border border-eve-accent/30">queued</span>
+                  {% elif row.sync_status == "syncing" %}
+                    <span class="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1 w-fit">
+                      <svg class="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
+                      </svg>
+                      syncing
+                    </span>
+                  {% elif row.sync_status == "error" %}
+                    <span class="px-1.5 py-0.5 rounded bg-eve-danger/20 text-eve-danger border border-eve-danger/30" title="{{ row.sync_error or '' }}">error</span>
+                  {% else %}
+                    <span class="text-eve-muted">idle</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2">
+                  {% if row.stale_fields == 0 %}
+                    <span class="text-eve-success">0 / {{ row.total_fields }}</span>
+                  {% elif row.stale_fields == row.total_fields %}
+                    <span class="text-eve-danger">{{ row.stale_fields }} / {{ row.total_fields }}</span>
+                  {% else %}
+                    <span class="text-yellow-400">{{ row.stale_fields }} / {{ row.total_fields }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2">
+                  {% if row.warn_count > 0 %}
+                    <span class="text-yellow-400">⚠ {{ row.warn_count }}</span>
+                  {% else %}
+                    <span class="text-eve-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="px-3 py-4 text-eve-muted text-sm">No characters added yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- ESI Rate limit groups -->
+  <div class="mb-6">
+    <h2 class="text-xs uppercase tracking-wider text-eve-muted mb-3">ESI Rate Limit Groups</h2>
+    {% if groups %}
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {% for g in groups %}
+          {% if g.limit_total > 0 %}
+            {% set pct = (g.remaining / g.limit_total * 100) | int %}
+          {% else %}
+            {% set pct = 100 %}
+          {% endif %}
+          <div class="eve-border rounded p-3 bg-eve-surface space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-white">{{ g.group }}</span>
+              <span class="text-xs text-eve-muted">{{ g.limit_window }}</span>
+            </div>
+            <div class="w-full h-2 rounded bg-eve-border overflow-hidden">
+              {% if pct >= 20 %}
+                <div class="h-full rounded bg-eve-success transition-all" style="width: {{ pct }}%"></div>
+              {% elif pct >= 5 %}
+                <div class="h-full rounded bg-yellow-500 transition-all" style="width: {{ pct }}%"></div>
+              {% else %}
+                <div class="h-full rounded bg-eve-danger transition-all" style="width: {{ pct }}%"></div>
+              {% endif %}
+            </div>
+            <div class="flex items-center justify-between text-xs text-eve-muted">
+              <span>{{ g.remaining }} / {{ g.limit_total }} remaining</span>
+              <span>{{ g.last_updated | age_str }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-eve-muted text-sm font-mono">No ESI requests made yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- Legacy error limit -->
+  {% if legacy %}
+  <div class="eve-border rounded p-3 bg-eve-surface space-y-2 mb-6">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Legacy Error Limit</h2>
+      <span class="text-xs text-eve-muted font-mono">resets in {{ legacy.reset_in_seconds }}s</span>
+    </div>
+    {% set err_pct = legacy.remaining %}
+    <div class="w-full h-2 rounded bg-eve-border overflow-hidden">
+      {% if err_pct >= 20 %}
+        <div class="h-full rounded bg-eve-success" style="width: {{ err_pct }}%"></div>
+      {% elif err_pct >= 10 %}
+        <div class="h-full rounded bg-yellow-500" style="width: {{ err_pct }}%"></div>
+      {% else %}
+        <div class="h-full rounded bg-eve-danger" style="width: {{ err_pct }}%"></div>
+      {% endif %}
+    </div>
+    <div class="flex items-center justify-between text-xs text-eve-muted">
+      <span>{{ legacy.remaining }}/100 errors remaining</span>
+      <span>{{ legacy.last_updated | age_str }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Recent requests -->
+  <div class="eve-border rounded bg-eve-surface mb-6">
+    <div class="px-3 py-2 border-b border-eve-border flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Recent Requests</h2>
+      <span class="text-xs text-eve-muted font-mono">last {{ request_log | length }}</span>
+    </div>
+    {% if request_log %}
+      <div class="overflow-y-auto max-h-64 scrollbar-eve">
+        <table class="w-full text-xs font-mono">
+          <thead class="sticky top-0 bg-eve-surface">
+            <tr class="text-eve-muted border-b border-eve-border">
+              <th class="px-3 py-2 text-left">Time</th>
+              <th class="px-3 py-2 text-left">Status</th>
+              <th class="px-3 py-2 text-left">Group</th>
+              <th class="px-3 py-2 text-left">Tokens</th>
+              <th class="px-3 py-2 text-left">Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in request_log %}
+              <tr class="border-b border-eve-border/40 hover:bg-eve-border/20">
+                <td class="px-3 py-1 text-eve-muted whitespace-nowrap">{{ entry.timestamp.strftime("%H:%M:%S") }}</td>
+                <td class="px-3 py-1">
+                  {% if entry.status_code < 300 %}
+                    <span class="text-eve-success">{{ entry.status_code }}</span>
+                  {% elif entry.status_code < 400 %}
+                    <span class="text-eve-accent">{{ entry.status_code }}</span>
+                  {% elif entry.status_code in (429, 420) %}
+                    <span class="text-eve-danger font-semibold">{{ entry.status_code }}</span>
+                  {% else %}
+                    <span class="text-yellow-400">{{ entry.status_code }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-1 text-eve-muted">{{ entry.group or "—" }}</td>
+                <td class="px-3 py-1 text-eve-muted">{{ entry.tokens_used }}</td>
+                <td class="px-3 py-1 text-eve-muted truncate max-w-xs" title="{{ entry.path }}">{{ entry.path }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="px-3 py-4 text-eve-muted text-sm">No requests logged yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- Significant events -->
+  <div class="eve-border rounded bg-eve-surface">
+    <div class="px-3 py-2 border-b border-eve-border flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Significant Events</h2>
+      <span class="text-xs text-eve-muted font-mono">last {{ recent_events | length }}</span>
+    </div>
+    {% if recent_events %}
+      <div class="overflow-y-auto max-h-56 scrollbar-eve">
+        <table class="w-full text-xs font-mono">
+          <thead class="sticky top-0 bg-eve-surface">
+            <tr class="text-eve-muted border-b border-eve-border">
+              <th class="px-3 py-2 text-left">Time</th>
+              <th class="px-3 py-2 text-left">Type</th>
+              <th class="px-3 py-2 text-left">Group</th>
+              <th class="px-3 py-2 text-left">Path</th>
+              <th class="px-3 py-2 text-left">Remain</th>
+              <th class="px-3 py-2 text-left">Retry</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in recent_events %}
+              <tr class="border-b border-eve-border/40 hover:bg-eve-border/20">
+                <td class="px-3 py-1 text-eve-muted whitespace-nowrap">{{ ev.occurred_at | age_str }}</td>
+                <td class="px-3 py-1">
+                  {% if ev.event_type == "429" %}
+                    <span class="px-1.5 py-0.5 rounded bg-eve-danger/20 text-eve-danger border border-eve-danger/30">429</span>
+                  {% elif ev.event_type == "420" %}
+                    <span class="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30">420</span>
+                  {% else %}
+                    <span class="px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">warn</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-1 text-eve-muted">{{ ev.group_name or "—" }}</td>
+                <td class="px-3 py-1 text-eve-muted truncate max-w-xs" title="{{ ev.path }}">{{ ev.path }}</td>
+                <td class="px-3 py-1 text-eve-muted">{{ ev.remaining if ev.remaining is not none else "—" }}</td>
+                <td class="px-3 py-1 text-eve-muted">{{ (ev.retry_after | string + "s") if ev.retry_after else "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="px-3 py-4 text-eve-muted text-sm">No significant events recorded.</p>
+    {% endif %}
+  </div>
+
+</div>
