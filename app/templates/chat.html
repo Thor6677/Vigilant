@@ -209,18 +209,29 @@ function createUserBubble(text) {
 function createAuraBubble() {
     const wrap = document.createElement('div');
     wrap.className = 'flex justify-start';
-    const tokenId = 'tok-' + Date.now();
-    const toolId = 'tool-' + Date.now();
-    const statsId = 'stats-' + Date.now();
-    wrap.innerHTML = `
-        <div class="max-w-[75%]">
-            <div class="text-xs text-eve-success mb-1 uppercase tracking-widest px-1">AURA</div>
-            <div class="bubble-assistant px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap" id="aura-text-${tokenId}"></div>
-            <div id="${toolId}" class="text-xs text-eve-muted px-1 mt-1 hidden"></div>
-            <div id="${tokenId}" class="text-xs text-eve-muted/60 px-1 mt-1"></div>
-            <div id="${statsId}" class="text-xs text-eve-muted/50 px-1 mt-0.5 hidden"></div>
-        </div>`;
-    return { wrap, textId: 'aura-text-' + tokenId, tokenId, toolId, statsId };
+
+    const label = document.createElement('div');
+    label.className = 'text-xs text-eve-success mb-1 uppercase tracking-widest px-1';
+    label.textContent = 'AURA';
+
+    const textEl = document.createElement('div');
+    textEl.className = 'bubble-assistant px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap';
+
+    const toolEl = document.createElement('div');
+    toolEl.className = 'text-xs text-eve-muted px-1 mt-1 hidden';
+
+    const tokenEl = document.createElement('div');
+    tokenEl.className = 'text-xs text-eve-muted/60 px-1 mt-1';
+
+    const statsEl = document.createElement('div');
+    statsEl.className = 'text-xs text-eve-muted/50 px-1 mt-0.5 hidden';
+
+    const inner = document.createElement('div');
+    inner.className = 'max-w-[75%]';
+    inner.append(label, textEl, toolEl, tokenEl, statsEl);
+    wrap.appendChild(inner);
+
+    return { wrap, textEl, toolEl, tokenEl, statsEl };
 }
 
 function escapeHtml(str) {
@@ -251,9 +262,10 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
     showTyping();
     scrollToBottom();
 
-    // Create AURA bubble (hidden until first text arrives)
-    const { wrap: auraBubble, textId, tokenId, toolId, statsId } = createAuraBubble();
+    // Create AURA bubble — insert into DOM now so elements are always reachable
+    const { wrap: auraBubble, textEl: auraText, toolEl, tokenEl, statsEl } = createAuraBubble();
     auraBubble.classList.add('hidden');
+    messages.insertBefore(auraBubble, typing);
 
     try {
         const formData = new FormData();
@@ -283,58 +295,44 @@ document.getElementById('chat-form').addEventListener('submit', async function(e
                 if (evt.type === 'text') {
                     if (auraBubble.classList.contains('hidden')) {
                         hideTyping();
-                        messages.insertBefore(auraBubble, typing);
                         auraBubble.classList.remove('hidden');
                     }
-                    const textEl = document.getElementById(textId);
-                    textEl.textContent += evt.content;
-                    // Update estimated token count live
+                    auraText.textContent += evt.content;
                     if (evt.est_output_tokens) {
-                        document.getElementById(tokenId).textContent = `~${evt.est_output_tokens} tokens`;
+                        tokenEl.textContent = `~${evt.est_output_tokens} tokens`;
                     }
                     scrollToBottom();
 
                 } else if (evt.type === 'tool') {
-                    const toolEl = document.getElementById(toolId);
                     toolEl.classList.remove('hidden');
                     toolEl.textContent = `⚙ ${evt.name}…`;
 
                 } else if (evt.type === 'tokens') {
-                    document.getElementById(tokenId).textContent =
-                        `↑${evt.input} ↓${evt.output} · ${evt.total} tokens`;
+                    tokenEl.textContent = `↑${evt.input} ↓${evt.output} · ${evt.total} tokens`;
 
                 } else if (evt.type === 'done') {
                     hideTyping();
-                    // Hide live tool indicator
-                    document.getElementById(toolId).classList.add('hidden');
-                    // Show final stats
+                    toolEl.classList.add('hidden');
                     const s = evt.stats;
                     const elapsed = s.elapsed_s != null ? s.elapsed_s + 's' : '';
                     const tools = s.tool_calls ? ` · ${s.tool_calls} tool call${s.tool_calls !== 1 ? 's' : ''}` : '';
-                    document.getElementById(tokenId).textContent =
-                        `↑${s.input_tokens} ↓${s.output_tokens} · ${s.total_tokens} tokens`;
-                    const statsEl = document.getElementById(statsId);
+                    tokenEl.textContent = `↑${s.input_tokens} ↓${s.output_tokens} · ${s.total_tokens} tokens`;
                     statsEl.classList.remove('hidden');
                     statsEl.textContent = `${elapsed}${tools} · ${s.model}`;
                     scrollToBottom();
 
                 } else if (evt.type === 'error') {
                     hideTyping();
-                    if (auraBubble.classList.contains('hidden')) {
-                        messages.insertBefore(auraBubble, typing);
-                        auraBubble.classList.remove('hidden');
-                    }
-                    document.getElementById(textId).textContent = '⚠ ' + evt.message;
+                    auraBubble.classList.remove('hidden');
+                    auraText.textContent = '⚠ ' + evt.message;
                     scrollToBottom();
                 }
             }
         }
     } catch (err) {
         hideTyping();
-        const errWrap = document.createElement('div');
-        errWrap.className = 'flex justify-start';
-        errWrap.innerHTML = `<div class="bubble-assistant px-4 py-3 text-sm text-eve-danger">⚠ ${escapeHtml(err.message)}</div>`;
-        messages.insertBefore(errWrap, typing);
+        auraBubble.classList.remove('hidden');
+        auraText.textContent = '⚠ ' + err.message;
         scrollToBottom();
     } finally {
         input.disabled = false;
