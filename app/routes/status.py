@@ -95,10 +95,10 @@ async def _build_context(db: AsyncSession) -> dict:
     for char in characters:
         cache = char_caches.get(char.character_id)
         stale, total_fields = _stale_field_counts(char, cache)
-        warn_count = 0
+        sync_warnings = {}
         if cache and cache.sync_warnings_json:
             try:
-                warn_count = len(json.loads(cache.sync_warnings_json))
+                sync_warnings = json.loads(cache.sync_warnings_json)
             except Exception:
                 pass
         char_sync_rows.append({
@@ -110,7 +110,8 @@ async def _build_context(db: AsyncSession) -> dict:
             "queued": char.character_id in _queued_sync,
             "stale_fields": stale,
             "total_fields": total_fields,
-            "warn_count": warn_count,
+            "sync_warnings": sync_warnings,
+            "warn_count": len(sync_warnings),
             "sync_error": cache.sync_error if cache else None,
         })
 

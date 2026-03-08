@@ -36,6 +36,17 @@
 
 </div>
 
+<!-- Toggle detail rows in the sync table -->
+<script>
+function toggleDetail(id) {
+  const row = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (!row) return;
+  const hidden = row.classList.toggle('hidden');
+  if (arrow) arrow.textContent = hidden ? '▶' : '▼';
+}
+</script>
+
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
