@@ -1,6 +1,7 @@
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.agent.tools import TOOLS
 from app.agent.executor import execute_tool
 from app.agent.providers import get_provider
@@ -32,14 +33,19 @@ async def chat(
     messages: list[dict],
     character_context: str,
     db: AsyncSession,
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], dict]:
     """
     Run a conversation turn with tool use via the configured LLM provider.
-    Returns (assistant_text, updated_messages).
+    Returns (assistant_text, updated_messages, stats).
+    stats keys: input_tokens, output_tokens, tool_calls, model
     """
     provider = get_provider()
+    settings = get_settings()
     system = f"{SYSTEM_PROMPT}\n\n{character_context}"
     updated_messages = list(messages)
+    total_input = 0
+    total_output = 0
+    total_tool_calls = 0
 
     while True:
         response = await provider.create_message(
@@ -48,13 +54,29 @@ async def chat(
             tools=TOOLS,
         )
 
+        total_input += response.input_tokens
+        total_output += response.output_tokens
+
         updated_messages.append({
             "role": "assistant",
             "content": response.raw_assistant_content,
         })
 
         if not response.has_tool_calls or response.stop_reason == "end_turn":
-            return response.text, updated_messages
+            model = (
+                settings.anthropic_model
+                if settings.llm_provider.lower() == "anthropic"
+                else settings.ollama_model
+            )
+            stats = {
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "total_tokens": total_input + total_output,
+                "tool_calls": total_tool_calls,
+                "model": model,
+                "provider": settings.llm_provider,
+            }
+            return response.text, updated_messages, stats
 
         tool_results = []
         for tc in response.tool_calls:
@@ -64,5 +86,6 @@ async def chat(
                 "tool_use_id": tc.id,
                 "content": result,
             })
+            total_tool_calls += 1
 
         updated_messages.append({"role": "user", "content": tool_results})

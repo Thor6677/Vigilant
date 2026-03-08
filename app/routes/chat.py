@@ -1,16 +1,25 @@
 import json
+import time
 from fastapi import APIRouter, Request, Depends, Form
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.models import get_db, Character, ChatSession
 from app.agent.claude import chat
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 templates = Jinja2Templates(directory="app/templates")
+settings = get_settings()
+
+
+def _active_model() -> str:
+    if settings.llm_provider.lower() == "anthropic":
+        return settings.anthropic_model
+    return settings.ollama_model
 
 
 def _build_character_context(characters: list[Character], active_char: Character) -> str:
@@ -37,7 +46,6 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
 
-    # Load or create session
     session_result = await db.execute(
         select(ChatSession).where(ChatSession.character_id == active_id)
         .order_by(ChatSession.updated_at.desc())
@@ -45,7 +53,6 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
     chat_session = session_result.scalar_one_or_none()
     history = json.loads(chat_session.messages) if chat_session else []
 
-    # Convert to display format (only user/assistant text)
     display_messages = []
     for msg in history:
         if isinstance(msg.get("content"), str):
@@ -63,6 +70,8 @@ async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
         "characters": characters,
         "active_char": active_char,
         "messages": display_messages,
+        "llm_model": _active_model(),
+        "llm_provider": settings.llm_provider,
     })
 
 
@@ -84,7 +93,6 @@ async def send_message(
     if not active_char:
         return HTMLResponse("<p>Character not found.</p>", status_code=404)
 
-    # Load existing session
     session_result = await db.execute(
         select(ChatSession).where(ChatSession.character_id == active_id)
         .order_by(ChatSession.updated_at.desc())
@@ -92,14 +100,13 @@ async def send_message(
     chat_session = session_result.scalar_one_or_none()
     history = json.loads(chat_session.messages) if chat_session else []
 
-    # Add user message
     history.append({"role": "user", "content": message})
     character_context = _build_character_context(characters, active_char)
 
-    # Run Claude
-    response_text, updated_history = await chat(history, character_context, db)
+    t_start = time.monotonic()
+    response_text, updated_history, stats = await chat(history, character_context, db)
+    elapsed = round(time.monotonic() - t_start, 1)
 
-    # Save session
     if chat_session:
         chat_session.messages = json.dumps(updated_history, default=str)
         chat_session.updated_at = datetime.now(timezone.utc)
@@ -110,13 +117,16 @@ async def send_message(
         ))
     await db.commit()
 
-    # Return HTMX partial — both user message and assistant response
     return templates.TemplateResponse("partials/chat_messages.html", {
         "request": request,
         "new_messages": [
             {"role": "user", "text": message},
             {"role": "assistant", "text": response_text},
         ],
+        "stats": {
+            **stats,
+            "elapsed_s": elapsed,
+        },
     })
 
 

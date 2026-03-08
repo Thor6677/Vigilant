@@ -3,8 +3,18 @@
 {% block head %}
 <style>
     #chat-messages { scroll-behavior: smooth; }
-    .message-user { background: #0f1a2e; border-left: 2px solid #4a9eff; }
-    .message-assistant { background: #0d1a0d; border-left: 2px solid #44bb44; }
+    .bubble-user {
+        background: #0f1a2e;
+        border: 1px solid #1e3a5f;
+        border-radius: 1.25rem;
+        border-top-right-radius: 0.25rem;
+    }
+    .bubble-assistant {
+        background: #0b1a0b;
+        border: 1px solid #1a3a1a;
+        border-radius: 1.25rem;
+        border-top-left-radius: 0.25rem;
+    }
     .typing-dot { animation: blink 1.4s infinite both; }
     .typing-dot:nth-child(2) { animation-delay: .2s; }
     .typing-dot:nth-child(3) { animation-delay: .4s; }
@@ -82,10 +92,17 @@
     <div class="flex-1 flex flex-col eve-border rounded bg-eve-surface">
 
         <!-- Header -->
-        <div class="flex items-center gap-3 px-4 py-3 border-b border-eve-border">
-            <div class="w-2 h-2 rounded-full bg-eve-success aura-pulse"></div>
-            <span class="text-eve-accent text-sm tracking-widest">AURA</span>
-            <span class="text-eve-muted text-xs">Autonomous Universal Response Algorithm</span>
+        <div class="flex items-center justify-between px-4 py-3 border-b border-eve-border">
+            <div class="flex items-center gap-3">
+                <div class="w-2 h-2 rounded-full bg-eve-success aura-pulse"></div>
+                <span class="text-eve-accent text-sm tracking-widest">AURA</span>
+                <span class="text-eve-muted text-xs">Autonomous Universal Response Algorithm</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-eve-muted">
+                <span class="uppercase tracking-widest">{{ llm_provider }}</span>
+                <span>·</span>
+                <span class="text-eve-muted/70">{{ llm_model }}</span>
+            </div>
         </div>
 
         <!-- Messages -->
@@ -99,21 +116,30 @@
             {% endif %}
 
             {% for msg in messages %}
-            <div class="rounded p-3 text-sm {% if msg.role == 'user' %}message-user{% else %}message-assistant{% endif %}">
-                <div class="text-xs {% if msg.role == 'user' %}text-eve-accent{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest">
-                    {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
+            <div class="flex {% if msg.role == 'user' %}justify-end{% else %}justify-start{% endif %}">
+                <div class="max-w-[75%]">
+                    <div class="text-xs {% if msg.role == 'user' %}text-eve-accent text-right{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest px-1">
+                        {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
+                    </div>
+                    <div class="{% if msg.role == 'user' %}bubble-user{% else %}bubble-assistant{% endif %} px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
                 </div>
-                <div class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
             </div>
             {% endfor %}
 
             <!-- Typing indicator -->
-            <div id="typing-indicator" class="hidden rounded p-3 text-sm message-assistant">
-                <div class="text-xs text-eve-success mb-1 uppercase tracking-widest">AURA</div>
-                <div class="flex gap-1 items-center h-4">
-                    <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
-                    <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
-                    <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
+            <div id="typing-indicator" class="hidden flex justify-start">
+                <div class="max-w-[75%]">
+                    <div class="text-xs text-eve-success mb-1 uppercase tracking-widest px-1">AURA</div>
+                    <div class="bubble-assistant px-4 py-3">
+                        <div class="flex items-center gap-3">
+                            <div class="flex gap-1 items-center">
+                                <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
+                                <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
+                                <div class="typing-dot w-1.5 h-1.5 rounded-full bg-eve-success"></div>
+                            </div>
+                            <span id="thinking-timer" class="text-xs text-eve-muted">0.0s</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -144,6 +170,9 @@
 </div>
 
 <script>
+let _thinkingTimer = null;
+let _thinkingStart = null;
+
 function scrollToBottom() {
     const el = document.getElementById('chat-messages');
     el.scrollTop = el.scrollHeight;
@@ -151,11 +180,18 @@ function scrollToBottom() {
 
 function showTyping() {
     document.getElementById('typing-indicator').classList.remove('hidden');
+    _thinkingStart = performance.now();
+    _thinkingTimer = setInterval(() => {
+        const elapsed = ((performance.now() - _thinkingStart) / 1000).toFixed(1);
+        document.getElementById('thinking-timer').textContent = elapsed + 's';
+    }, 100);
     scrollToBottom();
 }
 
 function hideTyping() {
     document.getElementById('typing-indicator').classList.add('hidden');
+    clearInterval(_thinkingTimer);
+    _thinkingTimer = null;
 }
 
 function setPrompt(text) {

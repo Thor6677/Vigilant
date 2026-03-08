@@ -166,9 +166,12 @@ class OllamaProvider(BaseLLMProvider):
 
         raw_assistant_content = _response_to_anthropic_content(choice)
 
+        usage = response.usage
         return LLMResponse(
             text=text,
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             raw_assistant_content=raw_assistant_content,
+            input_tokens=usage.prompt_tokens if usage else 0,
+            output_tokens=usage.completion_tokens if usage else 0,
         )

@@ -1,8 +1,18 @@
 {% for msg in new_messages %}
-<div class="rounded p-3 text-sm {% if msg.role == 'user' %}message-user{% else %}message-assistant{% endif %}">
-    <div class="text-xs {% if msg.role == 'user' %}text-eve-accent{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest">
-        {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
+<div class="flex {% if msg.role == 'user' %}justify-end{% else %}justify-start{% endif %}">
+    <div class="max-w-[75%]">
+        <div class="text-xs {% if msg.role == 'user' %}text-eve-accent text-right{% else %}text-eve-success{% endif %} mb-1 uppercase tracking-widest px-1">
+            {% if msg.role == 'user' %}You{% else %}AURA{% endif %}
+        </div>
+        <div class="{% if msg.role == 'user' %}bubble-user{% else %}bubble-assistant{% endif %} px-4 py-3 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
+        {% if msg.role == 'assistant' and stats %}
+        <div class="text-xs text-eve-muted mt-1 px-1 flex gap-2">
+            <span>{{ stats.elapsed_s }}s</span>
+            {% if stats.total_tokens %}<span>·</span><span>{{ "{:,}".format(stats.total_tokens) }} tokens</span>{% endif %}
+            {% if stats.tool_calls %}<span>·</span><span>{{ stats.tool_calls }} tool call{{ 's' if stats.tool_calls != 1 }}</span>{% endif %}
+            <span>·</span><span class="text-eve-muted/60">{{ stats.model }}</span>
+        </div>
+        {% endif %}
     </div>
-    <div class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ msg.text }}</div>
 </div>
 {% endfor %}

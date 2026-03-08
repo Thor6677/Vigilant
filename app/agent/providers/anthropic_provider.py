@@ -31,4 +31,6 @@ class AnthropicProvider(BaseLLMProvider):
             tool_calls=tool_calls,
             stop_reason=response.stop_reason or "end_turn",
             raw_assistant_content=raw_assistant_content,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
         )

@@ -20,6 +20,8 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     stop_reason: str = "end_turn"
     raw_assistant_content: list[dict] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     @property
     def has_tool_calls(self) -> bool:
