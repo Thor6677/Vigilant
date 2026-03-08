@@ -495,7 +495,7 @@
         {% endfor %}
 
         {% if has_pi.found %}
-        <div class="divide-y divide-eve-border max-h-64 overflow-y-auto">
+        <div class="divide-y divide-eve-border">
         {% for char in characters %}
         {% set pi_list = pi.get(char.character_id) %}
         {% if pi_list and pi_list is iterable and pi_list | length > 0 %}
