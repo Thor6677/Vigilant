@@ -25,6 +25,19 @@ from app.sde import lookup as sde
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
 
+
+def _sec_color_val(sec: float | None) -> str:
+    """Tailwind colour class for a raw security status float."""
+    if sec is None:
+        return "text-eve-muted"
+    if sec >= 5.0:
+        return "text-sky-400"
+    if sec >= 0.0:
+        return "text-yellow-400"
+    return "text-eve-danger"
+
+templates.env.globals["sec_color_val"] = _sec_color_val
+
 # Character IDs that are either actively syncing or queued to sync.
 # Prevents duplicate _sync_all_task spawns across rapid page loads.
 _queued_sync: set[int] = set()
@@ -218,9 +231,13 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
         if not client:
             return char.character_id, None, err
         try:
-            loc = await esi_char.get_location(client, char.character_id)
+            loc, ship_data = await asyncio.gather(
+                esi_char.get_location(client, char.character_id),
+                esi_char.get_ship(client, char.character_id) if _has_scope(char, "esi-location.read_ship_type.v1") else asyncio.sleep(0, result={}),
+            )
             system_id = loc.get("solar_system_id")
-            result = {"system_id": system_id, "system_name": None, "security": None, "region": None, "docked_at": None}
+            result = {"system_id": system_id, "system_name": None, "security": None, "region": None, "docked_at": None,
+                      "ship_type_id": None, "ship_type_name": None, "ship_name": None}
             if system_id:
                 sys_info = await sde.system_info(db, system_id)
                 if sys_info:
@@ -239,6 +256,12 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
                     result["docked_at"] = struct.get("name", "Unknown Structure")
                 except Exception:
                     result["docked_at"] = "Unknown Structure"
+            if ship_data:
+                ship_type_id = ship_data.get("ship_type_id")
+                result["ship_type_id"] = ship_type_id
+                result["ship_name"] = ship_data.get("ship_name")
+                if ship_type_id:
+                    result["ship_type_name"] = await sde.type_id_to_name(db, ship_type_id)
             return char.character_id, result, None
         except Exception as e:
             logger.warning("Location fetch failed for char %s: %s", char.character_id, e)

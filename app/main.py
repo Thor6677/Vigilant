@@ -57,6 +57,16 @@ async def startup():
             .values(sync_status="idle")
         )
         await db.commit()
+    from sqlalchemy import text
+    async with AsyncSessionLocal() as db:
+        for stmt in [
+            "ALTER TABLE characters ADD COLUMN security_status REAL",
+        ]:
+            try:
+                await db.execute(text(stmt))
+                await db.commit()
+            except Exception:
+                await db.rollback()
     import asyncio
     asyncio.create_task(ensure_sde_loaded())
     asyncio.create_task(_background_scheduler())

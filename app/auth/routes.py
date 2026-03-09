@@ -97,6 +97,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     pub_info = await esi_char.get_public_info(esi, character_id)
     corporation_id = pub_info.get("corporation_id")
     alliance_id = pub_info.get("alliance_id")
+    security_status = pub_info.get("security_status")
 
     corporation_name = None
     alliance_name = None
@@ -125,6 +126,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         existing.corporation_name = corporation_name
         existing.alliance_id = alliance_id
         existing.alliance_name = alliance_name
+        existing.security_status = security_status
         existing.last_seen = datetime.now(timezone.utc)
     else:
         db.add(Character(
@@ -134,6 +136,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             corporation_name=corporation_name,
             alliance_id=alliance_id,
             alliance_name=alliance_name,
+            security_status=security_status,
             access_token=access_token,
             refresh_token=refresh_token,
             token_expiry=token_expiry,

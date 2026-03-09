@@ -32,6 +32,7 @@ class Character(Base):
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sort_order = Column(Integer, default=0)
+    security_status = Column(Float, nullable=True)
     account_group = Column(String, default="Ungrouped")
 
     chat_sessions = relationship("ChatSession", back_populates="character", cascade="all, delete-orphan")

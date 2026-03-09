@@ -122,24 +122,92 @@
     "esi-contracts.read_character_contracts.v1" not in char_scopes or
     "esi-planets.manage_planets.v1" not in char_scopes
 ) %}
-<div class="eve-border rounded p-4 bg-eve-surface {% if char.character_id == active_char.character_id %}eve-glow border-eve-accent{% endif %}">
-    <div class="flex items-start justify-between mb-3">
-        <div>
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+<div class="eve-border rounded overflow-hidden bg-eve-surface {% if char.character_id == active_char.character_id %}ring-1 ring-eve-accent{% endif %}">
+
+    {# ── EVE-style banner header ── #}
+    <div class="relative flex overflow-hidden"
+         style="background: linear-gradient(135deg, #141008 0%, #1e1809 45%, #2a2210 100%); min-height: 7rem;">
+
+        {# Character portrait — left edge, full banner height #}
+        <div class="flex-shrink-0 relative">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}"
-                 class="w-12 h-12 rounded border border-eve-border mb-2">
-            <div class="text-white font-medium text-sm">{{ char.character_name }}</div>
-            {% if char.corporation_name %}
-            <div class="text-eve-muted text-xs">{{ char.corporation_name }}</div>
-            {% endif %}
-            {% if char.alliance_name %}
-            <div class="text-eve-gold text-xs">{{ char.alliance_name }}</div>
+                 class="h-28 w-28 object-cover object-top block">
+            {# Active badge overlaid on portrait corner #}
+            {% if char.character_id == active_char.character_id %}
+            <span class="absolute bottom-1 left-1 text-[10px] bg-eve-accent/90 text-eve-bg px-1.5 py-0.5 rounded font-semibold leading-tight">ACTIVE</span>
             {% endif %}
         </div>
-        {% if char.character_id == active_char.character_id %}
-        <span class="text-xs bg-eve-accent text-eve-bg px-2 py-1 rounded">Active</span>
-        {% endif %}
+
+        {# Main info area #}
+        <div class="flex-1 flex flex-col justify-between px-3 py-2.5 min-w-0 relative z-10">
+
+            {# Top: name + corp/alliance #}
+            <div class="min-w-0">
+                <div class="text-white font-semibold text-sm leading-snug truncate tracking-wide">{{ char.character_name }}</div>
+
+                {# Corp row #}
+                {% if char.corporation_name %}
+                <div class="flex items-center gap-1.5 mt-1.5 min-w-0">
+                    {% if char.corporation_id %}
+                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32"
+                         class="w-5 h-5 flex-shrink-0 rounded-sm"
+                         onerror="this.style.display='none'">
+                    {% endif %}
+                    <span class="text-xs text-eve-muted truncate">{{ char.corporation_name }}</span>
+                </div>
+                {% endif %}
+
+                {# Alliance row #}
+                {% if char.alliance_name %}
+                <div class="flex items-center gap-1.5 mt-0.5 min-w-0">
+                    {% if char.alliance_id %}
+                    <img src="https://images.evetech.net/alliances/{{ char.alliance_id }}/logo?size=32"
+                         class="w-4 h-4 flex-shrink-0 opacity-80"
+                         onerror="this.style.display='none'">
+                    {% endif %}
+                    <span class="text-xs text-eve-gold/80 truncate">{{ char.alliance_name }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {# Bottom: ship + security status #}
+            <div class="flex items-end justify-between gap-2 mt-1">
+                <div class="min-w-0">
+                    {# Ship #}
+                    {% if loc and loc.ship_type_id %}
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32"
+                             class="w-5 h-5 flex-shrink-0 rounded-sm opacity-90"
+                             onerror="this.style.display='none'">
+                        <div class="min-w-0">
+                            <div class="text-xs text-white/90 truncate leading-tight">{{ loc.ship_type_name or "Unknown Ship" }}</div>
+                            {% if loc.ship_name and loc.ship_name != loc.ship_type_name %}
+                            <div class="text-[11px] text-eve-muted truncate leading-tight italic">{{ loc.ship_name }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {# Security status — right-aligned #}
+                {% if char.security_status is not none %}
+                <div class="text-xs font-mono flex-shrink-0">
+                    <span class="text-eve-muted">Sec</span>
+                    <span class="ml-1 {{ sec_color_val(char.security_status) }}">{{ "%.1f"|format(char.security_status) }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Diagonal stripe accent — EVE style, bottom-right corner #}
+        <div class="absolute bottom-0 right-0 w-16 h-full overflow-hidden pointer-events-none opacity-25">
+            <div class="absolute inset-0"
+                 style="background: repeating-linear-gradient(-55deg, transparent 0px, transparent 5px, rgba(200,169,81,0.9) 5px, rgba(200,169,81,0.9) 8px, transparent 8px, transparent 13px, rgba(255,255,255,0.6) 13px, rgba(255,255,255,0.6) 15px, transparent 15px, transparent 20px);"></div>
+        </div>
     </div>
+
+    {# ── Card body — keep padding consistent with rest of card ── #}
+    <div class="p-3">
 
     {# Location #}
     {% if loc %}
@@ -255,7 +323,8 @@
             </button>
         </form>
     </div>
-</div>
+    </div>{# closes <div class="p-3"> #}
+</div>{# closes the outer card div #}
 {% endfor %}
 </div>
 
