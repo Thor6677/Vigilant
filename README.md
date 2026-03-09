@@ -10,12 +10,14 @@ An AI-powered EVE Online assistant that gives you a unified dashboard for all yo
 
 ## Features
 
+- **EVE-style character cards** — portrait, corp/alliance logos, current ship (type + name), security status, and diagonal stripe accent matching the in-game UI
 - **Multi-character dashboard** — wallet, location, industry jobs, market orders, skill queue, mail, notifications, contracts, planetary industry, and zKillboard kills — all on one page
-- **Background sync** — data refreshes per-field on ESI-recommended cache timers (30s for location, 2min for wallet, etc.) without blocking the UI
+- **Automatic background sync** — a scheduler runs every 60 seconds, refreshing each field on its ESI-recommended cache timer (30s location, 2min wallet, 1h clones, etc.); page loads never trigger ESI calls
+- **Instant on character add** — full sync fires immediately when a character is authenticated
 - **AI chat assistant (AURA)** — ask questions about your characters in plain English; backed by Claude (Anthropic) or any Ollama-compatible local model
 - **Character grouping** — organize alts into named account groups, reorder with drag-and-drop
 - **Skills page** — full skill queue details with training completion times and warnings for paused queues
-- **ESI status page** — live ESI health, rate limit event log, and recent API request history
+- **App status dashboard** — request activity chart (Chart.js), background sync table with expandable per-field warnings, ESI rate limit progress bars, recent request log, and significant event history
 - **Sync diagnostics** — per-field ⚠ warnings on the dashboard when a sync fails, with re-authenticate links for expired tokens
 
 ---
@@ -43,7 +45,7 @@ cd capsuleerai
 1. Create a `.env` file and prompt for your EVE SSO credentials and (if using Anthropic) your API key
 2. Create a Python virtual environment and install dependencies
 3. Start the app in the background at **http://localhost:8000**
-4. Confirm the app started successfully
+4. Wait for the app to confirm startup before returning to the terminal
 
 To stop:
 ```bash
@@ -96,6 +98,18 @@ CapsuleerAI requests the following ESI scopes when you add a character:
 
 ---
 
+## Pages
+
+| Route | Description |
+|---|---|
+| `/dashboard` | Main character overview — cards, wallet totals, mail, PI, skill queue, kill history |
+| `/skills` | Detailed skill queue for all characters with training times |
+| `/characters` | Manage characters — groups, reorder, remove |
+| `/status` | App status dashboard — sync health, ESI rate limits, request activity chart |
+| `/chat` | AURA AI chat assistant |
+
+---
+
 ## Docker / VPS deployment
 
 A `Dockerfile`, `docker-compose.yml`, and `setup_vps.sh` are included for server deployment. Copy `.env.example` to `.env`, fill in your credentials, then:
@@ -109,7 +123,7 @@ docker compose up -d
 ## Tech Stack
 
 - **Backend**: FastAPI, SQLAlchemy (async/aiosqlite), Uvicorn
-- **Frontend**: Jinja2 templates, HTMX, Tailwind CSS (CDN)
+- **Frontend**: Jinja2 templates, HTMX, Tailwind CSS (CDN), Chart.js
 - **AI**: Anthropic Claude API or Ollama (OpenAI-compatible)
 - **Data**: EVE ESI REST API, zKillboard API, EVE SDE (Static Data Export)
 
