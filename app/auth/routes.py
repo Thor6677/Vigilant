@@ -195,6 +195,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     await db.commit()
 
     # ── Update session ────────────────────────────────────────────────────────
+    # Clear then repopulate to regenerate session state and prevent session fixation.
+    request.session.clear()
     request.session["user_id"] = user.id
     request.session["active_character_id"] = character_id
 

@@ -164,12 +164,17 @@ async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/status/chart.json")
-async def status_chart_json():
+async def status_chart_json(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
     return JSONResponse(_compute_chart_data())
 
 
 @router.get("/status/banner", response_class=HTMLResponse)
 async def status_banner(request: Request):
+    if not request.session.get("user_id"):
+        return HTMLResponse('<div id="esi-banner"></div>')
+
     overall = rate_limit_tracker.overall_status()
 
     if overall == "ok":
