@@ -68,7 +68,7 @@ def _stale_field_counts(char: Character, cache: CharacterDashboardCache | None) 
     return stale, total
 
 
-async def _build_context(db: AsyncSession, user_id: int | None = None) -> dict:
+async def _build_context(db: AsyncSession, user_id: int) -> dict:
     from app.routes.dashboard import _queued_sync
 
     tracker = rate_limit_tracker
@@ -83,10 +83,7 @@ async def _build_context(db: AsyncSession, user_id: int | None = None) -> dict:
     success_rate = round(success_count / total_requests * 100) if total_requests else 100
 
     # Character sync status — filtered to the logged-in user's characters
-    if user_id is not None:
-        char_result = await db.execute(select(Character).where(Character.user_id == user_id))
-    else:
-        char_result = await db.execute(select(Character))
+    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = list(char_result.scalars().all())
     cids = [c.character_id for c in characters]
     cache_result = await db.execute(
@@ -156,18 +153,25 @@ async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX partial — refreshes live sections without touching the chart."""
     user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
     ctx = await _build_context(db, user_id=user_id)
     ctx["request"] = request
     return templates.TemplateResponse("status_data.html", ctx)
 
 
 @router.get("/status/chart.json")
-async def status_chart_json():
+async def status_chart_json(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
     return JSONResponse(_compute_chart_data())
 
 
 @router.get("/status/banner", response_class=HTMLResponse)
 async def status_banner(request: Request):
+    if not request.session.get("user_id"):
+        return HTMLResponse('<div id="esi-banner"></div>')
+
     overall = rate_limit_tracker.overall_status()
 
     if overall == "ok":

@@ -191,6 +191,8 @@ async def rename_group(request: Request, db: AsyncSession = Depends(get_db)):
 
     if not old_name or not new_name:
         return JSONResponse({"error": "Names required"}, status_code=400)
+    if len(new_name) > 100:
+        return JSONResponse({"error": "Group name too long (max 100 characters)"}, status_code=400)
 
     result = await db.execute(
         select(Character).where(
