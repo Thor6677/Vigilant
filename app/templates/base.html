@@ -52,7 +52,7 @@
 </head>
 <body class="min-h-screen text-gray-200">
 
-{% if request.session.get('active_character_id') %}
+{% if request.session.get('user_id') %}
 <nav class="eve-border border-b bg-eve-surface sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
         <a href="/dashboard" class="text-eve-accent font-semibold tracking-widest text-sm uppercase">

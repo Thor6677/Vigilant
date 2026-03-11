@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, CharacterDashboardCache, AsyncSessionLocal
+from app.db.models import get_db, Character, CharacterDashboardCache, AsyncSessionLocal, User
 from app.db.cache import cache_stats
 from app.routes.skills import _process_skillqueue, group_skill_data
 from app.esi.client import ESIClient, refresh_token
@@ -722,21 +722,33 @@ def _build_data_from_caches(characters: list[Character], char_caches: dict) -> d
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    if request.session.get("active_character_id"):
+    if request.session.get("user_id"):
         return RedirectResponse("/dashboard")
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
     active_id = request.session.get("active_character_id")
+
+    # Fetch only this user's characters (enforces isolation between users)
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = result.scalars().all()
+
+    # Ensure active character belongs to this user; fall back to first owned character
+    if not active_id or not any(c.character_id == active_id for c in characters):
+        active_id = characters[0].character_id if characters else None
+        request.session["active_character_id"] = active_id
+
     if not active_id:
         return RedirectResponse("/")
 
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
-    characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
+    character_ids = [c.character_id for c in characters]
 
     # Load all cached data (fast DB reads)
     cache_result = await db.execute(
@@ -793,10 +805,16 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
     any_syncing = any(s == "syncing" for s in sync_statuses.values())
 
+    # Fetch user for main character info
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    main_character_id = user.main_character_id if user else None
+
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "characters": characters,
         "active_char": active_char,
+        "main_character_id": main_character_id,
         "cache_stats": stats,
         "skill_groups": skill_groups,
         "wallets": wallets,
@@ -830,7 +848,14 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 @router.post("/dashboard/sync/{character_id}")
 async def trigger_sync(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Manual resync for a single character."""
-    if character_id not in request.session.get("character_ids", []):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/dashboard", status_code=303)
+    # Verify character belongs to this user
+    ownership = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    if not ownership.scalar_one_or_none():
         return RedirectResponse("/dashboard", status_code=303)
 
     cache_result = await db.execute(
@@ -856,7 +881,15 @@ async def trigger_sync(character_id: int, request: Request, db: AsyncSession = D
 @router.get("/dashboard/sync-status", response_class=HTMLResponse)
 async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX polling endpoint. Returns spinner while syncing; triggers page refresh when done."""
-    character_ids = request.session.get("character_ids", [])
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse('<div id="sync-poller"></div>')
+
+    char_result = await db.execute(
+        select(Character.character_id).where(Character.user_id == user_id)
+    )
+    character_ids = [row[0] for row in char_result.all()]
+
     result = await db.execute(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(character_ids))
     )
@@ -872,7 +905,6 @@ async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db))
         resp.headers["HX-Refresh"] = "true"
         return resp
 
-    count = sum(1 for c in caches if c.sync_status == "syncing") + len(_queued_sync.intersection(set(character_ids)))
     # Avoid double-counting: a character can be both in _queued_sync and status=syncing
     count = len(
         {c.character_id for c in caches if c.sync_status == "syncing"}

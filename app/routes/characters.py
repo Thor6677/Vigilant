@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character
+from app.db.models import get_db, Character, User
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.sde import lookup as sde
@@ -101,14 +101,21 @@ def _group_characters(characters: list[Character]) -> dict[str, list[Character]]
 
 @router.get("/characters", response_class=HTMLResponse)
 async def characters_page(request: Request, sort: str = "default", db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return RedirectResponse("/")
 
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
+    active_id = request.session.get("active_character_id")
+
+    # Fetch only this user's characters (enforces isolation)
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
+
+    # Fetch user for main character designation
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    main_character_id = user.main_character_id if user else None
 
     needs_reauth_count = sum(
         1 for c in characters
@@ -138,6 +145,7 @@ async def characters_page(request: Request, sort: str = "default", db: AsyncSess
         "characters": sorted_chars,
         "groups": groups,
         "active_char": active_char,
+        "main_character_id": main_character_id,
         "sort": sort,
         "training": training,
         "skill_names": skill_names,
@@ -147,18 +155,21 @@ async def characters_page(request: Request, sort: str = "default", db: AsyncSess
 
 @router.post("/characters/reorder")
 async def reorder_characters(request: Request, db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
-    session_char_ids = set(request.session.get("character_ids", []))
     data = await request.json()
 
     for item in data:
         char_id = item.get("character_id")
-        if char_id not in session_char_ids:
-            continue
-        result = await db.execute(select(Character).where(Character.character_id == char_id))
+        # Filter by user_id to prevent modifying other users' characters
+        result = await db.execute(
+            select(Character).where(
+                Character.character_id == char_id,
+                Character.user_id == user_id,
+            )
+        )
         char = result.scalar_one_or_none()
         if char:
             char.sort_order = item.get("sort_order", 0)
@@ -170,11 +181,10 @@ async def reorder_characters(request: Request, db: AsyncSession = Depends(get_db
 
 @router.post("/characters/rename-group")
 async def rename_group(request: Request, db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
-    session_char_ids = request.session.get("character_ids", [])
     data = await request.json()
     old_name = data.get("old_name", "").strip()
     new_name = data.get("new_name", "").strip()
@@ -184,7 +194,7 @@ async def rename_group(request: Request, db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(
         select(Character).where(
-            Character.character_id.in_(session_char_ids),
+            Character.user_id == user_id,
             Character.account_group == old_name,
         )
     )

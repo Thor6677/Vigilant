@@ -186,13 +186,15 @@ def group_skill_data(skill_data: list[dict]) -> dict[str, list[dict]]:
 
 @router.get("/skills", response_class=HTMLResponse)
 async def skills_page(request: Request, db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return RedirectResponse("/")
 
-    character_ids = request.session.get("character_ids", [])
+    active_id = request.session.get("active_character_id")
+
+    # Fetch only this user's characters
     result = await db.execute(
-        select(Character).where(Character.character_id.in_(character_ids))
+        select(Character).where(Character.user_id == user_id)
     )
     characters = sorted(
         result.scalars().all(),

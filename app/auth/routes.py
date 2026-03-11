@@ -6,12 +6,12 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db.models import get_db, Character
+from app.db.models import get_db, Character, User
 from app.esi.client import ESIClient
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
@@ -114,22 +114,34 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         except Exception:
             pass
 
-    result = await db.execute(select(Character).where(Character.character_id == character_id))
-    existing = result.scalar_one_or_none()
+    # ── Determine which User this character belongs to ────────────────────────
+    #
+    # Case A: User is already logged in (session has user_id) → add character to them.
+    # Case B: This character already has a User record → log in as that user.
+    # Case C: Brand-new character, no existing user → create a new User account
+    #         and designate this character as the main.
 
-    if existing:
-        existing.access_token = access_token
-        existing.refresh_token = refresh_token
-        existing.token_expiry = token_expiry
-        existing.scopes = scopes
-        existing.corporation_id = corporation_id
-        existing.corporation_name = corporation_name
-        existing.alliance_id = alliance_id
-        existing.alliance_name = alliance_name
-        existing.security_status = security_status
-        existing.last_seen = datetime.now(timezone.utc)
+    session_user_id: int | None = request.session.get("user_id")
+
+    # Load or create the Character row first
+    result = await db.execute(select(Character).where(Character.character_id == character_id))
+    existing_char = result.scalar_one_or_none()
+
+    if existing_char:
+        # Update tokens and public info
+        existing_char.access_token = access_token
+        existing_char.refresh_token = refresh_token
+        existing_char.token_expiry = token_expiry
+        existing_char.scopes = scopes
+        existing_char.corporation_id = corporation_id
+        existing_char.corporation_name = corporation_name
+        existing_char.alliance_id = alliance_id
+        existing_char.alliance_name = alliance_name
+        existing_char.security_status = security_status
+        existing_char.last_seen = datetime.now(timezone.utc)
+        char = existing_char
     else:
-        db.add(Character(
+        char = Character(
             character_id=character_id,
             character_name=verify_data["CharacterName"],
             corporation_id=corporation_id,
@@ -141,19 +153,52 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             refresh_token=refresh_token,
             token_expiry=token_expiry,
             scopes=scopes,
-        ))
+        )
+        db.add(char)
+        await db.flush()  # assign char.id without committing
+
+    # Resolve which User account this character belongs to
+    if session_user_id:
+        # Case A: logged-in user is adding a new character
+        user_result = await db.execute(select(User).where(User.id == session_user_id))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            # Stale session; treat as Case C
+            session_user_id = None
+
+    if not session_user_id:
+        if char.user_id:
+            # Case B: character already registered — log in as that user
+            user_result = await db.execute(select(User).where(User.id == char.user_id))
+            user = user_result.scalar_one_or_none()
+            if user is None:
+                # Data inconsistency — create a new user
+                user = User(
+                    main_character_id=character_id,
+                    last_login=datetime.now(timezone.utc),
+                )
+                db.add(user)
+                await db.flush()
+        else:
+            # Case C: brand-new signup — create a User and make this the main
+            user = User(
+                main_character_id=character_id,
+                last_login=datetime.now(timezone.utc),
+            )
+            db.add(user)
+            await db.flush()
+
+    # Link character to user (handles new chars and orphaned existing chars)
+    char.user_id = user.id
+    user.last_login = datetime.now(timezone.utc)
 
     await db.commit()
 
-    # Set active character in session
+    # ── Update session ────────────────────────────────────────────────────────
+    request.session["user_id"] = user.id
     request.session["active_character_id"] = character_id
-    if "character_ids" not in request.session:
-        request.session["character_ids"] = []
-    if character_id not in request.session["character_ids"]:
-        request.session["character_ids"].append(character_id)
 
     # Trigger an immediate sync for this character (new add or re-auth).
-    # Import here to avoid module-level circular import risk.
     from app.routes.dashboard import _sync_task, _queued_sync
     if character_id not in _queued_sync:
         _queued_sync.add(character_id)
@@ -169,8 +214,18 @@ async def logout(request: Request):
 
 
 @router.post("/switch/{character_id}")
-async def switch_character(character_id: int, request: Request):
-    if character_id in request.session.get("character_ids", []):
+async def switch_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=303)
+    # Verify character belongs to this user
+    result = await db.execute(
+        select(Character).where(
+            Character.character_id == character_id,
+            Character.user_id == user_id,
+        )
+    )
+    if result.scalar_one_or_none():
         request.session["active_character_id"] = character_id
     return RedirectResponse("/dashboard", status_code=303)
 
@@ -181,24 +236,73 @@ async def reauth_all(request: Request):
     return RedirectResponse("/auth/login")
 
 
-@router.post("/remove/{character_id}")
-async def remove_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    # Only allow removing characters that belong to this session
-    if character_id not in request.session.get("character_ids", []):
-        return RedirectResponse("/dashboard", status_code=303)
+@router.post("/set-main/{character_id}")
+async def set_main_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Designate a character as the main for this user account."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
-    result = await db.execute(select(Character).where(Character.character_id == character_id))
-    char = result.scalar_one_or_none()
-    if char:
-        await db.delete(char)
+    # Verify character belongs to this user
+    result = await db.execute(
+        select(Character).where(
+            Character.character_id == character_id,
+            Character.user_id == user_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        return JSONResponse({"error": "Character not found"}, status_code=404)
+
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if user:
+        user.main_character_id = character_id
         await db.commit()
 
-    ids = request.session.get("character_ids", [])
-    if character_id in ids:
-        ids.remove(character_id)
-    request.session["character_ids"] = ids
+    return RedirectResponse("/characters", status_code=303)
 
+
+@router.post("/remove/{character_id}")
+async def remove_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/dashboard", status_code=303)
+
+    # Only allow removing characters that belong to this user
+    result = await db.execute(
+        select(Character).where(
+            Character.character_id == character_id,
+            Character.user_id == user_id,
+        )
+    )
+    char = result.scalar_one_or_none()
+    if not char:
+        return RedirectResponse("/dashboard", status_code=303)
+
+    # If removing the main character, clear the main designation
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if user and user.main_character_id == character_id:
+        # Find another character to promote, or leave null
+        other_result = await db.execute(
+            select(Character).where(
+                Character.user_id == user_id,
+                Character.character_id != character_id,
+            )
+        )
+        other = other_result.scalars().first()
+        user.main_character_id = other.character_id if other else None
+
+    await db.delete(char)
+    await db.commit()
+
+    # Update active character if we just removed it
     if request.session.get("active_character_id") == character_id:
-        request.session["active_character_id"] = ids[0] if ids else None
+        # Pick any remaining character for this user
+        remaining_result = await db.execute(
+            select(Character.character_id).where(Character.user_id == user_id)
+        )
+        remaining = remaining_result.scalars().first()
+        request.session["active_character_id"] = remaining
 
     return RedirectResponse("/dashboard", status_code=303)
