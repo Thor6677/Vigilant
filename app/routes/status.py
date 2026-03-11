@@ -68,7 +68,7 @@ def _stale_field_counts(char: Character, cache: CharacterDashboardCache | None) 
     return stale, total
 
 
-async def _build_context(db: AsyncSession, user_id: int | None = None) -> dict:
+async def _build_context(db: AsyncSession, user_id: int) -> dict:
     from app.routes.dashboard import _queued_sync
 
     tracker = rate_limit_tracker
@@ -83,10 +83,7 @@ async def _build_context(db: AsyncSession, user_id: int | None = None) -> dict:
     success_rate = round(success_count / total_requests * 100) if total_requests else 100
 
     # Character sync status — filtered to the logged-in user's characters
-    if user_id is not None:
-        char_result = await db.execute(select(Character).where(Character.user_id == user_id))
-    else:
-        char_result = await db.execute(select(Character))
+    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = list(char_result.scalars().all())
     cids = [c.character_id for c in characters]
     cache_result = await db.execute(
