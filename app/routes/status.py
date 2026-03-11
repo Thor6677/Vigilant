@@ -156,6 +156,8 @@ async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX partial — refreshes live sections without touching the chart."""
     user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
     ctx = await _build_context(db, user_id=user_id)
     ctx["request"] = request
     return templates.TemplateResponse("status_data.html", ctx)
