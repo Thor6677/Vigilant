@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./capsuleerai.db"
     debug: bool = False
 
+    llm_provider: str = "ollama"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-6"
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "qwen3:32b"
+
     eve_sso_auth_url: str = "https://login.eveonline.com/v2/oauth/authorize"
     eve_sso_token_url: str = "https://login.eveonline.com/v2/oauth/token"
     eve_sso_verify_url: str = "https://login.eveonline.com/oauth/verify"

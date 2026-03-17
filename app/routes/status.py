@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -68,7 +68,7 @@ def _stale_field_counts(char: Character, cache: CharacterDashboardCache | None) 
     return stale, total
 
 
-async def _build_context(db: AsyncSession, user_id: int) -> dict:
+async def _build_context(db: AsyncSession) -> dict:
     from app.routes.dashboard import _queued_sync
 
     tracker = rate_limit_tracker
@@ -82,8 +82,8 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
     error_count = sum(1 for e in log_all if e.status_code >= 400)
     success_rate = round(success_count / total_requests * 100) if total_requests else 100
 
-    # Character sync status — filtered to the logged-in user's characters
-    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
+    # Character sync status
+    char_result = await db.execute(select(Character))
     characters = list(char_result.scalars().all())
     cids = [c.character_id for c in characters]
     cache_result = await db.execute(
@@ -141,10 +141,7 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
 
 @router.get("/status", response_class=HTMLResponse)
 async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return RedirectResponse("/")
-    ctx = await _build_context(db, user_id=user_id)
+    ctx = await _build_context(db)
     ctx["request"] = request
     return templates.TemplateResponse("status.html", ctx)
 
@@ -152,26 +149,18 @@ async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
 @router.get("/status/data", response_class=HTMLResponse)
 async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX partial — refreshes live sections without touching the chart."""
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return RedirectResponse("/")
-    ctx = await _build_context(db, user_id=user_id)
+    ctx = await _build_context(db)
     ctx["request"] = request
     return templates.TemplateResponse("status_data.html", ctx)
 
 
 @router.get("/status/chart.json")
-async def status_chart_json(request: Request):
-    if not request.session.get("user_id"):
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+async def status_chart_json():
     return JSONResponse(_compute_chart_data())
 
 
 @router.get("/status/banner", response_class=HTMLResponse)
 async def status_banner(request: Request):
-    if not request.session.get("user_id"):
-        return HTMLResponse('<div id="esi-banner"></div>')
-
     overall = rate_limit_tracker.overall_status()
 
     if overall == "ok":

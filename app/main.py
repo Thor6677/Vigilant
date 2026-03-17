@@ -9,6 +9,7 @@ from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
+from app.routes.chat import router as chat_router
 from app.routes.characters import router as characters_router
 from app.routes.skills import router as skills_router
 from app.routes.status import router as status_router
@@ -38,6 +39,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.include_router(auth_router)
 app.include_router(dashboard_router)
+app.include_router(chat_router)
 app.include_router(characters_router)
 app.include_router(skills_router)
 app.include_router(status_router)

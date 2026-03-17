@@ -133,15 +133,10 @@
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}"
                  class="h-28 w-28 object-cover object-top block">
-            {# Active / Main badges overlaid on portrait corner #}
-            <div class="absolute bottom-1 left-1 flex flex-col gap-0.5">
-                {% if char.character_id == main_character_id %}
-                <span class="text-[10px] bg-eve-gold/90 text-eve-bg px-1.5 py-0.5 rounded font-semibold leading-tight">★ MAIN</span>
-                {% endif %}
-                {% if char.character_id == active_char.character_id %}
-                <span class="text-[10px] bg-eve-accent/90 text-eve-bg px-1.5 py-0.5 rounded font-semibold leading-tight">ACTIVE</span>
-                {% endif %}
-            </div>
+            {# Active badge overlaid on portrait corner #}
+            {% if char.character_id == active_char.character_id %}
+            <span class="absolute bottom-1 left-1 text-[10px] bg-eve-accent/90 text-eve-bg px-1.5 py-0.5 rounded font-semibold leading-tight">ACTIVE</span>
+            {% endif %}
         </div>
 
         {# Main info area #}

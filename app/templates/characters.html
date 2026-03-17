@@ -83,9 +83,6 @@
                 <div class="text-eve-muted text-xs truncate">{{ char.corporation_name }}</div>
                 {% endif %}
                 <div class="flex gap-1 mt-0.5 flex-wrap">
-                    {% if char.character_id == main_character_id %}
-                    <span class="text-xs bg-eve-gold text-eve-bg px-1.5 py-0.5 rounded font-semibold">★ Main</span>
-                    {% endif %}
                     {% if char.character_id == active_char.character_id %}
                     <span class="text-xs bg-eve-accent text-eve-bg px-1.5 py-0.5 rounded">Active</span>
                     {% endif %}
@@ -119,15 +116,6 @@
             {% else %}
             <div class="flex-1"></div>
             {% endif %}
-            {% if char.character_id != main_character_id %}
-            <form method="POST" action="/auth/set-main/{{ char.character_id }}"
-                  title="Designate as account main">
-                <button type="submit"
-                        class="text-xs border border-eve-border hover:border-eve-gold text-eve-muted hover:text-eve-gold px-2 py-1 rounded transition-colors">
-                    ★
-                </button>
-            </form>
-            {% endif %}
             <form method="POST" action="/auth/remove/{{ char.character_id }}"
                   onsubmit="return confirm('Remove {{ char.character_name }}?')">
                 <button type="submit"
@@ -148,7 +136,7 @@
 {# ── REGULAR GRID VIEW ── #}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
 {% for char in characters %}
-<div class="eve-border rounded p-3 bg-eve-surface {% if char.character_id == active_char.character_id %}border-eve-accent{% elif char.character_id == main_character_id %}border-eve-gold{% endif %}">
+<div class="eve-border rounded p-3 bg-eve-surface {% if char.character_id == active_char.character_id %}border-eve-accent{% endif %}">
     <div class="flex items-center gap-3 mb-3">
         <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
              alt="{{ char.character_name }}"
@@ -159,9 +147,6 @@
             <div class="text-eve-muted text-xs truncate">{{ char.corporation_name }}</div>
             {% endif %}
             <div class="flex gap-1 mt-0.5 flex-wrap">
-                {% if char.character_id == main_character_id %}
-                <span class="text-xs bg-eve-gold text-eve-bg px-1.5 py-0.5 rounded font-semibold">★ Main</span>
-                {% endif %}
                 {% if char.character_id == active_char.character_id %}
                 <span class="text-xs bg-eve-accent text-eve-bg px-1.5 py-0.5 rounded">Active</span>
                 {% endif %}
@@ -192,15 +177,6 @@
         </form>
         {% else %}
         <div class="flex-1"></div>
-        {% endif %}
-        {% if char.character_id != main_character_id %}
-        <form method="POST" action="/auth/set-main/{{ char.character_id }}"
-              title="Designate as account main">
-            <button type="submit"
-                    class="text-xs border border-eve-border hover:border-eve-gold text-eve-muted hover:text-eve-gold px-2 py-1 rounded transition-colors">
-                ★
-            </button>
-        </form>
         {% endif %}
         <form method="POST" action="/auth/remove/{{ char.character_id }}"
               onsubmit="return confirm('Remove {{ char.character_name }}?')">

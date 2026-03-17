@@ -52,7 +52,7 @@
 </head>
 <body class="min-h-screen text-gray-200">
 
-{% if request.session.get('user_id') %}
+{% if request.session.get('active_character_id') %}
 <nav class="eve-border border-b bg-eve-surface sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
         <a href="/dashboard" class="text-eve-accent font-semibold tracking-widest text-sm uppercase">
@@ -63,6 +63,7 @@
             <a href="/characters" class="text-eve-muted hover:text-white transition-colors">Characters</a>
             <a href="/skills" class="text-eve-muted hover:text-white transition-colors">Skills</a>
             <a href="/status" class="text-eve-muted hover:text-white transition-colors">ESI Status</a>
+            <a href="/chat" class="text-eve-muted hover:text-white transition-colors">AURA Chat</a>
             <a href="/auth/login" class="text-eve-muted hover:text-white transition-colors">+ Add Character</a>
             <a href="/auth/logout" class="text-eve-danger hover:text-red-300 transition-colors">Logout</a>
         </div>

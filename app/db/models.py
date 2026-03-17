@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy import text
 from datetime import datetime, timezone
 from app.config import get_settings
 
@@ -13,18 +12,6 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
     pass
-
-
-class User(Base):
-    """Platform user — one per human player. Characters belong to a User."""
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    main_character_id = Column(Integer, nullable=True)  # EVE character_id of the main character
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_login = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    characters = relationship("Character", back_populates="user", lazy="select")
 
 
 class Character(Base):
@@ -47,9 +34,8 @@ class Character(Base):
     sort_order = Column(Integer, default=0)
     security_status = Column(Float, nullable=True)
     account_group = Column(String, default="Ungrouped")
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
-    user = relationship("User", back_populates="characters")
+    chat_sessions = relationship("ChatSession", back_populates="character", cascade="all, delete-orphan")
 
     @property
     def has_corp_roles(self) -> bool:
@@ -79,6 +65,19 @@ class CharacterDashboardCache(Base):
     field_synced_json = Column(Text, nullable=True)   # JSON: {"wallet": "2024-01-01T00:00:00", ...}
 
 
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(Integer, primary_key=True)
+    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False)
+    title = Column(String, nullable=False, default="New Chat")
+    messages = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    character = relationship("Character", back_populates="chat_sessions")
+
+
 class ESIRateLimitEvent(Base):
     __tablename__ = "esi_rate_limit_events"
     id          = Column(Integer, primary_key=True, autoincrement=True)
@@ -94,14 +93,6 @@ class ESIRateLimitEvent(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Schema migrations — safe to run on every startup (IF NOT EXISTS / try-except)
-        for stmt in [
-            "ALTER TABLE characters ADD COLUMN user_id INTEGER REFERENCES users(id)",
-        ]:
-            try:
-                await conn.execute(text(stmt))
-            except Exception:
-                pass  # Column already exists
 
 
 async def get_db() -> AsyncSession:
