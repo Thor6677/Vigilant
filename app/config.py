@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     eve_client_secret: str
     eve_callback_url: str = "http://localhost:8000/auth/callback"
     secret_key: str
-    database_url: str = "sqlite+aiosqlite:///./capsuleerai.db"
+    database_url: str = "sqlite+aiosqlite:///./vigilant.db"
     debug: bool = False
 
     llm_provider: str = "ollama"

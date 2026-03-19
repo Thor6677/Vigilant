@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -68,7 +68,7 @@ def _stale_field_counts(char: Character, cache: CharacterDashboardCache | None) 
     return stale, total
 
 
-async def _build_context(db: AsyncSession) -> dict:
+async def _build_context(db: AsyncSession, user_id: int) -> dict:
     from app.routes.dashboard import _queued_sync
 
     tracker = rate_limit_tracker
@@ -82,8 +82,8 @@ async def _build_context(db: AsyncSession) -> dict:
     error_count = sum(1 for e in log_all if e.status_code >= 400)
     success_rate = round(success_count / total_requests * 100) if total_requests else 100
 
-    # Character sync status
-    char_result = await db.execute(select(Character))
+    # Character sync status — only show characters belonging to this user
+    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = list(char_result.scalars().all())
     cids = [c.character_id for c in characters]
     cache_result = await db.execute(
@@ -141,7 +141,10 @@ async def _build_context(db: AsyncSession) -> dict:
 
 @router.get("/status", response_class=HTMLResponse)
 async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
-    ctx = await _build_context(db)
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+    ctx = await _build_context(db, user_id)
     ctx["request"] = request
     return templates.TemplateResponse("status.html", ctx)
 
@@ -149,18 +152,25 @@ async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
 @router.get("/status/data", response_class=HTMLResponse)
 async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX partial — refreshes live sections without touching the chart."""
-    ctx = await _build_context(db)
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    ctx = await _build_context(db, user_id)
     ctx["request"] = request
     return templates.TemplateResponse("status_data.html", ctx)
 
 
 @router.get("/status/chart.json")
-async def status_chart_json():
+async def status_chart_json(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=403)
     return JSONResponse(_compute_chart_data())
 
 
 @router.get("/status/banner", response_class=HTMLResponse)
 async def status_banner(request: Request):
+    if not request.session.get("user_id"):
+        return HTMLResponse('<div id="esi-banner"></div>')
     overall = rate_limit_tracker.overall_status()
 
     if overall == "ok":
@@ -169,18 +179,31 @@ async def status_banner(request: Request):
             'hx-get="/status/banner" hx-trigger="every 30s" hx-swap="outerHTML"></div>'
         )
     elif overall == "warning":
-        colour = "bg-yellow-900/60 border-yellow-600/50 text-yellow-200"
+        border_color = "#c8a951"
+        text_color = "#c8a951"
         icon = "⚠"
         msg = "ESI rate limit warning — approaching token limit on one or more route groups."
     else:
-        colour = "bg-red-900/60 border-red-600/50 text-red-200"
+        border_color = "#cc3333"
+        text_color = "#cc3333"
         icon = "✕"
-        msg = "ESI rate limit critical — heavily throttled. Check <a href='/status' class='underline'>ESI Status</a> for details."
+        msg = "ESI rate limit critical — heavily throttled. Check <a href='/status' style='text-decoration:underline;'>ESI Status</a> for details."
 
+    style = (
+        f"border-bottom:1px solid {border_color};"
+        f"color:{text_color};"
+        "background:#0e0e0e;"
+        "padding:0.4rem 2rem;"
+        "font-size:11px;"
+        "letter-spacing:0.1em;"
+        "text-align:center;"
+        "font-family:'JetBrains Mono',monospace;"
+        "text-transform:uppercase;"
+    )
     return HTMLResponse(
         f'<div id="esi-banner" '
         f'hx-get="/status/banner" hx-trigger="every 30s" hx-swap="outerHTML" '
-        f'class="border-b {colour} px-4 py-2 text-sm text-center font-mono">'
+        f'style="{style}">'
         f'{icon} {msg}'
         f'</div>'
     )

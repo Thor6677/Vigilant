@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}{{ char.character_name }} — VIGILANT{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+    .range-btn {
+        padding: 0.25rem 0.6rem;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        background: none;
+        cursor: pointer;
+        font-family: inherit;
+        transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .range-btn:hover { color: var(--text); border-color: var(--muted); }
+    .range-btn.is-active {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: rgba(200, 169, 81, 0.07);
+    }
+    .tx-amount-pos { color: var(--success); }
+    .tx-amount-neg { color: var(--danger); }
+    .ref-type {
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        padding: 1px 4px;
+        white-space: nowrap;
+    }
+    #wallet-chart {
+        width: 100% !important;
+    }
+</style>
+{% endblock %}
+
+{% macro format_isk(amount) %}
+  {%- if amount is none -%}—
+  {%- elif amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T ISK
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B ISK
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M ISK
+  {%- else -%}{{ "%.0f"|format(amount) }} ISK
+  {%- endif %}
+{% endmacro %}
+
+{% macro format_isk_signed(amount) %}
+  {%- if amount >= 0 -%}+{% endif %}
+  {%- if amount | abs >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount | abs >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount | abs >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount | abs >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif %}
+{% endmacro %}
+
+{% block content %}
+
+{# ── Back + Header ──────────────────────────────────────────────────────────── #}
+<div class="b-server-bar">
+    <a href="/dashboard" class="b-link">← Dashboard</a>
+    <span style="color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
+        Character Detail
+    </span>
+</div>
+
+<div class="b-page-header">
+    <div style="display:flex;align-items:center;gap:1rem;">
+        <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+             alt="{{ char.character_name }}"
+             style="width:48px;height:48px;object-fit:cover;object-position:top center;border:1px solid var(--border);filter:grayscale(15%) contrast(1.05);flex-shrink:0;">
+        <div>
+            <h1 class="b-page-title" style="font-size:16px;">{{ char.character_name }}</h1>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-top:2px;">
+                {% if char.corporation_name %}{{ char.corporation_name }}{% endif %}
+                {% if char.alliance_name %} · <span style="color:var(--accent)">{{ char.alliance_name }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div style="text-align:right;">
+        <div style="font-size:20px;font-weight:300;color:var(--accent);">{{ format_isk(current_wallet) }}</div>
+        <div class="b-label" style="margin-top:2px;">Current Balance</div>
+    </div>
+</div>
+
+{# ── Wallet History Chart ───────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Wallet History</span>
+        <div style="display:flex;gap:4px;" id="range-buttons">
+            {% for r in ranges %}
+            <button class="range-btn {% if r == active_range %}is-active{% endif %}"
+                    data-range="{{ r }}"
+                    onclick="setRange('{{ r }}', this)">{{ r }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div style="border:1px solid var(--border);border-top:none;background:var(--surface);padding:1rem 0.75rem;">
+        <div id="chart-empty" style="display:none;text-align:center;padding:2rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
+            No data for this period yet — data accumulates as the background sync runs.
+        </div>
+        <canvas id="wallet-chart" height="180"></canvas>
+    </div>
+</div>
+
+{# ── Last 20 Journal Entries ───────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Recent Transactions</span>
+        <span class="b-label" style="color:var(--muted)">Last 20 entries</span>
+    </div>
+
+    {% if journal_error == "missing_scope" %}
+    <div class="b-empty">Wallet scope not available — re-auth required.</div>
+    {% elif journal_error %}
+    <div class="b-empty" style="color:var(--danger)">Failed to load journal: {{ journal_error }}</div>
+    {% elif not journal %}
+    <div class="b-empty">No journal entries found.</div>
+    {% else %}
+    <div class="b-panel" style="border-top:none;">
+
+        {# Header row #}
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+            <span class="b-row-label" style="flex:0 0 110px;">Date</span>
+            <span class="b-row-label" style="flex:1;">Type / Description</span>
+            <span class="b-row-label" style="flex:0 0 90px;text-align:right;">Amount</span>
+            <span class="b-row-label" style="flex:0 0 110px;text-align:right;">Balance After</span>
+        </div>
+
+        {% for entry in journal %}
+        {% set amount = entry.get("amount", 0) or 0 %}
+        {% set balance = entry.get("balance") %}
+        {% set ref_type = entry.get("ref_type", "") %}
+        {% set desc = entry.get("description", "") %}
+        {% set date_raw = entry.get("date", "") %}
+        <div class="b-table-row">
+            <span style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
+                {{ date_raw[:16].replace("T", " ") if date_raw else "—" }}
+            </span>
+            <span style="flex:1;min-width:0;overflow:hidden;">
+                <span class="ref-type">{{ ref_type.replace("_", " ") }}</span>
+                {% if desc %}
+                <span style="font-size:10px;color:var(--muted);margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ desc[:60] }}{% if desc|length > 60 %}…{% endif %}
+                </span>
+                {% endif %}
+            </span>
+            <span style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
+                  class="{% if amount >= 0 %}tx-amount-pos{% else %}tx-amount-neg{% endif %}">
+                {{ format_isk_signed(amount) }}
+            </span>
+            <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+                {{ format_isk(balance) if balance is not none else "—" }}
+            </span>
+        </div>
+        {% endfor %}
+
+    </div>
+    {% endif %}
+</div>
+
+{# ── Chart JS ──────────────────────────────────────────────────────────────── #}
+<script id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>
+<script>
+(function () {
+    const initialData = JSON.parse(document.getElementById('chart-data').textContent);
+    let chart = null;
+
+    function formatISK(v) {
+        const abs = Math.abs(v);
+        if (abs >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+        if (abs >= 1e9)  return (v / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6)  return (v / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3)  return (v / 1e3).toFixed(1) + 'K';
+        return v.toFixed(0);
+    }
+
+    function buildChart(data) {
+        const canvas = document.getElementById('wallet-chart');
+        const empty  = document.getElementById('chart-empty');
+
+        if (!data.labels || data.labels.length === 0) {
+            canvas.style.display = 'none';
+            empty.style.display  = 'block';
+            if (chart) { chart.destroy(); chart = null; }
+            return;
+        }
+        canvas.style.display = 'block';
+        empty.style.display  = 'none';
+
+        const points = data.labels.map((l, i) => ({ x: new Date(l), y: data.values[i] }));
+
+        if (chart) {
+            chart.data.datasets[0].data = points;
+            chart.update('none');
+            return;
+        }
+
+        chart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    data: points,
+                    borderColor: '#c8a951',
+                    backgroundColor: 'rgba(200,169,81,0.06)',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    pointHoverBackgroundColor: '#c8a951',
+                    fill: true,
+                    tension: 0.3,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#0e0e0e',
+                        borderColor: '#1a1a1a',
+                        borderWidth: 1,
+                        titleColor: '#474747',
+                        bodyColor: '#c8a951',
+                        titleFont: { family: "'JetBrains Mono', monospace", size: 10 },
+                        bodyFont:  { family: "'JetBrains Mono', monospace", size: 11 },
+                        callbacks: {
+                            title: items => {
+                                const d = new Date(items[0].parsed.x);
+                                return d.toLocaleString('en-GB', {
+                                    year:'numeric', month:'short', day:'numeric',
+                                    hour:'2-digit', minute:'2-digit', timeZone:'UTC'
+                                }) + ' UTC';
+                            },
+                            label: item => ' ' + formatISK(item.parsed.y) + ' ISK',
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        grid: { color: '#191919' },
+                        ticks: {
+                            color: '#474747',
+                            font: { family: "'JetBrains Mono', monospace", size: 9 },
+                            maxTicksLimit: 8,
+                        },
+                        border: { color: '#191919' },
+                    },
+                    y: {
+                        grid: { color: '#191919' },
+                        ticks: {
+                            color: '#474747',
+                            font: { family: "'JetBrains Mono', monospace", size: 9 },
+                            callback: v => formatISK(v) + ' ISK',
+                            maxTicksLimit: 6,
+                        },
+                        border: { color: '#191919' },
+                    }
+                }
+            }
+        });
+    }
+
+    buildChart(initialData);
+
+    window.setRange = function(range, btn) {
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+
+        fetch(`/character/{{ char.character_id }}/wallet/chart.json?range=${range}`)
+            .then(r => r.json())
+            .then(data => buildChart(data))
+            .catch(err => console.error('Chart fetch error:', err));
+    };
+})();
+</script>
+
+{% endblock %}

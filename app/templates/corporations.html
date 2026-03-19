@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Corporations — VIGILANT{% endblock %}
+
+{% block head %}
+<style>
+    /* Corp accordion */
+    .corp-accordion {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        margin-bottom: 1px;
+    }
+    .corp-accordion[open] {
+        border-color: var(--rule);
+    }
+
+    .corp-accordion summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.55rem 0.75rem;
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        gap: 1rem;
+    }
+    .corp-accordion summary::-webkit-details-marker { display: none; }
+    .corp-accordion[open] summary {
+        border-bottom: 2px solid var(--rule);
+    }
+    .corp-accordion summary:hover { background: rgba(200,169,81,0.03); }
+
+    .corp-chevron {
+        font-size: 10px;
+        color: var(--muted);
+        transition: transform 0.15s;
+        flex-shrink: 0;
+    }
+    .corp-accordion[open] .corp-chevron { transform: rotate(180deg); }
+
+    .corp-logo-sm {
+        width: 36px;
+        height: 36px;
+        object-fit: contain;
+        border: 1px solid var(--border);
+        flex-shrink: 0;
+        filter: grayscale(15%);
+    }
+
+    .scope-pip {
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        background: var(--accent);
+        margin-right: 2px;
+        border-radius: 50% !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <span class="b-page-title">Corporations</span>
+    <span class="b-label">{{ corps | length }} corporation{{ 's' if corps | length != 1 else '' }}</span>
+</div>
+
+{% if not corps %}
+<div class="b-empty">No corporations found — add characters to get started.</div>
+{% else %}
+
+{% for corp in corps %}
+<details class="corp-accordion" id="corp-{{ corp.corp_id }}">
+    <summary>
+        <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
+            <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
+                 alt="" class="corp-logo-sm">
+            <div style="min-width:0">
+                <div class="b-card-name">{{ corp.corp_name }}</div>
+                <div class="b-card-sub">
+                    {% if corp.alliance_name %}
+                    {{ corp.alliance_name }}
+                    {% else %}
+                    <span class="is-muted">No Alliance</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
+            <div style="text-align:right">
+                <div class="b-label">{{ corp.characters | length }} of our char{{ 's' if corp.characters | length != 1 else '' }}</div>
+                {% if corp.available_scopes %}
+                <div style="margin-top:2px">
+                    {% for _ in corp.available_scopes %}<span class="scope-pip"></span>{% endfor %}
+                    <span class="b-label" style="color:var(--accent)">{{ corp.available_scopes | length }} corp scope{{ 's' if corp.available_scopes | length != 1 else '' }}</span>
+                </div>
+                {% else %}
+                <div class="b-label" style="margin-top:2px">Public only</div>
+                {% endif %}
+            </div>
+            <span class="corp-chevron">▼</span>
+        </div>
+    </summary>
+
+    <!-- Detail panel — lazy-loaded via HTMX on first expand -->
+    <div id="corp-detail-{{ corp.corp_id }}"
+         hx-get="/corporations/{{ corp.corp_id }}/detail"
+         hx-trigger="toggle from:closest details once"
+         hx-swap="innerHTML">
+        <div style="display:flex;align-items:center;gap:0.5rem;padding:1rem 0.75rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase">
+            <span class="spin-anim">◌</span>
+            <span>Loading...</span>
+        </div>
+    </div>
+</details>
+{% endfor %}
+
+{% endif %}
+{% endblock %}

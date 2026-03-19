@@ -12,14 +12,15 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, CharacterDashboardCache, AsyncSessionLocal
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, AsyncSessionLocal
 from app.db.cache import cache_stats
-from app.routes.skills import _process_skillqueue, group_skill_data
+from app.routes.characters import _process_skillqueue, group_skill_data
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import market as esi_market
 from app.esi import industry as esi_industry
 from app.esi import universe as esi_universe
+from app.esi import assets as esi_assets
 from app.sde import lookup as sde
 
 router = APIRouter(tags=["dashboard"])
@@ -79,6 +80,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "pi":            600,   # ESI max-age: 600s
     "skillqueue":    120,   # ESI max-age: 120s
     "zkill":        3600,   # zkillboard — 1h is plenty
+    "assets":       3600,   # ESI max-age: 3600s
 }
 
 FIELD_SCOPES: dict[str, str] = {
@@ -93,9 +95,10 @@ FIELD_SCOPES: dict[str, str] = {
     "pi":            "esi-planets.manage_planets.v1",
     "skillqueue":    "esi-skills.read_skillqueue.v1",
     "zkill":         None,   # no ESI scope required
+    "assets":        "esi-assets.read_assets.v1",
 }
 
-# DB column for each field (None = special Float column)
+# DB column for each field (None = special handling — wallet Float or assets separate table)
 _FIELD_DB_COLUMN: dict[str, str | None] = {
     "wallet":        None,
     "location":      "location_json",
@@ -108,6 +111,7 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "pi":            "pi_json",
     "skillqueue":    "skillqueue_json",
     "zkill":         "zkill_json",
+    "assets":        None,
 }
 
 # UI staleness thresholds (based on last_synced, for indicator colours)
@@ -467,7 +471,7 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
 async def fetch_server_status() -> dict:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get("https://esi.evetech.net/latest/status/", headers={"User-Agent": "CapsuleerAI/1.0"})
+            resp = await client.get("https://esi.evetech.net/latest/status/", headers={"User-Agent": "Vigilant/1.0"})
             if resp.status_code == 200:
                 data = resp.json()
                 return {"online": True, "players": data.get("players", 0)}
@@ -499,7 +503,7 @@ async def fetch_zkillboard_data(characters: list[Character], db: AsyncSession) -
             async with httpx.AsyncClient(timeout=5.0) as http:
                 resp = await http.get(
                     f"https://zkillboard.com/api/characterID/{char.character_id}/page/1/",
-                    headers={"User-Agent": "CapsuleerAI/1.0", "Accept-Encoding": "gzip"},
+                    headers={"User-Agent": "Vigilant/1.0", "Accept-Encoding": "gzip"},
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -511,6 +515,179 @@ async def fetch_zkillboard_data(characters: list[Character], db: AsyncSession) -
         except Exception:
             pass
         return char.character_id, [], None
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
+async def _resolve_assets_for_character(
+    char: Character, raw_assets: list, client, db: AsyncSession
+) -> list[dict]:
+    """Walk item chains, resolve locations + type names into flat asset dicts."""
+    if not raw_assets:
+        return []
+
+    # Build item_id → asset lookup for chain walking
+    item_map = {a["item_id"]: a for a in raw_assets}
+
+    # Walk each asset's location chain to find its root location
+    # root_for[item_id] = (root_location_id, root_type)
+    root_for: dict[int, tuple[int, str]] = {}
+    for asset in raw_assets:
+        current_id = asset["location_id"]
+        current_type = asset["location_type"]
+        for _ in range(20):
+            if current_type != "item":
+                break
+            if current_id not in item_map:
+                # Points outside our item list — classify by ID range
+                if current_id > 1_000_000_000_000:
+                    current_type = "structure"
+                break
+            parent = item_map[current_id]
+            current_id = parent["location_id"]
+            current_type = parent["location_type"]
+        root_for[asset["item_id"]] = (current_id, current_type)
+
+    # Partition unique root IDs by kind
+    system_ids: set[int] = set()
+    station_ids: set[int] = set()
+    structure_ids: set[int] = set()
+    for root_id, root_type in root_for.values():
+        if root_type == "solar_system":
+            system_ids.add(root_id)
+        elif root_type == "station":
+            station_ids.add(root_id)
+        elif root_type == "structure":
+            structure_ids.add(root_id)
+        else:
+            # Unknown — attempt system lookup as fallback
+            system_ids.add(root_id)
+
+    # Resolve NPC stations in bulk from SDE
+    station_cache = await sde.stations_by_ids(db, list(station_ids))
+    # ESI fallback for any station not in SDE
+    for sid in station_ids:
+        if sid not in station_cache:
+            try:
+                st = await esi_universe.get_station(client, sid)
+                station_cache[sid] = {"system_id": st.get("system_id"), "station_name": st.get("name")}
+            except Exception:
+                station_cache[sid] = {"system_id": None, "station_name": "Unknown Station"}
+    # Add station system_ids to system resolution set
+    for st_info in station_cache.values():
+        if st_info.get("system_id"):
+            system_ids.add(st_info["system_id"])
+
+    # Resolve player structures via ESI (concurrent)
+    structure_cache: dict[int, dict] = {}
+    if structure_ids:
+        async def _fetch_structure(struct_id):
+            try:
+                data = await esi_universe.get_structure(client, struct_id)
+                sys_id = data.get("solar_system_id")
+                return struct_id, {"system_id": sys_id, "structure_name": data.get("name", "Unknown Structure")}
+            except Exception:
+                return struct_id, {"system_id": None, "structure_name": "Unknown Structure"}
+
+        results = await asyncio.gather(*[_fetch_structure(sid) for sid in structure_ids])
+        for struct_id, info in results:
+            structure_cache[struct_id] = info
+            if info.get("system_id"):
+                system_ids.add(info["system_id"])
+
+    # Resolve system info from SDE
+    sys_info_cache: dict[int, dict | None] = {}
+    for sys_id in system_ids:
+        sys_info_cache[sys_id] = await sde.system_info(db, sys_id)
+
+    # Build resolved location info per root ID
+    root_resolved: dict[int, dict] = {}
+    for root_id, root_type in set(root_for.values()):
+        if root_type == "solar_system":
+            si = sys_info_cache.get(root_id)
+            root_resolved[root_id] = {
+                "location_kind": "system",
+                "system_id": root_id,
+                "system_name": si.get("system_name") if si else None,
+                "security": si.get("security") if si else None,
+                "region": si.get("region") if si else None,
+                "location_name": si.get("system_name") if si else str(root_id),
+            }
+        elif root_type == "station":
+            st = station_cache.get(root_id, {})
+            sys_id = st.get("system_id")
+            si = sys_info_cache.get(sys_id) if sys_id else None
+            root_resolved[root_id] = {
+                "location_kind": "station",
+                "system_id": sys_id,
+                "system_name": si.get("system_name") if si else None,
+                "security": si.get("security") if si else None,
+                "region": si.get("region") if si else None,
+                "location_name": st.get("station_name"),
+            }
+        elif root_type == "structure":
+            struct = structure_cache.get(root_id, {})
+            sys_id = struct.get("system_id")
+            si = sys_info_cache.get(sys_id) if sys_id else None
+            root_resolved[root_id] = {
+                "location_kind": "structure",
+                "system_id": sys_id,
+                "system_name": si.get("system_name") if si else None,
+                "security": si.get("security") if si else None,
+                "region": si.get("region") if si else None,
+                "location_name": struct.get("structure_name", "Unknown Structure"),
+            }
+        else:
+            # Unknown — try system info fallback
+            si = sys_info_cache.get(root_id)
+            root_resolved[root_id] = {
+                "location_kind": "system" if si else "unknown",
+                "system_id": root_id if si else None,
+                "system_name": si.get("system_name") if si else None,
+                "security": si.get("security") if si else None,
+                "region": si.get("region") if si else None,
+                "location_name": si.get("system_name") if si else "Unknown",
+            }
+
+    # Batch resolve all type names in one DB call
+    all_type_ids = list({a["type_id"] for a in raw_assets})
+    type_names = await sde.type_ids_to_names(db, all_type_ids)
+
+    # Assemble final resolved list
+    resolved = []
+    for asset in raw_assets:
+        root_id, _ = root_for.get(asset["item_id"], (None, None))
+        loc = root_resolved.get(root_id, {}) if root_id is not None else {}
+        resolved.append({
+            "type_id": asset["type_id"],
+            "type_name": type_names.get(asset["type_id"]),
+            "quantity": asset.get("quantity", 1),
+            "location_flag": asset.get("location_flag", ""),
+            "is_singleton": asset.get("is_singleton", False),
+            "system_id": loc.get("system_id"),
+            "system_name": loc.get("system_name"),
+            "security": loc.get("security"),
+            "region": loc.get("region"),
+            "location_name": loc.get("location_name"),
+            "location_kind": loc.get("location_kind", "unknown"),
+        })
+    return resolved
+
+
+async def fetch_assets_data(characters: list[Character], db: AsyncSession) -> dict:
+    async def _get(char):
+        if not _has_scope(char, "esi-assets.read_assets.v1"):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char, db)
+        if not client:
+            return char.character_id, None, err
+        try:
+            raw = await esi_assets.get_character_assets(client, char.character_id)
+            resolved = await _resolve_assets_for_character(char, raw, client, db)
+            return char.character_id, resolved, None
+        except Exception as e:
+            logger.warning("Assets fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
 
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
@@ -528,6 +705,7 @@ _FIELD_FETCHERS = {
     "pi":            fetch_pi_data,
     "skillqueue":    fetch_skillqueue_data,
     "zkill":         fetch_zkillboard_data,
+    "assets":        fetch_assets_data,
 }
 
 
@@ -543,7 +721,7 @@ async def _sync_task(character_id: int):
                 if not char:
                     return
 
-                # Load or create cache row
+                # Load or create cache rows
                 cache_result = await db.execute(
                     select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
                 )
@@ -551,6 +729,14 @@ async def _sync_task(character_id: int):
                 if cache is None:
                     cache = CharacterDashboardCache(character_id=character_id)
                     db.add(cache)
+
+                asset_cache_result = await db.execute(
+                    select(CharacterAssetCache).where(CharacterAssetCache.character_id == character_id)
+                )
+                asset_cache = asset_cache_result.scalar_one_or_none()
+                if asset_cache is None:
+                    asset_cache = CharacterAssetCache(character_id=character_id)
+                    db.add(asset_cache)
 
                 # Mark syncing now that the lock is held (idempotent if already set)
                 cache.sync_status = "syncing"
@@ -581,9 +767,24 @@ async def _sync_task(character_id: int):
                     for field, result in zip(stale_fields, results):
                         val, warn = result.get(character_id, (None, None))
                         col = _FIELD_DB_COLUMN[field]
+                        if field == "assets":
+                            if val is not None:
+                                asset_cache.assets_json = json.dumps(val)
+                                asset_cache.last_fetched = now
+                                warnings.pop(field, None)
+                            elif warn and warn != "missing_scope":
+                                warnings[field] = warn
+                            field_synced[field] = now.isoformat()
+                            continue
                         if val is not None:
                             if col is None:  # wallet is a Float column
                                 cache.wallet = val
+                                if field == "wallet":
+                                    db.add(WalletSnapshot(
+                                        character_id=character_id,
+                                        balance=val,
+                                        recorded_at=now,
+                                    ))
                             else:
                                 setattr(cache, col, json.dumps(val))
                             warnings.pop(field, None)
@@ -613,6 +814,20 @@ async def _sync_task(character_id: int):
                     pass
 
 
+async def _cleanup_old_snapshots():
+    """Delete WalletSnapshot rows older than 1 year to prevent unbounded DB growth."""
+    from sqlalchemy import delete as sa_delete
+    cutoff = datetime.now(timezone.utc) - timedelta(days=365)
+    cutoff_naive = cutoff.replace(tzinfo=None)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            sa_delete(WalletSnapshot).where(WalletSnapshot.recorded_at < cutoff_naive)
+        )
+        await db.commit()
+        if result.rowcount:
+            logger.info("Cleaned up %d old WalletSnapshot rows", result.rowcount)
+
+
 async def _sync_all_task(character_ids: list[int]):
     """Process a batch of characters sequentially.
 
@@ -635,6 +850,7 @@ async def _background_scheduler():
     route no longer spawns syncs on page load.
     """
     await asyncio.sleep(15)  # Allow app startup (SDE load, etc.) to settle first
+    _last_cleanup: datetime | None = None
     while True:
         try:
             async with AsyncSessionLocal() as db:
@@ -656,6 +872,16 @@ async def _background_scheduler():
                         logger.info("Scheduler queued %d character(s) for sync: %s", len(stale_ids), stale_ids)
         except Exception as e:
             logger.warning("Background scheduler error: %s", e)
+
+        # Daily WalletSnapshot cleanup
+        now = datetime.now(timezone.utc)
+        if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
+            try:
+                await _cleanup_old_snapshots()
+                _last_cleanup = now
+            except Exception as e:
+                logger.warning("Snapshot cleanup error: %s", e)
+
         await asyncio.sleep(60)
 
 
@@ -722,21 +948,28 @@ def _build_data_from_caches(characters: list[Character], char_caches: dict) -> d
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    if request.session.get("active_character_id"):
+    if request.session.get("user_id"):
         return RedirectResponse("/dashboard")
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return RedirectResponse("/")
+    active_id = request.session.get("active_character_id")
 
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
+    if not active_char and characters:
+        # Fallback: use the main character if active_id is stale.
+        active_char = next((c for c in characters if c.is_main), characters[0])
+        request.session["active_character_id"] = active_char.character_id
+        active_id = active_char.character_id
+
+    character_ids = [c.character_id for c in characters]
 
     # Load all cached data (fast DB reads)
     cache_result = await db.execute(
@@ -830,7 +1063,13 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 @router.post("/dashboard/sync/{character_id}")
 async def trigger_sync(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Manual resync for a single character."""
-    if character_id not in request.session.get("character_ids", []):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/dashboard", status_code=303)
+    ownership = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    if not ownership.scalar_one_or_none():
         return RedirectResponse("/dashboard", status_code=303)
 
     cache_result = await db.execute(
@@ -856,7 +1095,13 @@ async def trigger_sync(character_id: int, request: Request, db: AsyncSession = D
 @router.get("/dashboard/sync-status", response_class=HTMLResponse)
 async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX polling endpoint. Returns spinner while syncing; triggers page refresh when done."""
-    character_ids = request.session.get("character_ids", [])
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse('<div id="sync-poller"></div>')
+
+    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
+    character_ids = [c.character_id for c in char_result.scalars().all()]
+
     result = await db.execute(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(character_ids))
     )
@@ -872,8 +1117,6 @@ async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db))
         resp.headers["HX-Refresh"] = "true"
         return resp
 
-    count = sum(1 for c in caches if c.sync_status == "syncing") + len(_queued_sync.intersection(set(character_ids)))
-    # Avoid double-counting: a character can be both in _queued_sync and status=syncing
     count = len(
         {c.character_id for c in caches if c.sync_status == "syncing"}
         | _queued_sync.intersection(set(character_ids))

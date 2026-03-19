@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Asset Search — VIGILANT{% endblock %}
+
+{% block head %}
+<style>
+    .asset-search-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.6rem 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1.5rem;
+    }
+
+    .asset-input {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 12px;
+        padding: 0.45rem 0.75rem;
+        outline: none;
+        width: 340px;
+        transition: border-color 0.1s;
+        letter-spacing: 0.05em;
+    }
+    .asset-input:focus { border-color: var(--muted); }
+    .asset-input::placeholder { color: var(--muted); }
+
+    .asset-select {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-family: inherit;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.6rem;
+        outline: none;
+        cursor: pointer;
+        transition: border-color 0.1s;
+    }
+    .asset-select:focus { border-color: var(--muted); }
+    .asset-select option { text-transform: none; letter-spacing: 0; }
+
+    .asset-controls-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .asset-controls-label {
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Asset Search</h1>
+</div>
+
+{# ── Search controls ────────────────────────────────────────────────────────── #}
+<div class="asset-search-bar">
+    <input
+        id="asset-search"
+        name="q"
+        type="search"
+        class="asset-input"
+        placeholder="Search item name..."
+        autocomplete="off"
+        hx-get="/assets/search"
+        hx-trigger="input changed delay:400ms, search"
+        hx-target="#asset-results"
+        hx-include="#from-char-select"
+    >
+
+    <div class="asset-controls-right">
+        <span class="asset-controls-label">Nearest to</span>
+        <select
+            id="from-char-select"
+            name="from_char"
+            class="asset-select"
+            hx-get="/assets/search"
+            hx-trigger="change"
+            hx-target="#asset-results"
+            hx-include="#asset-search"
+        >
+            {% for char in characters %}
+            <option
+                value="{{ char.character_id }}"
+                {% if char.character_id == active_char_id %}selected{% endif %}
+            >
+                {{ char.character_name }}{% if char.system_name %} · {{ char.system_name }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+{# ── Results area ───────────────────────────────────────────────────────────── #}
+<div id="asset-results">
+    <div class="b-empty">Enter an item name to search across all characters...</div>
+</div>
+
+{% endblock %}

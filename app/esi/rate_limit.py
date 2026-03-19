@@ -142,6 +142,8 @@ async def log_event(event_type: str, path: str, headers: dict, retry_after: int 
     """Async DB write for significant events. Called via asyncio.create_task()."""
     from app.db.models import AsyncSessionLocal, ESIRateLimitEvent
     group     = headers.get("x-ratelimit-group")
+    if group:
+        group = group[:128]  # match DB column length
     remaining = headers.get("x-ratelimit-remaining")
     limit_str = headers.get("x-ratelimit-limit")
     async with AsyncSessionLocal() as db:

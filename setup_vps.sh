@@ -2,7 +2,7 @@
 # Run this on your fresh Ubuntu 24.04 Digital Ocean VPS as root
 set -e
 
-echo "=== CapsuleerAI VPS Setup ==="
+echo "=== Vigilant VPS Setup ==="
 
 # Update system
 apt-get update && apt-get upgrade -y
@@ -21,18 +21,18 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 apt-get install -y git
 
 # Create app user
-useradd -m -s /bin/bash capsuleer || true
-usermod -aG docker capsuleer
+useradd -m -s /bin/bash vigilant || true
+usermod -aG docker vigilant
 
 # Create app directory
-mkdir -p /opt/capsuleerai
-chown capsuleer:capsuleer /opt/capsuleerai
+mkdir -p /opt/vigilant
+chown vigilant:vigilant /opt/vigilant
 
 echo ""
 echo "=== Setup complete ==="
 echo "Next steps:"
-echo "1. Clone your repo: git clone https://github.com/YOUR_USERNAME/capsuleerai /opt/capsuleerai"
-echo "2. Copy .env: cp /opt/capsuleerai/.env.example /opt/capsuleerai/.env && nano /opt/capsuleerai/.env"
+echo "1. Clone your repo: git clone https://github.com/YOUR_USERNAME/vigilant /opt/vigilant"
+echo "2. Copy .env: cp /opt/vigilant/.env.example /opt/vigilant/.env && nano /opt/vigilant/.env"
 echo "3. Get SSL cert (run as root, point DNS first):"
-echo "   docker run --rm -p 80:80 certbot/certbot certonly --standalone -d capsuleerai.app -d www.capsuleerai.app --email YOUR_EMAIL --agree-tos"
-echo "4. Start the app: cd /opt/capsuleerai && docker compose up -d"
+echo "   docker run --rm -p 80:80 certbot/certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com --email YOUR_EMAIL --agree-tos"
+echo "4. Start the app: cd /opt/vigilant && docker compose up -d"

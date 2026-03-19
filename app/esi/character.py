@@ -25,6 +25,10 @@ async def get_wallet(client: ESIClient, character_id: int) -> float:
     return await client.get(f"/characters/{character_id}/wallet/")
 
 
+async def get_wallet_journal(client: ESIClient, character_id: int, page: int = 1) -> list:
+    return await client.get(f"/characters/{character_id}/wallet/journal/", params={"page": page})
+
+
 async def get_public_info(client: ESIClient, character_id: int) -> dict:
     return await client.get_public(f"/characters/{character_id}/")
 

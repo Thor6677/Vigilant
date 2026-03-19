@@ -37,8 +37,8 @@ An EVE Online dashboard that gives you a unified view of all your characters —
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/capsuleerai.git
-cd capsuleerai
+git clone https://github.com/yourusername/vigilant.git
+cd vigilant
 
 # Run the startup script
 ./start.sh
@@ -59,10 +59,10 @@ Vigilant will be available at **http://localhost:8000** once startup is complete
 
 ```bash
 # Stream all logs
-tail -f capsuleerai.log
+tail -f vigilant.log
 
 # Filter for errors and warnings only
-tail -f capsuleerai.log | grep -i 'error\|warning\|critical'
+tail -f vigilant.log | grep -i 'error\|warning\|critical'
 ```
 
 #### Stop the App
@@ -73,7 +73,7 @@ tail -f capsuleerai.log | grep -i 'error\|warning\|critical'
 
 Or manually:
 ```bash
-kill $(cat capsuleerai.pid)
+kill $(cat vigilant.pid)
 ```
 
 ---
@@ -182,11 +182,12 @@ All scopes are requested at authentication. You can view CCP's scope documentati
 | Route | Description | Refresh Rate |
 |---|---|---|
 | `/` / `/dashboard` | Main character overview — cards, wallet totals, mail, PI, skill queue, kill history | Auto-syncs every 60s per field |
-| `/skills` | Detailed skill queue for all characters with training times and paused queue warnings | 1 minute |
+| `/character/{character_id}` | Individual character detail — wallet chart, journal, assets, orders, kill history | On-demand |
 | `/characters` | Manage characters — groups, rename, reorder, remove | On-demand |
+| `/assets` | Aggregated asset browser across all characters with SDE type lookup | On-demand |
+| `/corporations` | Corporation-level data — members, wallet, industry, orders, structures, contracts | On-demand |
 | `/industry` | Consolidated industry jobs and market orders across all characters | 2 minutes |
 | `/kills` | Aggregated kill history from zKillboard with system security status | 5 minutes |
-| `/character/{character_id}` | Individual character detail — location, assets, orders, contract summary | 1 minute |
 | `/status` | App status dashboard — sync health, ESI rate limits, request activity, event history | 3 seconds (real-time) |
 
 ---
@@ -292,21 +293,21 @@ A: Yes. Use the Docker deployment steps above. Make sure to:
 
 A: Check the logs:
 ```bash
-tail -30 capsuleerai.log
+tail -30 vigilant.log
 ```
 
 Common causes:
 - Python version too old (need 3.11+)
 - Missing dependencies (run `pip install -r requirements.txt` in `.venv`)
 - Port 8000 already in use (change `--port` in `start.sh` or kill the other process)
-- Database locked (delete `capsuleerai.db` and restart)
+- Database locked (delete `vigilant.db` and restart)
 
 **Q: "connection refused" when accessing http://localhost:8000**
 
 A: The app may not be running. Check:
 ```bash
 ps aux | grep uvicorn
-cat capsuleerai.log  # Check for startup errors
+cat vigilant.log  # Check for startup errors
 ./start.sh           # Start it again
 ```
 
@@ -379,7 +380,7 @@ For VPS or public deployment, follow these practices:
 
 3. **Database Security**
    - SQLite is suitable for personal use but consider PostgreSQL for production
-   - Restrict database file permissions: `chmod 600 capsuleerai.db`
+   - Restrict database file permissions: `chmod 600 vigilant.db`
    - Regular backups of your database
    - For sensitive deployments, add database encryption (e.g., SQLCipher)
 
@@ -471,7 +472,7 @@ The Vigilant code is provided as-is. Use at your own risk.
 
 ## Troubleshooting Tips
 
-- **Check logs frequently**: `tail -f capsuleerai.log`
+- **Check logs frequently**: `tail -f vigilant.log`
 - **Monitor the `/status` page** for sync errors and ESI rate limits
 - **Test EVE SSO**: Log into [https://esi.evetech.net/](https://esi.evetech.net/) to verify your app is registered
 - **Verify Python version**: `python --version` (must be 3.11+)
@@ -482,7 +483,7 @@ The Vigilant code is provided as-is. Use at your own risk.
 ## Getting Help
 
 - Check the [FAQ](#faq) section above
-- Review logs in `capsuleerai.log`
+- Review logs in `vigilant.log`
 - Check the `/status` page for sync errors
 - Open an issue on GitHub with logs and error details
 

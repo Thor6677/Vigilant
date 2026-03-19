@@ -57,12 +57,12 @@ async def _get_active_session(request: Request, active_id: int, db: AsyncSession
 
 @router.get("", response_class=HTMLResponse)
 async def chat_page(request: Request, db: AsyncSession = Depends(get_db)):
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return RedirectResponse("/")
+    active_id = request.session.get("active_character_id")
 
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
 
@@ -137,12 +137,12 @@ async def stream_message(
     db: AsyncSession = Depends(get_db),
 ):
     """SSE streaming endpoint. Returns text/event-stream."""
-    active_id = request.session.get("active_character_id")
-    if not active_id:
+    user_id = request.session.get("user_id")
+    if not user_id:
         return HTMLResponse("Not authenticated", status_code=401)
+    active_id = request.session.get("active_character_id")
 
-    character_ids = request.session.get("character_ids", [])
-    result = await db.execute(select(Character).where(Character.character_id.in_(character_ids)))
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = result.scalars().all()
     active_char = next((c for c in characters if c.character_id == active_id), None)
 

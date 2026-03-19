@@ -134,6 +134,58 @@ async def nearest_cloning_facilities(
     return sorted(results, key=lambda x: x["jumps"])
 
 
+async def system_jump_distance(db: AsyncSession, origin_id: int, destination_id: int) -> int | None:
+    """BFS jump distance between two systems. Returns 0 if same, int if reachable, None if unreachable."""
+    if origin_id == destination_id:
+        return 0
+    jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
+    graph: dict[int, list[int]] = {}
+    for row in jumps_result.fetchall():
+        graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+    visited = {origin_id}
+    queue = deque([(origin_id, 0)])
+    while queue:
+        system_id, jumps = queue.popleft()
+        for neighbor in graph.get(system_id, []):
+            if neighbor == destination_id:
+                return jumps + 1
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, jumps + 1))
+    return None
+
+
+async def jump_distances_from(db: AsyncSession, origin_id: int) -> dict[int, int]:
+    """Full BFS from origin. Returns {system_id: jump_count} for all reachable systems."""
+    jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
+    graph: dict[int, list[int]] = {}
+    for row in jumps_result.fetchall():
+        graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+    distances: dict[int, int] = {origin_id: 0}
+    queue = deque([origin_id])
+    while queue:
+        system_id = queue.popleft()
+        for neighbor in graph.get(system_id, []):
+            if neighbor not in distances:
+                distances[neighbor] = distances[system_id] + 1
+                queue.append(neighbor)
+    return distances
+
+
+async def stations_by_ids(db: AsyncSession, station_ids: list[int]) -> dict[int, dict]:
+    """Bulk resolve NPC station IDs to {station_id: {system_id, station_name}}."""
+    if not station_ids:
+        return {}
+    result = await db.execute(
+        select(SDEStation.station_id, SDEStation.station_name, SDEStation.system_id)
+        .where(SDEStation.station_id.in_(station_ids))
+    )
+    return {
+        row.station_id: {"station_name": row.station_name, "system_id": row.system_id}
+        for row in result.fetchall()
+    }
+
+
 async def get_blueprint_materials(db: AsyncSession, blueprint_type_id: int) -> list[dict]:
     """Return manufacturing materials for a blueprint type_id."""
     result = await db.execute(

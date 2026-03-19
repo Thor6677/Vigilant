@@ -14,6 +14,17 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """Represents a player account. Identified by their main EVE character."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_login = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    characters = relationship("Character", back_populates="user")
+
+
 class Character(Base):
     __tablename__ = "characters"
 
@@ -34,7 +45,11 @@ class Character(Base):
     sort_order = Column(Integer, default=0)
     security_status = Column(Float, nullable=True)
     account_group = Column(String, default="Ungrouped")
+    # Account ownership — nullable to support migration of pre-existing rows
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    is_main = Column(Boolean, default=False)
 
+    user = relationship("User", back_populates="characters")
     chat_sessions = relationship("ChatSession", back_populates="character", cascade="all, delete-orphan")
 
     @property
@@ -78,6 +93,16 @@ class ChatSession(Base):
     character = relationship("Character", back_populates="chat_sessions")
 
 
+class WalletSnapshot(Base):
+    """Periodic snapshots of a character's wallet balance for historical charting."""
+    __tablename__ = "wallet_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
+    balance = Column(Float, nullable=False)
+    recorded_at = Column(DateTime, nullable=False)  # naive UTC
+
+
 class ESIRateLimitEvent(Base):
     __tablename__ = "esi_rate_limit_events"
     id          = Column(Integer, primary_key=True, autoincrement=True)
@@ -88,6 +113,15 @@ class ESIRateLimitEvent(Base):
     limit_str   = Column(String(64), nullable=True)   # e.g. "150/15m"
     retry_after = Column(Integer, nullable=True)
     occurred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class CharacterAssetCache(Base):
+    """Pre-resolved asset list per character, refreshed by background sync."""
+    __tablename__ = "character_asset_cache"
+
+    character_id = Column(Integer, ForeignKey("characters.character_id"), primary_key=True)
+    assets_json  = Column(Text, nullable=True)   # JSON list of resolved asset dicts
+    last_fetched = Column(DateTime, nullable=True)  # naive UTC
 
 
 async def init_db():

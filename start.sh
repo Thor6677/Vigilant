@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-# CapsuleerAI local startup script
-# Runs the app directly without Docker — for local use with Ollama
+# Vigilant local startup script
+# Runs the app directly without Docker
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -111,8 +111,8 @@ fi
 # Launch
 # ---------------------------------------------------------------------------
 
-PIDFILE="$SCRIPT_DIR/capsuleerai.pid"
-LOGFILE="$SCRIPT_DIR/capsuleerai.log"
+PIDFILE="$SCRIPT_DIR/vigilant.pid"
+LOGFILE="$SCRIPT_DIR/vigilant.log"
 
 # Stop any existing instance
 if [ -f "$PIDFILE" ]; then
@@ -126,9 +126,9 @@ if [ -f "$PIDFILE" ]; then
 fi
 
 echo ""
-echo "Starting CapsuleerAI at http://localhost:8000"
+echo "Starting Vigilant at http://localhost:8000"
 echo "Logs: $LOGFILE"
-echo "Stop: kill \$(cat capsuleerai.pid)  or  ./stop.sh"
+echo "Stop: kill \$(cat vigilant.pid)  or  ./stop.sh"
 echo ""
 
 nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$LOGFILE" 2>&1 &
@@ -141,7 +141,7 @@ for i in $(seq 1 20); do
     sleep 0.5
     if grep -q "Application startup complete" "$LOGFILE" 2>/dev/null; then
         echo ""
-        echo "✓ CapsuleerAI is running — PID $APP_PID"
+        echo "✓ Vigilant is running — PID $APP_PID"
         echo "  http://localhost:8000"
         echo ""
         echo "To watch logs:  tail -f $LOGFILE"

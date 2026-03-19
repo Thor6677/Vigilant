@@ -57,6 +57,7 @@ class ESIClient:
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
+            "User-Agent": "Vigilant/1.0 (EVE Online personal dashboard)",
         }
 
     async def _throttle_if_needed(self) -> None:

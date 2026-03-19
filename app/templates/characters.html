@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Characters — CapsuleerAI{% endblock %}
+{% block title %}Characters — Vigilant{% endblock %}
 {% block head %}
 {% if sort == "custom" %}
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
@@ -11,12 +11,12 @@
     <h1 class="text-lg font-light tracking-widest text-white uppercase">Characters</h1>
     <div class="flex gap-2">
         {% if needs_reauth_count > 0 %}
-        <a href="/auth/reauth-all"
+        <a href="/auth/add-character"
            class="text-xs border border-eve-gold text-eve-gold hover:bg-eve-gold hover:text-eve-bg px-4 py-2 rounded tracking-widest uppercase transition-colors">
             ↻ Reauth {{ needs_reauth_count }}
         </a>
         {% endif %}
-        <a href="/auth/login"
+        <a href="/auth/add-character"
            class="text-xs border border-eve-accent text-eve-accent hover:bg-eve-accent hover:text-eve-bg px-4 py-2 rounded tracking-widest uppercase transition-colors">
             + Add Character
         </a>
@@ -46,15 +46,14 @@
 {# ── CUSTOM DRAG-AND-DROP VIEW ── #}
 <div id="groups-container" class="space-y-6">
 {% for group_name, chars in groups.items() %}
-{% set any_training = chars | selectattr('character_id', 'in', training.keys()) | list %}
-{% set active_training_count = namespace(n=0) %}
-{% for c in chars %}{% if training.get(c.character_id, {}).get('skill_id') %}{% set active_training_count.n = active_training_count.n + 1 %}{% endif %}{% endfor %}
+{% set ns = namespace(any_training=false) %}
+{% for c in chars %}{% set sk = skill_map.get(c.character_id) %}{% if sk and sk.warning in ('ok', 'warning', 'critical') %}{% set ns.any_training = true %}{% endif %}{% endfor %}
 
 <div class="group-section" data-group="{{ group_name }}">
     <div class="flex items-center gap-3 mb-2">
         <div class="flex items-center gap-2">
-            {% if active_training_count.n > 0 %}
-            <span class="w-2 h-2 rounded-full bg-eve-success inline-block" title="{{ active_training_count.n }} training"></span>
+            {% if ns.any_training %}
+            <span class="w-2 h-2 rounded-full bg-eve-success inline-block" title="Training active"></span>
             {% else %}
             <span class="w-2 h-2 rounded-full bg-eve-danger inline-block" title="None training"></span>
             {% endif %}
@@ -70,14 +69,18 @@
     <div class="sortable-group grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 min-h-16 p-2 rounded border border-dashed border-eve-border"
          data-group="{{ group_name }}">
     {% for char in chars %}
-    <div class="eve-border rounded p-3 bg-eve-surface cursor-grab active:cursor-grabbing select-none
-                {% if char.character_id == active_char.character_id %}border-eve-accent{% endif %}"
+    {% set sk = skill_map.get(char.character_id) %}
+    {% set w = sk.warning if sk else 'error' %}
+    <div class="eve-border rounded bg-eve-surface cursor-grab active:cursor-grabbing select-none overflow-hidden
+                {% if char.character_id == active_char.character_id %}border-eve-accent{% endif %}
+                {% if w == 'empty' %}border-l-4 border-l-eve-danger{% elif w == 'critical' %}border-l-4 border-l-orange-500{% elif w == 'warning' %}border-l-4 border-l-yellow-500{% elif w in ('no_scope', 'error') %}border-l-4 border-l-eve-border{% else %}border-l-4 border-l-eve-success{% endif %}"
          data-char-id="{{ char.character_id }}">
-        <div class="flex items-center gap-3 mb-3">
+        <div class="p-3">
+        <div class="flex items-center gap-3 mb-2">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
                  alt="{{ char.character_name }}"
                  class="w-10 h-10 rounded border border-eve-border flex-shrink-0 pointer-events-none">
-            <div class="min-w-0">
+            <div class="flex-1 min-w-0">
                 <div class="text-white text-xs font-medium truncate">{{ char.character_name }}</div>
                 {% if char.corporation_name %}
                 <div class="text-eve-muted text-xs truncate">{{ char.corporation_name }}</div>
@@ -86,23 +89,63 @@
                     {% if char.character_id == active_char.character_id %}
                     <span class="text-xs bg-eve-accent text-eve-bg px-1.5 py-0.5 rounded">Active</span>
                     {% endif %}
-                    {% if 'esi-skills.read_skillqueue.v1' not in (char.scopes or '') %}
-                    <span class="text-xs border border-eve-gold text-eve-gold px-1.5 py-0.5 rounded">Reauth</span>
+                </div>
+            </div>
+            <!-- Warning Badge -->
+            {% if w == 'empty' %}
+            <span class="flex-shrink-0 text-xs bg-eve-danger text-white px-2 py-0.5 rounded font-bold tracking-wide">EMPTY</span>
+            {% elif w == 'critical' %}
+            <span class="flex-shrink-0 text-xs bg-orange-600 text-white px-2 py-0.5 rounded font-bold tracking-wide">&lt; 7 DAYS</span>
+            {% elif w == 'warning' %}
+            <span class="flex-shrink-0 text-xs bg-yellow-600 text-black px-2 py-0.5 rounded font-bold tracking-wide">&lt; 14 DAYS</span>
+            {% elif w == 'no_scope' %}
+            <span class="flex-shrink-0 text-xs border border-eve-border text-eve-muted px-2 py-0.5 rounded tracking-wide">NO SCOPE</span>
+            {% elif w == 'error' %}
+            <span class="flex-shrink-0 text-xs border border-eve-border text-eve-muted px-2 py-0.5 rounded tracking-wide">ERROR</span>
+            {% else %}
+            <span class="flex-shrink-0 text-xs bg-green-800 text-green-300 px-2 py-0.5 rounded tracking-wide">OK</span>
+            {% endif %}
+        </div>
+
+        <!-- Skill Info -->
+        {% if sk %}
+        <div class="border-t border-eve-border pt-2 mb-2">
+        {% if w == 'no_scope' %}
+        <div class="text-eve-muted text-xs italic">No skill scope. <a href="/auth/add-character" class="text-eve-accent hover:underline">Re-auth →</a></div>
+        {% elif w == 'error' %}
+        <div class="text-eve-muted text-xs italic">Could not fetch skill queue.</div>
+        {% elif w == 'empty' %}
+        <div class="text-eve-danger text-xs font-medium">No skills in queue — training paused!</div>
+        {% else %}
+        <div class="space-y-1.5">
+            {% if sk.current_skill %}
+            <div class="flex items-baseline justify-between gap-2">
+                <div class="text-xs text-eve-muted">Training</div>
+                <div class="text-xs text-white font-medium truncate text-right">
+                    {{ sk.current_skill }}
+                    {% if sk.current_level %}
+                    <span class="text-eve-accent">
+                        {% for i in range(sk.current_level) %}▪{% endfor %}{% for i in range(5 - sk.current_level) %}<span class="text-eve-border">▪</span>{% endfor %}
+                    </span>
                     {% endif %}
                 </div>
             </div>
-        </div>
-
-        {% set t = training.get(char.character_id, {}) %}
-        {% if t.get('skill_id') %}
-        <div class="mb-2 text-xs text-eve-muted border-t border-eve-border pt-2">
-            <div class="text-white truncate">{{ skill_names.get(t.skill_id, 'Unknown') }} {{ t.level }}</div>
-            {% if t.queue_finish %}
-            <div>Queue ends: {{ t.queue_finish }}</div>
+            <div class="w-full bg-eve-border rounded-full h-1">
+                <div class="bg-eve-accent h-1 rounded-full" style="width: {{ sk.progress_pct }}%"></div>
+            </div>
+            {% endif %}
+            <div class="flex items-center justify-between text-xs text-eve-muted">
+                <span>{{ sk.queue_length }} skill{% if sk.queue_length != 1 %}s{% endif %} queued</span>
+                {% if sk.time_remaining_str %}
+                <span class="{% if w == 'critical' %}text-orange-400{% elif w == 'warning' %}text-yellow-400{% else %}text-eve-muted{% endif %}">ends {{ sk.time_remaining_str }}</span>
+                {% endif %}
+            </div>
+            {% if sk.queue_end_str %}
+            <div class="text-xs text-eve-muted">{{ sk.queue_end_str }} UTC</div>
             {% endif %}
         </div>
-        {% elif t %}
-        <div class="mb-2 text-xs text-eve-muted border-t border-eve-border pt-2">Queue empty</div>
+        {% endif %}
+        </div>
         {% endif %}
 
         <div class="flex gap-1.5">
@@ -116,6 +159,9 @@
             {% else %}
             <div class="flex-1"></div>
             {% endif %}
+            <a href="/auth/login"
+               class="text-xs border border-eve-border hover:border-eve-gold text-eve-muted hover:text-eve-gold px-2 py-1 rounded transition-colors"
+               title="Re-authenticate {{ char.character_name }}">↻</a>
             <form method="POST" action="/auth/remove/{{ char.character_id }}"
                   onsubmit="return confirm('Remove {{ char.character_name }}?')">
                 <button type="submit"
@@ -123,6 +169,7 @@
                     ✕
                 </button>
             </form>
+        </div>
         </div>
     </div>
     {% endfor %}
@@ -136,12 +183,17 @@
 {# ── REGULAR GRID VIEW ── #}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
 {% for char in characters %}
-<div class="eve-border rounded p-3 bg-eve-surface {% if char.character_id == active_char.character_id %}border-eve-accent{% endif %}">
+{% set sk = skill_map.get(char.character_id) %}
+{% set w = sk.warning if sk else 'error' %}
+<div class="eve-border rounded bg-eve-surface overflow-hidden
+            {% if char.character_id == active_char.character_id %}border-eve-accent{% endif %}
+            {% if w == 'empty' %}border-l-4 border-l-eve-danger{% elif w == 'critical' %}border-l-4 border-l-orange-500{% elif w == 'warning' %}border-l-4 border-l-yellow-500{% elif w in ('no_scope', 'error') %}border-l-4 border-l-eve-border{% else %}border-l-4 border-l-eve-success{% endif %}">
+    <div class="p-3">
     <div class="flex items-center gap-3 mb-3">
         <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
              alt="{{ char.character_name }}"
              class="w-10 h-10 rounded border border-eve-border flex-shrink-0">
-        <div class="min-w-0">
+        <div class="flex-1 min-w-0">
             <div class="text-white text-xs font-medium truncate">{{ char.character_name }}</div>
             {% if char.corporation_name %}
             <div class="text-eve-muted text-xs truncate">{{ char.corporation_name }}</div>
@@ -150,20 +202,62 @@
                 {% if char.character_id == active_char.character_id %}
                 <span class="text-xs bg-eve-accent text-eve-bg px-1.5 py-0.5 rounded">Active</span>
                 {% endif %}
-                {% if 'esi-skills.read_skillqueue.v1' not in (char.scopes or '') %}
-                <span class="text-xs border border-eve-gold text-eve-gold px-1.5 py-0.5 rounded">Reauth</span>
+            </div>
+        </div>
+        <!-- Warning Badge -->
+        {% if w == 'empty' %}
+        <span class="flex-shrink-0 text-xs bg-eve-danger text-white px-2 py-0.5 rounded font-bold tracking-wide">EMPTY</span>
+        {% elif w == 'critical' %}
+        <span class="flex-shrink-0 text-xs bg-orange-600 text-white px-2 py-0.5 rounded font-bold tracking-wide">&lt; 7 DAYS</span>
+        {% elif w == 'warning' %}
+        <span class="flex-shrink-0 text-xs bg-yellow-600 text-black px-2 py-0.5 rounded font-bold tracking-wide">&lt; 14 DAYS</span>
+        {% elif w == 'no_scope' %}
+        <span class="flex-shrink-0 text-xs border border-eve-border text-eve-muted px-2 py-0.5 rounded tracking-wide">NO SCOPE</span>
+        {% elif w == 'error' %}
+        <span class="flex-shrink-0 text-xs border border-eve-border text-eve-muted px-2 py-0.5 rounded tracking-wide">ERROR</span>
+        {% else %}
+        <span class="flex-shrink-0 text-xs bg-green-800 text-green-300 px-2 py-0.5 rounded tracking-wide">OK</span>
+        {% endif %}
+    </div>
+
+    <!-- Skill Info -->
+    {% if sk %}
+    <div class="border-t border-eve-border pt-2 mb-3">
+    {% if w == 'no_scope' %}
+    <div class="text-eve-muted text-xs italic">No skill scope. <a href="/auth/add-character" class="text-eve-accent hover:underline">Re-auth →</a></div>
+    {% elif w == 'error' %}
+    <div class="text-eve-muted text-xs italic">Could not fetch skill queue.</div>
+    {% elif w == 'empty' %}
+    <div class="text-eve-danger text-xs font-medium">No skills in queue — training paused!</div>
+    {% else %}
+    <div class="space-y-1.5">
+        {% if sk.current_skill %}
+        <div class="flex items-baseline justify-between gap-2">
+            <div class="text-xs text-eve-muted">Training</div>
+            <div class="text-xs text-white font-medium truncate text-right">
+                {{ sk.current_skill }}
+                {% if sk.current_level %}
+                <span class="text-eve-accent">
+                    {% for i in range(sk.current_level) %}▪{% endfor %}{% for i in range(5 - sk.current_level) %}<span class="text-eve-border">▪</span>{% endfor %}
+                </span>
                 {% endif %}
             </div>
         </div>
-    </div>
-
-    {% set t = training.get(char.character_id, {}) %}
-    {% if t.get('skill_id') %}
-    <div class="mb-2 text-xs text-eve-muted border-t border-eve-border pt-2">
-        <div class="text-white truncate">{{ skill_names.get(t.skill_id, 'Unknown Skill') }} {{ t.level }}</div>
-        {% if t.queue_finish %}
-        <div>Queue ends: {{ t.queue_finish }}</div>
+        <div class="w-full bg-eve-border rounded-full h-1">
+            <div class="bg-eve-accent h-1 rounded-full" style="width: {{ sk.progress_pct }}%"></div>
+        </div>
         {% endif %}
+        <div class="flex items-center justify-between text-xs text-eve-muted">
+            <span>{{ sk.queue_length }} skill{% if sk.queue_length != 1 %}s{% endif %} queued</span>
+            {% if sk.time_remaining_str %}
+            <span class="{% if w == 'critical' %}text-orange-400{% elif w == 'warning' %}text-yellow-400{% else %}text-eve-muted{% endif %}">ends {{ sk.time_remaining_str }}</span>
+            {% endif %}
+        </div>
+        {% if sk.queue_end_str %}
+        <div class="text-xs text-eve-muted">{{ sk.queue_end_str }} UTC</div>
+        {% endif %}
+    </div>
+    {% endif %}
     </div>
     {% endif %}
 
@@ -178,6 +272,9 @@
         {% else %}
         <div class="flex-1"></div>
         {% endif %}
+        <a href="/auth/login"
+           class="text-xs border border-eve-border hover:border-eve-gold text-eve-muted hover:text-eve-gold px-2 py-1 rounded transition-colors"
+           title="Re-authenticate {{ char.character_name }}">↻</a>
         <form method="POST" action="/auth/remove/{{ char.character_id }}"
               onsubmit="return confirm('Remove {{ char.character_name }}?')">
             <button type="submit"
@@ -185,6 +282,7 @@
                 ✕
             </button>
         </form>
+    </div>
     </div>
 </div>
 {% endfor %}

@@ -1,0 +1,123 @@
+{% macro jump_badge(jump_dist, has_origin) %}
+  {%- if not has_origin -%}
+    <span style="color:var(--muted);font-size:9px;letter-spacing:0.1em;">—</span>
+  {%- elif jump_dist is none -%}
+    <span class="b-badge is-warn">WH?</span>
+  {%- elif jump_dist == 0 -%}
+    <span class="b-badge is-active">HERE</span>
+  {%- elif jump_dist <= 5 -%}
+    <span class="b-badge is-ok">{{ jump_dist }}j</span>
+  {%- elif jump_dist <= 15 -%}
+    <span class="b-badge is-warn">{{ jump_dist }}j</span>
+  {%- else -%}
+    <span class="b-badge is-danger">{{ jump_dist }}j</span>
+  {%- endif %}
+{% endmacro %}
+
+{% macro sec_badge(security) %}
+  {%- if security is none -%}
+    <span style="color:var(--muted);font-size:9px;">—</span>
+  {%- elif security >= 0.5 -%}
+    <span style="color:var(--success);font-size:9px;letter-spacing:0.04em;">{{ "%.1f"|format(security) }}</span>
+  {%- elif security >= 0.0 -%}
+    <span style="color:var(--accent);font-size:9px;letter-spacing:0.04em;">{{ "%.1f"|format(security) }}</span>
+  {%- else -%}
+    <span style="color:var(--danger);font-size:9px;letter-spacing:0.04em;">{{ "%.1f"|format(security) }}</span>
+  {%- endif %}
+{% endmacro %}
+
+{% for group_name in sorted_group_names %}
+{% set group_chars = groups[group_name] %}
+
+{# ── Account group header ──────────────────────────────────────────────────── #}
+<div class="b-section-head" style="margin-top:{% if loop.first %}0{% else %}2rem{% endif %};">
+    <span class="b-label">{{ group_name }}</span>
+    <span class="b-label" style="color:var(--muted);">
+        {% set total = namespace(n=0) %}
+        {% for cid, cdata in group_chars.items() %}
+            {% set total.n = total.n + cdata.assets|length %}
+        {% endfor %}
+        {{ total.n }} result{{ "s" if total.n != 1 else "" }}
+    </span>
+</div>
+
+{% for cid, cdata in group_chars.items() %}
+{% set char = cdata.char %}
+{% set assets = cdata.assets %}
+
+{# ── Character panel ───────────────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:1px;">
+    <div class="b-panel-head">
+        <div style="display:flex;align-items:center;gap:0.6rem;">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 alt="{{ char.character_name }}"
+                 style="width:24px;height:24px;object-fit:cover;object-position:top center;border:1px solid var(--border);filter:grayscale(15%);flex-shrink:0;">
+            <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text);">
+                {{ char.character_name }}
+            </span>
+        </div>
+        <span class="b-label" style="color:var(--muted);">{{ assets|length }} result{{ "s" if assets|length != 1 else "" }}</span>
+    </div>
+
+    {# ── Header row ──────────────────────────────────────────────────────────── #}
+    <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.25rem 0.75rem;">
+        <span style="width:32px;flex-shrink:0;"></span>
+        <span class="b-row-label" style="flex:2;min-width:120px;">Item</span>
+        <span class="b-row-label" style="flex:0 0 60px;text-align:right;">Qty</span>
+        <span class="b-row-label" style="flex:3;min-width:160px;padding-left:0.6rem;">Location</span>
+        <span class="b-row-label" style="flex:0 0 34px;text-align:center;">Sec</span>
+        <span class="b-row-label" style="flex:0 0 90px;text-align:center;">Flag</span>
+        <span class="b-row-label" style="flex:0 0 52px;text-align:center;">Jumps</span>
+    </div>
+
+    {% for asset in assets %}
+    <div class="b-table-row">
+        {# Type icon #}
+        <img src="https://images.evetech.net/types/{{ asset.type_id }}/icon?size=32"
+             alt=""
+             style="width:32px;height:32px;object-fit:contain;border:1px solid var(--border);flex-shrink:0;filter:grayscale(10%);"
+             loading="lazy">
+
+        {# Item name #}
+        <span style="flex:2;min-width:120px;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {{ asset.type_name or ("Type " ~ asset.type_id) }}
+        </span>
+
+        {# Quantity #}
+        <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--muted);">
+            {% if asset.is_singleton %}—{% else %}×{{ "{:,}".format(asset.quantity) }}{% endif %}
+        </span>
+
+        {# Location name + region #}
+        <span style="flex:3;min-width:160px;padding-left:0.6rem;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {% if asset.location_name %}
+                <span style="color:var(--text);">{{ asset.location_name }}</span>
+                {% if asset.region %}
+                    <span style="color:var(--muted);"> · {{ asset.region }}</span>
+                {% endif %}
+            {% else %}
+                <span style="color:var(--muted);">Unknown</span>
+            {% endif %}
+        </span>
+
+        {# Security #}
+        <span style="flex:0 0 34px;text-align:center;">
+            {{ sec_badge(asset.security) }}
+        </span>
+
+        {# Location flag #}
+        <span style="flex:0 0 90px;text-align:center;font-size:9px;color:var(--muted);letter-spacing:0.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {{ asset.location_flag | camel_to_space }}
+        </span>
+
+        {# Jump distance #}
+        <span style="flex:0 0 52px;text-align:center;">
+            {{ jump_badge(asset.jump_dist, asset.has_origin) }}
+        </span>
+    </div>
+    {% endfor %}
+
+</div>
+{% endfor %}
+
+{% endfor %}

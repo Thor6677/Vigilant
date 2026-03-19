@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:////data/capsuleerai.db
+      - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
     volumes:
       - app_data:/data
     networks:
@@ -20,7 +20,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/capsuleerai.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/vigilant.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     networks:
       - web
