@@ -849,40 +849,44 @@ async def _background_scheduler():
     This is the *only* place automatic syncs are triggered — the dashboard
     route no longer spawns syncs on page load.
     """
-    await asyncio.sleep(15)  # Allow app startup (SDE load, etc.) to settle first
-    _last_cleanup: datetime | None = None
-    while True:
-        try:
-            async with AsyncSessionLocal() as db:
-                char_result = await db.execute(select(Character))
-                characters = char_result.scalars().all()
-                if characters:
-                    cids = [c.character_id for c in characters]
-                    cache_result = await db.execute(
-                        select(CharacterDashboardCache).where(
-                            CharacterDashboardCache.character_id.in_(cids)
-                        )
-                    )
-                    char_caches = {c.character_id: c for c in cache_result.scalars().all()}
-                    stale_ids = _collect_stale(list(characters), char_caches)
-                    if stale_ids:
-                        for cid in stale_ids:
-                            _queued_sync.add(cid)
-                        asyncio.create_task(_sync_all_task(stale_ids))
-                        logger.info("Scheduler queued %d character(s) for sync: %s", len(stale_ids), stale_ids)
-        except Exception as e:
-            logger.warning("Background scheduler error: %s", e)
-
-        # Daily WalletSnapshot cleanup
-        now = datetime.now(timezone.utc)
-        if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
+    try:
+        await asyncio.sleep(15)  # Allow app startup (SDE load, etc.) to settle first
+        _last_cleanup: datetime | None = None
+        while True:
             try:
-                await _cleanup_old_snapshots()
-                _last_cleanup = now
+                async with AsyncSessionLocal() as db:
+                    char_result = await db.execute(select(Character))
+                    characters = char_result.scalars().all()
+                    if characters:
+                        cids = [c.character_id for c in characters]
+                        cache_result = await db.execute(
+                            select(CharacterDashboardCache).where(
+                                CharacterDashboardCache.character_id.in_(cids)
+                            )
+                        )
+                        char_caches = {c.character_id: c for c in cache_result.scalars().all()}
+                        stale_ids = _collect_stale(list(characters), char_caches)
+                        if stale_ids:
+                            for cid in stale_ids:
+                                _queued_sync.add(cid)
+                            asyncio.create_task(_sync_all_task(stale_ids))
+                            logger.info("Scheduler queued %d character(s) for sync: %s", len(stale_ids), stale_ids)
             except Exception as e:
-                logger.warning("Snapshot cleanup error: %s", e)
+                logger.warning("Background scheduler error: %s", e)
 
-        await asyncio.sleep(60)
+            # Daily WalletSnapshot cleanup
+            now = datetime.now(timezone.utc)
+            if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
+                try:
+                    await _cleanup_old_snapshots()
+                    _last_cleanup = now
+                except Exception as e:
+                    logger.warning("Snapshot cleanup error: %s", e)
+
+            await asyncio.sleep(60)
+    except Exception as e:
+        logger.error("Background scheduler crashed during initialization: %s", e, exc_info=True)
+        raise
 
 
 def _collect_stale(characters: list[Character], char_caches: dict) -> list[int]:
