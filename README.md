@@ -14,11 +14,12 @@ An EVE Online dashboard that gives you a unified view of all your characters —
 - **Multi-character dashboard** — wallet, location, industry jobs, market orders, skill queue, mail, notifications, contracts, planetary industry, and zKillboard kills — all on one page
 - **Automatic background sync** — a scheduler runs every 60 seconds, refreshing each field on its ESI-recommended cache timer (30s location, 2min wallet, 1h clones, etc.); page loads never trigger ESI calls
 - **Instant on character add** — full sync fires immediately when a character is authenticated
-- **Character detail pages** — individual character overview with location, assets, orders, and kill history
+- **Character detail page** — per-character wallet balance chart (with time range selection), wallet journal, active market orders, and kill history
+- **Character management** — organize alts into named account groups, reorder with drag-and-drop, view skill queue details with training completion times and paused queue warnings
+- **Assets page** — aggregated asset browser across all characters with EVE SDE type lookup and search
+- **Corporations page** — corporation-level wallet, industry jobs, market orders, structures, contracts, and member list (requires corp roles)
 - **Industry page** — consolidated view of all industry jobs and market orders across all characters
 - **Kills page** — aggregated kill history from zKillboard with system security status
-- **Character grouping** — organize alts into named account groups, reorder with drag-and-drop
-- **Skills page** — full skill queue details with training completion times and warnings for paused queues
 - **App status dashboard** — request activity chart (Chart.js), background sync table with expandable per-field warnings, ESI rate limit progress bars, recent request log, and significant event history
 - **Sync diagnostics** — per-field ⚠ warnings on the dashboard when a sync fails, with re-authenticate links for expired tokens
 
@@ -157,23 +158,29 @@ Vigilant requests the following ESI scopes when you authenticate a character:
 
 | Scope | Purpose |
 |---|---|
-| `esi-wallet.read_character_wallet.v1` | Read wallet balance and transaction history |
+| `esi-wallet.read_character_wallet.v1` | Wallet balance and journal |
 | `esi-location.read_location.v1` | Current system location |
-| `esi-location.read_ship_type.v1` | Current ship type information |
-| `esi-location.read_online.v1` | Character online status |
+| `esi-location.read_ship_type.v1` | Current ship type |
+| `esi-assets.read_assets.v1` | Character assets |
 | `esi-industry.read_character_jobs.v1` | Industry jobs (manufacturing, research, etc.) |
-| `esi-clones.read_clones.v1` | Clone locations and attributes |
+| `esi-clones.read_clones.v1` | Clone locations |
 | `esi-clones.read_implants.v1` | Implant data |
-| `esi-markets.read_character_orders.v1` | Sell/buy orders |
+| `esi-markets.read_character_orders.v1` | Buy/sell orders |
 | `esi-mail.read_mail.v1` | Mail headers and labels |
 | `esi-characters.read_notifications.v1` | In-game notifications |
-| `esi-contracts.read_character_contracts.v1` | Contract information |
+| `esi-contracts.read_character_contracts.v1` | Contracts |
 | `esi-planets.manage_planets.v1` | Planetary interaction data |
-| `esi-skills.read_skills.v1` | Trained skills |
-| `esi-skills.read_skillqueue.v1` | Skill queue status |
-| `esi-corporations.read_corporation_membership.v1` | Corporation membership (optional) |
+| `esi-skills.read_skillqueue.v1` | Skill queue |
+| `esi-characters.read_corporation_roles.v1` | Determine if character holds corp roles |
+| `esi-corporations.read_corporation_membership.v1` | Corporation member list |
+| `esi-wallet.read_corporation_wallets.v1` | Corporation wallet divisions |
+| `esi-industry.read_corporation_jobs.v1` | Corporation industry jobs |
+| `esi-markets.read_corporation_orders.v1` | Corporation market orders |
+| `esi-corporations.read_structures.v1` | Corporation structures |
+| `esi-contracts.read_corporation_contracts.v1` | Corporation contracts |
+| `esi-assets.read_corporation_assets.v1` | Corporation assets |
 
-All scopes are requested at authentication. You can view CCP's scope documentation at [EVE Swagger Interface Docs](https://esi.evetech.net/).
+Character-level scopes are always requested. Corporation-level scopes are only usable if EVE SSO grants them based on the character's in-game roles. You can view CCP's scope documentation at [EVE Swagger Interface Docs](https://esi.evetech.net/).
 
 ---
 
@@ -236,18 +243,20 @@ Vigilant includes Docker configuration for server deployment.
 
 ### Using `setup_vps.sh`
 
-A helper script is provided for VPS setup:
+A helper script is provided for fresh Ubuntu 24.04 VPS setup (run as root):
 
 ```bash
 chmod +x setup_vps.sh
 ./setup_vps.sh
 ```
 
-This will guide you through:
-- Installing dependencies
-- Configuring `.env`
-- Setting up systemd service (optional)
-- Configuring nginx reverse proxy (optional)
+This will:
+- Install Docker and Docker Compose
+- Install git
+- Create a `vigilant` system user
+- Create `/opt/vigilant` and set ownership
+
+After running it, follow the printed next steps to clone the repo, configure `.env`, obtain an SSL certificate, and start the app.
 
 ---
 
