@@ -317,8 +317,9 @@ async def corp_detail(
                         "state_timer_end": s.get("state_timer_end", "")[:10] if s.get("state_timer_end") else None,
                     })
                 corp_structures = sorted(enriched, key=lambda s: s["name"])
+                logger.info("Successfully fetched %d structures for corp %s", len(corp_structures), corp_id)
             except Exception as e:
-                logger.warning("Corp structures fetch failed for %s: %s", corp_id, e, exc_info=True)
+                logger.error("Corp structures fetch failed for %s: %s", corp_id, e, exc_info=True)
         else:
             logger.warning("Failed to get auth client for structures scope for corp %s", corp_id)
     else:

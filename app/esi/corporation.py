@@ -39,12 +39,17 @@ async def get_corporation_structures(client: ESIClient, corporation_id: int) -> 
     while True:
         data = await client.get(
             f"/corporations/{corporation_id}/structures/",
-            params={"page": page}
+            params={"page": page} if page > 1 else {}
         )
+        if not isinstance(data, list):
+            # Unexpected response format
+            return []
         if not data:
+            # Empty response, reached end
             break
         all_structures.extend(data)
-        if len(data) < 1000:  # Last page
+        # ESI returns ~1000 items per page, if we get fewer, it's the last page
+        if len(data) < 1000:
             break
         page += 1
     return all_structures
