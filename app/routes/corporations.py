@@ -89,6 +89,46 @@ templates.env.filters["fuel_remaining"] = _fuel_remaining
 templates.env.globals["STRUCTURE_STATE_CLASS"] = STRUCTURE_STATE_CLASS
 
 
+async def _try_api_call_with_fallback(
+    scope_name: str,
+    scope_chars: dict[str, list],
+    api_call_func,
+    corp_id: int,
+    db: AsyncSession
+) -> tuple[any, str | None]:
+    """
+    Try an API call with multiple characters, falling back if one fails with 403.
+    Returns (result, error_message)
+    """
+    if scope_name not in scope_chars:
+        return None, f"No characters with {scope_name} scope"
+
+    chars_to_try = scope_chars[scope_name]
+    last_error = None
+
+    for char in chars_to_try:
+        client = await _auth_client(char, db)
+        if not client:
+            logger.debug("Could not get auth client for %s", char.character_name)
+            last_error = f"Failed to refresh token for {char.character_name}"
+            continue
+
+        try:
+            logger.debug("Trying API call for %s with character %s", scope_name, char.character_name)
+            result = await api_call_func(client, corp_id)
+            logger.debug("API call succeeded for %s with character %s", scope_name, char.character_name)
+            return result, None
+        except Exception as e:
+            error_str = str(e)
+            logger.debug("API call failed for %s with character %s: %s", scope_name, char.character_name, error_str)
+            last_error = error_str
+            # If 403, try next character; otherwise break
+            if "403" not in error_str:
+                break
+
+    return None, last_error
+
+
 async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
     try:
         async with AsyncSessionLocal() as token_db:
@@ -171,15 +211,18 @@ async def corp_detail(
     if not corp_chars:
         return HTMLResponse('<div class="b-empty">No characters in this corporation.</div>')
 
-    # First character with each scope — used to authenticate API calls
-    scope_char: dict[str, Character] = {}
+    # All characters with each scope — used to authenticate API calls
+    # Maps scope_name -> [list of characters with that scope]
+    scope_chars: dict[str, list] = {}
     for char in corp_chars:
         logger.debug("Checking scopes for char %s: %r", char.character_name, char.scopes)
         for scope_name, scope_val in CORP_SCOPES.items():
-            if scope_name not in scope_char and scope_val in (char.scopes or ""):
+            if scope_val in (char.scopes or ""):
+                if scope_name not in scope_chars:
+                    scope_chars[scope_name] = []
+                scope_chars[scope_name].append(char)
                 logger.debug("Found scope %s for char %s", scope_name, char.character_name)
-                scope_char[scope_name] = char
-    logger.debug("Final scope_char for corp %s: %s", corp_id, list(scope_char.keys()))
+    logger.debug("Final scope_chars for corp %s: %s", corp_id, {k: [c.character_name for c in v] for k, v in scope_chars.items()})
 
     # --- Public corp info (no auth needed) ---
     pub_client = ESIClient("", db=db)
@@ -201,39 +244,52 @@ async def corp_detail(
 
     # --- Corp member count (if scope available) ---
     member_count: int | None = None
-    if "members" in scope_char:
-        client = await _auth_client(scope_char["members"], db)
-        if client:
-            try:
-                member_ids = await esi_corp.get_corporation_members(client, corp_id)
-                member_count = len(member_ids)
-            except Exception as e:
-                logger.warning("Corp members fetch failed for %s: %s", corp_id, e)
+    if "members" in scope_chars:
+        member_ids, error = await _try_api_call_with_fallback(
+            "members",
+            scope_chars,
+            esi_corp.get_corporation_members,
+            corp_id,
+            db
+        )
+        if member_ids:
+            member_count = len(member_ids)
+        elif error:
+            logger.warning("Corp members fetch failed for %s: %s", corp_id, error)
 
     # --- Corp wallet (if scope available) ---
     corp_wallets: list | None = None
     corp_wallet_total: float | None = None
-    if "wallet" in scope_char:
-        client = await _auth_client(scope_char["wallet"], db)
-        if client:
-            try:
-                raw = await esi_corp.get_corporation_wallets(client, corp_id)
-                # Filter out empty divisions, sort by division number
-                corp_wallets = sorted(
-                    [d for d in raw if d.get("balance", 0) != 0],
-                    key=lambda d: d["division"],
-                )
-                corp_wallet_total = sum(d.get("balance", 0) for d in raw)
-            except Exception as e:
-                logger.warning("Corp wallets fetch failed for %s: %s", corp_id, e)
+    if "wallet" in scope_chars:
+        raw, error = await _try_api_call_with_fallback(
+            "wallet",
+            scope_chars,
+            esi_corp.get_corporation_wallets,
+            corp_id,
+            db
+        )
+        if raw:
+            # Filter out empty divisions, sort by division number
+            corp_wallets = sorted(
+                [d for d in raw if d.get("balance", 0) != 0],
+                key=lambda d: d["division"],
+            )
+            corp_wallet_total = sum(d.get("balance", 0) for d in raw)
+        elif error:
+            logger.warning("Corp wallets fetch failed for %s: %s", corp_id, error)
 
     # --- Corp industry jobs (if scope available) ---
     corp_jobs: list | None = None
-    if "industry" in scope_char:
-        client = await _auth_client(scope_char["industry"], db)
-        if client:
+    if "industry" in scope_chars:
+        raw_jobs, error = await _try_api_call_with_fallback(
+            "industry",
+            scope_chars,
+            esi_corp.get_corporation_jobs,
+            corp_id,
+            db
+        )
+        if raw_jobs:
             try:
-                raw_jobs = await esi_corp.get_corporation_jobs(client, corp_id)
                 now = datetime.now(timezone.utc)
                 active = []
                 for job in raw_jobs:
@@ -267,85 +323,95 @@ async def corp_detail(
                     })
                 corp_jobs = active
             except Exception as e:
-                logger.warning("Corp jobs fetch failed for %s: %s", corp_id, e)
+                logger.warning("Corp jobs processing failed for %s: %s", corp_id, e)
+        elif error:
+            logger.warning("Corp jobs fetch failed for %s: %s", corp_id, error)
 
     # --- Corp market orders (if scope available) ---
     corp_orders: dict | None = None
-    if "orders" in scope_char:
-        client = await _auth_client(scope_char["orders"], db)
-        if client:
-            try:
-                raw_orders = await esi_corp.get_corporation_orders(client, corp_id)
-                sell = [o for o in raw_orders if not o.get("is_buy_order")]
-                buy = [o for o in raw_orders if o.get("is_buy_order")]
-                corp_orders = {
-                    "sell_count": len(sell),
-                    "buy_count": len(buy),
-                    "sell_value": sum(o.get("price", 0) * o.get("volume_remain", 0) for o in sell),
-                    "buy_value": sum(o.get("price", 0) * o.get("volume_remain", 0) for o in buy),
-                    "total_count": len(raw_orders),
-                }
-            except Exception as e:
-                logger.warning("Corp orders fetch failed for %s: %s", corp_id, e)
+    if "orders" in scope_chars:
+        raw_orders, error = await _try_api_call_with_fallback(
+            "orders",
+            scope_chars,
+            esi_corp.get_corporation_orders,
+            corp_id,
+            db
+        )
+        if raw_orders:
+            sell = [o for o in raw_orders if not o.get("is_buy_order")]
+            buy = [o for o in raw_orders if o.get("is_buy_order")]
+            corp_orders = {
+                "sell_count": len(sell),
+                "buy_count": len(buy),
+                "sell_value": sum(o.get("price", 0) * o.get("volume_remain", 0) for o in sell),
+                "buy_value": sum(o.get("price", 0) * o.get("volume_remain", 0) for o in buy),
+                "total_count": len(raw_orders),
+            }
+        elif error:
+            logger.warning("Corp orders fetch failed for %s: %s", corp_id, error)
 
     # --- Corp structures (if scope available) ---
     corp_structures: list | None = None
-    if "structures" in scope_char:
-        structures_char = scope_char["structures"]
-        logger.debug("Structures scope found for corp %s, using character %s (ID: %s)", corp_id, structures_char.character_name, structures_char.character_id)
-        client = await _auth_client(structures_char, db)
-        if client:
-            try:
-                raw_structs = await esi_corp.get_corporation_structures(client, corp_id)
-                logger.debug("Got %d raw structures for corp %s", len(raw_structs), corp_id)
-                enriched = []
-                for s in raw_structs:
-                    type_id = s.get("type_id")
-                    system_id = s.get("system_id")
-                    type_name = await sde.type_id_to_name(db, type_id) if type_id else f"Type {type_id}"
-                    sys_info = await sde.system_info(db, system_id) if system_id else None
-                    fuel_str = _fuel_remaining(s.get("fuel_expires"))
-                    state = s.get("state", "unknown")
-                    enriched.append({
-                        "name": s.get("name", "Unknown Structure"),
-                        "type_name": type_name or f"Type {type_id}",
-                        "system_name": sys_info["system_name"] if sys_info else f"System {system_id}",
-                        "region": sys_info.get("region") if sys_info else None,
-                        "state": state,
-                        "state_class": STRUCTURE_STATE_CLASS.get(state, "is-warn"),
-                        "fuel_remaining": fuel_str,
-                        "fuel_expires": s.get("fuel_expires", "")[:10] if s.get("fuel_expires") else None,
-                        "services": s.get("services", []),
-                        "reinforce_hour": s.get("reinforce_hour"),
-                        "state_timer_end": s.get("state_timer_end", "")[:10] if s.get("state_timer_end") else None,
-                    })
-                corp_structures = sorted(enriched, key=lambda s: s["name"])
-                logger.info("Successfully fetched %d structures for corp %s", len(corp_structures), corp_id)
-            except Exception as e:
-                logger.error("Corp structures fetch failed for %s: %s", corp_id, e, exc_info=True)
-        else:
-            logger.warning("Failed to get auth client for structures scope for corp %s", corp_id)
+    if "structures" in scope_chars:
+        raw_structs, error = await _try_api_call_with_fallback(
+            "structures",
+            scope_chars,
+            esi_corp.get_corporation_structures,
+            corp_id,
+            db
+        )
+        if raw_structs:
+            logger.debug("Got %d raw structures for corp %s", len(raw_structs), corp_id)
+            enriched = []
+            for s in raw_structs:
+                type_id = s.get("type_id")
+                system_id = s.get("system_id")
+                type_name = await sde.type_id_to_name(db, type_id) if type_id else f"Type {type_id}"
+                sys_info = await sde.system_info(db, system_id) if system_id else None
+                fuel_str = _fuel_remaining(s.get("fuel_expires"))
+                state = s.get("state", "unknown")
+                enriched.append({
+                    "name": s.get("name", "Unknown Structure"),
+                    "type_name": type_name or f"Type {type_id}",
+                    "system_name": sys_info["system_name"] if sys_info else f"System {system_id}",
+                    "region": sys_info.get("region") if sys_info else None,
+                    "state": state,
+                    "state_class": STRUCTURE_STATE_CLASS.get(state, "is-warn"),
+                    "fuel_remaining": fuel_str,
+                    "fuel_expires": s.get("fuel_expires", "")[:10] if s.get("fuel_expires") else None,
+                    "services": s.get("services", []),
+                    "reinforce_hour": s.get("reinforce_hour"),
+                    "state_timer_end": s.get("state_timer_end", "")[:10] if s.get("state_timer_end") else None,
+                })
+            corp_structures = sorted(enriched, key=lambda s: s["name"])
+            logger.info("Successfully fetched %d structures for corp %s", len(corp_structures), corp_id)
+        elif error:
+            logger.error("Corp structures fetch failed for %s: %s", corp_id, error)
     else:
-        logger.debug("No structures scope found for corp %s. Available scopes: %s", corp_id, list(scope_char.keys()))
+        logger.debug("No structures scope found for corp %s. Available scopes: %s", corp_id, list(scope_chars.keys()))
 
     # --- Corp contracts (if scope available) ---
     corp_contracts: dict | None = None
-    if "contracts" in scope_char:
-        client = await _auth_client(scope_char["contracts"], db)
-        if client:
-            try:
-                raw_contracts = await esi_corp.get_corporation_contracts(client, corp_id)
-                outstanding = [c for c in raw_contracts if c.get("status") == "outstanding"]
-                by_type: dict[str, int] = {}
-                for contract in outstanding:
-                    ct = contract.get("type", "unknown").replace("_", " ").title()
-                    by_type[ct] = by_type.get(ct, 0) + 1
-                corp_contracts = {
-                    "active_count": len(outstanding),
-                    "by_type": by_type,
-                }
-            except Exception as e:
-                logger.warning("Corp contracts fetch failed for %s: %s", corp_id, e)
+    if "contracts" in scope_chars:
+        raw_contracts, error = await _try_api_call_with_fallback(
+            "contracts",
+            scope_chars,
+            esi_corp.get_corporation_contracts,
+            corp_id,
+            db
+        )
+        if raw_contracts:
+            outstanding = [c for c in raw_contracts if c.get("status") == "outstanding"]
+            by_type: dict[str, int] = {}
+            for contract in outstanding:
+                ct = contract.get("type", "unknown").replace("_", " ").title()
+                by_type[ct] = by_type.get(ct, 0) + 1
+            corp_contracts = {
+                "active_count": len(outstanding),
+                "by_type": by_type,
+            }
+        elif error:
+            logger.warning("Corp contracts fetch failed for %s: %s", corp_id, error)
 
     return templates.TemplateResponse("partials/corp_detail.html", {
         "request": request,
