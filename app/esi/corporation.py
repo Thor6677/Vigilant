@@ -33,7 +33,21 @@ async def get_corporation_orders(client: ESIClient, corporation_id: int) -> list
 
 
 async def get_corporation_structures(client: ESIClient, corporation_id: int) -> list:
-    return await client.get(f"/corporations/{corporation_id}/structures/")
+    """Fetch all corp structures with pagination support."""
+    all_structures = []
+    page = 1
+    while True:
+        data = await client.get(
+            f"/corporations/{corporation_id}/structures/",
+            params={"page": page}
+        )
+        if not data:
+            break
+        all_structures.extend(data)
+        if len(data) < 1000:  # Last page
+            break
+        page += 1
+    return all_structures
 
 
 async def get_corporation_contracts(client: ESIClient, corporation_id: int) -> list:

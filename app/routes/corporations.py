@@ -172,9 +172,12 @@ async def corp_detail(
     # First character with each scope — used to authenticate API calls
     scope_char: dict[str, Character] = {}
     for char in corp_chars:
+        logger.debug("Checking scopes for char %s: %r", char.character_name, char.scopes)
         for scope_name, scope_val in CORP_SCOPES.items():
             if scope_name not in scope_char and scope_val in (char.scopes or ""):
+                logger.debug("Found scope %s for char %s", scope_name, char.character_name)
                 scope_char[scope_name] = char
+    logger.debug("Final scope_char for corp %s: %s", corp_id, list(scope_char.keys()))
 
     # --- Public corp info (no auth needed) ---
     pub_client = ESIClient("", db=db)
@@ -286,10 +289,12 @@ async def corp_detail(
     # --- Corp structures (if scope available) ---
     corp_structures: list | None = None
     if "structures" in scope_char:
+        logger.debug("Structures scope found for corp %s, attempting fetch", corp_id)
         client = await _auth_client(scope_char["structures"], db)
         if client:
             try:
                 raw_structs = await esi_corp.get_corporation_structures(client, corp_id)
+                logger.debug("Got %d raw structures for corp %s", len(raw_structs), corp_id)
                 enriched = []
                 for s in raw_structs:
                     type_id = s.get("type_id")
@@ -313,7 +318,11 @@ async def corp_detail(
                     })
                 corp_structures = sorted(enriched, key=lambda s: s["name"])
             except Exception as e:
-                logger.warning("Corp structures fetch failed for %s: %s", corp_id, e)
+                logger.warning("Corp structures fetch failed for %s: %s", corp_id, e, exc_info=True)
+        else:
+            logger.warning("Failed to get auth client for structures scope for corp %s", corp_id)
+    else:
+        logger.debug("No structures scope found for corp %s. Available scopes: %s", corp_id, list(scope_char.keys()))
 
     # --- Corp contracts (if scope available) ---
     corp_contracts: dict | None = None

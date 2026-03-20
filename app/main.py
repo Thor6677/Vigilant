@@ -19,7 +19,7 @@ from app.routes.corporations import router as corporations_router
 settings = get_settings()
 
 import logging
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(name)s: %(message)s")
 
 app = FastAPI(
     title="Vigilant",
