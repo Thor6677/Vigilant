@@ -1,36 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Vigilant — EVE Online AI Assistant{% endblock %}
+{% block title %}Vigilant — EVE Online Operations Tracker{% endblock %}
 {% block content %}
 <div class="min-h-screen flex flex-col items-center justify-center text-center px-4" style="margin-top: -2rem;">
 
     <div class="mb-8">
         <div class="text-6xl font-thin tracking-widest text-eve-accent mb-2 aura-pulse inline-block px-4 py-2 rounded">◈</div>
         <h1 class="text-4xl font-light tracking-widest text-white uppercase mb-2">Vigilant</h1>
-        <p class="text-eve-muted tracking-widest text-sm uppercase">Powered by AURA &amp; Claude</p>
+        <p class="text-eve-muted tracking-widest text-sm uppercase">EVE Online Operations Tracker</p>
     </div>
 
     <div class="max-w-lg w-full eve-border eve-glow rounded p-6 bg-eve-surface mb-8">
         <p class="text-gray-400 text-sm leading-relaxed mb-6">
-            Your intelligent EVE Online assistant. Query your assets, track industry jobs,
-            check market prices, find cloning facilities, and navigate New Eden — all through
-            natural language conversation.
+            Monitor your EVE Online operations in one place. Track characters, assets,
+            industry jobs, corporations, and server status — all synced through ESI.
         </p>
         <div class="grid grid-cols-2 gap-3 text-xs text-eve-muted mb-6">
             <div class="eve-border rounded p-3">
-                <div class="text-eve-accent mb-1">◉ Location</div>
-                Where is my character? What system am I in?
+                <div class="text-eve-accent mb-1">◉ Dashboard</div>
+                Overview of all characters, wallets, skill queues, and industry jobs.
             </div>
             <div class="eve-border rounded p-3">
                 <div class="text-eve-accent mb-1">◉ Assets</div>
-                Where is my Tritanium? What ships do I own?
+                Search and browse assets across all characters and locations.
             </div>
             <div class="eve-border rounded p-3">
-                <div class="text-eve-accent mb-1">◉ Industry</div>
-                What jobs are running? When do they finish?
+                <div class="text-eve-accent mb-1">◉ Corporations</div>
+                Track corp membership, structures, and shared resources.
             </div>
             <div class="eve-border rounded p-3">
-                <div class="text-eve-accent mb-1">◉ Market</div>
-                What's PLEX selling for in Jita right now?
+                <div class="text-eve-accent mb-1">◉ Status</div>
+                Live server status, ESI health, and sync monitoring.
             </div>
         </div>
         <a href="/auth/login"

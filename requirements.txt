@@ -10,3 +10,4 @@ aiosqlite==0.20.0
 python-dotenv==1.0.1
 itsdangerous==2.2.0
 pydantic-settings==2.6.1
+cryptography>=42.0.0

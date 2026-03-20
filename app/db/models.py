@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
+from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
@@ -35,8 +36,8 @@ class Character(Base):
     corporation_name = Column(String, nullable=True)
     alliance_id = Column(Integer, nullable=True)
     alliance_name = Column(String, nullable=True)
-    access_token = Column(Text, nullable=False)
-    refresh_token = Column(Text, nullable=False)
+    access_token = Column(EncryptedText, nullable=False)
+    refresh_token = Column(EncryptedText, nullable=False)
     token_expiry = Column(DateTime, nullable=False)
     scopes = Column(Text, nullable=False, default="")
     is_active = Column(Boolean, default=True)

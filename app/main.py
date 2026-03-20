@@ -76,6 +76,38 @@ async def startup():
                 exc_str = str(migration_exc).lower()
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
+    # ── Encrypt plaintext ESI tokens in-place ──────────────────────────
+    from sqlalchemy import text as sql_text
+    from app.db.encryption import get_fernet
+    from cryptography.fernet import InvalidToken as FernetInvalidToken
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(sql_text("SELECT id, access_token, refresh_token FROM characters"))).fetchall()
+        fernet = get_fernet()
+        migrated = 0
+        for row in rows:
+            char_id, raw_at, raw_rt = row
+            needs_update = False
+            new_at, new_rt = raw_at, raw_rt
+            try:
+                fernet.decrypt(raw_at.encode())
+            except Exception:
+                new_at = fernet.encrypt(raw_at.encode()).decode()
+                needs_update = True
+            try:
+                fernet.decrypt(raw_rt.encode())
+            except Exception:
+                new_rt = fernet.encrypt(raw_rt.encode()).decode()
+                needs_update = True
+            if needs_update:
+                await db.execute(
+                    sql_text("UPDATE characters SET access_token = :at, refresh_token = :rt WHERE id = :id"),
+                    {"at": new_at, "rt": new_rt, "id": char_id},
+                )
+                migrated += 1
+        if migrated:
+            await db.commit()
+            logging.info("Encrypted tokens for %d characters.", migrated)
     import asyncio
     asyncio.create_task(ensure_sde_loaded())
     asyncio.create_task(_background_scheduler())
