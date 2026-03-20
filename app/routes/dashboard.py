@@ -40,8 +40,10 @@ def _sec_color_val(sec: float | None) -> str:
 templates.env.globals["sec_color_val"] = _sec_color_val
 
 # Character IDs that are either actively syncing or queued to sync.
+# Maps character_id -> timestamp when added to queue.
 # Prevents duplicate _sync_all_task spawns across rapid page loads.
-_queued_sync: set[int] = set()
+# Timestamps allow detection of stuck characters (in queue > 5 minutes).
+_queued_sync: dict[int, datetime] = {}
 
 # Hard serialisation lock — only one _sync_task can execute at a time,
 # regardless of how many coroutines have been created (manual syncs, etc.).
@@ -837,10 +839,33 @@ async def _sync_all_task(character_ids: list[int]):
     try:
         for character_id in character_ids:
             await _sync_task(character_id)
-            _queued_sync.discard(character_id)
+            _queued_sync.pop(character_id, None)
     finally:
         for cid in character_ids:
-            _queued_sync.discard(cid)
+            _queued_sync.pop(cid, None)
+
+def _clean_stuck_characters():
+    """Remove characters that have been queued for sync for >5 minutes (stuck detection).
+
+    This safety mechanism prevents characters from getting permanently stuck in the
+    _queued_sync queue if a sync task crashes or is cancelled without proper cleanup.
+    """
+    now = datetime.now(timezone.utc)
+    stuck_threshold = timedelta(minutes=5)
+    stuck_cids = []
+
+    for cid, queued_at in list(_queued_sync.items()):
+        # Make queued_at timezone-aware if needed
+        qa = queued_at if queued_at.tzinfo else queued_at.replace(tzinfo=timezone.utc)
+        if (now - qa) > stuck_threshold:
+            stuck_cids.append(cid)
+            _queued_sync.pop(cid, None)
+
+    if stuck_cids:
+        logger.warning("Detected %d character(s) stuck in sync queue (>5m): %s — force cleaned",
+                      len(stuck_cids), stuck_cids)
+
+    return stuck_cids
 
 
 async def _background_scheduler():
@@ -865,10 +890,23 @@ async def _background_scheduler():
                             )
                         )
                         char_caches = {c.character_id: c for c in cache_result.scalars().all()}
+
+                        # Check for and clean up characters stuck in queue (>5 minutes)
+                        stuck_cids = _clean_stuck_characters()
+
                         stale_ids = _collect_stale(list(characters), char_caches)
+
+                        # Re-queue any stuck characters if they have stale fields
+                        for stuck_cid in stuck_cids:
+                            stuck_char = next((c for c in characters if c.character_id == stuck_cid), None)
+                            if stuck_char and _any_field_stale(stuck_char, char_caches.get(stuck_cid)):
+                                stale_ids.append(stuck_cid)
+                                logger.info("Re-queuing stuck character %s for sync", stuck_cid)
+
                         if stale_ids:
+                            now = datetime.now(timezone.utc)
                             for cid in stale_ids:
-                                _queued_sync.add(cid)
+                                _queued_sync[cid] = now
                             asyncio.create_task(_sync_all_task(stale_ids))
                             logger.info("Scheduler queued %d character(s) for sync: %s", len(stale_ids), stale_ids)
             except Exception as e:
@@ -1113,7 +1151,7 @@ async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db))
     # Still syncing if any character is actively syncing in DB OR queued in memory
     still_syncing = (
         any(c.sync_status == "syncing" for c in caches)
-        or bool(_queued_sync.intersection(set(character_ids)))
+        or bool(_queued_sync.keys() & set(character_ids))
     )
 
     if not still_syncing:
@@ -1123,7 +1161,7 @@ async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db))
 
     count = len(
         {c.character_id for c in caches if c.sync_status == "syncing"}
-        | _queued_sync.intersection(set(character_ids))
+        | (_queued_sync.keys() & set(character_ids))
     )
     plural = "s" if count != 1 else ""
     return HTMLResponse(f"""
