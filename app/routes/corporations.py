@@ -97,11 +97,13 @@ async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
             )
             char_fresh = result.scalar_one_or_none()
             if not char_fresh:
+                logger.warning("Character %s (%s) not found in database", char.character_name, char.character_id)
                 return None
             token = await refresh_token(char_fresh, token_db)
+            logger.debug("Successfully refreshed token for %s (%s)", char.character_name, char.character_id)
         return ESIClient(token, db=db)
     except Exception as e:
-        logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
+        logger.error("Token refresh failed for char %s (%s): %s", char.character_name, char.character_id, e, exc_info=True)
         return None
 
 
@@ -289,8 +291,9 @@ async def corp_detail(
     # --- Corp structures (if scope available) ---
     corp_structures: list | None = None
     if "structures" in scope_char:
-        logger.debug("Structures scope found for corp %s, attempting fetch", corp_id)
-        client = await _auth_client(scope_char["structures"], db)
+        structures_char = scope_char["structures"]
+        logger.debug("Structures scope found for corp %s, using character %s (ID: %s)", corp_id, structures_char.character_name, structures_char.character_id)
+        client = await _auth_client(structures_char, db)
         if client:
             try:
                 raw_structs = await esi_corp.get_corporation_structures(client, corp_id)
