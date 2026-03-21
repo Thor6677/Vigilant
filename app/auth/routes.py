@@ -248,7 +248,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     # Trigger an immediate sync for this character.
     from app.routes.dashboard import _sync_task, _queued_sync
     if character_id not in _queued_sync:
-        _queued_sync.add(character_id)
+        _queued_sync[character_id] = datetime.now(timezone.utc)
         asyncio.create_task(_sync_task(character_id))
 
     return RedirectResponse("/dashboard")
