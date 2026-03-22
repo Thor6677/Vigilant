@@ -77,6 +77,30 @@ async def character_detail(
     )
     cache = cache_result.scalar_one_or_none()
 
+    # Parse cached data
+    skillqueue = []
+    total_sp_in_queue = 0
+    active_skill = None
+    if cache and cache.skillqueue_json:
+        try:
+            sq = json.loads(cache.skillqueue_json)
+            skillqueue = sq.get("skills", [])
+            total_sp_in_queue = sq.get("total_sp", 0)
+            active_skill = sq.get("active", None)
+        except Exception as e:
+            logger.warning("Failed to parse skillqueue for char %s: %s", character_id, e)
+
+    zkill = []
+    if cache and cache.zkill_json:
+        try:
+            zkill = json.loads(cache.zkill_json)
+        except Exception as e:
+            logger.warning("Failed to parse zkill for char %s: %s", character_id, e)
+
+    # Calculate kill/loss stats from zkill data
+    kills = sum(1 for km in zkill if not km.get("is_loss"))
+    losses = sum(1 for km in zkill if km.get("is_loss"))
+
     # Fetch wallet journal (live ESI call)
     journal = []
     journal_error = None
@@ -111,6 +135,13 @@ async def character_detail(
         "chart_data_json": json.dumps(chart_data),
         "active_range": range,
         "ranges": list(_RANGE_DAYS.keys()),
+        "active_skill": active_skill,
+        "skillqueue": skillqueue,
+        "total_sp_in_queue": total_sp_in_queue,
+        "zkill": zkill,
+        "kills": kills,
+        "losses": losses,
+        "now": datetime.now(timezone.utc),
     })
 
 

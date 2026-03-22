@@ -37,6 +37,138 @@
     #wallet-chart {
         width: 100% !important;
     }
+
+    /* Character Overview Styles */
+    .overview-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    @media (max-width: 1024px) {
+        .overview-grid { grid-template-columns: 1fr; }
+    }
+
+    .overview-card {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        padding: 1rem 0.75rem;
+    }
+
+    .card-title {
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 0.75rem;
+        display: block;
+    }
+
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        font-size: 10px;
+        border-bottom: 1px solid rgba(200, 169, 81, 0.1);
+    }
+    .stat-row:last-child { border-bottom: none; }
+
+    .stat-label { color: var(--muted); }
+    .stat-value { color: var(--text); font-weight: 500; }
+
+    .location-clickable {
+        cursor: pointer;
+        color: var(--accent);
+        text-decoration: underline;
+        transition: opacity 0.2s;
+    }
+    .location-clickable:hover { opacity: 0.8; }
+
+    .sec-status {
+        padding: 0.25rem 0.5rem;
+        border-radius: 2px;
+        font-weight: 500;
+        font-size: 9px;
+        display: inline-block;
+    }
+    .sec-status.positive { background: rgba(76, 175, 80, 0.2); color: #4CAF50; }
+    .sec-status.negative { background: rgba(244, 67, 54, 0.2); color: #F44336; }
+    .sec-status.neutral { background: rgba(200, 169, 81, 0.2); color: #C8A951; }
+
+    .skill-progress {
+        margin-top: 0.5rem;
+    }
+    .skill-name {
+        color: var(--accent);
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+    }
+    .skill-time { color: var(--muted); font-size: 9px; }
+
+    .assets-container {
+        margin-top: 1rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .asset-location {
+        border: 1px solid var(--border);
+        margin-bottom: 0.5rem;
+        background: rgba(200, 169, 81, 0.03);
+    }
+
+    .asset-location-header {
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+        transition: background 0.2s;
+    }
+    .asset-location-header:hover {
+        background: rgba(200, 169, 81, 0.07);
+    }
+
+    .asset-location-name { font-weight: 500; color: var(--accent); }
+    .asset-location-count { font-size: 9px; color: var(--muted); }
+    .expand-icon { transition: transform 0.2s; }
+    .expand-icon.open { transform: rotate(180deg); }
+
+    .asset-list {
+        display: none;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        max-height: 250px;
+        overflow-y: auto;
+    }
+    .asset-list.open { display: block; }
+
+    .asset-item {
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid rgba(200, 169, 81, 0.1);
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .asset-item:last-child { border-bottom: none; }
+    .asset-item-name { flex: 1; color: var(--text); }
+    .asset-item-qty { color: var(--muted); margin: 0 1rem; }
+
+    .kd-ratio {
+        font-weight: 600;
+        color: var(--accent);
+    }
+    .kd-good { color: #4CAF50; }
+    .kd-bad { color: #F44336; }
+
+    .skill-link {
+        color: var(--accent);
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .skill-link:hover { text-decoration: underline; }
 </style>
 {% endblock %}
 
@@ -56,6 +188,19 @@
   {%- elif amount | abs >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
   {%- elif amount | abs >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
   {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif %}
+{% endmacro %}
+
+{% macro format_duration(seconds) %}
+  {%- if seconds is none -%}—
+  {%- else -%}
+    {%- set days = (seconds / 86400) | int -%}
+    {%- set hours = ((seconds % 86400) / 3600) | int -%}
+    {%- set mins = ((seconds % 3600) / 60) | int -%}
+    {%- if days > 0 -%}{{ days }}d {{ hours }}h
+    {%- elif hours > 0 -%}{{ hours }}h {{ mins }}m
+    {%- else -%}{{ mins }}m
+    {%- endif -%}
   {%- endif %}
 {% endmacro %}
 
@@ -86,6 +231,143 @@
         <div style="font-size:20px;font-weight:300;color:var(--accent);">{{ format_isk(current_wallet) }}</div>
         <div class="b-label" style="margin-top:2px;">Current Balance</div>
     </div>
+</div>
+
+{# ── Character Overview ───────────────────────────────────────────────────────── #}
+<div class="overview-grid">
+
+    {# Left Column: Status Info #}
+    <div class="overview-card">
+        <span class="card-title">Character Info</span>
+
+        <div class="stat-row">
+            <span class="stat-label">Character Age</span>
+            <span class="stat-value">
+                {% if char.added_at %}
+                    {% set age_days = ((now - char.added_at).total_seconds() / 86400) | int %}
+                    {% if age_days > 365 %}
+                        {{ (age_days / 365) | int }}y
+                    {% else %}
+                        {{ age_days }}d
+                    {% endif %}
+                {% else %}—{% endif %}
+            </span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Total SP</span>
+            <span class="stat-value">
+                {% if total_sp_in_queue > 0 %}{{ (total_sp_in_queue / 1000000) | int }}M{% else %}—{% endif %}
+            </span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Bloodline</span>
+            <span class="stat-value">—</span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Security Status</span>
+            <span class="stat-value">
+                {% if char.security_status is not none %}
+                    {% set sec = char.security_status %}
+                    <span class="sec-status {% if sec >= 0 %}positive{% elif sec < -5 %}negative{% else %}neutral{% endif %}">
+                        {{ "%.2f"|format(sec) }}
+                    </span>
+                {% else %}—{% endif %}
+            </span>
+        </div>
+
+        {# Active Skill Training #}
+        {% if active_skill %}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <div class="card-title">Skill Training</div>
+            <div class="skill-progress">
+                <div class="skill-name">
+                    <a href="/skills" class="skill-link">{{ active_skill.get('skill_name', 'Unknown') }}</a>
+                </div>
+                <div class="skill-time">
+                    Level {{ active_skill.get('level', '?') }}
+                    {% set finish_ts = active_skill.get('finish_date') %}
+                    {% if finish_ts %}
+                        • {{ format_duration(active_skill.get('duration', 0)) }} remaining
+                    {% endif %}
+                </div>
+                {% if skillqueue %}
+                <div class="stat-row" style="margin-top: 0.5rem;">
+                    <span class="stat-label">Queue Total</span>
+                    <span class="stat-value">{{ format_duration(skillqueue[-1].get('duration', 0)) if skillqueue else '—' }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Right Column: Kills/Losses #}
+    <div class="overview-card">
+        <span class="card-title">Killboard Stats (30d)</span>
+
+        <div class="stat-row">
+            <span class="stat-label">Kills</span>
+            <span class="stat-value">{{ kills }}</span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Losses</span>
+            <span class="stat-value">{{ losses }}</span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">K/D Ratio</span>
+            <span class="stat-value">
+                {% if kills + losses > 0 %}
+                    {% set ratio = kills / (kills + losses) %}
+                    <span class="kd-ratio {% if ratio > 0.5 %}kd-good{% else %}kd-bad{% endif %}">
+                        {{ "%.2f"|format(ratio * 100) }}%
+                    </span>
+                {% else %}
+                    —
+                {% endif %}
+            </span>
+        </div>
+
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <span class="card-title">Location</span>
+            <div class="stat-row" style="border-bottom: none; padding: 0.25rem 0;">
+                <span class="stat-label">Current</span>
+                <span class="stat-value location-clickable" onclick="toggleAssets(event)">
+                    View Assets ↓
+                </span>
+            </div>
+
+            {# Assets Section #}
+            <div class="assets-container" id="assets-container" style="display: none;">
+                <span class="card-title" style="margin: 0.75rem 0 0.5rem 0;">Assets by Location</span>
+                <!-- Asset locations will be populated here -->
+                <div class="asset-location">
+                    <div class="asset-location-header">
+                        <span class="asset-location-name">Jita IV - Moon 4</span>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span class="asset-location-count">5 items</span>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                    </div>
+                    <div class="asset-list">
+                        <div class="asset-item">
+                            <span class="asset-item-name">Rifter</span>
+                            <span class="asset-item-qty">1</span>
+                        </div>
+                        <div class="asset-item">
+                            <span class="asset-item-name">Ammo - Standard</span>
+                            <span class="asset-item-qty">1000</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 {# ── Wallet History Chart ───────────────────────────────────────────────────── #}
@@ -281,6 +563,22 @@
             .then(data => buildChart(data))
             .catch(err => console.error('Chart fetch error:', err));
     };
+
+    window.toggleAssets = function(event) {
+        event.preventDefault();
+        const container = document.getElementById('assets-container');
+        container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    };
+
+    // Asset location expandable functionality
+    document.querySelectorAll('.asset-location-header').forEach(header => {
+        header.addEventListener('click', function() {
+            const list = this.nextElementSibling;
+            const icon = this.querySelector('.expand-icon');
+            list.classList.toggle('open');
+            icon.classList.toggle('open');
+        });
+    });
 })();
 </script>
 
