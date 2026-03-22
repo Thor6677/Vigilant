@@ -280,25 +280,55 @@
 
         {# Active Skill Training #}
         {% if active_skill %}
+        {% set roman = ["I", "II", "III", "IV", "V"] %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
             <div class="card-title">Skill Training</div>
             <div class="skill-progress">
-                <div class="skill-name">
-                    <a href="/skills" class="skill-link">{{ active_skill.get("skill_name", "Unknown") }}</a>
-                </div>
+                <div class="skill-name">{{ active_skill['skill_name'] }}</div>
                 <div class="skill-time">
-                    Level {{ active_skill.get('level', '?') }}
-                    {% if active_skill.get('remaining_time') is not none %}
-                        • {{ format_duration(active_skill.get('remaining_time', 0)) }} remaining
+                    → Level {{ roman[(active_skill['finished_level'] or 1) - 1] if active_skill.get('finished_level') else '?' }}
+                    {% if active_skill.get('remaining_seconds') is not none %}
+                        &nbsp;·&nbsp;{{ format_duration(active_skill['remaining_seconds']) }} remaining
+                    {% else %}
+                        &nbsp;·&nbsp;<span style="color:var(--muted)">paused</span>
                     {% endif %}
                 </div>
-                {% if skillqueue %}
+                {% if queue_remaining %}
                 <div class="stat-row" style="margin-top: 0.5rem;">
                     <span class="stat-label">Queue Total</span>
-                    <span class="stat-value">{{ format_duration(queue_remaining) if skillqueue else '—' }}</span>
+                    <span class="stat-value">{{ format_duration(queue_remaining) }}</span>
                 </div>
                 {% endif %}
             </div>
+
+            {# Full skill queue list #}
+            {% if skillqueue|length > 1 %}
+            <div style="margin-top: 0.75rem;">
+                <div style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem;">
+                    Queue ({{ skillqueue|length }} skills)
+                </div>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
+                    {% for entry in skillqueue %}
+                    <div style="display: flex; justify-content: space-between; align-items: center;
+                                padding: 0.35rem 0.6rem; font-size: 10px;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);
+                                {% if loop.first %}background: rgba(200,169,81,0.07);{% endif %}">
+                        <span style="flex: 1; color: {% if loop.first %}var(--accent){% else %}var(--text){% endif %};">
+                            {% if loop.first %}▶ {% endif %}{{ entry['skill_name'] }}
+                        </span>
+                        <span style="color: var(--muted); margin: 0 0.75rem; white-space: nowrap;">
+                            → {{ roman[(entry['finished_level'] or 1) - 1] if entry.get('finished_level') else '?' }}
+                        </span>
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 6rem; text-align: right;">
+                            {% if entry.get('remaining_seconds') is not none %}
+                                {{ format_duration(entry['remaining_seconds']) }}
+                            {% else %}—{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
     </div>
@@ -331,43 +361,109 @@
             </span>
         </div>
 
+        {# Implants #}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <span class="card-title">Implants</span>
+            {% if implants %}
+                {% set attr_implants = implants | selectattr("is_attr") | list %}
+                {% set hardwirings  = implants | rejectattr("is_attr") | list %}
+
+                {% if attr_implants %}
+                <div style="margin: 0.4rem 0 0.25rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Attribute Enhancers</div>
+                {% for imp in attr_implants %}
+                <div class="stat-row" style="padding: 0.2rem 0; border-bottom: none;">
+                    <span class="stat-label" style="font-size: 10px;">{{ imp.label }}</span>
+                    <span style="font-size: 9px; color: var(--muted);">{{ imp.name }}</span>
+                </div>
+                {% endfor %}
+                {% endif %}
+
+                {% if hardwirings %}
+                <div style="margin: {% if attr_implants %}0.6rem{% else %}0.4rem{% endif %} 0 0.25rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Hardwirings</div>
+                {% for imp in hardwirings %}
+                <div style="font-size: 10px; color: var(--text); padding: 0.2rem 0; border-bottom: 1px solid rgba(200,169,81,0.07);">
+                    {{ imp.name }}
+                </div>
+                {% endfor %}
+                {% endif %}
+            {% else %}
+                <div style="font-size: 10px; color: var(--muted); padding: 0.25rem 0;">No implants fitted.</div>
+            {% endif %}
+        </div>
+
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
             <span class="card-title">Location</span>
             <div class="stat-row" style="border-bottom: none; padding: 0.25rem 0;">
                 <span class="stat-label">Current</span>
-                <span class="stat-value location-clickable" onclick="toggleAssets(event)">
-                    View Assets ↓
-                </span>
+                <span class="stat-value">{{ docked_at if docked_at else "—" }}</span>
             </div>
 
-            {# Assets Section #}
-            <div class="assets-container" id="assets-container" style="display: none;">
+            {# Assets Section — auto-loaded on page load #}
+            <div class="assets-container" id="assets-container">
                 <span class="card-title" style="margin: 0.75rem 0 0.5rem 0;">Assets by Location</span>
-                <!-- Asset locations will be populated here -->
-                <div class="asset-location">
-                    <div class="asset-location-header">
-                        <span class="asset-location-name">Jita IV - Moon 4</span>
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <span class="asset-location-count">5 items</span>
-                            <span class="expand-icon">▼</span>
-                        </div>
-                    </div>
-                    <div class="asset-list">
-                        <div class="asset-item">
-                            <span class="asset-item-name">Rifter</span>
-                            <span class="asset-item-qty">1</span>
-                        </div>
-                        <div class="asset-item">
-                            <span class="asset-item-name">Ammo - Standard</span>
-                            <span class="asset-item-qty">1000</span>
-                        </div>
-                    </div>
+                <div id="assets-inner"
+                     hx-get="/character/{{ char.character_id }}/assets-partial"
+                     hx-trigger="load"
+                     hx-swap="innerHTML">
+                    <div style="color: var(--muted); font-size: 10px; padding: 1rem 0.75rem;">Loading…</div>
                 </div>
             </div>
         </div>
     </div>
 
 </div>
+
+{# ── Jump Clones ──────────────────────────────────────────────────────────────── #}
+{% if jump_clones %}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Jump Clones</span>
+        <span class="b-label" style="color:var(--muted)">{{ jump_clones|length }} clone{% if jump_clones|length != 1 %}s{% endif %}</span>
+    </div>
+    <div style="padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;" id="jump-clones-list">
+        {% for clone in jump_clones %}
+        <div class="asset-location">
+            <div class="asset-location-header">
+                <span class="asset-location-name" style="font-size: 10px;">{{ clone.location }}</span>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    {% if clone.implants %}
+                        <span class="asset-location-count">{{ clone.implants|length }} implant{% if clone.implants|length != 1 %}s{% endif %}</span>
+                    {% else %}
+                        <span class="asset-location-count">Empty</span>
+                    {% endif %}
+                    <span class="expand-icon">▼</span>
+                </div>
+            </div>
+            <div class="asset-list">
+                {% if clone.implants %}
+                    {% set attr_imps  = clone.implants | selectattr("is_attr") | list %}
+                    {% set hard_imps  = clone.implants | rejectattr("is_attr") | list %}
+                    {% if attr_imps %}
+                    <div style="padding: 0.3rem 0.75rem 0.1rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Attribute Enhancers</div>
+                    {% for imp in attr_imps %}
+                    <div class="asset-item">
+                        <span class="asset-item-name">{{ imp.label }}</span>
+                        <span style="font-size:9px;color:var(--muted);">{{ imp.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                    {% if hard_imps %}
+                    <div style="padding: 0.3rem 0.75rem 0.1rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Hardwirings</div>
+                    {% for imp in hard_imps %}
+                    <div class="asset-item">
+                        <span class="asset-item-name">{{ imp.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                {% else %}
+                    <div class="asset-item"><span style="color:var(--muted);">Empty clone</span></div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {# ── Wallet History Chart ───────────────────────────────────────────────────── #}
 <div class="b-section">
@@ -551,7 +647,7 @@
         });
     }
 
-    buildChart(initialData);
+    try { buildChart(initialData); } catch(e) { console.error('Chart init error:', e); }
 
     window.setRange = function(range, btn) {
         document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('is-active'));
@@ -563,22 +659,17 @@
             .catch(err => console.error('Chart fetch error:', err));
     };
 
-    window.toggleAssets = function(event) {
-        event.preventDefault();
-        const container = document.getElementById('assets-container');
-        container.style.display = container.style.display === 'none' ? 'block' : 'none';
-    };
-
-    // Asset location expandable functionality
-    document.querySelectorAll('.asset-location-header').forEach(header => {
-        header.addEventListener('click', function() {
-            const list = this.nextElementSibling;
-            const icon = this.querySelector('.expand-icon');
-            list.classList.toggle('open');
-            icon.classList.toggle('open');
-        });
-    });
 })();
+</script>
+
+<script>
+// Jump clone expand/collapse
+document.querySelectorAll('#jump-clones-list .asset-location-header').forEach(function(h) {
+    h.addEventListener('click', function() {
+        this.nextElementSibling.classList.toggle('open');
+        this.querySelector('.expand-icon').classList.toggle('open');
+    });
+});
 </script>
 
 {% endblock %}

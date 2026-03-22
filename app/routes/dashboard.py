@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -480,6 +480,11 @@ async def fetch_server_status() -> dict:
             return {"online": False, "players": None}
     except Exception:
         return {"online": False, "players": None}
+
+
+@router.get("/api/server-status")
+async def api_server_status():
+    return JSONResponse(await fetch_server_status())
 
 
 async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -> dict:
@@ -1032,13 +1037,13 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     pi = data["pi"]
     sync_warnings = data["sync_warnings"]
 
-    # Live fetches (server status and cache stats; skills/zkill now come from cache)
-    server_status, stats, skill_data = await asyncio.gather(
-        fetch_server_status(),
+    # Live fetches (cache stats and skillqueue processing; server status loaded via AJAX)
+    stats, skill_data = await asyncio.gather(
         cache_stats(db),
         _process_skillqueue(list(characters), data["skillqueue_raw"], db),
     )
     skill_groups = group_skill_data(skill_data)
+    server_status = {"online": None, "players": None}  # loaded client-side
     zkill = data["zkill"]
 
     # Aggregates

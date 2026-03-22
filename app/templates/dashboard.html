@@ -26,11 +26,9 @@
 {# ── Server Status ────────────────────────────────────────────────────────── #}
 <div class="b-server-bar">
     <div style="display:flex;align-items:center;gap:1.25rem;">
-        <span style="display:flex;align-items:center;gap:0.5rem;">
-            <span class="b-dot {% if server_status.online %}is-ok{% else %}is-error{% endif %}"></span>
-            <span style="color:{% if server_status.online %}var(--success){% else %}var(--danger){% endif %}">
-                TRANQUILITY — {% if server_status.online %}ONLINE{% else %}OFFLINE{% endif %}
-            </span>
+        <span style="display:flex;align-items:center;gap:0.5rem;" id="server-status-widget">
+            <span class="b-dot" id="server-status-dot" style="background:var(--muted)"></span>
+            <span id="server-status-text" style="color:var(--muted)">TRANQUILITY — CHECKING…</span>
         </span>
         {% if any_syncing %}
         <div id="sync-poller"
@@ -45,9 +43,7 @@
         <div id="sync-poller"></div>
         {% endif %}
     </div>
-    {% if server_status.online and server_status.players %}
-    <span style="color:var(--muted)">{{ "{:,}".format(server_status.players) }} pilots online</span>
-    {% endif %}
+    <span id="server-players" style="color:var(--muted);display:none;"></span>
 </div>
 
 {# ── Page Header ──────────────────────────────────────────────────────────── #}
@@ -730,6 +726,37 @@
         </div>
     </div>
     {% endif %}
+
+<script>
+function updateServerStatus() {
+    fetch('/api/server-status')
+        .then(r => r.json())
+        .then(data => {
+            const dot = document.getElementById('server-status-dot');
+            const text = document.getElementById('server-status-text');
+            const players = document.getElementById('server-players');
+            if (data.online) {
+                dot.style.background = 'var(--success)';
+                text.style.color = 'var(--success)';
+                text.textContent = 'TRANQUILITY — ONLINE';
+                if (data.players) {
+                    players.textContent = data.players.toLocaleString() + ' pilots online';
+                    players.style.display = '';
+                }
+            } else {
+                dot.style.background = 'var(--danger)';
+                text.style.color = 'var(--danger)';
+                text.textContent = 'TRANQUILITY — OFFLINE';
+                players.style.display = 'none';
+            }
+        })
+        .catch(() => {
+            document.getElementById('server-status-text').textContent = 'TRANQUILITY — UNKNOWN';
+        });
+}
+updateServerStatus();
+setInterval(updateServerStatus, 15 * 60 * 1000);
+</script>
 
 </div>
 
