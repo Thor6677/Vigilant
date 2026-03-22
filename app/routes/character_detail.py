@@ -123,7 +123,7 @@ async def character_detail(
                             active_skill["skill_name"] = f"Skill {skill_id}"
                     else:
                         active_skill["skill_name"] = "Unknown"
-                    total_sp_in_queue = sum(s.get(level_end_sp, 0) for s in skillqueue)
+                    total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
 
                     # Remaining time for active skill
                     fin_str = active_skill.get(finish_date)
