@@ -140,7 +140,7 @@ async def character_detail(
     # Fetch all trained skills to calculate total SP
     total_trained_sp = 0
     try:
-        if esi-skills.read_skills.v1 in (char.scopes or ):
+        if "esi-skills.read_skills.v1" in (char.scopes or ""):
             async with AsyncSessionLocal() as token_db:
                 char_result2 = await token_db.execute(
                     select(Character).where(Character.character_id == character_id)
