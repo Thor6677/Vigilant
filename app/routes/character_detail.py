@@ -78,8 +78,27 @@ async def character_detail(
     )
     cache = cache_result.scalar_one_or_none()
 
-    # Parse cached data
+    # Fetch total trained SP from ESI
+    total_trained_sp = 0
+    try:
+        if 'esi-skills.read_skills.v1' in (char.scopes or ''):
+            async with AsyncSessionLocal() as skills_db:
+                sc_result = await skills_db.execute(
+                    select(Character).where(Character.character_id == character_id)
+                )
+                sc_char = sc_result.scalar_one_or_none()
+                sc_token = await refresh_token(sc_char, skills_db)
+            sc_client = ESIClient(sc_token, db=db)
+            skills_path = '/characters/' + str(character_id) + '/skills/'
+            raw_skills = await sc_client.get(skills_path, 'public')
+            if raw_skills and isinstance(raw_skills, dict):
+                for s in raw_skills.get('skills', []):
+                    total_trained_sp += s.get('skillpoints_in_skill', 0)
+    except Exception as e:
+        logger.warning('Failed to fetch total SP for char %s: %s', character_id, e)
+
     queue_remaining = 0
+    # Parse cached data
     skillqueue = []
     total_sp_in_queue = 0
     active_skill = None
@@ -104,31 +123,31 @@ async def character_detail(
                             active_skill["skill_name"] = f"Skill {skill_id}"
                     else:
                         active_skill["skill_name"] = "Unknown"
-                    total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
+                    total_sp_in_queue = sum(s.get(level_end_sp, 0) for s in skillqueue)
 
-                    # Calculate remaining time for active skill
-                    finish_date_str = active_skill.get("finish_date")
-                    if finish_date_str:
+                    # Remaining time for active skill
+                    fin_str = active_skill.get(finish_date)
+                    if fin_str:
                         try:
-                            finish_date = iso_parser.isoparse(finish_date_str)
-                            now_utc = datetime.now(timezone.utc)
-                            remaining = (finish_date - now_utc).total_seconds()
-                            active_skill["remaining_time"] = max(0, remaining)
+                            from dateutil import parser as _p
+                            from datetime import timezone as _tz
+                            _fd = _p.isoparse(fin_str)
+                            _now = __import__(datetime).datetime.now(_tz.utc)
+                            active_skill[remaining_time] = max(0, (_fd - _now).total_seconds())
                         except Exception:
-                            active_skill["remaining_time"] = 0
-                    
-                    # Calculate total queue finish time
-                    if skillqueue:
-                        last_skill = skillqueue[-1]
-                        last_finish_str = last_skill.get("finish_date")
-                        if last_finish_str:
-                            try:
-                                last_finish = iso_parser.isoparse(last_finish_str)
-                                now_utc = datetime.now(timezone.utc)
-                                queue_remaining = (last_finish - now_utc).total_seconds()
-                                queue_remaining = max(0, queue_remaining)
-                            except Exception:
-                                queue_remaining = 0
+                            active_skill[remaining_time] = 0
+
+                    # Total queue remaining time
+                    _lf_str = skillqueue[-1].get(finish_date) if skillqueue else None
+                    if _lf_str:
+                        try:
+                            from dateutil import parser as _p
+                            from datetime import timezone as _tz
+                            _lf = _p.isoparse(_lf_str)
+                            _now = __import__(datetime).datetime.now(_tz.utc)
+                            queue_remaining = max(0, (_lf - _now).total_seconds())
+                        except Exception:
+                            pass
             else:
                 skillqueue = sq.get("skills", [])
                 total_sp_in_queue = sq.get("total_sp", 0)
@@ -189,11 +208,12 @@ async def character_detail(
         "active_skill": active_skill,
         "skillqueue": skillqueue,
         "total_sp_in_queue": total_sp_in_queue,
+        "total_trained_sp": total_trained_sp,
+        "queue_remaining": queue_remaining,
         "zkill": zkill,
         "kills": kills,
         "losses": losses,
         "assets": assets,
-        "queue_remaining": queue_remaining,
         "now": datetime.utcnow(),
     })
 
