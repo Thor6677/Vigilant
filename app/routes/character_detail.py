@@ -141,7 +141,7 @@ async def character_detail(
         "zkill": zkill,
         "kills": kills,
         "losses": losses,
-        "now": datetime.now(timezone.utc),
+        "now": datetime.utcnow(),
     })
 
 
