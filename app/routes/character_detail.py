@@ -136,7 +136,27 @@ async def character_detail(
         except Exception as e:
             logger.warning("Failed to parse skillqueue for char %s: %s", character_id, e)
 
-    zkill = []
+
+    # Fetch all trained skills to calculate total SP
+    total_trained_sp = 0
+    try:
+        if esi-skills.read_skills.v1 in (char.scopes or ):
+            async with AsyncSessionLocal() as token_db:
+                char_result2 = await token_db.execute(
+                    select(Character).where(Character.character_id == character_id)
+                )
+                char_fresh = char_result2.scalar_one_or_none()
+                token = await refresh_token(char_fresh, token_db)
+            client = ESIClient(token, db=db)
+            # Fetch skills from ESI
+            raw_skills = await client.get(f/characters/{character_id}/skills/, public)
+            if raw_skills and isinstance(raw_skills, dict) and skills in raw_skills:
+                skills_list = raw_skills.get(skills, [])
+                total_trained_sp = sum(s.get(skillpoints_in_skill, 0) for s in skills_list)
+    except Exception as e:
+        logger.warning(Failed to fetch total SP for char %s: %s, character_id, e)
+
+        zkill = []
     if cache and cache.zkill_json:
         try:
             zkill = json.loads(cache.zkill_json)
