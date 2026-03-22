@@ -193,14 +193,14 @@
 
 {% macro format_duration(seconds) %}
   {%- if seconds is none -%}—
-  {%- else -%}
-    {%- set days = (seconds / 86400) | int -%}
-    {%- set hours = ((seconds % 86400) / 3600) | int -%}
-    {%- set mins = ((seconds % 3600) / 60) | int -%}
-    {%- if days > 0 -%}{{ days }}d {{ hours }}h
+  {%- else %}
+    {%- set days = (seconds / 86400) | int %}
+    {%- set hours = ((seconds % 86400) / 3600) | int %}
+    {%- set mins = ((seconds % 3600) / 60) | int %}
+    {% if days > 0 -%}{{ days }}d {{ hours }}h
     {%- elif hours > 0 -%}{{ hours }}h {{ mins }}m
     {%- else -%}{{ mins }}m
-    {%- endif -%}
+    {%- endif %}
   {%- endif %}
 {% endmacro %}
 
