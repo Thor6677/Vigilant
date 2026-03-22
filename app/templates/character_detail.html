@@ -243,8 +243,8 @@
         <div class="stat-row">
             <span class="stat-label">Character Age</span>
             <span class="stat-value">
-                {% if char.added_at %}
-                    {% set age_days = ((now - char.added_at).total_seconds() / 86400) | int %}
+                {% if char.birthday %}
+                    {% set age_days = ((now - char.birthday).total_seconds() / 86400) | int %}
                     {% if age_days > 365 %}
                         {{ (age_days / 365) | int }}y
                     {% else %}

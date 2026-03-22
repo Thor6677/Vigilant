@@ -45,6 +45,7 @@ class Character(Base):
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sort_order = Column(Integer, default=0)
     security_status = Column(Float, nullable=True)
+    birthday = Column(DateTime, nullable=True)  # Character creation date from ESI
     account_group = Column(String, default="Ungrouped")
     # Account ownership — nullable to support migration of pre-existing rows
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)

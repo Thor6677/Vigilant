@@ -123,6 +123,14 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     corporation_id = pub_info.get("corporation_id")
     alliance_id = pub_info.get("alliance_id")
     security_status = pub_info.get("security_status")
+    birthday_str = pub_info.get("birthday")  # ISO 8601 format
+    birthday = None
+    if birthday_str:
+        try:
+            from dateutil import parser
+            birthday = parser.isoparse(birthday_str).replace(tzinfo=None)
+        except Exception:
+            pass
 
     corporation_name = None
     alliance_name = None
@@ -175,6 +183,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                 refresh_token=refresh_token,
                 token_expiry=token_expiry,
                 scopes=scopes,
+                birthday=birthday,
                 corporation_id=corporation_id,
                 corporation_name=corporation_name,
                 alliance_id=alliance_id,
@@ -222,6 +231,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                 refresh_token=refresh_token,
                 token_expiry=token_expiry,
                 scopes=scopes,
+                birthday=birthday,
                 corporation_id=corporation_id,
                 corporation_name=corporation_name,
                 alliance_id=alliance_id,
