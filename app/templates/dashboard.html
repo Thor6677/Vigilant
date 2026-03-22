@@ -270,7 +270,7 @@
 
         {# Actions strip #}
         <div class="b-actions">
-            <a href="/character/{{ char.character_id }}" class="b-btn">Wallet →</a>
+            <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
             {% if not is_active %}
             <form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;">
                 <button type="submit" class="b-btn" style="flex:1;">Set Active</button>
