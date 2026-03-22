@@ -255,9 +255,9 @@
         </div>
 
         <div class="stat-row">
-            <span class="stat-label">Queue Total SP</span>
+            <span class="stat-label">Total SP</span>
             <span class="stat-value">
-                {% if total_trained_sp > 0 %}{{ (total_trained_sp / 1000000) | int }}M{% else %}—{% endif %}
+                {% if total_trained_sp > 0 %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label">— missing scope</span>{% endif %}
             </span>
         </div>
 
