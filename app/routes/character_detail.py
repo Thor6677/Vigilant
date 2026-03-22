@@ -200,6 +200,6 @@ async def get_skill_name(skill_id: int, db: AsyncSession) -> str:
             select(SDEType).where(SDEType.type_id == skill_id)
         )
         skill_type = result.scalar_one_or_none()
-        return skill_type.type_name if skill_type else fSkill {skill_id}
+        return skill_type.type_name if skill_type else f"Skill {skill_id}"
     except Exception:
-        return fSkill {skill_id}
+        return f"Skill {skill_id}"
