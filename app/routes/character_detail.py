@@ -193,7 +193,7 @@ async def wallet_chart_json(
 
 # Helper function to get skill name from skill_id
 async def get_skill_name(skill_id: int, db: AsyncSession) -> str:
-    Look up skill name from SDE database
+    """Look up skill name from SDE database"""
     from app.db.sde_models import SDEType
     try:
         result = await db.execute(
