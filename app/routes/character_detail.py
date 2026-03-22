@@ -87,7 +87,21 @@ async def character_detail(
             if isinstance(sq, list):
                 skillqueue = sq
                 if skillqueue:
-                    active_skill = skillqueue[0]
+                    active_skill = skillqueue[0].copy()
+                    # Look up skill name from SDE
+                    skill_id = active_skill.get("skill_id")
+                    if skill_id:
+                        from app.db.sde_models import SDEType
+                        result = await db.execute(
+                            select(SDEType).where(SDEType.type_id == skill_id)
+                        )
+                        skill_type = result.scalar_one_or_none()
+                        if skill_type:
+                            active_skill["skill_name"] = skill_type.type_name
+                        else:
+                            active_skill["skill_name"] = f"Skill {skill_id}"
+                    else:
+                        active_skill["skill_name"] = "Unknown"
                     total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
             else:
                 skillqueue = sq.get("skills", [])
@@ -103,6 +117,11 @@ async def character_detail(
         except Exception as e:
             logger.warning("Failed to parse zkill for char %s: %s", character_id, e)
 
+    
+    assets = []
+    if cache and cache.skillqueue_json:  # Check if we have the assets column (reuse for now)
+        pass  # Assets not yet cached, will be added in future update
+    
     # Calculate kill/loss stats from zkill data
     kills = sum(1 for km in zkill if not km.get("is_loss"))
     losses = sum(1 for km in zkill if km.get("is_loss"))
@@ -147,6 +166,7 @@ async def character_detail(
         "zkill": zkill,
         "kills": kills,
         "losses": losses,
+        "assets": assets,
         "now": datetime.utcnow(),
     })
 
@@ -169,3 +189,17 @@ async def wallet_chart_json(
 
     data = await _get_chart_data(character_id, range, db)
     return JSONResponse(data)
+
+
+# Helper function to get skill name from skill_id
+async def get_skill_name(skill_id: int, db: AsyncSession) -> str:
+    Look up skill name from SDE database
+    from app.db.sde_models import SDEType
+    try:
+        result = await db.execute(
+            select(SDEType).where(SDEType.type_id == skill_id)
+        )
+        skill_type = result.scalar_one_or_none()
+        return skill_type.type_name if skill_type else fSkill {skill_id}
+    except Exception:
+        return fSkill {skill_id}

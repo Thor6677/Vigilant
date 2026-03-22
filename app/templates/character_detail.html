@@ -255,7 +255,7 @@
         </div>
 
         <div class="stat-row">
-            <span class="stat-label">Total SP</span>
+            <span class="stat-label">Queue Total SP</span>
             <span class="stat-value">
                 {% if total_sp_in_queue > 0 %}{{ (total_sp_in_queue / 1000000) | int }}M{% else %}—{% endif %}
             </span>
@@ -284,7 +284,7 @@
             <div class="card-title">Skill Training</div>
             <div class="skill-progress">
                 <div class="skill-name">
-                    <a href="/skills" class="skill-link">{{ active_skill.get('skill_name', 'Unknown') }}</a>
+                    <a href="/skills" class="skill-link">{{ active_skill.get("skill_name", "Unknown") }}</a>
                 </div>
                 <div class="skill-time">
                     Level {{ active_skill.get('level', '?') }}
