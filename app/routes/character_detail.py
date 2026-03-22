@@ -84,9 +84,15 @@ async def character_detail(
     if cache and cache.skillqueue_json:
         try:
             sq = json.loads(cache.skillqueue_json)
-            skillqueue = sq.get("skills", [])
-            total_sp_in_queue = sq.get("total_sp", 0)
-            active_skill = sq.get("active", None)
+            if isinstance(sq, list):
+                skillqueue = sq
+                if skillqueue:
+                    active_skill = skillqueue[0]
+                    total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
+            else:
+                skillqueue = sq.get("skills", [])
+                total_sp_in_queue = sq.get("total_sp", 0)
+                active_skill = sq.get("active", None)
         except Exception as e:
             logger.warning("Failed to parse skillqueue for char %s: %s", character_id, e)
 
