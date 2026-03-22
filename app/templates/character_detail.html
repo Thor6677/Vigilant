@@ -288,15 +288,14 @@
                 </div>
                 <div class="skill-time">
                     Level {{ active_skill.get('level', '?') }}
-                    {% set finish_ts = active_skill.get('finish_date') %}
-                    {% if finish_ts %}
-                        • {{ format_duration(active_skill.get('duration', 0)) }} remaining
+                    {% if active_skill.get('remaining_time') is not none %}
+                        • {{ format_duration(active_skill.get('remaining_time', 0)) }} remaining
                     {% endif %}
                 </div>
                 {% if skillqueue %}
                 <div class="stat-row" style="margin-top: 0.5rem;">
                     <span class="stat-label">Queue Total</span>
-                    <span class="stat-value">{{ format_duration(skillqueue[-1].get('duration', 0)) if skillqueue else '—' }}</span>
+                    <span class="stat-value">{{ format_duration(queue_remaining) if skillqueue else '—' }}</span>
                 </div>
                 {% endif %}
             </div>

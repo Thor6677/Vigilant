@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, AsyncSessionLocal
 from app.esi.client import ESIClient, refresh_token
 from app.esi.character import get_wallet_journal
+from dateutil import parser as iso_parser
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ async def character_detail(
     cache = cache_result.scalar_one_or_none()
 
     # Parse cached data
+    queue_remaining = 0
     skillqueue = []
     total_sp_in_queue = 0
     active_skill = None
@@ -103,6 +105,30 @@ async def character_detail(
                     else:
                         active_skill["skill_name"] = "Unknown"
                     total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
+
+                    # Calculate remaining time for active skill
+                    finish_date_str = active_skill.get("finish_date")
+                    if finish_date_str:
+                        try:
+                            finish_date = iso_parser.isoparse(finish_date_str)
+                            now_utc = datetime.now(timezone.utc)
+                            remaining = (finish_date - now_utc).total_seconds()
+                            active_skill["remaining_time"] = max(0, remaining)
+                        except Exception:
+                            active_skill["remaining_time"] = 0
+                    
+                    # Calculate total queue finish time
+                    if skillqueue:
+                        last_skill = skillqueue[-1]
+                        last_finish_str = last_skill.get("finish_date")
+                        if last_finish_str:
+                            try:
+                                last_finish = iso_parser.isoparse(last_finish_str)
+                                now_utc = datetime.now(timezone.utc)
+                                queue_remaining = (last_finish - now_utc).total_seconds()
+                                queue_remaining = max(0, queue_remaining)
+                            except Exception:
+                                queue_remaining = 0
             else:
                 skillqueue = sq.get("skills", [])
                 total_sp_in_queue = sq.get("total_sp", 0)
@@ -167,6 +193,7 @@ async def character_detail(
         "kills": kills,
         "losses": losses,
         "assets": assets,
+        "queue_remaining": queue_remaining,
         "now": datetime.utcnow(),
     })
 
