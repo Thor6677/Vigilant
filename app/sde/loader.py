@@ -1,11 +1,12 @@
 """
-Downloads and imports EVE SDE data from Fuzzwork into local SQLite.
+Downloads and imports EVE SDE data from the official CCP source into local SQLite.
 Only re-downloads if data is older than 30 days.
 """
-import bz2
-import csv
+import asyncio
 import io
+import json
 import logging
+import zipfile
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -17,18 +18,8 @@ from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion
 
 log = logging.getLogger(__name__)
 
-FUZZWORK_BASE = "https://www.fuzzwork.co.uk/dump/latest"
+SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 REFRESH_DAYS = 30
-
-TABLES = [
-    "invTypes",
-    "mapSolarSystems",
-    "mapSolarSystemJumps",
-    "mapRegions",
-    "mapConstellations",
-    "staStations",
-    "staOperationServices",
-]
 
 
 async def _get_meta(db: AsyncSession, key: str) -> str | None:
@@ -55,195 +46,243 @@ async def needs_update(db: AsyncSession) -> bool:
     return datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS)
 
 
-async def _fetch_csv(url: str):
-    """Stream-decompress a bz2 CSV from Fuzzwork, yielding one dict per row."""
-    log.info(f"Downloading {url}")
-    async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-    # Decompress and stream line by line to avoid loading full file into RAM
-    decompressed = bz2.decompress(resp.content).decode("utf-8")
-    reader = csv.DictReader(io.StringIO(decompressed))
-    for row in reader:
-        yield row
+def _iter_jsonl(zf: zipfile.ZipFile, filename: str):
+    """Yield parsed JSON objects from a JSON Lines file inside a zip archive."""
+    with zf.open(filename) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
 
 
-async def _import_table(db, table, rows_gen, batch_size=200):
-    """Generic streaming batch insert — never holds more than batch_size rows in memory."""
-    count = 0
-    batch = []
-    async for row in rows_gen:
-        if row is None:
-            continue
-        batch.append(row)
-        if len(batch) >= batch_size:
-            await db.execute(table.insert(), batch)
-            await db.commit()
-            count += len(batch)
-            batch = []
-    if batch:
-        await db.execute(table.insert(), batch)
+async def _bulk_insert(db: AsyncSession, table, rows: list[dict]):
+    if rows:
+        await db.execute(table.insert(), rows)
         await db.commit()
-        count += len(batch)
-    return count
 
 
 async def download_and_import(db: AsyncSession):
-    log.info("Starting SDE import from Fuzzwork (streaming mode)...")
+    log.info("Downloading official EVE SDE from CCP...")
+    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+        resp = await client.get(SDE_URL)
+        resp.raise_for_status()
+    log.info(f"Downloaded {len(resp.content):,} bytes, importing...")
 
-    # --- invTypes ---
-    log.info("Importing invTypes...")
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+
+    # --- types (invTypes equivalent) ---
+    log.info("Importing types...")
     await db.execute(text("DELETE FROM sde_types"))
     await db.commit()
-
-    async def type_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/invTypes.csv.bz2"):
-            if r.get("published") != "1":
-                continue
-            try:
-                yield {
-                    "type_id": int(r["typeID"]),
-                    "type_name": r["typeName"],
-                    "group_id": int(r["groupID"]) if r.get("groupID") else None,
-                    "category_id": None,
-                    "published": True,
-                }
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDEType.__table__, type_rows())
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "types.jsonl"):
+        if not item.get("published"):
+            continue
+        try:
+            batch.append({
+                "type_id": int(item["_key"]),
+                "type_name": item["name"]["en"],
+                "group_id": item.get("groupID"),
+                "category_id": None,
+                "published": True,
+            })
+        except (KeyError, ValueError, TypeError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEType.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEType.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} types")
 
     # --- mapRegions ---
-    log.info("Importing mapRegions...")
+    log.info("Importing regions...")
     await db.execute(text("DELETE FROM sde_regions"))
     await db.commit()
-
-    async def region_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/mapRegions.csv.bz2"):
-            if not r.get("regionName"):
-                continue
-            try:
-                yield {"region_id": int(r["regionID"]), "region_name": r["regionName"]}
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDERegion.__table__, region_rows())
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "mapRegions.jsonl"):
+        name = item.get("name", {}).get("en")
+        if not name:
+            continue
+        try:
+            batch.append({"region_id": int(item["_key"]), "region_name": name})
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDERegion.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDERegion.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} regions")
 
     # --- mapConstellations ---
-    log.info("Importing mapConstellations...")
+    log.info("Importing constellations...")
     await db.execute(text("DELETE FROM sde_constellations"))
     await db.commit()
-
-    async def const_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/mapConstellations.csv.bz2"):
-            if not r.get("constellationName"):
-                continue
-            try:
-                yield {
-                    "constellation_id": int(r["constellationID"]),
-                    "constellation_name": r["constellationName"],
-                    "region_id": int(r["regionID"]) if r.get("regionID") else None,
-                }
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDEConstellation.__table__, const_rows())
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "mapConstellations.jsonl"):
+        name = item.get("name", {}).get("en")
+        if not name:
+            continue
+        try:
+            batch.append({
+                "constellation_id": int(item["_key"]),
+                "constellation_name": name,
+                "region_id": item.get("regionID"),
+            })
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEConstellation.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEConstellation.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} constellations")
 
     # --- mapSolarSystems ---
-    log.info("Importing mapSolarSystems...")
+    # Field name: securityStatus (official SDE) vs security (fuzzworks)
+    log.info("Importing solar systems...")
     await db.execute(text("DELETE FROM sde_systems"))
     await db.commit()
-
-    async def system_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/mapSolarSystems.csv.bz2"):
-            try:
-                yield {
-                    "system_id": int(r["solarSystemID"]),
-                    "system_name": r["solarSystemName"],
-                    "security": float(r["security"]) if r.get("security") else None,
-                    "constellation_id": int(r["constellationID"]) if r.get("constellationID") else None,
-                    "region_id": int(r["regionID"]) if r.get("regionID") else None,
-                }
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDESystem.__table__, system_rows())
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "mapSolarSystems.jsonl"):
+        try:
+            batch.append({
+                "system_id": int(item["_key"]),
+                "system_name": item.get("name", {}).get("en"),
+                "security": item.get("securityStatus"),
+                "constellation_id": item.get("constellationID"),
+                "region_id": item.get("regionID"),
+            })
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDESystem.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDESystem.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} systems")
 
-    # --- mapSolarSystemJumps ---
-    log.info("Importing mapSolarSystemJumps...")
+    # --- mapStargates → jump graph (replaces mapSolarSystemJumps) ---
+    # Each stargate has a paired counterpart at the destination, so both directions are present.
+    log.info("Importing jump edges from stargates...")
     await db.execute(text("DELETE FROM sde_jumps"))
     await db.commit()
-
-    async def jump_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/mapSolarSystemJumps.csv.bz2"):
-            try:
-                yield {
-                    "from_system_id": int(r["fromSolarSystemID"]),
-                    "to_system_id": int(r["toSolarSystemID"]),
-                }
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDEJump.__table__, jump_rows())
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "mapStargates.jsonl"):
+        try:
+            dest = item["destination"]
+            batch.append({
+                "from_system_id": int(item["solarSystemID"]),
+                "to_system_id": int(dest["solarSystemID"]),
+            })
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEJump.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEJump.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} jump edges")
 
-    # --- staOperationServices (small file — collect cloning op IDs) ---
-    log.info("Loading staOperationServices...")
-    cloning_operations: set[int] = set()
-    async for r in _fetch_csv(f"{FUZZWORK_BASE}/staOperationServices.csv.bz2"):
-        if r.get("serviceID") == "60":
-            try:
-                cloning_operations.add(int(r["operationID"]))
-            except (ValueError, KeyError):
-                pass
-    log.info(f"Found {len(cloning_operations)} operation types with cloning")
+    # --- stationOperations: build name lookup and cloning op set ---
+    # service 10 = "Cloning" (replaces serviceID=60 in fuzzworks staOperationServices)
+    log.info("Loading station operations...")
+    operation_names: dict[int, str] = {}
+    cloning_op_ids: set[int] = set()
+    for item in _iter_jsonl(zf, "stationOperations.jsonl"):
+        op_id = item["_key"]
+        op_name = item.get("operationName", {}).get("en", "Station")
+        operation_names[op_id] = op_name
+        if 10 in item.get("services", []):
+            cloning_op_ids.add(op_id)
+    log.info(f"Found {len(cloning_op_ids)} operation types with cloning service")
 
-    # --- staStations ---
-    log.info("Importing staStations...")
+    # --- npcStations (staStations equivalent) ---
+    # Collect station data first, then fetch exact names from ESI.
+    log.info("Collecting NPC station data...")
+    stations_data: list[dict] = []
+    for item in _iter_jsonl(zf, "npcStations.jsonl"):
+        try:
+            op_id = item.get("operationID")
+            stations_data.append({
+                "station_id": int(item["_key"]),
+                "station_name": "",  # filled in by ESI below
+                "system_id": int(item["solarSystemID"]),
+                "has_cloning": op_id in cloning_op_ids if op_id is not None else False,
+            })
+        except (KeyError, ValueError):
+            continue
+    log.info(f"Fetching {len(stations_data)} station names from ESI...")
+
+    # Fetch names concurrently with a semaphore to avoid overwhelming ESI.
+    sem = asyncio.Semaphore(20)
+
+    async def _fetch_name(client: httpx.AsyncClient, station_id: int) -> tuple[int, str]:
+        async with sem:
+            try:
+                r = await client.get(f"/universe/stations/{station_id}/")
+                if r.status_code == 200:
+                    return station_id, r.json().get("name", "")
+            except Exception:
+                pass
+        return station_id, ""
+
+    async with httpx.AsyncClient(
+        base_url="https://esi.evetech.net/latest",
+        timeout=30,
+        headers={"Accept": "application/json"},
+    ) as esi:
+        esi_results = await asyncio.gather(*[_fetch_name(esi, s["station_id"]) for s in stations_data])
+
+    name_map: dict[int, str] = {sid: name for sid, name in esi_results if name}
+    log.info(f"Got ESI names for {len(name_map)} of {len(stations_data)} stations")
+
     await db.execute(text("DELETE FROM sde_stations"))
     await db.commit()
-
-    async def station_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/staStations.csv.bz2"):
-            try:
-                op_id = int(r["operationID"]) if r.get("operationID") else None
-                yield {
-                    "station_id": int(r["stationID"]),
-                    "station_name": r["stationName"],
-                    "system_id": int(r["solarSystemID"]),
-                    "has_cloning": op_id in cloning_operations,
-                }
-            except (ValueError, KeyError):
-                continue
-
-    count = await _import_table(db, SDEStation.__table__, station_rows())
+    count, batch = 0, []
+    for row in stations_data:
+        row["station_name"] = name_map.get(row["station_id"], f"Station {row['station_id']}")
+        batch.append(row)
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEStation.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEStation.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} stations")
 
-    # --- industryActivityMaterials (manufacturing materials per blueprint) ---
-    log.info("Importing industryActivityMaterials...")
+    # --- blueprints (manufacturing materials, replaces industryActivityMaterials) ---
+    log.info("Importing blueprint materials...")
     await db.execute(text("DELETE FROM sde_blueprint_materials"))
     await db.commit()
-
-    async def material_rows():
-        async for r in _fetch_csv(f"{FUZZWORK_BASE}/industryActivityMaterials.csv.bz2"):
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "blueprints.jsonl"):
+        mfg = item.get("activities", {}).get("manufacturing")
+        if not mfg:
+            continue
+        bp_type_id = item["_key"]
+        for mat in mfg.get("materials", []):
             try:
-                activity_id = int(r["activityID"])
-                if activity_id != 1:  # 1 = manufacturing only
-                    continue
-                yield {
-                    "blueprint_type_id": int(r["typeID"]),
-                    "activity_id": activity_id,
-                    "material_type_id": int(r["materialTypeID"]),
-                    "quantity": int(r["quantity"]),
-                }
-            except (ValueError, KeyError):
+                batch.append({
+                    "blueprint_type_id": int(bp_type_id),
+                    "activity_id": 1,
+                    "material_type_id": int(mat["typeID"]),
+                    "quantity": int(mat["quantity"]),
+                })
+            except (KeyError, ValueError):
                 continue
-
-    count = await _import_table(db, SDEBlueprintMaterial.__table__, material_rows())
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDEBlueprintMaterial.__table__, batch)
+                count += len(batch)
+                batch = []
+    await _bulk_insert(db, SDEBlueprintMaterial.__table__, batch)
+    count += len(batch)
     log.info(f"Imported {count} blueprint material rows")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
