@@ -365,7 +365,7 @@ async def fetch_mail_data(characters: list[Character], db: AsyncSession) -> dict
             return char.character_id, None, err
         try:
             headers = await esi_char.get_mail_headers(client, char.character_id)
-            unread = sum(1 for m in headers if not m.get("is_read", True))
+            unread = sum(1 for m in headers if not m.get("is_read", False))
             return char.character_id, {"unread_count": unread}, None
         except Exception as e:
             logger.warning("Mail fetch failed for char %s: %s", char.character_id, e)
