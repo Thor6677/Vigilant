@@ -13,10 +13,6 @@ async def get_corporation_members(client: ESIClient, corporation_id: int) -> lis
     return await client.get(f"/corporations/{corporation_id}/members/")
 
 
-async def get_corporation_divisions(client: ESIClient, corporation_id: int) -> dict:
-    return await client.get(f"/corporations/{corporation_id}/divisions/")
-
-
 async def get_corporation_wallets(client: ESIClient, corporation_id: int) -> list:
     return await client.get(f"/corporations/{corporation_id}/wallets/")
 
@@ -42,13 +38,10 @@ async def get_corporation_structures(client: ESIClient, corporation_id: int) -> 
             params={"page": page} if page > 1 else {}
         )
         if not isinstance(data, list):
-            # Unexpected response format
             return []
         if not data:
-            # Empty response, reached end
             break
         all_structures.extend(data)
-        # ESI returns ~1000 items per page, if we get fewer, it's the last page
         if len(data) < 1000:
             break
         page += 1
@@ -68,15 +61,3 @@ async def get_corporation_wallet_journal(client: ESIClient, corporation_id: int,
 
 async def get_corporation_blueprints(client: ESIClient, corporation_id: int, page: int = 1) -> list:
     return await client.get(f"/corporations/{corporation_id}/blueprints/", params={"page": page})
-
-
-async def get_corporation_mining_observers(client: ESIClient, corporation_id: int) -> list:
-    return await client.get(f"/corporation/{corporation_id}/mining/observers/")
-
-
-async def get_corporation_mining_observer(client: ESIClient, corporation_id: int, observer_id: int, page: int = 1) -> list:
-    return await client.get(f"/corporation/{corporation_id}/mining/observers/{observer_id}/", params={"page": page})
-
-
-async def get_corporation_mining_extractions(client: ESIClient, corporation_id: int) -> list:
-    return await client.get(f"/corporation/{corporation_id}/mining/extractions/")

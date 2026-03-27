@@ -30,14 +30,6 @@ def get_fernet() -> Fernet:
     return _fernet
 
 
-def encrypt_value(plaintext: str) -> str:
-    return get_fernet().encrypt(plaintext.encode()).decode()
-
-
-def decrypt_value(ciphertext: str) -> str:
-    return get_fernet().decrypt(ciphertext.encode()).decode()
-
-
 class EncryptedText(TypeDecorator):
     """SQLAlchemy column type that encrypts on write and decrypts on read."""
 

@@ -99,16 +99,6 @@ async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
     await db.commit()
 
 
-async def cache_invalidate(db: AsyncSession, pattern: str):
-    """Invalidate all cache entries whose key contains pattern."""
-    result = await db.execute(select(ESICache))
-    rows = result.scalars().all()
-    for row in rows:
-        if pattern in row.key:
-            await db.delete(row)
-    await db.commit()
-
-
 async def cache_stats(db: AsyncSession) -> dict:
     """Return cache statistics."""
     result = await db.execute(select(ESICache))

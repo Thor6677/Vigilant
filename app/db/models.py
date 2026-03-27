@@ -52,7 +52,6 @@ class Character(Base):
     is_main = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="characters")
-    chat_sessions = relationship("ChatSession", back_populates="character", cascade="all, delete-orphan")
 
     @property
     def has_corp_roles(self) -> bool:
@@ -80,19 +79,6 @@ class CharacterDashboardCache(Base):
     sync_error = Column(Text, nullable=True)
     sync_warnings_json = Column(Text, nullable=True)  # JSON: {"wallet": "token_refresh_failed", ...}
     field_synced_json = Column(Text, nullable=True)   # JSON: {"wallet": "2024-01-01T00:00:00", ...}
-
-
-class ChatSession(Base):
-    __tablename__ = "chat_sessions"
-
-    id = Column(Integer, primary_key=True)
-    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False)
-    title = Column(String, nullable=False, default="New Chat")
-    messages = Column(Text, nullable=False, default="[]")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    character = relationship("Character", back_populates="chat_sessions")
 
 
 class WalletSnapshot(Base):

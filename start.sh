@@ -59,20 +59,6 @@ if [ -z "$eve_secret" ] || [ "$eve_secret" = "your_eve_client_secret" ]; then
     echo "Credentials saved to .env."
 fi
 
-# Prompt for Anthropic API key if provider is set to anthropic but key is missing
-llm_provider=$(_env_get LLM_PROVIDER)
-if [ "${llm_provider,,}" = "anthropic" ]; then
-    anthropic_key=$(_env_get ANTHROPIC_API_KEY)
-    if [ -z "$anthropic_key" ] || [ "$anthropic_key" = "your_anthropic_api_key" ]; then
-        echo ""
-        echo "LLM_PROVIDER is set to 'anthropic' but ANTHROPIC_API_KEY is missing."
-        read -rsp "  Anthropic API Key: " anthropic_key
-        echo ""
-        _env_set ANTHROPIC_API_KEY "$anthropic_key"
-        echo "Anthropic API key saved to .env."
-    fi
-fi
-
 # ---------------------------------------------------------------------------
 # Virtual environment
 # ---------------------------------------------------------------------------
@@ -86,26 +72,6 @@ source .venv/bin/activate
 
 # Install/update dependencies
 pip install -q -r requirements.txt
-
-# ---------------------------------------------------------------------------
-# Ollama check
-# ---------------------------------------------------------------------------
-
-if [ "${llm_provider,,}" = "ollama" ]; then
-    OLLAMA_URL=$(_env_get OLLAMA_BASE_URL)
-    OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434/v1}"
-    BASE="${OLLAMA_URL%/v1}"
-    if ! curl -sf "${BASE}/api/tags" > /dev/null 2>&1; then
-        echo "WARNING: Ollama not responding at ${BASE}. Make sure 'ollama serve' is running."
-    else
-        MODEL=$(_env_get OLLAMA_MODEL)
-        MODEL="${MODEL:-qwen3:32b}"
-        if ! curl -sf "${BASE}/api/tags" | grep -q "\"${MODEL}\""; then
-            echo "Model '${MODEL}' not found locally. Pulling now (this may take a while)..."
-            ollama pull "${MODEL}"
-        fi
-    fi
-fi
 
 # ---------------------------------------------------------------------------
 # Launch
@@ -141,7 +107,7 @@ for i in $(seq 1 20); do
     sleep 0.5
     if grep -q "Application startup complete" "$LOGFILE" 2>/dev/null; then
         echo ""
-        echo "✓ Vigilant is running — PID $APP_PID"
+        echo "Vigilant is running — PID $APP_PID"
         echo "  http://localhost:8000"
         echo ""
         echo "To watch logs:  tail -f $LOGFILE"
@@ -152,7 +118,7 @@ for i in $(seq 1 20); do
     # Check if the process already died
     if ! kill -0 "$APP_PID" 2>/dev/null; then
         echo ""
-        echo "✗ App failed to start. Last log output:"
+        echo "App failed to start. Last log output:"
         echo ""
         tail -20 "$LOGFILE"
         exit 1
@@ -161,5 +127,5 @@ for i in $(seq 1 20); do
 done
 
 echo ""
-echo "✗ App did not confirm startup within 10 seconds."
+echo "App did not confirm startup within 10 seconds."
 echo "  Check the log for errors:  tail -30 $LOGFILE"

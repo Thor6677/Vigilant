@@ -3,13 +3,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
-from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache
+from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
 from app.db.cache import ESICache  # registers table with Base
 from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
-from app.routes.chat import router as chat_router
 from app.routes.characters import router as characters_router
 from app.routes.status import router as status_router
 from app.routes.character_detail import router as character_detail_router
@@ -47,7 +46,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.include_router(auth_router)
 app.include_router(dashboard_router)
-app.include_router(chat_router)
 app.include_router(characters_router)
 app.include_router(status_router)
 app.include_router(character_detail_router)
@@ -91,12 +89,10 @@ async def startup():
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
     # ── Encrypt plaintext ESI tokens in-place ──────────────────────────
-    from sqlalchemy import text as sql_text
     from app.db.encryption import get_fernet
-    from cryptography.fernet import InvalidToken as FernetInvalidToken
 
     async with AsyncSessionLocal() as db:
-        rows = (await db.execute(sql_text("SELECT id, access_token, refresh_token FROM characters"))).fetchall()
+        rows = (await db.execute(text("SELECT id, access_token, refresh_token FROM characters"))).fetchall()
         fernet = get_fernet()
         migrated = 0
         for row in rows:
@@ -115,7 +111,7 @@ async def startup():
                 needs_update = True
             if needs_update:
                 await db.execute(
-                    sql_text("UPDATE characters SET access_token = :at, refresh_token = :rt WHERE id = :id"),
+                    text("UPDATE characters SET access_token = :at, refresh_token = :rt WHERE id = :id"),
                     {"at": new_at, "rt": new_rt, "id": char_id},
                 )
                 migrated += 1
