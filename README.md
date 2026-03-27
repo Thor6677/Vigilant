@@ -1,5 +1,9 @@
 # Vigilant
 
+<p align="center">
+  <img src="static/logo.png" alt="Vigilant" width="180">
+</p>
+
 An EVE Online dashboard that gives you a unified view of all your characters — wallet, location, industry, orders, skills, mail, and kill history all in one place.
 
 ![EVE Online](https://img.shields.io/badge/EVE%20Online-ESI-blue)
@@ -85,8 +89,7 @@ An EVE Online dashboard that gives you a unified view of all your characters —
 ### Other Features
 - **ESI rate limit monitoring** — real-time dashboard with request activity chart and per-group tracking
 - **Sync diagnostics** — per-field warnings, stale data indicators, manual resync buttons
-- **AI chat assistant** — Claude/Ollama integration with 15+ EVE-specific tools
-- **Server status** — Tranquility online/offline indicator with player count
+- **Server status** — Tranquility online/offline indicator with player count and EVE time (UTC) clock
 
  (Local)
 
@@ -272,7 +275,6 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 | `/corporations/{id}/mining` | Corp aggregated mining ledger |
 | `/industry` | Manufacturing calculator with nested build/buy and build times |
 | `/industry/compression` | Compression calculator with LP solver |
-| `/chat` | AI assistant with EVE-specific tools |
 | `/status` | ESI rate limits, sync health, request activity |
 
 ---

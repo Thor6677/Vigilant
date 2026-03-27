@@ -108,7 +108,10 @@ document.addEventListener('DOMContentLoaded', function() {
         <div id="sync-poller"></div>
         {% endif %}
     </div>
-    <span id="server-players" style="color:var(--muted);display:none;"></span>
+    <div style="display:flex;align-items:center;gap:1.25rem;">
+        <span id="server-players" style="color:var(--muted);display:none;"></span>
+        <span id="eve-time" style="color:var(--muted);font-variant-numeric:tabular-nums;"></span>
+    </div>
 </div>
 
 {# ── Page Header ──────────────────────────────────────────────────────────── #}
@@ -764,6 +767,15 @@ function updateServerStatus() {
 }
 updateServerStatus();
 setInterval(updateServerStatus, 15 * 60 * 1000);
+
+function updateEveTime() {
+    const now = new Date();
+    const h = String(now.getUTCHours()).padStart(2, '0');
+    const m = String(now.getUTCMinutes()).padStart(2, '0');
+    document.getElementById('eve-time').textContent = 'EVE ' + h + ':' + m;
+}
+updateEveTime();
+setInterval(updateEveTime, 10000);
 </script>
 
 </div>

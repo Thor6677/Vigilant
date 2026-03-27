@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}VIGILANT{% endblock %}</title>
+    <link rel=icon href=/static/favicon.ico type=image/x-icon>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -507,7 +508,7 @@
 
 {% if request.session.get('user_id') %}
 <nav class="b-nav">
-    <a href="/dashboard" class="b-nav-logo">◈ Vigilant</a>
+    <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
     <div class="b-nav-links">
         <a href="/dashboard" class="b-nav-link">Dashboard</a>
         <a href="/assets" class="b-nav-link">Assets</a>
