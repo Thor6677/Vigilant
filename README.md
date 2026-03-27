@@ -10,22 +10,85 @@ An EVE Online dashboard that gives you a unified view of all your characters —
 
 ## Features
 
-- **EVE-style character cards** — portrait, corp/alliance logos, current ship (type + name), security status, and diagonal stripe accent matching the in-game UI
-- **Multi-character dashboard** — wallet, location, industry jobs, market orders, skill queue, mail, notifications, contracts, planetary industry, and zKillboard kills — all on one page
-- **Automatic background sync** — a scheduler runs every 60 seconds, refreshing each field on its ESI-recommended cache timer (30s location, 2min wallet, 1h clones, etc.); page loads never trigger ESI calls
-- **Instant on character add** — full sync fires immediately when a character is authenticated
-- **Character detail page** — per-character wallet balance chart (with time range selection), wallet journal, active market orders, and kill history
-- **Character management** — organize alts into named account groups, reorder with drag-and-drop, view skill queue details with training completion times and paused queue warnings
-- **Assets page** — aggregated asset browser across all characters with EVE SDE type lookup and search
-- **Corporations page** — corporation-level wallet, industry jobs, market orders, structures, contracts, and member list (requires corp roles)
-- **Industry page** — consolidated view of all industry jobs and market orders across all characters
-- **Kills page** — aggregated kill history from zKillboard with system security status
-- **App status dashboard** — request activity chart (Chart.js), background sync table with expandable per-field warnings, ESI rate limit progress bars, recent request log, and significant event history
-- **Sync diagnostics** — per-field ⚠ warnings on the dashboard when a sync fails, with re-authenticate links for expired tokens
+### Dashboard
+- **Multi-character overview** — character cards with portrait, corp/alliance, online status (green/grey dot), wallet, location, current ship, skill training with progress bars, and sync status
+- **Account grouping** — organize alts into named account groups with drag-and-drop reordering (SortableJS)
+- **Sort modes** — Grouped (custom), Name, Corp, Training, Queue End
+- **Wealth breakdown** — per-character wallet bars with proportion visualization
+- **Automatic background sync** — scheduler refreshes 12 ESI data fields per character on their cache timers (30s–1h); page loads never trigger ESI calls
+- **Aggregated panels** — industry jobs, market orders, jump clones, planetary industry, mail, notifications, contracts, and zKillboard kills all on one page
 
----
+### Character Detail
+- **Wallet history chart** — interactive Chart.js graph with time ranges (1d/5d/1w/1m/6m/1y)
+- **Wallet journal** — last 20 entries inline + "Full Journal" link to dedicated page
+- **Mail reader** — htmx-loaded mail list with click-to-read body and sender name resolution
+- **Notification feed** — parsed notification types with human-readable labels and summaries
+- **Implants & jump clones** — attribute enhancers sorted by slot, hardwirings, per-clone implant sets
+- **Assets** — background-synced asset browser grouped by location
 
-## Quick Start (Local)
+### Skill Planner (`/character/{id}/skills`)
+- **Current attributes** — visual bars with implant bonuses
+- **Optimal remap calculator** — brute-force finds the best attribute distribution for your queue
+- **What-if remap simulator** — 5 attribute sliders, live recalculation of per-skill training times
+- **Per-skill comparison** — current vs proposed time for every queued skill
+
+### Fitting Viewer (`/character/{id}/fittings`)
+- **Slot-organized display** — High/Mid/Low/Rig/Subsystem/Drone/Cargo with ship slot counts
+- **Ship render images** — grouped by ship type
+- **EFT export** — "Copy EFT" button for pasting into EVE client or Pyfa
+
+### Blueprint Library (`/character/{id}/blueprints` + `/corporations/{id}/blueprints`)
+- **BPO/BPC display** — ME/TE research levels, remaining runs for copies
+- **Filters** — All, BPO Only, BPC Only, Unresearched; group by Type or Location
+- **Stats** — total count, originals, copies, researched, fully maxed (ME10/TE20)
+- **Corp blueprints** — corporation blueprint library (requires Director role)
+
+### Mining Ledger (`/character/{id}/mining` + `/corporations/{id}/mining`)
+- **30-day rolling history** — ore/system/daily breakdown with ISK value estimates
+- **Corporation view** — aggregates mining from all your characters in the corp
+- **Visualizations** — per-ore proportion bars, daily activity chart, ISK/day average
+- **Full detail** — expandable table with every individual mining entry
+
+### Wallet Journal (`/character/{id}/journal` + `/corporations/{id}/journal`)
+- **Full journal history** — multi-page fetch with entity name resolution
+- **Category filtering** — Market, Bounties, Industry, Contracts, Insurance, Transfers, Warfare, LP Store
+- **Summary stats** — income/expenses/net with entry count
+- **Corp journal** — 7 wallet divisions with division selector
+
+### Manufacturing Calculator (`/industry`)
+- **Blueprint search** — htmx-powered search with live results
+- **Full modifier support** — ME (0-10), TE (0-20), Structure (NPC/Raitaru/Azbel/Sotiyo), Rig (T1/T2 Basic/Specialized), Security (Hi/Low/Null)
+- **Nested build/buy** — click "Build" on any component to see its sub-BOM with independent settings; recursive for sub-sub-components
+- **Build time estimates** — parallel build (components simultaneous + final assembly), sequential build, per-component times
+- **Build All / Buy All** — one-click toggle to expand all buildable components
+- **Copy Parent Settings** — inherit ME/structure/rig/security from parent blueprint
+- **Shopping list** — aggregated materials with multibuy-compatible copy ("Item Name xQty" format)
+- **Send to Compressor** — one-click transfer of mineral requirements to the compression calculator
+- **Persistent state** — settings saved in localStorage, Reset button to start fresh
+
+### Compression Calculator (`/industry/compression`)
+- **LP solver** — scipy linear programming finds mathematically optimal compressed ore mix
+- **Three optimization modes** — Lowest ISK, Lowest Volume, Lowest Waste (minimizes surplus minerals)
+- **Character skill integration** — auto-fetches reprocessing skills (Simple/Coherent/Variegated/Complex/Abyssal/Mercoxit processing)
+- **Full reprocessing yield calculation** — structure (NPC/Athanor/Tatara), rig (T1/T2), security multiplier, implant (RX-801/802/804)
+- **Trade hub selection** — Jita, Amarr, Dodixie, Hek, Rens
+- **Results** — ore quantities with prices, minerals produced vs target with surplus, multibuy-compatible copy
+- **Persistent state** — settings and mineral values saved in localStorage
+- **Overwrite warning** — confirms before replacing saved compression state from manufacturing
+
+### Corporation Features
+- **Corp overview** — wallet divisions, industry jobs, market orders, structures (fuel/reinforcement status), contracts, member list
+- **Corp wallet journal** — 7 divisions with full filtering
+- **Corp blueprints** — with ME/TE, location, BPO/BPC filters
+- **Corp mining** — aggregated across all characters with mining scope
+
+### Other Features
+- **ESI rate limit monitoring** — real-time dashboard with request activity chart and per-group tracking
+- **Sync diagnostics** — per-field warnings, stale data indicators, manual resync buttons
+- **AI chat assistant** — Claude/Ollama integration with 15+ EVE-specific tools
+- **Server status** — Tranquility online/offline indicator with player count
+
+ (Local)
 
 ### Prerequisites
 
@@ -179,6 +242,13 @@ Vigilant requests the following ESI scopes when you authenticate a character:
 | `esi-corporations.read_structures.v1` | Corporation structures |
 | `esi-contracts.read_corporation_contracts.v1` | Corporation contracts |
 | `esi-assets.read_corporation_assets.v1` | Corporation assets |
+| `esi-location.read_online.v1` | Character online status |
+| `esi-fittings.read_fittings.v1` | Saved ship fittings |
+| `esi-characters.read_blueprints.v1` | Character blueprints |
+| `esi-corporations.read_blueprints.v1` | Corporation blueprints |
+| `esi-industry.read_character_mining.v1` | Mining ledger |
+| `esi-industry.read_corporation_mining.v1` | Corporation mining observers |
+| `esi-skills.read_skills.v1` | Trained skills and attributes |
 
 Character-level scopes are always requested. Corporation-level scopes are only usable if EVE SSO grants them based on the character's in-game roles. You can view CCP's scope documentation at [EVE Swagger Interface Docs](https://esi.evetech.net/).
 
@@ -186,16 +256,24 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 
 ## Pages
 
-| Route | Description | Refresh Rate |
-|---|---|---|
-| `/` / `/dashboard` | Main character overview — cards, wallet totals, mail, PI, skill queue, kill history | Auto-syncs every 60s per field |
-| `/character/{character_id}` | Individual character detail — wallet chart, journal, assets, orders, kill history | On-demand |
-| `/characters` | Manage characters — groups, rename, reorder, remove | On-demand |
-| `/assets` | Aggregated asset browser across all characters with SDE type lookup | On-demand |
-| `/corporations` | Corporation-level data — members, wallet, industry, orders, structures, contracts | On-demand |
-| `/industry` | Consolidated industry jobs and market orders across all characters | 2 minutes |
-| `/kills` | Aggregated kill history from zKillboard with system security status | 5 minutes |
-| `/status` | App status dashboard — sync health, ESI rate limits, request activity, event history | 3 seconds (real-time) |
+| Route | Description |
+|---|---|
+| `/dashboard` | Main dashboard — character cards, grouping, wealth breakdown, all summary panels |
+| `/character/{id}` | Character detail — wallet chart, journal, skills, implants, clones, assets, mail, notifications |
+| `/character/{id}/journal` | Full wallet journal with category filtering and pagination |
+| `/character/{id}/skills` | Skill planner with attribute remap optimizer |
+| `/character/{id}/fittings` | Ship fitting viewer with EFT export |
+| `/character/{id}/blueprints` | Blueprint library (BPO/BPC, ME/TE, filters) |
+| `/character/{id}/mining` | Mining ledger with ore/system/daily breakdown |
+| `/assets` | Cross-character asset search |
+| `/corporations/{id}` | Corporation overview (wallet, structures, jobs, orders, members) |
+| `/corporations/{id}/journal` | Corp wallet journal (7 divisions) |
+| `/corporations/{id}/blueprints` | Corp blueprint library |
+| `/corporations/{id}/mining` | Corp aggregated mining ledger |
+| `/industry` | Manufacturing calculator with nested build/buy and build times |
+| `/industry/compression` | Compression calculator with LP solver |
+| `/chat` | AI assistant with EVE-specific tools |
+| `/status` | ESI rate limits, sync health, request activity |
 
 ---
 
@@ -431,7 +509,7 @@ If you discover a security vulnerability, **do not open a public issue**. Instea
 
 ## Tech Stack
 
-- **Backend**: FastAPI, SQLAlchemy (async/aiosqlite), Uvicorn
+- **Backend**: FastAPI, SQLAlchemy (async/aiosqlite), Uvicorn, scipy (LP solver)
 - **Frontend**: Jinja2 templates, HTMX, Tailwind CSS (CDN), Chart.js
 - **Data**: EVE ESI REST API, zKillboard API, EVE SDE (Static Data Export)
 - **DevOps**: Docker, Docker Compose, systemd (optional)
