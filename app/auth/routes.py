@@ -21,6 +21,7 @@ settings = get_settings()
 
 EVE_SCOPES = " ".join([
     "esi-location.read_location.v1",
+    "esi-location.read_online.v1",
     "esi-location.read_ship_type.v1",
     "esi-assets.read_assets.v1",
     "esi-industry.read_character_jobs.v1",
@@ -36,6 +37,9 @@ EVE_SCOPES = " ".join([
     "esi-skills.read_skills.v1",
     "esi-mail.read_mail.v1",
     "esi-characters.read_notifications.v1",
+    "esi-fittings.read_fittings.v1",
+    "esi-characters.read_blueprints.v1",
+    "esi-industry.read_character_mining.v1",
     "esi-contracts.read_character_contracts.v1",
     "esi-planets.manage_planets.v1",
     # Corp-level scopes — only granted by EVE SSO if the character holds the
@@ -44,6 +48,8 @@ EVE_SCOPES = " ".join([
     "esi-markets.read_corporation_orders.v1",
     "esi-corporations.read_structures.v1",
     "esi-contracts.read_corporation_contracts.v1",
+    "esi-corporations.read_blueprints.v1",
+    "esi-industry.read_corporation_mining.v1",
 ])
 
 

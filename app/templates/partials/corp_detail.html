@@ -99,6 +99,7 @@
     <div class="b-section" style="margin-bottom:1.5rem">
         <div class="b-section-head">
             <span class="b-label">Corp Wallet</span>
+            <div style="display:flex;gap:0.75rem;"><a href="/corporations/{{ corp_id }}/journal" class="b-link" style="font-size:10px;">Journal →</a><a href="/corporations/{{ corp_id }}/blueprints" class="b-link" style="font-size:10px;">Blueprints →</a><a href="/corporations/{{ corp_id }}/mining" class="b-link" style="font-size:10px;">Mining →</a></div>
             {% if corp_wallet_total is not none %}
             <span class="b-label is-accent">{{ corp_wallet_total | format_isk }}</span>
             {% endif %}

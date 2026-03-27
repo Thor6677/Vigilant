@@ -5,7 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache
 from app.db.cache import ESICache  # registers table with Base
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta  # registers SDE tables
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
@@ -15,11 +15,17 @@ from app.routes.status import router as status_router
 from app.routes.character_detail import router as character_detail_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
+from app.routes.industry import router as industry_router
+from app.routes.journal import router as journal_router
+from app.routes.skills import router as skills_router
+from app.routes.fittings import router as fittings_router
+from app.routes.blueprints import router as blueprints_router
+from app.routes.mining import router as mining_router
 
 settings = get_settings()
 
 import logging
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(name)s: %(message)s")
+logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
 app = FastAPI(
     title="Vigilant",
@@ -47,6 +53,12 @@ app.include_router(status_router)
 app.include_router(character_detail_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
+app.include_router(industry_router)
+app.include_router(journal_router)
+app.include_router(skills_router)
+app.include_router(fittings_router)
+app.include_router(blueprints_router)
+app.include_router(mining_router)
 
 
 @app.on_event("startup")
@@ -67,6 +79,8 @@ async def startup():
             "ALTER TABLE characters ADD COLUMN security_status REAL",
             "ALTER TABLE characters ADD COLUMN user_id INTEGER REFERENCES users(id)",
             "ALTER TABLE characters ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sde_types ADD COLUMN volume REAL",
+            "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
         ]:
             try:
                 await db.execute(text(stmt))

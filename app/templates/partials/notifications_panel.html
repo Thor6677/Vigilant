@@ -1,0 +1,25 @@
+{# Notifications list — loaded via htmx on character detail page #}
+{% if notif_error %}
+<div class="b-empty">{{ notif_error }}</div>
+{% elif not notifications %}
+<div class="b-empty">No recent notifications</div>
+{% else %}
+{% for n in notifications %}
+<div class="b-table-row" style="{% if not n.is_read %}border-left:2px solid var(--accent);{% endif %}">
+    <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+            <span style="font-size:10px;letter-spacing:0.08em;color:var(--muted);border:1px solid var(--border);padding:1px 5px;">{{ n.type_label }}</span>
+            {% if not n.is_read %}
+            <span class="b-badge is-accent" style="font-size:8px;">NEW</span>
+            {% endif %}
+        </div>
+        {% if n.summary %}
+        <div style="font-size:11px;color:var(--text);margin-top:3px;">{{ n.summary }}</div>
+        {% endif %}
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;">
+            {{ n.timestamp[:16].replace('T', ' ') if n.timestamp else '' }}
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}

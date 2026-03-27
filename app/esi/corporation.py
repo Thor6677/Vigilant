@@ -57,3 +57,26 @@ async def get_corporation_structures(client: ESIClient, corporation_id: int) -> 
 
 async def get_corporation_contracts(client: ESIClient, corporation_id: int) -> list:
     return await client.get(f"/corporations/{corporation_id}/contracts/")
+
+
+async def get_corporation_wallet_journal(client: ESIClient, corporation_id: int, division: int = 1, page: int = 1) -> list:
+    return await client.get(
+        f"/corporations/{corporation_id}/wallets/{division}/journal/",
+        params={"page": page},
+    )
+
+
+async def get_corporation_blueprints(client: ESIClient, corporation_id: int, page: int = 1) -> list:
+    return await client.get(f"/corporations/{corporation_id}/blueprints/", params={"page": page})
+
+
+async def get_corporation_mining_observers(client: ESIClient, corporation_id: int) -> list:
+    return await client.get(f"/corporation/{corporation_id}/mining/observers/")
+
+
+async def get_corporation_mining_observer(client: ESIClient, corporation_id: int, observer_id: int, page: int = 1) -> list:
+    return await client.get(f"/corporation/{corporation_id}/mining/observers/{observer_id}/", params={"page": page})
+
+
+async def get_corporation_mining_extractions(client: ESIClient, corporation_id: int) -> list:
+    return await client.get(f"/corporation/{corporation_id}/mining/extractions/")

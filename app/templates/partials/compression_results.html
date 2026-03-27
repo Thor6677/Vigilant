@@ -1,0 +1,133 @@
+{# Compression calculator results #}
+{% macro format_isk(amount) %}
+  {%- if amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}{%- endif %}
+{% endmacro %}
+
+{% if not ores %}
+<div class="b-empty">No solution found. Check that minerals are available from ores on the market.</div>
+{% else %}
+
+{# ── Summary stats ─────────────────────────────────────────────────────────── #}
+<div class="b-stats" style="margin-bottom:1rem;">
+    <div class="b-stat">
+        <div class="b-stat-val is-accent">{{ format_isk(total_isk) }} ISK</div>
+        <div class="b-stat-label">Total Cost</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ "{:,.1f}".format(total_volume) }} m3</div>
+        <div class="b-stat-label">Total Volume</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ ores | length }}</div>
+        <div class="b-stat-label">Ore Types</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ hub_label }}</div>
+        <div class="b-stat-label">Market</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val" style="text-transform:uppercase;">{{ mode }}</div>
+        <div class="b-stat-label">Optimized By</div>
+    </div>
+</div>
+
+{# ── Ores to buy ───────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Ores to Buy</span>
+            <button onclick="copyCompressionMultibuy()" id="comp-copy-btn"
+                    class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">
+                Copy for Multibuy
+            </button>
+        </div>
+
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Ore</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Qty</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Price/Unit</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Total ISK</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Volume</span>
+        </div>
+
+        {% for ore in ores %}
+        <div class="b-table-row">
+            <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                <img src="https://images.evetech.net/types/{{ ore.type_id }}/icon?size=32"
+                     style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
+                     onerror="this.style.display='none'">
+                <span style="font-size:11px;color:var(--text);">{{ ore.name }}</span>
+            </span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:600;">{{ "{:,}".format(ore.quantity) }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(ore.price_each) }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(ore.total_price) }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(ore.volume) }} m3</span>
+        </div>
+        {% endfor %}
+
+        <div class="b-table-row" style="border-top:2px solid var(--border);">
+            <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Total</span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">{{ format_isk(total_isk) }} ISK</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,.1f}".format(total_volume) }} m3</span>
+        </div>
+    </div>
+</div>
+
+{# ── Minerals produced vs target ───────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Minerals Produced</span></div>
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Mineral</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Target</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Produced</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Surplus</span>
+        </div>
+        {% for name, target_qty in target_minerals.items() %}
+        {% set produced = minerals_produced.get(name, 0) %}
+        {% set surplus = minerals_surplus.get(name, 0) %}
+        <div class="b-table-row">
+            <span style="flex:2;font-size:11px;color:var(--text);">{{ name }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,}".format(target_qty) }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:{% if produced >= target_qty %}var(--success){% else %}var(--danger){% endif %};">{{ "{:,}".format(produced) }}</span>
+            {% if surplus > 0 %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--accent);">+{{ "{:,}".format(surplus) }}</span>
+            {% else %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{# ── Copyable text ─────────────────────────────────────────────────────────── #}
+<textarea id="comp-multibuy-text" readonly
+          style="width:100%;margin-top:0.5rem;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;min-height:50px;max-height:200px;"
+          onclick="this.select()">{{ multibuy_text }}</textarea>
+<div style="font-size:9px;color:var(--muted);margin-top:3px;">
+    Paste into EVE's Multibuy window (Alt+M). Format: <code>Item Name x{qty}</code>
+</div>
+
+<script>
+function copyCompressionMultibuy() {
+    var text = document.getElementById('comp-multibuy-text').value;
+    navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('comp-copy-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() {
+            btn.textContent = 'Copy for Multibuy';
+            btn.style.color = 'var(--accent)';
+            btn.style.borderColor = 'var(--accent)';
+        }, 2000);
+    });
+}
+</script>
+
+{% endif %}

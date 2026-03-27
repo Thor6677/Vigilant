@@ -1,5 +1,70 @@
 {% extends "base.html" %}
-{% block title %}DASHBOARD — VIGILANT{% endblock %}
+{% block title %}DASHBOARD — VIGILANT
+{% if sort == 'custom' %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var saveTimer = null;
+    function getOrderPayload() {
+        var items = [];
+        document.querySelectorAll('.sortable-group').forEach(function(list) {
+            var group = list.dataset.group;
+            list.querySelectorAll('[data-char-id]').forEach(function(card, idx) {
+                items.push({character_id: parseInt(card.dataset.charId), sort_order: idx, account_group: group});
+            });
+        });
+        return items;
+    }
+    function scheduleSave() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function() {
+            fetch('/characters/reorder', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getOrderPayload())});
+            var s = document.getElementById('save-status'); s.style.display = ''; setTimeout(function(){s.style.display='none';}, 2000);
+        }, 600);
+    }
+    document.querySelectorAll('.sortable-group').forEach(function(list) {
+        Sortable.create(list, {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+    });
+    var addBtn = document.getElementById('add-group-btn');
+    if (addBtn) addBtn.addEventListener('click', function() {
+        var name = prompt('Account name:', 'Account ' + (document.querySelectorAll('.group-section').length + 1));
+        if (!name) return;
+        var container = document.getElementById('groups-container');
+        var section = document.createElement('div');
+        section.className = 'b-section group-section';
+        section.dataset.group = name;
+        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span style="font-size:10px;color:var(--muted);">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
+        container.appendChild(section);
+        attachLabelEdit(section.querySelector('.group-label'));
+        Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+    });
+    function attachLabelEdit(label) {
+        label.addEventListener('click', function() {
+            var input = label.nextElementSibling;
+            label.style.display = 'none'; input.style.display = ''; input.focus(); input.select();
+            function commit() {
+                var newName = input.value.trim() || input.dataset.original;
+                var oldName = input.dataset.original;
+                if (newName !== oldName) {
+                    var section = label.closest('.group-section');
+                    section.dataset.group = newName;
+                    section.querySelectorAll('[data-group]').forEach(function(el){el.dataset.group = newName;});
+                    label.textContent = newName; label.dataset.group = newName; input.dataset.original = newName;
+                    fetch('/characters/rename-group', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_name: oldName, new_name: newName})});
+                    scheduleSave();
+                }
+                label.style.display = ''; input.style.display = 'none';
+            }
+            input.addEventListener('blur', commit, {once: true});
+            input.addEventListener('keydown', function(e) { if(e.key==='Enter'){e.preventDefault();input.blur();} if(e.key==='Escape'){input.value=input.dataset.original;input.blur();} });
+        });
+    }
+    document.querySelectorAll('.group-label').forEach(attachLabelEdit);
+});
+</script>
+{% endif %}
+
+{% endblock %}
 {% block content %}
 
 {# ── Macros ──────────────────────────────────────────────────────────────── #}
@@ -49,6 +114,15 @@
 {# ── Page Header ──────────────────────────────────────────────────────────── #}
 <div class="b-page-header">
     <h1 class="b-page-title">Dashboard</h1>
+    {% set _reauth_count = characters | selectattr('scopes') | list | length %}
+    {% set _needs_reauth = [] %}
+    {% for c in characters %}{% if 'esi-fittings.read_fittings.v1' not in (c.scopes or '') or 'esi-characters.read_blueprints.v1' not in (c.scopes or '') or 'esi-industry.read_character_mining.v1' not in (c.scopes or '') %}{% if _needs_reauth.append(c) %}{% endif %}{% endif %}{% endfor %}
+    {% if _needs_reauth %}
+    <a href="/auth/add-character" class="b-btn"
+       style="flex:none;padding:0.45rem 1rem;border:1px solid var(--accent);color:var(--accent);">
+        ↻ Reauth {{ _needs_reauth | length }}
+    </a>
+    {% endif %}
     <a href="/auth/add-character" class="b-btn"
        style="flex:none;padding:0.45rem 1rem;border:1px solid var(--border);">
         + Add Character
@@ -97,275 +171,209 @@
 </div>
 {% endif %}
 
+{# ── Sort Controls ──────────────────────────────────────────────────────── #}
+<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
+    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Sort:</span>
+    {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
+    <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
+    {% endfor %}
+    {% if sort == 'custom' %}
+    <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;">+ Add Account</button>
+    <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
+    {% endif %}
+</div>
+
 {# ── Character Cards ─────────────────────────────────────────────────────── #}
+{% if sort == 'custom' %}
+<div id="groups-container">
+{% for group_name, group_chars in char_groups.items() %}
+<div class="b-section group-section" data-group="{{ group_name }}">
+    <div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;">
+        <span class="group-label b-label" data-group="{{ group_name }}" style="cursor:pointer;" title="Click to rename">{{ group_name }}</span>
+        <input class="group-label-input" type="text" value="{{ group_name }}" data-original="{{ group_name }}" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;">
+        <span style="font-size:10px;color:var(--muted);">{{ group_chars | length }}</span>
+    </div>
+    <div class="sortable-group b-grid-3" data-group="{{ group_name }}">
+    {% for char in group_chars %}
+    {% set loc = locations.get(char.character_id) %}
+    {% set wallet = wallets.get(char.character_id) %}
+    {% set sk = skill_map.get(char.character_id, {}) %}
+    {% set w = sk.get('warning', 'error') %}
+    {% set is_active = char.character_id == active_char.character_id %}
+    <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
+         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+        <div class="b-card-top">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
+                 alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
+            <div class="b-card-info">
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                    <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if loc and loc.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
+                    <span class="b-card-name">{{ char.character_name }}</span>
+                    {% if is_active %}<span class="b-badge is-active">Active</span>{% endif %}
+                    {% if w == 'empty' %}<span class="b-badge is-danger" style="font-size:8px;">EMPTY</span>
+                    {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
+                    {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
+                    {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
+                </div>
+                {% if char.corporation_name %}
+                <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
+                    {% if char.corporation_id %}
+                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" onerror="this.style.display='none'">
+                    {% endif %}
+                    {{ char.corporation_name }}
+                </div>
+                {% endif %}
+                {% if char.alliance_name %}<div class="b-card-sub" style="color:var(--accent)">{{ char.alliance_name }}</div>{% endif %}
+            </div>
+        </div>
+        <div class="b-card-body">
+            {% if loc %}
+            <div class="b-row"><span class="b-row-label">Location</span><span class="b-row-val">{% if loc.security is not none %}<span class="{{ sec_cls(loc.security) }}">[{{ "%.1f"|format(loc.security) }}]</span> {% endif %}{{ loc.system_name or "Unknown" }}</span></div>
+            {% if loc.docked_at %}<div class="b-row"><span class="b-row-label">Dock</span><span class="b-row-val is-muted" style="max-width:160px;">{{ loc.docked_at }}</span></div>
+            {% else %}<div class="b-row"><span class="b-row-label">Status</span><span class="b-row-val is-warn">In Space</span></div>{% endif %}
+            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
+            {% endif %}
+            {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
+            {% if sk.get('current_skill') %}
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}{% if sk.queue_end_str %}<span style="font-size:8px;color:var(--border);">{{ sk.queue_end_str }} UTC</span>{% endif %}</span></div>
+            {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
+            {% elif w == 'paused' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="font-size:10px;color:var(--muted);">Paused ({{ sk.queue_length }} queued)</span></div>
+            {% elif w == 'empty' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val is-danger" style="font-size:10px;">Empty queue</span></div>{% endif %}
+            {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Sync</span><span style="display:flex;align-items:center;gap:0.5rem;">{% if char_sync == 'syncing' %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.3rem;"><span class="spin-anim">◌</span> syncing</span>{% elif char_sync == 'error' %}<span class="b-row-val is-danger">✕</span>{% elif char_last_sync %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.35rem;"><span class="b-dot {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-ok{% endif %}"></span>{{ char_last_sync }}</span>{% else %}<span class="b-row-val is-muted">never</span>{% endif %}{% if char_sync != 'syncing' and (char_stale in ('critical', 'warning', 'never') or char_sync == 'error') %}<form method="POST" action="/dashboard/sync/{{ char.character_id }}" style="line-height:1;"><button type="submit" class="b-btn" style="flex:none;padding:1px 6px;border:1px solid var(--border);font-size:9px;">↺</button></form>{% endif %}</span></div>
+        </div>
+        <div class="b-actions">
+            <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
+            {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
+            <a href="/auth/add-character" class="b-btn" style="font-size:9px;" title="Re-auth">↻</a>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">✕</button></form>
+        </div>
+    </div>
+
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
 <div class="b-section">
     <div class="b-grid-3">
     {% for char in characters %}
     {% set loc = locations.get(char.character_id) %}
     {% set wallet = wallets.get(char.character_id) %}
-    {% set char_scopes = char.scopes or "" %}
-    {% set char_warn = sync_warnings.get(char.character_id, {}) %}
-    {% set char_needs_reauth = (
-        "esi-mail.read_mail.v1" not in char_scopes or
-        "esi-characters.read_notifications.v1" not in char_scopes or
-        "esi-contracts.read_character_contracts.v1" not in char_scopes or
-        "esi-planets.manage_planets.v1" not in char_scopes
-    ) %}
+    {% set sk = skill_map.get(char.character_id, {}) %}
+    {% set w = sk.get('warning', 'error') %}
     {% set is_active = char.character_id == active_char.character_id %}
-
-    <div class="b-card {% if is_active %}is-active{% endif %}">
-
-        {# Portrait + Name #}
+    <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
+         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
         <div class="b-card-top">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
-                 alt="{{ char.character_name }}"
-                 class="b-card-portrait">
+                 alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
             <div class="b-card-info">
                 <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                    <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if loc and loc.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
                     <span class="b-card-name">{{ char.character_name }}</span>
-                    {% if is_active %}
-                    <span class="b-badge is-active">Active</span>
-                    {% endif %}
+                    {% if is_active %}<span class="b-badge is-active">Active</span>{% endif %}
+                    {% if w == 'empty' %}<span class="b-badge is-danger" style="font-size:8px;">EMPTY</span>
+                    {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
+                    {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
+                    {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
                 </div>
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
                     {% if char.corporation_id %}
-                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32"
-                         class="corp-logo"
-                         onerror="this.style.display='none'">
+                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" onerror="this.style.display='none'">
                     {% endif %}
                     {{ char.corporation_name }}
                 </div>
                 {% endif %}
-                {% if char.alliance_name %}
-                <div class="b-card-sub" style="color:var(--accent)">{{ char.alliance_name }}</div>
-                {% endif %}
-                {% if char.security_status is not none %}
-                <div class="b-card-sub">
-                    Sec <span class="{{ sec_cls(char.security_status) }}">{{ "%.1f"|format(char.security_status) }}</span>
-                </div>
-                {% endif %}
+                {% if char.alliance_name %}<div class="b-card-sub" style="color:var(--accent)">{{ char.alliance_name }}</div>{% endif %}
             </div>
         </div>
-
-        {# Data rows #}
         <div class="b-card-body">
-
-            {# Location #}
             {% if loc %}
-            <div class="b-row">
-                <span class="b-row-label">Location</span>
-                <span class="b-row-val">
-                    {% if loc.security is not none %}
-                    <span class="{{ sec_cls(loc.security) }}">[{{ "%.1f"|format(loc.security) }}]</span>
-                    {% endif %}
-                    {{ loc.system_name or "Unknown" }}{% if loc.region %} · {{ loc.region }}{% endif %}
-                </span>
-            </div>
-            {% if loc.docked_at %}
-            <div class="b-row">
-                <span class="b-row-label">Dock</span>
-                <span class="b-row-val is-muted" style="max-width:160px;">{{ loc.docked_at }}</span>
-            </div>
-            {% else %}
-            <div class="b-row">
-                <span class="b-row-label">Status</span>
-                <span class="b-row-val is-warn">▶ In Space</span>
-            </div>
+            <div class="b-row"><span class="b-row-label">Location</span><span class="b-row-val">{% if loc.security is not none %}<span class="{{ sec_cls(loc.security) }}">[{{ "%.1f"|format(loc.security) }}]</span> {% endif %}{{ loc.system_name or "Unknown" }}</span></div>
+            {% if loc.docked_at %}<div class="b-row"><span class="b-row-label">Dock</span><span class="b-row-val is-muted" style="max-width:160px;">{{ loc.docked_at }}</span></div>
+            {% else %}<div class="b-row"><span class="b-row-label">Status</span><span class="b-row-val is-warn">In Space</span></div>{% endif %}
+            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
             {% endif %}
-            {% if loc and loc.ship_type_id %}
-            <div class="b-row">
-                <span class="b-row-label">Ship</span>
-                <span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;">
-                    <img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32"
-                         style="width:16px;height:16px;object-fit:contain;border:1px solid var(--border);flex-shrink:0;filter:grayscale(15%);"
-                         onerror="this.style.display='none'">
-                    <span>{{ loc.ship_type_name or "Unknown" }}</span>
-                </span>
-            </div>
-            {% endif %}
-            {% elif char_warn.get("location") %}
-            <div class="b-row">
-                <span class="b-row-label">Location</span>
-                <span class="b-row-val is-warn" title="{{ char_warn.location }}">
-                    ⚠ unavailable
-                    {% if "token_refresh_failed" in char_warn.location %}
-                    · <a href="/auth/add-character" style="color:var(--text);">re-auth</a>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
-
-            {# Wallet #}
-            {% if wallet is not none %}
-            <div class="b-row">
-                <span class="b-row-label">Wallet</span>
-                <span class="b-row-val is-accent">{{ format_isk(wallet) }}</span>
-            </div>
-            {% elif char_warn.get("wallet") %}
-            <div class="b-row">
-                <span class="b-row-label">Wallet</span>
-                <span class="b-row-val is-warn" title="{{ char_warn.wallet }}">
-                    ⚠ unavailable
-                    {% if "token_refresh_failed" in char_warn.wallet %}
-                    · <a href="/auth/add-character" style="color:var(--text);">re-auth</a>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
-
-            {# Missing scopes #}
-            {% if char_needs_reauth %}
-            <div class="b-row">
-                <span class="b-row-label">Scopes</span>
-                <span class="b-row-val is-warn" style="font-size:10px;">
-                    ⚠ missing:
-                    {% if "esi-mail.read_mail.v1" not in char_scopes %}mail {% endif %}
-                    {% if "esi-characters.read_notifications.v1" not in char_scopes %}notifs {% endif %}
-                    {% if "esi-contracts.read_character_contracts.v1" not in char_scopes %}contracts {% endif %}
-                    {% if "esi-planets.manage_planets.v1" not in char_scopes %}pi{% endif %}
-                </span>
-            </div>
-            {% endif %}
-
-            {# Sync status #}
-            {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}
-            {% set char_stale = staleness.get(char.character_id, 'never') %}
-            {% set char_last_sync = last_synced_strs.get(char.character_id) %}
-            <div class="b-row" style="border-bottom:none;">
-                <span class="b-row-label">Sync</span>
-                <span style="display:flex;align-items:center;gap:0.5rem;">
-                    {% if char_sync == 'syncing' %}
-                    <span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.3rem;">
-                        <span class="spin-anim">◌</span> syncing
-                    </span>
-                    {% elif char_sync == 'error' %}
-                    <span class="b-row-val is-danger">✕ failed</span>
-                    {% elif char_last_sync %}
-                    <span class="b-row-val {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-muted{% endif %}"
-                          style="display:flex;align-items:center;gap:0.35rem;">
-                        <span class="b-dot {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-ok{% endif %}"></span>
-                        {{ char_last_sync }}
-                    </span>
-                    {% else %}
-                    <span class="b-row-val is-muted">never</span>
-                    {% endif %}
-
-                    {% if char_sync != 'syncing' and (char_stale in ('critical', 'warning', 'never') or char_sync == 'error') %}
-                    <form method="POST" action="/dashboard/sync/{{ char.character_id }}" style="line-height:1;">
-                        <button type="submit" class="b-btn"
-                                style="flex:none;padding:1px 6px;border:1px solid var(--border);font-size:9px;">
-                            ↺
-                        </button>
-                    </form>
-                    {% endif %}
-                </span>
-            </div>
-
-        </div>{# /b-card-body #}
-
-        {# Actions strip #}
+            {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
+            {% if sk.get('current_skill') %}
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}{% if sk.queue_end_str %}<span style="font-size:8px;color:var(--border);">{{ sk.queue_end_str }} UTC</span>{% endif %}</span></div>
+            {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
+            {% elif w == 'paused' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="font-size:10px;color:var(--muted);">Paused ({{ sk.queue_length }} queued)</span></div>
+            {% elif w == 'empty' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val is-danger" style="font-size:10px;">Empty queue</span></div>{% endif %}
+            {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Sync</span><span style="display:flex;align-items:center;gap:0.5rem;">{% if char_sync == 'syncing' %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.3rem;"><span class="spin-anim">◌</span> syncing</span>{% elif char_sync == 'error' %}<span class="b-row-val is-danger">✕</span>{% elif char_last_sync %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.35rem;"><span class="b-dot {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-ok{% endif %}"></span>{{ char_last_sync }}</span>{% else %}<span class="b-row-val is-muted">never</span>{% endif %}{% if char_sync != 'syncing' and (char_stale in ('critical', 'warning', 'never') or char_sync == 'error') %}<form method="POST" action="/dashboard/sync/{{ char.character_id }}" style="line-height:1;"><button type="submit" class="b-btn" style="flex:none;padding:1px 6px;border:1px solid var(--border);font-size:9px;">↺</button></form>{% endif %}</span></div>
+        </div>
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
-            {% if not is_active %}
-            <form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;">
-                <button type="submit" class="b-btn" style="flex:1;">Set Active</button>
-            </form>
-            {% endif %}
-            {% if char_needs_reauth %}
-            <a href="/auth/add-character" class="b-btn is-warn">Re-auth</a>
-            {% endif %}
-            <form method="POST" action="/auth/remove/{{ char.character_id }}"
-                  onsubmit="return confirm('Remove {{ char.character_name }}?')"
-                  style="display:flex;flex:1;">
-                <button type="submit" class="b-btn is-danger" style="flex:1;">✕ Remove</button>
-            </form>
+            {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
+            <a href="/auth/add-character" class="b-btn" style="font-size:9px;" title="Re-auth">↻</a>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">✕</button></form>
         </div>
+    </div>
 
-    </div>{# /b-card #}
     {% endfor %}
-    </div>{# /b-grid-3 #}
+    </div>
+</div>
+{% endif %}
+
+{# ── Skill Training Summary ────────────────────────────────────────────────── #}
+{% set ns_training = namespace(training=0, empty=0, warning=0) %}
+{% for group_name, items in skill_groups.items() %}
+    {% for item in items %}
+        {% if item.warning == 'empty' or item.warning == 'paused' %}{% set ns_training.empty = ns_training.empty + 1 %}
+        {% elif item.warning in ('ok', 'warning', 'critical') %}{% set ns_training.training = ns_training.training + 1 %}
+            {% if item.warning in ('warning', 'critical') %}{% set ns_training.warning = ns_training.warning + 1 %}{% endif %}
+        {% endif %}
+    {% endfor %}
+{% endfor %}
+<div class="b-section">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+            {% if ns_training.empty > 0 %}
+            <span class="b-dot is-error pulse-anim"></span>
+            {% else %}
+            <span class="b-dot is-ok"></span>
+            {% endif %}
+            <span style="font-size:11px;color:var(--text);">
+                <strong>{{ ns_training.training }}</strong> training
+                {% if ns_training.empty > 0 %} · <span style="color:var(--danger);">{{ ns_training.empty }} empty</span>{% endif %}
+                {% if ns_training.warning > 0 %} · <span style="color:var(--accent);">{{ ns_training.warning }} expiring soon</span>{% endif %}
+            </span>
+        </div>
+        <a href="/characters?sort=training" class="b-link" style="font-size:10px;">Skill Queue →</a>
+    </div>
 </div>
 
-{# ── Skill Queue ─────────────────────────────────────────────────────────── #}
+{# ── Wealth Breakdown ─────────────────────────────────────────────────────── #}
+{% if char_rows %}
 <div class="b-section">
     <div class="b-section-head">
-        <span class="b-label">Skill Queue</span>
-        <a href="/characters" class="b-link">Full View →</a>
+        <span class="b-label">Wealth by Character</span>
     </div>
-
-    {% set ns_all = namespace(all_ok=true) %}
-    {% for group_name, items in skill_groups.items() %}
-        {% set ns = namespace(any_training=false) %}
-        {% for item in items %}{% if item.warning in ('ok', 'warning', 'critical') %}{% set ns.any_training = true %}{% endif %}{% endfor %}
-        {% if not ns.any_training %}{% set ns_all.all_ok = false %}{% endif %}
-    {% endfor %}
-
-    {% if ns_all.all_ok %}
-    <div class="b-table-row" style="color:var(--success);">
-        <span class="b-dot is-ok"></span>
-        <span style="font-size:11px;letter-spacing:0.1em;">All accounts have active training</span>
-    </div>
-    {% else %}
-    {% for group_name, items in skill_groups.items() %}
-        {% set ns = namespace(any_training=false) %}
-        {% for item in items %}{% if item.warning in ('ok', 'warning', 'critical') %}{% set ns.any_training = true %}{% endif %}{% endfor %}
-
-        {# Compute worst badge #}
-        {% set ns2 = namespace(worst='') %}
-        {% for item in items %}
-            {% if item.warning == 'empty' and ns2.worst != 'critical' %}{% set ns2.worst = 'empty' %}{% endif %}
-            {% if item.warning == 'critical' %}{% set ns2.worst = 'critical' %}{% endif %}
-            {% if item.warning == 'warning' and ns2.worst not in ('critical', 'empty') %}{% set ns2.worst = 'warning' %}{% endif %}
-        {% endfor %}
-
-        <div style="border-bottom:1px solid var(--border);{% if not ns.any_training %}border-left:2px solid var(--danger);{% endif %}">
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.45rem 0.75rem;border-bottom:1px solid var(--border);">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                    <span class="b-dot {% if ns.any_training %}is-ok{% else %}is-error pulse-anim{% endif %}"></span>
-                    <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;">{{ group_name }}</span>
-                </div>
-                <div>
-                    {% if not ns.any_training %}
-                    <span class="b-badge is-danger">No Training</span>
-                    {% elif ns2.worst == 'critical' %}
-                    <span class="b-badge is-warn">&lt; 7d</span>
-                    {% elif ns2.worst == 'warning' %}
-                    <span class="b-badge is-warn">&lt; 14d</span>
-                    {% endif %}
-                </div>
-            </div>
-
-            {% for item in items %}
-            <div class="b-table-row">
-                <img src="https://images.evetech.net/characters/{{ item.char.character_id }}/portrait?size=32"
-                     class="b-portrait-sm" alt="">
-                <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
-                        <span style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                            {{ item.char.character_name.split(' ')[0] }}
-                            {% if item.current_skill %}
-                            <span style="color:var(--muted);"> · {{ item.current_skill }} {{ item.current_level }}</span>
-                            {% endif %}
-                        </span>
-                        <span style="font-size:11px;flex-shrink:0;"
-                              class="{% if item.warning == 'empty' %}is-danger{% elif item.warning == 'critical' %}is-warn{% elif item.warning == 'warning' %}is-warn{% else %}is-muted{% endif %}">
-                            {% if item.time_remaining_str %}{{ item.time_remaining_str }}{% elif item.warning == 'empty' %}empty{% endif %}
-                        </span>
-                    </div>
-                    {% if item.progress_pct > 0 %}
-                    <div class="b-progress">
-                        <div class="b-progress-fill {% if item.warning == 'critical' %}is-crit{% elif item.warning == 'warning' %}is-warn{% else %}is-active{% endif %}"
-                             style="width:{{ item.progress_pct }}%"></div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
+    {% for row in char_rows %}
+    {% set pct = ((row.wallet or 0) / total_wallet * 100) if total_wallet > 0 else 0 %}
+    <div class="b-table-row">
+        <div style="display:flex;align-items:center;gap:0.5rem;flex:1;min-width:0;">
+            <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if row.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
+            <img src="https://images.evetech.net/characters/{{ row.char.character_id }}/portrait?size=32"
+                 class="b-portrait-sm" alt="">
+            <span style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                {{ row.char.character_name }}
+            </span>
         </div>
+        <div style="flex:2;display:flex;align-items:center;gap:0.5rem;">
+            <div style="flex:1;height:4px;background:var(--border);">
+                <div style="height:100%;width:{{ pct }}%;background:var(--accent);"></div>
+            </div>
+            <span style="font-size:11px;color:var(--accent);min-width:90px;text-align:right;">{{ row.wallet_str }}</span>
+        </div>
+    </div>
     {% endfor %}
-    {% endif %}
 </div>
+{% endif %}
 
 {# ── Industry Jobs + Market Orders ───────────────────────────────────────── #}
 <div class="b-grid-2 b-section">

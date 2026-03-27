@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}INDUSTRY — VIGILANT
+<script>
+/* ── Persist manufacturing state in localStorage ────────────────────────── */
+var MFG_KEY = 'vigilant_mfg_state';
+
+function saveMfgState() {
+    var state = {
+        typeId: selectedTypeId,
+        runs: document.getElementById('inp-runs').value,
+        me: document.getElementById('inp-me').value,
+        te: document.getElementById('inp-te').value,
+        structure: document.getElementById('inp-structure').value,
+        rig: document.getElementById('inp-rig').value,
+        security: document.getElementById('inp-security').value,
+    };
+    localStorage.setItem(MFG_KEY, JSON.stringify(state));
+}
+
+function restoreMfgState() {
+    var raw = localStorage.getItem(MFG_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        if (state.typeId) {
+            document.getElementById('inp-runs').value = state.runs || 1;
+            document.getElementById('inp-me').value = state.me || 0;
+            document.getElementById('me-val').textContent = state.me || 0;
+            document.getElementById('inp-te').value = state.te || 0;
+            document.getElementById('te-val').textContent = state.te || 0;
+            document.getElementById('inp-structure').value = state.structure || 'npc_station';
+            document.getElementById('inp-rig').value = state.rig || 'none';
+            document.getElementById('inp-security').value = state.security || 'highsec';
+            selectBlueprint(state.typeId);
+        }
+    } catch(e) {}
+}
+
+function resetManufacturing() {
+    localStorage.removeItem(MFG_KEY);
+    window.location.href = '/industry';
+}
+
+/* Hook into recalculate to auto-save */
+var _origRecalc = recalculate;
+recalculate = function() {
+    _origRecalc();
+    saveMfgState();
+};
+
+/* Restore on page load */
+document.addEventListener('DOMContentLoaded', restoreMfgState);
+</script>
+
+{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Manufacturing Calculator</h1>
+    <div style="display:flex;gap:0.5rem;">
+        <button onclick="resetManufacturing()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+        <a href="/industry/compression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Compression →</a>
+    </div>
+</div>
+
+{# ── Blueprint Search ─────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Blueprint Search</span>
+        </div>
+        <div style="padding:0.75rem;">
+            <input type="text" id="bp-search" placeholder="Search blueprints (e.g. Drake, Rifter, Cerberus, Thanatos)..."
+                   hx-get="/industry/search"
+                   hx-trigger="input changed delay:300ms"
+                   hx-target="#search-results"
+                   hx-swap="innerHTML"
+                   name="q"
+                   style="width:100%;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;outline:none;"
+                   autocomplete="off">
+        </div>
+        <div id="search-results"></div>
+    </div>
+</div>
+
+{# ── Settings Panel (hidden until blueprint selected) ─────────────────────── #}
+<div id="settings-panel" style="display:none;" class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Manufacturing Settings</span>
+        </div>
+        <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Runs</label>
+                <input type="number" id="inp-runs" value="1" min="1" max="1000"
+                       onchange="recalculate()"
+                       style="width:70px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;text-align:center;">
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">ME <span id="me-val" style="color:var(--text);">0</span></label>
+                <input type="range" id="inp-me" value="0" min="0" max="10" step="1"
+                       oninput="document.getElementById('me-val').textContent=this.value; recalculate()"
+                       style="width:120px;accent-color:var(--accent);">
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">TE <span id="te-val" style="color:var(--text);">0</span></label>
+                <input type="range" id="inp-te" value="0" min="0" max="20" step="2"
+                       oninput="document.getElementById('te-val').textContent=this.value; recalculate()"
+                       style="width:120px;accent-color:var(--accent);">
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Structure</label>
+                <select id="inp-structure" onchange="recalculate()"
+                        style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, s in structures.items() %}
+                    <option value="{{ key }}">{{ s.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rig</label>
+                <select id="inp-rig" onchange="recalculate()"
+                        style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, r in rigs.items() %}
+                    <option value="{{ key }}">{{ r.label }}{% if r.mat > 0 %} ({{ "%.1f"|format(r.mat * 100) }}%){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Security</label>
+                <select id="inp-security" onchange="recalculate()"
+                        style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, s in sec_statuses.items() %}
+                    <option value="{{ key }}">{{ s.label }} ({{ "%.1f"|format(s.mult) }}x)</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+{# ── Calculation Results ──────────────────────────────────────────────────── #}
+<div id="calc-results"></div>
+
+{# ── Shopping List (generated on demand) ──────────────────────────────────── #}
+<div id="shopping-list-container"></div>
+
+{# ── Shopping List Button (hidden until blueprint selected) ───────────────── #}
+<div id="shopping-btn-wrap" style="display:none;margin-top:1rem;">
+    <button onclick="generateShoppingList()" class="b-btn"
+            style="padding:0.5rem 1.25rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;width:100%;">
+        Generate Shopping List
+    </button>
+</div>
+
+<script>
+var selectedTypeId = null;
+var recalcTimer = null;
+
+/* Track which components are being built (expanded) and their settings */
+var buildComponents = {};
+
+function selectBlueprint(typeId) {
+    selectedTypeId = typeId;
+    buildComponents = {};
+    document.getElementById('settings-panel').style.display = '';
+    document.getElementById('shopping-btn-wrap').style.display = '';
+    document.getElementById('search-results').innerHTML = '';
+    document.getElementById('bp-search').value = '';
+    document.getElementById('shopping-list-container').innerHTML = '';
+    recalculate();
+}
+
+function recalculate() {
+    if (!selectedTypeId) return;
+    clearTimeout(recalcTimer);
+    recalcTimer = setTimeout(function() {
+        var params = new URLSearchParams({
+            type_id: selectedTypeId,
+            runs: document.getElementById('inp-runs').value,
+            me: document.getElementById('inp-me').value,
+            te: document.getElementById('inp-te').value,
+            structure: document.getElementById('inp-structure').value,
+            rig: document.getElementById('inp-rig').value,
+            security: document.getElementById('inp-security').value,
+        });
+        htmx.ajax('GET', '/industry/calculate?' + params.toString(), '#calc-results');
+        /* Clear shopping list when main settings change */
+        document.getElementById('shopping-list-container').innerHTML = '';
+    }, 150);
+}
+
+function toggleComponent(typeId, needed, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    if (panel.style.display === 'none') {
+        panel.style.display = '';
+        btn.textContent = 'Build \u25BE';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        /* Inherit settings from parent blueprint */
+        var parentMe = document.getElementById('inp-me').value;
+        var parentStruct = document.getElementById('inp-structure').value;
+        var parentRig = document.getElementById('inp-rig').value;
+        var parentSec = document.getElementById('inp-security').value;
+        buildComponents[typeId] = {me: parseInt(parentMe), structure: parentStruct, rig: parentRig, security: parentSec};
+        var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + parentMe + '&structure=' + parentStruct + '&rig=' + parentRig + '&security=' + parentSec;
+        htmx.ajax('GET', '/industry/component?' + params, '#component-' + typeId);
+    } else {
+        panel.style.display = 'none';
+        btn.textContent = 'Build \u25B8';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+        /* Unregister */
+        delete buildComponents[typeId];
+    }
+    /* Clear shopping list when build/buy changes */
+    document.getElementById('shopping-list-container').innerHTML = '';
+}
+
+/* Called by sub-component panels when their settings change */
+function recalcComponent(typeId, qty) {
+    var meEl = document.getElementById('sub-me-' + typeId);
+    var structEl = document.getElementById('sub-struct-' + typeId);
+    var rigEl = document.getElementById('sub-rig-' + typeId);
+    var secEl = document.getElementById('sub-sec-' + typeId);
+    if (meEl && structEl && rigEl && secEl) {
+        buildComponents[typeId] = {
+            me: parseInt(meEl.value),
+            structure: structEl.value,
+            rig: rigEl.value,
+            security: secEl.value,
+        };
+    }
+    var p = new URLSearchParams({
+        type_id: typeId,
+        needed: qty,
+        me: meEl ? meEl.value : 0,
+        structure: structEl ? structEl.value : 'npc_station',
+        rig: rigEl ? rigEl.value : 'none',
+        security: secEl ? secEl.value : 'highsec',
+    });
+    htmx.ajax('GET', '/industry/component?' + p.toString(), '#component-' + typeId);
+    /* Clear shopping list when component settings change */
+    document.getElementById('shopping-list-container').innerHTML = '';
+}
+
+function generateShoppingList() {
+    if (!selectedTypeId) return;
+    var params = new URLSearchParams({
+        type_id: selectedTypeId,
+        runs: document.getElementById('inp-runs').value,
+        me: document.getElementById('inp-me').value,
+        structure: document.getElementById('inp-structure').value,
+        rig: document.getElementById('inp-rig').value,
+        security: document.getElementById('inp-security').value,
+        build_json: JSON.stringify(buildComponents),
+    });
+    htmx.ajax('GET', '/industry/shopping-list?' + params.toString(), '#shopping-list-container');
+}
+</script>
+
+
+<script>
+/* ── Persist manufacturing state in localStorage ────────────────────────── */
+var MFG_KEY = 'vigilant_mfg_state';
+
+function saveMfgState() {
+    var state = {
+        typeId: selectedTypeId,
+        runs: document.getElementById('inp-runs').value,
+        me: document.getElementById('inp-me').value,
+        te: document.getElementById('inp-te').value,
+        structure: document.getElementById('inp-structure').value,
+        rig: document.getElementById('inp-rig').value,
+        security: document.getElementById('inp-security').value,
+    };
+    localStorage.setItem(MFG_KEY, JSON.stringify(state));
+}
+
+function restoreMfgState() {
+    var raw = localStorage.getItem(MFG_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        if (state.typeId) {
+            document.getElementById('inp-runs').value = state.runs || 1;
+            document.getElementById('inp-me').value = state.me || 0;
+            document.getElementById('me-val').textContent = state.me || 0;
+            document.getElementById('inp-te').value = state.te || 0;
+            document.getElementById('te-val').textContent = state.te || 0;
+            document.getElementById('inp-structure').value = state.structure || 'npc_station';
+            document.getElementById('inp-rig').value = state.rig || 'none';
+            document.getElementById('inp-security').value = state.security || 'highsec';
+            selectBlueprint(state.typeId);
+        }
+    } catch(e) {}
+}
+
+function resetManufacturing() {
+    localStorage.removeItem(MFG_KEY);
+    window.location.href = '/industry';
+}
+
+/* Hook into recalculate to auto-save */
+var _origRecalc = recalculate;
+recalculate = function() {
+    _origRecalc();
+    saveMfgState();
+};
+
+/* Restore on page load */
+document.addEventListener('DOMContentLoaded', restoreMfgState);
+</script>
+
+{% endblock %}

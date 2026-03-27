@@ -140,6 +140,16 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def _format_isk_py(amount: float) -> str:
+    if amount >= 1_000_000_000_000:
+        return f"{amount / 1_000_000_000_000:.2f}T ISK"
+    if amount >= 1_000_000_000:
+        return f"{amount / 1_000_000_000:.2f}B ISK"
+    if amount >= 1_000_000:
+        return f"{amount / 1_000_000:.2f}M ISK"
+    return f"{amount:,.0f} ISK"
+
+
 def _age_str(last_synced: datetime | None) -> str | None:
     if last_synced is None:
         return None
@@ -237,13 +247,14 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
         if not client:
             return char.character_id, None, err
         try:
-            loc, ship_data = await asyncio.gather(
+            loc, ship_data, online_data = await asyncio.gather(
                 esi_char.get_location(client, char.character_id),
                 esi_char.get_ship(client, char.character_id) if _has_scope(char, "esi-location.read_ship_type.v1") else asyncio.sleep(0, result={}),
+                esi_char.get_online(client, char.character_id) if _has_scope(char, "esi-location.read_online.v1") else asyncio.sleep(0, result={}),
             )
             system_id = loc.get("solar_system_id")
             result = {"system_id": system_id, "system_name": None, "security": None, "region": None, "docked_at": None,
-                      "ship_type_id": None, "ship_type_name": None, "ship_name": None}
+                      "ship_type_id": None, "ship_type_name": None, "ship_name": None, "is_online": False}
             if system_id:
                 sys_info = await sde.system_info(db, system_id)
                 if sys_info:
@@ -268,6 +279,7 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
                 result["ship_name"] = ship_data.get("ship_name")
                 if ship_type_id:
                     result["ship_type_name"] = await sde.type_id_to_name(db, ship_type_id)
+            result["is_online"] = online_data.get("online", False) if isinstance(online_data, dict) else False
             return char.character_id, result, None
         except Exception as e:
             logger.warning("Location fetch failed for char %s: %s", char.character_id, e)
@@ -366,7 +378,20 @@ async def fetch_mail_data(characters: list[Character], db: AsyncSession) -> dict
         try:
             headers = await esi_char.get_mail_headers(client, char.character_id)
             unread = sum(1 for m in headers if not m.get("is_read", False))
-            return char.character_id, {"unread_count": unread}, None
+            return char.character_id, {
+                "unread_count": unread,
+                "headers": [
+                    {
+                        "mail_id": m.get("mail_id"),
+                        "subject": m.get("subject", "(No Subject)"),
+                        "from": m.get("from"),
+                        "timestamp": m.get("timestamp"),
+                        "is_read": m.get("is_read", False),
+                        "labels": m.get("labels", []),
+                    }
+                    for m in headers[:20]
+                ],
+            }, None
         except Exception as e:
             logger.warning("Mail fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, None, f"esi_error: {type(e).__name__}"
@@ -385,7 +410,22 @@ async def fetch_notification_data(characters: list[Character], db: AsyncSession)
             notifs = await esi_char.get_notifications(client, char.character_id)
             unread = [n for n in notifs if not n.get("is_read", True)]
             types = list({n.get("type") for n in unread[:20] if n.get("type")})[:5]
-            return char.character_id, {"unread_count": len(unread), "recent_types": types}, None
+            return char.character_id, {
+                "unread_count": len(unread),
+                "recent_types": types,
+                "notifications": [
+                    {
+                        "notification_id": n.get("notification_id"),
+                        "type": n.get("type"),
+                        "text": n.get("text", ""),
+                        "timestamp": n.get("timestamp"),
+                        "is_read": n.get("is_read", True),
+                        "sender_id": n.get("sender_id"),
+                        "sender_type": n.get("sender_type"),
+                    }
+                    for n in notifs[:30]
+                ],
+            }, None
         except Exception as e:
             logger.warning("Notifications fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, None, f"esi_error: {type(e).__name__}"
@@ -1001,7 +1041,7 @@ async def index(request: Request):
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
@@ -1043,6 +1083,28 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         _process_skillqueue(list(characters), data["skillqueue_raw"], db),
     )
     skill_groups = group_skill_data(skill_data)
+    # Build skill_map for per-character lookup in template
+    skill_map = {item["char"].character_id: item for item in skill_data}
+
+    # Sort characters
+    if sort == "name":
+        characters = sorted(characters, key=lambda c: c.character_name.lower())
+    elif sort == "corp":
+        characters = sorted(characters, key=lambda c: (c.corporation_name or "").lower())
+    elif sort == "training":
+        characters = sorted(characters, key=lambda c: 0 if skill_map.get(c.character_id, {}).get("current_skill") else 1)
+    elif sort == "queue":
+        from datetime import datetime as _dt
+        characters = sorted(characters, key=lambda c: skill_map.get(c.character_id, {}).get("queue_end") or _dt.max.replace(tzinfo=timezone.utc))
+    else:  # custom (default)
+        characters = sorted(characters, key=lambda c: (c.account_group or "Ungrouped", c.sort_order))
+
+    # Build groups for custom view
+    char_groups = {}
+    for char in characters:
+        group = char.account_group or "Ungrouped"
+        char_groups.setdefault(group, []).append(char)
+
     server_status = {"online": None, "players": None}  # loaded client-side
     zkill = data["zkill"]
 
@@ -1072,6 +1134,20 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         last_synced_strs[cid] = _age_str(cache.last_synced if cache else None)
 
     any_syncing = any(s == "syncing" for s in sync_statuses.values())
+
+    # Build char_rows for wealth breakdown
+    char_rows = []
+    for char in characters:
+        cid = char.character_id
+        w = wallets.get(cid)
+        loc = locations.get(cid)
+        char_rows.append({
+            "char": char,
+            "wallet": w,
+            "wallet_str": _format_isk_py(w) if w else "—",
+            "is_online": loc.get("is_online", False) if isinstance(loc, dict) else False,
+        })
+    char_rows.sort(key=lambda x: x["wallet"] or 0, reverse=True)
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -1104,6 +1180,10 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "last_synced_strs": last_synced_strs,
         "any_syncing": any_syncing,
         "sync_warnings": sync_warnings,
+        "char_rows": char_rows,
+        "skill_map": skill_map,
+        "sort": sort,
+        "char_groups": char_groups,
     })
 
 

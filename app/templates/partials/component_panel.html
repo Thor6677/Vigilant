@@ -1,0 +1,181 @@
+{# Sub-component Build panel — inline expansion for a buildable material #}
+<div style="margin:0 0 0.5rem 2.25rem;border:1px solid var(--border);border-top:none;background:var(--surface);">
+
+    {# Component header with settings #}
+    <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <img src="https://images.evetech.net/types/{{ type_id }}/icon?size=32"
+                 style="width:20px;height:20px;border:1px solid var(--border);"
+                 onerror="this.style.display='none'">
+            <span style="font-size:11px;font-weight:600;color:var(--accent);">{{ product_name }}</span>
+            <span style="font-size:10px;color:var(--muted);">× {{ "{:,}".format(needed) }}</span>
+        </div>
+
+        {# ME slider #}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">ME <span id="sub-me-val-{{ type_id }}" style="color:var(--text);">{{ me }}</span></label>
+            <input type="range" id="sub-me-{{ type_id }}" value="{{ me }}" min="0" max="10" step="1"
+                   oninput="document.getElementById('sub-me-val-{{ type_id }}').textContent=this.value; recalcComponent({{ type_id }}, {{ needed }})"
+                   style="width:90px;accent-color:var(--accent);">
+        </div>
+
+        {# Structure #}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Structure</label>
+            <select id="sub-struct-{{ type_id }}" onchange="recalcComponent({{ type_id }}, {{ needed }})"
+                    style="padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                {% for key, s in structures.items() %}
+                <option value="{{ key }}" {% if key == structure %}selected{% endif %}>{{ s.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        {# Rig #}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Rig</label>
+            <select id="sub-rig-{{ type_id }}" onchange="recalcComponent({{ type_id }}, {{ needed }})"
+                    style="padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                {% for key, r in rigs.items() %}
+                <option value="{{ key }}" {% if key == rig %}selected{% endif %}>{{ r.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        {# Security #}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Security</label>
+            <select id="sub-sec-{{ type_id }}" onchange="recalcComponent({{ type_id }}, {{ needed }})"
+                    style="padding:2px 4px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                {% for key, s in sec_statuses.items() %}
+                <option value="{{ key }}" {% if key == security %}selected{% endif %}>{{ s.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        {# Copy parent settings button #}
+        <button onclick="copyParentSettings({{ type_id }}, {{ needed }})" class="b-btn"
+                style="padding:2px 6px;font-size:9px;border:1px solid var(--accent);color:var(--accent);flex:none;align-self:flex-end;">
+            ↓ Parent
+        </button>
+    </div>
+
+    {# Build vs Buy comparison #}
+    <div style="display:flex;border-bottom:1px solid var(--border);">
+        <div style="flex:1;padding:0.5rem 0.75rem;text-align:center;border-right:1px solid var(--border);">
+            <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">Build Cost</div>
+            <div style="font-size:13px;font-weight:600;color:{% if total_build_cost < total_buy_cost and total_buy_cost > 0 %}var(--success){% else %}var(--text){% endif %};">
+                {% if total_build_cost >= 1000000000 %}{{ "%.2f"|format(total_build_cost / 1000000000) }}B
+                {% elif total_build_cost >= 1000000 %}{{ "%.2f"|format(total_build_cost / 1000000) }}M
+                {% else %}{{ "{:,.0f}".format(total_build_cost) }}{% endif %} ISK
+            </div>
+            {% if total_buy_cost > 0 and total_build_cost < total_buy_cost %}
+            <div style="font-size:9px;color:var(--success);margin-top:2px;">
+                Save {% set diff = total_buy_cost - total_build_cost %}
+                {% if diff >= 1000000 %}{{ "%.1f"|format(diff / 1000000) }}M{% else %}{{ "{:,.0f}".format(diff) }}{% endif %} ISK
+            </div>
+            {% endif %}
+        </div>
+        <div style="flex:1;padding:0.5rem 0.75rem;text-align:center;">
+            <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">Buy Cost</div>
+            <div style="font-size:13px;font-weight:600;color:{% if total_buy_cost > 0 and total_buy_cost <= total_build_cost %}var(--success){% else %}var(--text){% endif %};">
+                {% if total_buy_cost >= 1000000000 %}{{ "%.2f"|format(total_buy_cost / 1000000000) }}B
+                {% elif total_buy_cost >= 1000000 %}{{ "%.2f"|format(total_buy_cost / 1000000) }}M
+                {% elif total_buy_cost > 0 %}{{ "{:,.0f}".format(total_buy_cost) }}
+                {% else %}—{% endif %} {% if total_buy_cost > 0 %}ISK{% endif %}
+            </div>
+            {% if buy_unit_price > 0 %}
+            <div style="font-size:9px;color:var(--muted);margin-top:2px;">{{ "{:,.0f}".format(buy_unit_price) }} each</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Sub-material BOM #}
+    {% for row in sub_rows %}
+    <div>
+        <div class="b-table-row" style="padding-left:1rem;{% if row.buildable %}border-bottom:none;{% endif %}">
+            <span style="flex:3;display:flex;align-items:center;gap:0.35rem;">
+                <img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+                     style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
+                     onerror="this.style.display='none'">
+                <span style="font-size:10px;color:var(--text);">{{ row.name }}</span>
+            </span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(row.base_qty) }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--text);font-weight:{% if row.adjusted_qty < row.base_qty %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
+            {% if row.adjusted_qty < row.base_qty %}
+            <span style="flex:1;text-align:right;font-size:9px;color:var(--success);">-{{ "{:,}".format(row.base_qty - row.adjusted_qty) }}</span>
+            {% else %}
+            <span style="flex:1;text-align:right;font-size:9px;color:var(--muted);">—</span>
+            {% endif %}
+            {% if row.unit_price > 0 %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
+            {% else %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            {% endif %}
+        </div>
+        {% if row.buildable %}
+        <div style="padding:0 0.75rem 0.3rem 3rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
+            <button onclick="toggleSubComponent({{ row.type_id }}, {{ row.adjusted_qty }}, this)"
+                    class="b-btn" style="padding:1px 6px;font-size:8px;border:1px solid var(--border);flex:none;">
+                Build ▸
+            </button>
+            <span style="font-size:8px;color:var(--muted);">has blueprint</span>
+        </div>
+        <div id="subcomp-{{ row.type_id }}" style="display:none;"></div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+(function(){
+    window.recalcComponent = window.recalcComponent || function(typeId, qty) {
+        var p = new URLSearchParams({
+            type_id: typeId,
+            needed: qty,
+            me: document.getElementById('sub-me-' + typeId).value,
+            structure: document.getElementById('sub-struct-' + typeId).value,
+            rig: document.getElementById('sub-rig-' + typeId).value,
+            security: document.getElementById('sub-sec-' + typeId).value,
+        });
+        htmx.ajax('GET', '/industry/component?' + p.toString(), '#component-' + typeId);
+    };
+    window.toggleSubComponent = window.toggleSubComponent || function(typeId, needed, btn) {
+        var panel = document.getElementById('subcomp-' + typeId);
+        if (panel.style.display === 'none') {
+            panel.style.display = '';
+            btn.textContent = 'Build \u25BE';
+            btn.style.borderColor = 'var(--accent)';
+            btn.style.color = 'var(--accent)';
+            var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
+            var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
+            var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
+            var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
+            var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
+            htmx.ajax('GET', '/industry/component?' + params, '#subcomp-' + typeId);
+        } else {
+            panel.style.display = 'none';
+            btn.textContent = 'Build \u25B8';
+            btn.style.borderColor = 'var(--border)';
+            btn.style.color = '';
+        }
+    };
+    window.copyParentSettings = window.copyParentSettings || function(typeId, needed) {
+        var pMe = document.getElementById('inp-me');
+        var pSt = document.getElementById('inp-structure');
+        var pRi = document.getElementById('inp-rig');
+        var pSe = document.getElementById('inp-security');
+        if (pMe) {
+            var slider = document.getElementById('sub-me-' + typeId);
+            slider.value = pMe.value;
+            var label = document.getElementById('sub-me-val-' + typeId);
+            if (label) label.textContent = pMe.value;
+        }
+        if (pSt) document.getElementById('sub-struct-' + typeId).value = pSt.value;
+        if (pRi) document.getElementById('sub-rig-' + typeId).value = pRi.value;
+        if (pSe) document.getElementById('sub-sec-' + typeId).value = pSe.value;
+        recalcComponent(typeId, needed);
+    };
+})();
+</script>

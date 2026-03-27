@@ -1,0 +1,98 @@
+{# Shopping list — aggregated materials, multibuy-compatible #}
+<div class="b-section" id="shopping-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Shopping List</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <span style="font-size:10px;color:var(--muted);">{{ item_count }} item{{ 's' if item_count != 1 else '' }}</span>
+                <button onclick="copyShoppingList()" id="copy-btn"
+                        class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);flex:none;">
+                    Copy for Multibuy
+                </button>
+                {% if mineral_items %}
+                <button onclick="sendToCompressor()" id="compress-btn"
+                        class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);flex:none;">
+                    Send Minerals to Compressor
+                </button>
+                <script>
+                function sendToCompressor() {
+                    var url = '/industry/compression?{% for tid, qty in mineral_items.items() %}mineral_{{ tid }}={{ qty }}{% if not loop.last %}&{% endif %}{% endfor %}';
+                    var existing = localStorage.getItem('vigilant_comp_state');
+                    if (existing) {
+                        try {
+                            var state = JSON.parse(existing);
+                            var hasValues = false;
+                            for (var k in state) {
+                                if (k.indexOf('mineral_') === 0 && parseInt(state[k]) > 0) { hasValues = true; break; }
+                            }
+                            if (hasValues) {
+                                if (!confirm('The Compression Calculator already has mineral values saved. Overwrite with these new values?')) {
+                                    return;
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    localStorage.removeItem('vigilant_comp_state');
+                    window.location.href = url;
+                }
+                </script>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Material list #}
+        {% for item in items %}
+        <div class="b-table-row">
+            <span style="flex:3;font-size:11px;color:var(--text);">{{ item.name }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:600;">{{ "{:,}".format(item.qty) }}</span>
+            {% set p = price_map.get(item.name, 0) %}
+            {% if p > 0 %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--accent);">
+                {% set cost = p * item.qty %}
+                {% if cost >= 1000000000 %}{{ "%.1f"|format(cost / 1000000000) }}B
+                {% elif cost >= 1000000 %}{{ "%.1f"|format(cost / 1000000) }}M
+                {% else %}{{ "{:,.0f}".format(cost) }}{% endif %}
+            </span>
+            {% else %}
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {# Total #}
+        <div class="b-table-row" style="border-top:2px solid var(--border);">
+            <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Estimated Total</span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">
+                {% if total_cost >= 1000000000 %}{{ "%.2f"|format(total_cost / 1000000000) }}B ISK
+                {% elif total_cost >= 1000000 %}{{ "%.2f"|format(total_cost / 1000000) }}M ISK
+                {% else %}{{ "{:,.0f}".format(total_cost) }} ISK{% endif %}
+            </span>
+        </div>
+    </div>
+
+    {# Copyable text area (hidden, used by clipboard API) #}
+    <textarea id="multibuy-text" readonly
+              style="width:100%;margin-top:0.5rem;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;min-height:60px;max-height:300px;"
+              onclick="this.select()">{{ multibuy_text }}</textarea>
+    <div style="font-size:9px;color:var(--muted);margin-top:3px;">
+        Copy the text above and paste into EVE's Multibuy window (Alt+M → paste). Format: <code>Item Name x{qty}</code>
+    </div>
+</div>
+
+<script>
+function copyShoppingList() {
+    var text = document.getElementById('multibuy-text').value;
+    navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() {
+            btn.textContent = 'Copy for Multibuy';
+            btn.style.color = 'var(--accent)';
+            btn.style.borderColor = 'var(--accent)';
+        }, 2000);
+    });
+}
+</script>

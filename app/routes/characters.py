@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -15,14 +14,13 @@ from app.esi import character as esi_char
 from app.sde import lookup as sde
 
 router = APIRouter(tags=["characters"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 def skill_warning(queue: list, queue_end: datetime | None) -> str:
     if not queue:
         return "empty"
     if queue_end is None:
-        return "empty"
+        return "paused"
     days = (queue_end - datetime.now(timezone.utc)).days
     if days <= 7:
         return "critical"
@@ -189,6 +187,8 @@ def _group_characters(characters: list[Character]) -> dict[str, list[Character]]
 
 @router.get("/characters", response_class=HTMLResponse)
 async def characters_page(request: Request, sort: str = "default", db: AsyncSession = Depends(get_db)):
+    # Characters are now on the dashboard
+    return RedirectResponse(f"/dashboard?sort={sort}")
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")

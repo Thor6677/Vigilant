@@ -1,0 +1,680 @@
+"""Manufacturing calculator — nested build/buy with ME/TE, structure, rig, and security modifiers."""
+
+import json
+import math
+
+from fastapi import APIRouter, Request, Depends, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import get_db, Character
+import asyncio
+from app.sde import lookup as sde
+from app.industry.compression import (
+    MINERALS, MINERAL_IDS, MINERAL_NAMES, ORE_GROUP_SKILL,
+    SKILL_REPROCESSING, SKILL_REPROCESSING_EFFICIENCY,
+    STRUCTURES as REPRO_STRUCTURES, RIGS as REPRO_RIGS,
+    SECURITY as REPRO_SECURITY, IMPLANTS as REPRO_IMPLANTS,
+    TRADE_HUBS, compute_yield, solve_compression,
+)
+from app.esi.client import ESIClient
+from app.esi import market as esi_market
+
+router = APIRouter(tags=["industry"])
+templates = Jinja2Templates(directory="app/templates")
+
+# ── Manufacturing modifier tables ─────────────────────────────────────────────
+
+STRUCTURES = {
+    "npc_station": {"label": "NPC Station",  "mat": 1.00, "time": 1.00},
+    "raitaru":     {"label": "Raitaru",       "mat": 0.99, "time": 0.85},
+    "azbel":       {"label": "Azbel",         "mat": 0.99, "time": 0.80},
+    "sotiyo":      {"label": "Sotiyo",        "mat": 0.99, "time": 0.70},
+}
+
+RIGS = {
+    "none":            {"label": "None",             "mat": 0.0,    "time": 0.0},
+    "t1_basic":        {"label": "T1 Basic",         "mat": 0.020,  "time": 0.20},
+    "t2_basic":        {"label": "T2 Basic",         "mat": 0.024,  "time": 0.24},
+    "t1_specialized":  {"label": "T1 Specialized",   "mat": 0.042,  "time": 0.20},
+    "t2_specialized":  {"label": "T2 Specialized",   "mat": 0.0504, "time": 0.24},
+}
+
+SEC_STATUS = {
+    "highsec":  {"label": "Highsec",      "mult": 1.0},
+    "lowsec":   {"label": "Lowsec",       "mult": 1.9},
+    "nullsec":  {"label": "Null / WH",    "mult": 2.1},
+}
+
+
+def _calc_material(base_qty: int, runs: int, me: int,
+                   struct_mat: float, rig_mat_base: float, sec_mult: float) -> int:
+    me_mod = 1.0 - me / 100.0
+    rig_mod = 1.0 - (rig_mat_base * sec_mult)
+    adjusted = runs * base_qty * me_mod * struct_mat * rig_mod
+    adjusted = round(adjusted, 2)
+    return max(runs, math.ceil(adjusted))
+
+
+async def _get_price_map(db: AsyncSession, type_ids: set[int]) -> dict[int, float]:
+    """Fetch global average prices for a set of type IDs."""
+    price_map: dict[int, float] = {}
+    try:
+        client = ESIClient("", db=db)
+        all_prices = await esi_market.get_market_prices(client)
+        for p in all_prices:
+            tid = p.get("type_id")
+            if tid in type_ids:
+                price_map[tid] = p.get("average_price") or p.get("adjusted_price") or 0
+    except Exception:
+        pass
+    return price_map
+
+
+
+def _calc_time(base_time: int, te: int, struct_time: float, rig_time_base: float,
+               sec_mult: float, industry: int = 5, adv_industry: int = 5) -> int:
+    """Calculate manufacturing time in seconds with all modifiers."""
+    if not base_time:
+        return 0
+    t = base_time
+    t *= (1 - te / 100.0)
+    t *= struct_time
+    t *= (1 - rig_time_base * sec_mult)
+    t *= (1 - industry * 0.04)
+    t *= (1 - adv_industry * 0.03)
+    return max(1, round(t))
+
+
+def _format_time(seconds: int) -> str:
+    """Format seconds into human-readable duration."""
+    if seconds <= 0:
+        return "—"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    mins = (seconds % 3600) // 60
+    if days > 0:
+        return f"{days}d {hours}h {mins}m"
+    if hours > 0:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+@router.get("/industry", response_class=HTMLResponse)
+async def industry_page(request: Request):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+    return templates.TemplateResponse("industry.html", {
+        "request": request,
+        "structures": STRUCTURES,
+        "rigs": RIGS,
+        "sec_statuses": SEC_STATUS,
+    })
+
+
+@router.get("/industry/search", response_class=HTMLResponse)
+async def industry_search(request: Request, q: str = Query(""), db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id") or len(q) < 2:
+        return HTMLResponse("")
+
+    bp_results = await sde.search_types(db, q + " Blueprint", limit=10)
+    raw_results = await sde.search_types(db, q, limit=10)
+
+    seen = set()
+    merged = []
+    for r in bp_results + raw_results:
+        if r["type_id"] not in seen:
+            seen.add(r["type_id"])
+            merged.append(r)
+
+    valid = []
+    for r in merged[:15]:
+        mats = await sde.get_blueprint_materials(db, r["type_id"])
+        if mats:
+            valid.append(r)
+        if len(valid) >= 8:
+            break
+
+    if not valid:
+        return HTMLResponse('<div class="b-empty">No blueprints found</div>')
+
+    html_parts = []
+    for r in valid:
+        html_parts.append(
+            f'<div class="b-table-row" style="cursor:pointer;" '
+            f'onclick="selectBlueprint({r["type_id"]})">'
+            f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
+            f'style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" '
+            f'onerror="this.style.display=\'none\'">'
+            f'<span style="font-size:11px;color:var(--text);">{r["type_name"]}</span>'
+            f'</div>'
+        )
+    return HTMLResponse("\n".join(html_parts))
+
+
+@router.get("/industry/calculate", response_class=HTMLResponse)
+async def industry_calculate(
+    request: Request,
+    type_id: int = Query(...),
+    me: int = Query(0),
+    te: int = Query(0),
+    runs: int = Query(1),
+    structure: str = Query("npc_station"),
+    rig: str = Query("none"),
+    security: str = Query("highsec"),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return HTMLResponse("")
+
+    me = max(0, min(10, me))
+    te = max(0, min(20, te))
+    runs = max(1, min(1000, runs))
+
+    struct_info = STRUCTURES.get(structure, STRUCTURES["npc_station"])
+    rig_info = RIGS.get(rig, RIGS["none"])
+    sec_info = SEC_STATUS.get(security, SEC_STATUS["highsec"])
+
+    materials = await sde.get_blueprint_materials(db, type_id)
+    bp_name = await sde.type_id_to_name(db, type_id) or f"Type {type_id}"
+
+    if not materials:
+        return HTMLResponse(f'<div class="b-empty">No manufacturing data for {bp_name}</div>')
+
+    # Check which materials have blueprints (buildable)
+    all_type_ids = {m["type_id"] for m in materials}
+    price_map = await _get_price_map(db, all_type_ids)
+
+    total_cost = 0.0
+    total_base_cost = 0.0
+    rows = []
+    for m in materials:
+        base_qty = m["quantity"]
+        adjusted_qty = _calc_material(
+            base_qty, runs, me,
+            struct_info["mat"], rig_info["mat"], sec_info["mult"],
+        )
+        base_total = base_qty * runs
+        saved = base_total - adjusted_qty
+
+        price = price_map.get(m["type_id"], 0)
+        line_cost = price * adjusted_qty
+        total_cost += line_cost
+        total_base_cost += price * base_total
+
+        # Check if this material is buildable and get its build time
+        sub_bp = await sde.find_blueprint_for_product(db, m["type_id"])
+        build_time_str = None
+        build_time_secs = 0
+        if sub_bp:
+            base_time = await sde.get_blueprint_time(db, sub_bp)
+            if base_time:
+                build_time_secs = _calc_time(
+                    base_time, te, struct_info["time"],
+                    rig_info.get("time", 0), sec_info["mult"],
+                ) * adjusted_qty  # time per run * number of runs
+                build_time_str = _format_time(build_time_secs)
+
+        rows.append({
+            "type_id": m["type_id"],
+            "name": m["name"],
+            "base_qty": base_qty,
+            "adjusted_qty": adjusted_qty,
+            "saved": saved,
+            "unit_price": price,
+            "line_cost": line_cost,
+            "buildable": sub_bp is not None,
+            "sub_bp_id": sub_bp,
+            "build_time_str": build_time_str,
+            "build_time_secs": build_time_secs,
+        })
+
+    total_saved_cost = total_base_cost - total_cost
+
+    modifiers = []
+    if me > 0:
+        modifiers.append(f"ME {me}")
+    if struct_info["mat"] < 1.0:
+        modifiers.append(f'{struct_info["label"]} -{(1 - struct_info["mat"]) * 100:.0f}%')
+    if rig_info["mat"] > 0:
+        eff_rig = rig_info["mat"] * sec_info["mult"] * 100
+        modifiers.append(f'{rig_info["label"]} rig -{eff_rig:.1f}% ({sec_info["label"]})')
+
+    # Calculate main blueprint build time
+    main_bp_time = await sde.get_blueprint_time(db, type_id)
+    main_time_secs = 0
+    if main_bp_time:
+        main_time_secs = _calc_time(
+            main_bp_time, te, struct_info["time"],
+            rig_info.get("time", 0), sec_info["mult"],
+        ) * runs
+
+    # Calculate total build time: components in parallel + main build
+    component_times = [r["build_time_secs"] for r in rows if r.get("build_time_secs")]
+    max_component_time = max(component_times) if component_times else 0
+    total_time_parallel = max_component_time + main_time_secs  # parallel components, then main
+    total_time_sequential = sum(component_times) + main_time_secs  # all sequential
+
+    return templates.TemplateResponse("partials/calc_results.html", {
+        "request": request,
+        "bp_name": bp_name,
+        "rows": rows,
+        "runs": runs,
+        "me": me,
+        "te": te,
+        "total_cost": total_cost,
+        "total_saved_cost": total_saved_cost,
+        "modifiers": modifiers,
+        "structures": STRUCTURES,
+        "rigs": RIGS,
+        "sec_statuses": SEC_STATUS,
+        "main_time_str": _format_time(main_time_secs),
+        "parallel_time_str": _format_time(total_time_parallel),
+        "sequential_time_str": _format_time(total_time_sequential),
+        "main_time_secs": main_time_secs,
+    })
+
+
+@router.get("/industry/component", response_class=HTMLResponse)
+async def industry_component(
+    request: Request,
+    type_id: int = Query(..., description="Product type_id"),
+    needed: int = Query(1, description="Quantity needed from parent"),
+    me: int = Query(0),
+    structure: str = Query("npc_station"),
+    rig: str = Query("none"),
+    security: str = Query("highsec"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Calculate sub-component BOM for a buildable material."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("")
+
+    me = max(0, min(10, me))
+    needed = max(1, needed)
+
+    struct_info = STRUCTURES.get(structure, STRUCTURES["npc_station"])
+    rig_info = RIGS.get(rig, RIGS["none"])
+    sec_info = SEC_STATUS.get(security, SEC_STATUS["highsec"])
+
+    sub_bp = await sde.find_blueprint_for_product(db, type_id)
+    product_name = await sde.type_id_to_name(db, type_id) or f"Type {type_id}"
+
+    if not sub_bp:
+        return HTMLResponse(f'<div class="b-empty">{product_name} has no blueprint</div>')
+
+    materials = await sde.get_blueprint_materials(db, sub_bp)
+    if not materials:
+        return HTMLResponse(f'<div class="b-empty">No materials for {product_name}</div>')
+
+    all_type_ids = {m["type_id"] for m in materials}
+    price_map = await _get_price_map(db, all_type_ids)
+
+    # Calculate: we need `needed` units, each run produces 1 unit
+    runs = needed
+    total_build_cost = 0.0
+    sub_rows = []
+    for m in materials:
+        adjusted_qty = _calc_material(
+            m["quantity"], runs, me,
+            struct_info["mat"], rig_info["mat"], sec_info["mult"],
+        )
+        price = price_map.get(m["type_id"], 0)
+        line_cost = price * adjusted_qty
+
+        total_build_cost += line_cost
+        sub_bp = await sde.find_blueprint_for_product(db, m["type_id"])
+        sub_rows.append({
+            "type_id": m["type_id"],
+            "name": m["name"],
+            "base_qty": m["quantity"] * runs,
+            "adjusted_qty": adjusted_qty,
+            "unit_price": price,
+            "line_cost": line_cost,
+            "buildable": sub_bp is not None,
+        })
+
+    # Buy cost for comparison
+    buy_price = price_map.get(type_id, 0)
+    # We need to fetch the product price too
+    if type_id not in price_map:
+        prod_prices = await _get_price_map(db, {type_id})
+        buy_price = prod_prices.get(type_id, 0)
+    total_buy_cost = buy_price * needed
+
+    return templates.TemplateResponse("partials/component_panel.html", {
+        "request": request,
+        "product_name": product_name,
+        "type_id": type_id,
+        "needed": needed,
+        "me": me,
+        "structure": structure,
+        "rig": rig,
+        "security": security,
+        "sub_rows": sub_rows,
+        "total_build_cost": total_build_cost,
+        "total_buy_cost": total_buy_cost,
+        "buy_unit_price": buy_price,
+        "structures": STRUCTURES,
+        "rigs": RIGS,
+        "sec_statuses": SEC_STATUS,
+    })
+
+
+
+@router.get("/industry/shopping-list", response_class=HTMLResponse)
+async def industry_shopping_list(
+    request: Request,
+    type_id: int = Query(...),
+    me: int = Query(0),
+    runs: int = Query(1),
+    structure: str = Query("npc_station"),
+    rig: str = Query("none"),
+    security: str = Query("highsec"),
+    build_json: str = Query("{}"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate all materials into a shopping list.
+
+    build_json is a JSON dict mapping type_id (str) -> {me, structure, rig, security}
+    for components the user chose to Build. Everything else is Buy.
+    """
+    if not request.session.get("user_id"):
+        return HTMLResponse("")
+
+    me = max(0, min(10, me))
+    runs = max(1, min(1000, runs))
+
+    try:
+        build_components = json.loads(build_json)
+    except (json.JSONDecodeError, TypeError):
+        build_components = {}
+
+    struct_info = STRUCTURES.get(structure, STRUCTURES["npc_station"])
+    rig_info = RIGS.get(rig, RIGS["none"])
+    sec_info = SEC_STATUS.get(security, SEC_STATUS["highsec"])
+
+    materials = await sde.get_blueprint_materials(db, type_id)
+    if not materials:
+        return HTMLResponse('<div class="b-empty">No materials</div>')
+
+    # Aggregate: {type_id: {"name": str, "qty": int}}
+    shopping: dict[int, dict] = {}
+
+    def _add(tid: int, name: str, qty: int):
+        if tid in shopping:
+            shopping[tid]["qty"] += qty
+        else:
+            shopping[tid] = {"name": name, "qty": qty}
+
+    for m in materials:
+        adjusted_qty = _calc_material(
+            m["quantity"], runs, me,
+            struct_info["mat"], rig_info["mat"], sec_info["mult"],
+        )
+
+        tid_str = str(m["type_id"])
+        if tid_str in build_components:
+            # This component is being built — resolve its sub-materials
+            comp = build_components[tid_str]
+            comp_me = max(0, min(10, int(comp.get("me", 0))))
+            comp_struct = STRUCTURES.get(comp.get("structure", "npc_station"), STRUCTURES["npc_station"])
+            comp_rig = RIGS.get(comp.get("rig", "none"), RIGS["none"])
+            comp_sec = SEC_STATUS.get(comp.get("security", "highsec"), SEC_STATUS["highsec"])
+
+            sub_bp = await sde.find_blueprint_for_product(db, m["type_id"])
+            if sub_bp:
+                sub_mats = await sde.get_blueprint_materials(db, sub_bp)
+                for sm in sub_mats:
+                    sub_qty = _calc_material(
+                        sm["quantity"], adjusted_qty, comp_me,
+                        comp_struct["mat"], comp_rig["mat"], comp_sec["mult"],
+                    )
+                    _add(sm["type_id"], sm["name"], sub_qty)
+            else:
+                # Fallback: can't find blueprint, treat as buy
+                _add(m["type_id"], m["name"], adjusted_qty)
+        else:
+            # Buy this material directly
+            _add(m["type_id"], m["name"], adjusted_qty)
+
+    # Sort alphabetically by name
+    sorted_items = sorted(shopping.values(), key=lambda x: x["name"])
+
+    # Extract minerals (type_ids 34-40) for compression calculator link
+    MINERAL_TYPE_IDS = {34, 35, 36, 37, 38, 39, 40}
+    mineral_items = {tid: info["qty"] for tid, info in shopping.items() if tid in MINERAL_TYPE_IDS}
+
+    # Get prices for total cost estimate
+    all_ids = set(shopping.keys())
+    price_map = await _get_price_map(db, all_ids)
+    total_cost = sum(price_map.get(tid, 0) * info["qty"] for tid, info in shopping.items())
+
+    # Build multibuy-compatible text
+    multibuy_lines = [f'{item["name"]} x{item["qty"]}' for item in sorted_items]
+    multibuy_text = "\n".join(multibuy_lines)
+
+    return templates.TemplateResponse("partials/shopping_list.html", {
+        "request": request,
+        "items": sorted_items,
+        "item_count": len(sorted_items),
+        "total_cost": total_cost,
+        "multibuy_text": multibuy_text,
+        "price_map": {shopping[tid]["name"]: price_map.get(tid, 0) for tid in shopping},
+        "mineral_items": mineral_items,
+    })
+
+
+
+# ── Compression Calculator ────────────────────────────────────────────────────
+
+@router.get("/industry/compression", response_class=HTMLResponse)
+async def compression_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
+    from sqlalchemy import select
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = [
+        {"character_id": c.character_id, "character_name": c.character_name}
+        for c in result.scalars().all()
+    ]
+
+    # Pre-fill mineral values from query params (from manufacturing shopping list)
+    prefill = {}
+    for name, mid in MINERALS.items():
+        val = request.query_params.get(f"mineral_{mid}", "0")
+        try:
+            prefill[mid] = int(val)
+        except (ValueError, TypeError):
+            prefill[mid] = 0
+
+    return templates.TemplateResponse("compression.html", {
+        "request": request,
+        "characters": characters,
+        "minerals": MINERALS,
+        "structures": REPRO_STRUCTURES,
+        "rigs": REPRO_RIGS,
+        "security": REPRO_SECURITY,
+        "implants": REPRO_IMPLANTS,
+        "trade_hubs": TRADE_HUBS,
+        "prefill": prefill,
+    })
+
+
+@router.get("/industry/compression/skills/{character_id}", response_class=HTMLResponse)
+async def compression_skills(
+    request: Request, character_id: int, db: AsyncSession = Depends(get_db),
+):
+    """Htmx partial: fetch character reprocessing skill levels."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    from sqlalchemy import select
+    from app.esi.client import refresh_token
+    from app.esi import character as esi_char
+
+    char_result = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    char = char_result.scalar_one_or_none()
+    if not char or "esi-skills.read_skills.v1" not in (char.scopes or ""):
+        return HTMLResponse('<span style="font-size:10px;color:var(--muted);">Skills scope not available</span>')
+
+    try:
+        token = await refresh_token(char, db)
+        client = ESIClient(token, db=db)
+        raw = await esi_char.get_skills(client, character_id)
+        skills_by_id = {s["skill_id"]: s.get("active_skill_level", 0) for s in raw.get("skills", [])}
+
+        repro = skills_by_id.get(SKILL_REPROCESSING, 0)
+        eff = skills_by_id.get(SKILL_REPROCESSING_EFFICIENCY, 0)
+
+        # Build skill display with new tier-based skills
+        SKILL_LABELS = {
+            60377: "Simple", 60378: "Coherent", 60379: "Variegated",
+            60380: "Complex", 60381: "Abyssal", 12189: "Mercoxit",
+        }
+        html = '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">'
+        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Reprocessing</label><input type="number" name="repro_level" value="{repro}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
+        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label><input type="number" name="eff_level" value="{eff}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
+        for sid, label in SKILL_LABELS.items():
+            lv = skills_by_id.get(sid, 0)
+            html += f'<span style="font-size:10px;color:var(--text);border:1px solid var(--border);padding:2px 6px;">{label} <strong>{lv}</strong></span>'
+        html += f'<span style="font-size:9px;color:var(--success);align-self:flex-end;padding-bottom:4px;">Loaded</span>'
+        html += '</div>'
+
+        # Store ore-specific skill levels as JSON for the form
+        # Map each group_id to the character's level in its processing skill
+        ore_skills = {}
+        for group_id, skill_id in ORE_GROUP_SKILL.items():
+            ore_skills[str(group_id)] = skills_by_id.get(skill_id, 0)
+        import json
+        html += f'<input type="hidden" id="skill-ore-json" value=\'{json.dumps(ore_skills)}\'>'
+
+        return HTMLResponse(html)
+    except Exception:
+        return HTMLResponse('<span style="font-size:10px;color:var(--danger);">Failed to load skills</span>')
+
+
+@router.post("/industry/compression/calculate", response_class=HTMLResponse)
+async def compression_calculate(
+    request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Main compression calculation endpoint."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    form = await request.form()
+
+    # Parse mineral targets
+    target = {}
+    for name, mid in MINERALS.items():
+        val = form.get(f"mineral_{mid}", "0")
+        try:
+            target[mid] = max(0, int(val.replace(",", "")))
+        except (ValueError, AttributeError):
+            target[mid] = 0
+
+    if sum(target.values()) == 0:
+        return HTMLResponse('<div class="b-empty">Enter at least one mineral amount.</div>')
+
+    structure = form.get("structure", "npc_station")
+    rig = form.get("rig", "none")
+    security = form.get("security", "highsec")
+    implant = form.get("implant", "none")
+    mode = form.get("mode", "isk")
+    hub = form.get("trade_hub", "jita")
+    repro_level = int(form.get("repro_level", "0"))
+    eff_level = int(form.get("eff_level", "0"))
+    ore_skills_json = form.get("ore_skills", "{}")
+
+    import json as _json
+    try:
+        ore_skills = _json.loads(ore_skills_json)
+    except Exception:
+        ore_skills = {}
+
+    # Load compressed ore data from SDE
+    ore_data = await sde.get_ore_reprocessing_map(db)
+    if not ore_data:
+        return HTMLResponse('<div class="b-empty">No ore data available. SDE may need to reload.</div>')
+
+    # Filter to only ores that produce standard minerals (34-40)
+    mineral_set = set(MINERAL_IDS)
+    filtered_ore_data = {}
+    for oid, data in ore_data.items():
+        ore_minerals = {mid: qty for mid, qty in data["minerals"].items() if mid in mineral_set}
+        if ore_minerals:
+            filtered_ore_data[oid] = {**data, "minerals": ore_minerals}
+
+    # Compute per-ore yield (varies by ore-specific skill)
+    yield_per_ore = {}
+    for oid, data in filtered_ore_data.items():
+        group_id = data.get("group_id", 0)
+        ore_skill = int(ore_skills.get(str(group_id), 0))
+        yield_per_ore[oid] = compute_yield(
+            structure=structure, rig=rig, security=security,
+            repro_level=repro_level, efficiency_level=eff_level,
+            ore_skill_level=ore_skill, implant=implant,
+        )
+
+    # Fetch global average prices (single ESI call, covers all types)
+    hub_info = TRADE_HUBS.get(hub, TRADE_HUBS["jita"])
+    ore_prices = {}
+    try:
+        global_prices = await esi_market.get_market_prices(ESIClient("", db=db))
+        for p in global_prices:
+            tid = p.get("type_id")
+            if tid in filtered_ore_data:
+                ore_prices[tid] = p.get("average_price") or p.get("adjusted_price") or 0
+    except Exception:
+        pass
+
+    # Remove ores with zero or missing prices
+    ore_prices = {k: v for k, v in ore_prices.items() if v > 0}
+
+    # Fetch mineral prices for waste mode
+    mineral_prices = {}
+    if mode == "waste":
+        for p in (await esi_market.get_market_prices(ESIClient("", db=db)) if not ore_prices else []):
+            pass  # prices already fetched above
+        # Extract mineral prices from the same global prices call
+        try:
+            all_prices = await esi_market.get_market_prices(ESIClient("", db=db))
+            for p in all_prices:
+                tid = p.get("type_id")
+                if tid in (34, 35, 36, 37, 38, 39, 40):
+                    mineral_prices[tid] = p.get("average_price") or p.get("adjusted_price") or 1.0
+        except Exception:
+            pass
+
+    # Run solver
+    result = solve_compression(target, filtered_ore_data, ore_prices, yield_per_ore, mode, mineral_prices)
+
+    if result.get("error"):
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{result["error"]}</div>')
+
+    # Build multibuy text
+    multibuy_lines = [f'{ore["name"]} x{ore["quantity"]}' for ore in result["ores"]]
+    multibuy_text = "\n".join(multibuy_lines)
+
+    target_named = {MINERAL_NAMES.get(mid, str(mid)): qty for mid, qty in target.items() if qty > 0}
+
+    return templates.TemplateResponse("partials/compression_results.html", {
+        "request": request,
+        "ores": result["ores"],
+        "total_isk": result["total_isk"],
+        "total_volume": result["total_volume"],
+        "minerals_produced": result["minerals_produced"],
+        "minerals_surplus": result["minerals_surplus"],
+        "target_minerals": target_named,
+        "multibuy_text": multibuy_text,
+        "mode": mode,
+        "hub_label": hub_info["label"],
+    })

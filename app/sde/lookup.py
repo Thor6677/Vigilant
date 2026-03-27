@@ -6,7 +6,7 @@ from collections import deque
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEBlueprintMaterial
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo
 
 
 async def type_name_to_id(db: AsyncSession, name: str) -> int | None:
@@ -210,3 +210,91 @@ async def sde_is_loaded(db: AsyncSession) -> bool:
     result = await db.execute(select(func.count()).select_from(SDESystem))
     count = result.scalar()
     return (count or 0) > 0
+
+
+async def find_blueprint_for_product(db: AsyncSession, product_type_id: int) -> int | None:
+    """Find a blueprint type_id that manufactures the given product.
+    Uses the EVE naming convention: product 'Foo' -> 'Foo Blueprint'.
+    Returns None if no blueprint found or it has no manufacturing materials."""
+    name = await type_id_to_name(db, product_type_id)
+    if not name:
+        return None
+    bp_id = await type_name_to_id(db, name + " Blueprint")
+    if not bp_id:
+        return None
+    # Verify it has manufacturing materials
+    result = await db.execute(
+        select(func.count()).select_from(SDEBlueprintMaterial)
+        .where(SDEBlueprintMaterial.blueprint_type_id == bp_id)
+        .where(SDEBlueprintMaterial.activity_id == 1)
+    )
+    count = result.scalar() or 0
+    return bp_id if count > 0 else None
+
+
+async def get_type_materials(db: AsyncSession, type_id: int) -> list[dict]:
+    """Return reprocessing outputs for a type_id."""
+    result = await db.execute(
+        select(SDETypeMaterial.material_type_id, SDETypeMaterial.quantity)
+        .where(SDETypeMaterial.type_id == type_id)
+    )
+    return [{"material_type_id": r.material_type_id, "quantity": r.quantity} for r in result.fetchall()]
+
+
+async def get_compressed_ores(db: AsyncSession) -> list[dict]:
+    """Return all compressed ore types with their volume and portion_size.
+    Includes both 'Compressed X' and 'Batch Compressed X' variants."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.volume, SDEType.portion_size, SDEType.group_id)
+        .where(SDEType.published == True)
+        .where(SDEType.type_name.like("Compressed %"))
+        .where(~SDEType.type_name.like("%Blueprint%"))
+    )
+    return [
+        {"type_id": r.type_id, "name": r.type_name, "volume": r.volume or 0.15,
+         "portion_size": r.portion_size or 1, "group_id": r.group_id}
+        for r in result.fetchall()
+    ]
+
+
+async def get_ore_reprocessing_map(db: AsyncSession) -> dict:
+    """Build a map of compressed ore type_id -> {name, volume, minerals: {mat_id: qty}}.
+    Only includes ores that have reprocessing outputs (typeMaterials entries)."""
+    ores = await get_compressed_ores(db)
+    result = {}
+    for ore in ores:
+        mats = await get_type_materials(db, ore["type_id"])
+        if not mats:
+            continue
+        result[ore["type_id"]] = {
+            "name": ore["name"],
+            "volume": ore["volume"],
+            "portion_size": ore["portion_size"],
+            "group_id": ore["group_id"],
+            "minerals": {m["material_type_id"]: m["quantity"] for m in mats},
+        }
+    return result
+
+
+async def get_blueprint_info(db: AsyncSession, blueprint_type_id: int) -> dict | None:
+    """Get manufacturing time and product for a blueprint."""
+    result = await db.execute(
+        select(SDEBlueprintInfo).where(SDEBlueprintInfo.blueprint_type_id == blueprint_type_id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    return {
+        "blueprint_type_id": row.blueprint_type_id,
+        "product_type_id": row.product_type_id,
+        "manufacturing_time": row.manufacturing_time,
+        "product_quantity": row.product_quantity,
+    }
+
+
+async def get_blueprint_time(db: AsyncSession, blueprint_type_id: int) -> int | None:
+    """Get base manufacturing time in seconds for a blueprint."""
+    result = await db.execute(
+        select(SDEBlueprintInfo.manufacturing_time).where(SDEBlueprintInfo.blueprint_type_id == blueprint_type_id)
+    )
+    return result.scalar_one_or_none()

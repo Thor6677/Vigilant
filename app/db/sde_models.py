@@ -11,6 +11,8 @@ class SDEType(Base):
     group_id = Column(Integer, nullable=True)
     category_id = Column(Integer, nullable=True)
     published = Column(Boolean, default=True)
+    volume = Column(Float, nullable=True)
+    portion_size = Column(Integer, nullable=True)
 
 
 class SDESystem(Base):
@@ -77,3 +79,32 @@ class SDEMeta(Base):
 
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=False)
+
+
+class SDETypeMaterial(Base):
+    """invTypeMaterials — reprocessing outputs for ore/item types."""
+    __tablename__ = "sde_type_materials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    material_type_id = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+
+class SDECompressible(Base):
+    """compressibleTypes — maps raw ore type_id to compressed type_id."""
+    __tablename__ = "sde_compressible"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    compressed_type_id = Column(Integer, nullable=False, index=True)
+
+
+class SDEBlueprintInfo(Base):
+    """Blueprint manufacturing time and product mapping."""
+    __tablename__ = "sde_blueprint_info"
+
+    blueprint_type_id = Column(Integer, primary_key=True)
+    product_type_id = Column(Integer, nullable=True, index=True)
+    manufacturing_time = Column(Integer, nullable=True)  # seconds
+    product_quantity = Column(Integer, nullable=True, default=1)

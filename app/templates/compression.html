@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}COMPRESSION CALCULATOR — VIGILANT
+<script>
+/* ── Persist compression state in localStorage ──────────────────────────── */
+var COMP_KEY = 'vigilant_comp_state';
+
+function saveCompState() {
+    var form = document.getElementById('compression-form');
+    if (!form) return;
+    var state = {};
+    var inputs = form.querySelectorAll('input[name], select[name]');
+    inputs.forEach(function(el) {
+        state[el.name] = el.value;
+    });
+    state._character = document.getElementById('inp-character') ? document.getElementById('inp-character').value : '';
+    localStorage.setItem(COMP_KEY, JSON.stringify(state));
+}
+
+function restoreCompState() {
+    /* Skip restore if URL has prefill params (from manufacturing shopping list) */
+    if (window.location.search.indexOf('mineral_') >= 0) {
+        /* Save the prefilled state immediately so it persists */
+        setTimeout(saveCompState, 100);
+        return;
+    }
+    var raw = localStorage.getItem(COMP_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        var form = document.getElementById('compression-form');
+        if (!form) return;
+        Object.keys(state).forEach(function(name) {
+            if (name === '_character') {
+                var sel = document.getElementById('inp-character');
+                if (sel) sel.value = state[name];
+                return;
+            }
+            var el = form.querySelector('[name="' + name + '"]');
+            if (el) el.value = state[name];
+        });
+    } catch(e) {}
+}
+
+function resetCompression() {
+    localStorage.removeItem(COMP_KEY);
+    window.location.href = '/industry/compression';
+}
+
+/* Save on form submit */
+document.getElementById('compression-form').addEventListener('htmx:beforeRequest', saveCompState);
+
+/* Restore on load */
+document.addEventListener('DOMContentLoaded', restoreCompState);
+</script>
+
+{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Compression Calculator</h1>
+    <div style="display:flex;gap:0.5rem;">
+        <button onclick="resetCompression()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+        <a href="/industry" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Manufacturing</a>
+    </div>
+</div>
+
+<form id="compression-form" hx-post="/industry/compression/calculate" hx-target="#compression-results" hx-swap="innerHTML">
+
+{# ── Settings Row 1 ───────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Settings</span></div>
+        <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
+
+            {# Character #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Character (skills)</label>
+                <select id="inp-character"
+                        hx-get="" hx-trigger="change" hx-target="#skill-display" hx-swap="innerHTML"
+                        onchange="if(this.value){htmx.ajax('GET','/industry/compression/skills/'+this.value,'#skill-display')}"
+                        style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="">Manual skills</option>
+                    {% for c in characters %}
+                    <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Trade Hub #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Trade Hub</label>
+                <select name="trade_hub" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, hub in trade_hubs.items() %}
+                    <option value="{{ key }}" {% if key == 'jita' %}selected{% endif %}>{{ hub.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Structure #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Structure</label>
+                <select name="structure" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, s in structures.items() %}
+                    <option value="{{ key }}">{{ s.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Rig #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rig</label>
+                <select name="rig" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, r in rigs.items() %}
+                    <option value="{{ key }}">{{ r.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Security #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Security</label>
+                <select name="security" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, s in security.items() %}
+                    <option value="{{ key }}">{{ s.label }} ({{ "%.1f"|format(s.mult) }}x)</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Implant #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Implant</label>
+                <select name="implant" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, imp in implants.items() %}
+                    <option value="{{ key }}">{{ imp.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {# Optimize by #}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Optimize</label>
+                <select name="mode" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="isk">Lowest ISK</option>
+                    <option value="volume">Lowest Volume</option>
+                    <option value="waste">Lowest Waste</option>
+                </select>
+            </div>
+
+        </div>
+
+        {# Skills display (auto-populated by htmx) #}
+        <div id="skill-display" style="padding:0 0.75rem 0.5rem;">
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;">
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Reprocessing</label>
+                    <input type="number" name="repro_level" id="skill-repro" value="0" min="0" max="5"
+                           style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label>
+                    <input type="number" name="eff_level" id="skill-eff" value="0" min="0" max="5"
+                           style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
+                </div>
+                <span style="font-size:9px;color:var(--muted);align-self:flex-end;padding-bottom:4px;">Select a character to auto-fill skills, or enter manually</span>
+            </div>
+        </div>
+        <input type="hidden" name="ore_skills" id="ore-skills-input" value="{}">
+    </div>
+</div>
+
+{# ── Mineral Inputs ───────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Target Minerals</span></div>
+        <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:0.75rem;">
+            {% for name, mid in minerals.items() %}
+            <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:110px;">
+                <label style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:4px;">
+                    <img src="https://images.evetech.net/types/{{ mid }}/icon?size=32" style="width:14px;height:14px;" onerror="this.style.display='none'">
+                    {{ name }}
+                </label>
+                <input type="text" name="mineral_{{ mid }}" value="{{ prefill.get(mid, 0) if prefill else 0 }}" placeholder="0"
+                       style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;text-align:right;">
+            </div>
+            {% endfor %}
+        </div>
+        <div style="padding:0 0.75rem 0.75rem;">
+            <button type="submit" class="b-btn"
+                    style="width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                Calculate Optimal Ores
+            </button>
+        </div>
+    </div>
+</div>
+
+</form>
+
+{# ── Results ──────────────────────────────────────────────────────────────── #}
+<div id="compression-results"></div>
+
+<script>
+// When character skill data loads, update the hidden ore_skills input
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id === 'skill-display') {
+        var oreJson = document.getElementById('skill-ore-json');
+        if (oreJson) {
+            document.getElementById('ore-skills-input').value = oreJson.value;
+        }
+        // Also update the visible skill inputs
+        var repro = document.getElementById('skill-repro');
+        var eff = document.getElementById('skill-eff');
+        // The htmx response may replace the skill display, so look for hidden inputs
+        var newRepro = evt.detail.target.querySelector('#skill-repro');
+        var newEff = evt.detail.target.querySelector('#skill-eff');
+        // Hidden inputs from skill fetch overwrite the form inputs
+    }
+});
+</script>
+
+
+<script>
+/* ── Persist compression state in localStorage ──────────────────────────── */
+var COMP_KEY = 'vigilant_comp_state';
+
+function saveCompState() {
+    var form = document.getElementById('compression-form');
+    if (!form) return;
+    var state = {};
+    var inputs = form.querySelectorAll('input[name], select[name]');
+    inputs.forEach(function(el) {
+        state[el.name] = el.value;
+    });
+    state._character = document.getElementById('inp-character') ? document.getElementById('inp-character').value : '';
+    localStorage.setItem(COMP_KEY, JSON.stringify(state));
+}
+
+function restoreCompState() {
+    /* Skip restore if URL has prefill params (from manufacturing shopping list) */
+    if (window.location.search.indexOf('mineral_') >= 0) {
+        /* Save the prefilled state immediately so it persists */
+        setTimeout(saveCompState, 100);
+        return;
+    }
+    var raw = localStorage.getItem(COMP_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        var form = document.getElementById('compression-form');
+        if (!form) return;
+        Object.keys(state).forEach(function(name) {
+            if (name === '_character') {
+                var sel = document.getElementById('inp-character');
+                if (sel) sel.value = state[name];
+                return;
+            }
+            var el = form.querySelector('[name="' + name + '"]');
+            if (el) el.value = state[name];
+        });
+    } catch(e) {}
+}
+
+function resetCompression() {
+    localStorage.removeItem(COMP_KEY);
+    window.location.href = '/industry/compression';
+}
+
+/* Save on form submit */
+document.getElementById('compression-form').addEventListener('htmx:beforeRequest', saveCompState);
+
+/* Restore on load */
+document.addEventListener('DOMContentLoaded', restoreCompState);
+</script>
+
+{% endblock %}

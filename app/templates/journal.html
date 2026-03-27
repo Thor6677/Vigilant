@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}{% if is_corp %}CORP {% endif %}JOURNAL — VIGILANT{% endblock %}
+{% block content %}
+
+{% macro format_isk(amount) %}
+  {%- if amount is none -%}—
+  {%- elif amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}{%- endif %}
+{% endmacro %}
+
+{% macro format_isk_signed(amount) %}
+  {%- if amount >= 0 -%}+{{ format_isk(amount) }}
+  {%- else -%}{{ format_isk(amount) }}{%- endif %}
+{% endmacro %}
+
+{# ── Page Header ──────────────────────────────────────────────────────────── #}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">
+            {% if is_corp %}Corporation Wallet Journal{% else %}Wallet Journal{% endif %}
+        </h1>
+        {% if char %}
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 style="width:20px;height:20px;border:1px solid var(--border);" alt="">
+            <span style="font-size:11px;color:var(--muted);">{{ char.character_name }}{% if is_corp %} · {{ char.corporation_name }}{% endif %}</span>
+        </div>
+        {% endif %}
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+        {% if char %}
+        <a href="/character/{{ char.character_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Character</a>
+        {% endif %}
+        {% if is_corp and corp_id %}
+        <a href="/corporations/{{ corp_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Corporation</a>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Corp division selector ───────────────────────────────────────────────── #}
+{% if is_corp and corp_id %}
+<div style="display:flex;gap:4px;margin-bottom:1rem;">
+    {% for d in range(1, 8) %}
+    <a href="/corporations/{{ corp_id }}/journal?division={{ d }}&category={{ category }}"
+       class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if division == d %}var(--accent){% else %}var(--border){% endif %};{% if division == d %}color:var(--accent);{% endif %}">
+        Div {{ d }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Filter bar ───────────────────────────────────────────────────────────── #}
+<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:1rem;">
+    {% set base_url = "/corporations/" ~ corp_id ~ "/journal?division=" ~ division if is_corp else "/character/" ~ char.character_id ~ "/journal" %}
+    {% set sep = "&" if is_corp else "?" %}
+    <a href="{{ base_url }}{{ sep }}category=all"
+       class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if category == 'all' %}var(--accent){% else %}var(--border){% endif %};{% if category == 'all' %}color:var(--accent);{% endif %}">
+        All
+    </a>
+    {% for key, label in categories.items() %}
+    <a href="{{ base_url }}{{ sep }}category={{ key }}"
+       class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if category == key %}var(--accent){% else %}var(--border){% endif %};{% if category == key %}color:var(--accent);{% endif %}">
+        {{ label }}
+    </a>
+    {% endfor %}
+</div>
+
+{# ── Error state ──────────────────────────────────────────────────────────── #}
+{% if error %}
+<div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>
+
+{% elif not entries %}
+<div class="b-empty">No journal entries{% if category != 'all' %} for this filter{% endif %}.</div>
+
+{% else %}
+{# ── Journal table ────────────────────────────────────────────────────────── #}
+
+{# Summary stats #}
+{% set ns = namespace(income=0, expense=0) %}
+{% for e in entries %}
+    {% if e.amount >= 0 %}{% set ns.income = ns.income + e.amount %}{% else %}{% set ns.expense = ns.expense + e.amount %}{% endif %}
+{% endfor %}
+<div class="b-stats" style="margin-bottom:1rem;">
+    <div class="b-stat">
+        <div class="b-stat-val" style="color:var(--success);">+{{ format_isk(ns.income) }} ISK</div>
+        <div class="b-stat-label">Income</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val" style="color:var(--danger);">{{ format_isk(ns.expense) }} ISK</div>
+        <div class="b-stat-label">Expenses</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val {% if ns.income + ns.expense >= 0 %}is-accent{% else %}is-danger{% endif %}">{{ format_isk_signed(ns.income + ns.expense) }} ISK</div>
+        <div class="b-stat-label">Net</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ entries | length }}</div>
+        <div class="b-stat-label">Entries</div>
+    </div>
+</div>
+
+<div class="b-panel">
+    {# Header #}
+    <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+        <span style="flex:0 0 120px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
+        <span style="flex:0 0 130px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
+        <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Details</span>
+        <span style="flex:0 0 110px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Amount</span>
+        <span style="flex:0 0 110px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Balance</span>
+    </div>
+
+    {# Entries #}
+    <div id="journal-entries">
+    {% for e in entries %}
+    <div class="b-table-row">
+        <span style="flex:0 0 120px;font-size:9px;color:var(--muted);letter-spacing:0.04em;white-space:nowrap;">
+            {{ e.date[:16].replace("T", " ") if e.date else "—" }}
+        </span>
+        <span style="flex:0 0 130px;">
+            <span style="font-size:9px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);padding:1px 4px;display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                {{ e.ref_type_label }}
+            </span>
+        </span>
+        <span style="flex:1;min-width:0;overflow:hidden;">
+            {% if e.first_party and e.second_party %}
+            <span style="font-size:10px;color:var(--text);">{{ e.first_party }}</span>
+            <span style="font-size:9px;color:var(--muted);"> → </span>
+            <span style="font-size:10px;color:var(--text);">{{ e.second_party }}</span>
+            {% elif e.first_party %}
+            <span style="font-size:10px;color:var(--text);">{{ e.first_party }}</span>
+            {% elif e.second_party %}
+            <span style="font-size:10px;color:var(--text);">{{ e.second_party }}</span>
+            {% endif %}
+            {% if e.description %}
+            <div style="font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">
+                {{ e.description[:80] }}{% if e.description|length > 80 %}…{% endif %}
+            </div>
+            {% endif %}
+            {% if e.reason %}
+            <div style="font-size:9px;color:var(--accent);font-style:italic;">{{ e.reason[:60] }}</div>
+            {% endif %}
+            {% if e.tax and e.tax > 0 %}
+            <div style="font-size:9px;color:var(--muted);">Tax: {{ format_isk(e.tax) }} ISK</div>
+            {% endif %}
+        </span>
+        <span style="flex:0 0 110px;text-align:right;font-size:11px;font-weight:500;{% if e.amount >= 0 %}color:var(--success);{% else %}color:var(--danger);{% endif %}">
+            {{ format_isk_signed(e.amount) }} ISK
+        </span>
+        <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+            {% if e.balance is not none %}{{ format_isk(e.balance) }}{% else %}—{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    </div>
+
+    {# Load more #}
+    {% if has_more %}
+    <div id="load-more" style="padding:0.75rem;text-align:center;">
+        {% if is_corp %}
+        <a href="/corporations/{{ corp_id }}/journal?division={{ division }}&page={{ page + 1 }}&category={{ category }}"
+           class="b-btn" style="padding:0.4rem 1.5rem;border:1px solid var(--border);font-size:10px;">
+            Load More Entries
+        </a>
+        {% else %}
+        <a href="/character/{{ char.character_id }}/journal?page={{ page + 1 }}&category={{ category }}"
+           class="b-btn" style="padding:0.4rem 1.5rem;border:1px solid var(--border);font-size:10px;">
+            Load More Entries
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

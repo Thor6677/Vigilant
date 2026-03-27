@@ -1,0 +1,28 @@
+{# Mail list + reader panel — loaded via htmx on character detail page #}
+{% if mail_error %}
+<div class="b-empty">{{ mail_error }}</div>
+{% elif not mail_headers %}
+<div class="b-empty">No recent mail</div>
+{% else %}
+<div id="mail-list">
+{% for m in mail_headers %}
+<div class="b-table-row" style="cursor:pointer;{% if not m.is_read %}border-left:2px solid var(--accent);{% endif %}"
+     hx-get="/character/{{ character_id }}/mail/{{ m.mail_id }}"
+     hx-target="#mail-body"
+     hx-swap="innerHTML">
+    <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m.is_read %}font-weight:600;{% endif %}">
+            {{ m.subject }}
+        </div>
+        <div style="font-size:10px;color:var(--muted);">
+            {% if m.timestamp %}{{ m.timestamp[:16].replace('T', ' ') }}{% endif %}
+        </div>
+    </div>
+    {% if not m.is_read %}
+    <span class="b-badge is-accent" style="flex-shrink:0;">NEW</span>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+<div id="mail-body" style="margin-top:0.5rem;"></div>
+{% endif %}

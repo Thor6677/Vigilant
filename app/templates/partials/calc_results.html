@@ -1,0 +1,210 @@
+{# Manufacturing calculator results with Build/Buy per material #}
+<div class="b-section">
+
+    {% if modifiers %}
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:0.5rem;">
+        <span style="font-size:10px;color:var(--muted);">Active bonuses:</span>
+        {% for m in modifiers %}
+        <span style="font-size:10px;letter-spacing:0.06em;color:var(--success);border:1px solid var(--border);padding:1px 6px;">{{ m }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Build time summary #}
+    {% if main_time_secs or parallel_time_str %}
+    <div style="display:flex;gap:1px;margin-bottom:0.5rem;">
+        {% if parallel_time_str %}
+        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Parallel Build</div>
+            <div style="font-size:14px;font-weight:300;color:var(--success);">{{ parallel_time_str }}</div>
+            <div style="font-size:8px;color:var(--muted);margin-top:1px;">components + final</div>
+        </div>
+        {% endif %}
+        {% if sequential_time_str %}
+        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Sequential Build</div>
+            <div style="font-size:14px;font-weight:300;color:var(--text);">{{ sequential_time_str }}</div>
+            <div style="font-size:8px;color:var(--muted);margin-top:1px;">one at a time</div>
+        </div>
+        {% endif %}
+        {% if main_time_str %}
+        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Final Assembly</div>
+            <div style="font-size:14px;font-weight:300;color:var(--accent);">{{ main_time_str }}</div>
+            <div style="font-size:8px;color:var(--muted);margin-top:1px;">after components</div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">{{ bp_name }}</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:10px;color:var(--muted);">{{ runs }} run{{ 's' if runs != 1 else '' }}</span>
+                {% set buildable_rows = rows | selectattr('buildable') | list %}
+                {% if buildable_rows %}
+                <button id="build-all-btn" onclick="toggleBuildAll()"
+                        class="b-btn" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
+                    Build All
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Header #}
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:3;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Material</span>
+            <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Base</span>
+            <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Needed</span>
+            <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Saved</span>
+            <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Unit</span>
+            <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Total</span>
+        </div>
+
+        {% for row in rows %}
+        <div>
+            {# Main material row #}
+            <div class="b-table-row" style="border-bottom:{% if row.buildable %}none{% else %}1px solid var(--border){% endif %};">
+                <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                    <img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+                         style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
+                         onerror="this.style.display='none'">
+                    <span style="font-size:11px;color:var(--text);">{{ row.name }}</span>
+                </span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,}".format(row.base_qty * runs) }}</span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:{% if row.saved > 0 %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
+                {% if row.saved > 0 %}
+                <span style="flex:1;text-align:right;font-size:10px;color:var(--success);">-{{ "{:,}".format(row.saved) }}</span>
+                {% else %}
+                <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+                {% endif %}
+                {% if row.unit_price > 0 %}
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
+                {% else %}
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
+                {% endif %}
+            </div>
+
+            {# Build/Buy toggle for buildable materials #}
+            {% if row.buildable %}
+            <div style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
+                <button onclick="toggleComponent({{ row.type_id }}, {{ row.adjusted_qty }}, this)"
+                        class="b-btn build-toggle-btn" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
+                        style="padding:1px 6px;font-size:9px;border:1px solid var(--border);flex:none;">
+                    Build ▸
+                </button>
+                <span style="font-size:9px;color:var(--muted);">has blueprint</span>
+            </div>
+            <div id="component-{{ row.type_id }}" style="display:none;"></div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {# Total row #}
+        <div class="b-table-row" style="border-top:2px solid var(--border);">
+            <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Total Material Cost (Buy All)</span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;"></span>
+            <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">
+                {% if total_cost >= 1000000000 %}{{ "%.2f"|format(total_cost / 1000000000) }}B ISK
+                {% elif total_cost >= 1000000 %}{{ "%.2f"|format(total_cost / 1000000) }}M ISK
+                {% else %}{{ "{:,.0f}".format(total_cost) }} ISK{% endif %}
+            </span>
+        </div>
+
+        {% if total_saved_cost > 0 %}
+        <div class="b-table-row" style="border-top:1px solid var(--border);">
+            <span style="flex:3;font-size:10px;color:var(--success);">Material savings from bonuses</span>
+            <span style="flex:1;"></span><span style="flex:1;"></span><span style="flex:1;"></span><span style="flex:1;"></span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--success);">
+                -{% if total_saved_cost >= 1000000000 %}{{ "%.2f"|format(total_saved_cost / 1000000000) }}B{% elif total_saved_cost >= 1000000 %}{{ "%.2f"|format(total_saved_cost / 1000000) }}M{% else %}{{ "{:,.0f}".format(total_saved_cost) }}{% endif %} ISK
+            </span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div style="padding:0.5rem 0;font-size:10px;color:var(--muted);">
+        Prices based on EVE global averages. Does not include job installation cost or facility taxes.
+        Click <strong>Build</strong> on components to see sub-material costs with independent ME/structure settings.
+    </div>
+</div>
+
+<script>
+var allBuilt = false;
+
+function toggleBuildAll() {
+    var btns = document.querySelectorAll('.build-toggle-btn');
+    var buildAllBtn = document.getElementById('build-all-btn');
+    allBuilt = !allBuilt;
+
+    if (allBuilt) {
+        // Open all: stagger requests 200ms apart to avoid flooding
+        var delay = 0;
+        btns.forEach(function(btn) {
+            var typeId = parseInt(btn.dataset.typeId);
+            var needed = parseInt(btn.dataset.needed);
+            var panel = document.getElementById('component-' + typeId);
+            if (panel && panel.style.display === 'none') {
+                setTimeout(function() {
+                    openComponent(typeId, needed, btn);
+                }, delay);
+                delay += 200;
+            }
+        });
+    } else {
+        // Close all: immediate, no server calls
+        btns.forEach(function(btn) {
+            var typeId = parseInt(btn.dataset.typeId);
+            var panel = document.getElementById('component-' + typeId);
+            if (panel && panel.style.display !== 'none') {
+                closeComponent(typeId, btn);
+            }
+        });
+    }
+    if (buildAllBtn) {
+        buildAllBtn.textContent = allBuilt ? 'Buy All' : 'Build All';
+    }
+}
+
+function openComponent(typeId, needed, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    panel.style.display = '';
+    btn.textContent = 'Build ▾';
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.color = 'var(--accent)';
+    var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
+    var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
+    var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
+    var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
+    if (typeof buildComponents !== 'undefined') {
+        buildComponents[typeId] = {me: parseInt(pMe), structure: pSt, rig: pRi, security: pSe};
+    }
+    var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
+    htmx.ajax('GET', '/industry/component?' + params, '#component-' + typeId);
+}
+
+function closeComponent(typeId, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    panel.style.display = 'none';
+    btn.textContent = 'Build ▸';
+    btn.style.borderColor = 'var(--border)';
+    btn.style.color = '';
+    if (typeof buildComponents !== 'undefined') {
+        delete buildComponents[typeId];
+    }
+}
+
+function toggleComponent(typeId, needed, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    if (panel.style.display === 'none') {
+        openComponent(typeId, needed, btn);
+    } else {
+        closeComponent(typeId, btn);
+    }
+}
+</script>

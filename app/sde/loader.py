@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AsyncSessionLocal
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDEBlueprintMaterial
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,8 @@ async def download_and_import(db: AsyncSession):
                 "group_id": item.get("groupID"),
                 "category_id": None,
                 "published": True,
+                "volume": item.get("volume"),
+                "portion_size": item.get("portionSize"),
             })
         except (KeyError, ValueError, TypeError):
             continue
@@ -284,6 +286,83 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDEBlueprintMaterial.__table__, batch)
     count += len(batch)
     log.info(f"Imported {count} blueprint material rows")
+
+    # --- blueprint info (manufacturing time + product mapping) ---
+    log.info("Importing blueprint info (time + products)...")
+    await db.execute(text("DELETE FROM sde_blueprint_info"))
+    await db.commit()
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "blueprints.jsonl"):
+        mfg = item.get("activities", {}).get("manufacturing")
+        if not mfg:
+            continue
+        bp_type_id = int(item["_key"])
+        time_secs = mfg.get("time")
+        products = mfg.get("products", [])
+        product_type_id = None
+        product_qty = 1
+        if products:
+            product_type_id = int(products[0].get("typeID", 0)) or None
+            product_qty = int(products[0].get("quantity", 1))
+        if time_secs or product_type_id:
+            batch.append({
+                "blueprint_type_id": bp_type_id,
+                "product_type_id": product_type_id,
+                "manufacturing_time": time_secs,
+                "product_quantity": product_qty,
+            })
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
+                count += len(batch)
+                batch = []
+    await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} blueprint info rows")
+
+    # --- typeMaterials (reprocessing outputs) ---
+    log.info("Importing type materials (reprocessing)...")
+    await db.execute(text("DELETE FROM sde_type_materials"))
+    await db.commit()
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "typeMaterials.jsonl"):
+        type_id = int(item["_key"])
+        for mat in item.get("materials", []):
+            try:
+                batch.append({
+                    "type_id": type_id,
+                    "material_type_id": int(mat["materialTypeID"]),
+                    "quantity": int(mat["quantity"]),
+                })
+            except (KeyError, ValueError):
+                continue
+            if len(batch) >= 1000:
+                await _bulk_insert(db, SDETypeMaterial.__table__, batch)
+                count += len(batch)
+                batch = []
+    await _bulk_insert(db, SDETypeMaterial.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} type material rows")
+
+    # --- compressibleTypes ---
+    log.info("Importing compressible types...")
+    await db.execute(text("DELETE FROM sde_compressible"))
+    await db.commit()
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "compressibleTypes.jsonl"):
+        try:
+            batch.append({
+                "type_id": int(item["_key"]),
+                "compressed_type_id": int(item["compressedTypeID"]),
+            })
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDECompressible.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDECompressible.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} compressible type mappings")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")

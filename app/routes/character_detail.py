@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, AsyncSessionLocal
-from app.esi.client import ESIClient, refresh_token
+from app.esi.client import ESIClient
+from app.esi import character as esi_char
+from app.esi.client import refresh_token
 from app.esi.character import get_wallet_journal
 from dateutil import parser as iso_parser
 
@@ -607,3 +609,192 @@ async def get_skill_name(skill_id: int, db: AsyncSession) -> str:
         return skill_type.type_name if skill_type else "Skill " + str(skill_id)
     except Exception:
         return "Skill " + str(skill_id)
+
+
+# ── Notification type labels ──────────────────────────────────────────────────
+_NOTIF_LABELS = {
+    "AllWarDeclaredMsg": "War Declared",
+    "AllWarSurrenderMsg": "War Surrender",
+    "AllWarFinishedMsg": "War Ended",
+    "AllyJoinedWarMsg": "Ally Joined War",
+    "CorpWarDeclaredMsg": "Corp War Declared",
+    "EntosisCaptureStarted": "Entosis Started",
+    "OrbitalAttacked": "POCO Attacked",
+    "OrbitalReinforced": "POCO Reinforced",
+    "StructureUnderAttack": "Structure Attacked",
+    "StructureLostShields": "Structure Lost Shields",
+    "StructureLostArmor": "Structure Lost Armor",
+    "StructureDestroyed": "Structure Destroyed",
+    "StructureOnline": "Structure Online",
+    "StructureFuelAlert": "Fuel Alert",
+    "StructureAnchoring": "Structure Anchoring",
+    "StructureUnanchoring": "Structure Unanchoring",
+    "StructureServicesOffline": "Services Offline",
+    "TowerAlertMsg": "POS Alert",
+    "TowerResourceAlertMsg": "POS Fuel Alert",
+    "SovStructureReinforced": "Sov Reinforced",
+    "SovCommandNodeEventStarted": "Sov Node Event",
+    "CorpNewCEOMsg": "New CEO",
+    "CorpVoteCEORevokedMsg": "CEO Vote Revoked",
+    "CharAppAcceptMsg": "Application Accepted",
+    "CharAppRejectMsg": "Application Rejected",
+    "CharLeftCorpMsg": "Member Left Corp",
+    "CorpAppNewMsg": "New Application",
+    "InsurancePayoutMsg": "Insurance Payout",
+    "InsuranceFirstShipMsg": "First Ship Insurance",
+    "BillPaidCorpAllMsg": "Bill Paid",
+    "BountyClaimMsg": "Bounty Claimed",
+    "KillReportVictim": "Kill Report (Loss)",
+    "KillReportFinalBlow": "Kill Report (Final Blow)",
+    "MoonminingExtractionStarted": "Moon Extraction Started",
+    "MoonminingExtractionFinished": "Moon Chunk Ready",
+    "MoonminingAutomaticFracture": "Moon Auto-Fracture",
+    "MoonminingLaserFired": "Moon Laser Fired",
+    "SkyhookDestructionImminent": "Skyhook Threatened",
+    "OrbitalBombardmentComplete": "Orbital Bombardment",
+    "CloneActivationMsg": "Clone Activated",
+    "CloneMovedMsg": "Clone Moved",
+    "JumpCloneDeleteMsg": "Clone Deleted",
+    "CorpTaxChangeMsg": "Tax Rate Changed",
+}
+
+
+def _notif_label(notif_type: str) -> str:
+    if notif_type in _NOTIF_LABELS:
+        return _NOTIF_LABELS[notif_type]
+    # Convert CamelCase to spaced words
+    import re
+    label = re.sub(r"Msg$", "", notif_type)
+    label = re.sub(r"([a-z])([A-Z])", r"\1 \2", label)
+    return label
+
+
+def _notif_summary(text: str) -> str:
+    """Extract a one-line summary from notification YAML text."""
+    if not text:
+        return ""
+    lines = text.strip().split("\n")
+    for line in lines[:3]:
+        line = line.strip()
+        if ":" in line and not line.startswith("-"):
+            key, _, val = line.partition(":")
+            val = val.strip()
+            if val and len(val) > 2:
+                return f"{key.strip()}: {val[:80]}"
+    return lines[0][:80] if lines else ""
+
+
+@router.get("/character/{character_id}/mail-partial", response_class=HTMLResponse)
+async def character_mail_partial(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Htmx partial: mail list for a character."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    cache_result = await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
+    )
+    cache = cache_result.scalar_one_or_none()
+
+    mail_data = json.loads(cache.mail_json) if cache and cache.mail_json else None
+    if mail_data is None or mail_data == "no_scope":
+        return templates.TemplateResponse("partials/mail_panel.html", {
+            "request": request, "character_id": character_id,
+            "mail_headers": [], "mail_error": "Mail scope not available — re-authorize to view mail.",
+        })
+
+    headers = mail_data.get("headers", []) if isinstance(mail_data, dict) else []
+    return templates.TemplateResponse("partials/mail_panel.html", {
+        "request": request, "character_id": character_id,
+        "mail_headers": headers, "mail_error": None,
+    })
+
+
+@router.get("/character/{character_id}/mail/{mail_id}", response_class=HTMLResponse)
+async def character_mail_body(character_id: int, mail_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Htmx partial: fetch and render a single mail body."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    char_result = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    char = char_result.scalar_one_or_none()
+    if not char:
+        return HTMLResponse('<div class="b-empty">Character not found</div>')
+
+    try:
+        from app.esi.client import refresh_token as _refresh
+        token = await _refresh(char, db)
+        from app.esi.client import ESIClient
+        client = ESIClient(token, db=db)
+        mail = await esi_char.get_mail(client, character_id, mail_id)
+
+        body = mail.get("body", "")
+        subject = mail.get("subject", "(No Subject)")
+        timestamp = mail.get("timestamp", "")
+        if timestamp:
+            timestamp = timestamp[:16].replace("T", " ")
+
+        # Resolve sender name
+        sender_id = mail.get("from")
+        sender_name = None
+        if sender_id:
+            try:
+                info = await client.post_public("/universe/names/", [sender_id])
+                if info:
+                    sender_name = info[0].get("name")
+            except Exception:
+                sender_name = str(sender_id)
+
+        # Strip HTML tags from body for clean display
+        import re
+        body = re.sub(r"<br\s*/?>", "\n", body)
+        body = re.sub(r"<[^>]+>", "", body)
+        body = body.strip()
+
+        return templates.TemplateResponse("partials/mail_body.html", {
+            "request": request, "subject": subject, "body": body,
+            "timestamp": timestamp, "sender_name": sender_name, "recipients": [],
+        })
+    except Exception as e:
+        return HTMLResponse(f'<div class="b-empty">Failed to load mail: {type(e).__name__}</div>')
+
+
+@router.get("/character/{character_id}/notifications-partial", response_class=HTMLResponse)
+async def character_notifications_partial(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Htmx partial: notification list for a character."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    cache_result = await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
+    )
+    cache = cache_result.scalar_one_or_none()
+
+    notif_data = json.loads(cache.notifications_json) if cache and cache.notifications_json else None
+    if notif_data is None or notif_data == "no_scope":
+        return templates.TemplateResponse("partials/notifications_panel.html", {
+            "request": request,
+            "notifications": [], "notif_error": "Notification scope not available — re-authorize.",
+        })
+
+    raw_notifs = notif_data.get("notifications", []) if isinstance(notif_data, dict) else []
+    enriched = []
+    for n in raw_notifs:
+        enriched.append({
+            "notification_id": n.get("notification_id"),
+            "type": n.get("type", "Unknown"),
+            "type_label": _notif_label(n.get("type", "Unknown")),
+            "summary": _notif_summary(n.get("text", "")),
+            "timestamp": n.get("timestamp", ""),
+            "is_read": n.get("is_read", True),
+            "sender_id": n.get("sender_id"),
+        })
+
+    return templates.TemplateResponse("partials/notifications_panel.html", {
+        "request": request,
+        "notifications": enriched, "notif_error": None,
+    })

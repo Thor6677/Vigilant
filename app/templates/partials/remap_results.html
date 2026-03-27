@@ -1,0 +1,60 @@
+{# Remap comparison results — loaded via htmx #}
+
+{% if not valid %}
+<div class="b-section">
+    <div class="b-empty" style="color:var(--danger);">
+        Invalid remap: total points must equal 99 (currently {{ total_points }}).
+        {% if total_points > 99 %}Remove {{ total_points - 99 }} point{{ 's' if total_points - 99 != 1 else '' }}.{% endif %}
+        {% if total_points < 99 %}Add {{ 99 - total_points }} more point{{ 's' if 99 - total_points != 1 else '' }}.{% endif %}
+    </div>
+</div>
+{% else %}
+
+<div class="b-section">
+    {# Summary comparison #}
+    <div style="display:flex;margin-bottom:0.5rem;border:1px solid var(--border);">
+        <div style="flex:1;padding:0.6rem;text-align:center;border-right:1px solid var(--border);">
+            <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">Current</div>
+            <div style="font-size:14px;font-weight:300;color:var(--text);">{{ current_total_str }}</div>
+        </div>
+        <div style="flex:1;padding:0.6rem;text-align:center;border-right:1px solid var(--border);">
+            <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">After Remap</div>
+            <div style="font-size:14px;font-weight:300;color:{% if is_faster %}var(--success){% else %}var(--text){% endif %};">{{ proposed_total_str }}</div>
+        </div>
+        <div style="flex:1;padding:0.6rem;text-align:center;">
+            <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">Difference</div>
+            <div style="font-size:14px;font-weight:600;color:{% if is_faster %}var(--success){% elif time_diff < -1 %}var(--danger){% else %}var(--muted){% endif %};">
+                {% if is_faster %}-{{ time_diff_str }} faster{% elif time_diff < -1 %}+{{ time_diff_str }} slower{% else %}no change{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# Per-skill breakdown #}
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Per-Skill Comparison</span>
+        </div>
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Skill</span>
+            <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Attrs</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Current</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Remapped</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Diff</span>
+        </div>
+
+        {% for row in rows %}
+        <div class="b-table-row">
+            <span style="flex:3;font-size:11px;color:var(--text);">
+                {{ row.name }} <span style="color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][row.level] }}</span>
+            </span>
+            <span style="flex:1;font-size:9px;color:var(--muted);">{{ row.primary_name[:3] }}/{{ row.secondary_name[:3] }}</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:10px;color:var(--muted);">{{ row.current_time }}</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:10px;color:{% if row.faster %}var(--success){% else %}var(--text){% endif %};">{{ row.proposed_time }}</span>
+            <span style="flex:0 0 80px;text-align:right;font-size:10px;color:{% if row.faster %}var(--success){% elif row.diff_minutes < -0.5 %}var(--danger){% else %}var(--muted){% endif %};">
+                {% if row.faster %}-{{ row.diff_str }}{% elif row.diff_minutes < -0.5 %}+{{ row.diff_str }}{% else %}—{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

@@ -282,7 +282,10 @@
         {% if active_skill %}
         {% set roman = ["I", "II", "III", "IV", "V"] %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
-            <div class="card-title">Skill Training</div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">Skill Training <a href="/character/{{ char.character_id }}/skills" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Skill Planner →</a></div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Ship Fittings <a href="/character/{{ char.character_id }}/fittings" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">View Fittings →</a></div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Blueprints <a href="/character/{{ char.character_id }}/blueprints" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Blueprint Library →</a></div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Mining <a href="/character/{{ char.character_id }}/mining" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Mining Ledger →</a></div>
             <div class="skill-progress">
                 <div class="skill-name">{{ active_skill['skill_name'] }}</div>
                 <div class="skill-time">
@@ -465,6 +468,32 @@
 </div>
 {% endif %}
 
+
+{# ── Mail ──────────────────────────────────────────────────────────────────── #}
+<div class="b-grid-2 b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Mail</span>
+        </div>
+        <div hx-get="/character/{{ char.character_id }}/mail-partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="b-empty" style="color:var(--muted);">Loading mail...</div>
+        </div>
+    </div>
+
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Notifications</span>
+        </div>
+        <div hx-get="/character/{{ char.character_id }}/notifications-partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="b-empty" style="color:var(--muted);">Loading notifications...</div>
+        </div>
+    </div>
+</div>
+
 {# ── Wallet History Chart ───────────────────────────────────────────────────── #}
 <div class="b-section">
     <div class="b-section-head">
@@ -490,7 +519,7 @@
 <div class="b-section">
     <div class="b-section-head">
         <span class="b-label">Recent Transactions</span>
-        <span class="b-label" style="color:var(--muted)">Last 20 entries</span>
+        <a href="/character/{{ char.character_id }}/journal" class="b-link" style="font-size:10px;">Full Journal →</a>
     </div>
 
     {% if journal_error == "missing_scope" %}

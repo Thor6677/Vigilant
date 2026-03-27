@@ -59,3 +59,27 @@ async def get_planets(client: ESIClient, character_id: int) -> list:
 
 async def get_planet_details(client: ESIClient, character_id: int, planet_id: int) -> dict:
     return await client.get(f"/characters/{character_id}/planets/{planet_id}/")
+
+
+async def get_mail(client: ESIClient, character_id: int, mail_id: int) -> dict:
+    return await client.get(f"/characters/{character_id}/mail/{mail_id}/")
+
+
+async def get_attributes(client: ESIClient, character_id: int) -> dict:
+    return await client.get(f"/characters/{character_id}/attributes/")
+
+
+async def get_skills(client: ESIClient, character_id: int) -> dict:
+    return await client.get(f"/characters/{character_id}/skills/")
+
+
+async def get_fittings(client: ESIClient, character_id: int) -> list:
+    return await client.get(f"/characters/{character_id}/fittings/")
+
+
+async def get_blueprints(client: ESIClient, character_id: int, page: int = 1) -> list:
+    return await client.get(f"/characters/{character_id}/blueprints/", params={"page": page})
+
+
+async def get_mining(client: ESIClient, character_id: int, page: int = 1) -> list:
+    return await client.get(f"/characters/{character_id}/mining/", params={"page": page})

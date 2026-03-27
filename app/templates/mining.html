@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}{% if is_corp %}CORP {% endif %}MINING — VIGILANT{% endblock %}
+{% block content %}
+
+{% macro format_isk(amount) %}
+  {%- if amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}{%- endif %}
+{% endmacro %}
+
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">{% if is_corp %}Corporation {% endif %}Mining Ledger</h1>
+        {% if char and char.character_name %}
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+            {% if char.character_id %}
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 style="width:20px;height:20px;border:1px solid var(--border);" alt="">
+            {% endif %}
+            <span style="font-size:11px;color:var(--muted);">
+                {{ char.character_name }}{% if is_corp and char.corporation_name %} · {{ char.corporation_name }}{% endif %}
+            </span>
+        </div>
+        {% endif %}
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+        {% if char and char.character_id and not is_corp %}
+        <a href="/character/{{ char.character_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Character</a>
+        {% endif %}
+        {% if is_corp and corp_id %}
+        <a href="/corporations/{{ corp_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Corporation</a>
+        {% endif %}
+        {# Toggle between character and corp view #}
+        {% if not is_corp and char and char.corporation_id %}
+        <a href="/corporations/{{ char.corporation_id }}/mining" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Corp View →</a>
+        {% elif is_corp and char and char.character_id %}
+        <a href="/character/{{ char.character_id }}/mining" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Personal View</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if error %}
+<div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>
+
+{% elif not data or data.total_quantity == 0 %}
+<div class="b-empty">No mining activity in the last 30 days.</div>
+
+{% else %}
+
+{# ── Corp character list ──────────────────────────────────────────────────── #}
+{% if is_corp and characters %}
+<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:1rem;">
+    <span style="font-size:10px;color:var(--muted);">Includes:</span>
+    {% for name in characters %}
+    <span style="font-size:10px;letter-spacing:0.06em;color:var(--text);border:1px solid var(--border);padding:1px 6px;">{{ name }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Summary Stats ─────────────────────────────────────────────────────────── #}
+<div class="b-stats" style="margin-bottom:1rem;">
+    <div class="b-stat">
+        <div class="b-stat-val is-accent">{{ format_isk(data.total_value) }} ISK</div>
+        <div class="b-stat-label">Total Value</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ "{:,.0f}".format(data.total_quantity) }}</div>
+        <div class="b-stat-label">Units Mined</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ data.days_active }}</div>
+        <div class="b-stat-label">Days Active</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ data.by_ore | length }}</div>
+        <div class="b-stat-label">Ore Types</div>
+    </div>
+    {% if data.days_active > 0 %}
+    <div class="b-stat">
+        <div class="b-stat-val">{{ format_isk(data.total_value / data.days_active) }}</div>
+        <div class="b-stat-label">ISK / Day</div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="b-grid-2 b-section">
+
+    {# ── By Ore Type ───────────────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">By Ore Type</span>
+        </div>
+        {% for ore in data.by_ore %}
+        {% set pct = (ore.value / data.total_value * 100) if data.total_value > 0 else 0 %}
+        <div class="b-table-row">
+            <span style="flex:2;display:flex;align-items:center;gap:0.4rem;">
+                <img src="https://images.evetech.net/types/{{ ore.type_id }}/icon?size=32"
+                     style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
+                     onerror="this.style.display='none'">
+                <span style="font-size:11px;color:var(--text);">{{ ore.name }}</span>
+            </span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(ore.quantity) }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(ore.value) }}</span>
+            <span style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# ── By System ─────────────────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">By System</span>
+        </div>
+        {% for sys in data.by_system %}
+        {% set pct = (sys.value / data.total_value * 100) if data.total_value > 0 else 0 %}
+        <div class="b-table-row">
+            <span style="flex:2;font-size:11px;color:var(--text);">{{ sys.name }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(sys.quantity) }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(sys.value) }}</span>
+            <span style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+{# ── Daily Breakdown ───────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Daily Summary</span>
+            <span style="font-size:10px;color:var(--muted);">Last 30 days</span>
+        </div>
+
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:0 0 100px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Units</span>
+            <span style="flex:0 0 50px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Types</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Value</span>
+            <span style="flex:2;"></span>
+        </div>
+
+        {% for day in data.by_date %}
+        {% set bar_pct = (day.value / data.by_date[0].value * 100) if data.by_date[0].value > 0 else 0 %}
+        <div class="b-table-row">
+            <span style="flex:0 0 100px;font-size:11px;color:var(--text);">{{ day.date }}</span>
+            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(day.quantity) }}</span>
+            <span style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ day.types }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(day.value) }}</span>
+            <span style="flex:2;display:flex;align-items:center;padding-left:0.5rem;">
+                <div style="height:4px;background:var(--accent);width:{{ bar_pct | int }}%;min-width:1px;"></div>
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{# ── Full Detail ───────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="cursor:pointer;" onclick="document.getElementById('detail-table').style.display = document.getElementById('detail-table').style.display === 'none' ? '' : 'none'; this.querySelector('.fit-arrow').textContent = document.getElementById('detail-table').style.display === 'none' ? '▸' : '▾';">
+            <span class="b-label">Full Detail</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:10px;color:var(--muted);">{{ data.entries | length }} entries</span>
+                <span class="fit-arrow" style="font-size:10px;color:var(--muted);">▸</span>
+            </div>
+        </div>
+
+        <div id="detail-table" style="display:none;">
+            <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+                <span style="flex:0 0 90px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
+                <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Ore</span>
+                <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">System</span>
+                <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Quantity</span>
+                <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Value</span>
+            </div>
+
+            {% for e in data.entries %}
+            <div class="b-table-row">
+                <span style="flex:0 0 90px;font-size:10px;color:var(--muted);">{{ e.date }}</span>
+                <span style="flex:2;display:flex;align-items:center;gap:0.35rem;">
+                    <img src="https://images.evetech.net/types/{{ e.type_id }}/icon?size=32"
+                         style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
+                         onerror="this.style.display='none'">
+                    <span style="font-size:11px;color:var(--text);">{{ e.ore_name }}</span>
+                </span>
+                <span style="flex:1;font-size:10px;color:var(--muted);">{{ e.system_name }}</span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,.0f}".format(e.quantity) }}</span>
+                <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(e.value) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
