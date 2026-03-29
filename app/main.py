@@ -20,6 +20,7 @@ from app.routes.skills import router as skills_router
 from app.routes.fittings import router as fittings_router
 from app.routes.blueprints import router as blueprints_router
 from app.routes.mining import router as mining_router
+from app.routes.mining_ledger import router as mining_ledger_router
 
 settings = get_settings()
 
@@ -57,6 +58,7 @@ app.include_router(skills_router)
 app.include_router(fittings_router)
 app.include_router(blueprints_router)
 app.include_router(mining_router)
+app.include_router(mining_ledger_router)
 
 
 @app.on_event("startup")

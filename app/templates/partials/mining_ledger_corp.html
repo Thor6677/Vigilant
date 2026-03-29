@@ -1,0 +1,66 @@
+{% macro format_isk(amount) %}
+  {%- if amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}{%- endif %}
+{% endmacro %}
+
+{% if error %}
+<div style="padding:0.75rem;font-size:10px;color:var(--danger);">Failed to load: {{ error }}</div>
+
+{% elif not char_stats %}
+<div style="padding:0.75rem;font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;">No characters with mining scope.</div>
+
+{% else %}
+
+{# ── Corp summary row ─────────────────────────────────────────────────────── #}
+<div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <span style="font-size:11px;color:var(--accent);font-weight:bold;">{{ format_isk(corp_total_value) }} ISK</span>
+    <span style="font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(corp_total_quantity) }} units</span>
+    <span style="font-size:10px;color:var(--muted);">{{ corp_days }} days active</span>
+    <button onclick="viewLedger('{{ char_stats | map(attribute='character_id') | join(',') }}')"
+            class="b-btn" style="margin-left:auto;padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
+        View Corp Ledger
+    </button>
+</div>
+
+{# ── Per-character rows ───────────────────────────────────────────────────── #}
+{% for c in char_stats %}
+<div class="b-table-row" style="padding:0.4rem 0.75rem;align-items:center;">
+    <span style="flex:0 0 20px;">
+        <input type="checkbox" class="ml-check" data-charid="{{ c.character_id }}"
+               onclick="toggleChar('{{ c.character_id }}', this)"
+               style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
+    </span>
+    <span style="flex:0 0 24px;">
+        <img src="https://images.evetech.net/characters/{{ c.character_id }}/portrait?size=32"
+             style="width:20px;height:20px;border:1px solid var(--border);" alt=""
+             onerror="this.style.display='none'">
+    </span>
+    <span style="flex:2;font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.character_name }}</span>
+    <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(c.value) }}</span>
+    <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(c.quantity) }} units</span>
+    <span style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ c.days }}d</span>
+    <span style="flex:0 0 40px;text-align:right;">
+        <button onclick="event.stopPropagation(); viewLedger('{{ c.character_id }}')"
+                class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
+            View
+        </button>
+    </span>
+</div>
+{% endfor %}
+
+{# ── Restore checkbox state for previously selected chars ─────────────────── #}
+<script>
+(function() {
+    try {
+        var sel = JSON.parse(localStorage.getItem('vigilant_mining_selection') || '[]');
+        var set = new Set(sel);
+        document.querySelectorAll('#corp-chars-{{ corp_id }} .ml-check').forEach(function(cb) {
+            if (set.has(parseInt(cb.dataset.charid))) cb.checked = true;
+        });
+    } catch(e) {}
+})();
+</script>
+
+{% endif %}
