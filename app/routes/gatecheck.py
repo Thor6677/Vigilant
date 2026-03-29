@@ -182,7 +182,7 @@ def _analyze_kills(
         kill_val = zkb.get("totalValue", 0)
         total_val += kill_val
 
-        att_ships = Counter()
+        att_ships: dict[int, int] = {}  # type_id → count
         att_weapons = Counter()
 
         for att in attackers:
@@ -191,7 +191,7 @@ def _analyze_kills(
             gid = group_ids.get(sid)
 
             if sid:
-                att_ships[type_names.get(sid, f"Unknown ({sid})")] += 1
+                att_ships[sid] = att_ships.get(sid, 0) + 1
                 if gid in DICTOR_GROUPS:
                     has_dic = True
                 if gid in HIC_GROUPS:
@@ -204,6 +204,13 @@ def _analyze_kills(
                     if "smartbomb" in wname.lower():
                         has_sb = True
 
+        # Build attacker ships as list of dicts with type_id for linking
+        top_att = sorted(att_ships.items(), key=lambda x: -x[1])[:8]
+        att_ships_list = [
+            {"name": type_names.get(tid, f"Unknown ({tid})"), "type_id": tid, "count": cnt}
+            for tid, cnt in top_att
+        ]
+
         analyzed.append({
             "killmail_id": km.get("killmail_id"),
             "time_str": _time_ago(km.get("killmail_time", "")),
@@ -211,7 +218,7 @@ def _analyze_kills(
             "victim_ship_id": v_ship_id,
             "victim_char_id": victim.get("character_id"),
             "attacker_count": len(attackers),
-            "attacker_ships": dict(att_ships.most_common(8)),
+            "attacker_ships": att_ships_list,
             "attacker_weapons": dict(att_weapons.most_common(8)),
             "value": kill_val,
             "value_str": _format_isk(kill_val),
