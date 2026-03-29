@@ -60,14 +60,6 @@
     }
     .gc-route-btn:hover { color: var(--accent); border-color: var(--accent); }
 
-    .gc-loc-btn {
-        background: none; border: 1px solid var(--border);
-        color: var(--muted); padding: 1px 6px;
-        font: inherit; font-size: 9px; cursor: pointer;
-        display: inline-flex; align-items: center; gap: 3px;
-        transition: border-color 0.15s, color 0.15s;
-    }
-    .gc-loc-btn:hover { color: var(--accent); border-color: var(--accent); }
 </style>
 {% endblock %}
 
@@ -94,22 +86,24 @@
                 {# Origin #}
                 <div style="flex:1;min-width:180px;position:relative;">
                     <label class="gc-lbl">From</label>
-                    <input type="text" name="origin" id="gc-origin" class="gc-input"
-                           placeholder="e.g. Jita" autocomplete="off"
-                           oninput="gcSearch(this,'gc-origin-dd')" onfocus="gcSearch(this,'gc-origin-dd')">
-                    <div id="gc-origin-dd" class="gc-dropdown" style="display:none;"></div>
-                    {% if char_locations %}
-                    <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
-                        {% for cl in char_locations %}
-                        <button type="button" class="gc-loc-btn" onclick="gcSetOrigin('{{ cl.system_name }}')"
-                                title="{{ cl.character_name }} — {{ cl.system_name }}">
-                            <img src="https://images.evetech.net/characters/{{ cl.character_id }}/portrait?size=32"
-                                 style="width:14px;height:14px;border-radius:2px;vertical-align:middle;">
-                            {{ cl.system_name }}
-                        </button>
-                        {% endfor %}
+                    <div style="display:flex;gap:0;">
+                        {% if char_locations %}
+                        <select id="gc-origin-chars" class="gc-select" onchange="gcCharLoc(this)"
+                                style="width:auto;min-width:0;max-width:42px;padding:0.4rem 0.4rem;border-right:none;flex-shrink:0;
+                                       background-image:none;text-overflow:ellipsis;cursor:pointer;"
+                                title="Use character location">
+                            <option value="">📍</option>
+                            {% for cl in char_locations %}
+                            <option value="{{ cl.system_name }}">{{ cl.character_name }} — {{ cl.system_name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                        <input type="text" name="origin" id="gc-origin" class="gc-input"
+                               placeholder="e.g. Jita" autocomplete="off"
+                               style="{% if char_locations %}border-top-left-radius:0;border-bottom-left-radius:0;{% endif %}"
+                               oninput="gcSearch(this,'gc-origin-dd')" onfocus="gcSearch(this,'gc-origin-dd')">
                     </div>
-                    {% endif %}
+                    <div id="gc-origin-dd" class="gc-dropdown" style="display:none;"></div>
                 </div>
 
                 {# Destination #}
@@ -298,8 +292,11 @@ function gcCommonRoute(from, to) {
     htmx.trigger(document.getElementById('gc-form'), 'submit');
 }
 
-function gcSetOrigin(systemName) {
-    document.getElementById('gc-origin').value = systemName;
+function gcCharLoc(sel) {
+    if (sel.value) {
+        document.getElementById('gc-origin').value = sel.value;
+    }
+    sel.selectedIndex = 0;
 }
 
 /* Close dropdowns on outside click */
