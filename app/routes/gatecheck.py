@@ -5,6 +5,7 @@ All features included: detailed kill intel, gatecamp finder, war target tracking
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections import Counter, defaultdict
@@ -13,9 +14,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AsyncSessionLocal, get_db
+from app.db.models import AsyncSessionLocal, get_db, Character, CharacterDashboardCache
 from app.esi.client import ESIClient, get_http_client
 from app.sde import lookup as sde
 
@@ -367,8 +369,40 @@ async def _check_route_systems(route: list[int], db: AsyncSession) -> list[dict]
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/intel/gatecheck", response_class=HTMLResponse)
-async def gatecheck_page(request: Request):
-    return templates.TemplateResponse("gatecheck.html", {"request": request})
+async def gatecheck_page(request: Request, db: AsyncSession = Depends(get_db)):
+    # Load logged-in user's characters with cached locations
+    char_locations = []
+    user_id = request.session.get("user_id")
+    if user_id:
+        result = await db.execute(select(Character).where(Character.user_id == user_id))
+        characters = result.scalars().all()
+        cids = [c.character_id for c in characters]
+        if cids:
+            cache_result = await db.execute(
+                select(CharacterDashboardCache).where(
+                    CharacterDashboardCache.character_id.in_(cids)
+                )
+            )
+            caches = {c.character_id: c for c in cache_result.scalars().all()}
+            for char in characters:
+                cache = caches.get(char.character_id)
+                loc = None
+                if cache and cache.location_json:
+                    try:
+                        loc = json.loads(cache.location_json)
+                    except Exception:
+                        pass
+                if loc and loc.get("system_name"):
+                    char_locations.append({
+                        "character_name": char.character_name,
+                        "character_id": char.character_id,
+                        "system_name": loc["system_name"],
+                    })
+
+    return templates.TemplateResponse("gatecheck.html", {
+        "request": request,
+        "char_locations": char_locations,
+    })
 
 
 @router.get("/intel/gatecheck/systems", response_class=JSONResponse)

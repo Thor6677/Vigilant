@@ -51,6 +51,23 @@
         display: block; font-size: 9px; letter-spacing: 0.12em;
         text-transform: uppercase; color: var(--muted); margin-bottom: 3px;
     }
+
+    .gc-route-btn {
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--muted); padding: 0.3rem 0.6rem;
+        font: inherit; font-size: 10px; cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+    }
+    .gc-route-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    .gc-loc-btn {
+        background: none; border: 1px solid var(--border);
+        color: var(--muted); padding: 1px 6px;
+        font: inherit; font-size: 9px; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 3px;
+        transition: border-color 0.15s, color 0.15s;
+    }
+    .gc-loc-btn:hover { color: var(--accent); border-color: var(--accent); }
 </style>
 {% endblock %}
 
@@ -71,7 +88,7 @@
 <div id="tab-checker" class="gc-tab-content is-active">
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">Check Route Safety</span></div>
-        <form hx-post="/intel/gatecheck/check" hx-target="#route-results" hx-swap="innerHTML" hx-indicator="#route-loading">
+        <form id="gc-form" hx-post="/intel/gatecheck/check" hx-target="#route-results" hx-swap="innerHTML" hx-indicator="#route-loading">
             <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
 
                 {# Origin #}
@@ -81,6 +98,18 @@
                            placeholder="e.g. Jita" autocomplete="off"
                            oninput="gcSearch(this,'gc-origin-dd')" onfocus="gcSearch(this,'gc-origin-dd')">
                     <div id="gc-origin-dd" class="gc-dropdown" style="display:none;"></div>
+                    {% if char_locations %}
+                    <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
+                        {% for cl in char_locations %}
+                        <button type="button" class="gc-loc-btn" onclick="gcSetOrigin('{{ cl.system_name }}')"
+                                title="{{ cl.character_name }} — {{ cl.system_name }}">
+                            <img src="https://images.evetech.net/characters/{{ cl.character_id }}/portrait?size=32"
+                                 style="width:14px;height:14px;border-radius:2px;vertical-align:middle;">
+                            {{ cl.system_name }}
+                        </button>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </div>
 
                 {# Destination #}
@@ -121,6 +150,21 @@
                 </details>
             </div>
         </form>
+    </div>
+
+    {# ── Common Routes ─────────────────────────────────────────────────────── #}
+    <div class="b-panel" style="margin-top:0.5rem;">
+        <div class="b-panel-head"><span class="b-label">Common Routes</span></div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Jita','Amarr')">Jita → Amarr</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Jita','Dodixie')">Jita → Dodixie</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Jita','Hek')">Jita → Hek</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Jita','Rens')">Jita → Rens</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Amarr','Dodixie')">Amarr → Dodixie</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Amarr','Hek')">Amarr → Hek</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Dodixie','Rens')">Dodixie → Rens</button>
+            <button type="button" class="gc-route-btn" onclick="gcCommonRoute('Jita','Perimeter')">Jita → Perimeter</button>
+        </div>
     </div>
 
     {# Legend #}
@@ -245,6 +289,17 @@ function _secCol(s) {
     if (s >= 0.3) return '#cc8844';
     if (s >= 0.1) return '#cc5533';
     return '#cc3333';
+}
+
+/* ── Common routes & character location ───────────────────────────────────── */
+function gcCommonRoute(from, to) {
+    document.getElementById('gc-origin').value = from;
+    document.getElementById('gc-dest').value = to;
+    htmx.trigger(document.getElementById('gc-form'), 'submit');
+}
+
+function gcSetOrigin(systemName) {
+    document.getElementById('gc-origin').value = systemName;
 }
 
 /* Close dropdowns on outside click */
