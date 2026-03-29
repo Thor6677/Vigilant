@@ -21,6 +21,7 @@ from app.esi import market as esi_market
 from app.esi import industry as esi_industry
 from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
+from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
 
 router = APIRouter(tags=["dashboard"])
@@ -45,9 +46,154 @@ templates.env.globals["sec_color_val"] = _sec_color_val
 # Timestamps allow detection of stuck characters (in queue > 5 minutes).
 _queued_sync: dict[int, datetime] = {}
 
-# Hard serialisation lock — only one _sync_task can execute at a time,
-# regardless of how many coroutines have been created (manual syncs, etc.).
-_sync_lock: asyncio.Lock | None = None
+# ── Browser notification events ───────────────────────────────────────────────
+# Per-user event queue. Cleared when polled by the client.
+_notification_events: dict[int, list] = {}
+_NOTIFICATION_MAX = 50
+
+
+def _emit_notification(user_id: int, event: dict):
+    """Add a notification event for a user."""
+    if user_id not in _notification_events:
+        _notification_events[user_id] = []
+    q = _notification_events[user_id]
+    event["timestamp"] = datetime.now(timezone.utc).isoformat()
+    q.append(event)
+    if len(q) > _NOTIFICATION_MAX:
+        _notification_events[user_id] = q[-_NOTIFICATION_MAX:]
+
+
+# Track which skills we've already notified about: {character_id: set(skill_id_level)}
+_notified_skills: dict[int, set] = {}
+
+
+async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: dict, db):
+    """Compare old vs new cached data and emit notification events.
+    Skills are resolved to names via SDE. Only fires once per skill completion."""
+    user_id = char.user_id
+    char_name = char.character_name
+    cid = char.character_id
+    portrait = f"https://images.evetech.net/characters/{cid}/portrait?size=64"
+
+    # 1. Skill training complete
+    # Compare the currently-training skill between old and new queue.
+    # If the old active skill is different from the new one, the old one finished.
+    old_sq = old_cache.get("skillqueue")
+    new_sq = new_cache.get("skillqueue")
+    if old_sq and new_sq and isinstance(old_sq, list) and isinstance(new_sq, list):
+        now = datetime.now(timezone.utc)
+        if cid not in _notified_skills:
+            _notified_skills[cid] = set()
+
+        def _find_active(queue):
+            """Find the currently training skill (start <= now < finish)."""
+            for entry in queue:
+                start_raw = entry.get("start_date")
+                finish_raw = entry.get("finish_date")
+                if not start_raw or not finish_raw:
+                    continue
+                try:
+                    start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                    finish_dt = datetime.fromisoformat(finish_raw.replace("Z", "+00:00"))
+                    if start_dt <= now and finish_dt > now:
+                        return entry
+                except Exception:
+                    continue
+            return None
+
+        old_active = _find_active(old_sq)
+        new_active = _find_active(new_sq)
+
+        # The old active skill finished if: there WAS an active skill before,
+        # and now either there's a different one or none at all
+        if old_active:
+            old_sid = old_active.get("skill_id")
+            old_level = old_active.get("finished_level")
+            old_key = f"{old_sid}_{old_level}"
+            new_sid = new_active.get("skill_id") if new_active else None
+
+            if old_sid != new_sid and old_key not in _notified_skills[cid]:
+                # Old skill is no longer active — it completed
+                _notified_skills[cid].add(old_key)
+                skill_name = f"Skill {old_sid}"
+                try:
+                    names = await sde.type_ids_to_names(db, [old_sid])
+                    skill_name = names.get(old_sid, skill_name)
+                except Exception:
+                    pass
+                _emit_notification(user_id, {
+                    "type": "skill_complete",
+                    "title": "Skill Complete",
+                    "body": f"{char_name} — {skill_name} {old_level} finished",
+                    "icon": portrait,
+                })
+
+        # Clean up notified set when skills leave the queue entirely
+        current_keys = {f"{e.get('skill_id')}_{e.get('finished_level')}" for e in new_sq if e.get("skill_id")}
+        _notified_skills[cid] = _notified_skills[cid] & current_keys
+
+    # 2. Industry job ready
+    old_ind = old_cache.get("industry")
+    new_ind = new_cache.get("industry")
+    if isinstance(old_ind, dict) and isinstance(new_ind, dict):
+        old_ready = old_ind.get("ready_count", 0)
+        new_ready = new_ind.get("ready_count", 0)
+        if new_ready > old_ready:
+            diff = new_ready - old_ready
+            product = new_ind.get("soonest_product", "")
+            body = f"{char_name} — {diff} job{'s' if diff > 1 else ''} ready for delivery"
+            if diff == 1 and product:
+                body = f"{char_name} — {product} ready for delivery"
+            _emit_notification(user_id, {
+                "type": "job_ready",
+                "title": "Industry Job Ready",
+                "body": body,
+                "icon": portrait,
+            })
+
+    # 3. PI extractors expiring
+    old_pi = old_cache.get("pi")
+    new_pi = new_cache.get("pi")
+    if isinstance(old_pi, list) and isinstance(new_pi, list):
+        old_expired = {p.get("planet_id") for p in old_pi if p.get("expiry_warning") in ("critical", "expired")}
+        for planet in new_pi:
+            pid = planet.get("planet_id")
+            warning = planet.get("expiry_warning")
+            if warning in ("critical", "expired") and pid not in old_expired:
+                pname = planet.get("planet_name", f"Planet {pid}")
+                _emit_notification(user_id, {
+                    "type": "pi_expiring",
+                    "title": "PI Expiring" if warning == "critical" else "PI Expired",
+                    "body": f"{char_name} — extractors {'expiring soon' if warning == 'critical' else 'expired'} on {pname}",
+                    "icon": portrait,
+                })
+
+    # 4. New mail
+    old_mail = old_cache.get("mail")
+    new_mail = new_cache.get("mail")
+    if isinstance(old_mail, dict) and isinstance(new_mail, dict):
+        old_unread = old_mail.get("unread_count", 0)
+        new_unread = new_mail.get("unread_count", 0)
+        if new_unread > old_unread:
+            diff = new_unread - old_unread
+            _emit_notification(user_id, {
+                "type": "new_mail",
+                "title": "New Mail",
+                "body": f"{char_name} — {diff} new message{'s' if diff > 1 else ''}",
+                "icon": portrait,
+            })
+
+# Semaphore for concurrent character syncing — allows up to N characters
+# to sync in parallel instead of strict serialisation.
+_sync_semaphore: asyncio.Semaphore | None = None
+_SYNC_CONCURRENCY = 5
+
+
+def _get_sync_semaphore() -> asyncio.Semaphore:
+    global _sync_semaphore
+    if _sync_semaphore is None:
+        _sync_semaphore = asyncio.Semaphore(_SYNC_CONCURRENCY)
+    return _sync_semaphore
 
 # Per-character locks for token refresh. Serialises concurrent _client_for()
 # calls for the same character so asyncio.gather() can't trigger two
@@ -55,12 +201,15 @@ _sync_lock: asyncio.Lock | None = None
 # second concurrent request with the old token would fail).
 _token_locks: dict[int, asyncio.Lock] = {}
 
+# Per-character sync locks — prevents the same character from syncing twice
+# concurrently (e.g. manual resync while background scheduler is running).
+_char_sync_locks: dict[int, asyncio.Lock] = {}
 
-def _get_sync_lock() -> asyncio.Lock:
-    global _sync_lock
-    if _sync_lock is None:
-        _sync_lock = asyncio.Lock()
-    return _sync_lock
+
+def _get_char_sync_lock(character_id: int) -> asyncio.Lock:
+    if character_id not in _char_sync_locks:
+        _char_sync_locks[character_id] = asyncio.Lock()
+    return _char_sync_locks[character_id]
 
 
 def _get_token_lock(character_id: int) -> asyncio.Lock:
@@ -72,11 +221,11 @@ def _get_token_lock(character_id: int) -> asyncio.Lock:
 # https://esi.evetech.net/latest/swagger.json
 FIELD_CACHE_SECONDS: dict[str, int] = {
     "wallet":        120,   # ESI max-age: 120s
-    "location":       30,   # ESI max-age:   5s  — 30s is adequate for a dashboard
+    "location":       60,   # ESI max-age:   5s  — 60s is adequate for a dashboard
     "industry":      300,   # ESI max-age: 300s
     "clones":       3600,   # ESI max-age: 3600s
     "orders":        300,   # ESI max-age: 300s
-    "mail":           30,   # ESI max-age:  30s
+    "mail":          120,   # ESI max-age:  30s  — 120s reduces churn without missing much
     "notifications": 600,   # ESI max-age: 600s
     "contracts":     300,   # ESI max-age: 300s
     "pi":            600,   # ESI max-age: 600s
@@ -759,8 +908,10 @@ _FIELD_FETCHERS = {
 # ── Background sync task ──────────────────────────────────────────────────────
 
 async def _sync_task(character_id: int):
-    """Sync one character. Acquires _sync_lock so only one character runs at a time."""
-    async with _get_sync_lock():
+    """Sync one character. Acquires semaphore slot + per-character lock."""
+    if _get_char_sync_lock(character_id).locked():
+        return  # Already syncing this character
+    async with _get_sync_semaphore():
         async with AsyncSessionLocal() as db:
             try:
                 char_result = await db.execute(select(Character).where(Character.character_id == character_id))
@@ -807,6 +958,24 @@ async def _sync_task(character_id: int):
 
                 logger.info("Syncing char %s — stale fields: %s", character_id, stale_fields or "none")
 
+                # Snapshot old data for notification detection
+                _old_cache = {}
+                if stale_fields:
+                    for sf in stale_fields:
+                        col = _FIELD_DB_COLUMN.get(sf)
+                        if sf == "skillqueue" and cache.skillqueue_json:
+                            try: _old_cache["skillqueue"] = json.loads(cache.skillqueue_json)
+                            except Exception: pass
+                        elif sf == "industry" and cache.industry_json:
+                            try: _old_cache["industry"] = json.loads(cache.industry_json)
+                            except Exception: pass
+                        elif sf == "pi" and cache.pi_json:
+                            try: _old_cache["pi"] = json.loads(cache.pi_json)
+                            except Exception: pass
+                        elif sf == "mail" and cache.mail_json:
+                            try: _old_cache["mail"] = json.loads(cache.mail_json)
+                            except Exception: pass
+
                 if stale_fields:
                     results = await asyncio.gather(
                         *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields]
@@ -845,6 +1014,27 @@ async def _sync_task(character_id: int):
                 cache.sync_status = "idle"
                 cache.sync_error = None
                 await db.commit()
+
+                # Detect notification events by comparing old vs new data
+                if _old_cache and char.user_id:
+                    _new_cache = {}
+                    if cache.skillqueue_json:
+                        try: _new_cache["skillqueue"] = json.loads(cache.skillqueue_json)
+                        except Exception: pass
+                    if cache.industry_json:
+                        try: _new_cache["industry"] = json.loads(cache.industry_json)
+                        except Exception: pass
+                    if cache.pi_json:
+                        try: _new_cache["pi"] = json.loads(cache.pi_json)
+                        except Exception: pass
+                    if cache.mail_json:
+                        try: _new_cache["mail"] = json.loads(cache.mail_json)
+                        except Exception: pass
+                    try:
+                        await _detect_notifications(char, _old_cache, _new_cache, db)
+                    except Exception as notif_err:
+                        logger.debug("Notification detection error for char %s: %s", character_id, notif_err)
+
                 logger.info("Sync complete for char %s", character_id)
 
             except Exception as e:
@@ -876,15 +1066,18 @@ async def _cleanup_old_snapshots():
 
 
 async def _sync_all_task(character_ids: list[int]):
-    """Process a batch of characters sequentially.
+    """Process a batch of characters concurrently (up to _SYNC_CONCURRENCY at a time).
 
-    _sync_task holds _sync_lock for the duration of each character, so
-    characters are strictly one-at-a-time even if concurrent callers exist.
+    The semaphore inside _sync_task limits how many run in parallel.
     """
+    async def _sync_and_cleanup(cid: int):
+        try:
+            await _sync_task(cid)
+        finally:
+            _queued_sync.pop(cid, None)
+
     try:
-        for character_id in character_ids:
-            await _sync_task(character_id)
-            _queued_sync.pop(character_id, None)
+        await asyncio.gather(*[_sync_and_cleanup(cid) for cid in character_ids])
     finally:
         for cid in character_ids:
             _queued_sync.pop(cid, None)
@@ -1097,9 +1290,16 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         from datetime import datetime as _dt
         characters = sorted(characters, key=lambda c: skill_map.get(c.character_id, {}).get("queue_end") or _dt.max.replace(tzinfo=timezone.utc))
     else:  # custom (default)
-        characters = sorted(characters, key=lambda c: (c.account_group or "Ungrouped", c.sort_order))
+        # Use saved group order from session if available
+        saved_group_order = request.session.get("group_order", [])
+        group_rank = {name: idx for idx, name in enumerate(saved_group_order)}
+        characters = sorted(characters, key=lambda c: (
+            group_rank.get(c.account_group or "Ungrouped", 999),
+            c.account_group or "Ungrouped",
+            c.sort_order,
+        ))
 
-    # Build groups for custom view
+    # Build groups for custom view (dict preserves insertion order)
     char_groups = {}
     for char in characters:
         group = char.account_group or "Ungrouped"
@@ -1134,6 +1334,33 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         last_synced_strs[cid] = _age_str(cache.last_synced if cache else None)
 
     any_syncing = any(s == "syncing" for s in sync_statuses.values())
+
+    # Detect characters needing re-auth
+    # Flag if: token refresh failed OR character has fewer scopes than the most-scoped character
+    needs_reauth: dict[int, bool] = {}
+    max_scopes = max((len((c.scopes or "").split()) for c in characters), default=0)
+    for char in characters:
+        cid = char.character_id
+        warns = sync_warnings.get(cid, {})
+        token_failed = any("token_refresh_failed" in str(v) for v in warns.values())
+        missing_scopes = len((char.scopes or "").split()) < max_scopes
+        needs_reauth[cid] = token_failed or missing_scopes
+
+    # Corporation aggregates
+    corp_ids = set()
+    for char in characters:
+        if char.corporation_id:
+            corp_ids.add(char.corporation_id)
+    total_corporations = len(corp_ids)
+
+    # Find best character per corp for ESI calls (one with most scopes)
+    corp_chars: dict[int, Character] = {}
+    for char in characters:
+        if not char.corporation_id:
+            continue
+        existing = corp_chars.get(char.corporation_id)
+        if not existing or len((char.scopes or "").split()) > len((existing.scopes or "").split()):
+            corp_chars[char.corporation_id] = char
 
     # Build char_rows for wealth breakdown
     char_rows = []
@@ -1180,11 +1407,22 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "last_synced_strs": last_synced_strs,
         "any_syncing": any_syncing,
         "sync_warnings": sync_warnings,
+        "needs_reauth": needs_reauth,
+        "total_corporations": total_corporations,
         "char_rows": char_rows,
         "skill_map": skill_map,
         "sort": sort,
         "char_groups": char_groups,
     })
+
+
+@router.post("/dashboard/group-order")
+async def save_group_order(request: Request):
+    """Save the visual order of account groups in the session."""
+    data = await request.json()
+    if isinstance(data, list):
+        request.session["group_order"] = data
+    return JSONResponse({"ok": True})
 
 
 @router.post("/dashboard/sync/{character_id}")
@@ -1217,6 +1455,163 @@ async def trigger_sync(character_id: int, request: Request, db: AsyncSession = D
 
     asyncio.create_task(_sync_task(character_id))
     return RedirectResponse("/dashboard", status_code=303)
+
+
+# In-memory cache for corp stats (avoids hitting ESI on every dashboard load)
+_corp_stats_cache: dict[int, dict] = {}  # user_id -> {html, expires_at}
+_CORP_STATS_TTL = 300  # 5 minutes
+
+
+@router.get("/notifications/poll")
+async def notifications_poll(request: Request):
+    """Return pending notification events for the current user and clear them."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse([])
+    events = _notification_events.pop(user_id, [])
+    return JSONResponse(events)
+
+
+@router.post("/notifications/dismiss")
+async def notifications_dismiss(request: Request):
+    """Clear all pending notification events."""
+    user_id = request.session.get("user_id")
+    if user_id:
+        _notification_events.pop(user_id, None)
+    return JSONResponse({"ok": True})
+
+
+@router.get("/dashboard/corp-stats", response_class=HTMLResponse)
+async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
+    """HTMX lazy-loaded corporation stats for the dashboard summary bar."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    # Check in-memory cache first
+    cached = _corp_stats_cache.get(user_id)
+    if cached and cached["expires_at"] > datetime.now(timezone.utc):
+        return HTMLResponse(cached["html"])
+
+    char_result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = char_result.scalars().all()
+
+    # Build list of characters per player corp (skip NPC corps)
+    corp_char_lists: dict[int, list[Character]] = {}
+    for char in characters:
+        if not char.corporation_id or char.corporation_id < 2000000:
+            continue
+        corp_char_lists.setdefault(char.corporation_id, []).append(char)
+
+    corp_wallet_total = 0.0
+    corp_active_jobs = 0
+    corp_done_jobs = 0
+    corp_expiring_jobs = 0
+    corp_active_orders = 0
+    now = datetime.now(timezone.utc)
+    threshold_48h = now + timedelta(hours=48)
+
+    async def _try_corp_call(chars: list[Character], api_func, corp_id: int):
+        """Try an ESI corp call with each character until one succeeds (has in-game role)."""
+        for char in chars:
+            try:
+                client, err = await _client_for(char, db)
+                if err or not client:
+                    continue
+                return await api_func(client, corp_id)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403:
+                    continue  # This char lacks the in-game role, try next
+                raise
+            except Exception:
+                continue
+        return None
+
+    async def fetch_corp_data(corp_id: int, chars: list[Character]):
+        nonlocal corp_wallet_total, corp_active_jobs, corp_done_jobs, corp_expiring_jobs, corp_active_orders
+        scopes = chars[0].scopes or ""
+
+        try:
+            tasks = []
+            if "esi-wallet.read_corporation_wallets.v1" in scopes:
+                tasks.append(("wallet", _try_corp_call(chars, esi_corp.get_corporation_wallets, corp_id)))
+            if "esi-industry.read_corporation_jobs.v1" in scopes:
+                tasks.append(("industry", _try_corp_call(chars, esi_corp.get_corporation_jobs, corp_id)))
+            if "esi-markets.read_corporation_orders.v1" in scopes:
+                tasks.append(("orders", _try_corp_call(chars, esi_corp.get_corporation_orders, corp_id)))
+
+            if not tasks:
+                return
+
+            results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
+
+            for (label, _), result in zip(tasks, results):
+                if result is None or isinstance(result, Exception):
+                    continue
+                if label == "wallet" and isinstance(result, list):
+                    corp_wallet_total += sum(d.get("balance", 0) for d in result)
+                elif label == "industry" and isinstance(result, list):
+                    for job in result:
+                        status = job.get("status", "")
+                        if status == "active":
+                            corp_active_jobs += 1
+                            end_str = job.get("end_date")
+                            if end_str:
+                                try:
+                                    end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                                    if end_dt <= threshold_48h:
+                                        corp_expiring_jobs += 1
+                                except Exception:
+                                    pass
+                        elif status == "ready":
+                            corp_done_jobs += 1
+                elif label == "orders" and isinstance(result, list):
+                    corp_active_orders += len(result)
+        except Exception:
+            pass
+
+    await asyncio.gather(*[fetch_corp_data(cid, chars) for cid, chars in corp_char_lists.items()])
+
+    # Format wallet
+    if corp_wallet_total >= 1e12:
+        wallet_str = f"{corp_wallet_total / 1e12:.2f}T ISK"
+    elif corp_wallet_total >= 1e9:
+        wallet_str = f"{corp_wallet_total / 1e9:.2f}B ISK"
+    elif corp_wallet_total >= 1e6:
+        wallet_str = f"{corp_wallet_total / 1e6:.2f}M ISK"
+    else:
+        wallet_str = f"{corp_wallet_total:,.0f} ISK"
+
+    # Build jobs label
+    jobs_parts = []
+    if corp_active_jobs:
+        jobs_parts.append(f"{corp_active_jobs} active")
+    if corp_expiring_jobs:
+        jobs_parts.append(f"{corp_expiring_jobs} <48h")
+    if corp_done_jobs:
+        jobs_parts.append(f"{corp_done_jobs} done")
+    jobs_str = " · ".join(jobs_parts) if jobs_parts else "0"
+
+    html = f"""
+    <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+        <div class="b-stat-val is-accent">{wallet_str}</div>
+        <div class="b-stat-label">Corp Wallet</div>
+    </a>
+    <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+        <div class="b-stat-val" style="font-size:{'11px' if len(jobs_str) > 10 else '14px'};">{jobs_str}</div>
+        <div class="b-stat-label">Corp Jobs</div>
+    </a>
+    <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+        <div class="b-stat-val">{corp_active_orders}</div>
+        <div class="b-stat-label">Corp Orders</div>
+    </a>
+    """
+    # Cache the result
+    _corp_stats_cache[user_id] = {
+        "html": html,
+        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_CORP_STATS_TTL),
+    }
+    return HTMLResponse(html)
 
 
 @router.get("/dashboard/sync-status", response_class=HTMLResponse)

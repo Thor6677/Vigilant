@@ -298,3 +298,23 @@ async def get_blueprint_time(db: AsyncSession, blueprint_type_id: int) -> int | 
         select(SDEBlueprintInfo.manufacturing_time).where(SDEBlueprintInfo.blueprint_type_id == blueprint_type_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_type_volumes(db: AsyncSession, type_ids: list[int]) -> dict[int, float]:
+    """Bulk fetch volumes from sde_types. Returns {type_id: volume}."""
+    if not type_ids:
+        return {}
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.volume).where(SDEType.type_id.in_(type_ids))
+    )
+    return {row.type_id: row.volume or 0.0 for row in result.fetchall()}
+
+
+async def get_type_group_ids(db: AsyncSession, type_ids: list[int]) -> dict[int, int | None]:
+    """Bulk fetch group_ids from sde_types. Returns {type_id: group_id}."""
+    if not type_ids:
+        return {}
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(type_ids))
+    )
+    return {row.type_id: row.group_id for row in result.fetchall()}

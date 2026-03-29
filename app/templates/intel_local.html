@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Local Scan{% if dscan.label %} — {{ dscan.label }}{% endif %} — VIGILANT{% endblock %}
+{% block content %}
+
+{# ── Header ───────────────────────────────────────────────────────────────── #}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title" style="margin-bottom:2px;">Local Scan{% if dscan.label %} — {{ dscan.label }}{% endif %}</h1>
+        <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
+            <span>{{ summary.resolved }} pilot{{ 's' if summary.resolved != 1 else '' }}</span>
+            <span>·</span>
+            <span>{{ summary.by_corp | length }} corp{{ 's' if summary.by_corp | length != 1 else '' }}</span>
+            {% if summary.by_alliance %}<span>·</span><span>{{ summary.by_alliance | length }} alliance{{ 's' if summary.by_alliance | length != 1 else '' }}</span>{% endif %}
+            <span>·</span>
+            <span>Expires in {{ expires_str }}</span>
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+        <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        <button onclick="copyLocalComp()" id="copy-comp-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Copy Summary</button>
+        <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
+    </div>
+</div>
+<input type="text" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+
+{# ── Summary Stats ────────────────────────────────────────────────────────── #}
+<div class="b-stats">
+    <div class="b-stat">
+        <div class="b-stat-val is-accent" style="font-size:28px;">{{ summary.resolved }}</div>
+        <div class="b-stat-label">Pilots</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ summary.by_corp | length }}</div>
+        <div class="b-stat-label">Corporations</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ summary.by_alliance | length }}</div>
+        <div class="b-stat-label">Alliances</div>
+    </div>
+    {% if summary.unresolved_count > 0 %}
+    <div class="b-stat">
+        <div class="b-stat-val" style="color:var(--muted);">{{ summary.unresolved_count }}</div>
+        <div class="b-stat-label">Unresolved</div>
+    </div>
+    {% endif %}
+</div>
+
+{# ── Search ───────────────────────────────────────────────────────────────── #}
+<div style="margin-bottom:1rem;">
+    <input type="text" id="intel-search" placeholder="Search pilots, corporations, or alliances..."
+           oninput="filterIntel()"
+           style="width:100%;max-width:400px;padding:0.45rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+</div>
+
+{# ── Two-Column: By Corporation + By Alliance ────────────────────────────── #}
+<div class="b-grid-2" style="gap:1rem;align-items:start;">
+
+    {# ── LEFT: By Corporation ─────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">By Corporation</span>
+            <span style="font-size:13px;font-weight:600;color:var(--accent);" id="corp-count">{{ summary.by_corp | length }}</span>
+        </div>
+        <div id="corp-list">
+        {% for corp_name, count in summary.by_corp.items() %}
+        <div class="b-table-row intel-corp-row" data-corp="{{ corp_name | lower }}" data-alliance="{{ (summary.corp_to_alliance.get(corp_name) or '') | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" onclick="filterByCorp('{{ corp_name | e }}')">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ corp_name }}</span>
+            {% if summary.corp_to_alliance.get(corp_name) %}
+            <span style="font-size:10px;color:var(--muted);flex-shrink:0;">{{ summary.corp_to_alliance[corp_name] }}</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+    </div>
+
+    {# ── RIGHT: By Alliance ───────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">By Alliance</span>
+            <span style="font-size:13px;font-weight:600;color:var(--accent);" id="alliance-count">{{ summary.by_alliance | length }}</span>
+        </div>
+        <div id="alliance-list">
+        {% if summary.by_alliance %}
+        {% for alliance_name, count in summary.by_alliance.items() %}
+        <div class="b-table-row intel-alliance-row" data-alliance="{{ alliance_name | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" onclick="filterByAlliance('{{ alliance_name | e }}')">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ alliance_name }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty">No alliances</div>
+        {% endif %}
+        </div>
+    </div>
+
+</div>
+
+{# ── Expiry / Extend ──────────────────────────────────────────────────────── #}
+<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding:0.5rem 0;">
+    <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Keep for:</span>
+    {% for key, delta in expiry_options.items() %}
+    <form method="POST" action="/intel/{{ scan_id }}/extend" style="display:inline;">
+        <input type="hidden" name="duration" value="{{ key }}">
+        <button type="submit" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">
+            {{ key.replace('1week', '1 Week').replace('1month', '1 Month').replace('1year', '1 Year').replace('24h', '24 Hours').replace('48h', '48 Hours') }}
+        </button>
+    </form>
+    {% endfor %}
+</div>
+
+{# ── Pilot List (collapsed) ────────────────────────────────────────────────── #}
+<details style="margin-top:0.5rem;" id="pilot-details">
+    <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
+        <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">All Pilots</span>
+        <span style="font-size:10px;color:var(--muted);" id="pilot-count">{{ items | length }}</span>
+        <span style="font-size:10px;color:var(--muted);">▼</span>
+    </summary>
+    <div class="b-panel" style="margin-top:0.25rem;">
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Pilot</span>
+            <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Corporation</span>
+            <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Alliance</span>
+        </div>
+        <div id="pilot-list">
+        {% for char in items %}
+        <div class="b-table-row intel-pilot-row" data-name="{{ char.name | lower }}" data-corp="{{ char.corporation_name | lower }}" data-alliance="{{ (char.alliance_name or '') | lower }}" style="padding:0.25rem 0.75rem;">
+            <span style="flex:2;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;overflow:hidden;">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32" style="width:16px;height:16px;flex-shrink:0;border-radius:2px;" onerror="this.style.display='none'" loading="lazy">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.name }}</span>
+            </span>
+            <span style="flex:2;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.corporation_name }}</span>
+            <span style="flex:2;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.alliance_name or '—' }}</span>
+        </div>
+        {% endfor %}
+        </div>
+    </div>
+</details>
+
+<script>
+var activeFilter = null;
+
+function filterIntel() {
+    var q = document.getElementById('intel-search').value.toLowerCase().trim();
+    activeFilter = q || null;
+    applyFilter();
+}
+
+function filterByCorp(corpName) {
+    var input = document.getElementById('intel-search');
+    if (input.value === corpName) {
+        input.value = '';
+        activeFilter = null;
+    } else {
+        input.value = corpName;
+        activeFilter = corpName.toLowerCase();
+    }
+    applyFilter();
+}
+
+function filterByAlliance(allianceName) {
+    var input = document.getElementById('intel-search');
+    if (input.value === allianceName) {
+        input.value = '';
+        activeFilter = null;
+    } else {
+        input.value = allianceName;
+        activeFilter = allianceName.toLowerCase();
+    }
+    applyFilter();
+}
+
+function applyFilter() {
+    var q = activeFilter;
+    var visiblePilots = 0;
+    var visibleCorps = 0;
+    var visibleAlliances = 0;
+
+    document.querySelectorAll('.intel-pilot-row').forEach(function(row) {
+        if (!q) {
+            row.style.display = '';
+            visiblePilots++;
+        } else {
+            var match = row.dataset.name.indexOf(q) >= 0 ||
+                        row.dataset.corp.indexOf(q) >= 0 ||
+                        row.dataset.alliance.indexOf(q) >= 0;
+            row.style.display = match ? '' : 'none';
+            if (match) visiblePilots++;
+        }
+    });
+
+    document.querySelectorAll('.intel-corp-row').forEach(function(row) {
+        if (!q) {
+            row.style.display = '';
+            visibleCorps++;
+        } else {
+            var match = row.dataset.corp.indexOf(q) >= 0 ||
+                        row.dataset.alliance.indexOf(q) >= 0;
+            row.style.display = match ? '' : 'none';
+            if (match) visibleCorps++;
+        }
+    });
+
+    document.querySelectorAll('.intel-alliance-row').forEach(function(row) {
+        if (!q) {
+            row.style.display = '';
+            visibleAlliances++;
+        } else {
+            var match = row.dataset.alliance.indexOf(q) >= 0;
+            row.style.display = match ? '' : 'none';
+            if (match) visibleAlliances++;
+        }
+    });
+
+    document.getElementById('pilot-count').textContent = visiblePilots + (q ? ' / {{ items | length }}' : '');
+    document.getElementById('corp-count').textContent = visibleCorps;
+    document.getElementById('alliance-count').textContent = visibleAlliances;
+}
+
+function copyShareUrl() {
+    var url = document.getElementById('share-url').value;
+    navigator.clipboard.writeText(url).then(function() {
+        var btn = document.getElementById('copy-url-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
+    });
+}
+
+function copyLocalComp() {
+    var lines = [];
+    lines.push('Local Scan — {{ summary.resolved }} pilots');
+    lines.push('');
+    {% for alliance_name, count in summary.by_alliance.items() %}
+    lines.push('{{ count }}x {{ alliance_name }}');
+    {% endfor %}
+    {% for corp_name, count in summary.by_corp.items() %}
+    {% if not summary.corp_to_alliance.get(corp_name) %}
+    lines.push('{{ count }}x {{ corp_name }} (no alliance)');
+    {% endif %}
+    {% endfor %}
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        var btn = document.getElementById('copy-comp-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy Summary'; btn.style.color = 'var(--text)'; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+</script>
+
+{% endblock %}

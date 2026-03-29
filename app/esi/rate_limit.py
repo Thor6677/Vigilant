@@ -34,7 +34,7 @@ class RateLimitTracker:
     def __init__(self):
         self.groups: dict[str, GroupState] = {}
         self.legacy: Optional[LegacyErrorState] = None
-        self.request_log: deque[RequestLogEntry] = deque(maxlen=200)
+        self.request_log: deque[RequestLogEntry] = deque(maxlen=3000)
         self._warned_groups: set[str] = set()  # prevent DB spam when stuck in warning zone
 
     def update_from_response(self, path: str, status_code: int, headers: dict) -> list[dict]:

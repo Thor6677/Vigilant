@@ -452,6 +452,16 @@ async def industry_shopping_list(
     price_map = await _get_price_map(db, all_ids)
     total_cost = sum(price_map.get(tid, 0) * info["qty"] for tid, info in shopping.items())
 
+    # Get volumes for hauling calculator
+    volumes = await sde.get_type_volumes(db, list(all_ids))
+    total_volume = 0.0
+    for tid, info in shopping.items():
+        vol = volumes.get(tid, 0.0)
+        info["volume"] = vol
+        info["total_volume"] = round(vol * info["qty"], 2)
+        info["type_id"] = tid
+        total_volume += info["total_volume"]
+
     # Build multibuy-compatible text
     multibuy_lines = [f'{item["name"]} x{item["qty"]}' for item in sorted_items]
     multibuy_text = "\n".join(multibuy_lines)
@@ -461,6 +471,7 @@ async def industry_shopping_list(
         "items": sorted_items,
         "item_count": len(sorted_items),
         "total_cost": total_cost,
+        "total_volume": total_volume,
         "multibuy_text": multibuy_text,
         "price_map": {shopping[tid]["name"]: price_map.get(tid, 0) for tid in shopping},
         "mineral_items": mineral_items,
@@ -677,4 +688,184 @@ async def compression_calculate(
         "multibuy_text": multibuy_text,
         "mode": mode,
         "hub_label": hub_info["label"],
+    })
+
+
+# ── Hauling Calculator ────────────────────────────────────────────────────────
+
+from app.industry.hauling import (
+    HAULING_SHIPS, CARGO_MODULES, CARGO_RIGS, BAY_LABELS,
+    get_ships_by_group, calculate_effective_capacity,
+    parse_eve_paste, categorize_item, recommend_ships,
+)
+
+
+@router.get("/industry/hauling", response_class=HTMLResponse)
+async def industry_hauling(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/")
+    return templates.TemplateResponse("hauling.html", {
+        "request": request,
+        "ships_by_group": get_ships_by_group(),
+        "all_ships": HAULING_SHIPS,
+        "cargo_modules": CARGO_MODULES,
+        "cargo_rigs": CARGO_RIGS,
+        "bay_labels": BAY_LABELS,
+    })
+
+
+@router.post("/industry/hauling/resolve", response_class=HTMLResponse)
+async def hauling_resolve(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Parse pasted item list, resolve names, look up volumes, categorize."""
+    form = await request.form()
+    paste_text = form.get("paste_text", "")
+
+    if not paste_text.strip():
+        return HTMLResponse('<div class="b-empty">Paste items above to resolve</div>')
+
+    parsed = parse_eve_paste(paste_text)
+    if not parsed:
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Could not parse any items</div>')
+
+    # Resolve names to type_ids
+    resolved = []
+    unresolved = []
+    for item in parsed:
+        type_id = await sde.type_name_to_id(db, item["name"])
+        if type_id:
+            resolved.append({"type_id": type_id, "name": item["name"], "qty": item["qty"]})
+        else:
+            unresolved.append(item["name"])
+
+    if not resolved:
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">No items could be resolved</div>')
+
+    # Get volumes and group_ids
+    type_ids = [r["type_id"] for r in resolved]
+    volumes = await sde.get_type_volumes(db, type_ids)
+    group_ids = await sde.get_type_group_ids(db, type_ids)
+
+    # Enrich items
+    items_by_bay: dict[str, float] = {}
+    for item in resolved:
+        tid = item["type_id"]
+        vol = volumes.get(tid, 0.0)
+        gid = group_ids.get(tid)
+        bay = categorize_item(gid)
+        item["volume"] = vol
+        item["total_volume"] = round(vol * item["qty"], 2)
+        item["bay"] = bay
+        items_by_bay[bay] = items_by_bay.get(bay, 0) + item["total_volume"]
+
+    total_volume = sum(item["total_volume"] for item in resolved)
+
+    # Get recommendations
+    recommendations = recommend_ships(items_by_bay)
+
+    return templates.TemplateResponse("partials/hauling_resolved.html", {
+        "request": request,
+        "items": resolved,
+        "unresolved": unresolved,
+        "items_by_bay": items_by_bay,
+        "total_volume": total_volume,
+        "recommendations": recommendations,
+        "bay_labels": BAY_LABELS,
+    })
+
+
+# ── Appraisal Calculator ─────────────────────────────────────────────────────
+
+from app.esi.market import APPRAISAL_HUBS, get_hub_prices_batch
+from app.industry.hauling import parse_eve_paste
+
+
+@router.get("/industry/appraisal", response_class=HTMLResponse)
+async def industry_appraisal(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/")
+    return templates.TemplateResponse("appraisal.html", {
+        "request": request,
+        "hubs": APPRAISAL_HUBS,
+    })
+
+
+@router.post("/industry/appraisal/calculate", response_class=HTMLResponse)
+async def appraisal_calculate(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Parse pasted items, resolve via SDE, fetch live sell prices from trade hub."""
+    form = await request.form()
+    paste_text = form.get("paste_text", "")
+    hub_key = form.get("hub", "jita")
+
+    if not paste_text.strip():
+        return HTMLResponse('<div class="b-empty">Paste items above to appraise</div>')
+
+    if hub_key not in APPRAISAL_HUBS:
+        hub_key = "jita"
+
+    parsed = parse_eve_paste(paste_text)
+    if not parsed:
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Could not parse any items</div>')
+
+    # Resolve names to type_ids
+    resolved = []
+    unresolved = []
+    for item in parsed:
+        type_id = await sde.type_name_to_id(db, item["name"])
+        if type_id:
+            resolved.append({"type_id": type_id, "name": item["name"], "qty": item["qty"]})
+        else:
+            unresolved.append(item["name"])
+
+    if not resolved:
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">No items could be resolved</div>')
+
+    # Get volumes
+    type_ids = [r["type_id"] for r in resolved]
+    volumes = await sde.get_type_volumes(db, type_ids)
+
+    # Get live sell prices from trade hub
+    client = ESIClient("", db=db)
+    prices = await get_hub_prices_batch(client, hub_key, type_ids)
+
+    # Build results
+    items = []
+    total_isk = 0.0
+    total_volume = 0.0
+    for r in resolved:
+        tid = r["type_id"]
+        price = prices.get(tid)
+        vol = volumes.get(tid, 0.0)
+        item_total = (price or 0) * r["qty"]
+        item_vol = vol * r["qty"]
+        total_isk += item_total
+        total_volume += item_vol
+        items.append({
+            "type_id": tid,
+            "name": r["name"],
+            "qty": r["qty"],
+            "unit_price": price,
+            "total_price": item_total,
+            "unit_volume": vol,
+            "total_volume": round(item_vol, 2),
+        })
+
+    # Sort by total price descending (most valuable first)
+    items.sort(key=lambda x: x["total_price"], reverse=True)
+
+    hub = APPRAISAL_HUBS[hub_key]
+
+    return templates.TemplateResponse("partials/appraisal_results.html", {
+        "request": request,
+        "items": items,
+        "unresolved": unresolved,
+        "total_isk": total_isk,
+        "total_volume": total_volume,
+        "hub_label": hub["label"],
+        "item_count": len(items),
     })

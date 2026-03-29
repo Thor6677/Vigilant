@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+{% block title %}HAULING CALCULATOR — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Hauling Calculator</h1>
+    <div style="display:flex;gap:0.5rem;">
+        <button onclick="resetHauling()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+        <a href="/industry" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Manufacturing</a>
+        <a href="/industry/compression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Compression</a>
+        <a href="/industry/appraisal" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Appraisal →</a>
+    </div>
+</div>
+
+{# ── Fleet Configuration ─────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Fleet</span>
+            <button onclick="addShipEntry()" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">+ Add Ship</button>
+        </div>
+        <div id="fleet-entries"></div>
+    </div>
+</div>
+
+{# ── Trip Results ─────────────────────────────────────────────────────────── #}
+<div id="trip-results" style="display:none;">
+    <div class="b-section">
+        <div class="b-panel">
+            <div class="b-panel-head"><span class="b-label">Trip Calculation</span></div>
+            <div style="padding:0.75rem;">
+                <div class="b-stats" style="margin-bottom:0.75rem;">
+                    <div class="b-stat">
+                        <div class="b-stat-val" id="result-trips" style="font-size:28px;">—</div>
+                        <div class="b-stat-label">Trips Needed</div>
+                    </div>
+                    <div class="b-stat">
+                        <div class="b-stat-val is-accent" id="result-total-vol">—</div>
+                        <div class="b-stat-label">Total Volume</div>
+                    </div>
+                    <div class="b-stat">
+                        <div class="b-stat-val" id="result-fleet-cap">—</div>
+                        <div class="b-stat-label">Fleet Capacity / Trip</div>
+                    </div>
+                </div>
+                <div id="result-bay-breakdown"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Volume Input ─────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Volume to Haul</span>
+            <div style="display:flex;gap:0.5rem;">
+                <button type="button" onclick="showTab('manual')" id="tab-manual" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Manual m³</button>
+                <button type="button" onclick="showTab('paste')" id="tab-paste" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);">Paste Items</button>
+            </div>
+        </div>
+
+        {# Manual input #}
+        <div id="panel-manual" style="padding:0.75rem;">
+            <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Total Volume to Haul (m³)</label>
+                <input type="text" id="vol-total" value="0" oninput="recalcTrips()"
+                       style="padding:0.5rem;background:var(--bg);border:1px solid var(--accent);color:var(--text);font-family:inherit;font-size:14px;text-align:right;max-width:250px;">
+            </div>
+        </div>
+
+        {# Paste input #}
+        <div id="panel-paste" style="padding:0.75rem;display:none;">
+            <form hx-post="/industry/hauling/resolve" hx-target="#resolved-items" hx-swap="innerHTML">
+                <textarea name="paste_text" id="paste-text" rows="8" placeholder="Paste items here...&#10;&#10;Supported formats:&#10;  Item Name&#9;5000  (multibuy/tab-separated)&#10;  Item Name x5000  (contract format)&#10;  Item Name  (one per line, qty=1)"
+                          style="width:100%;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;"></textarea>
+                <button type="submit" class="b-btn" style="margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Resolve Items & Calculate
+                </button>
+            </form>
+            <div id="resolved-items" style="margin-top:0.75rem;"></div>
+        </div>
+    </div>
+</div>
+
+{# ── Ship entry template (hidden, cloned by JS) ─────────────────────────── #}
+<template id="ship-entry-tpl">
+    <div class="ship-entry" style="padding:0.75rem;border-bottom:1px solid var(--border);">
+        <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:50px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Qty</label>
+                <input type="number" data-field="qty" value="1" min="1" max="50" onchange="recalcAll()"
+                       style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:160px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Ship</label>
+                <select data-field="ship" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="">Select a ship…</option>
+                    {% for group_name, ships in ships_by_group.items() %}
+                    <optgroup label="{{ group_name }}">
+                        {% for s in ships %}
+                        <option value="{{ s.type_id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Expander</label>
+                <select data-field="mod" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, mod in cargo_modules.items() %}
+                    <option value="{{ key }}">{{ mod.label }}{% if mod.bonus > 0 %} (+{{ "%.1f"|format(mod.bonus * 100) }}%){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Mods</label>
+                <input type="number" data-field="modCount" value="0" min="0" max="8" onchange="recalcAll()"
+                       style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Rig</label>
+                <select data-field="rig" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, rig in cargo_rigs.items() %}
+                    <option value="{{ key }}">{{ rig.label }}{% if rig.bonus > 0 %} (+{{ "%.1f"|format(rig.bonus * 100) }}%){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rigs</label>
+                <input type="number" data-field="rigCount" value="0" min="0" max="3" onchange="recalcAll()"
+                       style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Skill</label>
+                <select data-field="skill" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="0">0</option><option value="1">1</option><option value="2">2</option>
+                    <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">&nbsp;</label>
+                <button onclick="removeShipEntry(this)" class="b-btn" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
+            </div>
+        </div>
+        <div class="ship-capacity" style="padding-top:0.5rem;display:none;">
+            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;"></div>
+        </div>
+    </div>
+</template>
+
+<script>
+var ALL_SHIPS = {{ all_ships | tojson }};
+var CARGO_MODULES = {{ cargo_modules | tojson }};
+var CARGO_RIGS = {{ cargo_rigs | tojson }};
+var BAY_LABELS = {{ bay_labels | tojson }};
+var HAUL_KEY = 'vigilant_haul_state';
+var HAUL_ITEMS_KEY = 'vigilant_haul_items';
+
+function stackingPenalty(n) {
+    if (n <= 0) return 0;
+    return Math.pow(0.87, Math.pow(n - 1, 2));
+}
+
+function formatNumber(n) {
+    return n.toLocaleString('en-US', {maximumFractionDigits: 1});
+}
+
+/* ── Tab switching ────────────────────────────────────────────────────────── */
+function showTab(tab) {
+    document.getElementById('panel-manual').style.display = tab === 'manual' ? 'block' : 'none';
+    document.getElementById('panel-paste').style.display = tab === 'paste' ? 'block' : 'none';
+    document.getElementById('tab-manual').style.borderColor = tab === 'manual' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('tab-manual').style.color = tab === 'manual' ? 'var(--accent)' : 'var(--muted)';
+    document.getElementById('tab-paste').style.borderColor = tab === 'paste' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('tab-paste').style.color = tab === 'paste' ? 'var(--accent)' : 'var(--muted)';
+}
+
+/* ── Fleet entry management ───────────────────────────────────────────────── */
+function addShipEntry(config) {
+    var tpl = document.getElementById('ship-entry-tpl');
+    var clone = tpl.content.cloneNode(true);
+    var entry = clone.querySelector('.ship-entry');
+
+    if (config) {
+        if (config.ship) entry.querySelector('[data-field="ship"]').value = config.ship;
+        if (config.qty) entry.querySelector('[data-field="qty"]').value = config.qty;
+        if (config.mod) entry.querySelector('[data-field="mod"]').value = config.mod;
+        if (config.modCount) entry.querySelector('[data-field="modCount"]').value = config.modCount;
+        if (config.rig) entry.querySelector('[data-field="rig"]').value = config.rig;
+        if (config.rigCount) entry.querySelector('[data-field="rigCount"]').value = config.rigCount;
+        if (config.skill !== undefined) entry.querySelector('[data-field="skill"]').value = config.skill;
+    }
+
+    document.getElementById('fleet-entries').appendChild(clone);
+    recalcAll();
+}
+
+function removeShipEntry(btn) {
+    var entries = document.querySelectorAll('.ship-entry');
+    if (entries.length <= 1) return;
+    btn.closest('.ship-entry').remove();
+    recalcAll();
+}
+
+function getField(entry, name) {
+    var el = entry.querySelector('[data-field="' + name + '"]');
+    return el ? el.value : '';
+}
+
+/* ── Capacity for a single ship entry ─────────────────────────────────────── */
+function calcEntryCapacity(entry) {
+    var shipId = getField(entry, 'ship');
+    var ship = ALL_SHIPS[shipId];
+    if (!ship) return null;
+
+    var qty = parseInt(getField(entry, 'qty')) || 1;
+    var modKey = getField(entry, 'mod');
+    var modCount = Math.min(parseInt(getField(entry, 'modCount')) || 0, ship.low_slots);
+    var rigKey = getField(entry, 'rig');
+    var rigCount = Math.min(parseInt(getField(entry, 'rigCount')) || 0, ship.rig_slots);
+    var skillLevel = parseInt(getField(entry, 'skill')) || 0;
+
+    var modBonus = CARGO_MODULES[modKey] ? CARGO_MODULES[modKey].bonus : 0;
+    var rigBonus = CARGO_RIGS[rigKey] ? CARGO_RIGS[rigKey].bonus : 0;
+
+    var bays = {};
+    var bayKeys = Object.keys(ship.bays);
+    for (var i = 0; i < bayKeys.length; i++) {
+        var bay = bayKeys[i];
+        var info = ship.bays[bay];
+        var base = info.base;
+
+        if (ship.skill_bonus && ship.skill_bonus.bay === bay)
+            base *= (1 + ship.skill_bonus.per_level * skillLevel);
+        if (ship.extra_skill_bonus) {
+            for (var e = 0; e < ship.extra_skill_bonus.length; e++) {
+                if (ship.extra_skill_bonus[e].bay === bay)
+                    base *= (1 + ship.extra_skill_bonus[e].per_level * skillLevel);
+            }
+        }
+        if (info.expandable) {
+            var mult = 1.0;
+            for (var m = 1; m <= modCount; m++) mult *= (1 + modBonus * stackingPenalty(m));
+            for (var r = 1; r <= rigCount; r++) mult *= (1 + rigBonus * stackingPenalty(r));
+            base *= mult;
+        }
+        bays[bay] = Math.round(base * 10) / 10;
+    }
+
+    /* Clamp displayed mod/rig counts */
+    entry.querySelector('[data-field="modCount"]').max = ship.low_slots;
+    entry.querySelector('[data-field="rigCount"]').max = ship.rig_slots;
+
+    return { name: ship.name, qty: qty, bays: bays };
+}
+
+/* ── Render capacity badges under a ship entry ────────────────────────────── */
+function renderEntryCapacity(entry, cap) {
+    var container = entry.querySelector('.ship-capacity');
+    var inner = container.querySelector('div');
+    inner.innerHTML = '';
+
+    if (!cap) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+
+    var totalCap = 0;
+    var bayKeys = Object.keys(cap.bays);
+    for (var i = 0; i < bayKeys.length; i++) {
+        var bay = bayKeys[i];
+        var val = cap.bays[bay];
+        totalCap += val;
+        var label = BAY_LABELS[bay] || bay;
+        var div = document.createElement('span');
+        div.style.cssText = 'display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.5rem;background:var(--surface);border:1px solid var(--border);border-radius:3px;font-size:10px;';
+        div.innerHTML = '<span style="color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-size:8px;">' + label + '</span>' +
+            '<span style="color:var(--accent);font-weight:600;">' + formatNumber(val) + '</span>';
+        inner.appendChild(div);
+    }
+
+    if (cap.qty > 1) {
+        var tag = document.createElement('span');
+        tag.style.cssText = 'font-size:10px;color:var(--muted);padding:0.2rem 0.4rem;';
+        tag.textContent = '× ' + cap.qty + ' = ' + formatNumber(totalCap * cap.qty) + ' m³/trip';
+        inner.appendChild(tag);
+    } else {
+        var tag = document.createElement('span');
+        tag.style.cssText = 'font-size:10px;color:var(--muted);padding:0.2rem 0.4rem;';
+        tag.textContent = '= ' + formatNumber(totalCap) + ' m³/trip';
+        inner.appendChild(tag);
+    }
+}
+
+/* ── Recalculate everything ───────────────────────────────────────────────── */
+function recalcAll() {
+    var entries = document.querySelectorAll('.ship-entry');
+    var fleetCapacity = 0;
+    var fleetShipNames = [];
+
+    entries.forEach(function(entry) {
+        var cap = calcEntryCapacity(entry);
+        renderEntryCapacity(entry, cap);
+        if (cap) {
+            var shipTotal = 0;
+            Object.keys(cap.bays).forEach(function(b) { shipTotal += cap.bays[b]; });
+            fleetCapacity += shipTotal * cap.qty;
+            for (var q = 0; q < cap.qty; q++) fleetShipNames.push(cap.name);
+        }
+    });
+
+    recalcTrips(fleetCapacity, fleetShipNames);
+    saveHaulState();
+}
+
+/* ── Trip recalculation ───────────────────────────────────────────────────── */
+function recalcTrips(fleetCapacity, fleetShipNames) {
+    var totalInput = parseFloat((document.getElementById('vol-total').value || '0').replace(/,/g, '')) || 0;
+
+    if (totalInput <= 0 || fleetCapacity <= 0) {
+        document.getElementById('trip-results').style.display = 'none';
+        return;
+    }
+
+    var trips = Math.ceil(totalInput / fleetCapacity);
+
+    /* Build breakdown by ship */
+    var entries = document.querySelectorAll('.ship-entry');
+    var breakdownHtml = '';
+    entries.forEach(function(entry) {
+        var cap = calcEntryCapacity(entry);
+        if (!cap) return;
+        var shipTotal = 0;
+        Object.keys(cap.bays).forEach(function(b) { shipTotal += cap.bays[b]; });
+        var perTrip = shipTotal * cap.qty;
+
+        var bayDetail = Object.keys(cap.bays).map(function(b) {
+            return (BAY_LABELS[b] || b) + ': ' + formatNumber(cap.bays[b]);
+        }).join(' + ');
+
+        breakdownHtml += '<div class="b-table-row">' +
+            '<span style="flex:2;font-size:11px;color:var(--text);">' + cap.name + (cap.qty > 1 ? ' ×' + cap.qty : '') + '</span>' +
+            '<span style="flex:2;text-align:right;font-size:10px;color:var(--muted);">' + bayDetail + '</span>' +
+            '<span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">' + formatNumber(perTrip) + ' m³/trip</span>' +
+            '</div>';
+    });
+
+    /* Fleet summary label */
+    var shipCounts = {};
+    fleetShipNames.forEach(function(n) { shipCounts[n] = (shipCounts[n] || 0) + 1; });
+    var fleetLabel = Object.keys(shipCounts).map(function(n) {
+        return shipCounts[n] > 1 ? shipCounts[n] + '× ' + n : n;
+    }).join(', ');
+
+    document.getElementById('result-trips').textContent = trips;
+    document.getElementById('result-trips').style.color = trips > 1 ? 'var(--accent)' : 'var(--success)';
+    document.getElementById('result-total-vol').textContent = formatNumber(totalInput) + ' m³';
+    document.getElementById('result-fleet-cap').textContent = formatNumber(fleetCapacity) + ' m³';
+    document.getElementById('result-bay-breakdown').innerHTML = breakdownHtml;
+    document.getElementById('trip-results').style.display = 'block';
+}
+
+/* ── localStorage persistence ─────────────────────────────────────────────── */
+function saveHaulState() {
+    var fleet = [];
+    document.querySelectorAll('.ship-entry').forEach(function(entry) {
+        fleet.push({
+            ship: getField(entry, 'ship'),
+            qty: getField(entry, 'qty'),
+            mod: getField(entry, 'mod'),
+            modCount: getField(entry, 'modCount'),
+            rig: getField(entry, 'rig'),
+            rigCount: getField(entry, 'rigCount'),
+            skill: getField(entry, 'skill'),
+        });
+    });
+    var state = {
+        fleet: fleet,
+        totalVol: document.getElementById('vol-total').value,
+    };
+    localStorage.setItem(HAUL_KEY, JSON.stringify(state));
+}
+
+function restoreHaulState() {
+    /* Cross-page item import */
+    var importRaw = localStorage.getItem(HAUL_ITEMS_KEY);
+    if (importRaw) {
+        localStorage.removeItem(HAUL_ITEMS_KEY);
+        try {
+            var items = JSON.parse(importRaw);
+            if (items && items.length > 0) {
+                var lines = items.map(function(item) { return item.name + '\t' + item.qty; });
+                showTab('paste');
+                document.getElementById('paste-text').value = lines.join('\n');
+                addShipEntry();
+                setTimeout(function() {
+                    htmx.trigger(document.querySelector('#panel-paste form'), 'submit');
+                }, 200);
+                return;
+            }
+        } catch(e) {}
+    }
+
+    var raw = localStorage.getItem(HAUL_KEY);
+    if (!raw) { addShipEntry(); return; }
+    try {
+        var state = JSON.parse(raw);
+
+        /* Handle old single-ship format */
+        if (state.ship && !state.fleet) {
+            addShipEntry({
+                ship: state.ship, qty: 1, mod: state.cargoMod,
+                modCount: state.cargoModCount, rig: state.cargoRig,
+                rigCount: state.cargoRigCount, skill: state.skill,
+            });
+        } else if (state.fleet && state.fleet.length > 0) {
+            state.fleet.forEach(function(cfg) { addShipEntry(cfg); });
+        } else {
+            addShipEntry();
+        }
+
+        if (state.totalVol) document.getElementById('vol-total').value = state.totalVol;
+        recalcAll();
+    } catch(e) { addShipEntry(); }
+}
+
+function resetHauling() {
+    localStorage.removeItem(HAUL_KEY);
+    window.location.href = '/industry/hauling';
+}
+
+/* ── Handle resolved items from paste ─────────────────────────────────────── */
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id === 'resolved-items') {
+        var container = document.getElementById('resolved-items');
+        var bayData = container.querySelector('[data-bay-volumes]');
+        if (bayData) {
+            try {
+                var volumes = JSON.parse(bayData.getAttribute('data-bay-volumes'));
+                var total = 0;
+                Object.keys(volumes).forEach(function(bay) { total += volumes[bay]; });
+                if (total > 0) {
+                    document.getElementById('vol-total').value = total.toFixed(1);
+                    recalcAll();
+                }
+            } catch(e) {}
+        }
+    }
+});
+
+/* Init */
+document.addEventListener('DOMContentLoaded', restoreHaulState);
+</script>
+
+{% endblock %}

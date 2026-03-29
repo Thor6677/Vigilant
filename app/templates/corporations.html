@@ -3,7 +3,6 @@
 
 {% block head %}
 <style>
-    /* Corp accordion */
     .corp-accordion {
         border: 1px solid var(--border);
         background: var(--surface);
@@ -12,7 +11,6 @@
     .corp-accordion[open] {
         border-color: var(--rule);
     }
-
     .corp-accordion summary {
         display: flex;
         align-items: center;
@@ -28,7 +26,6 @@
         border-bottom: 2px solid var(--rule);
     }
     .corp-accordion summary:hover { background: rgba(200,169,81,0.03); }
-
     .corp-chevron {
         font-size: 10px;
         color: var(--muted);
@@ -36,7 +33,6 @@
         flex-shrink: 0;
     }
     .corp-accordion[open] .corp-chevron { transform: rotate(180deg); }
-
     .corp-logo-sm {
         width: 36px;
         height: 36px;
@@ -45,7 +41,6 @@
         flex-shrink: 0;
         filter: grayscale(15%);
     }
-
     .scope-pip {
         display: inline-block;
         width: 5px;
@@ -54,64 +49,223 @@
         margin-right: 2px;
         border-radius: 50% !important;
     }
+    .corp-sortable .corp-accordion {
+        cursor: grab;
+    }
+    .corp-sortable .corp-accordion.dragging {
+        opacity: 0.4;
+    }
+    .corp-sortable .corp-accordion.drag-over {
+        border-top: 2px solid var(--accent);
+    }
+    .corp-drag-handle {
+        color: var(--muted);
+        font-size: 12px;
+        cursor: grab;
+        padding: 0 0.25rem;
+        flex-shrink: 0;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="b-page-header">
     <span class="b-page-title">Corporations</span>
-    <span class="b-label">{{ corps | length }} corporation{{ 's' if corps | length != 1 else '' }}</span>
+    <span class="b-label">{{ total_corps }} corporation{{ 's' if total_corps != 1 else '' }}</span>
 </div>
 
-{% if not corps %}
+{% if not corps and not npc_corps %}
 <div class="b-empty">No corporations found — add characters to get started.</div>
 {% else %}
 
-{% for corp in corps %}
-<details class="corp-accordion" id="corp-{{ corp.corp_id }}">
-    <summary>
-        <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
-            <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
-                 alt="" class="corp-logo-sm">
-            <div style="min-width:0">
-                <div class="b-card-name">{{ corp.corp_name }}</div>
-                <div class="b-card-sub">
-                    {% if corp.alliance_name %}
-                    {{ corp.alliance_name }}
+{# ── Player Corporations ──────────────────────────────────────────────────── #}
+{% if corps %}
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="b-label">Player Corporations</span>
+        <span class="b-label" style="color:var(--muted);">{{ corps | length }}</span>
+    </div>
+    <div id="player-corps" class="corp-sortable">
+    {% for corp in corps %}
+    <details class="corp-accordion" id="corp-{{ corp.corp_id }}" data-corp-id="{{ corp.corp_id }}">
+        <summary>
+            <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
+                <span class="corp-drag-handle" title="Drag to reorder">☰</span>
+                <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
+                     alt="" class="corp-logo-sm">
+                <div style="min-width:0">
+                    <div class="b-card-name">{{ corp.corp_name }}</div>
+                    <div class="b-card-sub">
+                        {% if corp.alliance_name %}
+                        {{ corp.alliance_name }}
+                        {% else %}
+                        <span class="is-muted">No Alliance</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
+                <div style="text-align:right">
+                    <div class="b-label">{{ corp.characters | length }} of our char{{ 's' if corp.characters | length != 1 else '' }}</div>
+                    {% if corp.available_scopes %}
+                    <div style="margin-top:2px">
+                        {% for _ in corp.available_scopes %}<span class="scope-pip"></span>{% endfor %}
+                        <span class="b-label" style="color:var(--accent)">{{ corp.available_scopes | length }} corp scope{{ 's' if corp.available_scopes | length != 1 else '' }}</span>
+                    </div>
                     {% else %}
-                    <span class="is-muted">No Alliance</span>
+                    <div class="b-label" style="margin-top:2px">Public only</div>
                     {% endif %}
                 </div>
+                <span class="corp-chevron">▼</span>
+            </div>
+        </summary>
+        <div id="corp-detail-{{ corp.corp_id }}"
+             hx-get="/corporations/{{ corp.corp_id }}/detail"
+             hx-trigger="toggle from:closest details once"
+             hx-swap="innerHTML">
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:1rem 0.75rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase">
+                <span class="spin-anim">◌</span>
+                <span>Loading...</span>
             </div>
         </div>
-        <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
-            <div style="text-align:right">
-                <div class="b-label">{{ corp.characters | length }} of our char{{ 's' if corp.characters | length != 1 else '' }}</div>
-                {% if corp.available_scopes %}
-                <div style="margin-top:2px">
-                    {% for _ in corp.available_scopes %}<span class="scope-pip"></span>{% endfor %}
-                    <span class="b-label" style="color:var(--accent)">{{ corp.available_scopes | length }} corp scope{{ 's' if corp.available_scopes | length != 1 else '' }}</span>
-                </div>
-                {% else %}
-                <div class="b-label" style="margin-top:2px">Public only</div>
-                {% endif %}
-            </div>
-            <span class="corp-chevron">▼</span>
-        </div>
-    </summary>
-
-    <!-- Detail panel — lazy-loaded via HTMX on first expand -->
-    <div id="corp-detail-{{ corp.corp_id }}"
-         hx-get="/corporations/{{ corp.corp_id }}/detail"
-         hx-trigger="toggle from:closest details once"
-         hx-swap="innerHTML">
-        <div style="display:flex;align-items:center;gap:0.5rem;padding:1rem 0.75rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase">
-            <span class="spin-anim">◌</span>
-            <span>Loading...</span>
-        </div>
+    </details>
+    {% endfor %}
     </div>
-</details>
-{% endfor %}
+</div>
+{% endif %}
+
+{# ── NPC Corporations ─────────────────────────────────────────────────────── #}
+{% if npc_corps %}
+<div class="b-section" style="margin-top:2rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="b-label" style="color:var(--muted);">NPC Corporations</span>
+        <span class="b-label" style="color:var(--muted);">{{ npc_corps | length }}</span>
+    </div>
+    <div id="npc-corps">
+    {% for corp in npc_corps %}
+    <details class="corp-accordion" id="corp-{{ corp.corp_id }}">
+        <summary>
+            <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
+                <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
+                     alt="" class="corp-logo-sm">
+                <div style="min-width:0">
+                    <div class="b-card-name">{{ corp.corp_name }}</div>
+                    <div class="b-card-sub is-muted">NPC Corporation</div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
+                <div style="text-align:right">
+                    <div class="b-label">{{ corp.characters | length }} char{{ 's' if corp.characters | length != 1 else '' }}</div>
+                </div>
+                <span class="corp-chevron">▼</span>
+            </div>
+        </summary>
+        <div id="corp-detail-{{ corp.corp_id }}"
+             hx-get="/corporations/{{ corp.corp_id }}/detail"
+             hx-trigger="toggle from:closest details once"
+             hx-swap="innerHTML">
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:1rem 0.75rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase">
+                <span class="spin-anim">◌</span>
+                <span>Loading...</span>
+            </div>
+        </div>
+    </details>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% endif %}
+
+<script>
+/* ── Drag-and-drop reorder for player corporations ────────────────────────── */
+(function() {
+    var container = document.getElementById('player-corps');
+    if (!container) return;
+
+    var CORP_ORDER_KEY = 'vigilant_corp_order';
+    var dragEl = null;
+
+    function getCorpIds() {
+        return Array.from(container.querySelectorAll('.corp-accordion[data-corp-id]'))
+            .map(function(el) { return el.getAttribute('data-corp-id'); });
+    }
+
+    function saveOrder() {
+        localStorage.setItem(CORP_ORDER_KEY, JSON.stringify(getCorpIds()));
+    }
+
+    function restoreOrder() {
+        var raw = localStorage.getItem(CORP_ORDER_KEY);
+        if (!raw) return;
+        try {
+            var order = JSON.parse(raw);
+            var items = {};
+            container.querySelectorAll('.corp-accordion[data-corp-id]').forEach(function(el) {
+                items[el.getAttribute('data-corp-id')] = el;
+            });
+            /* Append in saved order, remaining items keep their position */
+            order.forEach(function(id) {
+                if (items[id]) {
+                    container.appendChild(items[id]);
+                    delete items[id];
+                }
+            });
+            /* Append any new corps not in saved order */
+            Object.values(items).forEach(function(el) {
+                container.appendChild(el);
+            });
+        } catch(e) {}
+    }
+
+    container.querySelectorAll('.corp-accordion[data-corp-id]').forEach(function(el) {
+        el.setAttribute('draggable', 'true');
+
+        el.addEventListener('dragstart', function(e) {
+            dragEl = el;
+            el.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', '');
+        });
+
+        el.addEventListener('dragend', function() {
+            el.classList.remove('dragging');
+            container.querySelectorAll('.drag-over').forEach(function(d) { d.classList.remove('drag-over'); });
+            dragEl = null;
+        });
+
+        el.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragEl && dragEl !== el) {
+                el.classList.add('drag-over');
+            }
+        });
+
+        el.addEventListener('dragleave', function() {
+            el.classList.remove('drag-over');
+        });
+
+        el.addEventListener('drop', function(e) {
+            e.preventDefault();
+            el.classList.remove('drag-over');
+            if (dragEl && dragEl !== el) {
+                var allItems = Array.from(container.querySelectorAll('.corp-accordion[data-corp-id]'));
+                var dragIdx = allItems.indexOf(dragEl);
+                var dropIdx = allItems.indexOf(el);
+                if (dragIdx < dropIdx) {
+                    container.insertBefore(dragEl, el.nextSibling);
+                } else {
+                    container.insertBefore(dragEl, el);
+                }
+                saveOrder();
+            }
+        });
+    });
+
+    /* Restore saved order on load */
+    restoreOrder();
+})();
+</script>
+
 {% endblock %}

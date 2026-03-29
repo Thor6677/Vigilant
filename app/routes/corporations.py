@@ -182,11 +182,21 @@ async def corporations_page(request: Request, db: AsyncSession = Depends(get_db)
                     scope_set.add(scope_name)
         corp["available_scopes"] = sorted(scope_set)
 
-    sorted_corps = sorted(corps.values(), key=lambda c: c["corp_name"].lower())
+    # Split into player corps and NPC corps
+    player_corps = sorted(
+        [c for c in corps.values() if c["corp_id"] >= 2000000],
+        key=lambda c: c["corp_name"].lower(),
+    )
+    npc_corps = sorted(
+        [c for c in corps.values() if c["corp_id"] < 2000000],
+        key=lambda c: c["corp_name"].lower(),
+    )
 
     return templates.TemplateResponse("corporations.html", {
         "request": request,
-        "corps": sorted_corps,
+        "corps": player_corps,
+        "npc_corps": npc_corps,
+        "total_corps": len(player_corps) + len(npc_corps),
     })
 
 

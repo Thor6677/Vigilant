@@ -123,11 +123,19 @@ async def _process_skillqueue(
                 if total_secs > 0:
                     progress_pct = min(100, max(0, int(elapsed_secs / total_secs * 100)))
 
+        current_finish_str = None
+        if active:
+            finish_raw_a = active.get("finish_date")
+            if finish_raw_a:
+                finish_dt = datetime.fromisoformat(finish_raw_a.replace("Z", "+00:00"))
+                current_finish_str = finish_dt.strftime("%Y-%m-%d %H:%M")
+
         results.append({
             "char": char,
             "warning": skill_warning(queue, queue_end),
             "current_skill": current_skill,
             "current_level": current_level,
+            "current_finish_str": current_finish_str,
             "queue_end": queue_end,
             "queue_end_str": queue_end_str,
             "days_remaining": days_remaining,

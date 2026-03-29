@@ -112,6 +112,20 @@ class CharacterAssetCache(Base):
     last_fetched = Column(DateTime, nullable=True)  # naive UTC
 
 
+class DScanResult(Base):
+    """Stored d-scan parse result with shareable public URL."""
+    __tablename__ = "dscan_results"
+
+    id = Column(String(12), primary_key=True)
+    paste_data = Column(Text, nullable=False)
+    parsed_json = Column(Text, nullable=False)
+    summary_json = Column(Text, nullable=True)
+    label = Column(String(128), nullable=True)
+    user_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

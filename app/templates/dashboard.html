@@ -1,70 +1,12 @@
 {% extends "base.html" %}
-{% block title %}DASHBOARD — VIGILANT
+{% block title %}DASHBOARD — VIGILANT{% endblock %}
+
+{% block head %}
 {% if sort == 'custom' %}
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    var saveTimer = null;
-    function getOrderPayload() {
-        var items = [];
-        document.querySelectorAll('.sortable-group').forEach(function(list) {
-            var group = list.dataset.group;
-            list.querySelectorAll('[data-char-id]').forEach(function(card, idx) {
-                items.push({character_id: parseInt(card.dataset.charId), sort_order: idx, account_group: group});
-            });
-        });
-        return items;
-    }
-    function scheduleSave() {
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(function() {
-            fetch('/characters/reorder', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getOrderPayload())});
-            var s = document.getElementById('save-status'); s.style.display = ''; setTimeout(function(){s.style.display='none';}, 2000);
-        }, 600);
-    }
-    document.querySelectorAll('.sortable-group').forEach(function(list) {
-        Sortable.create(list, {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
-    });
-    var addBtn = document.getElementById('add-group-btn');
-    if (addBtn) addBtn.addEventListener('click', function() {
-        var name = prompt('Account name:', 'Account ' + (document.querySelectorAll('.group-section').length + 1));
-        if (!name) return;
-        var container = document.getElementById('groups-container');
-        var section = document.createElement('div');
-        section.className = 'b-section group-section';
-        section.dataset.group = name;
-        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span style="font-size:10px;color:var(--muted);">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
-        container.appendChild(section);
-        attachLabelEdit(section.querySelector('.group-label'));
-        Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
-    });
-    function attachLabelEdit(label) {
-        label.addEventListener('click', function() {
-            var input = label.nextElementSibling;
-            label.style.display = 'none'; input.style.display = ''; input.focus(); input.select();
-            function commit() {
-                var newName = input.value.trim() || input.dataset.original;
-                var oldName = input.dataset.original;
-                if (newName !== oldName) {
-                    var section = label.closest('.group-section');
-                    section.dataset.group = newName;
-                    section.querySelectorAll('[data-group]').forEach(function(el){el.dataset.group = newName;});
-                    label.textContent = newName; label.dataset.group = newName; input.dataset.original = newName;
-                    fetch('/characters/rename-group', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_name: oldName, new_name: newName})});
-                    scheduleSave();
-                }
-                label.style.display = ''; input.style.display = 'none';
-            }
-            input.addEventListener('blur', commit, {once: true});
-            input.addEventListener('keydown', function(e) { if(e.key==='Enter'){e.preventDefault();input.blur();} if(e.key==='Escape'){input.value=input.dataset.original;input.blur();} });
-        });
-    }
-    document.querySelectorAll('.group-label').forEach(attachLabelEdit);
-});
-</script>
 {% endif %}
-
 {% endblock %}
+
 {% block content %}
 
 {# ── Macros ──────────────────────────────────────────────────────────────── #}
@@ -134,33 +76,65 @@ document.addEventListener('DOMContentLoaded', function() {
 
 {# ── Summary Stats ────────────────────────────────────────────────────────── #}
 <div class="b-stats">
-    <div class="b-stat">
+    <a href="/characters" class="b-stat" style="text-decoration:none;cursor:pointer;">
+        <div class="b-stat-val">{{ characters | length }}</div>
+        <div class="b-stat-label">Characters</div>
+    </a>
+    <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+        <div class="b-stat-val">{{ total_corporations }}</div>
+        <div class="b-stat-label">Corporations</div>
+    </a>
+    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val is-accent">{{ format_isk(total_wallet) }}</div>
         <div class="b-stat-label">Total Wallet</div>
-    </div>
-    <div class="b-stat">
+    </a>
+    <a href="/industry" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val">{{ total_active_jobs }}</div>
         <div class="b-stat-label">Active Jobs</div>
-    </div>
-    <div class="b-stat">
+    </a>
+    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val">{{ total_active_orders }}</div>
         <div class="b-stat-label">Market Orders</div>
-    </div>
-    <div class="b-stat">
+    </a>
+    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val {% if total_unread_mail > 0 %}is-accent{% endif %}">
             {{ total_unread_mail if not needs_mail_scope else "—" }}
         </div>
         <div class="b-stat-label">Unread Mail</div>
-    </div>
-    <div class="b-stat">
+    </a>
+    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val {% if total_unread_notifs > 0 %}is-accent{% endif %}">
             {{ total_unread_notifs if not needs_notif_scope else "—" }}
         </div>
         <div class="b-stat-label">Notifications</div>
+    </a>
+    <div hx-get="/dashboard/corp-stats" hx-trigger="load" hx-swap="outerHTML" style="display:contents;">
+        <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+            <div class="b-stat-val" style="font-size:10px;color:var(--muted);">…</div>
+            <div class="b-stat-label">Corp Wallet</div>
+        </a>
+        <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+            <div class="b-stat-val" style="font-size:10px;color:var(--muted);">…</div>
+            <div class="b-stat-label">Corp Jobs</div>
+        </a>
+        <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
+            <div class="b-stat-val" style="font-size:10px;color:var(--muted);">…</div>
+            <div class="b-stat-label">Corp Orders</div>
+        </a>
     </div>
 </div>
 
 {# ── Re-auth Banner ──────────────────────────────────────────────────────── #}
+{% set reauth_chars = [] %}
+{% for cid, val in needs_reauth.items() if val %}{% if reauth_chars.append(cid) %}{% endif %}{% endfor %}
+{% if reauth_chars %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">
+        Token expired — {% for cid in reauth_chars %}{% for c in characters if c.character_id == cid %}<strong>{{ c.character_name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}, {% endif %}{% endfor %}
+    </span>
+    <a href="/auth/add-character" class="b-link" style="flex-shrink:0;color:var(--danger);">Re-auth →</a>
+</div>
+{% endif %}
 {% if needs_mail_scope or needs_notif_scope or needs_contracts_scope or needs_pi_scope %}
 <div class="b-banner" style="margin-bottom:2rem;">
     <span style="color:var(--accent)">
@@ -192,6 +166,10 @@ document.addEventListener('DOMContentLoaded', function() {
 {% for group_name, group_chars in char_groups.items() %}
 <div class="b-section group-section" data-group="{{ group_name }}">
     <div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;">
+        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">
+            <button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button>
+            <button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button>
+        </div>
         <span class="group-label b-label" data-group="{{ group_name }}" style="cursor:pointer;" title="Click to rename">{{ group_name }}</span>
         <input class="group-label-input" type="text" value="{{ group_name }}" data-original="{{ group_name }}" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;">
         <span style="font-size:10px;color:var(--muted);">{{ group_chars | length }}</span>
@@ -204,7 +182,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% set w = sk.get('warning', 'error') %}
     {% set is_active = char.character_id == active_char.character_id %}
     <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
-         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
         <div class="b-card-top">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
@@ -217,6 +195,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
                     {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
+                    {% if needs_reauth.get(char.character_id) %}<a href="/auth/add-character" class="b-badge is-danger" style="font-size:8px;text-decoration:none;">RE-AUTH</a>{% endif %}
                 </div>
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
@@ -238,7 +217,7 @@ document.addEventListener('DOMContentLoaded', function() {
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
             {% if sk.get('current_skill') %}
-            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}{% if sk.queue_end_str %}<span style="font-size:8px;color:var(--border);">{{ sk.queue_end_str }} UTC</span>{% endif %}</span></div>
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.current_finish_str %}<span style="font-size:9px;color:var(--text);">done {{ sk.current_finish_str }} UTC</span>{% endif %}{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}</span></div>
             {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
             {% elif w == 'paused' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="font-size:10px;color:var(--muted);">Paused ({{ sk.queue_length }} queued)</span></div>
             {% elif w == 'empty' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val is-danger" style="font-size:10px;">Empty queue</span></div>{% endif %}
@@ -248,8 +227,8 @@ document.addEventListener('DOMContentLoaded', function() {
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
             {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
-            <a href="/auth/add-character" class="b-btn" style="font-size:9px;" title="Re-auth">↻</a>
-            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">✕</button></form>
+            <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
 
@@ -268,7 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
     {% set w = sk.get('warning', 'error') %}
     {% set is_active = char.character_id == active_char.character_id %}
     <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
-         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
         <div class="b-card-top">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
@@ -281,6 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
                     {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
+                    {% if needs_reauth.get(char.character_id) %}<a href="/auth/add-character" class="b-badge is-danger" style="font-size:8px;text-decoration:none;">RE-AUTH</a>{% endif %}
                 </div>
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
@@ -302,7 +282,7 @@ document.addEventListener('DOMContentLoaded', function() {
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
             {% if sk.get('current_skill') %}
-            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}{% if sk.queue_end_str %}<span style="font-size:8px;color:var(--border);">{{ sk.queue_end_str }} UTC</span>{% endif %}</span></div>
+            <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.current_finish_str %}<span style="font-size:9px;color:var(--text);">done {{ sk.current_finish_str }} UTC</span>{% endif %}{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}</span></div>
             {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
             {% elif w == 'paused' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="font-size:10px;color:var(--muted);">Paused ({{ sk.queue_length }} queued)</span></div>
             {% elif w == 'empty' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val is-danger" style="font-size:10px;">Empty queue</span></div>{% endif %}
@@ -312,8 +292,8 @@ document.addEventListener('DOMContentLoaded', function() {
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
             {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
-            <a href="/auth/add-character" class="b-btn" style="font-size:9px;" title="Re-auth">↻</a>
-            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">✕</button></form>
+            <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
 
@@ -325,12 +305,14 @@ document.addEventListener('DOMContentLoaded', function() {
 {# ── Skill Training Summary ────────────────────────────────────────────────── #}
 {% set ns_training = namespace(training=0, empty=0, warning=0) %}
 {% for group_name, items in skill_groups.items() %}
+    {% set ns_group = namespace(has_training=false, has_warning=false) %}
     {% for item in items %}
-        {% if item.warning == 'empty' or item.warning == 'paused' %}{% set ns_training.empty = ns_training.empty + 1 %}
-        {% elif item.warning in ('ok', 'warning', 'critical') %}{% set ns_training.training = ns_training.training + 1 %}
-            {% if item.warning in ('warning', 'critical') %}{% set ns_training.warning = ns_training.warning + 1 %}{% endif %}
-        {% endif %}
+        {% if item.warning in ('ok', 'warning', 'critical') %}{% set ns_group.has_training = true %}{% endif %}
+        {% if item.warning in ('warning', 'critical') %}{% set ns_group.has_warning = true %}{% endif %}
     {% endfor %}
+    {% if ns_group.has_training %}{% set ns_training.training = ns_training.training + 1 %}
+    {% else %}{% set ns_training.empty = ns_training.empty + 1 %}{% endif %}
+    {% if ns_group.has_warning %}{% set ns_training.warning = ns_training.warning + 1 %}{% endif %}
 {% endfor %}
 <div class="b-section">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;">
@@ -341,8 +323,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <span class="b-dot is-ok"></span>
             {% endif %}
             <span style="font-size:11px;color:var(--text);">
-                <strong>{{ ns_training.training }}</strong> training
-                {% if ns_training.empty > 0 %} · <span style="color:var(--danger);">{{ ns_training.empty }} empty</span>{% endif %}
+                <strong>{{ ns_training.training }}</strong> / {{ skill_groups | length }} accounts training
+                {% if ns_training.empty > 0 %} · <span style="color:var(--danger);">{{ ns_training.empty }} no training</span>{% endif %}
                 {% if ns_training.warning > 0 %} · <span style="color:var(--accent);">{{ ns_training.warning }} expiring soon</span>{% endif %}
             </span>
         </div>
@@ -779,5 +761,98 @@ setInterval(updateEveTime, 10000);
 </script>
 
 </div>
+
+{% if sort == 'custom' %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var saveTimer = null;
+    function getOrderPayload() {
+        var items = [];
+        document.querySelectorAll('.sortable-group').forEach(function(list) {
+            var group = list.dataset.group;
+            list.querySelectorAll('[data-char-id]').forEach(function(card, idx) {
+                items.push({character_id: parseInt(card.dataset.charId), sort_order: idx, account_group: group});
+            });
+        });
+        return items;
+    }
+    function scheduleSave() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function() {
+            fetch('/characters/reorder', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getOrderPayload())});
+            var s = document.getElementById('save-status'); if(s){s.style.display = ''; setTimeout(function(){s.style.display='none';}, 2000);}
+        }, 600);
+    }
+    document.querySelectorAll('.sortable-group').forEach(function(list) {
+        Sortable.create(list, {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+    });
+    /* Group move up/down buttons */
+    function saveGroupOrder() {
+        var container = document.getElementById('groups-container');
+        if (!container) return;
+        var order = [];
+        container.querySelectorAll('.group-section').forEach(function(s) {
+            order.push(s.dataset.group);
+        });
+        fetch('/dashboard/group-order', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(order)});
+    }
+    function moveGroup(btn, dir) {
+        var section = btn.closest('.group-section');
+        var container = document.getElementById('groups-container');
+        if (!section || !container) return;
+        if (dir === 'up' && section.previousElementSibling) {
+            container.insertBefore(section, section.previousElementSibling);
+        } else if (dir === 'down' && section.nextElementSibling) {
+            container.insertBefore(section.nextElementSibling, section);
+        }
+        saveGroupOrder();
+        scheduleSave();
+    }
+    document.querySelectorAll('.group-move-up').forEach(function(btn) {
+        btn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'up'); });
+    });
+    document.querySelectorAll('.group-move-down').forEach(function(btn) {
+        btn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'down'); });
+    });
+    var addBtn = document.getElementById('add-group-btn');
+    if (addBtn) addBtn.addEventListener('click', function() {
+        var name = prompt('Account name:', 'Account ' + (document.querySelectorAll('.group-section').length + 1));
+        if (!name) return;
+        var container = document.getElementById('groups-container');
+        var section = document.createElement('div');
+        section.className = 'b-section group-section';
+        section.dataset.group = name;
+        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;"><button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button><button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button></div><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span style="font-size:10px;color:var(--muted);">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
+        container.appendChild(section);
+        attachLabelEdit(section.querySelector('.group-label'));
+        section.querySelector('.group-move-up').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'up'); });
+        section.querySelector('.group-move-down').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'down'); });
+        Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+    });
+    function attachLabelEdit(label) {
+        label.addEventListener('click', function() {
+            var input = label.nextElementSibling;
+            label.style.display = 'none'; input.style.display = ''; input.focus(); input.select();
+            function commit() {
+                var newName = input.value.trim() || input.dataset.original;
+                var oldName = input.dataset.original;
+                if (newName !== oldName) {
+                    var section = label.closest('.group-section');
+                    section.dataset.group = newName;
+                    section.querySelectorAll('[data-group]').forEach(function(el){el.dataset.group = newName;});
+                    label.textContent = newName; label.dataset.group = newName; input.dataset.original = newName;
+                    fetch('/characters/rename-group', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_name: oldName, new_name: newName})});
+                    scheduleSave();
+                }
+                label.style.display = ''; input.style.display = 'none';
+            }
+            input.addEventListener('blur', commit, {once: true});
+            input.addEventListener('keydown', function(e) { if(e.key==='Enter'){e.preventDefault();input.blur();} if(e.key==='Escape'){input.value=input.dataset.original;input.blur();} });
+        });
+    }
+    document.querySelectorAll('.group-label').forEach(attachLabelEdit);
+});
+</script>
+{% endif %}
 
 {% endblock %}

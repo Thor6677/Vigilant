@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %} — VIGILANT{% endblock %}
+{% block content %}
+
+{# ── Header ───────────────────────────────────────────────────────────────── #}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title" style="margin-bottom:2px;">D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %}</h1>
+        <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
+            <span>{{ summary.ships }} ship{{ 's' if summary.ships != 1 else '' }}{% if non_ship_items %} · {{ non_ship_items | length }} other{% endif %}</span>
+            <span>·</span>
+            <span>Expires in {{ expires_str }}</span>
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+        <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        <button onclick="copyFleetComp()" id="copy-comp-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Copy Comp</button>
+        <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
+    </div>
+</div>
+<input type="text" id="share-url" value="{{ request.url_for('dscan_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+
+{# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
+<div class="b-grid-2" style="gap:1rem;align-items:start;">
+
+    {# ── LEFT: Ships by Class ─────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Ships</span>
+            <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+        </div>
+        {% for cls, count in summary.ship_classes.items() %}
+        <div class="b-table-row" style="padding:0.3rem 0.75rem;">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ cls }}</span>
+        </div>
+        {% endfor %}
+        {% if summary.ships == 0 %}
+        <div class="b-empty">No ships on scan</div>
+        {% endif %}
+    </div>
+
+    {# ── RIGHT: Ship Types ─────────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">By Type</span>
+            <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+        </div>
+        {% for group in summary.ships_grouped %}
+        <div class="b-table-row" style="padding:0.3rem 0.75rem;">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ group.total }}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ group.group }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+{# ── Expiry / Extend ──────────────────────────────────────────────────────── #}
+<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding:0.5rem 0;">
+    <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Keep for:</span>
+    {% for key, delta in expiry_options.items() %}
+    <form method="POST" action="/intel/{{ scan_id }}/extend" style="display:inline;">
+        <input type="hidden" name="duration" value="{{ key }}">
+        <button type="submit" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">
+            {{ key.replace('1week', '1 Week').replace('1month', '1 Month').replace('1year', '1 Year').replace('24h', '24 Hours').replace('48h', '48 Hours') }}
+        </button>
+    </form>
+    {% endfor %}
+</div>
+
+{# ── Non-Ship Items (collapsed) ───────────────────────────────────────────── #}
+{% if non_ship_items %}
+<details style="margin-top:0.5rem;">
+    <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
+        <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Other on Scan ({{ non_ship_items | length }})</span>
+        <span style="font-size:10px;color:var(--muted);">▼</span>
+    </summary>
+    <div class="b-panel" style="margin-top:0.25rem;">
+        {% for item in non_ship_items %}
+        <div class="b-table-row" style="padding:0.25rem 0.75rem;">
+            <span style="flex:3;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;overflow:hidden;">
+                <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" onerror="this.style.display='none'">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.type_name }}</span>
+            </span>
+            <span style="flex:1;font-size:10px;color:var(--muted);text-align:right;">{{ item.distance_str }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
+<script>
+function copyShareUrl() {
+    var url = document.getElementById('share-url').value;
+    navigator.clipboard.writeText(url).then(function() {
+        var btn = document.getElementById('copy-url-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
+    });
+}
+
+function copyFleetComp() {
+    var lines = [];
+    {% for cls, count in summary.ship_classes.items() %}
+    lines.push('{{ count }}x {{ cls }}');
+    {% endfor %}
+    lines.push('');
+    lines.push('Total: {{ summary.ships }} ships');
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        var btn = document.getElementById('copy-comp-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy Comp'; btn.style.color = 'var(--text)'; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+</script>
+
+{% endblock %}

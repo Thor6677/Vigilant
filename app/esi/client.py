@@ -12,6 +12,37 @@ from app.esi.rate_limit import rate_limit_tracker, log_event
 
 settings = get_settings()
 
+# ── Shared HTTP client with connection pooling ────────────────────────────────
+# Reused across all ESI requests to avoid TCP handshake overhead.
+_http_client: httpx.AsyncClient | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=30,
+            limits=httpx.Limits(
+                max_connections=80,
+                max_keepalive_connections=30,
+                keepalive_expiry=120,
+            ),
+            http2=False,
+        )
+    return _http_client
+
+
+# ── In-memory ETag cache for authenticated endpoints ─────────────────────────
+# Key: (path, token_hash) → {etag, data}
+# This avoids re-downloading unchanged character data.
+_etag_cache: dict[str, dict] = {}
+_ETAG_CACHE_MAX = 5000
+
+
+def _etag_key(path: str, token: str) -> str:
+    """Build a cache key from path + token (first 16 chars)."""
+    return f"{path}:{token[:16]}"
+
 
 async def refresh_token(character: Character, db: AsyncSession) -> str:
     """Refresh access token if expired, return valid access token."""
@@ -27,20 +58,20 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
         f"{settings.eve_client_id}:{settings.eve_client_secret}".encode()
     ).decode()
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            settings.eve_sso_token_url,
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": character.refresh_token,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    client = get_http_client()
+    resp = await client.post(
+        settings.eve_sso_token_url,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": character.refresh_token,
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
     character.access_token = data["access_token"]
     character.refresh_token = data.get("refresh_token", character.refresh_token)
@@ -66,17 +97,29 @@ class ESIClient:
             await asyncio.sleep(delay)
 
     async def _raw_get(self, url: str, req_headers: dict, params: dict):
-        async with httpx.AsyncClient(timeout=30) as client:
-            return await client.get(url, headers=req_headers, params=params)
+        client = get_http_client()
+        return await client.get(url, headers=req_headers, params=params)
 
     async def get(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
-        """Authenticated GET — private character data, not cached."""
+        """Authenticated GET with ETag support for 304 Not Modified."""
         await self._throttle_if_needed()
         url = f"{self.base}{path}"
-        resp = await self._raw_get(url, self.headers, params or {})
+        req_headers = dict(self.headers)
+
+        # Check ETag cache
+        ek = _etag_key(path, self.token)
+        cached_entry = _etag_cache.get(ek)
+        if cached_entry and not bypass_cache:
+            req_headers["If-None-Match"] = cached_entry["etag"]
+
+        resp = await self._raw_get(url, req_headers, params or {})
         events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         for e in events:
             asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
+
+        # Handle 304 Not Modified — return cached data
+        if resp.status_code == 304 and cached_entry:
+            return cached_entry["data"]
 
         if resp.status_code == 429:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
@@ -91,7 +134,20 @@ class ESIClient:
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
 
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+        # Store ETag for next request
+        etag = resp.headers.get("etag")
+        if etag:
+            # Evict oldest entries if cache is too large
+            if len(_etag_cache) >= _ETAG_CACHE_MAX:
+                # Remove ~20% of entries
+                keys_to_remove = list(_etag_cache.keys())[:_ETAG_CACHE_MAX // 5]
+                for k in keys_to_remove:
+                    _etag_cache.pop(k, None)
+            _etag_cache[ek] = {"etag": etag, "data": data}
+
+        return data
 
     async def get_public(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
         """Public GET — cached when db session is available."""
@@ -138,8 +194,8 @@ class ESIClient:
 
         await self._throttle_if_needed()
         url = f"{self.base}{path}"
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+        client = get_http_client()
+        resp = await client.post(url, json=body, headers={"Accept": "application/json"})
         events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         for e in events:
             asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
@@ -148,14 +204,12 @@ class ESIClient:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
             asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
             await asyncio.sleep(retry_after)
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+            resp = await client.post(url, json=body, headers={"Accept": "application/json"})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code == 420:
             asyncio.create_task(log_event("420", path, dict(resp.headers)))
             await asyncio.sleep(60)
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(url, json=body, headers={"Accept": "application/json"})
+            resp = await client.post(url, json=body, headers={"Accept": "application/json"})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
 
         resp.raise_for_status()

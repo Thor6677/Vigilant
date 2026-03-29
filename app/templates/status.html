@@ -21,8 +21,9 @@
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-xs uppercase tracking-wider text-eve-muted">Request Activity</h2>
       <div class="flex items-center gap-3 text-xs text-eve-muted font-mono">
-        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-success/70"></span>Success</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-danger/70"></span>Error</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-success/70"></span>Fetched</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(100,160,220,0.7);"></span>Cached</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-danger/70"></span>Rejected</span>
         <span class="text-eve-muted/50">· last 30 min</span>
       </div>
     </div>
@@ -42,6 +43,7 @@
 (function () {
   const initialData = {{ chart_data | safe }};
   const EVE_GREEN  = 'rgba(77,166,77,0.75)';
+  const EVE_BLUE   = 'rgba(100,160,220,0.7)';
   const EVE_RED    = 'rgba(204,60,60,0.75)';
   const EVE_BORDER = 'rgba(255,255,255,0.06)';
   const EVE_MUTED  = 'rgba(255,255,255,0.3)';
@@ -52,15 +54,22 @@
       labels: data.labels,
       datasets: [
         {
-          label: 'Success',
-          data: data.ok,
+          label: 'Fetched',
+          data: data.fetched,
           backgroundColor: EVE_GREEN,
           borderRadius: 2,
           stack: 'req',
         },
         {
-          label: 'Error',
-          data: data.errors,
+          label: 'Cached',
+          data: data.cached,
+          backgroundColor: EVE_BLUE,
+          borderRadius: 2,
+          stack: 'req',
+        },
+        {
+          label: 'Rejected',
+          data: data.rejected,
           backgroundColor: EVE_RED,
           borderRadius: 2,
           stack: 'req',
@@ -117,8 +126,9 @@
       if (!resp.ok) return;
       const d = await resp.json();
       chart.data.labels = d.labels;
-      chart.data.datasets[0].data = d.ok;
-      chart.data.datasets[1].data = d.errors;
+      chart.data.datasets[0].data = d.fetched;
+      chart.data.datasets[1].data = d.cached;
+      chart.data.datasets[2].data = d.rejected;
       chart.update('none');
     } catch (_) {}
   }, 10000);

@@ -10,16 +10,13 @@
       <div class="text-xs text-eve-muted mt-1">Requests (session)</div>
     </div>
     <div class="eve-border rounded p-3 bg-eve-surface text-center">
-      {% if success_rate >= 95 %}
-        <div class="text-2xl font-mono font-semibold text-eve-success">{{ success_rate }}%</div>
-      {% elif success_rate >= 80 %}
-        <div class="text-2xl font-mono font-semibold text-yellow-400">{{ success_rate }}%</div>
-      {% else %}
-        <div class="text-2xl font-mono font-semibold text-eve-danger">{{ success_rate }}%</div>
+      <div class="text-2xl font-mono font-semibold text-white">{{ ok_count }}</div>
+      <div class="text-xs text-eve-muted mt-1">Fetched</div>
+      {% if cached_count > 0 %}
+        <div class="text-xs mt-0.5" style="color:rgba(100,160,220,0.9);">{{ cached_count }} cached</div>
       {% endif %}
-      <div class="text-xs text-eve-muted mt-1">Success Rate</div>
-      {% if error_count > 0 %}
-        <div class="text-xs text-eve-danger/70 mt-0.5">{{ error_count }} errors</div>
+      {% if rejected_count > 0 %}
+        <div class="text-xs text-eve-muted mt-0.5">{{ rejected_count }} rejected</div>
       {% endif %}
     </div>
     <div class="eve-border rounded p-3 bg-eve-surface text-center">
@@ -58,7 +55,7 @@
               <th class="px-3 py-2 text-left">Last Sync</th>
               <th class="px-3 py-2 text-left">Status</th>
               <th class="px-3 py-2 text-left">Stale Fields</th>
-              <th class="px-3 py-2 text-left">Warnings / Errors</th>
+              <th class="px-3 py-2 text-left">Warnings / Issues</th>
             </tr>
           </thead>
           <tbody>
@@ -193,7 +190,7 @@
       {% endif %}
     </div>
     <div class="flex items-center justify-between text-xs text-eve-muted">
-      <span>{{ legacy.remaining }}/100 errors remaining</span>
+      <span>{{ legacy.remaining }}/100 budget remaining</span>
       <span>{{ legacy.last_updated | age_str }}</span>
     </div>
   </div>

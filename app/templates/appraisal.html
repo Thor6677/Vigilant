@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}APPRAISAL — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Paste Appraisal</h1>
+    <div style="display:flex;gap:0.5rem;">
+        <a href="/industry" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Manufacturing</a>
+        <a href="/industry/compression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Compression</a>
+        <a href="/industry/hauling" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Hauling</a>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Appraise Items</span>
+        </div>
+        <form hx-post="/industry/appraisal/calculate" hx-target="#appraisal-results" hx-swap="innerHTML" hx-indicator="#appraisal-loading">
+            <div style="padding:0.75rem;">
+                <div style="display:flex;gap:1rem;align-items:flex-end;margin-bottom:0.75rem;">
+                    <div style="display:flex;flex-direction:column;gap:3px;">
+                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Trade Hub</label>
+                        <select name="hub" id="inp-hub" onchange="saveHubPref()"
+                                style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                            {% for key, hub in hubs.items() %}
+                            <option value="{{ key }}" {% if key == 'jita' %}selected{% endif %}>{{ hub.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <textarea name="paste_text" id="paste-text" rows="10"
+                          placeholder="Paste items here...&#10;&#10;Supported formats:&#10;  Item Name&#9;5000  (inventory copy)&#10;  Item Name x5000  (contract format)&#10;  Item Name  (one per line, qty=1)"
+                          style="width:100%;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;"></textarea>
+                <button type="submit" class="b-btn"
+                        style="margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Appraise
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="appraisal-loading" class="htmx-indicator" style="text-align:center;padding:1rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
+    <span class="spin-anim">◌</span> Fetching prices...
+</div>
+
+<div id="appraisal-results"></div>
+
+<script>
+var APPRAISAL_KEY = 'vigilant_appraisal_hub';
+
+function saveHubPref() {
+    localStorage.setItem(APPRAISAL_KEY, document.getElementById('inp-hub').value);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var saved = localStorage.getItem(APPRAISAL_KEY);
+    if (saved) document.getElementById('inp-hub').value = saved;
+});
+</script>
+
+{% endblock %}

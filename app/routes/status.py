@@ -35,19 +35,22 @@ templates.env.filters["age_str"] = _age_str
 def _compute_chart_data() -> dict:
     """Bucket request_log into per-minute counts for the last 30 minutes."""
     now = datetime.now(timezone.utc)
-    ok_buckets = [0] * 30
-    err_buckets = [0] * 30
+    fetched = [0] * 30
+    cached = [0] * 30
+    rejected = [0] * 30
     for entry in rate_limit_tracker.request_log:
         age_s = (now - entry.timestamp).total_seconds()
         minute = int(age_s // 60)
         if 0 <= minute < 30:
-            idx = 29 - minute  # 0 = 29min ago, 29 = current minute
-            if entry.status_code < 400:
-                ok_buckets[idx] += 1
+            idx = 29 - minute
+            if entry.status_code == 304:
+                cached[idx] += 1
+            elif entry.status_code < 400:
+                fetched[idx] += 1
             else:
-                err_buckets[idx] += 1
+                rejected[idx] += 1
     labels = [f"-{29 - i}m" if i < 29 else "now" for i in range(30)]
-    return {"labels": labels, "ok": ok_buckets, "errors": err_buckets}
+    return {"labels": labels, "fetched": fetched, "cached": cached, "rejected": rejected}
 
 
 def _stale_field_counts(char: Character, cache: CharacterDashboardCache | None) -> tuple[int, int]:
@@ -75,12 +78,13 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
     request_log = list(reversed(tracker.request_log))
     overall = tracker.overall_status()
 
-    # Summary stats
+    # Summary stats — 304 Not Modified counts as success (ETag cache hit)
     log_all = list(tracker.request_log)
     total_requests = len(log_all)
-    success_count = sum(1 for e in log_all if e.status_code < 300)
-    error_count = sum(1 for e in log_all if e.status_code >= 400)
-    success_rate = round(success_count / total_requests * 100) if total_requests else 100
+    ok_count = sum(1 for e in log_all if e.status_code < 400)
+    rejected_count = sum(1 for e in log_all if e.status_code >= 400)
+    cached_count = sum(1 for e in log_all if e.status_code == 304)
+    ok_rate = round(ok_count / total_requests * 100) if total_requests else 100
 
     # Character sync status — only show characters belonging to this user
     char_result = await db.execute(select(Character).where(Character.user_id == user_id))
@@ -130,9 +134,10 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
         recent_events=recent_events,
         overall_status=overall,
         total_requests=total_requests,
-        success_count=success_count,
-        error_count=error_count,
-        success_rate=success_rate,
+        ok_count=ok_count,
+        rejected_count=rejected_count,
+        cached_count=cached_count,
+        ok_rate=ok_rate,
         char_sync_rows=char_sync_rows,
         syncing_count=syncing_count,
         chart_data=json.dumps(_compute_chart_data()),

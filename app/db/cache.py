@@ -12,8 +12,9 @@ TTL = {
     "universe_station": 86400,        # station info — 24h
     "universe_const":   86400 * 365,  # constellation/region — permanent
     "universe_names":   86400 * 30,   # name resolution — 30 days
-    "corporation":      3600,         # corp info — 1h
-    "alliance":         3600,         # alliance info — 1h
+    "character_public":  3600,         # public char info (corp/alliance) — 1h
+    "corporation":      86400,        # corp info (name, ticker) — 24h
+    "alliance":         86400,        # alliance info (name) — 24h
     "route":            600,          # route calc — 10 min
     "market_orders":    300,          # market orders — 5 min
     "market_prices":    300,          # global prices — 5 min
@@ -49,6 +50,10 @@ def _ttl_for_path(path: str) -> int:
     if "/universe/constellations/" in path: return TTL["universe_const"]
     if "/universe/regions/" in path:     return TTL["universe_const"]
     if "/universe/names" in path:        return TTL["universe_names"]
+    # Public character info: /characters/12345/ (no sub-path beyond the ID)
+    import re as _re
+    if _re.match(r'^/characters/\d+/?$', path):
+        return TTL["character_public"]
     if "/corporations/" in path:         return TTL["corporation"]
     if "/alliances/" in path:            return TTL["alliance"]
     if "/route/" in path:                return TTL["route"]

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Intel — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Intel</h1>
+</div>
+
+{% if error %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">{{ error }}</span>
+</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Paste D-Scan or Local</span></div>
+        <form method="POST" action="/intel/parse">
+            <div style="padding:0.75rem;">
+                <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;max-width:300px;">
+                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Label (optional)</label>
+                    <input type="text" name="label" placeholder="e.g. J105705 local"
+                           style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                </div>
+                <textarea name="paste_text" rows="12"
+                          placeholder="Paste here — auto-detects the type:&#10;&#10;D-Scan: Open d-scan (Alt+D), scan, Ctrl+A, Ctrl+V&#10;Local: Click in local chat member list, Ctrl+A, Ctrl+V"
+                          style="width:100%;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;"></textarea>
+                <button type="submit" class="b-btn"
+                        style="margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Parse & Share
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
