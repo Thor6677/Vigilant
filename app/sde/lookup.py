@@ -44,6 +44,21 @@ async def search_types(db: AsyncSession, query: str, limit: int = 10) -> list[di
     return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.fetchall()]
 
 
+async def search_systems(db: AsyncSession, query: str, limit: int = 8) -> list[dict]:
+    """Search solar systems by partial name for autocomplete."""
+    result = await db.execute(
+        select(SDESystem.system_id, SDESystem.system_name, SDESystem.security)
+        .where(func.lower(SDESystem.system_name).contains(query.lower()))
+        .order_by(func.length(SDESystem.system_name))
+        .limit(limit)
+    )
+    return [
+        {"system_id": r.system_id, "system_name": r.system_name,
+         "security": round(r.security, 2) if r.security is not None else 0.0}
+        for r in result.fetchall()
+    ]
+
+
 async def system_name_to_id(db: AsyncSession, name: str) -> int | None:
     result = await db.execute(
         select(SDESystem.system_id).where(func.lower(SDESystem.system_name) == name.lower())

@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Gate Check — VIGILANT{% endblock %}
+
+{% block head %}
+<style>
+    details > summary { list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+
+    .gc-tabs { display: flex; gap: 1px; margin-bottom: 1rem; }
+    .gc-tab {
+        background: var(--surface); border: 1px solid var(--border);
+        color: var(--muted); padding: 0.5rem 1rem;
+        font: inherit; font-size: 10px; letter-spacing: 0.12em;
+        text-transform: uppercase; cursor: pointer;
+    }
+    .gc-tab.is-active { color: var(--accent); border-color: var(--accent); }
+    .gc-tab:hover { color: var(--text); }
+
+    .gc-tab-content { display: none; }
+    .gc-tab-content.is-active { display: block; }
+
+    .gc-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: var(--surface); border: 1px solid var(--border);
+        z-index: 100; max-height: 200px; overflow-y: auto;
+    }
+    .gc-dd-item {
+        padding: 0.4rem 0.75rem; font-size: 11px;
+        cursor: pointer; display: flex; gap: 0.5rem; align-items: center;
+    }
+    .gc-dd-item:hover { background: var(--bg); }
+
+    .gc-input {
+        width: 100%; padding: 0.4rem 0.75rem;
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 11px;
+    }
+    .gc-input:focus { outline: none; border-color: var(--accent); }
+
+    .gc-select {
+        width: 100%; padding: 0.4rem 0.75rem;
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 11px;
+    }
+
+    .gc-legend { display: flex; gap: 1rem; flex-wrap: wrap; padding: 0.5rem 0; font-size: 10px; align-items: center; }
+    .gc-legend-item { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+    .gc-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    .gc-lbl {
+        display: block; font-size: 9px; letter-spacing: 0.12em;
+        text-transform: uppercase; color: var(--muted); margin-bottom: 3px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Gate Check</h1>
+</div>
+
+{# ── Tabs ────────────────────────────────────────────────────────────────── #}
+<div class="gc-tabs">
+    <button class="gc-tab is-active" onclick="gcTab('checker',this)">Route Checker</button>
+    <button class="gc-tab" onclick="gcTab('finder',this)">Gatecamp Finder</button>
+    <button class="gc-tab" onclick="gcTab('wartargets',this)">War Targets</button>
+</div>
+
+{# ── Tab 1: Route Checker ───────────────────────────────────────────────── #}
+<div id="tab-checker" class="gc-tab-content is-active">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Check Route Safety</span></div>
+        <form hx-post="/intel/gatecheck/check" hx-target="#route-results" hx-swap="innerHTML" hx-indicator="#route-loading">
+            <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+
+                {# Origin #}
+                <div style="flex:1;min-width:180px;position:relative;">
+                    <label class="gc-lbl">From</label>
+                    <input type="text" name="origin" id="gc-origin" class="gc-input"
+                           placeholder="e.g. Jita" autocomplete="off"
+                           oninput="gcSearch(this,'gc-origin-dd')" onfocus="gcSearch(this,'gc-origin-dd')">
+                    <div id="gc-origin-dd" class="gc-dropdown" style="display:none;"></div>
+                </div>
+
+                {# Destination #}
+                <div style="flex:1;min-width:180px;position:relative;">
+                    <label class="gc-lbl">To</label>
+                    <input type="text" name="destination" id="gc-dest" class="gc-input"
+                           placeholder="e.g. Amarr" autocomplete="off"
+                           oninput="gcSearch(this,'gc-dest-dd')" onfocus="gcSearch(this,'gc-dest-dd')">
+                    <div id="gc-dest-dd" class="gc-dropdown" style="display:none;"></div>
+                </div>
+
+                {# Route preference #}
+                <div style="min-width:120px;">
+                    <label class="gc-lbl">Route</label>
+                    <select name="flag" class="gc-select">
+                        <option value="shortest">Shortest</option>
+                        <option value="secure">Secure (Highsec)</option>
+                        <option value="insecure">Insecure (Lowsec)</option>
+                    </select>
+                </div>
+
+                {# Submit #}
+                <button type="submit" class="b-btn"
+                        style="padding:0.4rem 1.25rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;white-space:nowrap;">
+                    Check Route
+                </button>
+            </div>
+
+            {# Avoid systems (collapsible) #}
+            <div style="padding:0 0.75rem 0.75rem;">
+                <details>
+                    <summary style="font-size:10px;color:var(--muted);cursor:pointer;letter-spacing:0.08em;">
+                        Avoid systems (optional)
+                    </summary>
+                    <textarea name="avoid" class="gc-input" rows="3"
+                              placeholder="One system per line&#10;e.g. Uedama&#10;Niarja"
+                              style="margin-top:0.5rem;resize:vertical;"></textarea>
+                </details>
+            </div>
+        </form>
+    </div>
+
+    {# Legend #}
+    <div class="gc-legend">
+        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--success);"></div> 0 kills</div>
+        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--accent);"></div> 1–2 kills</div>
+        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--danger);"></div> 3+ kills</div>
+        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:#ff4444;"></div> Smartbombs</div>
+        <span style="font-size:9px;color:var(--muted);margin-left:auto;">Kills in past hour · zKillboard</span>
+    </div>
+
+    {# Loading indicator #}
+    <div id="route-loading" class="htmx-indicator" style="padding:1.5rem;text-align:center;color:var(--muted);font-size:11px;">
+        <div style="margin-bottom:0.5rem;">⏳</div>
+        Checking route… querying kill data for each system.
+    </div>
+
+    {# Results injected here by HTMX #}
+    <div id="route-results"></div>
+</div>
+
+{# ── Tab 2: Gatecamp Finder ─────────────────────────────────────────────── #}
+<div id="tab-finder" class="gc-tab-content">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Active Gatecamps</span></div>
+        <div style="padding:0.5rem 0.75rem;font-size:10px;color:var(--muted);">
+            Systems with 3+ PvP kills in the past hour. Data from zKillboard.
+        </div>
+    </div>
+    <div id="finder-loading" class="htmx-indicator" style="padding:1.5rem;text-align:center;color:var(--muted);font-size:11px;">
+        Scanning for active gatecamps…
+    </div>
+    <div id="finder-results" style="margin-top:0.5rem;"></div>
+</div>
+
+{# ── Tab 3: War Targets ─────────────────────────────────────────────────── #}
+<div id="tab-wartargets" class="gc-tab-content">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">War Target Intel</span></div>
+        <form hx-post="/intel/gatecheck/wartargets" hx-target="#wt-results" hx-swap="innerHTML" hx-indicator="#wt-loading">
+            <div style="padding:0.75rem;display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
+                <div style="flex:1;min-width:200px;">
+                    <label class="gc-lbl">Character, Corporation, or Alliance</label>
+                    <input type="text" name="entity_name" class="gc-input" placeholder="e.g. Pandemic Legion">
+                </div>
+                <div style="min-width:130px;">
+                    <label class="gc-lbl">Type</label>
+                    <select name="entity_type" class="gc-select">
+                        <option value="auto">Auto-detect</option>
+                        <option value="character">Character</option>
+                        <option value="corporation">Corporation</option>
+                        <option value="alliance">Alliance</option>
+                    </select>
+                </div>
+                <button type="submit" class="b-btn"
+                        style="padding:0.4rem 1.25rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Search
+                </button>
+            </div>
+        </form>
+        <div style="padding:0 0.75rem 0.5rem;font-size:10px;color:var(--muted);">
+            Shows where and when a target was active in the past 3 hours — kills, losses, ships, and weapons used.
+        </div>
+    </div>
+    <div id="wt-loading" class="htmx-indicator" style="padding:1.5rem;text-align:center;color:var(--muted);font-size:11px;">
+        Searching activity…
+    </div>
+    <div id="wt-results" style="margin-top:0.5rem;"></div>
+</div>
+
+<script>
+/* ── Tab switching ────────────────────────────────────────────────────────── */
+function gcTab(tab, btn) {
+    document.querySelectorAll('.gc-tab-content').forEach(function(el) { el.classList.remove('is-active'); });
+    document.querySelectorAll('.gc-tab').forEach(function(el) { el.classList.remove('is-active'); });
+    document.getElementById('tab-' + tab).classList.add('is-active');
+    btn.classList.add('is-active');
+
+    // Auto-load finder on first click
+    if (tab === 'finder' && !document.getElementById('finder-results').dataset.loaded) {
+        document.getElementById('finder-results').dataset.loaded = '1';
+        htmx.ajax('GET', '/intel/gatecheck/finder', {target: '#finder-results', indicator: '#finder-loading'});
+    }
+}
+
+/* ── System autocomplete ──────────────────────────────────────────────────── */
+var _gcTimer;
+function gcSearch(input, ddId) {
+    clearTimeout(_gcTimer);
+    var dd = document.getElementById(ddId);
+    var q = input.value.trim();
+    if (q.length < 2) { dd.style.display = 'none'; return; }
+
+    _gcTimer = setTimeout(function() {
+        fetch('/intel/gatecheck/systems?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.length) { dd.style.display = 'none'; return; }
+                dd.innerHTML = data.map(function(s) {
+                    var c = _secCol(s.security);
+                    var safe = s.system_name.replace(/'/g, "\\'");
+                    return '<div class="gc-dd-item" onmousedown="gcPick(\'' + input.id + "','" + ddId + "','" + safe + '\')">'
+                        + '<span style="color:' + c + ';font-size:10px;min-width:28px;">' + s.security.toFixed(1) + '</span>'
+                        + '<span>' + s.system_name + '</span>'
+                        + '</div>';
+                }).join('');
+                dd.style.display = 'block';
+            })
+            .catch(function() { dd.style.display = 'none'; });
+    }, 250);
+}
+
+function gcPick(inputId, ddId, name) {
+    document.getElementById(inputId).value = name;
+    document.getElementById(ddId).style.display = 'none';
+}
+
+function _secCol(s) {
+    if (s >= 0.9) return '#33aa55';
+    if (s >= 0.7) return '#55cc55';
+    if (s >= 0.5) return '#88bb44';
+    if (s >= 0.3) return '#cc8844';
+    if (s >= 0.1) return '#cc5533';
+    return '#cc3333';
+}
+
+/* Close dropdowns on outside click */
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.gc-dropdown') && !e.target.closest('.gc-input')) {
+        document.querySelectorAll('.gc-dropdown').forEach(function(d) { d.style.display = 'none'; });
+    }
+});
+</script>
+{% endblock %}
