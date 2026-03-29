@@ -23,6 +23,7 @@ TTL = {
     "character_clones": 300,          # clones — 5 min
     "character_wallet": 120,          # wallet — 2 min
     "character_location": 60,         # location — 60 sec
+    "killmail":         86400,        # killmails are immutable — 24h
     "search":           300,          # search results — 5 min
 }
 
@@ -56,6 +57,7 @@ def _ttl_for_path(path: str) -> int:
         return TTL["character_public"]
     if "/corporations/" in path:         return TTL["corporation"]
     if "/alliances/" in path:            return TTL["alliance"]
+    if "/killmails/" in path:            return TTL["killmail"]
     if "/route/" in path:                return TTL["route"]
     if "/markets/" in path and "/orders" in path: return TTL["market_orders"]
     if "/markets/prices" in path:        return TTL["market_prices"]

@@ -1,6 +1,6 @@
 """Gate Check — Route safety checker, gatecamp finder, and war target intel.
 
-Checks kill activity along your route using zKillboard data and ESI route planning.
+Checks kill activity at stargates along your route using zKillboard + ESI data.
 All features included: detailed kill intel, gatecamp finder, war target tracking.
 """
 
@@ -46,7 +46,6 @@ async def _zkb_get(path: str) -> list:
         return cached[0]
 
     async with _zkb_sem:
-        # Re-check after acquiring semaphore
         cached = _zkb_cache.get(url)
         if cached and cached[1] > now:
             return cached[0]
@@ -59,7 +58,6 @@ async def _zkb_get(path: str) -> list:
                 if not isinstance(data, list):
                     data = []
                 _zkb_cache[url] = (data, now + _ZKB_CACHE_TTL)
-                # Lazy cache cleanup
                 if len(_zkb_cache) > 500:
                     expired = [k for k, v in _zkb_cache.items() if v[1] < now]
                     for k in expired:
@@ -73,6 +71,45 @@ async def _zkb_get(path: str) -> list:
             return []
 
 
+# ── ESI helpers ─────────────────────────────────────────────────────────────
+
+_esi_sem = asyncio.Semaphore(10)
+
+
+async def _get_system_gates(system_id: int) -> set[int]:
+    """Get stargate IDs for a system from ESI (cached permanently)."""
+    async with AsyncSessionLocal() as db:
+        client = ESIClient("", db=db)
+        try:
+            data = await client.get_public(f"/universe/systems/{system_id}/")
+            if isinstance(data, dict):
+                return set(data.get("stargates", []))
+        except Exception:
+            pass
+    return set()
+
+
+async def _fetch_killmail(killmail_id: int, km_hash: str) -> dict | None:
+    """Fetch full killmail from ESI using the hash from zKillboard."""
+    async with _esi_sem:
+        async with AsyncSessionLocal() as db:
+            client = ESIClient("", db=db)
+            try:
+                data = await client.get_public(
+                    f"/killmails/{killmail_id}/{km_hash}/",
+                )
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+    return None
+
+
+def _is_gate_location(location_id: int) -> bool:
+    """Heuristic: stargate IDs are in the 50_000_000 range."""
+    return 50_000_000 <= location_id <= 59_999_999
+
+
 # ── Ship group constants for threat classification ──────────────────────────
 
 DICTOR_GROUPS = {541}   # Interdictor
@@ -80,7 +117,6 @@ HIC_GROUPS = {894}      # Heavy Interdictor
 
 
 def _sec_color(sec: float) -> str:
-    """CSS color for security status value."""
     if sec >= 0.9:
         return "#33aa55"
     if sec >= 0.7:
@@ -123,7 +159,7 @@ def _analyze_kills(
     type_names: dict[int, str],
     group_ids: dict[int, int | None],
 ) -> dict:
-    """Analyze a list of killmails for threat indicators."""
+    """Analyze full killmails (ESI format + merged zkb) for threat indicators."""
     if not kills:
         return {
             "kill_count": 0, "pvp_kills": 0, "threat": "safe",
@@ -201,12 +237,12 @@ def _analyze_kills(
     }
 
 
-# ── Bulk type resolution helper ─────────────────────────────────────────────
+# ── Bulk type resolution ────────────────────────────────────────────────────
 
 async def _resolve_type_ids(
-    db: AsyncSession, kills_by_key: dict[int, list],
+    db: AsyncSession, kills_by_key: dict,
 ) -> tuple[dict[int, str], dict[int, int | None]]:
-    """Collect all type IDs from grouped kills and resolve names + groups."""
+    """Collect all type IDs from full killmails and resolve names + groups."""
     tids: set[int] = set()
     for kills in kills_by_key.values():
         for km in kills:
@@ -224,33 +260,91 @@ async def _resolve_type_ids(
     return names, groups
 
 
+# ── Fetch full killmail data for a set of zKB entries ────────────────────────
+
+async def _enrich_kills(zkb_kills: list, max_per_call: int = 15) -> list[dict]:
+    """Fetch full killmail data from ESI for a list of zKB entries.
+
+    Returns merged killmails (ESI data + zkb section). Caps at max_per_call
+    to avoid excessive API requests.
+    """
+    to_fetch = []
+    for km in zkb_kills[:max_per_call]:
+        km_id = km.get("killmail_id")
+        km_hash = km.get("zkb", {}).get("hash", "")
+        if km_id and km_hash:
+            to_fetch.append((km_id, km_hash, km.get("zkb", {})))
+
+    if not to_fetch:
+        return []
+
+    async def fetch_one(km_id: int, km_hash: str, zkb: dict):
+        full = await _fetch_killmail(km_id, km_hash)
+        if full:
+            full["zkb"] = zkb
+        return full
+
+    results = await asyncio.gather(
+        *[fetch_one(km_id, km_hash, zkb) for km_id, km_hash, zkb in to_fetch]
+    )
+    return [r for r in results if r]
+
+
 # ── Route checking ───────────────────────────────────────────────────────────
 
 async def _check_route_systems(route: list[int], db: AsyncSession) -> list[dict]:
-    """Fetch kills for each system on route and build enriched system list."""
-    # Fetch system info from SDE
+    """For each system on route: get stargates, fetch zKB kills, filter to
+    gate kills only, then fetch full killmail details from ESI."""
+
+    # Step 1: Parallel fetch — zKB kills AND system stargates for every system
+    async def fetch_system(sid: int):
+        kills, gates = await asyncio.gather(
+            _zkb_get(f"/kills/systemID/{sid}/pastSeconds/3600/"),
+            _get_system_gates(sid),
+        )
+        return sid, kills, gates
+
+    sys_results = await asyncio.gather(*[fetch_system(sid) for sid in route])
+
+    # Step 2: Filter to gate kills (locationID matches a stargate in the system)
+    gate_kills_by_sys: dict[int, list] = {}
+    for sid, kills, gates in sys_results:
+        gate_kills = []
+        for km in kills:
+            loc_id = km.get("zkb", {}).get("locationID", 0)
+            if loc_id in gates:
+                gate_kills.append(km)
+        gate_kills_by_sys[sid] = gate_kills
+
+    # Step 3: Fetch full killmail data from ESI for gate kills
+    full_kms_by_sys: dict[int, list] = {}
+    fetch_tasks = []
+    for sid in route:
+        gk = gate_kills_by_sys.get(sid, [])
+        if gk:
+            fetch_tasks.append((sid, _enrich_kills(gk, max_per_call=10)))
+    if fetch_tasks:
+        enriched = await asyncio.gather(*[t for _, t in fetch_tasks])
+        for (sid, _), full_kms in zip(fetch_tasks, enriched):
+            full_kms_by_sys[sid] = full_kms
+
+    # Step 4: Resolve type IDs from full killmails
+    type_names, group_ids = await _resolve_type_ids(db, full_kms_by_sys)
+
+    # Step 5: Build output
     sys_info: dict[int, dict] = {}
     for sid in route:
         info = await sde.system_info(db, sid)
         if info:
             sys_info[sid] = info
 
-    # Fetch kills from zKillboard in parallel
-    async def fetch(sid: int):
-        return sid, await _zkb_get(f"/kills/systemID/{sid}/pastSeconds/3600/")
-
-    results = await asyncio.gather(*[fetch(sid) for sid in route])
-    kills_map: dict[int, list] = dict(results)
-
-    # Resolve all type IDs in one batch
-    type_names, group_ids = await _resolve_type_ids(db, kills_map)
-
-    # Analyze each system
     out = []
     for i, sid in enumerate(route):
         info = sys_info.get(sid, {})
         sec = info.get("security", 0)
-        analysis = _analyze_kills(kills_map.get(sid, []), type_names, group_ids)
+        analysis = _analyze_kills(
+            full_kms_by_sys.get(sid, []), type_names, group_ids,
+        )
         out.append({
             "waypoint": i + 1,
             "system_id": sid,
@@ -272,7 +366,6 @@ async def gatecheck_page(request: Request):
 
 @router.get("/intel/gatecheck/systems", response_class=JSONResponse)
 async def system_autocomplete(q: str = Query(""), db: AsyncSession = Depends(get_db)):
-    """System name autocomplete — returns JSON list."""
     if len(q) < 2:
         return []
     return await sde.search_systems(db, q, limit=8)
@@ -280,7 +373,6 @@ async def system_autocomplete(q: str = Query(""), db: AsyncSession = Depends(get
 
 @router.post("/intel/gatecheck/check", response_class=HTMLResponse)
 async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
-    """Check route for gate kills. Returns HTMX partial."""
     form = await request.form()
     origin = form.get("origin", "").strip()
     dest = form.get("destination", "").strip()
@@ -290,7 +382,6 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
     if not origin or not dest:
         return HTMLResponse(_err("Enter both origin and destination systems."))
 
-    # Resolve system names to IDs via SDE
     origin_id = await sde.system_name_to_id(db, origin)
     dest_id = await sde.system_name_to_id(db, dest)
     if not origin_id:
@@ -298,7 +389,6 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
     if not dest_id:
         return HTMLResponse(_err(f"Unknown system: {dest}"))
 
-    # Resolve avoid list
     avoid_ids = []
     if avoid_text:
         for line in avoid_text.splitlines():
@@ -308,7 +398,6 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
                 if aid:
                     avoid_ids.append(aid)
 
-    # Get route from ESI
     async with AsyncSessionLocal() as esi_db:
         client = ESIClient("", db=esi_db)
         params: dict = {"flag": flag}
@@ -325,7 +414,6 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
         except Exception:
             return HTMLResponse(_err("Route calculation failed. Try again."))
 
-    # Check each system for kills
     systems = await _check_route_systems(route, db)
 
     total_kills = sum(s["pvp_kills"] for s in systems)
@@ -346,24 +434,32 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/intel/gatecheck/finder", response_class=HTMLResponse)
 async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
-    """Find active gatecamps across EVE. Returns HTMX partial."""
-    # Fetch recent kills (2 pages = up to 400 kills)
+    """Find active gatecamps across EVE."""
+    # Fetch recent kills (2 pages)
     page1, page2 = await asyncio.gather(
         _zkb_get("/kills/pastSeconds/3600/"),
         _zkb_get("/kills/pastSeconds/3600/page/2/"),
     )
     all_kills = page1 + page2
 
-    # Group non-NPC kills by system
-    by_sys: dict[int, list] = defaultdict(list)
+    # Pre-filter: keep only non-NPC kills at gate locations (heuristic)
+    gate_kills = []
     for km in all_kills:
-        if km.get("zkb", {}).get("npc"):
+        zkb = km.get("zkb", {})
+        if zkb.get("npc"):
             continue
+        loc_id = zkb.get("locationID", 0)
+        if _is_gate_location(loc_id):
+            gate_kills.append(km)
+
+    # Group by system
+    by_sys: dict[int, list] = defaultdict(list)
+    for km in gate_kills:
         sid = km.get("solar_system_id")
         if sid:
             by_sys[sid].append(km)
 
-    # Systems with 3+ PvP kills = potential camps
+    # Systems with 3+ gate kills = potential camps
     camp_systems = {sid: kms for sid, kms in by_sys.items() if len(kms) >= 3}
 
     if not camp_systems:
@@ -371,7 +467,28 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
             "request": request, "camps": [],
         })
 
-    type_names, group_ids = await _resolve_type_ids(db, camp_systems)
+    # Fetch full killmail details for camps (top 5 camps, 10 kills each)
+    full_kms_by_sys: dict[int, list] = {}
+    top_camps = sorted(camp_systems.items(), key=lambda x: -len(x[1]))[:5]
+    if top_camps:
+        enriched = await asyncio.gather(
+            *[_enrich_kills(kms, max_per_call=10) for _, kms in top_camps]
+        )
+        for (sid, _), full_kms in zip(top_camps, enriched):
+            full_kms_by_sys[sid] = full_kms
+
+    # For remaining camps, use basic zkb data only
+    for sid, kms in camp_systems.items():
+        if sid not in full_kms_by_sys:
+            # Create minimal killmail stubs from zkb data
+            full_kms_by_sys[sid] = [
+                {"killmail_id": km.get("killmail_id"), "zkb": km.get("zkb", {}),
+                 "victim": {}, "attackers": [],
+                 "killmail_time": "", "solar_system_id": sid}
+                for km in kms
+            ]
+
+    type_names, group_ids = await _resolve_type_ids(db, full_kms_by_sys)
 
     camps = []
     for sid, kms in sorted(camp_systems.items(), key=lambda x: -len(x[1])):
@@ -379,7 +496,9 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
         if not info:
             continue
         sec = info.get("security", 0)
-        analysis = _analyze_kills(kms, type_names, group_ids)
+        analysis = _analyze_kills(
+            full_kms_by_sys.get(sid, []), type_names, group_ids,
+        )
         camps.append({
             "system_id": sid,
             "system_name": info.get("system_name", str(sid)),
@@ -396,7 +515,6 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/intel/gatecheck/wartargets", response_class=HTMLResponse)
 async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
-    """Search for war target activity in past 3 hours. Returns HTMX partial."""
     form = await request.form()
     name = form.get("entity_name", "").strip()
     hint = form.get("entity_type", "auto")
@@ -404,7 +522,6 @@ async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
     if not name:
         return HTMLResponse(_err("Enter a character, corporation, or alliance name."))
 
-    # Resolve name via ESI
     client = ESIClient("", db=db)
     try:
         result = await client.post_public("/universe/ids/", [name])
@@ -439,14 +556,17 @@ async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
         _zkb_get(f"/losses/{entity_type}/{entity_id}/pastSeconds/10800/"),
     )
 
-    all_kms = kills_data + losses_data
+    # Fetch full killmail details for all activity
+    all_zkb = kills_data + losses_data
+    full_kms = await _enrich_kills(all_zkb, max_per_call=30)
+
     by_sys: dict[int, list] = defaultdict(list)
-    for km in all_kms:
+    for km in full_kms:
         sid = km.get("solar_system_id")
         if sid:
             by_sys[sid].append(km)
 
-    type_names, group_ids = await _resolve_type_ids(db, by_sys)
+    type_names, group_ids = await _resolve_type_ids(db, dict(by_sys))
 
     systems = []
     for sid, kms in sorted(by_sys.items(), key=lambda x: -len(x[1])):
