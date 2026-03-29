@@ -29,7 +29,7 @@
 
     {% for s in systems %}
     <div style="border-bottom:1px solid var(--border);
-        {% if s.threat == 'smartbomb' %}background:rgba(255,68,68,0.08);
+        {% if s.threat == 'smartbomb' %}background:rgba(180,77,255,0.08);
         {% elif s.threat == 'dangerous' %}background:rgba(204,51,51,0.06);
         {% elif s.threat == 'caution' %}background:rgba(200,169,81,0.06);{% endif %}">
 
@@ -48,7 +48,7 @@
                 {# Threat badges #}
                 {% if s.has_dictors %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">DICTOR</span>{% endif %}
                 {% if s.has_hics %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">HIC</span>{% endif %}
-                {% if s.has_smartbombs %}<span style="color:#ff4444;font-size:8px;padding:1px 4px;border:1px solid #ff4444;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
+                {% if s.has_smartbombs %}<span style="color:#b44dff;font-size:8px;padding:1px 4px;border:1px solid #b44dff;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
 
                 <span style="{% if s.threat in ('dangerous','smartbomb') %}color:var(--danger);{% elif s.threat == 'caution' %}color:var(--accent);{% endif %}min-width:55px;text-align:right;font-size:10px;">
                     {{ s.pvp_kills }} kill{{ 's' if s.pvp_kills != 1 }}

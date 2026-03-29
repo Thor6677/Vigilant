@@ -60,13 +60,6 @@
     }
     .gc-route-btn:hover { color: var(--accent); border-color: var(--accent); }
 
-    .gc-loc-trigger {
-        display: flex; align-items: center; justify-content: center;
-        width: 34px; flex-shrink: 0; cursor: pointer;
-        background: var(--bg); border: 1px solid var(--border); border-right: none;
-        color: var(--muted); transition: color 0.15s, border-color 0.15s;
-    }
-    .gc-loc-trigger:hover { color: var(--accent); border-color: var(--accent); }
 </style>
 {% endblock %}
 
@@ -95,21 +88,15 @@
                     <label class="gc-lbl">From</label>
                     <div style="display:flex;gap:0;">
                         {% if char_locations %}
-                        <div class="gc-loc-trigger" onclick="gcToggleLocDD()" title="Use character location">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/>
-                            </svg>
-                        </div>
-                        <div id="gc-loc-dd" class="gc-dropdown" style="display:none;left:0;right:auto;min-width:220px;">
+                        <select id="gc-origin-chars" class="gc-select" onchange="gcCharLoc(this)"
+                                style="width:auto;min-width:0;max-width:42px;padding:0.4rem 0.4rem;border-right:none;flex-shrink:0;
+                                       background-image:none;text-overflow:ellipsis;cursor:pointer;"
+                                title="Use character location">
+                            <option value="">&#x2299;</option>
                             {% for cl in char_locations %}
-                            <div class="gc-dd-item" onmousedown="gcPickLoc('{{ cl.system_name }}')">
-                                <img src="https://images.evetech.net/characters/{{ cl.character_id }}/portrait?size=32"
-                                     style="width:16px;height:16px;border-radius:2px;">
-                                <span>{{ cl.character_name }}</span>
-                                <span style="color:var(--muted);margin-left:auto;font-size:10px;">{{ cl.system_name }}</span>
-                            </div>
+                            <option value="{{ cl.system_name }}">{{ cl.character_name }} — {{ cl.system_name }}</option>
                             {% endfor %}
-                        </div>
+                        </select>
                         {% endif %}
                         <input type="text" name="origin" id="gc-origin" class="gc-input"
                                placeholder="e.g. Jita" autocomplete="off"
@@ -178,7 +165,7 @@
         <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--success);"></div> 0 kills</div>
         <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--accent);"></div> 1–2 kills</div>
         <div class="gc-legend-item"><div class="gc-legend-dot" style="background:var(--danger);"></div> 3+ kills</div>
-        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:#ff4444;"></div> Smartbombs</div>
+        <div class="gc-legend-item"><div class="gc-legend-dot" style="background:#b44dff;"></div> Smartbombs</div>
         <span style="font-size:9px;color:var(--muted);margin-left:auto;">Kills in past hour · zKillboard</span>
     </div>
 
@@ -308,19 +295,16 @@ function gcCommonRoute(from, to) {
     htmx.trigger(document.getElementById('gc-form'), 'submit');
 }
 
-function gcToggleLocDD() {
-    var dd = document.getElementById('gc-loc-dd');
-    dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
-}
-
-function gcPickLoc(systemName) {
-    document.getElementById('gc-origin').value = systemName;
-    document.getElementById('gc-loc-dd').style.display = 'none';
+function gcCharLoc(sel) {
+    if (sel.value) {
+        document.getElementById('gc-origin').value = sel.value;
+    }
+    sel.selectedIndex = 0;
 }
 
 /* Close dropdowns on outside click */
 document.addEventListener('click', function(e) {
-    if (!e.target.closest('.gc-dropdown') && !e.target.closest('.gc-input') && !e.target.closest('.gc-loc-trigger')) {
+    if (!e.target.closest('.gc-dropdown') && !e.target.closest('.gc-input')) {
         document.querySelectorAll('.gc-dropdown').forEach(function(d) { d.style.display = 'none'; });
     }
 });
