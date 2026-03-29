@@ -108,7 +108,7 @@
     {% if not corps %}
     <div class="b-empty">No characters found.</div>
     {% else %}
-    <div style="display:flex;flex-direction:column;gap:1px;">
+    <div style="display:flex;flex-direction:column;gap:1px;padding-bottom:60px;">
         {% for corp in corps %}
         <div class="ml-corp-card" id="corp-card-{{ corp.corp_id }}">
             <div class="ml-corp-top"
