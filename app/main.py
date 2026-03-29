@@ -61,8 +61,8 @@ app.include_router(fittings_router)
 app.include_router(blueprints_router)
 app.include_router(mining_router)
 app.include_router(mining_ledger_router)
-app.include_router(dscan_router)
 app.include_router(gatecheck_router)
+app.include_router(dscan_router)
 
 
 @app.on_event("startup")
