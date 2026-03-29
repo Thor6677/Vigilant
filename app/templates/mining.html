@@ -44,7 +44,7 @@
 <div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>
 
 {% elif not data or data.total_quantity == 0 %}
-<div class="b-empty">No mining activity in the last 30 days.</div>
+<div class="b-empty">No mining activity recorded.</div>
 
 {% else %}
 
@@ -130,7 +130,7 @@
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">Daily Summary</span>
-            <span style="font-size:10px;color:var(--muted);">Last 30 days</span>
+            <span style="font-size:10px;color:var(--muted);">All time</span>
         </div>
 
         <div class="b-table-row" style="border-bottom:2px solid var(--border);">

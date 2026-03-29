@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character
+from app.db.models import get_db, Character, MiningLedgerEntry
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import market as esi_market
@@ -34,6 +34,75 @@ async def _fetch_all_mining(client: ESIClient, character_id: int) -> list:
         if len(data) < 1000:
             break
     return all_entries
+
+
+async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: AsyncSession) -> list:
+    """Fetch from ESI, store new entries, return ALL historical entries from DB."""
+    # 1. Fetch fresh data from ESI (last 30 days)
+    esi_entries = await _fetch_all_mining(client, character_id)
+
+    # 2. Upsert into DB — build lookup of existing entries to avoid duplicates
+    if esi_entries:
+        existing = await db.execute(
+            select(MiningLedgerEntry).where(MiningLedgerEntry.character_id == character_id)
+        )
+        existing_keys = {
+            (r.date, r.type_id, r.solar_system_id)
+            for r in existing.scalars().all()
+        }
+
+        new_entries = []
+        for e in esi_entries:
+            key = (e.get("date", ""), e.get("type_id", 0), e.get("solar_system_id", 0))
+            if key not in existing_keys:
+                new_entries.append(MiningLedgerEntry(
+                    character_id=character_id,
+                    date=e["date"],
+                    type_id=e["type_id"],
+                    solar_system_id=e["solar_system_id"],
+                    quantity=e["quantity"],
+                ))
+                existing_keys.add(key)
+            else:
+                # Update quantity if it changed (same day, still mining)
+                pass
+
+        if new_entries:
+            db.add_all(new_entries)
+            await db.commit()
+            logger.info("Stored %d new mining entries for char %s", len(new_entries), character_id)
+
+        # Update quantities for today's entries (they can change during the day)
+        from sqlalchemy import update, and_
+        for e in esi_entries:
+            await db.execute(
+                update(MiningLedgerEntry).where(
+                    and_(
+                        MiningLedgerEntry.character_id == character_id,
+                        MiningLedgerEntry.date == e["date"],
+                        MiningLedgerEntry.type_id == e["type_id"],
+                        MiningLedgerEntry.solar_system_id == e["solar_system_id"],
+                    )
+                ).values(quantity=e["quantity"])
+            )
+        await db.commit()
+
+    # 3. Return ALL historical entries from DB
+    result = await db.execute(
+        select(MiningLedgerEntry)
+        .where(MiningLedgerEntry.character_id == character_id)
+        .order_by(MiningLedgerEntry.date.desc())
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "date": r.date,
+            "type_id": r.type_id,
+            "solar_system_id": r.solar_system_id,
+            "quantity": r.quantity,
+        }
+        for r in rows
+    ]
 
 
 async def _get_price_map(db: AsyncSession, type_ids: set[int]) -> dict[int, float]:
@@ -154,7 +223,7 @@ async def character_mining(
     try:
         token = await refresh_token(char, db)
         client = ESIClient(token, db=db)
-        raw = await _fetch_all_mining(client, character_id)
+        raw = await _sync_and_fetch_mining(client, character_id, db)
 
         # Resolve names
         type_ids = list({e["type_id"] for e in raw})
@@ -224,7 +293,7 @@ async def corp_mining(
         async def _fetch_for_char(c):
             token = await refresh_token(c, db)
             client = ESIClient(token, db=db)
-            entries = await _fetch_all_mining(client, c.character_id)
+            entries = await _sync_and_fetch_mining(client, c.character_id, db)
             return c.character_name, entries
 
         results = await asyncio.gather(*[_fetch_for_char(c) for c in corp_chars], return_exceptions=True)

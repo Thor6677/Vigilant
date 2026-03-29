@@ -112,6 +112,18 @@ class CharacterAssetCache(Base):
     last_fetched = Column(DateTime, nullable=True)  # naive UTC
 
 
+class MiningLedgerEntry(Base):
+    """Persistent mining ledger — survives beyond ESI's 30-day window."""
+    __tablename__ = "mining_ledger_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
+    date = Column(String(10), nullable=False)          # "2026-03-15"
+    type_id = Column(Integer, nullable=False)
+    solar_system_id = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+
 class DScanResult(Base):
     """Stored d-scan parse result with shareable public URL."""
     __tablename__ = "dscan_results"
