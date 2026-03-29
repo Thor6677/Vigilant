@@ -101,8 +101,116 @@
             transition: color 0.1s;
         }
         .b-nav-link:hover { color: var(--text); }
+        .b-nav-link.is-active { color: var(--accent); font-weight: 500; }
         .b-nav-link.is-danger:hover { color: var(--danger); }
         .b-nav-link.is-add { color: var(--text); }
+
+        /* ── Nav dropdown ────────────────────────────────────────────────── */
+        .b-nav-dropdown {
+            position: relative;
+        }
+        .b-nav-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 0;
+            padding: 0.4rem 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            min-width: 160px;
+            z-index: 60;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .b-nav-dropdown:hover .b-nav-dropdown-menu { display: block; }
+        .b-nav-dropdown-item {
+            display: block;
+            padding: 0.4rem 0.75rem;
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+            white-space: nowrap;
+            transition: color 0.1s, background 0.1s;
+        }
+        .b-nav-dropdown-item:hover { color: var(--text); background: rgba(200,169,81,0.07); }
+        .b-nav-dropdown-item.is-active { color: var(--accent); font-weight: 500; }
+
+        /* ── Breadcrumbs ─────────────────────────────────────────────────── */
+        .b-breadcrumbs {
+            padding: 0.5rem 2rem;
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .b-breadcrumbs a {
+            color: var(--muted);
+            text-decoration: none;
+            transition: color 0.1s;
+        }
+        .b-breadcrumbs a:hover { color: var(--text); }
+        .b-breadcrumbs .b-crumb-sep { margin: 0 0.4rem; color: var(--border); }
+        .b-breadcrumbs .b-crumb-current { color: var(--text); }
+
+        /* ── Character tab strip ─────────────────────────────────────────── */
+        .b-tab-strip {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1.25rem;
+            overflow-x: auto;
+        }
+        .b-tab-strip a {
+            padding: 0.5rem 0.85rem;
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+            white-space: nowrap;
+            border-bottom: 2px solid transparent;
+            transition: color 0.1s, border-color 0.1s;
+        }
+        .b-tab-strip a:hover { color: var(--text); }
+        .b-tab-strip a.is-active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+            font-weight: 500;
+        }
+
+        /* ── Footer ──────────────────────────────────────────────────────── */
+        .b-footer {
+            border-top: 1px solid var(--border);
+            padding: 1.25rem 2rem;
+            margin-top: 3rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .b-footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        .b-footer-link {
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+            transition: color 0.1s;
+        }
+        .b-footer-link:hover { color: var(--text); }
+        .b-footer-brand {
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
 
         /* ── Main layout ─────────────────────────────────────────────────── */
         .b-main {
@@ -489,9 +597,58 @@
         .is-muted  { color: var(--muted)   !important; }
         .is-accent { color: var(--accent)  !important; }
 
+        /* ── Mobile hamburger ─────────────────────────────────────────── */
+        .b-hamburger {
+            display: none;
+            align-items: center;
+            gap: 0.35rem;
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            padding: 0.25rem 0;
+        }
+        .b-hamburger:hover { color: var(--text); }
+        .b-hamburger svg { flex-shrink: 0; }
+        .b-mobile-menu {
+            display: none;
+            flex-direction: column;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 0.5rem 0;
+        }
+        .b-mobile-menu.is-open { display: flex; }
+        .b-mobile-menu a {
+            display: block;
+            padding: 0.55rem 1.5rem;
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+        }
+        .b-mobile-menu a:hover { color: var(--text); background: rgba(200,169,81,0.05); }
+        .b-mobile-menu a.is-active { color: var(--accent); font-weight: 500; }
+        .b-mobile-menu .b-mobile-sep {
+            border-top: 1px solid var(--border);
+            margin: 0.25rem 1.5rem;
+        }
+
         /* ── Responsive ──────────────────────────────────────────────────── */
         @media (max-width: 1000px) {
             .b-grid-3 { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .b-nav-links { display: none; }
+            .b-hamburger { display: flex; }
+            .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }
+            .b-footer-links { flex-wrap: wrap; justify-content: center; }
+            .b-breadcrumbs { padding: 0.5rem 1rem; }
         }
         @media (max-width: 640px) {
             .b-grid-3 { grid-template-columns: 1fr; }
@@ -509,13 +666,23 @@
 {% if request.session.get('user_id') %}
 <nav class="b-nav">
     <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
+    {% set _path = request.url.path %}
     <div class="b-nav-links">
-        <a href="/dashboard" class="b-nav-link">Dashboard</a>
-        <a href="/assets" class="b-nav-link">Assets</a>
-        <a href="/corporations" class="b-nav-link">Corporations</a>
-        <a href="/industry" class="b-nav-link">Industry</a>
-        <a href="/intel" class="b-nav-link">Intel</a>
-        <a href="/status" class="b-nav-link">Status</a>
+        <a href="/dashboard" class="b-nav-link {{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
+        <a href="/assets" class="b-nav-link {{ 'is-active' if _path.startswith('/assets') }}">Assets</a>
+        <a href="/corporations" class="b-nav-link {{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
+        <span class="b-nav-dropdown">
+            <a href="/industry" class="b-nav-link {{ 'is-active' if _path.startswith('/industry') }}">Industry ▾</a>
+            <div class="b-nav-dropdown-menu">
+                <a href="/industry" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry' }}">Manufacturing</a>
+                <a href="/industry/compression" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/compression' }}">Compression</a>
+                <a href="/industry/hauling" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/hauling' }}">Hauling</a>
+                <a href="/industry/appraisal" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/appraisal' }}">Appraisal</a>
+                <a href="/industry/mining-ledger" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/industry/mining-ledger') }}">Mining Ledger</a>
+            </div>
+        </span>
+        <a href="/intel" class="b-nav-link {{ 'is-active' if _path.startswith('/intel') or _path.startswith('/dscan') }}">Intel</a>
+        <a href="/status" class="b-nav-link {{ 'is-active' if _path.startswith('/status') }}">Status</a>
         <span id="notif-btn" onclick="onBellClick()" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -536,16 +703,54 @@
         <a href="/auth/add-character" class="b-nav-link is-add">+ Add Character</a>
         <a href="/auth/logout" class="b-nav-link is-danger">Logout</a>
     </div>
+    <button class="b-hamburger" onclick="document.getElementById('mobile-menu').classList.toggle('is-open')" aria-label="Toggle menu">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        Menu
+    </button>
 </nav>
+<div id="mobile-menu" class="b-mobile-menu">
+    <a href="/dashboard" class="{{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
+    <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Assets</a>
+    <a href="/corporations" class="{{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
+    <div class="b-mobile-sep"></div>
+    <a href="/industry" class="{{ 'is-active' if _path == '/industry' }}">Manufacturing</a>
+    <a href="/industry/compression" class="{{ 'is-active' if _path == '/industry/compression' }}">Compression</a>
+    <a href="/industry/hauling" class="{{ 'is-active' if _path == '/industry/hauling' }}">Hauling</a>
+    <a href="/industry/appraisal" class="{{ 'is-active' if _path == '/industry/appraisal' }}">Appraisal</a>
+    <a href="/industry/mining-ledger" class="{{ 'is-active' if _path.startswith('/industry/mining-ledger') }}">Mining Ledger</a>
+    <div class="b-mobile-sep"></div>
+    <a href="/intel" class="{{ 'is-active' if _path.startswith('/intel') or _path.startswith('/dscan') }}">Intel</a>
+    <a href="/status" class="{{ 'is-active' if _path.startswith('/status') }}">Status</a>
+    <div class="b-mobile-sep"></div>
+    <a href="/auth/add-character" style="color:var(--accent);">+ Add Character</a>
+    <a href="/auth/logout" style="color:var(--danger);">Logout</a>
+</div>
 <div id="esi-banner"
      hx-get="/status/banner"
      hx-trigger="load, every 30s"
      hx-swap="outerHTML"></div>
 {% endif %}
 
+{% block breadcrumbs %}{% endblock %}
+
 <main class="b-main">
     {% block content %}{% endblock %}
 </main>
+
+{% if request.session.get('user_id') %}
+<footer class="b-footer">
+    <span class="b-footer-brand"><img src="/static/logo.png" alt="" style="height:16px;width:auto;opacity:0.5;">Vigilant</span>
+    <div class="b-footer-links">
+        <a href="/dashboard" class="b-footer-link">Dashboard</a>
+        <a href="/assets" class="b-footer-link">Assets</a>
+        <a href="/corporations" class="b-footer-link">Corporations</a>
+        <a href="/industry" class="b-footer-link">Industry</a>
+        <a href="/intel" class="b-footer-link">Intel</a>
+        <a href="/status" class="b-footer-link">Status</a>
+    </div>
+    <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
+</footer>
+{% endif %}
 
 <script src="/static/js/notifications.js"></script>
 </body>

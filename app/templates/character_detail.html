@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ char.character_name }} — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">{{ char.character_name }}</span></div>
+{% endblock %}
 
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -206,14 +209,7 @@
 
 {% block content %}
 
-{# ── Back + Header ──────────────────────────────────────────────────────────── #}
-<div class="b-server-bar">
-    <a href="/dashboard" class="b-link">← Dashboard</a>
-    <span style="color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
-        Character Detail
-    </span>
-</div>
-
+{# ── Header ──────────────────────────────────────────────────────────── #}
 <div class="b-page-header">
     <div style="display:flex;align-items:center;gap:1rem;">
         <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
@@ -231,6 +227,17 @@
         <div style="font-size:20px;font-weight:300;color:var(--accent);">{{ format_isk(current_wallet) }}</div>
         <div class="b-label" style="margin-top:2px;">Current Balance</div>
     </div>
+</div>
+
+{# ── Tab Strip ───────────────────────────────────────────────────────────── #}
+{% set _cid = char.character_id %}
+<div class="b-tab-strip">
+    <a href="/character/{{ _cid }}" class="is-active">Overview</a>
+    <a href="/character/{{ _cid }}/skills">Skills</a>
+    <a href="/character/{{ _cid }}/fittings">Fittings</a>
+    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
+    <a href="/character/{{ _cid }}/journal">Journal</a>
+    <a href="/character/{{ _cid }}/mining">Mining</a>
 </div>
 
 {# ── Character Overview ───────────────────────────────────────────────────────── #}
@@ -282,10 +289,7 @@
         {% if active_skill %}
         {% set roman = ["I", "II", "III", "IV", "V"] %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">Skill Training <a href="/character/{{ char.character_id }}/skills" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Skill Planner →</a></div>
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Ship Fittings <a href="/character/{{ char.character_id }}/fittings" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">View Fittings →</a></div>
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Blueprints <a href="/character/{{ char.character_id }}/blueprints" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Blueprint Library →</a></div>
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">Mining <a href="/character/{{ char.character_id }}/mining" style="font-size:10px;color:var(--accent);text-decoration:none;font-weight:400;">Mining Ledger →</a></div>
+            <div class="card-title">Skill Training</div>
             <div class="skill-progress">
                 <div class="skill-name">{{ active_skill['skill_name'] }}</div>
                 <div class="skill-time">

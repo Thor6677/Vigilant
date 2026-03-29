@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{% if is_corp %}CORP {% endif %}JOURNAL — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+{% if is_corp and corp_id %}
+<div class="b-breadcrumbs"><a href="/corporations">Corporations</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Journal</span></div>
+{% elif char %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><a href="/character/{{ char.character_id }}">{{ char.character_name }}</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Journal</span></div>
+{% endif %}
+{% endblock %}
 {% block content %}
 
 {% macro format_isk(amount) %}
@@ -30,15 +37,19 @@
         </div>
         {% endif %}
     </div>
-    <div style="display:flex;gap:0.5rem;">
-        {% if char %}
-        <a href="/character/{{ char.character_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Character</a>
-        {% endif %}
-        {% if is_corp and corp_id %}
-        <a href="/corporations/{{ corp_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Corporation</a>
-        {% endif %}
-    </div>
 </div>
+
+{% if char and not is_corp %}
+{% set _cid = char.character_id %}
+<div class="b-tab-strip">
+    <a href="/character/{{ _cid }}">Overview</a>
+    <a href="/character/{{ _cid }}/skills">Skills</a>
+    <a href="/character/{{ _cid }}/fittings">Fittings</a>
+    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
+    <a href="/character/{{ _cid }}/journal" class="is-active">Journal</a>
+    <a href="/character/{{ _cid }}/mining">Mining</a>
+</div>
+{% endif %}
 
 {# ── Corp division selector ───────────────────────────────────────────────── #}
 {% if is_corp and corp_id %}

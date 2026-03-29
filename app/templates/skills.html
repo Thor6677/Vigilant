@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block title %}SKILL PLANNER — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+{% if char %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><a href="/character/{{ char.character_id }}">{{ char.character_name }}</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Skills</span></div>
+{% endif %}
+{% endblock %}
 {% block content %}
 
 <div class="b-page-header">
@@ -16,10 +21,19 @@
         </div>
         {% endif %}
     </div>
-    {% if char %}
-    <a href="/character/{{ char.character_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Character</a>
-    {% endif %}
 </div>
+
+{% if char %}
+{% set _cid = char.character_id %}
+<div class="b-tab-strip">
+    <a href="/character/{{ _cid }}">Overview</a>
+    <a href="/character/{{ _cid }}/skills" class="is-active">Skills</a>
+    <a href="/character/{{ _cid }}/fittings">Fittings</a>
+    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
+    <a href="/character/{{ _cid }}/journal">Journal</a>
+    <a href="/character/{{ _cid }}/mining">Mining</a>
+</div>
+{% endif %}
 
 {% if error %}
 <div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>

@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{% if is_corp %}CORP {% endif %}MINING — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+{% if is_corp and corp_id %}
+<div class="b-breadcrumbs"><a href="/corporations">Corporations</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Mining</span></div>
+{% elif char %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><a href="/character/{{ char.character_id }}">{{ char.character_name }}</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Mining</span></div>
+{% endif %}
+{% endblock %}
 {% block content %}
 
 {% macro format_isk(amount) %}
@@ -25,12 +32,6 @@
         {% endif %}
     </div>
     <div style="display:flex;gap:0.5rem;">
-        {% if char and char.character_id and not is_corp %}
-        <a href="/character/{{ char.character_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Character</a>
-        {% endif %}
-        {% if is_corp and corp_id %}
-        <a href="/corporations/{{ corp_id }}" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Corporation</a>
-        {% endif %}
         {# Toggle between character and corp view #}
         {% if not is_corp and char and char.corporation_id %}
         <a href="/corporations/{{ char.corporation_id }}/mining" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Corp View →</a>
@@ -39,6 +40,18 @@
         {% endif %}
     </div>
 </div>
+
+{% if char and char.character_id and not is_corp %}
+{% set _cid = char.character_id %}
+<div class="b-tab-strip">
+    <a href="/character/{{ _cid }}">Overview</a>
+    <a href="/character/{{ _cid }}/skills">Skills</a>
+    <a href="/character/{{ _cid }}/fittings">Fittings</a>
+    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
+    <a href="/character/{{ _cid }}/journal">Journal</a>
+    <a href="/character/{{ _cid }}/mining" class="is-active">Mining</a>
+</div>
+{% endif %}
 
 {% if error %}
 <div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>
