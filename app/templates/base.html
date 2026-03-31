@@ -733,7 +733,7 @@
                 <a href="https://mapper.thunderborn.dev" class="b-nav-dropdown-item" target="_blank">Wormhole Mapper</a>
             </div>
         </span>
-        <a href="/status" class="b-nav-link {{ 'is-active' if _path.startswith('/status') }}">Status</a>
+        {% if request.session.get('is_admin') %}<a href="/admin" class="b-nav-link {{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
         <span id="notif-btn" onclick="onBellClick()" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -774,7 +774,7 @@
     <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
     <div class="b-mobile-sep"></div>
     <a href="https://mapper.thunderborn.dev" target="_blank">Wormhole Mapper</a>
-    <a href="/status" class="{{ 'is-active' if _path.startswith('/status') }}">Status</a>
+    {% if request.session.get('is_admin') %}<a href="/admin" class="{{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
     <div class="b-mobile-sep"></div>
     <a href="/auth/add-character" style="color:var(--accent);">+ Add Character</a>
     <a href="/auth/logout" style="color:var(--danger);">Logout</a>
@@ -808,7 +808,7 @@
         <a href="/corporations" class="b-footer-link">Corporations</a>
         <a href="/industry" class="b-footer-link">Industry</a>
         <a href="/intel" class="b-footer-link">Intel</a>
-        <a href="/status" class="b-footer-link">Status</a>
+        {% if request.session.get('is_admin') %}<a href="/admin" class="b-footer-link">Admin</a>{% endif %}
     </div>
     <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
 </footer>

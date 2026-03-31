@@ -1,0 +1,140 @@
+{# ── Users & Characters ─────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-bottom:1.5rem;">
+    <div class="b-section-head">
+        <span class="b-label">Users & Characters</span>
+        <span class="b-label" style="color:var(--muted);">{{ users|length }} user{{ 's' if users|length != 1 else '' }}</span>
+    </div>
+
+    {% for u in users %}
+    <div style="border-bottom:1px solid var(--border);">
+        {# User header row — click to expand #}
+        <div class="b-row" style="cursor:pointer;gap:0.5rem;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? '' : 'none'; this.querySelector('.expand-arrow').textContent = this.nextElementSibling.style.display === 'none' ? '▸' : '▾';">
+            <span style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+                {% if u.main_character_id %}
+                <img src="https://images.evetech.net/characters/{{ u.main_character_id }}/portrait?size=32"
+                     style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'">
+                {% endif %}
+                <span style="font-weight:500;font-size:12px;color:var(--text);">{{ u.display_name }}</span>
+                {% if u.user.role == 'admin' %}<span class="b-badge is-danger" style="font-size:7px;">Admin</span>
+                {% elif u.user.role == 'manager' %}<span class="b-badge is-warn" style="font-size:7px;">Manager</span>{% endif %}
+                <span style="color:var(--muted);font-size:10px;">{{ u.char_count }} char{{ 's' if u.char_count != 1 else '' }}</span>
+            </span>
+            <span style="font-size:10px;color:var(--muted);min-width:70px;">{{ format_age(u.user.last_login) }}</span>
+            <div style="display:flex;gap:4px;align-items:center;" onclick="event.stopPropagation();">
+                {% if u.user.id != admin_id %}
+                    {% set can_modify = (admin_role == 'admin') or (admin_role == 'manager' and u.user.role != 'admin') %}
+                    {% if can_modify %}
+                    <select onchange="htmx.ajax('POST', '/admin/action/set-role/{{ u.user.id }}/' + this.value, {target:'#admin-content', swap:'innerHTML'})"
+                            style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                        <option value="user" {% if u.user.role == 'user' %}selected{% endif %}>User</option>
+                        <option value="manager" {% if u.user.role == 'manager' %}selected{% endif %}>Manager</option>
+                        {% if admin_role == 'admin' %}
+                        <option value="admin" {% if u.user.role == 'admin' %}selected{% endif %}>Admin</option>
+                        {% endif %}
+                    </select>
+                    <button class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);"
+                            hx-post="/admin/action/remove-user/{{ u.user.id }}"
+                            hx-target="#admin-content" hx-swap="innerHTML"
+                            hx-confirm="Delete {{ u.display_name }} and all their characters? This cannot be undone.">Delete</button>
+                    {% endif %}
+                {% else %}
+                <span style="font-size:9px;color:var(--muted);">You</span>
+                {% endif %}
+            </div>
+            <span class="expand-arrow" style="color:var(--muted);font-size:10px;flex-shrink:0;width:12px;text-align:center;">▸</span>
+        </div>
+
+        {# Character list — collapsed by default #}
+        <div style="display:none;background:var(--bg);border-top:1px solid var(--border);">
+            {% for c in u.characters %}
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0.75rem 0.3rem 2.5rem;border-bottom:1px solid var(--border);">
+                <img src="https://images.evetech.net/characters/{{ c.character_id }}/portrait?size=32"
+                     style="width:18px;height:18px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'">
+                <span style="flex:1;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.character_name }}</span>
+                <span style="font-size:10px;color:var(--muted);min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.corporation_name }}</span>
+                <span style="flex:0 0 40px;text-align:center;">
+                    <span class="b-dot {% if c.token_status == 'ok' %}is-ok{% elif c.token_status == 'expiring' %}is-warn{% else %}is-error{% endif %}"></span>
+                </span>
+                <span style="flex:0 0 40px;text-align:center;">
+                    {% if c.sync_status == 'error' %}<span class="b-badge is-danger" style="font-size:7px;">ERR</span>
+                    {% elif c.sync_status == 'syncing' %}<span class="b-badge" style="font-size:7px;color:var(--accent);">SYNC</span>
+                    {% else %}<span class="b-dot is-ok"></span>{% endif %}
+                </span>
+                <span style="flex:0 0 60px;font-size:10px;color:var(--muted);text-align:center;">{{ format_age(c.last_synced) }}</span>
+                <span style="display:flex;gap:3px;">
+                    <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--border);font-size:8px;"
+                            hx-post="/admin/action/force-sync/{{ c.character_id }}"
+                            hx-target="#admin-content" hx-swap="innerHTML">Sync</button>
+                    <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);"
+                            hx-post="/admin/action/remove-character/{{ c.character_id }}"
+                            hx-target="#admin-content" hx-swap="innerHTML"
+                            hx-confirm="Remove {{ c.character_name }}?">&times;</button>
+                </span>
+            </div>
+            {% endfor %}
+            {% if not u.characters %}
+            <div style="padding:0.5rem 2.5rem;font-size:10px;color:var(--muted);">No characters.</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ── Registration Allowlist ────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Registration Allowlist</span>
+        <span style="font-size:10px;color:var(--muted);">
+            {% if allowlist_enabled %}Active — only listed entries can register{% else %}Inactive — anyone can register{% endif %}
+        </span>
+    </div>
+
+    {% if allowlist %}
+    {% for entry in allowlist %}
+    <div class="b-row">
+        <span style="min-width:80px;">
+            {% if entry.entry_type == 'character' %}
+            <span class="b-badge" style="font-size:7px;color:var(--text);">Character</span>
+            {% elif entry.entry_type == 'corporation' %}
+            <span class="b-badge" style="font-size:7px;color:var(--accent);">Corporation</span>
+            {% else %}
+            <span class="b-badge" style="font-size:7px;color:var(--success);">Alliance</span>
+            {% endif %}
+        </span>
+        <span style="flex:1;font-size:11px;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
+        <span style="font-size:10px;color:var(--muted);min-width:80px;">{{ entry.eve_id }}</span>
+        <button class="b-btn" style="padding:0.15rem 0.35rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);flex:none;"
+                hx-post="/admin/action/allowlist-remove/{{ entry.id }}"
+                hx-target="#admin-content" hx-swap="innerHTML">&times;</button>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="b-empty" style="font-size:10px;">No entries — all EVE characters can register. Add entries below to restrict access.</div>
+    {% endif %}
+
+    {# Add new allowlist entry #}
+    <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <select id="allow-type" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <option value="character">Character</option>
+            <option value="corporation">Corporation</option>
+            <option value="alliance">Alliance</option>
+        </select>
+        <input type="text" id="allow-id" placeholder="EVE ID" style="width:100px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+        <input type="text" id="allow-name" placeholder="Name (optional, auto-resolved)" style="flex:1;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+        <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
+                onclick="addAllowlistEntry()">Add</button>
+    </div>
+</div>
+
+<script>
+function addAllowlistEntry() {
+    var entryType = document.getElementById('allow-type').value;
+    var eveId = document.getElementById('allow-id').value.trim();
+    var name = document.getElementById('allow-name').value.trim();
+    if (!eveId) { alert('Enter an EVE ID.'); return; }
+    htmx.ajax('POST', '/admin/action/allowlist-add', {
+        target: '#admin-content', swap: 'innerHTML',
+        values: { entry_type: entryType, eve_id: eveId, name: name },
+    });
+}
+</script>

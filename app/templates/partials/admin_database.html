@@ -1,0 +1,53 @@
+<div class="b-stats" style="margin-bottom:1.5rem;">
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_size }}</div>
+        <div class="b-stat-label">DB File Size</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_cache.total_entries }}</div>
+        <div class="b-stat-label">ESI Cache Total</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_cache.active_entries }}</div>
+        <div class="b-stat-label">Cache Active</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_cache.expired_entries }}</div>
+        <div class="b-stat-label">Cache Expired</div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Application Tables</span>
+        </div>
+        {% for t in app_tables %}
+        <div class="b-row">
+            <span class="b-row-label">{{ t.name }}</span>
+            <span class="b-row-val">{{ "{:,}".format(t.count) if t.count is number else t.count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">SDE Tables</span>
+        </div>
+        {% for t in sde_tables %}
+        <div class="b-row">
+            <span class="b-row-label">{{ t.name }}</span>
+            <span class="b-row-val">{{ "{:,}".format(t.count) if t.count is number else t.count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% if db_cache.expired_entries > 0 %}
+<div style="margin-top:1rem;text-align:right;">
+    <button class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;"
+            hx-post="/admin/action/cache-purge"
+            hx-target="#admin-content"
+            hx-swap="innerHTML">Purge {{ db_cache.expired_entries }} Expired Cache Entries</button>
+</div>
+{% endif %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Admin — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Admin</span></div>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Admin</h1>
+</div>
+
+<div class="b-tab-strip" id="admin-tabs">
+    <a href="javascript:void(0)" class="is-active" onclick="switchTab('overview', this)">Overview</a>
+    <a href="javascript:void(0)" onclick="switchTab('users', this)">Users</a>
+    <a href="javascript:void(0)" onclick="switchTab('esi', this)">ESI Health</a>
+    <a href="javascript:void(0)" onclick="switchTab('scheduler', this)">Scheduler</a>
+    <a href="javascript:void(0)" onclick="switchTab('database', this)">Database</a>
+    <a href="javascript:void(0)" onclick="switchTab('sde', this)">SDE</a>
+    <a href="javascript:void(0)" onclick="switchTab('audit', this)">Audit Log</a>
+</div>
+
+<div id="admin-content"
+     hx-get="/admin/section/overview"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+    <div class="b-empty">Loading...</div>
+</div>
+
+<script>
+var currentSection = 'overview';
+var refreshTimer = null;
+
+function switchTab(section, el) {
+    currentSection = section;
+    document.querySelectorAll('#admin-tabs a').forEach(function(a) { a.classList.remove('is-active'); });
+    el.classList.add('is-active');
+    htmx.ajax('GET', '/admin/section/' + section, '#admin-content');
+
+    /* Auto-refresh active section */
+    if (refreshTimer) clearInterval(refreshTimer);
+    var refreshSections = {'overview': 10000, 'scheduler': 5000, 'esi': 5000};
+    var interval = refreshSections[section];
+    if (interval) {
+        refreshTimer = setInterval(function() {
+            htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
+        }, interval);
+    }
+}
+
+/* Start auto-refresh for overview */
+refreshTimer = setInterval(function() {
+    htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
+}, 10000);
+</script>
+{% endblock %}

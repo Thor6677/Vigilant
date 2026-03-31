@@ -40,6 +40,9 @@ def _sec_color_val(sec: float | None) -> str:
 
 templates.env.globals["sec_color_val"] = _sec_color_val
 
+# App start time for uptime calculation
+_app_start_time: datetime = datetime.now(timezone.utc)
+
 # Character IDs that are either actively syncing or queued to sync.
 # Maps character_id -> timestamp when added to queue.
 # Prevents duplicate _sync_all_task spawns across rapid page loads.
@@ -288,6 +291,20 @@ async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: d
 # to sync in parallel instead of strict serialisation.
 _sync_semaphore: asyncio.Semaphore | None = None
 _SYNC_CONCURRENCY = 5
+
+
+def get_scheduler_state() -> dict:
+    """Return scheduler state for admin dashboard."""
+    sem = _sync_semaphore
+    return {
+        "queue_depth": len(_queued_sync),
+        "queued_characters": dict(_queued_sync),
+        "sync_concurrency": _SYNC_CONCURRENCY,
+        "semaphore_available": sem._value if sem else _SYNC_CONCURRENCY,
+        "last_inv_check": getattr(_background_scheduler, '_last_inv_check', None),
+        "app_start_time": _app_start_time,
+        "notification_queues": sum(len(v) for v in _notification_events.values()),
+    }
 
 
 def _get_sync_semaphore() -> asyncio.Semaphore:

@@ -15,3 +15,8 @@ nginx/ssl/
 vigilant.pid
 vigilant.log
 CLAUDE.md
+.DS_Store
+.claude/
+repo/
+wanderer-compose.yml
+wanderer-conf.env

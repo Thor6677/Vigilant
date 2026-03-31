@@ -1,0 +1,44 @@
+<div class="b-stats" style="margin-bottom:1.5rem;">
+    <div class="b-stat">
+        <div class="b-stat-val">{{ uptime }}</div>
+        <div class="b-stat-label">Uptime</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ user_count }}</div>
+        <div class="b-stat-label">Users</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ char_count }}</div>
+        <div class="b-stat-label">Characters</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_size }}</div>
+        <div class="b-stat-label">DB Size</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val {% if esi_status == 'critical' %}is-danger{% elif esi_status == 'warning' %}is-warn{% else %}is-ok{% endif %}">
+            {{ esi_status | upper }}
+        </div>
+        <div class="b-stat-label">ESI Status</div>
+    </div>
+</div>
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">System Info</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Python</span>
+        <span class="b-row-val">{{ python_version }}</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">SDE Age</span>
+        <span class="b-row-val {% if sde_age_days is not none and sde_age_days >= 30 %}is-warn{% endif %}">
+            {% if sde_age_days is not none %}{{ sde_age_days }}d{% else %}Unknown{% endif %}
+        </span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Sync Queue</span>
+        <span class="b-row-val">{{ queue_depth }} queued · {{ active_syncs }}/{{ sync_concurrency }} active</span>
+    </div>
+</div>

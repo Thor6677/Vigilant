@@ -1,0 +1,30 @@
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Static Data Export</span>
+        {% if needs_update %}<span class="b-badge is-warn" style="font-size:8px;">Update Recommended</span>{% endif %}
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Last Updated</span>
+        <span class="b-row-val">{{ sde_last_updated or 'Never' }}</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Age</span>
+        <span class="b-row-val {% if sde_age_days is not none and sde_age_days >= 30 %}is-warn{% endif %}">
+            {% if sde_age_days is not none %}{{ sde_age_days }} days{% else %}Unknown{% endif %}
+        </span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Status</span>
+        <span class="b-row-val {% if needs_update %}is-warn{% else %}is-ok{% endif %}">
+            {% if needs_update %}Overdue{% else %}Current{% endif %}
+        </span>
+    </div>
+</div>
+
+<div style="text-align:right;">
+    <button class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;"
+            hx-post="/admin/action/sde-update"
+            hx-target="#admin-content"
+            hx-swap="innerHTML"
+            hx-confirm="Force SDE re-download? This takes 2-5 minutes.">Force Update SDE</button>
+</div>

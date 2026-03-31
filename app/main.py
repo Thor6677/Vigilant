@@ -23,6 +23,7 @@ from app.routes.mining import router as mining_router
 from app.routes.mining_ledger import router as mining_ledger_router
 from app.routes.dscan import router as dscan_router
 from app.routes.gatecheck import router as gatecheck_router
+from app.routes.admin import router as admin_router
 
 settings = get_settings()
 
@@ -63,6 +64,7 @@ app.include_router(mining_router)
 app.include_router(mining_ledger_router)
 app.include_router(gatecheck_router)
 app.include_router(dscan_router)
+app.include_router(admin_router)
 
 
 @app.on_event("startup")
@@ -85,6 +87,8 @@ async def startup():
             "ALTER TABLE characters ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sde_types ADD COLUMN volume REAL",
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
+            "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
         ]:
             try:
                 await db.execute(text(stmt))
@@ -94,6 +98,16 @@ async def startup():
                 exc_str = str(migration_exc).lower()
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
+    # ── Auto-promote first user to admin if no admin exists ────────────
+    async with AsyncSessionLocal() as db:
+        admin_check = await db.execute(text("SELECT id FROM users WHERE is_admin = 1 LIMIT 1"))
+        if not admin_check.fetchone():
+            await db.execute(text("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = (SELECT MIN(id) FROM users)"))
+            await db.commit()
+        # Sync role column for existing admins
+        await db.execute(text("UPDATE users SET role = 'admin' WHERE is_admin = 1 AND role = 'user'"))
+        await db.commit()
+
     # ── Encrypt plaintext ESI tokens in-place ──────────────────────────
     from app.db.encryption import get_fernet
 

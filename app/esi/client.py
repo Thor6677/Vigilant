@@ -46,6 +46,15 @@ def _etag_key(path: str, token: str) -> str:
     return f"{path}:{token[:16]}"
 
 
+def get_etag_cache_stats() -> dict:
+    """Return ETag cache statistics for admin dashboard."""
+    return {
+        "entries": len(_etag_cache),
+        "max_entries": _ETAG_CACHE_MAX,
+        "utilization_pct": round(len(_etag_cache) / _ETAG_CACHE_MAX * 100, 1) if _ETAG_CACHE_MAX else 0,
+    }
+
+
 async def refresh_token(character: Character, db: AsyncSession) -> str:
     """Refresh access token if expired, return valid access token."""
     now = datetime.now(timezone.utc)

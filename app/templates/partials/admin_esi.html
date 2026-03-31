@@ -1,0 +1,180 @@
+{# ── Summary stats ──────────────────────────────────────────────────────────── #}
+<div class="b-stats" style="margin-bottom:1.5rem;">
+    <div class="b-stat">
+        <div class="b-stat-val {% if esi_status == 'critical' %}is-danger{% elif esi_status == 'warning' %}is-warn{% else %}is-ok{% endif %}">{{ esi_status | upper }}</div>
+        <div class="b-stat-label">ESI Status</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ total_requests }}</div>
+        <div class="b-stat-label">Requests</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val" style="color:var(--success);">{{ ok_count }}</div>
+        <div class="b-stat-label">Fetched{% if cached_count %} <span style="font-size:9px;color:var(--muted);">({{ cached_count }} cached)</span>{% endif %}</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val {% if rejected_count %}is-danger{% endif %}">{{ rejected_count }}</div>
+        <div class="b-stat-label">Rejected</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ etag_cache.entries }}/{{ etag_cache.max_entries }}</div>
+        <div class="b-stat-label">ETag Cache</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ db_cache.active_entries }}</div>
+        <div class="b-stat-label">DB Cache</div>
+    </div>
+</div>
+
+{# ── Request activity chart ────────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Request Activity</span>
+        <span style="font-size:9px;color:var(--muted);">last 30 min</span>
+    </div>
+    <div style="padding:0.5rem;height:160px;">
+        <canvas id="admin-request-chart"></canvas>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    var data = {{ chart_data_json | safe }};
+    var canvas = document.getElementById('admin-request-chart');
+    if (!canvas) return;
+    if (window._adminChart) { window._adminChart.destroy(); }
+    window._adminChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                { label: 'Fetched', data: data.fetched, backgroundColor: 'rgba(51,170,85,0.7)', stack: 'r' },
+                { label: 'Cached', data: data.cached, backgroundColor: 'rgba(100,160,220,0.7)', stack: 'r' },
+                { label: 'Rejected', data: data.rejected, backgroundColor: 'rgba(204,51,51,0.7)', stack: 'r' },
+            ],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: true, position: 'top', labels: { color: '#474747', font: { family: "'JetBrains Mono',monospace", size: 9 }, boxWidth: 10, padding: 8, usePointStyle: true } } },
+            scales: {
+                x: { stacked: true, grid: { color: '#191919' }, ticks: { color: '#474747', font: { family: 'monospace', size: 9 }, maxTicksLimit: 10 } },
+                y: { stacked: true, beginAtZero: true, grid: { color: '#191919' }, ticks: { color: '#474747', font: { family: 'monospace', size: 9 }, precision: 0 } }
+            }
+        }
+    });
+})();
+</script>
+
+{# ── Rate limit groups ─────────────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Rate Limit Groups</span>
+    </div>
+    {% for g in groups %}
+    {% if g.limit_total > 0 %}
+    {% set pct_used = ((g.limit_total - g.remaining) / g.limit_total * 100) %}
+    <div class="b-row" style="flex-wrap:wrap;gap:0.25rem;">
+        <span class="b-row-label" style="min-width:140px;">{{ g.group }}</span>
+        <div style="flex:1;min-width:100px;">
+            <div class="b-progress" style="height:4px;">
+                <div class="b-progress-fill {% if pct_used > 95 %}is-crit{% elif pct_used > 80 %}is-warn{% else %}is-active{% endif %}"
+                     style="width:{{ pct_used | round(1) }}%;"></div>
+            </div>
+        </div>
+        <span class="b-row-val" style="min-width:100px;font-size:10px;">{{ g.remaining }}/{{ g.limit_total }} · {{ g.limit_window }}</span>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="b-empty">No rate limit data yet.</div>
+    {% endfor %}
+</div>
+
+{# ── Legacy error limit ───────────────────────────────────────────────────── #}
+{% if legacy %}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Legacy Error Limit</span>
+        <span style="font-size:10px;color:var(--muted);">resets in {{ legacy.reset_in_seconds }}s</span>
+    </div>
+    <div style="padding:0.5rem 0.75rem;">
+        <div class="b-progress" style="height:6px;">
+            <div class="b-progress-fill {% if legacy.remaining < 10 %}is-crit{% elif legacy.remaining < 20 %}is-warn{% else %}is-active{% endif %}"
+                 style="width:{{ legacy.remaining }}%;"></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">{{ legacy.remaining }}/100 budget remaining</div>
+    </div>
+</div>
+{% endif %}
+
+{# ── ETag + DB cache ───────────────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Cache Utilization</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">ETag (in-memory)</span>
+        <div style="flex:1;min-width:80px;">
+            <div class="b-progress" style="height:4px;">
+                <div class="b-progress-fill {% if etag_cache.utilization_pct > 90 %}is-warn{% else %}is-active{% endif %}"
+                     style="width:{{ etag_cache.utilization_pct }}%;"></div>
+            </div>
+        </div>
+        <span class="b-row-val" style="min-width:80px;font-size:10px;">{{ etag_cache.entries }}/{{ etag_cache.max_entries }} ({{ etag_cache.utilization_pct }}%)</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">DB Cache</span>
+        <span class="b-row-val">{{ db_cache.active_entries }} active · {{ db_cache.expired_entries }} expired · {{ db_cache.total_entries }} total</span>
+    </div>
+</div>
+
+{# ── Recent request log ────────────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Recent Requests</span>
+        <span style="font-size:10px;color:var(--muted);">{{ request_log | length }}</span>
+    </div>
+    {% if request_log %}
+    <div style="max-height:250px;overflow-y:auto;">
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
+            <span style="flex:0 0 65px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Time</span>
+            <span style="flex:0 0 40px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Code</span>
+            <span style="flex:0 0 80px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Group</span>
+            <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Path</span>
+        </div>
+        {% for e in request_log %}
+        <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;">
+            <span style="flex:0 0 65px;font-size:10px;color:var(--muted);">{{ e.timestamp.strftime('%H:%M:%S') }}</span>
+            <span style="flex:0 0 40px;font-size:10px;{% if e.status_code < 300 %}color:var(--success);{% elif e.status_code < 400 %}color:var(--accent);{% elif e.status_code in (429, 420) %}color:var(--danger);font-weight:600;{% else %}color:var(--warn);{% endif %}">{{ e.status_code }}</span>
+            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.group or '—' }}</span>
+            <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.path }}">{{ e.path }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="b-empty">No requests logged yet.</div>
+    {% endif %}
+</div>
+
+{# ── Significant events (from DB) ─────────────────────────────────────────── #}
+{% if recent_events %}
+<div class="b-panel">
+    <div class="b-panel-head">
+        <span class="b-label">Rate Limit Events</span>
+        <span style="font-size:10px;color:var(--muted);">{{ recent_events | length }}</span>
+    </div>
+    <div style="max-height:200px;overflow-y:auto;">
+        {% for ev in recent_events[:20] %}
+        <div class="b-row">
+            <span class="b-row-label" style="min-width:60px;">
+                {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;">429</span>
+                {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;">420</span>
+                {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);">warn</span>{% endif %}
+            </span>
+            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);">{{ ev.group_name or '—' }}</span>
+            <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
+            <span style="flex:0 0 50px;font-size:10px;color:var(--muted);text-align:right;">{% if ev.retry_after %}{{ ev.retry_after }}s{% else %}—{% endif %}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

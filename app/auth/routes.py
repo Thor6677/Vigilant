@@ -157,6 +157,30 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     result = await db.execute(select(Character).where(Character.character_id == character_id))
     existing_char = result.scalar_one_or_none()
 
+    # ── Registration allowlist check ──────────────────────────────────
+    # If allowlist entries exist, only allowed characters/corps/alliances can register new accounts
+    if not existing_char or not existing_char.user_id:
+        from app.db.models import RegistrationAllowlist
+        allow_result = await db.execute(select(RegistrationAllowlist))
+        allowlist = allow_result.scalars().all()
+        if allowlist:  # Allowlist is active
+            allowed = False
+            for entry in allowlist:
+                if entry.entry_type == "character" and entry.eve_id == character_id:
+                    allowed = True
+                    break
+                if entry.entry_type == "corporation" and entry.eve_id == corporation_id:
+                    allowed = True
+                    break
+                if entry.entry_type == "alliance" and entry.eve_id == alliance_id:
+                    allowed = True
+                    break
+            if not allowed:
+                return templates.TemplateResponse("index.html", {
+                    "request": request,
+                    "error": "Registration is restricted. Your character, corporation, or alliance is not on the allowlist.",
+                })
+
     if intent == "login":
         if existing_char and existing_char.user_id:
             # Character already has an owner — log in as that user.
@@ -216,6 +240,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
 
         request.session["user_id"] = user.id
         request.session["active_character_id"] = character_id
+        request.session["is_admin"] = user.role in ("admin", "manager")
 
     else:  # add_character
         current_user_id = request.session.get("user_id")

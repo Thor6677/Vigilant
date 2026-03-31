@@ -149,9 +149,8 @@ async def status_page(request: Request, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
-    ctx = await _build_context(db, user_id)
-    ctx["request"] = request
-    return templates.TemplateResponse("status.html", ctx)
+    # Status page is now part of the admin dashboard
+    return RedirectResponse("/admin")
 
 
 @router.get("/status/data", response_class=HTMLResponse)
@@ -192,7 +191,7 @@ async def status_banner(request: Request):
         border_color = "#cc3333"
         text_color = "#cc3333"
         icon = "✕"
-        msg = "ESI rate limit critical — heavily throttled. Check <a href='/status' style='text-decoration:underline;'>ESI Status</a> for details."
+        msg = "ESI rate limit critical — heavily throttled. Check <a href='/admin' style='text-decoration:underline;'>Admin</a> for details."
 
     style = (
         f"border-bottom:1px solid {border_color};"

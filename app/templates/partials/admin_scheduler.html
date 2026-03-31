@@ -1,0 +1,95 @@
+<div class="b-stats" style="margin-bottom:1.5rem;">
+    <div class="b-stat">
+        <div class="b-stat-val">{{ queue_depth }}</div>
+        <div class="b-stat-label">Queued</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ active_syncs }}/{{ sync_concurrency }}</div>
+        <div class="b-stat-label">Active Syncs</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ semaphore_available }}</div>
+        <div class="b-stat-label">Slots Free</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{{ notification_queues }}</div>
+        <div class="b-stat-label">Pending Notifs</div>
+    </div>
+</div>
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Background Tasks</span>
+        <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
+                hx-post="/admin/action/sync-all"
+                hx-target="#admin-content"
+                hx-swap="innerHTML"
+                hx-confirm="Sync all characters now?">Sync All</button>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Last Inventory Check</span>
+        <span class="b-row-val">{{ last_inv_check }}</span>
+    </div>
+</div>
+
+{% if stuck_characters %}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label" style="color:var(--danger);">Stuck Characters</span>
+    </div>
+    {% for s in stuck_characters %}
+    <div class="b-row">
+        <span class="b-row-label">{{ s.character_id }}</span>
+        <span class="b-row-val is-danger">Queued for {{ s.queued_for }}</span>
+        <button class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:8px;flex:none;"
+                hx-post="/admin/action/force-sync/{{ s.character_id }}"
+                hx-target="#admin-content"
+                hx-swap="innerHTML">Force Sync</button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Character sync status table ───────────────────────────────────────────── #}
+<div class="b-panel">
+    <div class="b-panel-head">
+        <span class="b-label">Character Sync Status</span>
+        <span style="font-size:10px;color:var(--muted);">{{ char_sync_rows | length }} characters</span>
+    </div>
+    {% if char_sync_rows %}
+    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+        <span style="flex:2;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Character</span>
+        <span style="flex:0 0 70px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Last Sync</span>
+        <span style="flex:0 0 55px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;">Status</span>
+        <span style="flex:0 0 60px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;">Stale</span>
+        <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Issues</span>
+    </div>
+    {% for row in char_sync_rows %}
+    <div class="b-table-row" style="padding:0.25rem 0.75rem;min-height:24px;">
+        <span style="flex:2;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.character_name }}</span>
+        <span style="flex:0 0 70px;font-size:10px;color:var(--muted);">{{ row.last_synced_str }}</span>
+        <span style="flex:0 0 55px;text-align:center;">
+            {% if row.queued and row.sync_status != 'syncing' %}
+            <span class="b-badge is-warn" style="font-size:7px;">QUEUE</span>
+            {% elif row.sync_status == 'syncing' %}
+            <span class="b-badge" style="font-size:7px;color:var(--accent);">SYNC</span>
+            {% elif row.sync_status == 'error' %}
+            <span class="b-badge is-danger" style="font-size:7px;">ERR</span>
+            {% else %}
+            <span class="b-dot is-ok"></span>
+            {% endif %}
+        </span>
+        <span style="flex:0 0 60px;text-align:center;font-size:10px;{% if row.stale_fields == 0 %}color:var(--success);{% elif row.stale_fields == row.total_fields %}color:var(--danger);{% else %}color:var(--warn);{% endif %}">
+            {{ row.stale_fields }}/{{ row.total_fields }}
+        </span>
+        <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {% if row.sync_error %}<span style="color:var(--danger);">{{ row.sync_error[:50] }}</span>
+            {% elif row.warn_count > 0 %}<span style="color:var(--warn);">{{ row.warn_count }} warning{{ 's' if row.warn_count != 1 else '' }}</span>
+            {% else %}—{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="b-empty">No characters.</div>
+    {% endif %}
+</div>

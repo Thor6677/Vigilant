@@ -22,6 +22,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_admin = Column(Boolean, default=False)
+    role = Column(String(16), default="user")  # user, manager, admin
 
     characters = relationship("Character", back_populates="user")
 
@@ -160,6 +162,31 @@ class DScanResult(Base):
     user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=False)
+
+
+class RegistrationAllowlist(Base):
+    """Allowlist for who can register. Entries can be character, corp, or alliance IDs."""
+    __tablename__ = "registration_allowlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    entry_type = Column(String(16), nullable=False)   # character, corporation, alliance
+    eve_id = Column(Integer, nullable=False)
+    name = Column(String, nullable=True)
+    added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AdminAuditLog(Base):
+    """Admin audit trail for logins, errors, and admin actions."""
+    __tablename__ = "admin_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    detail = Column(Text, nullable=True)
+    character_id = Column(Integer, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 async def init_db():
