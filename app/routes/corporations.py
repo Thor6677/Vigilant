@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, AsyncSessionLocal
+from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold
 from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
@@ -130,18 +130,11 @@ async def _try_api_call_with_fallback(
 
 
 async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
+    from app.esi.client import get_client_safe
     try:
-        async with AsyncSessionLocal() as token_db:
-            result = await token_db.execute(
-                select(Character).where(Character.character_id == char.character_id)
-            )
-            char_fresh = result.scalar_one_or_none()
-            if not char_fresh:
-                logger.warning("Character %s (%s) not found in database", char.character_name, char.character_id)
-                return None
-            token = await refresh_token(char_fresh, token_db)
-            logger.debug("Successfully refreshed token for %s (%s)", char.character_name, char.character_id)
-        return ESIClient(token, db=db)
+        client = await get_client_safe(char)
+        client.db = db  # Attach request-scoped db for cache operations
+        return client
     except Exception as e:
         logger.error("Token refresh failed for char %s (%s): %s", char.character_name, char.character_id, e, exc_info=True)
         return None
@@ -423,6 +416,16 @@ async def corp_detail(
         elif error:
             logger.warning("Corp contracts fetch failed for %s: %s", corp_id, error)
 
+    # --- Inventory threshold counts (for nav badge) ---
+    inv_result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+        )
+    )
+    inv_thresholds = inv_result.scalars().all()
+    inv_alert_count = sum(1 for t in inv_thresholds if t.alert_state in ("low", "critical"))
+
     return templates.TemplateResponse("partials/corp_detail.html", {
         "request": request,
         "corp_id": corp_id,
@@ -436,4 +439,403 @@ async def corp_detail(
         "corp_orders": corp_orders,
         "corp_structures": corp_structures,
         "corp_contracts": corp_contracts,
+        "inv_alert_count": inv_alert_count,
+    })
+
+
+# ── Corp Inventory Tracker ────────────────────────────────────────────────────
+
+HANGAR_LABELS = {
+    "": "All Hangars",
+    "CorpSAG1": "Hangar 1",
+    "CorpSAG2": "Hangar 2",
+    "CorpSAG3": "Hangar 3",
+    "CorpSAG4": "Hangar 4",
+    "CorpSAG5": "Hangar 5",
+    "CorpSAG6": "Hangar 6",
+    "CorpSAG7": "Hangar 7",
+}
+CORP_HANGAR_FLAGS = {"CorpSAG1", "CorpSAG2", "CorpSAG3", "CorpSAG4", "CorpSAG5", "CorpSAG6", "CorpSAG7", "CorpDeliveries"}
+
+templates.env.globals["HANGAR_LABELS"] = HANGAR_LABELS
+
+
+async def _get_corp_scope_chars(user_id: int, corp_id: int, db: AsyncSession) -> dict[str, list]:
+    """Get characters grouped by scope for a corp."""
+    result = await db.execute(
+        select(Character).where(Character.user_id == user_id, Character.corporation_id == corp_id)
+    )
+    corp_chars = list(result.scalars().all())
+    scope_chars: dict[str, list] = {}
+    for char in corp_chars:
+        for scope_name, scope_val in CORP_SCOPES.items():
+            if scope_val in (char.scopes or ""):
+                scope_chars.setdefault(scope_name, []).append(char)
+    return scope_chars
+
+
+def _build_office_to_structure_map(all_assets: list) -> dict[int, int]:
+    """Map office item_ids to structure_ids.
+
+    Corp hangar items have location_id = office item_id (not the structure).
+    Office items have location_flag='OfficeFolder' and location_id = structure_id.
+    """
+    return {
+        a["item_id"]: a["location_id"]
+        for a in all_assets
+        if a.get("location_flag") == "OfficeFolder"
+    }
+
+
+@router.get("/{corp_id}/inventory", response_class=HTMLResponse)
+async def corp_inventory(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Inventory tracker page for a corporation."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
+    # Get corp name
+    result = await db.execute(
+        select(Character).where(Character.user_id == user_id, Character.corporation_id == corp_id)
+    )
+    corp_chars = list(result.scalars().all())
+    if not corp_chars:
+        return RedirectResponse("/corporations")
+    corp_name = corp_chars[0].corporation_name or "Unknown Corp"
+
+    # Get existing thresholds
+    thresh_result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+        ).order_by(CorpInventoryThreshold.location_name, CorpInventoryThreshold.type_name)
+    )
+    thresholds = thresh_result.scalars().all()
+
+    # Group by location
+    by_location: dict[int, dict] = {}
+    for t in thresholds:
+        lid = t.location_id
+        if lid not in by_location:
+            by_location[lid] = {"location_name": t.location_name or f"Location {lid}", "items": []}
+        by_location[lid]["items"].append(t)
+
+    return templates.TemplateResponse("corp_inventory.html", {
+        "request": request,
+        "corp_id": corp_id,
+        "corp_name": corp_name,
+        "by_location": by_location,
+        "thresholds": thresholds,
+        "hangar_labels": HANGAR_LABELS,
+    })
+
+
+@router.get("/{corp_id}/inventory/scan", response_class=HTMLResponse)
+async def corp_inventory_scan(corp_id: int, location_id: int = 0, request: Request = None, db: AsyncSession = Depends(get_db)):
+    """Scan corp hangar items at a specific structure."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+    if not location_id:
+        return HTMLResponse('<div class="b-empty">Select a structure above.</div>')
+
+    scope_chars = await _get_corp_scope_chars(user_id, corp_id, db)
+    if "assets" not in scope_chars:
+        return HTMLResponse('<div class="b-empty">No characters with corp asset scope.</div>')
+
+    raw_assets, error = await _try_api_call_with_fallback(
+        "assets", scope_chars, esi_corp.get_corporation_assets, corp_id, db
+    )
+    if not raw_assets:
+        return HTMLResponse(f'<div class="b-empty">Failed to fetch assets{": " + error if error else ""}.</div>')
+
+    # Map office item_ids to structure_ids, then filter hangar items at the target structure
+    office_map = _build_office_to_structure_map(raw_assets)
+    hangar_assets = [
+        a for a in raw_assets
+        if a.get("location_flag", "") in CORP_HANGAR_FLAGS
+        and office_map.get(a.get("location_id")) == location_id
+    ]
+
+    if not hangar_assets:
+        return HTMLResponse('<div class="b-empty">No items found in corp hangars at this structure.</div>')
+
+    # Aggregate: (type_id, flag) -> quantity
+    agg: dict[tuple, int] = {}
+    type_ids: set[int] = set()
+    for a in hangar_assets:
+        key = (a["type_id"], a.get("location_flag", ""))
+        agg[key] = agg.get(key, 0) + a.get("quantity", 1)
+        type_ids.add(a["type_id"])
+
+    # Resolve type names
+    type_names = await sde.type_ids_to_names(db, list(type_ids)) if type_ids else {}
+
+    # Get location name from structures
+    location_name = f"Location {location_id}"
+    if "structures" in scope_chars:
+        structs, _ = await _try_api_call_with_fallback(
+            "structures", scope_chars, esi_corp.get_corporation_structures, corp_id, db
+        )
+        if structs:
+            for s in structs:
+                if s.get("structure_id") == location_id:
+                    location_name = s.get("name", location_name)
+                    break
+
+    # Already-monitored items
+    existing = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+            CorpInventoryThreshold.location_id == location_id,
+        )
+    )
+    monitored_keys = {(t.type_id, t.location_flag) for t in existing.scalars().all()}
+
+    # Build item list sorted by type name
+    items = []
+    for (tid, flag), qty in agg.items():
+        items.append({
+            "location_id": location_id,
+            "type_id": tid,
+            "type_name": type_names.get(tid, f"Type {tid}"),
+            "flag": flag,
+            "flag_label": HANGAR_LABELS.get(flag, flag),
+            "quantity": qty,
+            "monitored": (tid, flag) in monitored_keys,
+        })
+    items.sort(key=lambda x: x["type_name"])
+
+    return templates.TemplateResponse("partials/corp_inventory_scan.html", {
+        "request": request,
+        "corp_id": corp_id,
+        "location_name": location_name,
+        "items": items,
+    })
+
+
+@router.get("/{corp_id}/inventory/type-search", response_class=HTMLResponse)
+async def corp_inventory_type_search(corp_id: int, q: str = "", db: AsyncSession = Depends(get_db)):
+    """SDE type search for adding items to monitor."""
+    if len(q) < 2:
+        return HTMLResponse("")
+    results = await sde.search_types(db, q, limit=12)
+    html = ""
+    for r in results:
+        html += (
+            f'<div class="b-row" style="cursor:pointer;" '
+            f'onclick="selectSearchItem({r["type_id"]}, \'{r["type_name"].replace(chr(39), "&#39;")}\')">'
+            f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
+            f'style="width:24px;height:24px;border:1px solid var(--border);">'
+            f'<span class="b-row-val" style="text-align:left;flex:1;">{r["type_name"]}</span>'
+            f'</div>'
+        )
+    return HTMLResponse(html)
+
+
+@router.get("/{corp_id}/inventory/structures", response_class=HTMLResponse)
+async def corp_inventory_structures(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Return structure options for location picker."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    scope_chars = await _get_corp_scope_chars(user_id, corp_id, db)
+    structs, _ = await _try_api_call_with_fallback(
+        "structures", scope_chars, esi_corp.get_corporation_structures, corp_id, db
+    )
+    html = '<option value="">Select structure...</option>'
+    if structs:
+        for s in sorted(structs, key=lambda x: x.get("name", "")):
+            sid = s.get("structure_id", 0)
+            name = s.get("name", "Unknown")
+            html += f'<option value="{sid}">{name}</option>'
+    return HTMLResponse(html)
+
+
+@router.post("/{corp_id}/inventory/threshold", response_class=HTMLResponse)
+async def corp_inventory_add_threshold(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Add or update an inventory threshold."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    form = await request.form()
+    type_id = int(form.get("type_id", 0))
+    location_id = int(form.get("location_id", 0))
+    location_flag = form.get("location_flag", "")
+    threshold_low = int(form.get("threshold_low", 0))
+    threshold_critical = int(form.get("threshold_critical", 0))
+    location_name = form.get("location_name", "")
+    type_name = form.get("type_name", "")
+
+    if not type_id or not location_id:
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Item and location are required.</div>')
+
+    # Resolve names if not provided
+    if not type_name:
+        tn = await sde.type_id_to_name(db, type_id)
+        type_name = tn or f"Type {type_id}"
+
+    # Check for existing threshold
+    existing = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+            CorpInventoryThreshold.location_id == location_id,
+            CorpInventoryThreshold.type_id == type_id,
+            CorpInventoryThreshold.location_flag == location_flag,
+        )
+    )
+    thresh = existing.scalar_one_or_none()
+    if thresh:
+        thresh.threshold_low = threshold_low
+        thresh.threshold_critical = threshold_critical
+    else:
+        thresh = CorpInventoryThreshold(
+            user_id=user_id,
+            corp_id=corp_id,
+            location_id=location_id,
+            location_name=location_name,
+            location_flag=location_flag,
+            type_id=type_id,
+            type_name=type_name,
+            threshold_low=threshold_low,
+            threshold_critical=threshold_critical,
+        )
+        db.add(thresh)
+    await db.commit()
+
+    # Return refreshed items partial
+    return await _render_inventory_items(user_id, corp_id, db, request)
+
+
+@router.post("/{corp_id}/inventory/threshold/{threshold_id}/delete", response_class=HTMLResponse)
+async def corp_inventory_delete_threshold(corp_id: int, threshold_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Remove a tracked item."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.id == threshold_id,
+            CorpInventoryThreshold.user_id == user_id,
+        )
+    )
+    thresh = result.scalar_one_or_none()
+    if thresh:
+        await db.delete(thresh)
+        await db.commit()
+
+    return await _render_inventory_items(user_id, corp_id, db, request)
+
+
+@router.post("/{corp_id}/inventory/check", response_class=HTMLResponse)
+async def corp_inventory_check(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Refresh inventory counts against thresholds."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    await check_corp_inventory(user_id, corp_id, db)
+    return await _render_inventory_items(user_id, corp_id, db, request)
+
+
+async def check_corp_inventory(user_id: int, corp_id: int, db: AsyncSession, emit_notifications: bool = False):
+    """Check live corp assets against thresholds and update alert states."""
+    thresh_result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+        )
+    )
+    thresholds = thresh_result.scalars().all()
+    if not thresholds:
+        return
+
+    scope_chars = await _get_corp_scope_chars(user_id, corp_id, db)
+    if "assets" not in scope_chars:
+        return
+
+    wanted_structure_ids = {t.location_id for t in thresholds}
+
+    raw_assets, _ = await _try_api_call_with_fallback(
+        "assets", scope_chars, esi_corp.get_corporation_assets, corp_id, db
+    )
+    if raw_assets is None:
+        return
+
+    # Map office containers to structure IDs
+    office_map = _build_office_to_structure_map(raw_assets)
+
+    # Aggregate quantities: (structure_id, type_id, flag) -> qty
+    agg: dict[tuple, int] = {}
+    for a in raw_assets:
+        if a.get("location_flag", "") not in CORP_HANGAR_FLAGS:
+            continue
+        struct_id = office_map.get(a.get("location_id"))
+        if struct_id not in wanted_structure_ids:
+            continue
+        key = (struct_id, a["type_id"], a.get("location_flag", ""))
+        agg[key] = agg.get(key, 0) + a.get("quantity", 1)
+
+    now = datetime.now(timezone.utc)
+    for t in thresholds:
+        if t.location_flag:
+            qty = agg.get((t.location_id, t.type_id, t.location_flag), 0)
+        else:
+            # Sum across all hangars at this structure
+            qty = sum(v for (sid, tid, _), v in agg.items() if sid == t.location_id and tid == t.type_id)
+
+        old_state = t.alert_state
+        if t.threshold_critical > 0 and qty <= t.threshold_critical:
+            new_state = "critical"
+        elif t.threshold_low > 0 and qty <= t.threshold_low:
+            new_state = "low"
+        else:
+            new_state = "ok"
+
+        t.current_quantity = qty
+        t.alert_state = new_state
+        t.last_checked = now
+
+        # Emit notifications on state transitions
+        if emit_notifications and new_state != old_state and new_state != "ok":
+            from app.routes.dashboard import _emit_notification
+            ntype = "inventory_critical" if new_state == "critical" else "inventory_low"
+            title = "Inventory Critical" if new_state == "critical" else "Inventory Low"
+            _emit_notification(user_id, {
+                "type": ntype,
+                "title": title,
+                "body": f"{t.type_name} at {t.location_name} — {qty}/{t.threshold_critical if new_state == 'critical' else t.threshold_low}",
+                "icon": f"https://images.evetech.net/types/{t.type_id}/icon?size=64",
+            })
+
+    await db.commit()
+
+
+async def _render_inventory_items(user_id: int, corp_id: int, db: AsyncSession, request: Request) -> HTMLResponse:
+    """Render the inventory items partial."""
+    thresh_result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.corp_id == corp_id,
+        ).order_by(CorpInventoryThreshold.location_name, CorpInventoryThreshold.type_name)
+    )
+    thresholds = thresh_result.scalars().all()
+
+    by_location: dict[int, dict] = {}
+    for t in thresholds:
+        lid = t.location_id
+        if lid not in by_location:
+            by_location[lid] = {"location_name": t.location_name or f"Location {lid}", "items": []}
+        by_location[lid]["items"].append(t)
+
+    return templates.TemplateResponse("partials/corp_inventory_items.html", {
+        "request": request,
+        "corp_id": corp_id,
+        "by_location": by_location,
+        "thresholds": thresholds,
     })

@@ -84,7 +84,7 @@
         <div class="b-stat-val">{{ total_corporations }}</div>
         <div class="b-stat-label">Corporations</div>
     </a>
-    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
+    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val is-accent">{{ format_isk(total_wallet) }}</div>
         <div class="b-stat-label">Total Wallet</div>
     </a>
@@ -92,17 +92,17 @@
         <div class="b-stat-val">{{ total_active_jobs }}</div>
         <div class="b-stat-label">Active Jobs</div>
     </a>
-    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
+    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val">{{ total_active_orders }}</div>
         <div class="b-stat-label">Market Orders</div>
     </a>
-    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
+    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val {% if total_unread_mail > 0 %}is-accent{% endif %}">
             {{ total_unread_mail if not needs_mail_scope else "—" }}
         </div>
         <div class="b-stat-label">Unread Mail</div>
     </a>
-    <a href="{% if active_char %}/character/{{ active_char.character_id }}{% else %}/dashboard{% endif %}" class="b-stat" style="text-decoration:none;cursor:pointer;">
+    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val {% if total_unread_notifs > 0 %}is-accent{% endif %}">
             {{ total_unread_notifs if not needs_notif_scope else "—" }}
         </div>
@@ -155,7 +155,8 @@
     <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}
     {% if sort == 'custom' %}
-    <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;">+ Add Account</button>
+    <button id="edit-mode-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;" onclick="toggleEditMode()">Edit</button>
+    <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);display:none;">+ Add Account</button>
     <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
     {% endif %}
 </div>
@@ -166,11 +167,11 @@
 {% for group_name, group_chars in char_groups.items() %}
 <div class="b-section group-section" data-group="{{ group_name }}">
     <div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;">
-        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">
+        <div class="edit-mode-only" style="display:none;flex-direction:column;gap:2px;flex-shrink:0;">
             <button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button>
             <button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button>
         </div>
-        <span class="group-label b-label" data-group="{{ group_name }}" style="cursor:pointer;" title="Click to rename">{{ group_name }}</span>
+        <span class="group-label b-label" data-group="{{ group_name }}">{{ group_name }}</span>
         <input class="group-label-input" type="text" value="{{ group_name }}" data-original="{{ group_name }}" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;">
         <span style="font-size:10px;color:var(--muted);">{{ group_chars | length }}</span>
     </div>
@@ -180,9 +181,8 @@
     {% set wallet = wallets.get(char.character_id) %}
     {% set sk = skill_map.get(char.character_id, {}) %}
     {% set w = sk.get('warning', 'error') %}
-    {% set is_active = char.character_id == active_char.character_id %}
-    <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
-         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+    <div class="b-card" data-char-id="{{ char.character_id }}"
+         style="{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
         <div class="b-card-top">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
@@ -190,7 +190,6 @@
                 <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                     <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if loc and loc.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
                     <span class="b-card-name">{{ char.character_name }}</span>
-                    {% if is_active %}<span class="b-badge is-active">Active</span>{% endif %}
                     {% if w == 'empty' %}<span class="b-badge is-danger" style="font-size:8px;">EMPTY</span>
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
@@ -226,7 +225,6 @@
         </div>
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
-            {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
             <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
             <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
@@ -245,9 +243,8 @@
     {% set wallet = wallets.get(char.character_id) %}
     {% set sk = skill_map.get(char.character_id, {}) %}
     {% set w = sk.get('warning', 'error') %}
-    {% set is_active = char.character_id == active_char.character_id %}
-    <div class="b-card {% if is_active %}is-active{% endif %}" data-char-id="{{ char.character_id }}"
-         style="{% if sort == 'custom' %}cursor:grab;{% endif %}{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+    <div class="b-card" data-char-id="{{ char.character_id }}"
+         style="{% if needs_reauth.get(char.character_id) %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
         <div class="b-card-top">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
                  alt="{{ char.character_name }}" class="b-card-portrait" style="pointer-events:none;">
@@ -255,7 +252,6 @@
                 <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                     <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if loc and loc.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
                     <span class="b-card-name">{{ char.character_name }}</span>
-                    {% if is_active %}<span class="b-badge is-active">Active</span>{% endif %}
                     {% if w == 'empty' %}<span class="b-badge is-danger" style="font-size:8px;">EMPTY</span>
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
@@ -291,7 +287,6 @@
         </div>
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
-            {% if not is_active %}<form method="POST" action="/auth/switch/{{ char.character_id }}" style="flex:1;display:flex;"><button type="submit" class="b-btn" style="flex:1;">Set Active</button></form>{% endif %}
             <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
             <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
@@ -666,10 +661,8 @@
 </div>
 {% endif %}
 
-{# ── Bottom Row: Cache Stats + Active Character ──────────────────────────── #}
-<div class="b-grid-2">
-
-    {# Cache Stats #}
+{# ── Cache Stats ─────────────────────────────────────────────────────────── #}
+<div>
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">ESI Cache</span>
@@ -689,36 +682,6 @@
             </div>
         </div>
     </div>
-
-    {# Active Character #}
-    {% if active_char %}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Active Character</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;">
-            <img src="https://images.evetech.net/characters/{{ active_char.character_id }}/portrait?size=64"
-                 alt="{{ active_char.character_name }}"
-                 style="width:48px;height:48px;object-fit:cover;border:1px solid var(--border);flex-shrink:0;filter:grayscale(15%);">
-            <div style="min-width:0;">
-                <div style="font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text);">{{ active_char.character_name }}</div>
-                {% if active_char.corporation_name %}
-                <div style="font-size:10px;color:var(--muted);margin-top:2px;">{{ active_char.corporation_name }}</div>
-                {% endif %}
-                {% if active_char.alliance_name %}
-                <div style="font-size:10px;color:var(--accent);margin-top:1px;">{{ active_char.alliance_name }}</div>
-                {% endif %}
-                <div style="font-size:10px;margin-top:3px;">
-                    {% if active_char.has_corp_roles %}
-                    <span style="color:var(--success);">✓ Corp access</span>
-                    {% else %}
-                    <span style="color:var(--muted);">Personal only</span>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
 
 <script>
 function updateServerStatus() {
@@ -764,6 +727,34 @@ setInterval(updateEveTime, 10000);
 
 {% if sort == 'custom' %}
 <script>
+var editMode = false;
+var sortables = [];
+
+function toggleEditMode() {
+    editMode = !editMode;
+    var btn = document.getElementById('edit-mode-btn');
+    var addBtn = document.getElementById('add-group-btn');
+    if (editMode) {
+        btn.textContent = 'Done';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        addBtn.style.display = '';
+        document.querySelectorAll('.edit-mode-only').forEach(function(el) { el.style.display = 'flex'; });
+        document.querySelectorAll('.group-label').forEach(function(el) { el.style.cursor = 'pointer'; el.title = 'Click to rename'; });
+        document.querySelectorAll('[data-char-id]').forEach(function(el) { el.style.cursor = 'grab'; });
+        sortables.forEach(function(s) { s.option('disabled', false); });
+    } else {
+        btn.textContent = 'Edit';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+        addBtn.style.display = 'none';
+        document.querySelectorAll('.edit-mode-only').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('.group-label').forEach(function(el) { el.style.cursor = ''; el.title = ''; });
+        document.querySelectorAll('[data-char-id]').forEach(function(el) { el.style.cursor = ''; });
+        sortables.forEach(function(s) { s.option('disabled', true); });
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     var saveTimer = null;
     function getOrderPayload() {
@@ -784,7 +775,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 600);
     }
     document.querySelectorAll('.sortable-group').forEach(function(list) {
-        Sortable.create(list, {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+        var s = Sortable.create(list, {group: 'characters', animation: 150, ghostClass: 'opacity-30', disabled: true, onEnd: scheduleSave});
+        sortables.push(s);
     });
     /* Group move up/down buttons */
     function saveGroupOrder() {
@@ -822,15 +814,17 @@ document.addEventListener('DOMContentLoaded', function() {
         var section = document.createElement('div');
         section.className = 'b-section group-section';
         section.dataset.group = name;
-        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;"><button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button><button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button></div><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span style="font-size:10px;color:var(--muted);">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
+        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><div class="edit-mode-only" style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;"><button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button><button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button></div><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span style="font-size:10px;color:var(--muted);">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
         container.appendChild(section);
         attachLabelEdit(section.querySelector('.group-label'));
         section.querySelector('.group-move-up').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'up'); });
         section.querySelector('.group-move-down').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'down'); });
-        Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', onEnd: scheduleSave});
+        var ns = Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', disabled: false, onEnd: scheduleSave});
+        sortables.push(ns);
     });
     function attachLabelEdit(label) {
         label.addEventListener('click', function() {
+            if (!editMode) return;
             var input = label.nextElementSibling;
             label.style.display = 'none'; input.style.display = ''; input.focus(); input.select();
             function commit() {

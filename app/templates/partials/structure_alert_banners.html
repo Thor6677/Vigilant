@@ -1,0 +1,66 @@
+<div id="structure-alerts" hx-get="/alerts/structure-banners" hx-trigger="every 60s" hx-swap="outerHTML">
+{% for alert in alerts %}
+<div class="structure-alert-banner {% if alert.severity == 'danger' %}is-danger{% else %}is-warn{% endif %}"
+     data-alert-id="{{ alert.id }}" style="display:none;">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">{% if alert.severity == 'danger' %}&#9888;{% else %}&#9733;{% endif %}</span>
+        <span class="alert-text">
+            <strong>{{ alert.label }}</strong>
+            {% if alert.struct_type %} &mdash; {{ alert.struct_type }}{% endif %}
+            {% if alert.system_name %} in <strong>{{ alert.system_name }}</strong>{% endif %}
+            {% if alert.attacker %} <span style="color:var(--muted);font-size:10px;">by {{ alert.attacker }}</span>{% endif %}
+            {% if alert.hp %} <span style="color:var(--text);font-size:10px;">[{{ alert.hp }}]</span>{% endif %}
+            {% if alert.timestamp %}<span class="alert-time" data-ts="{{ alert.timestamp }}"></span>{% endif %}
+        </span>
+    </div>
+    <button class="alert-dismiss" onclick="dismissStructureAlert('{{ alert.id }}')" title="Dismiss">&times;</button>
+</div>
+{% endfor %}
+<script>
+(function() {
+    var KEY = 'vigilant_dismissed_alerts';
+    function getDismissed() {
+        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
+    }
+    function setDismissed(d) {
+        try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
+    }
+    window.dismissStructureAlert = function(id) {
+        var d = getDismissed();
+        d[id] = Date.now();
+        setDismissed(d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+    /* Show non-dismissed alerts */
+    var dismissed = getDismissed();
+    /* Prune entries older than 7 days */
+    var cutoff = Date.now() - 7 * 86400000;
+    var changed = false;
+    for (var k in dismissed) {
+        if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
+    }
+    if (changed) setDismissed(dismissed);
+    var banners = document.querySelectorAll('.structure-alert-banner[data-alert-id]');
+    for (var i = 0; i < banners.length; i++) {
+        var aid = banners[i].getAttribute('data-alert-id');
+        if (!dismissed[aid]) banners[i].style.display = '';
+    }
+    /* Relative timestamps */
+    var times = document.querySelectorAll('#structure-alerts .alert-time[data-ts]');
+    for (var j = 0; j < times.length; j++) {
+        try {
+            var ts = times[j].getAttribute('data-ts');
+            var d = new Date(ts);
+            var diff = Math.floor((Date.now() - d.getTime()) / 1000);
+            var label = '';
+            if (diff < 60) label = 'just now';
+            else if (diff < 3600) label = Math.floor(diff / 60) + 'm ago';
+            else if (diff < 86400) label = Math.floor(diff / 3600) + 'h ago';
+            else label = Math.floor(diff / 86400) + 'd ago';
+            times[j].textContent = ' (' + label + ')';
+        } catch(e) {}
+    }
+})();
+</script>
+</div>

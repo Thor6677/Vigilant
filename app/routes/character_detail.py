@@ -66,7 +66,7 @@ def _enrich_implants(type_ids: list, type_map: dict) -> list:
 
 def _downsample(snapshots: list, target: int) -> list:
     """Return at most `target` evenly-spaced snapshots."""
-    if len(snapshots) <= target:
+    if target <= 0 or len(snapshots) <= target:
         return snapshots
     step = len(snapshots) / target
     return [snapshots[int(i * step)] for i in range(target)]
@@ -409,13 +409,9 @@ async def character_detail(
     journal_error = None
     if "esi-wallet.read_character_wallet.v1" in (char.scopes or ""):
         try:
-            async with AsyncSessionLocal() as token_db:
-                char_result2 = await token_db.execute(
-                    select(Character).where(Character.character_id == character_id)
-                )
-                char_fresh = char_result2.scalar_one_or_none()
-                token = await refresh_token(char_fresh, token_db)
-            client = ESIClient(token, db=db)
+            from app.esi.client import get_client_safe
+            client = await get_client_safe(char)
+            client.db = db
             raw = await get_wallet_journal(client, character_id, page=1)
             journal = raw[:20] if raw else []
         except Exception as e:

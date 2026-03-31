@@ -9,10 +9,11 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character
+from app.db.models import get_db, Character, AsyncSessionLocal
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
+from app.routes.corporations import _try_api_call_with_fallback
 from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
@@ -199,19 +200,15 @@ async def corp_blueprints(
     characters = list(result.scalars().all())
 
     scope = "esi-corporations.read_blueprints.v1"
-    char = None
-    for c in characters:
-        if c.corporation_id == corp_id and scope in (c.scopes or ""):
-            char = c
-            break
+    corp_chars = [c for c in characters if c.corporation_id == corp_id and scope in (c.scopes or "")]
 
     char_info = {
-        "character_id": char.character_id if char else None,
-        "character_name": char.character_name if char else None,
-        "corporation_name": char.corporation_name if char else None,
+        "character_id": corp_chars[0].character_id if corp_chars else None,
+        "character_name": corp_chars[0].character_name if corp_chars else None,
+        "corporation_name": corp_chars[0].corporation_name if corp_chars else None,
     }
 
-    if not char:
+    if not corp_chars:
         return templates.TemplateResponse("blueprints.html", {
             "request": request, "char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
@@ -220,10 +217,14 @@ async def corp_blueprints(
         })
 
     try:
-        token = await refresh_token(char, db)
-        client = ESIClient(token, db=db)
+        scope_chars = {"blueprints": corp_chars}
 
-        raw = await _fetch_all_pages(esi_corp.get_corporation_blueprints, client, corp_id)
+        async def _fetch_bp(client, cid):
+            return await _fetch_all_pages(esi_corp.get_corporation_blueprints, client, cid)
+
+        raw, bp_error = await _try_api_call_with_fallback("blueprints", scope_chars, _fetch_bp, corp_id, db)
+        if raw is None:
+            raise Exception(bp_error or "All characters returned 403 — Director role required in-game.")
 
         all_type_ids = list({bp["type_id"] for bp in raw})
         type_names = await sde.type_ids_to_names(db, all_type_ids)

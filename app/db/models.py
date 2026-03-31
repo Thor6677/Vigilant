@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -115,6 +115,10 @@ class CharacterAssetCache(Base):
 class MiningLedgerEntry(Base):
     """Persistent mining ledger — survives beyond ESI's 30-day window."""
     __tablename__ = "mining_ledger_entries"
+    __table_args__ = (
+        UniqueConstraint("character_id", "date", "type_id", "solar_system_id",
+                         name="uq_mining_entry"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
@@ -122,6 +126,26 @@ class MiningLedgerEntry(Base):
     type_id = Column(Integer, nullable=False)
     solar_system_id = Column(Integer, nullable=False)
     quantity = Column(Integer, nullable=False)
+
+
+class CorpInventoryThreshold(Base):
+    """User-defined monitoring thresholds for items in corp hangars."""
+    __tablename__ = "corp_inventory_thresholds"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    corp_id = Column(Integer, nullable=False, index=True)
+    location_id = Column(Integer, nullable=False)
+    location_name = Column(String, nullable=True)
+    location_flag = Column(String, nullable=False, default="")
+    type_id = Column(Integer, nullable=False)
+    type_name = Column(String, nullable=True)
+    threshold_low = Column(Integer, nullable=False, default=0)
+    threshold_critical = Column(Integer, nullable=False, default=0)
+    current_quantity = Column(Integer, nullable=True)
+    last_checked = Column(DateTime, nullable=True)
+    alert_state = Column(String(16), nullable=False, default="ok")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class DScanResult(Base):

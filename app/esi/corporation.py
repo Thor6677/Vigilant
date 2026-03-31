@@ -61,3 +61,23 @@ async def get_corporation_wallet_journal(client: ESIClient, corporation_id: int,
 
 async def get_corporation_blueprints(client: ESIClient, corporation_id: int, page: int = 1) -> list:
     return await client.get(f"/corporations/{corporation_id}/blueprints/", params={"page": page})
+
+
+async def get_corporation_assets(client: ESIClient, corporation_id: int) -> list:
+    """Fetch all corp assets with pagination support."""
+    all_assets = []
+    page = 1
+    while True:
+        data = await client.get(
+            f"/corporations/{corporation_id}/assets/",
+            params={"page": page} if page > 1 else {}
+        )
+        if not isinstance(data, list):
+            return []
+        if not data:
+            break
+        all_assets.extend(data)
+        if len(data) < 1000:
+            break
+        page += 1
+    return all_assets

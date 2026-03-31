@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}INVENTORY — {{ corp_name }} — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/corporations">Corporations</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ corp_name }} — Inventory</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Inventory Tracker</h1>
+    <div style="display:flex;gap:0.75rem;align-items:center;">
+        <button class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);flex:none;font-size:10px;"
+                hx-post="/corporations/{{ corp_id }}/inventory/check"
+                hx-target="#inventory-items"
+                hx-swap="innerHTML"
+                hx-indicator="#check-loader">
+            Refresh
+        </button>
+        <span id="check-loader" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Checking...</span>
+    </div>
+</div>
+
+{# ── Tracked Items ─────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Tracked Items</span>
+        <span class="b-label" style="color:var(--muted);">{{ thresholds|length }} item{{ 's' if thresholds|length != 1 else '' }}</span>
+    </div>
+    <div id="inventory-items">
+        {% include "partials/corp_inventory_items.html" %}
+    </div>
+</div>
+
+{# ── Import From Hangar ─────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Import From Hangar</span>
+    </div>
+    <div style="padding:0.5rem 0.75rem;border:1px solid var(--border);border-bottom:none;background:var(--surface);display:flex;align-items:center;gap:0.75rem;">
+        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Structure</label>
+        <select id="scan-location"
+                hx-get="/corporations/{{ corp_id }}/inventory/structures"
+                hx-trigger="load"
+                hx-swap="innerHTML"
+                onchange="scanLocation(this.value)"
+                style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            <option value="">Loading structures...</option>
+        </select>
+    </div>
+    <div id="scan-results" style="border:1px solid var(--border);border-top:none;background:var(--surface);max-height:400px;overflow-y:auto;">
+        <div class="b-empty">Select a structure to scan its hangars.</div>
+    </div>
+    <span id="scan-loader" class="htmx-indicator" style="display:block;padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">Scanning hangar...</span>
+</div>
+
+{# ── Add By Search ─────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Add Item Manually</span>
+    </div>
+    <div style="padding:0.75rem;border:1px solid var(--border);background:var(--surface);">
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
+            {# Item search #}
+            <div style="flex:1;min-width:180px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Item</label>
+                <input type="text" id="add-search" placeholder="Search items..."
+                       hx-get="/corporations/{{ corp_id }}/inventory/type-search"
+                       hx-trigger="keyup changed delay:300ms"
+                       hx-target="#search-results"
+                       hx-swap="innerHTML"
+                       name="q"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <input type="hidden" id="add-type-id" value="">
+                <input type="hidden" id="add-type-name" value="">
+                <div id="search-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
+            </div>
+            {# Location #}
+            <div style="min-width:180px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Structure</label>
+                <select id="add-location"
+                        hx-get="/corporations/{{ corp_id }}/inventory/structures"
+                        hx-trigger="load"
+                        hx-swap="innerHTML"
+                        style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+            {# Hangar #}
+            <div style="min-width:120px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Hangar</label>
+                <select id="add-flag" style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    {% for key, label in hangar_labels.items() %}
+                    <option value="{{ key }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {# Thresholds #}
+            <div style="min-width:80px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Low</label>
+                <input type="number" id="add-low" value="10" min="0"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            </div>
+            <div style="min-width:80px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Critical</label>
+                <input type="number" id="add-critical" value="5" min="0"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            </div>
+            <button onclick="addManualItem()" class="b-btn" style="padding:0.35rem 0.6rem;border:1px solid var(--accent);color:var(--accent);flex:none;font-size:10px;">Add</button>
+        </div>
+    </div>
+</div>
+
+<script>
+/* Scan a specific structure */
+window.scanLocation = function(locationId) {
+    if (!locationId) {
+        document.getElementById('scan-results').innerHTML = '<div class="b-empty">Select a structure to scan its hangars.</div>';
+        return;
+    }
+    htmx.ajax('GET', '/corporations/{{ corp_id }}/inventory/scan?location_id=' + locationId, {
+        target: '#scan-results',
+        swap: 'innerHTML',
+        indicator: '#scan-loader',
+    });
+};
+
+/* Search result selection */
+window.selectSearchItem = function(typeId, typeName) {
+    document.getElementById('add-type-id').value = typeId;
+    document.getElementById('add-type-name').value = typeName;
+    document.getElementById('add-search').value = typeName;
+    document.getElementById('search-results').style.display = 'none';
+};
+
+/* Show/hide search results */
+var _searchEl = document.getElementById('add-search');
+if (_searchEl) _searchEl.addEventListener('input', function() {
+    document.getElementById('search-results').style.display = this.value.length >= 2 ? '' : 'none';
+    if (this.value.length < 2) {
+        document.getElementById('add-type-id').value = '';
+        document.getElementById('add-type-name').value = '';
+    }
+});
+
+/* Add manually searched item */
+window.addManualItem = function() {
+    var typeId = document.getElementById('add-type-id').value;
+    var typeName = document.getElementById('add-type-name').value;
+    var loc = document.getElementById('add-location');
+    var locationId = loc.value;
+    var locationName = loc.options[loc.selectedIndex] ? loc.options[loc.selectedIndex].text : '';
+    var flag = document.getElementById('add-flag').value;
+    var low = document.getElementById('add-low').value;
+    var critical = document.getElementById('add-critical').value;
+
+    if (!typeId || !locationId) {
+        alert('Select an item and a structure.');
+        return;
+    }
+
+    var fd = new FormData();
+    fd.append('type_id', typeId);
+    fd.append('type_name', typeName);
+    fd.append('location_id', locationId);
+    fd.append('location_name', locationName);
+    fd.append('location_flag', flag);
+    fd.append('threshold_low', low);
+    fd.append('threshold_critical', critical);
+
+    htmx.ajax('POST', '/corporations/{{ corp_id }}/inventory/threshold', {
+        target: '#inventory-items',
+        swap: 'innerHTML',
+        values: Object.fromEntries(fd),
+    });
+
+    /* Reset */
+    document.getElementById('add-search').value = '';
+    document.getElementById('add-type-id').value = '';
+    document.getElementById('add-type-name').value = '';
+};
+
+/* Add from scan results */
+window.addScanItem = function(btn) {
+    var row = btn.closest('[data-scan-item]');
+    var fd = new FormData();
+    fd.append('type_id', row.dataset.typeId);
+    fd.append('type_name', row.dataset.typeName);
+    fd.append('location_id', row.dataset.locationId);
+    fd.append('location_name', row.dataset.locationName);
+    fd.append('location_flag', row.dataset.flag);
+    fd.append('threshold_low', row.querySelector('.scan-low').value);
+    fd.append('threshold_critical', row.querySelector('.scan-critical').value);
+
+    htmx.ajax('POST', '/corporations/{{ corp_id }}/inventory/threshold', {
+        target: '#inventory-items',
+        swap: 'innerHTML',
+        values: Object.fromEntries(fd),
+    });
+    btn.textContent = 'Added';
+    btn.disabled = true;
+    btn.style.color = 'var(--success)';
+};
+</script>
+{% endblock %}

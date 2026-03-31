@@ -60,6 +60,9 @@
         job_ready: 'var(--accent)',
         pi_expiring: 'var(--danger)',
         new_mail: 'var(--text)',
+        structure_alert: 'var(--danger)',
+        inventory_low: 'var(--accent)',
+        inventory_critical: 'var(--danger)',
     };
 
     function renderList() {

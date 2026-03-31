@@ -2,7 +2,7 @@
 {% block title %}{% if is_corp %}CORP {% endif %}BLUEPRINTS — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 {% if is_corp and corp_id %}
-<div class="b-breadcrumbs"><a href="/corporations">Corporations</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Blueprints</span></div>
+<div class="b-breadcrumbs"><a href="/corporations">Corporations</a><span class="b-crumb-sep">&gt;</span><span>{{ char.corporation_name or 'Corp' }}</span><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Blueprints</span></div>
 {% elif char %}
 <div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><a href="/character/{{ char.character_id }}">{{ char.character_name }}</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Blueprints</span></div>
 {% endif %}
@@ -12,15 +12,22 @@
 <div class="b-page-header">
     <div>
         <h1 class="b-page-title">{% if is_corp %}Corporation {% endif %}Blueprint Library</h1>
-        {% if char and char.character_name %}
+        {% if is_corp and char.corporation_name %}
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+            {% if corp_id %}
+            <img src="https://images.evetech.net/corporations/{{ corp_id }}/logo?size=32"
+                 style="width:20px;height:20px;border:1px solid var(--border);" alt=""
+                 onerror="this.style.display='none'">
+            {% endif %}
+            <span style="font-size:11px;color:var(--muted);">{{ char.corporation_name }}</span>
+        </div>
+        {% elif char and char.character_name and not is_corp %}
         <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
             {% if char.character_id %}
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
                  style="width:20px;height:20px;border:1px solid var(--border);" alt="">
             {% endif %}
-            <span style="font-size:11px;color:var(--muted);">
-                {{ char.character_name }}{% if is_corp and char.corporation_name %} · {{ char.corporation_name }}{% endif %}
-            </span>
+            <span style="font-size:11px;color:var(--muted);">{{ char.character_name }}</span>
         </div>
         {% endif %}
     </div>
@@ -138,7 +145,7 @@
             {{ bp.location_label }}
         </span>
         <span style="flex:0 0 50px;text-align:right;">
-            <a href="/industry" onclick="setTimeout(function(){selectBlueprint({{ bp.type_id }})},500)"
+            <a href="/industry?type_id={{ bp.type_id }}"
                style="font-size:9px;color:var(--accent);text-decoration:none;">Calc →</a>
         </span>
     </div>

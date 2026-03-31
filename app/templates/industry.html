@@ -48,8 +48,16 @@ recalculate = function() {
     saveMfgState();
 };
 
-/* Restore on page load */
-document.addEventListener('DOMContentLoaded', restoreMfgState);
+/* Restore on page load — query param type_id takes priority */
+document.addEventListener('DOMContentLoaded', function() {
+    var params = new URLSearchParams(window.location.search);
+    var qTypeId = params.get('type_id');
+    if (qTypeId) {
+        selectBlueprint(parseInt(qTypeId));
+    } else {
+        restoreMfgState();
+    }
+});
 </script>
 
 {% endblock %}
@@ -57,13 +65,7 @@ document.addEventListener('DOMContentLoaded', restoreMfgState);
 
 <div class="b-page-header">
     <h1 class="b-page-title">Manufacturing Calculator</h1>
-    <div style="display:flex;gap:0.5rem;">
-        <button onclick="resetManufacturing()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
-        <a href="/industry/mining-ledger" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Mining Ledger</a>
-        <a href="/industry/compression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Compression →</a>
-        <a href="/industry/hauling" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Hauling →</a>
-        <a href="/industry/appraisal" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Appraisal →</a>
-    </div>
+    <button onclick="resetManufacturing()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
 </div>
 
 {# ── Blueprint Search ─────────────────────────────────────────────────────── #}
@@ -260,6 +262,7 @@ function generateShoppingList() {
         type_id: selectedTypeId,
         runs: document.getElementById('inp-runs').value,
         me: document.getElementById('inp-me').value,
+        te: document.getElementById('inp-te').value,
         structure: document.getElementById('inp-structure').value,
         rig: document.getElementById('inp-rig').value,
         security: document.getElementById('inp-security').value,
@@ -269,57 +272,5 @@ function generateShoppingList() {
 }
 </script>
 
-
-<script>
-/* ── Persist manufacturing state in localStorage ────────────────────────── */
-var MFG_KEY = 'vigilant_mfg_state';
-
-function saveMfgState() {
-    var state = {
-        typeId: selectedTypeId,
-        runs: document.getElementById('inp-runs').value,
-        me: document.getElementById('inp-me').value,
-        te: document.getElementById('inp-te').value,
-        structure: document.getElementById('inp-structure').value,
-        rig: document.getElementById('inp-rig').value,
-        security: document.getElementById('inp-security').value,
-    };
-    localStorage.setItem(MFG_KEY, JSON.stringify(state));
-}
-
-function restoreMfgState() {
-    var raw = localStorage.getItem(MFG_KEY);
-    if (!raw) return;
-    try {
-        var state = JSON.parse(raw);
-        if (state.typeId) {
-            document.getElementById('inp-runs').value = state.runs || 1;
-            document.getElementById('inp-me').value = state.me || 0;
-            document.getElementById('me-val').textContent = state.me || 0;
-            document.getElementById('inp-te').value = state.te || 0;
-            document.getElementById('te-val').textContent = state.te || 0;
-            document.getElementById('inp-structure').value = state.structure || 'npc_station';
-            document.getElementById('inp-rig').value = state.rig || 'none';
-            document.getElementById('inp-security').value = state.security || 'highsec';
-            selectBlueprint(state.typeId);
-        }
-    } catch(e) {}
-}
-
-function resetManufacturing() {
-    localStorage.removeItem(MFG_KEY);
-    window.location.href = '/industry';
-}
-
-/* Hook into recalculate to auto-save */
-var _origRecalc = recalculate;
-recalculate = function() {
-    _origRecalc();
-    saveMfgState();
-};
-
-/* Restore on page load */
-document.addEventListener('DOMContentLoaded', restoreMfgState);
-</script>
 
 {% endblock %}

@@ -7,12 +7,7 @@
 
 <div class="b-page-header">
     <h1 class="b-page-title">Hauling Calculator</h1>
-    <div style="display:flex;gap:0.5rem;">
-        <button onclick="resetHauling()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
-        <a href="/industry" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Manufacturing</a>
-        <a href="/industry/compression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Compression</a>
-        <a href="/industry/appraisal" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Appraisal →</a>
-    </div>
+    <button onclick="resetHauling()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
 </div>
 
 {# ── Fleet Configuration ─────────────────────────────────────────────────── #}
@@ -396,7 +391,8 @@ function restoreHaulState() {
                 document.getElementById('paste-text').value = lines.join('\n');
                 addShipEntry();
                 setTimeout(function() {
-                    htmx.trigger(document.querySelector('#panel-paste form'), 'submit');
+                    var f = document.querySelector('#panel-paste form');
+                    if (f) htmx.trigger(f, 'submit');
                 }, 200);
                 return;
             }

@@ -61,13 +61,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
 <div class="b-page-header">
     <h1 class="b-page-title">Compression Calculator</h1>
-    <div style="display:flex;gap:0.5rem;">
-        <button onclick="resetCompression()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
-        <a href="/industry" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">← Manufacturing</a>
-        <a href="/industry/mining-ledger" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Mining Ledger</a>
-        <a href="/industry/hauling" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Hauling →</a>
-        <a href="/industry/appraisal" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Appraisal →</a>
-    </div>
+    <button onclick="resetCompression()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
 </div>
 
 <form id="compression-form" hx-post="/industry/compression/calculate" hx-target="#compression-results" hx-swap="innerHTML">
@@ -82,7 +76,6 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Character (skills)</label>
                 <select id="inp-character"
-                        hx-get="" hx-trigger="change" hx-target="#skill-display" hx-swap="innerHTML"
                         onchange="if(this.value){htmx.ajax('GET','/industry/compression/skills/'+this.value,'#skill-display')}"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="">Manual skills</option>
@@ -223,58 +216,5 @@ document.body.addEventListener('htmx:afterSwap', function(evt) {
 });
 </script>
 
-
-<script>
-/* ── Persist compression state in localStorage ──────────────────────────── */
-var COMP_KEY = 'vigilant_comp_state';
-
-function saveCompState() {
-    var form = document.getElementById('compression-form');
-    if (!form) return;
-    var state = {};
-    var inputs = form.querySelectorAll('input[name], select[name]');
-    inputs.forEach(function(el) {
-        state[el.name] = el.value;
-    });
-    state._character = document.getElementById('inp-character') ? document.getElementById('inp-character').value : '';
-    localStorage.setItem(COMP_KEY, JSON.stringify(state));
-}
-
-function restoreCompState() {
-    /* Skip restore if URL has prefill params (from manufacturing shopping list) */
-    if (window.location.search.indexOf('mineral_') >= 0) {
-        /* Save the prefilled state immediately so it persists */
-        setTimeout(saveCompState, 100);
-        return;
-    }
-    var raw = localStorage.getItem(COMP_KEY);
-    if (!raw) return;
-    try {
-        var state = JSON.parse(raw);
-        var form = document.getElementById('compression-form');
-        if (!form) return;
-        Object.keys(state).forEach(function(name) {
-            if (name === '_character') {
-                var sel = document.getElementById('inp-character');
-                if (sel) sel.value = state[name];
-                return;
-            }
-            var el = form.querySelector('[name="' + name + '"]');
-            if (el) el.value = state[name];
-        });
-    } catch(e) {}
-}
-
-function resetCompression() {
-    localStorage.removeItem(COMP_KEY);
-    window.location.href = '/industry/compression';
-}
-
-/* Save on form submit */
-document.getElementById('compression-form').addEventListener('htmx:beforeRequest', saveCompState);
-
-/* Restore on load */
-document.addEventListener('DOMContentLoaded', restoreCompState);
-</script>
 
 {% endblock %}

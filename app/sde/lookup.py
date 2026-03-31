@@ -3,10 +3,16 @@ Fast local lookups against the SDE tables.
 Falls back gracefully if SDE isn't loaded yet.
 """
 from collections import deque
+from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo
+
+# Cached jump graph + cloning stations (loaded once, refreshed after 1h)
+_graph_cache: dict | None = None
+_graph_cache_ts: datetime | None = None
+_GRAPH_CACHE_TTL = 3600  # seconds
 
 
 async def type_name_to_id(db: AsyncSession, name: str) -> int | None:
@@ -59,6 +65,17 @@ async def search_systems(db: AsyncSession, query: str, limit: int = 8) -> list[d
     ]
 
 
+async def system_ids_to_names(db: AsyncSession, system_ids: list[int]) -> dict[int, str]:
+    """Bulk resolve system IDs to names. Returns {system_id: name}."""
+    if not system_ids:
+        return {}
+    result = await db.execute(
+        select(SDESystem.system_id, SDESystem.system_name)
+        .where(SDESystem.system_id.in_(system_ids))
+    )
+    return {row.system_id: row.system_name for row in result.fetchall()}
+
+
 async def system_name_to_id(db: AsyncSession, name: str) -> int | None:
     result = await db.execute(
         select(SDESystem.system_id).where(func.lower(SDESystem.system_name) == name.lower())
@@ -99,23 +116,28 @@ async def nearest_cloning_facilities(
     BFS across the full jump graph to find nearest NPC stations
     with cloning services. Returns list sorted by jump distance.
     """
-    # Load full jump graph into memory (one-time per call, ~30K edges)
-    jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
-    graph: dict[int, list[int]] = {}
-    for row in jumps_result.fetchall():
-        graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+    global _graph_cache, _graph_cache_ts
+    now = datetime.now(timezone.utc)
+    if _graph_cache is None or _graph_cache_ts is None or (now - _graph_cache_ts).total_seconds() > _GRAPH_CACHE_TTL:
+        jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
+        graph: dict[int, list[int]] = {}
+        for row in jumps_result.fetchall():
+            graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+        stations_result = await db.execute(
+            select(SDEStation.station_id, SDEStation.station_name, SDEStation.system_id)
+            .where(SDEStation.has_cloning == True)
+        )
+        cloning: dict[int, list[dict]] = {}
+        for row in stations_result.fetchall():
+            cloning.setdefault(row.system_id, []).append({
+                "station_id": row.station_id,
+                "station_name": row.station_name,
+            })
+        _graph_cache = {"graph": graph, "cloning": cloning}
+        _graph_cache_ts = now
 
-    # Load cloning stations indexed by system_id
-    stations_result = await db.execute(
-        select(SDEStation.station_id, SDEStation.station_name, SDEStation.system_id)
-        .where(SDEStation.has_cloning == True)
-    )
-    cloning_by_system: dict[int, list[dict]] = {}
-    for row in stations_result.fetchall():
-        cloning_by_system.setdefault(row.system_id, []).append({
-            "station_id": row.station_id,
-            "station_name": row.station_name,
-        })
+    graph = _graph_cache["graph"]
+    cloning_by_system = _graph_cache["cloning"]
 
     # BFS
     visited = {start_system_id}

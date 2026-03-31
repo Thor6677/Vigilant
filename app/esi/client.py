@@ -1,7 +1,9 @@
+from __future__ import annotations
 import asyncio
 import httpx
 import json
 import base64
+from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -35,7 +37,7 @@ def get_http_client() -> httpx.AsyncClient:
 # ── In-memory ETag cache for authenticated endpoints ─────────────────────────
 # Key: (path, token_hash) → {etag, data}
 # This avoids re-downloading unchanged character data.
-_etag_cache: dict[str, dict] = {}
+_etag_cache: OrderedDict[str, dict] = OrderedDict()
 _ETAG_CACHE_MAX = 5000
 
 
@@ -80,6 +82,30 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
     return character.access_token
 
 
+async def get_client(character: Character, db: AsyncSession) -> ESIClient:
+    """Get an authenticated ESIClient for a character. Refreshes token if needed."""
+    token = await refresh_token(character, db)
+    return ESIClient(token, db=db)
+
+
+async def get_client_safe(character: Character) -> ESIClient:
+    """Get an authenticated ESIClient using an isolated DB session for token refresh.
+
+    Use this when running concurrent operations (asyncio.gather) to avoid
+    shared-session conflicts.
+    """
+    from app.db.models import AsyncSessionLocal
+    async with AsyncSessionLocal() as token_db:
+        result = await token_db.execute(
+            select(Character).where(Character.character_id == character.character_id)
+        )
+        char_fresh = result.scalar_one_or_none()
+        if not char_fresh:
+            raise ValueError(f"Character {character.character_id} not found")
+        token = await refresh_token(char_fresh, token_db)
+    return ESIClient(token)
+
+
 class ESIClient:
     def __init__(self, token: str, db: AsyncSession = None):
         self.token = token
@@ -117,8 +143,9 @@ class ESIClient:
         for e in events:
             asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
 
-        # Handle 304 Not Modified — return cached data
+        # Handle 304 Not Modified — return cached data (mark as recently used)
         if resp.status_code == 304 and cached_entry:
+            _etag_cache.move_to_end(ek)
             return cached_entry["data"]
 
         if resp.status_code == 429:
@@ -136,15 +163,11 @@ class ESIClient:
         resp.raise_for_status()
         data = resp.json()
 
-        # Store ETag for next request
+        # Store ETag for next request (LRU eviction)
         etag = resp.headers.get("etag")
         if etag:
-            # Evict oldest entries if cache is too large
-            if len(_etag_cache) >= _ETAG_CACHE_MAX:
-                # Remove ~20% of entries
-                keys_to_remove = list(_etag_cache.keys())[:_ETAG_CACHE_MAX // 5]
-                for k in keys_to_remove:
-                    _etag_cache.pop(k, None)
+            while len(_etag_cache) >= _ETAG_CACHE_MAX:
+                _etag_cache.popitem(last=False)  # Remove least-recently-used
             _etag_cache[ek] = {"etag": etag, "data": data}
 
         return data

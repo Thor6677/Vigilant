@@ -1,0 +1,33 @@
+{% if not items %}
+<div class="b-empty">No items found in corp hangars at this structure.</div>
+{% else %}
+{% for item in items %}
+<div class="b-row" style="gap:0.4rem;padding:0.35rem 0.75rem;"
+     data-scan-item
+     data-type-id="{{ item.type_id }}"
+     data-type-name="{{ item.type_name }}"
+     data-location-id="{{ item.location_id }}"
+     data-location-name="{{ location_name }}"
+     data-flag="{{ item.flag }}">
+    <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
+         style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
+         onerror="this.style.display='none'">
+    <span style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ item.type_name }}
+        <span style="color:var(--muted);font-size:9px;">{{ item.flag_label }}</span>
+    </span>
+    <span style="font-size:11px;color:var(--accent);min-width:40px;text-align:right;">{{ item.quantity }}</span>
+    {% if item.monitored %}
+    <span style="font-size:9px;color:var(--success);min-width:60px;text-align:center;">Tracked</span>
+    {% else %}
+    <input type="number" class="scan-low" value="10" min="0" title="Low threshold"
+           style="width:50px;padding:0.2rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;text-align:center;">
+    <input type="number" class="scan-critical" value="5" min="0" title="Critical threshold"
+           style="width:50px;padding:0.2rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;text-align:center;">
+    <button onclick="addScanItem(this)" class="b-btn" style="flex:none;padding:0.2rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+        Track
+    </button>
+    {% endif %}
+</div>
+{% endfor %}
+{% endif %}

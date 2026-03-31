@@ -165,8 +165,8 @@ async def fetch_skill_data(characters: list[Character], db: AsyncSession) -> lis
             raw_data[char.character_id] = "no_scope"
             continue
         try:
-            token = await refresh_token(char, db)
-            client = ESIClient(token, db=db)
+            from app.esi.client import get_client
+            client = await get_client(char, db)
             queue = await esi_char.get_skill_queue(client, char.character_id)
             raw_data[char.character_id] = queue
         except Exception:
@@ -197,46 +197,6 @@ def _group_characters(characters: list[Character]) -> dict[str, list[Character]]
 async def characters_page(request: Request, sort: str = "default", db: AsyncSession = Depends(get_db)):
     # Characters are now on the dashboard
     return RedirectResponse(f"/dashboard?sort={sort}")
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return RedirectResponse("/")
-    active_id = request.session.get("active_character_id")
-
-    result = await db.execute(select(Character).where(Character.user_id == user_id))
-    characters = result.scalars().all()
-    active_char = next((c for c in characters if c.character_id == active_id), None)
-
-    needs_reauth_count = sum(
-        1 for c in characters
-        if "esi-skills.read_skillqueue.v1" not in (c.scopes or "")
-    )
-
-    sorted_chars = _sort_characters(list(characters), sort)
-    groups = _group_characters(sorted_chars) if sort == "custom" else {}
-
-    skill_data = await fetch_skill_data(list(characters), db)
-    skill_map = {item["char"].character_id: item for item in skill_data}
-
-    if sort == "training":
-        sorted_chars = sorted(
-            sorted_chars,
-            key=lambda c: 0 if skill_map.get(c.character_id, {}).get("current_skill") else 1
-        )
-    elif sort == "queue":
-        sorted_chars = sorted(
-            sorted_chars,
-            key=lambda c: skill_map.get(c.character_id, {}).get("queue_end") or datetime.max.replace(tzinfo=timezone.utc)
-        )
-
-    return templates.TemplateResponse("characters.html", {
-        "request": request,
-        "characters": sorted_chars,
-        "groups": groups,
-        "active_char": active_char,
-        "sort": sort,
-        "skill_map": skill_map,
-        "needs_reauth_count": needs_reauth_count,
-    })
 
 
 @router.post("/characters/reorder")

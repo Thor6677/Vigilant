@@ -1,0 +1,33 @@
+<div id="inventory-alerts" hx-get="/alerts/inventory-banners" hx-trigger="every 60s" hx-swap="outerHTML">
+{% for alert in alerts %}
+<div class="structure-alert-banner is-danger"
+     data-alert-id="inv-{{ alert.id }}" style="display:none;">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <img src="https://images.evetech.net/types/{{ alert.type_id }}/icon?size=32"
+             style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
+             onerror="this.style.display='none'">
+        <span class="alert-text">
+            <strong>Inventory Critical</strong> &mdash; {{ alert.type_name }}
+            at <strong>{{ alert.location_name }}</strong>
+            <span style="color:var(--text);font-size:10px;">({{ alert.current_quantity }}/{{ alert.threshold_critical }})</span>
+        </span>
+    </div>
+    <a href="/corporations/{{ alert.corp_id }}/inventory" style="font-size:9px;color:var(--muted);text-decoration:none;flex-shrink:0;margin-right:0.5rem;">View</a>
+    <button class="alert-dismiss" onclick="dismissStructureAlert('inv-{{ alert.id }}')" title="Dismiss">&times;</button>
+</div>
+{% endfor %}
+<script>
+(function() {
+    var KEY = 'vigilant_dismissed_alerts';
+    function getDismissed() {
+        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
+    }
+    var dismissed = getDismissed();
+    var banners = document.querySelectorAll('#inventory-alerts .structure-alert-banner[data-alert-id]');
+    for (var i = 0; i < banners.length; i++) {
+        var aid = banners[i].getAttribute('data-alert-id');
+        if (!dismissed[aid]) banners[i].style.display = '';
+    }
+})();
+</script>
+</div>

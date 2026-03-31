@@ -231,11 +231,7 @@ async def character_mining(
         system_ids = list({e["solar_system_id"] for e in raw})
         type_names = await sde.type_ids_to_names(db, type_ids) if type_ids else {}
 
-        system_names = {}
-        for sid in system_ids:
-            info = await sde.system_info(db, sid)
-            if info:
-                system_names[sid] = info["system_name"]
+        system_names = await sde.system_ids_to_names(db, system_ids) if system_ids else {}
 
         price_map = await _get_price_map(db, set(type_ids))
         data = _aggregate_ledger(raw, type_names, system_names, price_map)
@@ -312,11 +308,7 @@ async def corp_mining(
         system_ids = list({e["solar_system_id"] for e in all_raw})
         type_names = await sde.type_ids_to_names(db, type_ids) if type_ids else {}
 
-        system_names = {}
-        for sid in system_ids:
-            info = await sde.system_info(db, sid)
-            if info:
-                system_names[sid] = info["system_name"]
+        system_names = await sde.system_ids_to_names(db, system_ids) if system_ids else {}
 
         price_map = await _get_price_map(db, set(type_ids))
         data = _aggregate_ledger(all_raw, type_names, system_names, price_map)

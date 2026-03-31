@@ -159,6 +159,19 @@ def solve_compression(
 
     Returns dict with ores list, totals, surplus.
     """
+    _empty = {"ores": [], "total_isk": 0, "total_volume": 0,
+              "minerals_produced": {}, "minerals_surplus": {}}
+
+    # Input validation
+    for mid, qty in target_minerals.items():
+        if qty < 0:
+            return {**_empty, "error": f"Negative quantity for mineral {mid}"}
+    for oid, price in ore_prices.items():
+        if isinstance(price, float) and (math.isnan(price) or math.isinf(price)):
+            return {**_empty, "error": f"Invalid price for ore {oid}"}
+    if mode not in ("isk", "volume", "waste"):
+        return {**_empty, "error": f"Unknown mode: {mode}"}
+
     # Filter to ores that produce at least one needed mineral and have a price
     relevant_minerals = {mid for mid, qty in target_minerals.items() if qty > 0}
     if not relevant_minerals:

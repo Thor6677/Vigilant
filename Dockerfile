@@ -13,7 +13,7 @@ COPY . .
 
 RUN mkdir -p /data
 
-ENV DATABASE_URL=sqlite+aiosqlite:////data/capsuleerai.db
+ENV DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
 
 EXPOSE 8000
 

@@ -66,6 +66,50 @@ def _emit_notification(user_id: int, event: dict):
 # Track which skills we've already notified about: {character_id: set(skill_id_level)}
 _notified_skills: dict[int, set] = {}
 
+# Track which ESI notification IDs we've already emitted browser alerts for
+_notified_esi_ids: dict[int, set] = {}
+_NOTIFIED_ESI_MAX = 200  # cap per-char to prevent unbounded growth
+
+# Dedup corp-wide alerts across characters: {user_id: set((type, timestamp))}
+_emitted_alert_keys: dict[int, set] = {}
+_EMITTED_ALERT_MAX = 200
+
+# ESI notification types that trigger browser alerts
+_STRUCTURE_ALERT_TYPES = {
+    "StructureUnderAttack", "StructureLostShields", "StructureLostArmor",
+    "StructureDestroyed", "StructureFuelAlert", "StructureServicesOffline",
+    "StructureAnchoring", "StructureUnanchoring", "StructureOnline",
+    "TowerAlertMsg", "TowerResourceAlertMsg",
+    "OrbitalAttacked", "OrbitalReinforced",
+    "MoonminingExtractionStarted", "MoonminingExtractionFinished",
+    "MoonminingAutomaticFracture", "MoonminingLaserFired",
+    "SkyhookDestructionImminent",
+    "SovStructureReinforced", "SovCommandNodeEventStarted",
+}
+
+_STRUCTURE_ALERT_LABELS = {
+    "StructureUnderAttack": "Structure Under Attack",
+    "StructureLostShields": "Structure Lost Shields",
+    "StructureLostArmor": "Structure Lost Armor",
+    "StructureDestroyed": "Structure Destroyed",
+    "StructureFuelAlert": "Fuel Alert",
+    "StructureServicesOffline": "Services Offline",
+    "StructureAnchoring": "Structure Anchoring",
+    "StructureUnanchoring": "Structure Unanchoring",
+    "StructureOnline": "Structure Online",
+    "TowerAlertMsg": "POS Alert",
+    "TowerResourceAlertMsg": "POS Fuel Alert",
+    "OrbitalAttacked": "POCO Attacked",
+    "OrbitalReinforced": "POCO Reinforced",
+    "MoonminingExtractionStarted": "Moon Extraction Started",
+    "MoonminingExtractionFinished": "Moon Chunk Ready",
+    "MoonminingAutomaticFracture": "Moon Auto-Fracture",
+    "MoonminingLaserFired": "Moon Laser Fired",
+    "SkyhookDestructionImminent": "Skyhook Threatened",
+    "SovStructureReinforced": "Sov Reinforced",
+    "SovCommandNodeEventStarted": "Sov Node Event",
+}
+
 
 async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: dict, db):
     """Compare old vs new cached data and emit notification events.
@@ -182,6 +226,63 @@ async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: d
                 "body": f"{char_name} — {diff} new message{'s' if diff > 1 else ''}",
                 "icon": portrait,
             })
+
+    # 5. Structure / POS / moon / sov alerts from ESI notifications
+    new_notifs = new_cache.get("notifications")
+    if isinstance(new_notifs, dict):
+        notif_list = new_notifs.get("notifications", [])
+        if cid not in _notified_esi_ids:
+            # First sync: seed most IDs as "seen", but leave recent structure
+            # alerts (< 48h) unseeded so they fire on the NEXT sync cycle.
+            now_ts = datetime.now(timezone.utc)
+            seed_ids = set()
+            for n in notif_list:
+                nid = n.get("notification_id")
+                if not nid:
+                    continue
+                ntype = n.get("type", "")
+                if ntype in _STRUCTURE_ALERT_TYPES:
+                    try:
+                        ts = datetime.fromisoformat(n.get("timestamp", "").replace("Z", "+00:00"))
+                        if (now_ts - ts).total_seconds() < 48 * 3600:
+                            continue  # Don't seed — let it fire as new
+                    except Exception:
+                        pass
+                seed_ids.add(nid)
+            _notified_esi_ids[cid] = seed_ids
+        else:
+            seen = _notified_esi_ids[cid]
+            if user_id not in _emitted_alert_keys:
+                _emitted_alert_keys[user_id] = set()
+            emitted = _emitted_alert_keys[user_id]
+            # Collect new alerts, dedup by type (not per-event) to avoid spam
+            new_alerts: dict[str, int] = {}  # type -> count of new events
+            for n in notif_list:
+                nid = n.get("notification_id")
+                ntype = n.get("type", "")
+                if nid and nid not in seen and ntype in _STRUCTURE_ALERT_TYPES:
+                    new_alerts[ntype] = new_alerts.get(ntype, 0) + 1
+                if nid:
+                    seen.add(nid)
+            for ntype, count in new_alerts.items():
+                if ntype not in emitted:
+                    emitted.add(ntype)
+                    label = _STRUCTURE_ALERT_LABELS.get(ntype, ntype)
+                    body = f"{label} ({count})" if count > 1 else label
+                    _emit_notification(user_id, {
+                        "type": "structure_alert",
+                        "title": label,
+                        "body": body,
+                        "icon": portrait,
+                    })
+            # Cap emitted keys
+            if len(emitted) > _EMITTED_ALERT_MAX:
+                _emitted_alert_keys[user_id] = set()
+            # Cap the set size
+            if len(seen) > _NOTIFIED_ESI_MAX:
+                # Keep only IDs still present in the current notification list
+                current_ids = {n.get("notification_id") for n in notif_list if n.get("notification_id")}
+                _notified_esi_ids[cid] = current_ids
 
 # Semaphore for concurrent character syncing — allows up to N characters
 # to sync in parallel instead of strict serialisation.
@@ -352,17 +453,12 @@ async def _client_for(char: Character, db: AsyncSession) -> tuple[ESIClient | No
     fetches inside asyncio.gather() don't race on the same SQLAlchemy session
     or fire duplicate SSO refresh requests (EVE rotates refresh tokens).
     """
+    from app.esi.client import get_client_safe
     async with _get_token_lock(char.character_id):
         try:
-            async with AsyncSessionLocal() as token_db:
-                result = await token_db.execute(
-                    select(Character).where(Character.character_id == char.character_id)
-                )
-                char_fresh = result.scalar_one_or_none()
-                if char_fresh is None:
-                    return None, "character_not_found"
-                token = await refresh_token(char_fresh, token_db)
-            return ESIClient(token, db=db), None
+            client = await get_client_safe(char)
+            client.db = db  # Attach request-scoped db for cache operations
+            return client, None
         except Exception as e:
             logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
             return None, f"token_refresh_failed: {type(e).__name__}"
@@ -963,18 +1059,14 @@ async def _sync_task(character_id: int):
                 if stale_fields:
                     for sf in stale_fields:
                         col = _FIELD_DB_COLUMN.get(sf)
-                        if sf == "skillqueue" and cache.skillqueue_json:
-                            try: _old_cache["skillqueue"] = json.loads(cache.skillqueue_json)
-                            except Exception: pass
-                        elif sf == "industry" and cache.industry_json:
-                            try: _old_cache["industry"] = json.loads(cache.industry_json)
-                            except Exception: pass
-                        elif sf == "pi" and cache.pi_json:
-                            try: _old_cache["pi"] = json.loads(cache.pi_json)
-                            except Exception: pass
-                        elif sf == "mail" and cache.mail_json:
-                            try: _old_cache["mail"] = json.loads(cache.mail_json)
-                            except Exception: pass
+                        json_attr = f"{sf}_json" if sf != "wallet" else None
+                        if json_attr and sf in ("skillqueue", "industry", "pi", "mail", "notifications"):
+                            raw = getattr(cache, json_attr, None)
+                            if raw:
+                                try:
+                                    _old_cache[sf] = json.loads(raw)
+                                except (json.JSONDecodeError, TypeError) as e:
+                                    logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
 
                 if stale_fields:
                     results = await asyncio.gather(
@@ -1018,18 +1110,13 @@ async def _sync_task(character_id: int):
                 # Detect notification events by comparing old vs new data
                 if _old_cache and char.user_id:
                     _new_cache = {}
-                    if cache.skillqueue_json:
-                        try: _new_cache["skillqueue"] = json.loads(cache.skillqueue_json)
-                        except Exception: pass
-                    if cache.industry_json:
-                        try: _new_cache["industry"] = json.loads(cache.industry_json)
-                        except Exception: pass
-                    if cache.pi_json:
-                        try: _new_cache["pi"] = json.loads(cache.pi_json)
-                        except Exception: pass
-                    if cache.mail_json:
-                        try: _new_cache["mail"] = json.loads(cache.mail_json)
-                        except Exception: pass
+                    for field in ("skillqueue", "industry", "pi", "mail", "notifications"):
+                        raw = getattr(cache, f"{field}_json", None)
+                        if raw:
+                            try:
+                                _new_cache[field] = json.loads(raw)
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.warning("Corrupt %s cache for char %s: %s", field, character_id, e)
                     try:
                         await _detect_notifications(char, _old_cache, _new_cache, db)
                     except Exception as notif_err:
@@ -1063,6 +1150,25 @@ async def _cleanup_old_snapshots():
         await db.commit()
         if result.rowcount:
             logger.info("Cleaned up %d old WalletSnapshot rows", result.rowcount)
+
+
+async def _check_all_inventory_thresholds():
+    """Check all users' inventory thresholds against live corp assets."""
+    from app.db.models import CorpInventoryThreshold
+    from app.routes.corporations import check_corp_inventory
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(
+                CorpInventoryThreshold.user_id,
+                CorpInventoryThreshold.corp_id,
+            ).distinct()
+        )
+        pairs = result.fetchall()
+        for user_id, corp_id in pairs:
+            try:
+                await check_corp_inventory(user_id, corp_id, db, emit_notifications=True)
+            except Exception as e:
+                logger.debug("Inventory check failed for user %s corp %s: %s", user_id, corp_id, e)
 
 
 async def _sync_all_task(character_ids: list[int]):
@@ -1150,8 +1256,17 @@ async def _background_scheduler():
             except Exception as e:
                 logger.warning("Background scheduler error: %s", e)
 
-            # Daily WalletSnapshot cleanup
+            # Inventory threshold check (every 5 minutes)
             now = datetime.now(timezone.utc)
+            if not hasattr(_background_scheduler, '_last_inv_check') or \
+               (now - _background_scheduler._last_inv_check).total_seconds() >= 300:
+                try:
+                    await _check_all_inventory_thresholds()
+                    _background_scheduler._last_inv_check = now
+                except Exception as e:
+                    logger.warning("Inventory check error: %s", e)
+
+            # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
                 try:
                     await _cleanup_old_snapshots()
@@ -1379,7 +1494,6 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "characters": characters,
-        "active_char": active_char,
         "cache_stats": stats,
         "skill_groups": skill_groups,
         "wallets": wallets,
@@ -1481,6 +1595,188 @@ async def notifications_dismiss(request: Request):
     return JSONResponse({"ok": True})
 
 
+def _parse_notif_text(text: str) -> dict:
+    """Extract key-value pairs from ESI notification YAML text."""
+    fields: dict[str, str] = {}
+    if not text:
+        return fields
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if ":" in line and not line.startswith("-"):
+            key, _, val = line.partition(":")
+            val = val.strip()
+            if val:
+                fields[key.strip()] = val
+    return fields
+
+
+@router.get("/alerts/structure-banners", response_class=HTMLResponse)
+async def structure_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return persistent banner HTML for active structure/fuel alerts."""
+    _empty = '<div id="structure-alerts" hx-get="/alerts/structure-banners" hx-trigger="every 60s" hx-swap="outerHTML"></div>'
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse(_empty)
+
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = result.scalars().all()
+    char_ids = [c.character_id for c in characters]
+
+    if not char_ids:
+        return HTMLResponse(_empty)
+
+    cache_result = await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(char_ids))
+    )
+    caches = cache_result.scalars().all()
+
+    DANGER_TYPES = {
+        "StructureUnderAttack", "StructureLostShields", "StructureLostArmor",
+        "StructureDestroyed", "TowerAlertMsg", "OrbitalAttacked",
+    }
+    WARN_TYPES = {
+        "StructureFuelAlert", "StructureServicesOffline", "TowerResourceAlertMsg",
+    }
+    BANNER_TYPES = DANGER_TYPES | WARN_TYPES
+
+    # Collect all banner-worthy notifications, dedup by (type, timestamp)
+    seen_keys: dict[tuple, dict] = {}  # (type, timestamp) -> first notification data
+    for cache in caches:
+        if not cache.notifications_json:
+            continue
+        try:
+            data = json.loads(cache.notifications_json)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for n in data.get("notifications", []):
+            ntype = n.get("type", "")
+            if ntype not in BANNER_TYPES:
+                continue
+            dedup_key = (ntype, n.get("timestamp", ""))
+            if dedup_key in seen_keys:
+                continue  # Already have this event from another character
+            seen_keys[dedup_key] = n
+
+    # Collect IDs we need to resolve from SDE
+    system_ids: set[int] = set()
+    type_ids: set[int] = set()
+    for n in seen_keys.values():
+        fields = _parse_notif_text(n.get("text", ""))
+        sid = fields.get("solarsystemID") or fields.get("solarSystemID")
+        if sid:
+            try: system_ids.add(int(sid))
+            except ValueError: pass
+        tid = fields.get("structureTypeID")
+        if tid:
+            try: type_ids.add(int(tid))
+            except ValueError: pass
+
+    # Batch resolve names
+    system_names: dict[int, str] = {}
+    type_names: dict[int, str] = {}
+    if system_ids:
+        from app.db.sde_models import SDESystem
+        sr = await db.execute(
+            select(SDESystem.system_id, SDESystem.system_name)
+            .where(SDESystem.system_id.in_(system_ids))
+        )
+        system_names = {r.system_id: r.system_name for r in sr.fetchall()}
+    if type_ids:
+        type_names = await sde.type_ids_to_names(db, list(type_ids))
+
+    # Build enriched alert list
+    alerts = []
+    for (ntype, ts), n in seen_keys.items():
+        severity = "danger" if ntype in DANGER_TYPES else "warn"
+        label = _STRUCTURE_ALERT_LABELS.get(ntype, ntype)
+        fields = _parse_notif_text(n.get("text", ""))
+
+        # Resolve system name
+        sid_str = fields.get("solarsystemID") or fields.get("solarSystemID")
+        system_name = None
+        if sid_str:
+            try: system_name = system_names.get(int(sid_str))
+            except ValueError: pass
+
+        # Resolve structure type name
+        tid_str = fields.get("structureTypeID")
+        struct_type = None
+        if tid_str:
+            try: struct_type = type_names.get(int(tid_str))
+            except ValueError: pass
+
+        # Attacker info (for StructureUnderAttack)
+        attacker = fields.get("corpName")
+        alliance = fields.get("allianceName")
+        attacker_label = None
+        if attacker:
+            attacker_label = f"{attacker} [{alliance}]" if alliance else attacker
+
+        # Shield/armor/hull percentages
+        shield = fields.get("shieldPercentage")
+        armor = fields.get("armorPercentage")
+        hull = fields.get("hullPercentage")
+        hp_label = None
+        if shield is not None and ntype in ("StructureUnderAttack",):
+            try:
+                hp_label = f"S:{float(shield):.0f}% A:{float(armor):.0f}% H:{float(hull):.0f}%"
+            except (ValueError, TypeError):
+                pass
+
+        alerts.append({
+            "id": n.get("notification_id"),
+            "severity": severity,
+            "label": label,
+            "timestamp": ts,
+            "system_name": system_name,
+            "struct_type": struct_type,
+            "attacker": attacker_label,
+            "hp": hp_label,
+        })
+
+    alerts.sort(key=lambda a: a["timestamp"], reverse=True)
+    return templates.TemplateResponse("partials/structure_alert_banners.html", {
+        "request": request, "alerts": alerts,
+    })
+
+
+@router.get("/alerts/inventory-banners", response_class=HTMLResponse)
+async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
+    """Persistent banners for critical inventory levels."""
+    _empty = '<div id="inventory-alerts" hx-get="/alerts/inventory-banners" hx-trigger="every 60s" hx-swap="outerHTML"></div>'
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse(_empty)
+
+    from app.db.models import CorpInventoryThreshold
+    result = await db.execute(
+        select(CorpInventoryThreshold).where(
+            CorpInventoryThreshold.user_id == user_id,
+            CorpInventoryThreshold.alert_state == "critical",
+        )
+    )
+    critical_items = result.scalars().all()
+
+    if not critical_items:
+        return HTMLResponse(_empty)
+
+    alerts = [{
+        "id": t.id,
+        "type_id": t.type_id,
+        "type_name": t.type_name or f"Type {t.type_id}",
+        "location_name": t.location_name or f"Location {t.location_id}",
+        "current_quantity": t.current_quantity or 0,
+        "threshold_critical": t.threshold_critical,
+        "corp_id": t.corp_id,
+    } for t in critical_items]
+
+    return templates.TemplateResponse("partials/inventory_alert_banners.html", {
+        "request": request, "alerts": alerts,
+    })
+
+
 @router.get("/dashboard/corp-stats", response_class=HTMLResponse)
 async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX lazy-loaded corporation stats for the dashboard summary bar."""
@@ -1529,15 +1825,17 @@ async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db
 
     async def fetch_corp_data(corp_id: int, chars: list[Character]):
         nonlocal corp_wallet_total, corp_active_jobs, corp_done_jobs, corp_expiring_jobs, corp_active_orders
-        scopes = chars[0].scopes or ""
+        all_scopes = set()
+        for c in chars:
+            all_scopes.update((c.scopes or "").split())
 
         try:
             tasks = []
-            if "esi-wallet.read_corporation_wallets.v1" in scopes:
+            if "esi-wallet.read_corporation_wallets.v1" in all_scopes:
                 tasks.append(("wallet", _try_corp_call(chars, esi_corp.get_corporation_wallets, corp_id)))
-            if "esi-industry.read_corporation_jobs.v1" in scopes:
+            if "esi-industry.read_corporation_jobs.v1" in all_scopes:
                 tasks.append(("industry", _try_corp_call(chars, esi_corp.get_corporation_jobs, corp_id)))
-            if "esi-markets.read_corporation_orders.v1" in scopes:
+            if "esi-markets.read_corporation_orders.v1" in all_scopes:
                 tasks.append(("orders", _try_corp_call(chars, esi_corp.get_corporation_orders, corp_id)))
 
             if not tasks:

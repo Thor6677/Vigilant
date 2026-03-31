@@ -9,10 +9,11 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character
+from app.db.models import get_db, Character, AsyncSessionLocal
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
+from app.routes.corporations import _try_api_call_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -277,13 +278,9 @@ async def corp_journal(
     characters = list(result.scalars().all())
 
     scope = "esi-wallet.read_corporation_wallets.v1"
-    char = None
-    for c in characters:
-        if c.corporation_id == corp_id and scope in (c.scopes or ""):
-            char = c
-            break
+    corp_chars = [c for c in characters if c.corporation_id == corp_id and scope in (c.scopes or "")]
 
-    if not char:
+    if not corp_chars:
         return templates.TemplateResponse("journal.html", {
             "request": request, "char": characters[0] if characters else None,
             "entries": [], "error": "No character with corp wallet access for this corporation.",
@@ -292,18 +289,33 @@ async def corp_journal(
             "corp_id": corp_id, "division": division,
         })
 
-    try:
-        token = await refresh_token(char, db)
-        client = ESIClient(token, db=db)
+    char = corp_chars[0]  # For template display
 
+    try:
+        # Try each character until one succeeds (handles 403 from missing Director role)
         all_entries = []
-        for p in range(1, min(page + 1, 4)):
-            raw = await esi_corp.get_corporation_wallet_journal(client, corp_id, division, page=p)
-            if not raw:
-                break
-            all_entries.extend(raw)
-            if len(raw) < 2500:
-                break
+        client = None
+        last_error = None
+        for c in corp_chars:
+            try:
+                token = await refresh_token(c, db)
+                client = ESIClient(token, db=db)
+                for p in range(1, min(page + 1, 4)):
+                    raw = await esi_corp.get_corporation_wallet_journal(client, corp_id, division, page=p)
+                    if not raw:
+                        break
+                    all_entries.extend(raw)
+                    if len(raw) < 2500:
+                        break
+                last_error = None
+                break  # Success
+            except Exception as e:
+                last_error = e
+                if "403" not in str(e):
+                    break  # Non-403 error, don't try next char
+
+        if last_error:
+            raise last_error
 
         entity_ids = set()
         for e in all_entries:

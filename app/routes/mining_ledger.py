@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character
+from app.db.models import get_db, AsyncSessionLocal, Character
 from app.esi.client import ESIClient, refresh_token
 from app.routes.mining import _sync_and_fetch_mining, _get_price_map, _aggregate_ledger
 from app.sde import lookup as sde
@@ -93,10 +93,12 @@ async def _fetch_chars_mining(chars: list[Character], db: AsyncSession):
     char_names_used = []
 
     async def _fetch_one(c):
-        token = await refresh_token(c, db)
-        client = ESIClient(token, db=db)
-        entries = await _sync_and_fetch_mining(client, c.character_id, db)
-        return c.character_id, c.character_name, entries
+        # Each character needs its own session to avoid concurrent transaction conflicts
+        async with AsyncSessionLocal() as char_db:
+            token = await refresh_token(c, char_db)
+            client = ESIClient(token, db=char_db)
+            entries = await _sync_and_fetch_mining(client, c.character_id, char_db)
+            return c.character_id, c.character_name, entries
 
     results = await asyncio.gather(*[_fetch_one(c) for c in chars], return_exceptions=True)
     for r in results:
@@ -114,11 +116,7 @@ async def _fetch_chars_mining(chars: list[Character], db: AsyncSession):
     type_ids = list({e["type_id"] for e in all_raw})
     system_ids = list({e["solar_system_id"] for e in all_raw})
     type_names = await sde.type_ids_to_names(db, type_ids) if type_ids else {}
-    system_names = {}
-    for sid in system_ids:
-        info = await sde.system_info(db, sid)
-        if info:
-            system_names[sid] = info["system_name"]
+    system_names = await sde.system_ids_to_names(db, system_ids) if system_ids else {}
     price_map = await _get_price_map(db, set(type_ids))
 
     # Compute per-char value now that we have prices

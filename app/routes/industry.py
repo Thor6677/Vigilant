@@ -638,32 +638,21 @@ async def compression_calculate(
     # Fetch global average prices (single ESI call, covers all types)
     hub_info = TRADE_HUBS.get(hub, TRADE_HUBS["jita"])
     ore_prices = {}
+    mineral_prices = {}
     try:
         global_prices = await esi_market.get_market_prices(ESIClient("", db=db))
         for p in global_prices:
             tid = p.get("type_id")
+            price = p.get("average_price") or p.get("adjusted_price") or 0
             if tid in filtered_ore_data:
-                ore_prices[tid] = p.get("average_price") or p.get("adjusted_price") or 0
+                ore_prices[tid] = price
+            if mode == "waste" and tid in (34, 35, 36, 37, 38, 39, 40):
+                mineral_prices[tid] = price or 1.0
     except Exception:
         pass
 
     # Remove ores with zero or missing prices
     ore_prices = {k: v for k, v in ore_prices.items() if v > 0}
-
-    # Fetch mineral prices for waste mode
-    mineral_prices = {}
-    if mode == "waste":
-        for p in (await esi_market.get_market_prices(ESIClient("", db=db)) if not ore_prices else []):
-            pass  # prices already fetched above
-        # Extract mineral prices from the same global prices call
-        try:
-            all_prices = await esi_market.get_market_prices(ESIClient("", db=db))
-            for p in all_prices:
-                tid = p.get("type_id")
-                if tid in (34, 35, 36, 37, 38, 39, 40):
-                    mineral_prices[tid] = p.get("average_price") or p.get("adjusted_price") or 1.0
-        except Exception:
-            pass
 
     # Run solver
     result = solve_compression(target, filtered_ore_data, ore_prices, yield_per_ore, mode, mineral_prices)
