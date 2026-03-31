@@ -114,24 +114,60 @@
 
     {# Add new allowlist entry #}
     <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-        <select id="allow-type" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+        <select id="allow-type" onchange="clearAllowlistSearch()" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <option value="character">Character</option>
             <option value="corporation">Corporation</option>
             <option value="alliance">Alliance</option>
         </select>
-        <input type="text" id="allow-id" placeholder="EVE ID" style="width:100px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-        <input type="text" id="allow-name" placeholder="Name (optional, auto-resolved)" style="flex:1;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+        <div style="flex:1;min-width:180px;position:relative;">
+            <input type="text" id="allow-search" placeholder="Search by name…" autocomplete="off"
+                   oninput="searchAllowlist()"
+                   style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <div id="allow-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+        </div>
+        <input type="hidden" id="allow-id" value="">
+        <input type="hidden" id="allow-name" value="">
         <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
                 onclick="addAllowlistEntry()">Add</button>
     </div>
 </div>
 
 <script>
+var _allowSearchTimer = null;
+function searchAllowlist() {
+    clearTimeout(_allowSearchTimer);
+    document.getElementById('allow-id').value = '';
+    document.getElementById('allow-name').value = '';
+    var q = document.getElementById('allow-search').value.trim();
+    var resultsDiv = document.getElementById('allow-results');
+    if (q.length < 3) { resultsDiv.style.display = 'none'; resultsDiv.innerHTML = ''; return; }
+    _allowSearchTimer = setTimeout(function() {
+        var cat = document.getElementById('allow-type').value;
+        fetch('/admin/action/allowlist-search?q=' + encodeURIComponent(q) + '&category=' + cat)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                resultsDiv.innerHTML = html;
+                resultsDiv.style.display = html ? 'block' : 'none';
+            });
+    }, 300);
+}
+function selectAllowlistResult(id, name) {
+    document.getElementById('allow-id').value = id;
+    document.getElementById('allow-name').value = name;
+    document.getElementById('allow-search').value = name;
+    document.getElementById('allow-results').style.display = 'none';
+}
+function clearAllowlistSearch() {
+    document.getElementById('allow-search').value = '';
+    document.getElementById('allow-id').value = '';
+    document.getElementById('allow-name').value = '';
+    document.getElementById('allow-results').style.display = 'none';
+}
 function addAllowlistEntry() {
     var entryType = document.getElementById('allow-type').value;
     var eveId = document.getElementById('allow-id').value.trim();
     var name = document.getElementById('allow-name').value.trim();
-    if (!eveId) { alert('Enter an EVE ID.'); return; }
+    if (!eveId) { alert('Search and select a name first.'); return; }
     htmx.ajax('POST', '/admin/action/allowlist-add', {
         target: '#admin-content', swap: 'innerHTML',
         values: { entry_type: entryType, eve_id: eveId, name: name },

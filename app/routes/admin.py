@@ -607,6 +607,59 @@ async def admin_remove_character(character_id: int, request: Request,
 
 # ── Allowlist management ─────────────────────────────────────────────────────
 
+@router.get("/action/allowlist-search", response_class=HTMLResponse)
+async def admin_allowlist_search(request: Request, db: AsyncSession = Depends(get_db),
+                                 admin: User = Depends(require_admin)):
+    """Search ESI for characters/corporations/alliances by name."""
+    query = request.query_params.get("q", "").strip()
+    category = request.query_params.get("category", "character")
+
+    if len(query) < 3:
+        return HTMLResponse("")
+
+    from app.esi.client import ESIClient
+    client = ESIClient("")
+
+    # ESI search endpoint — returns IDs matching the name
+    categories_map = {"character": "character", "corporation": "corporation", "alliance": "alliance"}
+    esi_cat = categories_map.get(category, "character")
+
+    try:
+        search_data = await client.get_public(
+            "/search/", params={"categories": esi_cat, "search": query, "strict": "false"},
+            bypass_cache=True,
+        )
+        ids = search_data.get(esi_cat, [])[:10]  # Limit to 10 results
+    except Exception:
+        return HTMLResponse('<div style="font-size:10px;color:var(--danger);padding:0.25rem;">Search failed.</div>')
+
+    if not ids:
+        return HTMLResponse('<div style="font-size:10px;color:var(--muted);padding:0.25rem;">No results found.</div>')
+
+    # Resolve names for the IDs via ESI /universe/names/
+    try:
+        names_data = await client.post_public("/universe/names/", ids)
+        results = [{"id": item["id"], "name": item["name"]} for item in names_data]
+    except Exception:
+        results = [{"id": eid, "name": f"ID {eid}"} for eid in ids]
+
+    # Render clickable result rows
+    from html import escape
+    html_parts = []
+    for r in results:
+        safe_name = escape(r["name"], quote=True)
+        html_parts.append(
+            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'cursor:pointer;border-bottom:1px solid var(--border);" '
+            f'onmouseover="this.style.background=\'var(--border)\'" '
+            f'onmouseout="this.style.background=\'none\'" '
+            f'data-id="{r["id"]}" data-name="{safe_name}" '
+            f'onclick="selectAllowlistResult(+this.dataset.id, this.dataset.name)">'
+            f'{safe_name} <span style="color:var(--muted);">({r["id"]})</span></div>'
+        )
+    return HTMLResponse("".join(html_parts))
+
+
 @router.post("/action/allowlist-add", response_class=HTMLResponse)
 async def admin_allowlist_add(request: Request, db: AsyncSession = Depends(get_db),
                               admin: User = Depends(require_admin)):
