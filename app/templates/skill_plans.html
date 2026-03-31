@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}SKILL PLANS — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Skill Plans</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            {{ plans | length }} plan{{ 's' if plans | length != 1 else '' }}
+        </div>
+    </div>
+</div>
+
+{# ── Create New Plan ─────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Create New Plan</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+            <input type="text" id="new-plan-name" placeholder="Plan name…"
+                   style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <button class="b-btn" onclick="createPlan()"
+                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Create
+            </button>
+        </div>
+    </div>
+</div>
+
+{# ── Plan List ───────────────────────────────────────────────────────────── #}
+{% if plans %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Your Plans</span>
+        </div>
+        {% for plan in plans %}
+        <a href="/skill-plans/{{ plan.id }}" class="b-table-row" style="text-decoration:none;cursor:pointer;">
+            <span style="flex:3;display:flex;flex-direction:column;gap:2px;">
+                <span style="font-size:11px;color:var(--text);">{{ plan.name }}</span>
+                {% if plan.description %}
+                <span style="font-size:9px;color:var(--muted);">{{ plan.description[:60] }}</span>
+                {% endif %}
+            </span>
+            <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--accent);">
+                {{ plan.entries | length }} skill{{ 's' if plan.entries | length != 1 else '' }}
+            </span>
+            <span style="flex:0 0 100px;text-align:right;font-size:9px;color:var(--muted);">
+                {{ plan.updated_at.strftime('%Y-%m-%d') if plan.updated_at else '' }}
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% else %}
+<div class="b-empty">No skill plans yet. Create one above to get started.</div>
+{% endif %}
+
+<script>
+function createPlan() {
+    var name = document.getElementById('new-plan-name').value.trim();
+    if (!name) { alert('Enter a plan name.'); return; }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/skill-plans/create';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'name';
+    input.value = name;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+document.getElementById('new-plan-name').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') createPlan();
+});
+</script>
+
+{% endblock %}

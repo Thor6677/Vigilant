@@ -1,0 +1,47 @@
+{# Gap analysis results for a skill plan vs a character #}
+<div style="border-top:1px solid var(--border);">
+    <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 style="width:18px;height:18px;border:1px solid var(--border);" alt="">
+            <span style="font-size:10px;color:var(--text);">{{ char.character_name }}</span>
+        </div>
+        <div style="display:flex;gap:1rem;font-size:10px;">
+            <span style="color:var(--success);">{{ completed }}/{{ total }} complete</span>
+            {% if total_sp > 0 %}
+            <span style="color:var(--muted);">{{ "{:,.0f}".format(total_sp) }} SP needed</span>
+            <span style="color:var(--accent);">{{ total_time }}</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Progress bar #}
+    {% if total > 0 %}
+    <div style="padding:0 0.75rem 0.5rem;">
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+            <div style="height:100%;width:{{ (completed / total * 100) | int }}%;background:var(--success);"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Skill rows #}
+    {% for row in rows %}
+    <div class="b-table-row" style="{% if row.completed %}opacity:0.5;{% endif %}">
+        <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+            {% if row.completed %}
+            <span style="color:var(--success);font-size:10px;">&#10003;</span>
+            {% else %}
+            <span style="color:var(--danger);font-size:10px;">&#9679;</span>
+            {% endif %}
+            <span style="font-size:11px;color:var(--text);">{{ row.skill_name }}</span>
+            <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][row.target_level] }}</span>
+        </span>
+        <span style="flex:0 0 60px;text-align:center;font-size:9px;color:var(--muted);">
+            {{ row.current_level }} &rarr; {{ row.target_level }}
+        </span>
+        <span style="flex:0 0 70px;text-align:right;font-size:10px;color:{% if row.completed %}var(--success){% else %}var(--text){% endif %};">
+            {% if row.completed %}done{% else %}{{ row.time_str }}{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+</div>

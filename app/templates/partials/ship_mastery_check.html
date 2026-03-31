@@ -1,0 +1,95 @@
+{# Character mastery check results for a ship #}
+<div style="border-top:1px solid var(--border);">
+    {# Character header #}
+    <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 style="width:18px;height:18px;border:1px solid var(--border);" alt="">
+            <span style="font-size:10px;color:var(--text);">{{ char.character_name }}</span>
+        </div>
+        <span style="font-size:10px;font-weight:600;color:{% if can_fly %}var(--success){% else %}var(--danger){% endif %};">
+            {% if can_fly %}Can fly{% else %}Cannot fly{% endif %}
+        </span>
+    </div>
+
+    {# Direct requirements check #}
+    {% if direct_reqs %}
+    <div style="padding:0 0.75rem 0.5rem;">
+        <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.25rem;">Requirements</div>
+        {% for r in direct_reqs %}
+        {% set current = trained.get(r.skill_type_id, 0) %}
+        {% set met = current >= r.required_level %}
+        <div style="display:flex;align-items:center;gap:0.4rem;padding:0.15rem 0;">
+            <span style="font-size:10px;color:{% if met %}var(--success){% else %}var(--danger){% endif %};">
+                {% if met %}&#10003;{% else %}&#10007;{% endif %}
+            </span>
+            <span style="flex:1;font-size:10px;color:var(--text);">{{ r.skill_name }}</span>
+            <span style="font-size:9px;color:var(--muted);">{{ current }}/{{ r.required_level }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Mastery levels #}
+    <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);">
+        <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.5rem;">
+            Mastery Progress
+            {% if achieved_level >= 0 %}
+            <span style="color:var(--success);text-transform:none;letter-spacing:0;">
+                — Level {{ ['I', 'II', 'III', 'IV', 'V'][achieved_level] }} achieved
+            </span>
+            {% endif %}
+        </div>
+
+        {# Mastery chevrons #}
+        <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem;">
+            {% set level_names = ['I', 'II', 'III', 'IV', 'V'] %}
+            {% for m in mastery_results %}
+            <div style="text-align:center;flex:1;">
+                <div style="font-size:16px;color:{% if m.complete %}var(--success){% elif m.pct > 0 %}var(--accent){% else %}var(--border){% endif %};">
+                    {% if m.complete %}&#9733;{% else %}&#9734;{% endif %}
+                </div>
+                <div style="font-size:9px;font-weight:600;color:{% if m.complete %}var(--success){% else %}var(--muted){% endif %};">
+                    {{ level_names[m.level] }}
+                </div>
+                <div style="font-size:9px;color:var(--muted);">{{ m.pct }}%</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {# Per-level detail #}
+        {% for m in mastery_results %}
+        {% if not m.complete %}
+        <div style="margin-bottom:0.5rem;padding:0.4rem;border:1px solid var(--border);border-radius:3px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
+                <span style="font-size:10px;font-weight:600;color:var(--accent);">Mastery {{ level_names[m.level] }}</span>
+                <span style="font-size:9px;color:var(--muted);">
+                    {{ m.done }}/{{ m.total }} skills
+                    &middot; {{ "{:,.0f}".format(m.sp_needed) }} SP
+                    &middot; {{ m.time_str }}
+                </span>
+            </div>
+            {# Progress bar #}
+            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:0.3rem;">
+                <div style="height:100%;width:{{ m.pct }}%;background:var(--accent);"></div>
+            </div>
+            {# Missing skills #}
+            {% if m.missing_skills %}
+            {% for s in m.missing_skills %}
+            <div style="display:flex;align-items:center;gap:0.3rem;padding:0.1rem 0;font-size:9px;">
+                <span style="color:var(--danger);">&#9679;</span>
+                <span style="flex:1;color:var(--text);">{{ s.skill_name }}</span>
+                <span style="color:var(--muted);">{{ s.current }} &rarr; {{ s.target }}</span>
+            </div>
+            {% endfor %}
+            {% if m.missing > m.missing_skills | length %}
+            <div style="font-size:9px;color:var(--muted);padding:0.1rem 0;">
+                +{{ m.missing - m.missing_skills | length }} more…
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>

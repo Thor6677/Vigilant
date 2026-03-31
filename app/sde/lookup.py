@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo
+from app.db.sde_models import (
+    SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation,
+    SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
+    SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
+    SDEShipMastery,
+)
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h)
 _graph_cache: dict | None = None
@@ -355,3 +360,226 @@ async def get_type_group_ids(db: AsyncSession, type_ids: list[int]) -> dict[int,
         select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(type_ids))
     )
     return {row.type_id: row.group_id for row in result.fetchall()}
+
+
+# ── Skill planning lookups ───────────────────────────────────────────────────
+
+# EVE attribute ID -> human name mapping
+ATTR_NAMES = {164: "charisma", 165: "intelligence", 166: "memory", 167: "perception", 168: "willpower"}
+
+
+async def get_skill_requirements(db: AsyncSession, type_id: int) -> list[dict]:
+    """Get skill requirements for an item/ship. Returns list of {skill_type_id, skill_name, required_level}."""
+    result = await db.execute(
+        select(SDETypeSkillReq.skill_type_id, SDETypeSkillReq.required_level)
+        .where(SDETypeSkillReq.type_id == type_id)
+    )
+    rows = result.fetchall()
+    if not rows:
+        return []
+    skill_ids = [r.skill_type_id for r in rows]
+    names = await type_ids_to_names(db, skill_ids)
+    return [
+        {"skill_type_id": r.skill_type_id, "skill_name": names.get(r.skill_type_id, f"Skill {r.skill_type_id}"),
+         "required_level": r.required_level}
+        for r in rows
+    ]
+
+
+async def get_full_skill_tree(db: AsyncSession, type_id: int) -> list[dict]:
+    """Recursively resolve all prerequisite skills for an item/ship.
+    Returns a flat list of {skill_type_id, skill_name, required_level} including
+    transitive prerequisites, deduplicated by highest required level."""
+    needed: dict[int, int] = {}  # skill_type_id -> max required level
+
+    async def _walk(tid: int, level: int | None = None):
+        reqs = await db.execute(
+            select(SDETypeSkillReq.skill_type_id, SDETypeSkillReq.required_level)
+            .where(SDETypeSkillReq.type_id == tid)
+        )
+        for row in reqs.fetchall():
+            req_level = row.required_level
+            if level is not None:
+                req_level = min(req_level, level)  # Don't inflate prereq levels
+            current = needed.get(row.skill_type_id, 0)
+            if req_level > current:
+                needed[row.skill_type_id] = req_level
+                # Recurse into this skill's own prerequisites
+                await _walk(row.skill_type_id)
+
+    await _walk(type_id)
+
+    if not needed:
+        return []
+    names = await type_ids_to_names(db, list(needed.keys()))
+    return [
+        {"skill_type_id": sid, "skill_name": names.get(sid, f"Skill {sid}"),
+         "required_level": lvl}
+        for sid, lvl in sorted(needed.items(), key=lambda x: names.get(x[0], ""))
+    ]
+
+
+async def get_skill_info(db: AsyncSession, skill_type_id: int) -> dict | None:
+    """Get skill metadata (primary/secondary attr, rank)."""
+    result = await db.execute(
+        select(SDESkillInfo).where(SDESkillInfo.type_id == skill_type_id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    return {
+        "type_id": row.type_id,
+        "primary_attr": row.primary_attr,
+        "primary_attr_name": ATTR_NAMES.get(row.primary_attr, "unknown"),
+        "secondary_attr": row.secondary_attr,
+        "secondary_attr_name": ATTR_NAMES.get(row.secondary_attr, "unknown"),
+        "rank": row.rank,
+    }
+
+
+async def get_skill_infos(db: AsyncSession, skill_type_ids: list[int]) -> dict[int, dict]:
+    """Bulk fetch skill metadata. Returns {type_id: {primary_attr, secondary_attr, rank, ...}}."""
+    if not skill_type_ids:
+        return {}
+    result = await db.execute(
+        select(SDESkillInfo).where(SDESkillInfo.type_id.in_(skill_type_ids))
+    )
+    out = {}
+    for row in result.scalars().all():
+        out[row.type_id] = {
+            "type_id": row.type_id,
+            "primary_attr": row.primary_attr,
+            "primary_attr_name": ATTR_NAMES.get(row.primary_attr, "unknown"),
+            "secondary_attr": row.secondary_attr,
+            "secondary_attr_name": ATTR_NAMES.get(row.secondary_attr, "unknown"),
+            "rank": row.rank,
+        }
+    return out
+
+
+async def get_ship_mastery(db: AsyncSession, ship_type_id: int) -> dict:
+    """Get mastery data for a ship. Returns {level(0-4): [{certificate_id, name, skills: [...]}]}."""
+    # Get mastery → certificate mappings
+    mastery_result = await db.execute(
+        select(SDEShipMastery.mastery_level, SDEShipMastery.certificate_id)
+        .where(SDEShipMastery.ship_type_id == ship_type_id)
+        .order_by(SDEShipMastery.mastery_level)
+    )
+    mastery_rows = mastery_result.fetchall()
+    if not mastery_rows:
+        return {}
+
+    # Get all referenced certificate IDs
+    cert_ids = list({r.certificate_id for r in mastery_rows})
+
+    # Fetch certificate names
+    cert_result = await db.execute(
+        select(SDECertificate.certificate_id, SDECertificate.name)
+        .where(SDECertificate.certificate_id.in_(cert_ids))
+    )
+    cert_names = {r.certificate_id: r.name for r in cert_result.fetchall()}
+
+    # Fetch certificate skill requirements
+    cs_result = await db.execute(
+        select(SDECertificateSkill)
+        .where(SDECertificateSkill.certificate_id.in_(cert_ids))
+    )
+    # cert_id -> list of skill entries
+    cert_skills: dict[int, list] = {}
+    all_skill_ids: set[int] = set()
+    for cs in cs_result.scalars().all():
+        cert_skills.setdefault(cs.certificate_id, []).append(cs)
+        all_skill_ids.add(cs.skill_type_id)
+
+    # Resolve skill names
+    skill_names = await type_ids_to_names(db, list(all_skill_ids)) if all_skill_ids else {}
+
+    # Mastery level names for certificate skill level lookup
+    LEVEL_FIELDS = ["basic", "standard", "improved", "advanced", "elite"]
+
+    # Build output per mastery level
+    output: dict[int, list] = {}
+    for row in mastery_rows:
+        level = row.mastery_level
+        cert_id = row.certificate_id
+        level_field = LEVEL_FIELDS[level] if level < 5 else "elite"
+
+        skills = []
+        for cs in cert_skills.get(cert_id, []):
+            req_level = getattr(cs, level_field, 0)
+            if req_level and req_level > 0:
+                skills.append({
+                    "skill_type_id": cs.skill_type_id,
+                    "skill_name": skill_names.get(cs.skill_type_id, f"Skill {cs.skill_type_id}"),
+                    "required_level": req_level,
+                })
+
+        output.setdefault(level, []).append({
+            "certificate_id": cert_id,
+            "name": cert_names.get(cert_id, f"Certificate {cert_id}"),
+            "skills": skills,
+        })
+
+    return output
+
+
+async def get_mastery_skills(db: AsyncSession, ship_type_id: int, mastery_level: int) -> list[dict]:
+    """Get all unique skills needed for a specific mastery level of a ship.
+    Includes all skills from level 0 up to the requested level (cumulative).
+    Returns [{skill_type_id, skill_name, required_level}] deduplicated by max level."""
+    mastery_data = await get_ship_mastery(db, ship_type_id)
+    if not mastery_data:
+        return []
+
+    needed: dict[int, int] = {}  # skill_type_id -> max required level
+    for lvl in range(mastery_level + 1):
+        for cert in mastery_data.get(lvl, []):
+            for skill in cert.get("skills", []):
+                sid = skill["skill_type_id"]
+                req = skill["required_level"]
+                if req > needed.get(sid, 0):
+                    needed[sid] = req
+
+    if not needed:
+        return []
+    names = await type_ids_to_names(db, list(needed.keys()))
+    return sorted([
+        {"skill_type_id": sid, "skill_name": names.get(sid, f"Skill {sid}"),
+         "required_level": lvl}
+        for sid, lvl in needed.items()
+    ], key=lambda x: x["skill_name"])
+
+
+async def get_skill_groups(db: AsyncSession) -> list[dict]:
+    """Get all skill groups (categoryID=16). Returns [{group_id, group_name}]."""
+    result = await db.execute(
+        select(SDEGroup.group_id, SDEGroup.group_name)
+        .where(SDEGroup.category_id == 16)
+        .order_by(SDEGroup.group_name)
+    )
+    return [{"group_id": r.group_id, "group_name": r.group_name} for r in result.fetchall()]
+
+
+async def get_skills_in_group(db: AsyncSession, group_id: int) -> list[dict]:
+    """Get all skill types in a group. Returns [{type_id, type_name}]."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name)
+        .where(SDEType.group_id == group_id)
+        .where(SDEType.published == True)
+        .order_by(SDEType.type_name)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.fetchall()]
+
+
+async def search_skills(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
+    """Search skill types by partial name. Only returns items in skill category (category 16 groups)."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEGroup.category_id == 16)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(query.lower()))
+        .order_by(SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.fetchall()]

@@ -14,7 +14,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AsyncSessionLocal
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo
+from app.db.sde_models import (
+    SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
+    SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
+    SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
+    SDEShipMastery,
+)
 
 log = logging.getLogger(__name__)
 
@@ -363,6 +368,162 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDECompressible.__table__, batch)
     count += len(batch)
     log.info(f"Imported {count} compressible type mappings")
+
+    # --- groups (invGroups — for skill group organization) ---
+    log.info("Importing groups...")
+    await db.execute(text("DELETE FROM sde_groups"))
+    await db.commit()
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "groups.jsonl"):
+        name = item.get("name", {})
+        if isinstance(name, dict):
+            name = name.get("en", "")
+        if not name:
+            continue
+        try:
+            batch.append({
+                "group_id": int(item["_key"]),
+                "category_id": item.get("categoryID"),
+                "group_name": name,
+            })
+        except (KeyError, ValueError):
+            continue
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEGroup.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEGroup.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} groups")
+
+    # --- typeDogma (skill requirements + skill metadata) ---
+    # Attribute mapping for skill requirements:
+    #   requiredSkill1: 182 (type_id), 277 (level)
+    #   requiredSkill2: 183 (type_id), 278 (level)
+    #   requiredSkill3: 184 (type_id), 279 (level)
+    #   requiredSkill4: 1285 (type_id), 1286 (level)
+    #   requiredSkill5: 1289 (type_id), 1287 (level)
+    #   requiredSkill6: 1290 (type_id), 1288 (level)
+    # Skill info: 180=primaryAttr, 181=secondaryAttr, 275=rank
+    SKILL_REQ_PAIRS = [
+        (182, 277), (183, 278), (184, 279),
+        (1285, 1286), (1289, 1287), (1290, 1288),
+    ]
+    log.info("Importing typeDogma (skill requirements + skill info)...")
+    await db.execute(text("DELETE FROM sde_type_skill_reqs"))
+    await db.execute(text("DELETE FROM sde_skill_info"))
+    await db.commit()
+    req_count, info_count = 0, 0
+    req_batch, info_batch = [], []
+    for item in _iter_jsonl(zf, "typeDogma.jsonl"):
+        type_id = int(item["_key"])
+        attrs = {a["attributeID"]: a["value"] for a in item.get("dogmaAttributes", [])}
+
+        # Extract skill requirements for this type
+        for skill_attr, level_attr in SKILL_REQ_PAIRS:
+            skill_id = attrs.get(skill_attr)
+            level = attrs.get(level_attr)
+            if skill_id and level and int(skill_id) > 0 and int(level) > 0:
+                req_batch.append({
+                    "type_id": type_id,
+                    "skill_type_id": int(skill_id),
+                    "required_level": int(level),
+                })
+        if len(req_batch) >= 1000:
+            await _bulk_insert(db, SDETypeSkillReq.__table__, req_batch)
+            req_count += len(req_batch)
+            req_batch = []
+
+        # Extract skill metadata (only for skill types: have primary + secondary attrs)
+        primary = attrs.get(180)
+        secondary = attrs.get(181)
+        rank = attrs.get(275)
+        if primary and secondary and rank:
+            info_batch.append({
+                "type_id": type_id,
+                "primary_attr": int(primary),
+                "secondary_attr": int(secondary),
+                "rank": float(rank),
+            })
+        if len(info_batch) >= 1000:
+            await _bulk_insert(db, SDESkillInfo.__table__, info_batch)
+            info_count += len(info_batch)
+            info_batch = []
+
+    await _bulk_insert(db, SDETypeSkillReq.__table__, req_batch)
+    req_count += len(req_batch)
+    await _bulk_insert(db, SDESkillInfo.__table__, info_batch)
+    info_count += len(info_batch)
+    log.info(f"Imported {req_count} skill requirements, {info_count} skill info entries")
+
+    # --- certificates ---
+    log.info("Importing certificates...")
+    await db.execute(text("DELETE FROM sde_certificates"))
+    await db.execute(text("DELETE FROM sde_certificate_skills"))
+    await db.commit()
+    cert_count, cs_count = 0, 0
+    cert_batch, cs_batch = [], []
+    for item in _iter_jsonl(zf, "certificates.jsonl"):
+        cert_id = int(item["_key"])
+        name = item.get("name", {})
+        if isinstance(name, dict):
+            name = name.get("en", "")
+        cert_batch.append({
+            "certificate_id": cert_id,
+            "group_id": item.get("groupID"),
+            "name": name or f"Certificate {cert_id}",
+        })
+        if len(cert_batch) >= 500:
+            await _bulk_insert(db, SDECertificate.__table__, cert_batch)
+            cert_count += len(cert_batch)
+            cert_batch = []
+
+        for st in item.get("skillTypes", []):
+            try:
+                cs_batch.append({
+                    "certificate_id": cert_id,
+                    "skill_type_id": int(st["_key"]),
+                    "basic": int(st.get("basic", 0)),
+                    "standard": int(st.get("standard", 0)),
+                    "improved": int(st.get("improved", 0)),
+                    "advanced": int(st.get("advanced", 0)),
+                    "elite": int(st.get("elite", 0)),
+                })
+            except (KeyError, ValueError):
+                continue
+            if len(cs_batch) >= 1000:
+                await _bulk_insert(db, SDECertificateSkill.__table__, cs_batch)
+                cs_count += len(cs_batch)
+                cs_batch = []
+
+    await _bulk_insert(db, SDECertificate.__table__, cert_batch)
+    cert_count += len(cert_batch)
+    await _bulk_insert(db, SDECertificateSkill.__table__, cs_batch)
+    cs_count += len(cs_batch)
+    log.info(f"Imported {cert_count} certificates, {cs_count} certificate skill entries")
+
+    # --- masteries (ship → mastery level → certificate IDs) ---
+    log.info("Importing ship masteries...")
+    await db.execute(text("DELETE FROM sde_ship_masteries"))
+    await db.commit()
+    count, batch = 0, []
+    for item in _iter_jsonl(zf, "masteries.jsonl"):
+        ship_type_id = int(item["_key"])
+        for level_data in item.get("_value", []):
+            mastery_level = int(level_data["_key"])  # 0-4
+            for cert_id in level_data.get("_value", []):
+                batch.append({
+                    "ship_type_id": ship_type_id,
+                    "mastery_level": mastery_level,
+                    "certificate_id": int(cert_id),
+                })
+                if len(batch) >= 1000:
+                    await _bulk_insert(db, SDEShipMastery.__table__, batch)
+                    count += len(batch)
+                    batch = []
+    await _bulk_insert(db, SDEShipMastery.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} ship mastery entries")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")

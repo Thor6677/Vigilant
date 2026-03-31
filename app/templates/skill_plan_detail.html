@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} — SKILL PLANS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/skill-plans">Skill Plans</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ plan.name }}</span>
+</div>
+{% endblock %}
+{% block content %}
+
+<div class="b-page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;">
+    <div>
+        <h1 class="b-page-title" id="plan-title">{{ plan.name }}</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            {{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <form method="POST" action="/skill-plans/{{ plan.id }}/share" style="display:inline;">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid {% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};color:{% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};font-size:9px;">
+                {% if plan.share_token %}Shared{% else %}Share{% endif %}
+            </button>
+        </form>
+        <form method="POST" action="/skill-plans/{{ plan.id }}/delete"
+              onsubmit="return confirm('Delete this plan?');">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;">
+                Delete
+            </button>
+        </form>
+    </div>
+</div>
+
+{% if plan.share_token %}
+<div class="b-section">
+    <div style="padding:0.4rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <span style="font-size:9px;color:var(--muted);">Share link:</span>
+        <input type="text" id="share-url" readonly
+               value="{{ request.url.scheme }}://{{ request.url.netloc }}/skill-plans/shared/{{ plan.share_token }}"
+               onclick="this.select()"
+               style="flex:1;min-width:200px;padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--accent);font-family:inherit;font-size:9px;">
+        <button class="b-btn" onclick="navigator.clipboard.writeText(document.getElementById('share-url').value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)"
+                style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Copy</button>
+    </div>
+</div>
+{% endif %}
+
+<div class="b-grid-2">
+
+{# ── Left Column: Skills in Plan ─────────────────────────────────────────── #}
+<div>
+
+{# Skill list #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.25rem;">
+            <span class="b-label">Skills</span>
+            <div style="display:flex;gap:0.5rem;font-size:9px;">
+                <a href="#" onclick="exportPlan(event)" style="color:var(--accent);text-decoration:none;">Export</a>
+                {% if entries | length > 1 %}
+                <span style="color:var(--border);">|</span>
+                <span style="color:var(--muted);">Sort:</span>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="name">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
+                </form>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="optimal">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
+                </form>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="level">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if entries %}
+        <div id="skill-list">
+        {% for e in entries %}
+        <div class="b-table-row skill-row" draggable="true" data-id="{{ e.id }}"
+             style="cursor:grab;">
+            <span style="flex:0 0 16px;color:var(--border);font-size:10px;cursor:grab;" title="Drag to reorder">&#9776;</span>
+            <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
+                <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
+            </span>
+            <span style="flex:1;font-size:9px;color:var(--muted);">
+                {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
+                <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
+            </span>
+            <form method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            </form>
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="b-empty">No skills added yet. Use the tools on the right to add skills.</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Export target #}
+<div id="export-area" class="b-section" style="display:none;"></div>
+
+{# Gap Analysis #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Gap Analysis</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+            <select id="gap-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="">Select character…</option>
+                {% for c in characters %}
+                <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                {% endfor %}
+            </select>
+            <button class="b-btn" onclick="runGap()"
+                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Analyze
+            </button>
+        </div>
+        <div id="gap-results"></div>
+    </div>
+</div>
+
+</div>
+
+{# ── Right Column: Add Skills ────────────────────────────────────────────── #}
+<div>
+
+{# Add individual skill #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Add Skill</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <div style="position:relative;">
+                <input type="text" id="skill-search" placeholder="Search skill name…" autocomplete="off"
+                       oninput="searchSkills()"
+                       style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <div id="skill-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <input type="hidden" id="skill-id" value="">
+                <select id="skill-level" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="1">I</option>
+                    <option value="2">II</option>
+                    <option value="3">III</option>
+                    <option value="4">IV</option>
+                    <option value="5">V</option>
+                </select>
+                <button class="b-btn" onclick="addSkill()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Add
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Add from ship #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Add from Ship</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <div style="position:relative;">
+                <input type="text" id="ship-search" placeholder="Search ship name…" autocomplete="off"
+                       oninput="searchShips()"
+                       style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <div id="ship-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+            </div>
+            <input type="hidden" id="ship-id" value="">
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <select id="ship-mode" onchange="toggleMasteryLevel()"
+                        style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="requirements">Skill Requirements</option>
+                    <option value="mastery">Mastery Level</option>
+                </select>
+                <select id="mastery-level" style="display:none;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="0">I</option>
+                    <option value="1">II</option>
+                    <option value="2">III</option>
+                    <option value="3">IV</option>
+                    <option value="4">V</option>
+                </select>
+                <button class="b-btn" onclick="addFromShip()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Add
+                </button>
+                <a id="ship-link" href="#" style="display:none;font-size:9px;color:var(--accent);">View Ship</a>
+            </div>
+            <div id="ship-result"></div>
+        </div>
+    </div>
+</div>
+
+{# Import from Fitting (EFT) #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Import from Fitting</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea id="fitting-text" placeholder="Paste EFT fitting…&#10;[Loki, Shield Loki]&#10;Damage Control II&#10;Ballistic Control System II&#10;…"
+                      style="width:100%;height:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;padding:0.4rem;resize:vertical;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="b-btn" onclick="importFitting()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Import
+                </button>
+                <div id="fitting-result" style="flex:1;"></div>
+            </div>
+            <div style="font-size:9px;color:var(--muted);">
+                Adds all skill requirements for ship + every module, rig, drone, etc.
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Import from EVE #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Import Skill List</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea id="import-text" placeholder="Paste skill plan text from EVE…&#10;Example:&#10;Caldari Frigate III&#10;Shield Operation IV&#10;Afterburner III"
+                      style="width:100%;height:100px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;padding:0.4rem;resize:vertical;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="b-btn" onclick="importSkills()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Import
+                </button>
+                <div id="import-result" style="flex:1;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+</div>
+
+<script>
+var planId = {{ plan.id }};
+var _skillTimer = null, _shipTimer = null;
+
+/* ── Skill search ────────────────────────────────────────────────────────── */
+function searchSkills() {
+    clearTimeout(_skillTimer);
+    document.getElementById('skill-id').value = '';
+    var q = document.getElementById('skill-search').value.trim();
+    var r = document.getElementById('skill-results');
+    if (q.length < 2) { r.style.display = 'none'; r.innerHTML = ''; return; }
+    _skillTimer = setTimeout(function() {
+        fetch('/skill-plans/search/skills?q=' + encodeURIComponent(q))
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+    }, 250);
+}
+function selectSkill(id, name) {
+    document.getElementById('skill-id').value = id;
+    document.getElementById('skill-search').value = name;
+    document.getElementById('skill-results').style.display = 'none';
+}
+function addSkill() {
+    var id = document.getElementById('skill-id').value;
+    var level = document.getElementById('skill-level').value;
+    if (!id) { alert('Search and select a skill first.'); return; }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/skill-plans/' + planId + '/add-skill';
+    [{n:'skill_type_id',v:id},{n:'target_level',v:level}].forEach(function(f) {
+        var i = document.createElement('input'); i.type='hidden'; i.name=f.n; i.value=f.v; form.appendChild(i);
+    });
+    document.body.appendChild(form);
+    form.submit();
+}
+
+/* ── Ship search ─────────────────────────────────────────────────────────── */
+function searchShips() {
+    clearTimeout(_shipTimer);
+    document.getElementById('ship-id').value = '';
+    document.getElementById('ship-link').style.display = 'none';
+    var q = document.getElementById('ship-search').value.trim();
+    var r = document.getElementById('ship-results');
+    if (q.length < 2) { r.style.display = 'none'; r.innerHTML = ''; return; }
+    _shipTimer = setTimeout(function() {
+        fetch('/skill-plans/search/ships?q=' + encodeURIComponent(q))
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+    }, 250);
+}
+function selectShip(id, name) {
+    document.getElementById('ship-id').value = id;
+    document.getElementById('ship-search').value = name;
+    document.getElementById('ship-results').style.display = 'none';
+    var link = document.getElementById('ship-link');
+    link.href = '/skill-plans/ship/' + id;
+    link.style.display = '';
+}
+function toggleMasteryLevel() {
+    document.getElementById('mastery-level').style.display =
+        document.getElementById('ship-mode').value === 'mastery' ? '' : 'none';
+}
+function addFromShip() {
+    var id = document.getElementById('ship-id').value;
+    if (!id) { alert('Search and select a ship first.'); return; }
+    var mode = document.getElementById('ship-mode').value;
+    var masteryLvl = document.getElementById('mastery-level').value;
+    htmx.ajax('POST', '/skill-plans/' + planId + '/from-ship', {
+        target: '#ship-result', swap: 'innerHTML',
+        values: { ship_type_id: id, mode: mode, mastery_level: masteryLvl },
+    });
+    setTimeout(function() { location.reload(); }, 1500);
+}
+
+/* ── Import ──────────────────────────────────────────────────────────────── */
+function importSkills() {
+    var text = document.getElementById('import-text').value.trim();
+    if (!text) { alert('Paste skill plan text first.'); return; }
+    htmx.ajax('POST', '/skill-plans/' + planId + '/import', {
+        target: '#import-result', swap: 'innerHTML',
+        values: { skill_text: text },
+    });
+    setTimeout(function() { location.reload(); }, 1500);
+}
+
+/* ── Import fitting ──────────────────────────────────────────────────────── */
+function importFitting() {
+    var text = document.getElementById('fitting-text').value.trim();
+    if (!text) { alert('Paste a fitting first.'); return; }
+    htmx.ajax('POST', '/skill-plans/' + planId + '/from-fitting', {
+        target: '#fitting-result', swap: 'innerHTML',
+        values: { fitting_text: text },
+    });
+    setTimeout(function() { location.reload(); }, 2000);
+}
+
+/* ── Gap analysis ────────────────────────────────────────────────────────── */
+function runGap() {
+    var charId = document.getElementById('gap-char').value;
+    if (!charId) { alert('Select a character first.'); return; }
+    htmx.ajax('GET', '/skill-plans/' + planId + '/gap/' + charId, '#gap-results');
+}
+
+/* ── Export ───────────────────────────────────────────────────────────────── */
+function exportPlan(e) {
+    e.preventDefault();
+    var area = document.getElementById('export-area');
+    if (area.style.display === 'none') {
+        htmx.ajax('GET', '/skill-plans/' + planId + '/export', '#export-area');
+        area.style.display = '';
+    } else {
+        area.style.display = 'none';
+    }
+}
+
+/* ── Drag and Drop ───────────────────────────────────────────────────────── */
+(function() {
+    var list = document.getElementById('skill-list');
+    if (!list) return;
+    var dragEl = null;
+
+    list.addEventListener('dragstart', function(e) {
+        dragEl = e.target.closest('.skill-row');
+        if (dragEl) {
+            dragEl.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+    });
+    list.addEventListener('dragend', function(e) {
+        if (dragEl) dragEl.style.opacity = '1';
+        dragEl = null;
+        list.querySelectorAll('.skill-row').forEach(function(r) { r.style.borderTop = ''; });
+    });
+    list.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var target = e.target.closest('.skill-row');
+        list.querySelectorAll('.skill-row').forEach(function(r) { r.style.borderTop = ''; });
+        if (target && target !== dragEl) {
+            target.style.borderTop = '2px solid var(--accent)';
+        }
+    });
+    list.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var target = e.target.closest('.skill-row');
+        if (target && dragEl && target !== dragEl) {
+            list.insertBefore(dragEl, target);
+            saveOrder();
+        }
+    });
+
+    function saveOrder() {
+        var ids = [];
+        list.querySelectorAll('.skill-row').forEach(function(r) { ids.push(+r.dataset.id); });
+        htmx.ajax('POST', '/skill-plans/' + planId + '/reorder', {
+            values: { order: JSON.stringify(ids) },
+        });
+    }
+})();
+</script>
+
+{% endblock %}

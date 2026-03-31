@@ -108,3 +108,67 @@ class SDEBlueprintInfo(Base):
     product_type_id = Column(Integer, nullable=True, index=True)
     manufacturing_time = Column(Integer, nullable=True)  # seconds
     product_quantity = Column(Integer, nullable=True, default=1)
+
+
+# ── Skill planning SDE tables ───────────────────────────────────────────────
+
+class SDEGroup(Base):
+    """invGroups — item group id/name/category lookup."""
+    __tablename__ = "sde_groups"
+
+    group_id = Column(Integer, primary_key=True)
+    category_id = Column(Integer, nullable=True, index=True)
+    group_name = Column(String, nullable=False)
+
+
+class SDETypeSkillReq(Base):
+    """Skill requirements extracted from typeDogma — what skills an item/ship needs."""
+    __tablename__ = "sde_type_skill_reqs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+    required_level = Column(Integer, nullable=False)
+
+
+class SDESkillInfo(Base):
+    """Skill metadata extracted from typeDogma — primary/secondary attrs + rank."""
+    __tablename__ = "sde_skill_info"
+
+    type_id = Column(Integer, primary_key=True)
+    primary_attr = Column(Integer, nullable=False)    # 164=cha,165=int,166=mem,167=per,168=wil
+    secondary_attr = Column(Integer, nullable=False)
+    rank = Column(Float, nullable=False, default=1.0)
+
+
+class SDECertificate(Base):
+    """EVE certificates (mastery building blocks)."""
+    __tablename__ = "sde_certificates"
+
+    certificate_id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, nullable=True, index=True)
+    name = Column(String, nullable=False)
+
+
+class SDECertificateSkill(Base):
+    """Skills required per certificate at each mastery tier."""
+    __tablename__ = "sde_certificate_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    certificate_id = Column(Integer, nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+    basic = Column(Integer, default=0)       # Mastery I
+    standard = Column(Integer, default=0)    # Mastery II
+    improved = Column(Integer, default=0)    # Mastery III
+    advanced = Column(Integer, default=0)    # Mastery IV
+    elite = Column(Integer, default=0)       # Mastery V
+
+
+class SDEShipMastery(Base):
+    """Maps ships to certificate IDs per mastery level."""
+    __tablename__ = "sde_ship_masteries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ship_type_id = Column(Integer, nullable=False, index=True)
+    mastery_level = Column(Integer, nullable=False)  # 0-4 (I-V)
+    certificate_id = Column(Integer, nullable=False)

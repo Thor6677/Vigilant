@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} — SHARED SKILL PLAN — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">{{ plan.name }}</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            {{ entries | length }} skill{{ 's' if entries | length != 1 else '' }} &middot; Shared plan (read-only)
+        </div>
+    </div>
+</div>
+
+<div class="b-grid-2">
+
+{# ── Left Column: Skills ─────────────────────────────────────────────────── #}
+<div>
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Skills</span>
+        </div>
+        {% if entries %}
+        {% for e in entries %}
+        <div class="b-table-row">
+            <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
+                <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
+            </span>
+            <span style="flex:1;font-size:9px;color:var(--muted);">
+                {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
+                <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
+            </span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty">This plan has no skills.</div>
+        {% endif %}
+    </div>
+</div>
+</div>
+
+{# ── Right Column: Gap Analysis (if logged in) ──────────────────────────── #}
+<div>
+{% if characters %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Check Your Character</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+            <select id="gap-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="">Select character…</option>
+                {% for c in characters %}
+                <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                {% endfor %}
+            </select>
+            <button class="b-btn" onclick="runGap()"
+                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                Analyze
+            </button>
+        </div>
+        <div id="gap-results"></div>
+    </div>
+</div>
+{% else %}
+<div class="b-empty">Log in to check this plan against your characters.</div>
+{% endif %}
+</div>
+
+</div>
+
+{% if characters %}
+<script>
+function runGap() {
+    var charId = document.getElementById('gap-char').value;
+    if (!charId) { alert('Select a character.'); return; }
+    htmx.ajax('GET', '/skill-plans/{{ plan.id }}/gap/' + charId, '#gap-results');
+}
+</script>
+{% endif %}
+
+{% endblock %}

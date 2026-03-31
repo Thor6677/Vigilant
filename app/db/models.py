@@ -186,6 +186,35 @@ class StructureNameCache(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class SkillPlan(Base):
+    """User-created skill training plans."""
+    __tablename__ = "skill_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    share_token = Column(String(16), nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    entries = relationship("SkillPlanEntry", back_populates="plan", cascade="all, delete-orphan",
+                           order_by="SkillPlanEntry.sort_order")
+
+
+class SkillPlanEntry(Base):
+    """Individual skill + target level within a skill plan."""
+    __tablename__ = "skill_plan_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("skill_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+    target_level = Column(Integer, nullable=False)  # 1-5
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    plan = relationship("SkillPlan", back_populates="entries")
+
+
 class AdminAuditLog(Base):
     """Admin audit trail for logins, errors, and admin actions."""
     __tablename__ = "admin_audit_log"

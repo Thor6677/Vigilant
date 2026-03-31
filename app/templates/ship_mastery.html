@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}{{ ship_name }} — SHIP MASTERY — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/skill-plans">Skill Plans</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ ship_name }}</span>
+</div>
+{% endblock %}
+{% block content %}
+
+<div class="b-page-header" style="display:flex;align-items:flex-start;gap:1rem;">
+    <img src="https://images.evetech.net/types/{{ ship_type_id }}/render?size=64"
+         style="width:48px;height:48px;border:1px solid var(--border);" alt="">
+    <div>
+        <h1 class="b-page-title">{{ ship_name }}</h1>
+        {% if group_name %}
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">{{ group_name }}</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="b-grid-2">
+
+{# ── Left Column ─────────────────────────────────────────────────────────── #}
+<div>
+
+{# Direct Skill Requirements #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Required Skills</span>
+            <span style="font-size:10px;color:var(--muted);">to sit in ship</span>
+        </div>
+        {% if direct_reqs %}
+        {% for r in direct_reqs %}
+        <div class="b-table-row">
+            <span style="flex:3;font-size:11px;color:var(--text);">{{ r.skill_name }}</span>
+            <span style="flex:0 0 30px;text-align:right;font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][r.required_level] }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty">No direct skill requirements found.</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Full Skill Tree #}
+{% if full_tree | length > direct_reqs | length %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Full Prerequisite Tree</span>
+            <span style="font-size:10px;color:var(--muted);">{{ full_tree | length }} skills</span>
+        </div>
+        {% for r in full_tree %}
+        <div class="b-table-row">
+            <span style="flex:3;font-size:10px;color:var(--text);">{{ r.skill_name }}</span>
+            <span style="flex:0 0 30px;text-align:right;font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][r.required_level] }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# Mastery Levels #}
+{% if mastery_data %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Mastery Levels</span>
+        </div>
+        {% set mastery_names = ['I', 'II', 'III', 'IV', 'V'] %}
+        {% for level in range(5) %}
+        {% if level in mastery_data %}
+        <div style="border-bottom:1px solid var(--border);padding:0.5rem 0.75rem;">
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;cursor:pointer;"
+                 onclick="this.parentElement.querySelector('.mastery-details').classList.toggle('is-hidden')">
+                <span style="font-size:10px;font-weight:600;color:var(--accent);min-width:20px;">{{ mastery_names[level] }}</span>
+                <span style="font-size:10px;color:var(--muted);">
+                    {{ mastery_data[level] | length }} certificate{{ 's' if mastery_data[level] | length != 1 else '' }}
+                </span>
+                <span style="font-size:9px;color:var(--border);margin-left:auto;">click to expand</span>
+            </div>
+            <div class="mastery-details is-hidden" style="margin-left:1.5rem;">
+                {% for cert in mastery_data[level] %}
+                <div style="margin-bottom:0.35rem;">
+                    <div style="font-size:10px;color:var(--text);font-weight:500;">{{ cert.name }}</div>
+                    {% for skill in cert.skills %}
+                    <div style="font-size:9px;color:var(--muted);padding-left:0.75rem;">
+                        {{ skill.skill_name }}
+                        <span style="color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][skill.required_level] }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+</div>
+
+{# ── Right Column ────────────────────────────────────────────────────────── #}
+<div>
+
+{# Character Check #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Character Check</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+            <select id="check-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="">Select character…</option>
+                {% for c in characters %}
+                <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                {% endfor %}
+            </select>
+            <button class="b-btn" onclick="checkMastery()"
+                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Check
+            </button>
+        </div>
+        <div id="mastery-check-results"></div>
+    </div>
+</div>
+
+{# Quick Actions #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Add to Skill Plan</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <select id="target-plan" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                {% if plans %}
+                {% for p in plans %}
+                <option value="{{ p.id }}">{{ p.name }}</option>
+                {% endfor %}
+                {% else %}
+                <option value="">No plans — create one first</option>
+                {% endif %}
+            </select>
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <select id="add-mode" onchange="toggleMasterySelect()"
+                        style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="requirements">Skill Requirements</option>
+                    <option value="mastery">Mastery Level</option>
+                </select>
+                <select id="add-mastery-level" style="display:none;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="0">I</option>
+                    <option value="1">II</option>
+                    <option value="2">III</option>
+                    <option value="3">IV</option>
+                    <option value="4">V</option>
+                </select>
+                <button class="b-btn" onclick="addToPlan()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Add
+                </button>
+            </div>
+            <div id="add-result"></div>
+        </div>
+    </div>
+</div>
+
+{# Create new plan from ship #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Create New Plan from Ship</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <input type="text" id="new-plan-name" value="{{ ship_name }} Plan"
+                   style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <select id="new-plan-mode" onchange="toggleNewMasterySelect()"
+                        style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="requirements">Skill Requirements</option>
+                    <option value="mastery">Mastery Level</option>
+                </select>
+                <select id="new-plan-mastery" style="display:none;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="0">I</option>
+                    <option value="1">II</option>
+                    <option value="2">III</option>
+                    <option value="3">IV</option>
+                    <option value="4">V</option>
+                </select>
+                <button class="b-btn" onclick="createPlanFromShip()"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--success);color:var(--success);font-size:9px;">
+                    Create Plan
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+</div>
+
+<style>
+.is-hidden { display: none !important; }
+</style>
+
+<script>
+var shipTypeId = {{ ship_type_id }};
+
+function checkMastery() {
+    var charId = document.getElementById('check-char').value;
+    if (!charId) { alert('Select a character first.'); return; }
+    htmx.ajax('GET', '/skill-plans/ship/' + shipTypeId + '/check/' + charId, '#mastery-check-results');
+}
+
+function toggleMasterySelect() {
+    document.getElementById('add-mastery-level').style.display =
+        document.getElementById('add-mode').value === 'mastery' ? '' : 'none';
+}
+function toggleNewMasterySelect() {
+    document.getElementById('new-plan-mastery').style.display =
+        document.getElementById('new-plan-mode').value === 'mastery' ? '' : 'none';
+}
+
+function addToPlan() {
+    var planId = document.getElementById('target-plan').value;
+    if (!planId) { alert('Select or create a plan first.'); return; }
+    var mode = document.getElementById('add-mode').value;
+    var masteryLvl = document.getElementById('add-mastery-level').value;
+    htmx.ajax('POST', '/skill-plans/' + planId + '/from-ship', {
+        target: '#add-result', swap: 'innerHTML',
+        values: { ship_type_id: shipTypeId, mode: mode, mastery_level: masteryLvl },
+    });
+}
+
+function createPlanFromShip() {
+    var name = document.getElementById('new-plan-name').value.trim();
+    if (!name) name = '{{ ship_name }} Plan';
+    var mode = document.getElementById('new-plan-mode').value;
+    var masteryLvl = document.getElementById('new-plan-mastery').value;
+
+    // Step 1: Create the plan, then add skills from ship
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/skill-plans/create';
+    var nameInput = document.createElement('input');
+    nameInput.type = 'hidden'; nameInput.name = 'name'; nameInput.value = name;
+    form.appendChild(nameInput);
+
+    // We'll add skills after redirect — store intent in sessionStorage
+    sessionStorage.setItem('pendingShip', JSON.stringify({
+        ship_type_id: shipTypeId, mode: mode, mastery_level: masteryLvl
+    }));
+    document.body.appendChild(form);
+    form.submit();
+}
+
+// Auto-add ship skills after plan creation redirect
+(function() {
+    var pending = sessionStorage.getItem('pendingShip');
+    if (pending && window.location.pathname.match(/^\/skill-plans\/\d+$/)) {
+        sessionStorage.removeItem('pendingShip');
+        var data = JSON.parse(pending);
+        var planId = window.location.pathname.split('/').pop();
+        htmx.ajax('POST', '/skill-plans/' + planId + '/from-ship', {
+            target: '#ship-result', swap: 'innerHTML',
+            values: data,
+        });
+    }
+})();
+</script>
+
+{% endblock %}
