@@ -14,3 +14,4 @@ build/
 nginx/ssl/
 vigilant.pid
 vigilant.log
+CLAUDE.md
