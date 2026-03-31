@@ -17,11 +17,24 @@
         </div>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <form method="POST" action="/skill-plans/{{ plan.id }}/duplicate" style="display:inline;">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                Save As Copy
+            </button>
+        </form>
         <form method="POST" action="/skill-plans/{{ plan.id }}/share" style="display:inline;">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid {% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};color:{% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};font-size:9px;">
                 {% if plan.share_token %}Shared{% else %}Share{% endif %}
             </button>
         </form>
+        {% if entries %}
+        <form method="POST" action="/skill-plans/{{ plan.id }}/clear"
+              onsubmit="return confirm('Remove all skills from this plan?');">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--warn);color:var(--warn);font-size:9px;">
+                Clear All
+            </button>
+        </form>
+        {% endif %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/delete"
               onsubmit="return confirm('Delete this plan?');">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;">

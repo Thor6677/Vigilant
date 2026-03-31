@@ -176,6 +176,60 @@ async def delete_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     return RedirectResponse("/skill-plans", status_code=302)
 
 
+# ── Clear all skills from plan ───────────────────────────────────────────────
+
+@router.post("/{plan_id}/clear", response_class=HTMLResponse)
+async def clear_plan(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=302)
+
+    result = await db.execute(
+        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
+        .options(selectinload(SkillPlan.entries))
+    )
+    plan = result.scalar_one_or_none()
+    if plan:
+        for entry in list(plan.entries):
+            await db.delete(entry)
+        plan.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+
+# ── Duplicate plan ───────────────────────────────────────────────────────────
+
+@router.post("/{plan_id}/duplicate", response_class=HTMLResponse)
+async def duplicate_plan(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=302)
+
+    result = await db.execute(
+        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
+        .options(selectinload(SkillPlan.entries))
+    )
+    source = result.scalar_one_or_none()
+    if not source:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    new_plan = SkillPlan(user_id=user_id, name=f"{source.name} (Copy)")
+    db.add(new_plan)
+    await db.flush()
+
+    for e in source.entries:
+        db.add(SkillPlanEntry(
+            plan_id=new_plan.id,
+            skill_type_id=e.skill_type_id,
+            target_level=e.target_level,
+            sort_order=e.sort_order,
+        ))
+
+    await db.commit()
+    return RedirectResponse(f"/skill-plans/{new_plan.id}", status_code=302)
+
+
 # ── Rename plan ──────────────────────────────────────────────────────────────
 
 @router.post("/{plan_id}/rename", response_class=HTMLResponse)
