@@ -176,6 +176,16 @@ class RegistrationAllowlist(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class StructureNameCache(Base):
+    """Cache of player-owned structure names resolved via corp structures API."""
+    __tablename__ = "structure_name_cache"
+
+    structure_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    solar_system_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class AdminAuditLog(Base):
     """Admin audit trail for logins, errors, and admin actions."""
     __tablename__ = "admin_audit_log"

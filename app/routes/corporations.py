@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold
 from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
+from app.esi import universe as esi_universe
 from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
@@ -364,6 +365,8 @@ async def corp_detail(
             db
         )
         if raw_structs:
+            # Cache structure names for use across the app
+            await esi_universe.cache_corp_structures(db, raw_structs)
             logger.debug("Got %d raw structures for corp %s", len(raw_structs), corp_id)
             enriched = []
             for s in raw_structs:
@@ -578,10 +581,15 @@ async def corp_inventory_scan(corp_id: int, location_id: int = 0, request: Reque
             "structures", scope_chars, esi_corp.get_corporation_structures, corp_id, db
         )
         if structs:
+            await esi_universe.cache_corp_structures(db, structs)
             for s in structs:
                 if s.get("structure_id") == location_id:
                     location_name = s.get("name", location_name)
                     break
+    if location_name.startswith("Location "):
+        cached = await esi_universe.get_cached_structure_name(db, location_id)
+        if cached:
+            location_name = cached
 
     # Already-monitored items
     existing = await db.execute(
@@ -647,6 +655,7 @@ async def corp_inventory_structures(corp_id: int, request: Request, db: AsyncSes
     )
     html = '<option value="">Select structure...</option>'
     if structs:
+        await esi_universe.cache_corp_structures(db, structs)
         for s in sorted(structs, key=lambda x: x.get("name", "")):
             sid = s.get("structure_id", 0)
             name = s.get("name", "Unknown")

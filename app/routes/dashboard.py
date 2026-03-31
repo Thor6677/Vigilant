@@ -531,10 +531,12 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
                     pass
             elif "structure_id" in loc:
                 try:
-                    struct = await esi_universe.get_structure(client, loc["structure_id"])
+                    struct = await esi_universe.get_structure(client, loc["structure_id"], db=db)
                     result["docked_at"] = struct.get("name", "Unknown Structure")
                 except Exception:
-                    result["docked_at"] = "Unknown Structure"
+                    result["docked_at"] = await esi_universe.get_cached_structure_name(db, loc["structure_id"]) or "Unknown Structure"
+                if result["docked_at"] == "Unknown Structure" and result.get("system_name"):
+                    result["docked_at"] = f"Unknown Structure ({result['system_name']})"
             if ship_data:
                 ship_type_id = ship_data.get("ship_type_id")
                 result["ship_type_id"] = ship_type_id
@@ -892,10 +894,14 @@ async def _resolve_assets_for_character(
     if structure_ids:
         async def _fetch_structure(struct_id):
             try:
-                data = await esi_universe.get_structure(client, struct_id)
+                data = await esi_universe.get_structure(client, struct_id, db=db)
                 sys_id = data.get("solar_system_id")
-                return struct_id, {"system_id": sys_id, "structure_name": data.get("name", "Unknown Structure")}
+                name = data.get("name", "Unknown Structure")
+                return struct_id, {"system_id": sys_id, "structure_name": name}
             except Exception:
+                cached = await esi_universe.get_cached_structure(db, struct_id)
+                if cached:
+                    return struct_id, {"system_id": cached.get("solar_system_id"), "structure_name": cached["name"]}
                 return struct_id, {"system_id": None, "structure_name": "Unknown Structure"}
 
         results = await asyncio.gather(*[_fetch_structure(sid) for sid in structure_ids])
@@ -938,13 +944,16 @@ async def _resolve_assets_for_character(
             struct = structure_cache.get(root_id, {})
             sys_id = struct.get("system_id")
             si = sys_info_cache.get(sys_id) if sys_id else None
+            struct_name = struct.get("structure_name", "Unknown Structure")
+            if struct_name == "Unknown Structure" and si:
+                struct_name = f"Unknown Structure ({si.get('system_name', '')})"
             root_resolved[root_id] = {
                 "location_kind": "structure",
                 "system_id": sys_id,
                 "system_name": si.get("system_name") if si else None,
                 "security": si.get("security") if si else None,
                 "region": si.get("region") if si else None,
-                "location_name": struct.get("structure_name", "Unknown Structure"),
+                "location_name": struct_name,
             }
         else:
             # Unknown — try system info fallback

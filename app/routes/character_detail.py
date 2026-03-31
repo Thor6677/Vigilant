@@ -171,14 +171,32 @@ async def _fetch_assets(character_id: int, char: Character, client: ESIClient, d
             location_names[sys.system_id] = sys.system_name + " (Space)"
 
     # Player structures and unknowns
+    from app.esi import universe as esi_universe
+    from app.sde import lookup as sde
     for loc_id, loc_data in location_groups.items():
         if loc_id not in location_names:
             if loc_data["type"] == "other" and loc_id > 100_000_000:
+                resolved_name = None
                 try:
-                    struct_data = await client.get("/universe/structures/" + str(loc_id) + "/")
-                    location_names[loc_id] = struct_data.get("name", "Structure " + str(loc_id))
+                    struct_data = await esi_universe.get_structure(client, loc_id, db=db)
+                    resolved_name = struct_data.get("name")
+                    sys_id = struct_data.get("solar_system_id")
                 except Exception:
-                    location_names[loc_id] = "Structure " + str(loc_id)
+                    cached = await esi_universe.get_cached_structure(db, loc_id)
+                    if cached:
+                        resolved_name = cached["name"]
+                        sys_id = cached.get("solar_system_id")
+                    else:
+                        resolved_name = None
+                        sys_id = None
+                if resolved_name and resolved_name != "Unknown Structure":
+                    location_names[loc_id] = resolved_name
+                elif sys_id:
+                    sys_info = await sde.system_info(db, sys_id)
+                    sys_name = sys_info.get("system_name") if sys_info else None
+                    location_names[loc_id] = f"Unknown Structure ({sys_name})" if sys_name else "Unknown Structure"
+                else:
+                    location_names[loc_id] = "Unknown Structure"
             else:
                 location_names[loc_id] = "Location " + str(loc_id)
 

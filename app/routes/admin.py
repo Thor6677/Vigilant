@@ -617,34 +617,52 @@ async def admin_allowlist_search(request: Request, db: AsyncSession = Depends(ge
     if len(query) < 3:
         return HTMLResponse("")
 
-    from app.esi.client import ESIClient
-    client = ESIClient("")
+    from app.esi.client import ESIClient, get_client
+    from html import escape
 
-    # ESI search endpoint — returns IDs matching the name
     categories_map = {"character": "character", "corporation": "corporation", "alliance": "alliance"}
     esi_cat = categories_map.get(category, "character")
 
-    try:
-        search_data = await client.get_public(
-            "/search/", params={"categories": esi_cat, "search": query, "strict": "false"},
-            bypass_cache=True,
-        )
-        ids = search_data.get(esi_cat, [])[:10]  # Limit to 10 results
-    except Exception:
-        return HTMLResponse('<div style="font-size:10px;color:var(--danger);padding:0.25rem;">Search failed.</div>')
+    # Try authenticated fuzzy search first (requires esi-search scope)
+    search_scope = "esi-search.search_structures.v1"
+    char_result = await db.execute(
+        select(Character).where(Character.scopes.contains(search_scope)).limit(1)
+    )
+    char = char_result.scalar_one_or_none()
 
-    if not ids:
+    results = []
+    if char:
+        try:
+            client = await get_client(char, db)
+            search_data = await client.get(
+                f"/characters/{char.character_id}/search/",
+                params={"categories": esi_cat, "search": query, "strict": "false"},
+            )
+            ids = search_data.get(esi_cat, [])[:10]
+            if ids:
+                pub_client = ESIClient("")
+                names_data = await pub_client.post_public("/universe/names/", ids)
+                results = [{"id": item["id"], "name": item["name"]} for item in names_data]
+        except Exception:
+            pass  # Fall through to exact-match fallback
+
+    # Fallback: exact match via /universe/ids/ (public, no auth)
+    if not results:
+        universe_cat = {"character": "characters", "corporation": "corporations", "alliance": "alliances"}
+        try:
+            pub_client = ESIClient("")
+            id_data = await pub_client.post_public("/universe/ids/", [query])
+            results = [
+                {"id": item["id"], "name": item["name"]}
+                for item in id_data.get(universe_cat.get(category, "characters"), [])
+            ][:10]
+        except Exception:
+            return HTMLResponse('<div style="font-size:10px;color:var(--danger);padding:0.25rem;">Search failed.</div>')
+
+    if not results:
         return HTMLResponse('<div style="font-size:10px;color:var(--muted);padding:0.25rem;">No results found.</div>')
 
-    # Resolve names for the IDs via ESI /universe/names/
-    try:
-        names_data = await client.post_public("/universe/names/", ids)
-        results = [{"id": item["id"], "name": item["name"]} for item in names_data]
-    except Exception:
-        results = [{"id": eid, "name": f"ID {eid}"} for eid in ids]
-
     # Render clickable result rows
-    from html import escape
     html_parts = []
     for r in results:
         safe_name = escape(r["name"], quote=True)
