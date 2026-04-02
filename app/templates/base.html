@@ -708,7 +708,6 @@
     {% set _path = request.url.path %}
     <div class="b-nav-links">
         <a href="/dashboard" class="b-nav-link {{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
-        <a href="/assets" class="b-nav-link {{ 'is-active' if _path.startswith('/assets') }}">Assets</a>
         <a href="/corporations" class="b-nav-link {{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
         <a href="/skill-plans" class="b-nav-link {{ 'is-active' if _path.startswith('/skill-plans') }}">Skill Plans</a>
         <span class="b-nav-dropdown">
@@ -729,8 +728,9 @@
             </div>
         </span>
         <span class="b-nav-dropdown">
-            <span class="b-nav-link">Tools ▾</span>
+            <span class="b-nav-link {{ 'is-active' if _path.startswith('/assets') }}">Tools ▾</span>
             <div class="b-nav-dropdown-menu">
+                <a href="/assets" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
                 <a href="https://mapper.thunderborn.dev" class="b-nav-dropdown-item" target="_blank">Wormhole Mapper</a>
             </div>
         </span>
@@ -745,7 +745,50 @@
             <div id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;width:320px;max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:1000;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
                     <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Notifications</span>
-                    <button onclick="event.stopPropagation();clearNotifBadge()" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Clear All</button>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button onclick="event.stopPropagation();toggleShowHidden(this)" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Show Filtered</button>
+                        <button onclick="event.stopPropagation();toggleNotifSettings()" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;" title="Settings">&#9881;</button>
+                        <button onclick="event.stopPropagation();clearNotifBadge()" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Clear All</button>
+                    </div>
+                </div>
+                <div id="notif-settings" style="display:none;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
+                    <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.4rem;">Show notifications for:</div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="skill_complete" onchange="saveNotifPrefs()" checked> Skill Completion
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="job_ready" onchange="saveNotifPrefs()" checked> Industry Jobs
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="new_mail" onchange="saveNotifPrefs()" checked> New Mail
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="pi_expiring" onchange="saveNotifPrefs()" checked> PI Alerts
+                    </label>
+                    <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin:0.3rem 0 0.2rem;">Structures</div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_attack" onchange="saveNotifPrefs()" checked> Structure Attacks
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_fuel" onchange="saveNotifPrefs()" checked> Fuel / Services
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_change" onchange="saveNotifPrefs()" checked> Anchoring / Online
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="sovereignty" onchange="saveNotifPrefs()" checked> Sovereignty
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="moonmining" onchange="saveNotifPrefs()" checked> Moonmining
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="poco" onchange="saveNotifPrefs()" checked> POCO
+                    </label>
+                    <div style="border-top:1px solid var(--border);margin-top:0.3rem;padding-top:0.3rem;">
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="inventory_low" onchange="saveNotifPrefs()" checked> Inventory Alerts
+                        </label>
+                    </div>
                 </div>
                 <div id="notif-list">
                     <div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>
@@ -762,7 +805,6 @@
 </nav>
 <div id="mobile-menu" class="b-mobile-menu">
     <a href="/dashboard" class="{{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
-    <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Assets</a>
     <a href="/corporations" class="{{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
     <a href="/skill-plans" class="{{ 'is-active' if _path.startswith('/skill-plans') }}">Skill Plans</a>
     <div class="b-mobile-sep"></div>
@@ -775,6 +817,7 @@
     <a href="/intel" class="{{ 'is-active' if _path == '/intel' }}">D-Scan / Local</a>
     <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
     <div class="b-mobile-sep"></div>
+    <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
     <a href="https://mapper.thunderborn.dev" target="_blank">Wormhole Mapper</a>
     {% if request.session.get('is_admin') %}<a href="/admin" class="{{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
     <div class="b-mobile-sep"></div>

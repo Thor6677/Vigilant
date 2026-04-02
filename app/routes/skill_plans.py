@@ -74,6 +74,29 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
     )
     plans = result.scalars().all()
 
+    # Calculate SP and training time for each plan
+    all_skill_ids = set()
+    for p in plans:
+        for e in p.entries:
+            all_skill_ids.add(e.skill_type_id)
+    skill_infos = await sde.get_skill_infos(db, list(all_skill_ids)) if all_skill_ids else {}
+
+    plan_stats = {}
+    for p in plans:
+        total_sp = 0
+        total_mins = 0.0
+        for e in p.entries:
+            info = skill_infos.get(e.skill_type_id, {})
+            rank = info.get("rank", 1.0)
+            sp = _sp_for_level(e.target_level, rank)
+            total_sp += sp
+            # Estimate time at 20 primary / 20 secondary (base 17 + 3 implants)
+            total_mins += _training_time_minutes(sp, 20, 20)
+        plan_stats[p.id] = {
+            "total_sp": total_sp,
+            "time_str": _format_duration(total_mins) if total_mins > 0 else "—",
+        }
+
     # Get user's characters for the character selector
     char_result = await db.execute(
         select(Character).where(Character.user_id == user_id).order_by(Character.character_name)
@@ -83,6 +106,7 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse("skill_plans.html", {
         "request": request,
         "plans": plans,
+        "plan_stats": plan_stats,
         "characters": characters,
     })
 

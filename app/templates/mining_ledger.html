@@ -76,10 +76,13 @@
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">Mining Activity</span>
-            <div style="display:flex;gap:4px;">
+            <div id="range-buttons" style="display:flex;gap:4px;">
                 <button class="range-btn" onclick="filterRange(7, this)">7d</button>
                 <button class="range-btn" onclick="filterRange(14, this)">14d</button>
                 <button class="range-btn is-active" onclick="filterRange(30, this)">30d</button>
+                <button class="range-btn" onclick="filterRange(90, this)">90d</button>
+                <button class="range-btn" onclick="filterRange(180, this)">6m</button>
+                <button class="range-btn" onclick="filterRange(365, this)">1y</button>
             </div>
         </div>
         <div style="padding:0.5rem;">
@@ -253,8 +256,15 @@
         canvas.style.display = 'block';
         empty.style.display = 'none';
 
-        /* Slice to requested day range */
-        var startIdx = Math.max(0, data.dates.length - (days || 30));
+        /* Filter to dates within the requested day range from today */
+        var cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - (days || 30));
+        var cutoffStr = cutoff.toISOString().slice(0, 10);
+        var startIdx = 0;
+        for (var di = 0; di < data.dates.length; di++) {
+            if (data.dates[di] >= cutoffStr) { startIdx = di; break; }
+            startIdx = data.dates.length; /* none match */
+        }
         var dates = data.dates.slice(startIdx);
         var iskValues = data.isk_values.slice(startIdx);
 
@@ -290,10 +300,8 @@
         });
 
         if (miningChart) {
-            miningChart.data.labels = dates;
-            miningChart.data.datasets = datasets;
-            miningChart.update('none');
-            return;
+            miningChart.destroy();
+            miningChart = null;
         }
 
         miningChart = new Chart(canvas, {
@@ -389,23 +397,35 @@
 
     window.filterRange = function(days, btn) {
         document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
-        btn.classList.add('is-active');
+        if (btn) btn.classList.add('is-active');
         if (fullChartData) {
             buildMiningChart(fullChartData, days);
         }
     };
 
+    function setActiveRange(days) {
+        document.querySelectorAll('.range-btn').forEach(function(b) {
+            b.classList.remove('is-active');
+            if (b.textContent.trim() === '30d') b.classList.add('is-active');
+        });
+    }
+
     /* Listen for chart data from the HTMX partial */
-    document.addEventListener('mining-chart-ready', function() {
+    function tryLoadChartData() {
         var el = document.getElementById('mining-chart-data');
         if (!el) return;
         try {
             fullChartData = JSON.parse(el.textContent);
-            /* Reset range buttons to 30d */
-            document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
-            document.querySelector('.range-btn:last-child').classList.add('is-active');
+            setActiveRange(30);
             buildMiningChart(fullChartData, 30);
         } catch(e) { console.error('Chart data parse error:', e); }
+    }
+    document.addEventListener('mining-chart-ready', tryLoadChartData);
+    /* Also hook into htmx afterSettle as a fallback for script execution */
+    document.addEventListener('htmx:afterSettle', function(evt) {
+        if (evt.detail && evt.detail.target && evt.detail.target.id === 'ledger-data') {
+            setTimeout(tryLoadChartData, 100);
+        }
     });
 
     /* Init */

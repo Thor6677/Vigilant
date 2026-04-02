@@ -5,9 +5,91 @@
     var STORAGE_KEY = 'vigilant_notif_enabled';
     var EVENTS_KEY = 'vigilant_notif_events';
     var LOCK_KEY = 'vigilant_notif_lock';
+    var PREFS_KEY = 'vigilant_notif_prefs';
     var pollTimer = null;
     var storedEvents = [];
     var dropdownOpen = false;
+    var showHidden = false;
+
+    /* Default: all types enabled */
+    var DEFAULT_PREFS = {
+        skill_complete: true,
+        job_ready: true,
+        new_mail: true,
+        pi_expiring: true,
+        structure_attack: true,
+        structure_fuel: true,
+        structure_change: true,
+        sovereignty: true,
+        moonmining: true,
+        poco: true,
+        inventory_low: true,
+    };
+
+    /* Human-readable type labels */
+    var TYPE_LABELS = {
+        skill_complete: 'Skill',
+        job_ready: 'Industry',
+        new_mail: 'Mail',
+        pi_expiring: 'PI',
+        structure_attack: 'Structure Attack',
+        structure_fuel: 'Structure Fuel',
+        structure_change: 'Structure',
+        sovereignty: 'Sovereignty',
+        moonmining: 'Moonmining',
+        poco: 'POCO',
+        inventory_low: 'Inventory',
+        inventory_critical: 'Inventory',
+        structure_alert: 'Structure',
+    };
+
+    var TYPE_COLORS = {
+        skill_complete: 'var(--success)',
+        job_ready: 'var(--accent)',
+        pi_expiring: 'var(--danger)',
+        new_mail: 'var(--text)',
+        structure_attack: 'var(--danger)',
+        structure_fuel: 'var(--accent)',
+        structure_change: 'var(--muted)',
+        sovereignty: 'var(--warn, var(--accent))',
+        moonmining: 'var(--accent)',
+        poco: 'var(--danger)',
+        structure_alert: 'var(--danger)',
+        inventory_low: 'var(--accent)',
+        inventory_critical: 'var(--danger)',
+    };
+
+    function loadPrefs() {
+        try {
+            var raw = localStorage.getItem(PREFS_KEY);
+            if (raw) {
+                var prefs = JSON.parse(raw);
+                for (var k in DEFAULT_PREFS) {
+                    if (!(k in prefs)) prefs[k] = DEFAULT_PREFS[k];
+                }
+                /* Migrate old structure_alert pref to new subcategories */
+                if ('structure_alert' in prefs && !('structure_attack' in prefs)) {
+                    var val = prefs['structure_alert'];
+                    prefs.structure_attack = val;
+                    prefs.structure_fuel = val;
+                    prefs.structure_change = val;
+                    prefs.sovereignty = val;
+                    prefs.moonmining = val;
+                    prefs.poco = val;
+                }
+                return prefs;
+            }
+        } catch(e) {}
+        return Object.assign({}, DEFAULT_PREFS);
+    }
+
+    function isTypeEnabled(type) {
+        var prefs = loadPrefs();
+        if (type === 'inventory_critical') return prefs['inventory_low'] !== false;
+        /* Legacy: old events with type 'structure_alert' follow structure_attack pref */
+        if (type === 'structure_alert') return prefs['structure_attack'] !== false;
+        return prefs[type] !== false;
+    }
 
     function getIcon() { return document.getElementById('notif-icon'); }
     function getSlash() { return document.getElementById('notif-slash'); }
@@ -55,33 +137,44 @@
         } catch(e) { return ''; }
     }
 
-    var TYPE_COLORS = {
-        skill_complete: 'var(--success)',
-        job_ready: 'var(--accent)',
-        pi_expiring: 'var(--danger)',
-        new_mail: 'var(--text)',
-        structure_alert: 'var(--danger)',
-        inventory_low: 'var(--accent)',
-        inventory_critical: 'var(--danger)',
-    };
-
     function renderList() {
         var list = getList();
         if (!list) return;
-        if (storedEvents.length === 0) {
+
+        var visible = [];
+        var hidden = [];
+        for (var i = 0; i < storedEvents.length; i++) {
+            if (isTypeEnabled(storedEvents[i].type)) {
+                visible.push(storedEvents[i]);
+            } else {
+                hidden.push(storedEvents[i]);
+            }
+        }
+
+        var eventsToShow = showHidden ? storedEvents : visible;
+
+        if (eventsToShow.length === 0) {
             list.innerHTML = '<div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>';
             return;
         }
+
         var html = '';
-        for (var i = storedEvents.length - 1; i >= 0; i--) {
-            var ev = storedEvents[i];
+        for (var i = eventsToShow.length - 1; i >= 0; i--) {
+            var ev = eventsToShow[i];
+            var enabled = isTypeEnabled(ev.type);
             var color = TYPE_COLORS[ev.type] || 'var(--text)';
-            html += '<div style="display:flex;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);align-items:flex-start;" onclick="event.stopPropagation()">';
+            var typeLabel = TYPE_LABELS[ev.type] || ev.type || '';
+            var opacity = enabled ? '1' : '0.4';
+
+            html += '<div style="display:flex;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);align-items:flex-start;opacity:' + opacity + ';" onclick="event.stopPropagation()">';
             if (ev.icon) {
                 html += '<img src="' + ev.icon + '" style="width:28px;height:28px;flex-shrink:0;border-radius:2px;" onerror="this.style.display=\'none\'">';
             }
             html += '<div style="flex:1;min-width:0;">';
-            html += '<div style="font-size:11px;color:' + color + ';font-weight:600;">' + (ev.title || '') + '</div>';
+            html += '<div style="display:flex;align-items:center;gap:0.4rem;">';
+            html += '<span style="font-size:11px;color:' + color + ';font-weight:600;">' + (ev.title || '') + '</span>';
+            html += '<span onclick="event.stopPropagation();muteNotifType(\'' + ev.type + '\')" style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;white-space:nowrap;cursor:pointer;" title="Click to mute this type">' + typeLabel + ' &times;</span>';
+            html += '</div>';
             html += '<div style="font-size:10px;color:var(--text);margin-top:1px;word-break:break-word;">' + (ev.body || '') + '</div>';
             html += '<div style="font-size:9px;color:var(--muted);margin-top:2px;">' + formatTime(ev.timestamp) + '</div>';
             html += '</div></div>';
@@ -92,8 +185,9 @@
     function updateBadge() {
         var badge = getBadge();
         if (!badge) return;
-        if (storedEvents.length > 0) {
-            badge.textContent = storedEvents.length;
+        var visibleCount = storedEvents.filter(function(ev) { return isTypeEnabled(ev.type); }).length;
+        if (visibleCount > 0) {
+            badge.textContent = visibleCount;
             badge.style.display = '';
             setBellState('alert');
         } else {
@@ -135,8 +229,10 @@
             if (!Array.isArray(events) || events.length === 0) return;
 
             events.forEach(function(ev) {
-                showNotification(ev);
                 storedEvents.push(ev);
+                if (isTypeEnabled(ev.type)) {
+                    showNotification(ev);
+                }
             });
             saveEvents();
             updateBadge();
@@ -155,11 +251,63 @@
         releaseLock();
     }
 
+    /* Settings panel toggle */
+    window.toggleNotifSettings = function() {
+        var panel = document.getElementById('notif-settings');
+        if (!panel) return;
+        var visible = panel.style.display !== 'none';
+        panel.style.display = visible ? 'none' : '';
+        if (!visible) {
+            var prefs = loadPrefs();
+            var boxes = panel.querySelectorAll('input[data-notif-type]');
+            boxes.forEach(function(cb) {
+                var type = cb.getAttribute('data-notif-type');
+                cb.checked = prefs[type] !== false;
+            });
+        }
+    };
+
+    window.saveNotifPrefs = function() {
+        var panel = document.getElementById('notif-settings');
+        if (!panel) return;
+        var prefs = loadPrefs();
+        var boxes = panel.querySelectorAll('input[data-notif-type]');
+        boxes.forEach(function(cb) {
+            prefs[cb.getAttribute('data-notif-type')] = cb.checked;
+        });
+        try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+        updateBadge();
+        renderList();
+    };
+
+    window.muteNotifType = function(type) {
+        var prefs = loadPrefs();
+        /* inventory_critical follows inventory_low */
+        var key = type === 'inventory_critical' ? 'inventory_low' : type;
+        /* Legacy structure_alert maps to structure_attack */
+        if (key === 'structure_alert') key = 'structure_attack';
+        prefs[key] = false;
+        try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+        /* Also update the settings panel checkbox if visible */
+        var cb = document.querySelector('input[data-notif-type="' + key + '"]');
+        if (cb) cb.checked = false;
+        updateBadge();
+        renderList();
+    };
+
+    window.toggleShowHidden = function(btn) {
+        showHidden = !showHidden;
+        if (btn) {
+            btn.textContent = showHidden ? 'Hide Filtered' : 'Show Filtered';
+            btn.style.color = showHidden ? 'var(--accent)' : 'var(--muted)';
+        }
+        renderList();
+    };
+
     /* Bell click handler */
     window.onBellClick = function() {
         var enabled = localStorage.getItem(STORAGE_KEY) === 'true';
         if (!enabled) {
-            /* Enable notifications */
             if (!('Notification' in window)) { alert('Your browser does not support notifications.'); return; }
             Notification.requestPermission().then(function(perm) {
                 if (perm === 'granted') {
@@ -171,7 +319,6 @@
             return;
         }
 
-        /* Toggle dropdown */
         var dd = getDropdown();
         if (!dd) return;
         dropdownOpen = !dropdownOpen;

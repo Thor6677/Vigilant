@@ -46,8 +46,12 @@
             <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--accent);">
                 {{ plan.entries | length }} skill{{ 's' if plan.entries | length != 1 else '' }}
             </span>
-            <span style="flex:0 0 100px;text-align:right;font-size:9px;color:var(--muted);">
-                {{ plan.updated_at.strftime('%Y-%m-%d') if plan.updated_at else '' }}
+            {% set stats = plan_stats.get(plan.id, {}) %}
+            <span style="flex:0 0 80px;text-align:right;font-size:9px;color:var(--text);">
+                {% if stats.get('total_sp', 0) > 0 %}{{ "{:,.0f}".format(stats['total_sp']) }} SP{% endif %}
+            </span>
+            <span style="flex:0 0 70px;text-align:right;font-size:9px;color:var(--muted);">
+                {% if stats.get('total_sp', 0) > 0 %}{{ stats['time_str'] }}{% endif %}
             </span>
         </a>
         {% endfor %}

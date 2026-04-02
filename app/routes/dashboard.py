@@ -267,13 +267,37 @@ async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: d
                     new_alerts[ntype] = new_alerts.get(ntype, 0) + 1
                 if nid:
                     seen.add(nid)
+            # Map ESI notification types to subcategories for filtering
+            _ALERT_SUBCATEGORY = {
+                "StructureUnderAttack": "structure_attack",
+                "StructureLostShields": "structure_attack",
+                "StructureLostArmor": "structure_attack",
+                "StructureDestroyed": "structure_attack",
+                "StructureFuelAlert": "structure_fuel",
+                "StructureServicesOffline": "structure_fuel",
+                "StructureAnchoring": "structure_change",
+                "StructureUnanchoring": "structure_change",
+                "StructureOnline": "structure_change",
+                "TowerAlertMsg": "structure_attack",
+                "TowerResourceAlertMsg": "structure_fuel",
+                "OrbitalAttacked": "poco",
+                "OrbitalReinforced": "poco",
+                "MoonminingExtractionStarted": "moonmining",
+                "MoonminingExtractionFinished": "moonmining",
+                "MoonminingAutomaticFracture": "moonmining",
+                "MoonminingLaserFired": "moonmining",
+                "SkyhookDestructionImminent": "structure_attack",
+                "SovStructureReinforced": "sovereignty",
+                "SovCommandNodeEventStarted": "sovereignty",
+            }
             for ntype, count in new_alerts.items():
                 if ntype not in emitted:
                     emitted.add(ntype)
                     label = _STRUCTURE_ALERT_LABELS.get(ntype, ntype)
+                    subcat = _ALERT_SUBCATEGORY.get(ntype, "structure_alert")
                     body = f"{label} ({count})" if count > 1 else label
                     _emit_notification(user_id, {
-                        "type": "structure_alert",
+                        "type": subcat,
                         "title": label,
                         "body": body,
                         "icon": portrait,
