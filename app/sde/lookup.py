@@ -70,6 +70,17 @@ async def search_systems(db: AsyncSession, query: str, limit: int = 8) -> list[d
     ]
 
 
+async def search_regions(db: AsyncSession, query: str, limit: int = 8) -> list[dict]:
+    """Search regions by partial name for autocomplete."""
+    result = await db.execute(
+        select(SDERegion.region_id, SDERegion.region_name)
+        .where(func.lower(SDERegion.region_name).contains(query.lower()))
+        .order_by(func.length(SDERegion.region_name))
+        .limit(limit)
+    )
+    return [{"region_id": r.region_id, "region_name": r.region_name} for r in result.fetchall()]
+
+
 async def system_ids_to_names(db: AsyncSession, system_ids: list[int]) -> dict[int, str]:
     """Bulk resolve system IDs to names. Returns {system_id: name}."""
     if not system_ids:

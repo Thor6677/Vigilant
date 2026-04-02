@@ -391,6 +391,12 @@ async def corp_detail(
                 })
             corp_structures = sorted(enriched, key=lambda s: s["name"])
             logger.info("Successfully fetched %d structures for corp %s", len(corp_structures), corp_id)
+            # Auto-detect reinforced structure timers
+            try:
+                from app.routes.structure_timers import sync_esi_structure_timers
+                await sync_esi_structure_timers(db, raw_structs)
+            except Exception as e:
+                logger.warning("Structure timer sync failed: %s", e)
         elif error:
             logger.error("Corp structures fetch failed for %s: %s", corp_id, error)
     else:

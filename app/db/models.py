@@ -164,6 +164,55 @@ class DScanResult(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class StructureTimer(Base):
+    """Shared structure reinforcement timer board."""
+    __tablename__ = "structure_timers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    structure_name = Column(String, nullable=False)
+    structure_type = Column(String(16), nullable=False)   # citadel/ec/refinery/sov/poco/skyhook/other
+    system_name = Column(String, nullable=False)
+    region_name = Column(String, nullable=True)
+    owner_name = Column(String, nullable=False)
+    disposition = Column(String(16), nullable=False)      # hostile/friendly
+    timer_phase = Column(String(8), nullable=False)       # shield/armor/hull
+    timer_expires = Column(DateTime, nullable=False)      # naive UTC
+    priority = Column(String(8), nullable=False, default="normal")  # low/normal/critical
+    notes = Column(Text, nullable=True)
+    source = Column(String(8), nullable=False, default="manual")    # manual/esi
+    esi_structure_id = Column(Integer, nullable=True, index=True)
+    is_archived = Column(Boolean, nullable=False, default=False)
+    archived_at = Column(DateTime, nullable=True)
+    acl_group_id = Column(Integer, ForeignKey("timer_acl_groups.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class TimerACLGroup(Base):
+    """Named access control group for timer visibility."""
+    __tablename__ = "timer_acl_groups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    entries = relationship("TimerACLEntry", back_populates="group", cascade="all, delete-orphan")
+
+
+class TimerACLEntry(Base):
+    """Entry in an ACL group — a character, corporation, or alliance."""
+    __tablename__ = "timer_acl_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("timer_acl_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    entry_type = Column(String(16), nullable=False)  # character/corporation/alliance
+    eve_id = Column(Integer, nullable=False)
+    name = Column(String, nullable=True)
+
+    group = relationship("TimerACLGroup", back_populates="entries")
+
+
 class RegistrationAllowlist(Base):
     """Allowlist for who can register. Entries can be character, corp, or alliance IDs."""
     __tablename__ = "registration_allowlist"

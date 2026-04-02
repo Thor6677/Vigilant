@@ -728,9 +728,10 @@
             </div>
         </span>
         <span class="b-nav-dropdown">
-            <span class="b-nav-link {{ 'is-active' if _path.startswith('/assets') }}">Tools ▾</span>
+            <span class="b-nav-link {{ 'is-active' if _path.startswith('/assets') or _path.startswith('/structure-timers') }}">Tools ▾</span>
             <div class="b-nav-dropdown-menu">
                 <a href="/assets" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
+                <a href="/structure-timers" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>
                 <a href="https://mapper.thunderborn.dev" class="b-nav-dropdown-item" target="_blank">Wormhole Mapper</a>
             </div>
         </span>
@@ -818,6 +819,7 @@
     <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
     <div class="b-mobile-sep"></div>
     <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
+    <a href="/structure-timers" class="{{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>
     <a href="https://mapper.thunderborn.dev" target="_blank">Wormhole Mapper</a>
     {% if request.session.get('is_admin') %}<a href="/admin" class="{{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
     <div class="b-mobile-sep"></div>

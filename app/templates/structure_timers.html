@@ -1,0 +1,526 @@
+{% extends "base.html" %}
+{% block title %}STRUCTURE TIMERS — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Structure Timers</h1>
+    <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+        {{ active_timers | length }} active &middot; {{ archived_timers | length }} archived
+    </div>
+</div>
+
+{# ── Create Timer ────────────────────────────────────────────────────────── #}
+<details class="b-section" id="create-section">
+    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+        <span style="color:var(--accent);font-size:12px;">+</span>
+        <span class="b-label">Add Timer</span>
+    </summary>
+    <div class="b-panel" style="border-top:1px solid var(--border);">
+        <form method="POST" action="/structure-timers/create" style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
+
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <input type="text" name="structure_name" placeholder="Structure name" required
+                       style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <select name="structure_type" style="flex:1;min-width:100px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="citadel">Citadel</option>
+                    <option value="ec">Engineering Complex</option>
+                    <option value="refinery">Refinery</option>
+                    <option value="sov">Sov Structure</option>
+                    <option value="poco">POCO</option>
+                    <option value="skyhook">Skyhook</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <div style="flex:1;min-width:100px;position:relative;">
+                    <input type="text" name="system_name" id="system-search" placeholder="System" required autocomplete="off"
+                           oninput="searchField('systems', 'system')"
+                           style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <div id="system-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                </div>
+                <div style="flex:1;min-width:100px;position:relative;">
+                    <input type="text" name="region_name" id="region-search" placeholder="Region (optional)" autocomplete="off"
+                           oninput="searchField('regions', 'region')"
+                           style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <div id="region-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                </div>
+                <div style="flex:1;min-width:100px;position:relative;">
+                    <input type="text" name="owner_name" id="owner-search" placeholder="Owner (corp/alliance)" required autocomplete="off"
+                           oninput="searchField('owners', 'owner')"
+                           style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <div id="owner-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Side</span>
+                    <label style="font-size:10px;color:var(--danger);cursor:pointer;display:flex;align-items:center;gap:3px;">
+                        <input type="radio" name="disposition" value="hostile" checked> Hostile
+                    </label>
+                    <label style="font-size:10px;color:var(--success);cursor:pointer;display:flex;align-items:center;gap:3px;">
+                        <input type="radio" name="disposition" value="friendly"> Friendly
+                    </label>
+                </div>
+                <select name="timer_phase" style="padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="shield">Shield</option>
+                    <option value="armor" selected>Armor</option>
+                    <option value="hull">Hull</option>
+                    <option value="anchoring">Anchoring</option>
+                    <option value="unanchoring">Unanchoring</option>
+                </select>
+                <select name="priority" style="padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="low">Low</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="critical">Critical</option>
+                </select>
+            </div>
+
+            {# Timer input modes #}
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <select id="timer-mode" name="timer_mode" onchange="toggleTimerMode()"
+                        style="padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="countdown">Countdown</option>
+                    <option value="absolute">Absolute UTC</option>
+                </select>
+                <input type="text" id="countdown-input" name="countdown_text" placeholder="1d 4h 30m 15s"
+                       style="flex:1;min-width:140px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <input type="datetime-local" id="absolute-input" name="datetime_utc"
+                       style="display:none;flex:1;min-width:180px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            </div>
+
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+                <textarea name="notes" placeholder="Notes (optional)" rows="2"
+                          style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;"></textarea>
+                <div style="flex:1;min-width:120px;">
+                    <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                    <select name="acl_group_id" style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                        <option value="">Everyone</option>
+                        {% for g in acl_groups %}
+                        <option value="{{ g.id }}">{{ g.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="b-btn" style="align-self:flex-start;padding:0.3rem 1rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">
+                Add Timer
+            </button>
+        </form>
+    </div>
+</details>
+
+{# ── ACL Groups Management ───────────────────────────────────────────────── #}
+<details class="b-section">
+    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+        <span style="color:var(--muted);font-size:12px;">&#9881;</span>
+        <span class="b-label" style="color:var(--muted);">Access Control Groups</span>
+    </summary>
+    <div class="b-panel" style="border-top:1px solid var(--border);">
+        {# Create new group #}
+        <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;">
+            <form method="POST" action="/structure-timers/acl/create" style="display:flex;gap:0.5rem;flex:1;align-items:center;">
+                <input type="text" name="name" placeholder="New group name…" required
+                       style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Create</button>
+            </form>
+        </div>
+
+        {% if acl_groups %}
+        {% for group in acl_groups %}
+        <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+                <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
+                <form method="POST" action="/structure-timers/acl/{{ group.id }}/delete"
+                      onsubmit="return confirm('Delete this ACL group? Timers using it will become visible to everyone.');">
+                    <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                </form>
+            </div>
+
+            {# Existing entries #}
+            {% for entry in group.entries %}
+            <div style="display:flex;align-items:center;gap:0.4rem;padding:0.15rem 0;font-size:10px;">
+                {% if entry.entry_type == 'corporation' %}
+                <img src="https://images.evetech.net/corporations/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                {% elif entry.entry_type == 'alliance' %}
+                <img src="https://images.evetech.net/alliances/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                {% elif entry.entry_type == 'character' %}
+                <img src="https://images.evetech.net/characters/{{ entry.eve_id }}/portrait?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                {% endif %}
+                <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
+                <span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
+                <form method="POST" action="/structure-timers/acl/{{ group.id }}/remove/{{ entry.id }}" style="display:inline;">
+                    <button class="b-btn" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                </form>
+            </div>
+            {% endfor %}
+
+            {# Add entry #}
+            <div style="margin-top:0.35rem;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+                <select id="acl-type-{{ group.id }}" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;"
+                        onchange="document.getElementById('acl-search-{{ group.id }}').value='';document.getElementById('acl-id-{{ group.id }}').value='';">
+                    <option value="corporation">Corporation</option>
+                    <option value="alliance">Alliance</option>
+                    <option value="character">Character</option>
+                </select>
+                <div style="flex:1;min-width:120px;position:relative;">
+                    <input type="text" id="acl-search-{{ group.id }}" placeholder="Search…" autocomplete="off"
+                           oninput="searchACL({{ group.id }})"
+                           style="width:100%;padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    <div id="acl-results-{{ group.id }}" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                </div>
+                <input type="hidden" id="acl-id-{{ group.id }}" value="">
+                <input type="hidden" id="acl-name-{{ group.id }}" value="">
+                <button class="b-btn" onclick="addACLEntry({{ group.id }})"
+                        style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Add</button>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty" style="font-size:10px;">No ACL groups. Create one to restrict timer visibility.</div>
+        {% endif %}
+    </div>
+</details>
+
+{# ── Filters ─────────────────────────────────────────────────────────────── #}
+{% if active_timers %}
+<div class="b-section" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Filter:</span>
+    <button class="range-btn is-active" onclick="filterTimers('all', this)">All</button>
+    <button class="range-btn" onclick="filterTimers('hostile', this)">Hostile</button>
+    <button class="range-btn" onclick="filterTimers('friendly', this)">Friendly</button>
+    <span style="color:var(--border);">|</span>
+    <button class="range-btn" onclick="filterTimers('critical', this)">Critical</button>
+</div>
+{% endif %}
+
+{# ── Active Timers ───────────────────────────────────────────────────────── #}
+{% if active_timers %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Active Timers</span>
+        </div>
+
+        {% for t in active_timers %}
+        <div class="b-table-row timer-row" data-disposition="{{ t.disposition }}" data-priority="{{ t.priority }}"
+             style="flex-wrap:wrap;gap:0.25rem 0.5rem;border-left:3px solid {% if t.disposition == 'hostile' %}var(--danger){% else %}var(--success){% endif %};">
+
+            {# Row 1: Main info #}
+            <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:2px;">
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                    <span style="font-size:11px;font-weight:600;color:var(--text);">{{ t.structure_name }}</span>
+                    {% set type_labels = {'citadel':'Citadel','ec':'EC','refinery':'Refinery','sov':'Sov','poco':'POCO','skyhook':'Skyhook','other':'Other'} %}
+                    <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);border-radius:2px;color:var(--muted);">{{ type_labels.get(t.structure_type, t.structure_type) }}</span>
+                    {% set phase_colors = {'shield':'var(--accent)','armor':'var(--warn, var(--accent))','hull':'var(--danger)','anchoring':'var(--success)','unanchoring':'var(--muted)'} %}
+                    <span style="font-size:8px;padding:1px 4px;border-radius:2px;color:#000;font-weight:600;background:{{ phase_colors.get(t.timer_phase, 'var(--muted)') }};">{{ t.timer_phase | upper }}</span>
+                    {% if t.priority == 'critical' %}
+                    <span style="font-size:8px;padding:1px 4px;border-radius:2px;background:var(--danger);color:#000;font-weight:600;">CRITICAL</span>
+                    {% elif t.priority == 'low' %}
+                    <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);border-radius:2px;color:var(--muted);">Low</span>
+                    {% endif %}
+                    {% if t.source == 'esi' %}
+                    <span style="font-size:8px;color:var(--muted);" title="Auto-detected from ESI">ESI</span>
+                    {% endif %}
+                </div>
+                <div style="font-size:9px;color:var(--muted);">
+                    {{ t.system_name }}{% if t.region_name %} &middot; {{ t.region_name }}{% endif %}
+                    &middot; {{ t.owner_name }}
+                </div>
+                {% if t.notes %}
+                <div style="font-size:9px;color:var(--muted);font-style:italic;">{{ t.notes }}</div>
+                {% endif %}
+            </div>
+
+            {# Countdown + times #}
+            <div style="flex:0 0 200px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                <span class="timer-countdown" data-expires="{{ t.timer_expires.isoformat() }}"
+                      style="font-size:16px;font-weight:300;color:var(--text);font-variant-numeric:tabular-nums;"></span>
+                <span style="font-size:9px;color:var(--muted);">
+                    EVE: {{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }}
+                </span>
+                <span class="timer-local" data-expires="{{ t.timer_expires.isoformat() }}" style="font-size:9px;color:var(--muted);"></span>
+            </div>
+
+            {# Actions — only for creator, admins, managers, or directors #}
+            {% if is_privileged or t.created_by == user_id %}
+            <div style="flex:0 0 auto;display:flex;gap:0.25rem;align-items:center;">
+                <button class="b-btn" onclick="editTimer({{ t.id }})"
+                        style="padding:0.15rem 0.35rem;border:1px solid var(--border);font-size:8px;color:var(--muted);">Edit</button>
+                <form method="POST" action="/structure-timers/{{ t.id }}/delete" style="display:inline;"
+                      onsubmit="return confirm('Delete this timer?');">
+                    <button class="b-btn" style="padding:0.15rem 0.35rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+
+        {# Edit form (hidden by default, only for authorized users) #}
+        {% if is_privileged or t.created_by == user_id %}
+        <div id="edit-{{ t.id }}" style="display:none;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
+            <form method="POST" action="/structure-timers/{{ t.id }}/edit" style="display:flex;flex-direction:column;gap:0.5rem;">
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <input type="text" name="structure_name" value="{{ t.structure_name }}"
+                           style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <select name="structure_type" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                        {% for val, label in [('citadel','Citadel'),('ec','EC'),('refinery','Refinery'),('sov','Sov'),('poco','POCO'),('skyhook','Skyhook'),('other','Other')] %}
+                        <option value="{{ val }}" {% if t.structure_type == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <input type="text" name="system_name" value="{{ t.system_name }}"
+                           style="flex:1;min-width:80px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <input type="text" name="region_name" value="{{ t.region_name or '' }}" placeholder="Region"
+                           style="flex:1;min-width:80px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <input type="text" name="owner_name" value="{{ t.owner_name }}"
+                           style="flex:1;min-width:80px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                </div>
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                    <label style="font-size:10px;color:var(--danger);cursor:pointer;display:flex;align-items:center;gap:3px;">
+                        <input type="radio" name="disposition" value="hostile" {% if t.disposition == 'hostile' %}checked{% endif %}> Hostile
+                    </label>
+                    <label style="font-size:10px;color:var(--success);cursor:pointer;display:flex;align-items:center;gap:3px;">
+                        <input type="radio" name="disposition" value="friendly" {% if t.disposition == 'friendly' %}checked{% endif %}> Friendly
+                    </label>
+                    <select name="timer_phase" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                        {% for val in ['shield','armor','hull'] %}
+                        <option value="{{ val }}" {% if t.timer_phase == val %}selected{% endif %}>{{ val | capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="priority" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                        {% for val in ['low','normal','critical'] %}
+                        <option value="{{ val }}" {% if t.priority == val %}selected{% endif %}>{{ val | capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                    <input type="hidden" name="timer_mode" value="absolute">
+                    <input type="datetime-local" name="datetime_utc" value="{{ t.timer_expires.strftime('%Y-%m-%dT%H:%M') }}"
+                           style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <span style="font-size:9px;color:var(--muted);">UTC</span>
+                </div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <textarea name="notes" rows="2" placeholder="Notes"
+                              style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;">{{ t.notes or '' }}</textarea>
+                    <div style="flex:1;min-width:100px;">
+                        <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                        <select name="acl_group_id" style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                            <option value="">Everyone</option>
+                            {% for g in acl_groups %}
+                            <option value="{{ g.id }}" {% if t.acl_group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                    <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
+                    <button type="button" class="b-btn" onclick="editTimer({{ t.id }})" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% else %}
+<div class="b-empty">No active timers. Add one above or visit a corporation page to auto-detect reinforced structures.</div>
+{% endif %}
+
+{# ── Archived Timers ─────────────────────────────────────────────────────── #}
+{% if archived_timers %}
+<details class="b-section">
+    <summary class="b-panel-head" style="cursor:pointer;list-style:none;">
+        <span class="b-label" style="color:var(--muted);">Archived Timers ({{ archived_timers | length }})</span>
+    </summary>
+    <div class="b-panel" style="border-top:1px solid var(--border);">
+        {% for t in archived_timers %}
+        <div class="b-table-row" style="opacity:0.5;">
+            <span style="flex:2;font-size:10px;color:var(--text);">{{ t.structure_name }}</span>
+            <span style="flex:1;font-size:9px;color:var(--muted);">{{ t.system_name }}</span>
+            <span style="flex:0 0 50px;font-size:9px;color:var(--muted);">{{ t.timer_phase | capitalize }}</span>
+            <span style="flex:0 0 120px;font-size:9px;color:var(--muted);text-align:right;">
+                {{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }} UTC
+            </span>
+            <form method="POST" action="/structure-timers/{{ t.id }}/delete" style="flex:none;">
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
+<style>
+@keyframes timer-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+.timer-urgent { animation: timer-pulse 1.5s ease-in-out infinite; }
+.timer-expired .timer-countdown { color: var(--muted) !important; }
+</style>
+
+<script>
+function toggleTimerMode() {
+    var mode = document.getElementById('timer-mode').value;
+    document.getElementById('countdown-input').style.display = mode === 'countdown' ? '' : 'none';
+    document.getElementById('absolute-input').style.display = mode === 'absolute' ? '' : 'none';
+}
+
+/* Typeahead search for system, region, owner */
+var _searchTimers = {};
+function searchField(endpoint, field) {
+    clearTimeout(_searchTimers[field]);
+    var input = document.getElementById(field + '-search');
+    var results = document.getElementById(field + '-results');
+    var q = input.value.trim();
+    var minLen = endpoint === 'owners' ? 3 : 2;
+    if (q.length < minLen) { results.style.display = 'none'; results.innerHTML = ''; return; }
+    _searchTimers[field] = setTimeout(function() {
+        fetch('/structure-timers/search/' + endpoint + '?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                results.innerHTML = html;
+                results.style.display = html ? 'block' : 'none';
+            });
+    }, 250);
+}
+function selectSystem(name) {
+    document.getElementById('system-search').value = name;
+    document.getElementById('system-results').style.display = 'none';
+}
+function selectRegion(name) {
+    document.getElementById('region-search').value = name;
+    document.getElementById('region-results').style.display = 'none';
+}
+function selectOwner(name) {
+    document.getElementById('owner-search').value = name;
+    document.getElementById('owner-results').style.display = 'none';
+}
+/* Close dropdowns on outside click */
+document.addEventListener('click', function(e) {
+    ['system', 'region', 'owner'].forEach(function(f) {
+        var results = document.getElementById(f + '-results');
+        var input = document.getElementById(f + '-search');
+        if (results && input && !input.contains(e.target) && !results.contains(e.target)) {
+            results.style.display = 'none';
+        }
+    });
+});
+
+/* ACL search and add */
+var _aclTimers = {};
+function searchACL(groupId) {
+    clearTimeout(_aclTimers[groupId]);
+    var input = document.getElementById('acl-search-' + groupId);
+    var results = document.getElementById('acl-results-' + groupId);
+    var cat = document.getElementById('acl-type-' + groupId).value;
+    var q = input.value.trim();
+    if (q.length < 3) { results.style.display = 'none'; return; }
+    _aclTimers[groupId] = setTimeout(function() {
+        fetch('/structure-timers/acl/search?q=' + encodeURIComponent(q) + '&category=' + cat)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                results.innerHTML = html;
+                results.style.display = html ? 'block' : 'none';
+            });
+    }, 300);
+}
+/* Global handler called from search result onclick */
+var _activeACLGroup = null;
+window.selectACLEntry = function(id, name) {
+    if (_activeACLGroup !== null) {
+        document.getElementById('acl-id-' + _activeACLGroup).value = id;
+        document.getElementById('acl-name-' + _activeACLGroup).value = name;
+        document.getElementById('acl-search-' + _activeACLGroup).value = name;
+        document.getElementById('acl-results-' + _activeACLGroup).style.display = 'none';
+    }
+};
+/* Intercept searchACL to track active group */
+var _origSearchACL = searchACL;
+searchACL = function(groupId) { _activeACLGroup = groupId; _origSearchACL(groupId); };
+
+function addACLEntry(groupId) {
+    var eveId = document.getElementById('acl-id-' + groupId).value;
+    var name = document.getElementById('acl-name-' + groupId).value;
+    var entryType = document.getElementById('acl-type-' + groupId).value;
+    if (!eveId) { alert('Search and select an entry first.'); return; }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/structure-timers/acl/' + groupId + '/add';
+    [{n:'entry_type',v:entryType},{n:'eve_id',v:eveId},{n:'name',v:name}].forEach(function(f) {
+        var i = document.createElement('input'); i.type='hidden'; i.name=f.n; i.value=f.v; form.appendChild(i);
+    });
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function editTimer(id) {
+    var el = document.getElementById('edit-' + id);
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function filterTimers(filter, btn) {
+    document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
+    if (btn) btn.classList.add('is-active');
+    document.querySelectorAll('.timer-row').forEach(function(row) {
+        if (filter === 'all') { row.style.display = ''; return; }
+        if (filter === 'critical') {
+            row.style.display = row.dataset.priority === 'critical' ? '' : 'none';
+            return;
+        }
+        row.style.display = row.dataset.disposition === filter ? '' : 'none';
+    });
+}
+
+/* Live countdown */
+function updateCountdowns() {
+    document.querySelectorAll('.timer-countdown').forEach(function(el) {
+        var expires = new Date(el.dataset.expires + 'Z');
+        var now = new Date();
+        var diff = expires - now;
+        var row = el.closest('.timer-row');
+
+        if (diff <= 0) {
+            el.textContent = 'EXPIRED';
+            if (row) row.classList.add('timer-expired');
+            return;
+        }
+
+        var d = Math.floor(diff / 86400000);
+        var h = Math.floor((diff % 86400000) / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var s = Math.floor((diff % 60000) / 1000);
+
+        var parts = [];
+        if (d > 0) parts.push(d + 'd');
+        parts.push(h + 'h');
+        parts.push(String(m).padStart(2, '0') + 'm');
+        parts.push(String(s).padStart(2, '0') + 's');
+        el.textContent = parts.join(' ');
+
+        if (row) {
+            if (diff < 3600000) {
+                row.classList.add('timer-urgent');
+            } else {
+                row.classList.remove('timer-urgent');
+            }
+        }
+    });
+
+    /* Show local time */
+    document.querySelectorAll('.timer-local').forEach(function(el) {
+        if (el.dataset.done) return;
+        var expires = new Date(el.dataset.expires + 'Z');
+        el.textContent = 'Local: ' + expires.toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+        });
+        el.dataset.done = '1';
+    });
+}
+updateCountdowns();
+setInterval(updateCountdowns, 1000);
+</script>
+
+{% endblock %}
