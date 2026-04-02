@@ -10,6 +10,7 @@
     var storedEvents = [];
     var dropdownOpen = false;
     var showHidden = false;
+    var expandedFilterType = null; /* which filtered type is expanded */
 
     /* Default: all types enabled */
     var DEFAULT_PREFS = {
@@ -137,48 +138,88 @@
         } catch(e) { return ''; }
     }
 
+    function _renderEvent(ev, showMute) {
+        var color = TYPE_COLORS[ev.type] || 'var(--text)';
+        var typeLabel = TYPE_LABELS[ev.type] || ev.type || '';
+        var enabled = isTypeEnabled(ev.type);
+        var opacity = enabled ? '1' : '0.4';
+
+        var muteBtn = '<svg onclick="event.stopPropagation();muteNotifType(\'' + ev.type + '\')" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer;flex-shrink:0;opacity:0.8;" title="Mute ' + typeLabel + ' notifications"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21" stroke="var(--danger)" stroke-width="2.5"/></svg>';
+
+        var h = '<div style="display:flex;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);align-items:flex-start;opacity:' + opacity + ';">';
+        if (ev.icon) {
+            h += '<img src="' + ev.icon + '" style="width:28px;height:28px;flex-shrink:0;border-radius:2px;" onerror="this.style.display=\'none\'">';
+        }
+        h += '<div style="flex:1;min-width:0;">';
+        h += '<div style="font-size:11px;color:' + color + ';font-weight:600;">' + (ev.title || '') + '</div>';
+        h += '<div style="font-size:10px;color:var(--text);margin-top:1px;word-break:break-word;">' + (ev.body || '') + '</div>';
+        h += '<div style="display:flex;align-items:center;gap:0.5rem;margin-top:2px;">';
+        h += '<span style="font-size:9px;color:var(--muted);">' + formatTime(ev.timestamp) + '</span>';
+        h += '<span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">' + typeLabel + '</span>';
+        h += '</div></div>';
+        if (showMute && enabled) { h += muteBtn; }
+        h += '</div>';
+        return h;
+    }
+
     function renderList() {
         var list = getList();
         if (!list) return;
 
         var visible = [];
-        var hidden = [];
+        var hiddenByType = {};  /* type -> [events] */
         for (var i = 0; i < storedEvents.length; i++) {
-            if (isTypeEnabled(storedEvents[i].type)) {
-                visible.push(storedEvents[i]);
+            var ev = storedEvents[i];
+            if (isTypeEnabled(ev.type)) {
+                visible.push(ev);
             } else {
-                hidden.push(storedEvents[i]);
+                var t = ev.type;
+                if (!hiddenByType[t]) hiddenByType[t] = [];
+                hiddenByType[t].push(ev);
             }
         }
 
-        var eventsToShow = showHidden ? storedEvents : visible;
-
-        if (eventsToShow.length === 0) {
+        if (visible.length === 0 && Object.keys(hiddenByType).length === 0) {
             list.innerHTML = '<div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>';
             return;
         }
 
         var html = '';
-        for (var i = eventsToShow.length - 1; i >= 0; i--) {
-            var ev = eventsToShow[i];
-            var enabled = isTypeEnabled(ev.type);
-            var color = TYPE_COLORS[ev.type] || 'var(--text)';
-            var typeLabel = TYPE_LABELS[ev.type] || ev.type || '';
-            var opacity = enabled ? '1' : '0.4';
 
-            html += '<div style="display:flex;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);align-items:flex-start;opacity:' + opacity + ';" onclick="event.stopPropagation()">';
-            if (ev.icon) {
-                html += '<img src="' + ev.icon + '" style="width:28px;height:28px;flex-shrink:0;border-radius:2px;" onerror="this.style.display=\'none\'">';
-            }
-            html += '<div style="flex:1;min-width:0;">';
-            html += '<div style="display:flex;align-items:center;gap:0.4rem;">';
-            html += '<span style="font-size:11px;color:' + color + ';font-weight:600;">' + (ev.title || '') + '</span>';
-            html += '<span onclick="event.stopPropagation();muteNotifType(\'' + ev.type + '\')" style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;white-space:nowrap;cursor:pointer;" title="Click to mute this type">' + typeLabel + ' &times;</span>';
-            html += '</div>';
-            html += '<div style="font-size:10px;color:var(--text);margin-top:1px;word-break:break-word;">' + (ev.body || '') + '</div>';
-            html += '<div style="font-size:9px;color:var(--muted);margin-top:2px;">' + formatTime(ev.timestamp) + '</div>';
-            html += '</div></div>';
+        /* Render visible (enabled) notifications */
+        for (var i = visible.length - 1; i >= 0; i--) {
+            html += _renderEvent(visible[i], true);
         }
+        if (visible.length === 0) {
+            html += '<div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>';
+        }
+
+        /* Render filtered summary */
+        var hiddenTypes = Object.keys(hiddenByType);
+        if (hiddenTypes.length > 0) {
+            html += '<div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">';
+            html += '<div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem;">Filtered</div>';
+            for (var j = 0; j < hiddenTypes.length; j++) {
+                var htype = hiddenTypes[j];
+                var hcount = hiddenByType[htype].length;
+                var hlabel = TYPE_LABELS[htype] || htype;
+                var hcolor = TYPE_COLORS[htype] || 'var(--muted)';
+                var isExpanded = expandedFilterType === htype;
+                html += '<div onclick="event.stopPropagation();toggleFilteredType(\'' + htype + '\')" style="display:flex;align-items:center;gap:0.5rem;padding:0.2rem 0;cursor:pointer;opacity:0.6;">';
+                html += '<span style="font-size:10px;color:' + hcolor + ';">' + hlabel + '</span>';
+                html += '<span style="font-size:9px;color:var(--muted);background:var(--border);padding:0 5px;border-radius:8px;min-width:16px;text-align:center;">' + hcount + '</span>';
+                html += '<span style="font-size:9px;color:var(--muted);margin-left:auto;">' + (isExpanded ? '▾' : '▸') + '</span>';
+                html += '</div>';
+                /* Expand this type's events if selected */
+                if (isExpanded) {
+                    for (var k = hiddenByType[htype].length - 1; k >= 0; k--) {
+                        html += _renderEvent(hiddenByType[htype][k], false);
+                    }
+                }
+            }
+            html += '</div>';
+        }
+
         list.innerHTML = html;
     }
 
@@ -295,8 +336,14 @@
         renderList();
     };
 
+    window.toggleFilteredType = function(type) {
+        expandedFilterType = expandedFilterType === type ? null : type;
+        renderList();
+    };
+
     window.toggleShowHidden = function(btn) {
         showHidden = !showHidden;
+        expandedFilterType = null;
         if (btn) {
             btn.textContent = showHidden ? 'Hide Filtered' : 'Show Filtered';
             btn.style.color = showHidden ? 'var(--accent)' : 'var(--muted)';

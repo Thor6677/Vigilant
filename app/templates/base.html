@@ -747,7 +747,6 @@
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
                     <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Notifications</span>
                     <div style="display:flex;gap:0.5rem;">
-                        <button onclick="event.stopPropagation();toggleShowHidden(this)" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Show Filtered</button>
                         <button onclick="event.stopPropagation();toggleNotifSettings()" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;" title="Settings">&#9881;</button>
                         <button onclick="event.stopPropagation();clearNotifBadge()" style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Clear All</button>
                     </div>
@@ -861,6 +860,6 @@
 </footer>
 {% endif %}
 
-<script src="/static/js/notifications.js"></script>
+<script src="/static/js/notifications.js?v=3"></script>
 </body>
 </html>
