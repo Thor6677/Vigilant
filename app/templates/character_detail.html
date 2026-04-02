@@ -269,11 +269,6 @@
         </div>
 
         <div class="stat-row">
-            <span class="stat-label">Bloodline</span>
-            <span class="stat-value">—</span>
-        </div>
-
-        <div class="stat-row">
             <span class="stat-label">Security Status</span>
             <span class="stat-value">
                 {% if char.security_status is not none %}
@@ -336,6 +331,68 @@
                 </div>
             </div>
             {% endif %}
+
+            {# Recently completed skills #}
+            {% if completed_skills %}
+            <details style="margin-top: 0.75rem;">
+                <summary style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                    &#10003; Recently Completed ({{ completed_skills|length }})
+                </summary>
+                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                    {% for entry in completed_skills %}
+                    <div style="display: flex; justify-content: space-between; align-items: center;
+                                padding: 0.35rem 0.6rem; font-size: 10px; opacity: 0.6;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);">
+                        <span style="flex: 1; color: var(--success);">
+                            &#10003; {{ entry['skill_name'] }}
+                        </span>
+                        <span style="color: var(--muted); margin: 0 0.75rem; white-space: nowrap;">
+                            {{ roman[(entry['finished_level'] or 1) - 1] if entry.get('finished_level') else '?' }}
+                        </span>
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 6rem; text-align: right;">
+                            {% set ago = entry.get('completed_ago', 0) %}
+                            {% if ago < 3600 %}{{ (ago // 60)|int }}m ago
+                            {% elif ago < 86400 %}{{ (ago // 3600)|int }}h ago
+                            {% else %}{{ (ago // 86400)|int }}d ago{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Corporation History #}
+        {% if corp_history %}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <details>
+                <summary style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                    Corporation History ({{ corp_history|length }})
+                </summary>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                    {% for h in corp_history %}
+                    <div style="display: flex; align-items: center; gap: 0.5rem;
+                                padding: 0.35rem 0.6rem; font-size: 10px;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);
+                                {% if h.is_current %}background: rgba(200,169,81,0.07);{% endif %}">
+                        <img src="https://images.evetech.net/corporations/{{ h.corporation_id }}/logo?size=32"
+                             style="width:18px;height:18px;border-radius:2px;flex-shrink:0;" onerror="this.style.display='none'">
+                        <span style="flex: 1; color: {% if h.is_current %}var(--accent){% else %}var(--text){% endif %};">
+                            {{ h.corporation_name }}
+                        </span>
+                        {% if h.days_in is not none %}
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 4rem; text-align: right;">
+                            {% if h.days_in >= 365 %}{{ (h.days_in / 365)|round(1) }}y
+                            {% elif h.days_in > 0 %}{{ h.days_in }}d
+                            {% else %}&lt;1d{% endif %}
+                        </span>
+                        {% endif %}
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 5.5rem; text-align: right;">{{ h.start_date }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
         </div>
         {% endif %}
     </div>
@@ -402,7 +459,11 @@
             <span class="card-title">Location</span>
             <div class="stat-row" style="border-bottom: none; padding: 0.25rem 0;">
                 <span class="stat-label">Current</span>
-                <span class="stat-value">{{ docked_at if docked_at else "—" }}</span>
+                <span class="stat-value">
+                    {% if docked_at %}{{ docked_at }}
+                    {% elif current_system %}{{ current_system }} <span style="color:var(--muted);font-size:9px;">(in space)</span>
+                    {% else %}—{% endif %}
+                </span>
             </div>
 
             {# Assets Section — auto-loaded on page load #}

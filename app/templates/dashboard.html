@@ -96,7 +96,7 @@
         <div class="b-stat-val">{{ total_active_orders }}</div>
         <div class="b-stat-label">Market Orders</div>
     </a>
-    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
+    <a href="#mail-panel" class="b-stat" style="text-decoration:none;cursor:pointer;">
         <div class="b-stat-val {% if total_unread_mail > 0 %}is-accent{% endif %}">
             {{ total_unread_mail if not needs_mail_scope else "—" }}
         </div>
@@ -517,7 +517,7 @@
 
     {# Mail #}
     <div class="b-panel">
-        <div class="b-panel-head">
+        <div class="b-panel-head" id="mail-panel">
             <span class="b-label">Mail</span>
             {% if needs_mail_scope %}
             <a href="/auth/add-character" class="b-link" style="color:var(--accent);">Re-auth →</a>
@@ -528,7 +528,7 @@
         {% else %}
         {% for char in characters %}
         {% set m = mail.get(char.character_id) %}
-        <div class="b-table-row">
+        <a href="/character/{{ char.character_id }}" class="b-table-row" style="text-decoration:none;cursor:pointer;">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
                  class="b-portrait-sm" alt="">
             <span style="flex:1;font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</span>
@@ -541,7 +541,7 @@
             {% else %}
             <span style="font-size:11px;color:var(--muted);">—</span>
             {% endif %}
-        </div>
+        </a>
         {% endfor %}
         {% endif %}
     </div>

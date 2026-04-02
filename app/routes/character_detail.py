@@ -270,6 +270,7 @@ async def character_detail(
         logger.warning("Failed to fetch total SP for char %s: %s", character_id, e)
 
     queue_remaining = 0
+    completed_skills = []
     # Parse cached data
     skillqueue = []
     total_sp_in_queue = 0
@@ -289,6 +290,10 @@ async def character_detail(
                     skill_name_map = {t.type_id: t.type_name for t in sde_result.scalars().all()}
 
                     now_utc = datetime.now(timezone.utc)
+                    thirty_days_ago = now_utc - timedelta(days=30)
+                    completed_skills = []
+                    pending_skills = []
+
                     for entry in skillqueue:
                         sid = entry.get("skill_id")
                         entry["skill_name"] = skill_name_map.get(sid, "Skill " + str(sid)) if sid else "Unknown"
@@ -297,22 +302,33 @@ async def character_detail(
                             try:
                                 fd = iso_parser.isoparse(fin)
                                 entry["remaining_seconds"] = max(0, (fd - now_utc).total_seconds())
+                                entry["finish_dt"] = fd
+                                if fd <= now_utc:
+                                    # Completed — only keep if within 30 days
+                                    if fd >= thirty_days_ago:
+                                        entry["completed_ago"] = int((now_utc - fd).total_seconds())
+                                        completed_skills.append(entry)
+                                    continue
                             except Exception:
                                 entry["remaining_seconds"] = None
                         else:
                             entry["remaining_seconds"] = None
+                        pending_skills.append(entry)
 
-                    active_skill = skillqueue[0]
+                    skillqueue = pending_skills
+                    if skillqueue:
+                        active_skill = skillqueue[0]
                     total_sp_in_queue = sum(s.get("level_end_sp", 0) for s in skillqueue)
 
-                    # Total queue remaining (last entry's finish_date)
-                    last_fin = skillqueue[-1].get("finish_date")
-                    if last_fin:
-                        try:
-                            lf = iso_parser.isoparse(last_fin)
-                            queue_remaining = max(0, (lf - now_utc).total_seconds())
-                        except Exception:
-                            pass
+                    # Total queue remaining (last pending entry's finish_date)
+                    if skillqueue:
+                        last_fin = skillqueue[-1].get("finish_date")
+                        if last_fin:
+                            try:
+                                lf = iso_parser.isoparse(last_fin)
+                                queue_remaining = max(0, (lf - now_utc).total_seconds())
+                            except Exception:
+                                pass
             else:
                 skillqueue = sq.get("skills", [])
                 total_sp_in_queue = sq.get("total_sp", 0)
@@ -409,12 +425,14 @@ async def character_detail(
     # Assets are loaded lazily via /character/{id}/assets.json when the user clicks "View Assets"
     has_assets_scope = "esi-assets.read_assets.v1" in (char.scopes or "")
 
-    # Current docked location name (for asset highlighting)
+    # Current location (docked structure or system if in space)
     docked_at = None
+    current_system = None
     if cache and cache.location_json:
         try:
             loc = json.loads(cache.location_json)
             docked_at = loc.get("docked_at")
+            current_system = loc.get("system_name")
         except Exception:
             pass
 
@@ -438,6 +456,64 @@ async def character_detail(
     else:
         journal_error = "missing_scope"
 
+    # Fetch corporation history + backfill birthday (public, no auth needed)
+    corp_history = []
+    from app.esi.client import ESIClient as _PubClient
+    pub_client = _PubClient("")
+    try:
+        raw_history = await pub_client.get_public(f"/characters/{character_id}/corporationhistory/")
+        if raw_history:
+            # Resolve corp names
+            corp_ids = list({h.get("corporation_id") for h in raw_history if h.get("corporation_id")})
+            corp_names = {}
+            if corp_ids:
+                try:
+                    names_data = await pub_client.post_public("/universe/names/", corp_ids)
+                    corp_names = {n["id"]: n["name"] for n in names_data}
+                except Exception:
+                    pass
+            # Sort by record_id descending (most recent first) — ESI usually does this already
+            raw_history.sort(key=lambda x: x.get("record_id", 0), reverse=True)
+            now_utc = datetime.now(timezone.utc)
+            for i, h in enumerate(raw_history):
+                cid_h = h.get("corporation_id")
+                start = h.get("start_date", "")
+                # Duration: time between this start_date and the next entry's start_date (or now for current)
+                days_in = None
+                if start:
+                    try:
+                        start_dt = iso_parser.isoparse(start)
+                        if i == 0:
+                            days_in = (now_utc - start_dt).days
+                        else:
+                            prev_start = raw_history[i - 1].get("start_date", "")
+                            if prev_start:
+                                prev_dt = iso_parser.isoparse(prev_start)
+                                days_in = (prev_dt - start_dt).days
+                    except Exception:
+                        pass
+                corp_history.append({
+                    "corporation_id": cid_h,
+                    "corporation_name": corp_names.get(cid_h, f"Corp {cid_h}"),
+                    "start_date": start[:10] if start else "",
+                    "days_in": days_in,
+                    "is_current": i == 0,
+                })
+    except Exception as e:
+        logger.warning("Corp history fetch failed for char %s: %s", character_id, e)
+
+    # Backfill birthday if missing
+    if not char.birthday:
+        try:
+            pub_info = await pub_client.get_public(f"/characters/{character_id}/")
+            bday_str = pub_info.get("birthday")
+            if bday_str:
+                from dateutil import parser as iso_p
+                char.birthday = iso_p.isoparse(bday_str).replace(tzinfo=None)
+                await db.commit()
+        except Exception:
+            pass
+
     # Initial chart data (default range)
     chart_data = await _get_chart_data(character_id, range, db)
 
@@ -454,6 +530,8 @@ async def character_detail(
         "ranges": list(_RANGE_DAYS.keys()),
         "active_skill": active_skill,
         "skillqueue": skillqueue,
+        "completed_skills": completed_skills,
+        "corp_history": corp_history,
         "total_sp_in_queue": total_sp_in_queue,
         "total_trained_sp": total_trained_sp,
         "queue_remaining": queue_remaining,
@@ -462,6 +540,7 @@ async def character_detail(
         "losses": losses,
         "has_assets_scope": has_assets_scope,
         "docked_at": docked_at,
+        "current_system": current_system,
         "implants": implants,
         "jump_clones": jump_clones,
         "now": datetime.utcnow(),

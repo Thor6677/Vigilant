@@ -1,11 +1,11 @@
-{# Single mail body — loaded via htmx when clicking a mail #}
-<div class="b-panel" style="margin-top:0.5rem;">
-    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="b-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ subject }}</span>
-        <span style="font-size:10px;color:var(--muted);flex-shrink:0;">{{ timestamp }}</span>
+{# Single mail body — loaded inline below the mail header #}
+<div style="border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg);">
+    <div style="padding:0.4rem 0.75rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);">
+        <span style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ subject }}</span>
+        <span style="font-size:9px;color:var(--muted);flex-shrink:0;margin-left:0.5rem;">{{ timestamp }}</span>
     </div>
     {% if sender_name %}
-    <div style="padding:0.4rem 0.75rem;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);">
+    <div style="padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);">
         From: <span style="color:var(--text);">{{ sender_name }}</span>
         {% if recipients %}· To: {{ recipients|join(', ') }}{% endif %}
     </div>

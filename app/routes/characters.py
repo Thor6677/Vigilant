@@ -80,21 +80,31 @@ async def _process_skillqueue(
             })
             continue
 
-        active = None
+        # Filter out completed skills (finish_date in the past)
+        pending = []
         for entry in queue:
+            finish_raw = entry.get("finish_date")
+            if finish_raw:
+                finish_dt = datetime.fromisoformat(finish_raw.replace("Z", "+00:00"))
+                if finish_dt <= now:
+                    continue  # Already completed
+            pending.append(entry)
+
+        active = None
+        for entry in pending:
             start_raw = entry.get("start_date")
             if start_raw:
                 start = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
                 if start <= now:
                     active = entry
                     break
-        if not active and queue:
-            active = queue[0]
+        if not active and pending:
+            active = pending[0]
 
         queue_end = None
         queue_end_str = None
-        if queue:
-            finish_raw = queue[-1].get("finish_date")
+        if pending:
+            finish_raw = pending[-1].get("finish_date")
             if finish_raw:
                 queue_end = datetime.fromisoformat(finish_raw.replace("Z", "+00:00"))
                 queue_end_str = queue_end.strftime("%Y-%m-%d %H:%M")
@@ -140,7 +150,7 @@ async def _process_skillqueue(
             "queue_end_str": queue_end_str,
             "days_remaining": days_remaining,
             "time_remaining_str": time_remaining_str,
-            "queue_length": len(queue),
+            "queue_length": len(pending),
             "progress_pct": progress_pct,
         })
 
