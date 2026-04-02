@@ -287,6 +287,11 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         await db.commit()
 
         request.session["active_character_id"] = character_id
+        # Refresh admin flag
+        user_result = await db.execute(select(User).where(User.id == current_user_id))
+        current_user = user_result.scalar_one_or_none()
+        if current_user:
+            request.session["is_admin"] = current_user.role in ("admin", "manager")
 
     # Trigger an immediate sync for this character.
     from app.routes.dashboard import _sync_task, _queued_sync

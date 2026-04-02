@@ -1403,6 +1403,14 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
+
+    # Refresh admin flag in session
+    from app.db.models import User
+    user_obj = await db.execute(select(User).where(User.id == user_id))
+    user_row = user_obj.scalar_one_or_none()
+    if user_row:
+        request.session["is_admin"] = user_row.role in ("admin", "manager")
+
     active_id = request.session.get("active_character_id")
 
     result = await db.execute(select(Character).where(Character.user_id == user_id))

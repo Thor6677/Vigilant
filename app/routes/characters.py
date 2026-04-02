@@ -138,7 +138,11 @@ async def _process_skillqueue(
             finish_raw_a = active.get("finish_date")
             if finish_raw_a:
                 finish_dt = datetime.fromisoformat(finish_raw_a.replace("Z", "+00:00"))
-                current_finish_str = finish_dt.strftime("%Y-%m-%d %H:%M")
+                remaining = (finish_dt - now).total_seconds()
+                if remaining > 0:
+                    current_finish_str = format_duration(remaining)
+                else:
+                    current_finish_str = "done"
 
         results.append({
             "char": char,

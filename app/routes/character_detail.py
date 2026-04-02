@@ -16,6 +16,7 @@ from app.esi.client import ESIClient
 from app.esi import character as esi_char
 from app.esi.client import refresh_token
 from app.esi.character import get_wallet_journal
+from app.sde import lookup as sde
 from dateutil import parser as iso_parser
 
 logger = logging.getLogger(__name__)
@@ -762,19 +763,252 @@ def _notif_label(notif_type: str) -> str:
     return label
 
 
-def _notif_summary(text: str) -> str:
-    """Extract a one-line summary from notification YAML text."""
+def _parse_notif_fields(text: str) -> dict:
+    """Parse notification YAML text into a dict of key->value."""
+    fields = {}
     if not text:
-        return ""
-    lines = text.strip().split("\n")
-    for line in lines[:3]:
+        return fields
+    for line in text.strip().split("\n"):
         line = line.strip()
         if ":" in line and not line.startswith("-"):
             key, _, val = line.partition(":")
             val = val.strip()
-            if val and len(val) > 2:
-                return f"{key.strip()}: {val[:80]}"
-    return lines[0][:80] if lines else ""
+            if val:
+                fields[key.strip()] = val
+    return fields
+
+
+async def _enrich_notif_summary(notif_type: str, text: str, db) -> str:
+    """Build a human-readable summary from notification YAML text."""
+    fields = _parse_notif_fields(text)
+    if not fields:
+        return ""
+
+    # Format ISK amounts
+    def _fmt_isk(val):
+        try:
+            v = float(val)
+            if v >= 1e9:
+                return f"{v/1e9:.2f}B ISK"
+            if v >= 1e6:
+                return f"{v/1e6:.1f}M ISK"
+            if v >= 1e3:
+                return f"{v/1e3:.0f}K ISK"
+            return f"{v:,.0f} ISK"
+        except (ValueError, TypeError):
+            return val
+
+    # Type-specific formatting
+    if notif_type in ("KillReportVictim", "KillReportFinalBlow"):
+        ship_id = fields.get("victimShipTypeID") or fields.get("shipTypeID")
+        parts = []
+        if ship_id:
+            try:
+                name = await sde.type_id_to_name(db, int(ship_id))
+                if name:
+                    parts.append(name)
+            except (ValueError, TypeError):
+                pass
+        if not parts:
+            return "Ship destroyed"
+        return " — ".join(parts)
+
+    if notif_type in ("InsurancePayoutMsg",):
+        amount = fields.get("amount")
+        if amount:
+            return _fmt_isk(amount)
+        return ""
+
+    if notif_type == "RaffleFinished":
+        type_id = fields.get("type_id")
+        ticket_count = fields.get("ticket_count")
+        parts = []
+        if type_id:
+            try:
+                name = await sde.type_id_to_name(db, int(type_id))
+                if name:
+                    parts.append(name)
+            except (ValueError, TypeError):
+                pass
+        if ticket_count:
+            parts.append(f"{ticket_count} tickets")
+        return " — ".join(parts) if parts else ""
+
+    if notif_type == "GameTimeAdded":
+        return "Game time added to account"
+
+    if notif_type in ("RaffleCreated", "RaffleExpired"):
+        type_id = fields.get("type_id")
+        if type_id:
+            try:
+                name = await sde.type_id_to_name(db, int(type_id))
+                if name:
+                    return name
+            except (ValueError, TypeError):
+                pass
+        return ""
+
+    if notif_type in ("CloneActivationMsg", "CloneMovedMsg", "JumpCloneDeleteMsg"):
+        loc_id = fields.get("cloneStationID") or fields.get("stationID")
+        if loc_id:
+            try:
+                from app.db.sde_models import SDEStation
+                st_result = await db.execute(
+                    select(SDEStation).where(SDEStation.station_id == int(loc_id))
+                )
+                station = st_result.scalar_one_or_none()
+                if station:
+                    return station.station_name
+            except (ValueError, TypeError):
+                pass
+        return ""
+
+    if notif_type in ("BountyClaimMsg",):
+        amount = fields.get("amount")
+        return _fmt_isk(amount) if amount else ""
+
+    if notif_type in ("StructureUnderAttack", "StructureLostShields", "StructureLostArmor", "StructureDestroyed"):
+        parts = []
+        sys_id = fields.get("solarsystemID") or fields.get("solarSystemID")
+        struct_type = fields.get("structureTypeID")
+        if struct_type:
+            name = await sde.type_id_to_name(db, int(struct_type))
+            if name:
+                parts.append(name)
+        if sys_id:
+            info = await sde.system_info(db, int(sys_id))
+            if info:
+                parts.append(info["system_name"])
+        shield = fields.get("shieldPercentage")
+        armor = fields.get("armorPercentage")
+        hull = fields.get("hullPercentage")
+        if shield or armor or hull:
+            hp = []
+            if shield:
+                hp.append(f"S:{float(shield):.0f}%")
+            if armor:
+                hp.append(f"A:{float(armor):.0f}%")
+            if hull:
+                hp.append(f"H:{float(hull):.0f}%")
+            parts.append(" ".join(hp))
+        return " — ".join(parts) if parts else ""
+
+    if notif_type in ("StructureFuelAlert", "StructureServicesOffline", "StructureAnchoring",
+                       "StructureUnanchoring", "StructureOnline"):
+        sys_id = fields.get("solarsystemID") or fields.get("solarSystemID")
+        struct_type = fields.get("structureTypeID")
+        parts = []
+        if struct_type:
+            name = await sde.type_id_to_name(db, int(struct_type))
+            if name:
+                parts.append(name)
+        if sys_id:
+            info = await sde.system_info(db, int(sys_id))
+            if info:
+                parts.append(info["system_name"])
+        return " in ".join(parts) if parts else ""
+
+    if notif_type in ("SovStructureReinforced", "SovCommandNodeEventStarted"):
+        sys_id = fields.get("solarSystemID")
+        if sys_id:
+            info = await sde.system_info(db, int(sys_id))
+            if info:
+                return info["system_name"]
+        return ""
+
+    if notif_type in ("MoonminingExtractionStarted", "MoonminingExtractionFinished",
+                       "MoonminingAutomaticFracture", "MoonminingLaserFired"):
+        sys_id = fields.get("solarSystemID")
+        struct_type = fields.get("structureTypeID")
+        parts = []
+        if struct_type:
+            name = await sde.type_id_to_name(db, int(struct_type))
+            if name:
+                parts.append(name)
+        if sys_id:
+            info = await sde.system_info(db, int(sys_id))
+            if info:
+                parts.append(info["system_name"])
+        return " in ".join(parts) if parts else ""
+
+    if notif_type in ("CharLeftCorpMsg", "CharAppAcceptMsg", "CharAppRejectMsg", "CorpAppNewMsg"):
+        char_id = fields.get("charID") or fields.get("applicationCharID")
+        corp_id = fields.get("corpID")
+        parts = []
+        if char_id:
+            try:
+                from app.esi.client import ESIClient as _PC
+                pc = _PC("")
+                names = await pc.post_public("/universe/names/", [int(char_id)])
+                if names:
+                    parts.append(names[0]["name"])
+            except Exception:
+                pass
+        if corp_id:
+            try:
+                from app.esi.client import ESIClient as _PC
+                pc = _PC("")
+                names = await pc.post_public("/universe/names/", [int(corp_id)])
+                if names:
+                    parts.append(names[0]["name"])
+            except Exception:
+                pass
+        return " — ".join(parts) if parts else ""
+
+    if notif_type in ("BillPaidCorpAllMsg",):
+        amount = fields.get("amount")
+        return _fmt_isk(amount) if amount else ""
+
+    if notif_type in ("CorpTaxChangeMsg",):
+        new_rate = fields.get("newTaxRate")
+        if new_rate:
+            try:
+                return f"New rate: {float(new_rate)*100:.0f}%"
+            except (ValueError, TypeError):
+                pass
+        return ""
+
+    # Generic: skip hashes, long IDs, empty values; show first useful field
+    skip_keys = {"killMailHash", "killMailID", "notification_id", "hash", "logDateTime",
+                  "raffle_id", "itemID", "charID", "corpID", "allianceID", "applicationCharID"}
+    import re as _re
+    _uuid_pattern = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.IGNORECASE)
+    _hex_pattern = _re.compile(r'^[0-9a-f]{20,}$', _re.IGNORECASE)
+    for key, val in fields.items():
+        if key in skip_keys:
+            continue
+        if len(val) > 40:
+            continue  # Skip long hashes/IDs
+        if _uuid_pattern.match(val) or _hex_pattern.match(val):
+            continue  # Skip UUIDs and hex hashes
+        # Format numbers that look like ISK
+        if key.lower().endswith(("amount", "payout", "isk", "tax", "bounty")):
+            return f"{_fmt_isk(val)}"
+        # Resolve type IDs
+        if key.lower().endswith("typeid"):
+            try:
+                name = await sde.type_id_to_name(db, int(val))
+                if name:
+                    return name
+            except (ValueError, TypeError):
+                pass
+        # Resolve system IDs
+        if key.lower().endswith("systemid"):
+            try:
+                info = await sde.system_info(db, int(val))
+                if info:
+                    return info["system_name"]
+            except (ValueError, TypeError):
+                pass
+        # Skip raw numeric IDs
+        try:
+            int_val = int(float(val))
+            if int_val > 10000:
+                continue  # Likely an unresolved ID
+        except (ValueError, TypeError):
+            pass
+        return f"{val[:60]}"
+    return ""
 
 
 @router.get("/character/{character_id}/mail-partial", response_class=HTMLResponse)
@@ -877,11 +1111,13 @@ async def character_notifications_partial(character_id: int, request: Request, d
     raw_notifs = notif_data.get("notifications", []) if isinstance(notif_data, dict) else []
     enriched = []
     for n in raw_notifs:
+        ntype = n.get("type", "Unknown")
+        summary = await _enrich_notif_summary(ntype, n.get("text", ""), db)
         enriched.append({
             "notification_id": n.get("notification_id"),
-            "type": n.get("type", "Unknown"),
-            "type_label": _notif_label(n.get("type", "Unknown")),
-            "summary": _notif_summary(n.get("text", "")),
+            "type": ntype,
+            "type_label": _notif_label(ntype),
+            "summary": summary,
             "timestamp": n.get("timestamp", ""),
             "is_read": n.get("is_read", True),
             "sender_id": n.get("sender_id"),
