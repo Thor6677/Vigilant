@@ -22,9 +22,10 @@ interface Props {
   characters: CharacterLocation[];
   stats: MapStats | null;
   onFocusSystem: (system: SystemData) => void;
+  onHighlightSystems: (ids: Set<number> | null) => void;
 }
 
-export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem }: Props) {
+export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem, onHighlightSystems }: Props) {
   const shipEntries = Object.entries(JUMP_SHIPS) as [JumpShipClass, typeof JUMP_SHIPS[JumpShipClass]][];
   const charsWithLocation = characters.filter(c => c.system_id !== null);
 
@@ -158,6 +159,7 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
           systems={systems}
           stats={stats}
           onFocusSystem={onFocusSystem}
+          onHighlightSystems={onHighlightSystems}
         />
       )}
     </div>
@@ -166,11 +168,12 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
 
 /* ── Route Results with editable midpoints ──────────────────────── */
 
-function RouteResults({ planner, systems, stats, onFocusSystem }: {
+function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSystems }: {
   planner: JumpPlannerState;
   systems: SystemData[];
   stats: MapStats | null;
   onFocusSystem: (s: SystemData) => void;
+  onHighlightSystems: (ids: Set<number> | null) => void;
 }) {
   const route = planner.jumpRoute!;
   const last = route[route.length - 1];
@@ -261,8 +264,10 @@ function RouteResults({ planner, systems, stats, onFocusSystem }: {
                 <MidpointSearch
                   alternatives={planner.getAlternatives(i)}
                   allSystems={systems}
-                  onSelect={(id) => { planner.replaceMidpoint(i, id); setEditingIndex(null); }}
-                  onCancel={() => setEditingIndex(null)}
+                  stats={stats}
+                  onSelect={(id) => { planner.replaceMidpoint(i, id); setEditingIndex(null); onHighlightSystems(null); }}
+                  onCancel={() => { setEditingIndex(null); onHighlightSystems(null); }}
+                  onHighlightSystems={onHighlightSystems}
                 />
               )}
             </div>
@@ -289,9 +294,11 @@ function RouteResults({ planner, systems, stats, onFocusSystem }: {
                 <MidpointSearch
                   alternatives={planner.getAlternatives(i + 1)}
                   allSystems={systems}
+                  stats={stats}
                   isInsert
-                  onSelect={(id) => { planner.insertMidpoint(i, id); setInsertAfterIndex(null); }}
-                  onCancel={() => setInsertAfterIndex(null)}
+                  onSelect={(id) => { planner.insertMidpoint(i, id); setInsertAfterIndex(null); onHighlightSystems(null); }}
+                  onCancel={() => { setInsertAfterIndex(null); onHighlightSystems(null); }}
+                  onHighlightSystems={onHighlightSystems}
                 />
               </div>
             )}
@@ -313,17 +320,18 @@ function RouteResults({ planner, systems, stats, onFocusSystem }: {
 
 /* ── Midpoint search dropdown ──────────────────────────────────── */
 
-function MidpointSearch({ alternatives, allSystems, onSelect, onCancel, isInsert }: {
+function MidpointSearch({ alternatives, allSystems, stats, onSelect, onCancel, onHighlightSystems, isInsert }: {
   alternatives: SystemData[];
   allSystems: SystemData[];
+  stats: MapStats | null;
   onSelect: (id: number) => void;
   onCancel: () => void;
+  onHighlightSystems: (ids: Set<number> | null) => void;
   isInsert?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Show alternatives first, then search results
   const searchResults = useMemo(() => {
     if (query.length < 2) return [];
     const q = query.toLowerCase();
@@ -331,6 +339,14 @@ function MidpointSearch({ alternatives, allSystems, onSelect, onCancel, isInsert
   }, [query, allSystems]);
 
   const showAlts = query.length < 2 && alternatives.length > 0;
+
+  // Highlight alternatives on map when dropdown opens
+  useMemo(() => {
+    const systemsToShow = showAlts ? alternatives : searchResults;
+    if (systemsToShow.length > 0) {
+      onHighlightSystems(new Set(systemsToShow.map(s => s.id)));
+    }
+  }, [showAlts, alternatives, searchResults]);
 
   return (
     <div style={{
@@ -356,24 +372,24 @@ function MidpointSearch({ alternatives, allSystems, onSelect, onCancel, isInsert
         }}>×</button>
       </div>
 
-      <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+      <div style={{ maxHeight: 150, overflowY: 'auto' }}>
         {showAlts && (
           <>
             <div style={{ fontSize: 7, color: '#2a2a2a', letterSpacing: '0.1em', padding: '2px 0' }}>
-              REACHABLE ALTERNATIVES
+              REACHABLE ALTERNATIVES ({alternatives.length})
             </div>
-            {alternatives.slice(0, 8).map(sys => (
-              <SystemRow key={sys.id} system={sys} onClick={() => onSelect(sys.id)} />
+            {alternatives.slice(0, 10).map(sys => (
+              <SystemRowWithStats key={sys.id} system={sys} stats={stats} onClick={() => onSelect(sys.id)} />
             ))}
-            {alternatives.length > 8 && (
+            {alternatives.length > 10 && (
               <div style={{ fontSize: 7, color: '#2a2a2a', padding: '2px 4px' }}>
-                ... {alternatives.length - 8} more
+                ... {alternatives.length - 10} more
               </div>
             )}
           </>
         )}
         {searchResults.map(sys => (
-          <SystemRow key={sys.id} system={sys} onClick={() => onSelect(sys.id)} />
+          <SystemRowWithStats key={sys.id} system={sys} stats={stats} onClick={() => onSelect(sys.id)} />
         ))}
         {query.length >= 2 && searchResults.length === 0 && (
           <div style={{ color: '#2a2a2a', padding: '2px 4px', fontSize: 8 }}>No results</div>
@@ -383,24 +399,42 @@ function MidpointSearch({ alternatives, allSystems, onSelect, onCancel, isInsert
   );
 }
 
-function SystemRow({ system, onClick }: { system: SystemData; onClick: () => void }) {
+function SystemRowWithStats({ system, stats, onClick }: {
+  system: SystemData;
+  stats: MapStats | null;
+  onClick: () => void;
+}) {
+  const sid = String(system.id);
+  const kills = stats?.kills[sid];
+  const jumps = stats?.jumps[sid];
+  const hasActivity = (kills?.ship ?? 0) > 0 || (kills?.npc ?? 0) > 0 || (jumps ?? 0) > 0;
+
   return (
     <div
       onClick={onClick}
       style={{
-        padding: '3px 4px', cursor: 'pointer', display: 'flex',
-        justifyContent: 'space-between', alignItems: 'center', fontSize: 9,
+        padding: '3px 4px', cursor: 'pointer', fontSize: 9,
       }}
     >
-      <span style={{ color: TEXT }}>
-        {system.name}
-        {system.hasStation && (
-          <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
-        )}
-      </span>
-      <span style={{ color: securityColorCSS(system.sec), fontSize: 8 }}>
-        {system.sec.toFixed(1)}
-      </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: TEXT }}>
+          {system.name}
+          {system.hasStation && (
+            <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+          )}
+        </span>
+        <span style={{ color: securityColorCSS(system.sec), fontSize: 8 }}>
+          {system.sec.toFixed(1)}
+        </span>
+      </div>
+      {hasActivity && (
+        <div style={{ fontSize: 7, color: '#3a3a3a', display: 'flex', gap: 5, marginTop: 1 }}>
+          {(jumps ?? 0) > 0 && <span>JMP {jumps}</span>}
+          {(kills?.ship ?? 0) > 0 && <span style={{ color: '#993333' }}>SK {kills!.ship}</span>}
+          {(kills?.npc ?? 0) > 0 && <span>NK {kills!.npc.toLocaleString()}</span>}
+          {(kills?.pod ?? 0) > 0 && <span style={{ color: '#993333' }}>PK {kills!.pod}</span>}
+        </div>
+      )}
     </div>
   );
 }

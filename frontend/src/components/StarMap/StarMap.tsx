@@ -75,6 +75,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
   const overlayBarRef = useRef<HTMLDivElement>(null);
   const currentLODRef = useRef<LODTier>(LODTier.Galaxy);
+  const panelHoverRef = useRef(false); // true when mouse is over an HTML panel
   const selectedSystemRef = useRef<SystemData | null>(null);
 
   // Keep ref in sync for use in Pixi callbacks
@@ -167,13 +168,25 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
 
-  // Apply jump planner range highlight
+  // Apply jump planner highlight: route systems stay bright, others dimmed
   useEffect(() => {
     const sr = systemRendererRef.current;
     const jr = jumpRangeRendererRef.current;
     if (!sr || !jr) return;
 
-    if (jumpPlanner.active && jumpPlanner.jumpOrigin !== null) {
+    if (!jumpPlanner.active) {
+      sr.setJumpRangeHighlight(null, null);
+      jr.setReachable(null, []);
+      return;
+    }
+
+    // If a route exists, highlight the route systems
+    if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+      const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
+      sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
+      jr.setReachable(null, []); // range lines not needed when route is shown
+    } else if (jumpPlanner.jumpOrigin !== null) {
+      // No route yet — show reachable systems from origin
       const origin = data.systemMap.get(jumpPlanner.jumpOrigin);
       if (origin) {
         sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
@@ -183,7 +196,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       sr.setJumpRangeHighlight(null, null);
       jr.setReachable(null, []);
     }
-  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.reachableIds, jumpPlanner.reachableSystems, data.systemMap]);
+  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.jumpRoute, jumpPlanner.reachableIds, jumpPlanner.reachableSystems, data.systemMap]);
 
   // Apply jump route visualization (only when planner is active)
   useEffect(() => {
@@ -443,6 +456,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         hoverThrottleId = window.setTimeout(() => {
           hoverThrottleId = null;
         }, 16);
+
+        // Suppress hover when mouse is over an HTML panel
+        if (panelHoverRef.current) return;
 
         const worldPos = vp.toWorld(e.global);
         const hitRadius = 30 / vp.scaled;
@@ -780,23 +796,42 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
       {/* Jump planner panel */}
       {jumpPlanner.active && (
-        <JumpPlannerPanel
-          planner={jumpPlanner}
-          systems={data.systems}
-          systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
-          characters={characters}
-          stats={stats}
-          onFocusSystem={(sys) => {
-            if (viewportRef.current) {
-              viewportRef.current.animate({
-                position: { x: sys.x, y: sys.y },
-                scale: 2,
-                time: 600,
-                ease: 'easeInOutCubic',
-              });
-            }
-          }}
-        />
+        <div
+          onPointerEnter={() => { panelHoverRef.current = true; }}
+          onPointerLeave={() => { panelHoverRef.current = false; }}
+        >
+          <JumpPlannerPanel
+            planner={jumpPlanner}
+            systems={data.systems}
+            systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+            characters={characters}
+            stats={stats}
+            onFocusSystem={(sys) => {
+              if (viewportRef.current) {
+                viewportRef.current.animate({
+                  position: { x: sys.x, y: sys.y },
+                  scale: 2,
+                  time: 600,
+                  ease: 'easeInOutCubic',
+                });
+              }
+            }}
+            onHighlightSystems={(ids) => {
+              const sr = systemRendererRef.current;
+              if (!sr) return;
+              if (ids && ids.size > 0) {
+                // Temporarily highlight these alternatives
+                sr.setJumpRangeHighlight(null, ids);
+              } else if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+                // Restore route highlight
+                const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
+                sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
+              } else {
+                sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
+              }
+            }}
+          />
+        </div>
       )}
 
       {/* Hover tooltip */}
