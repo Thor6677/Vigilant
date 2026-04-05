@@ -85,14 +85,47 @@ def build(use_cache: bool):
                 "regionId": item.get("regionID"),
             }
 
-    # ── 2. NPC stations → set of system IDs that have at least one ──────
+    # ── 2. NPC stations + services per system ─────────────────────────
+    # Build operation → services mapping
+    log.info("Parsing station operations and services...")
+    service_names: dict[int, str] = {}
+    for item in iter_jsonl(zf, "stationServices.jsonl"):
+        service_names[int(item["_key"])] = item.get("serviceName", {}).get("en", "")
+
+    op_services: dict[int, set[int]] = {}
+    for item in iter_jsonl(zf, "stationOperations.jsonl"):
+        op_services[int(item["_key"])] = set(item.get("services", []))
+
+    # Key services to track (IDs from stationServices.jsonl)
+    TRACKED_SERVICES = {
+        5: "reprocessing",  # Reprocessing Plant
+        6: "refinery",      # Refinery
+        7: "market",        # Market
+        10: "cloning",      # Cloning
+        13: "repair",       # Repair Facilities
+        14: "factory",      # Factory (manufacturing)
+        15: "lab",          # Laboratory (research)
+        24: "jumpClone",    # Jump Clone Facility
+    }
+
     log.info("Parsing NPC stations...")
     systems_with_stations: set[int] = set()
+    system_services: dict[int, set[str]] = defaultdict(set)
+    system_station_count: dict[int, int] = defaultdict(int)
+
     for item in iter_jsonl(zf, "npcStations.jsonl"):
         try:
-            systems_with_stations.add(int(item["solarSystemID"]))
+            sid = int(item["solarSystemID"])
+            op_id = item.get("operationID")
         except (KeyError, ValueError):
             continue
+        systems_with_stations.add(sid)
+        system_station_count[sid] += 1
+        if op_id and op_id in op_services:
+            for svc_id in op_services[op_id]:
+                if svc_id in TRACKED_SERVICES:
+                    system_services[sid].add(TRACKED_SERVICES[svc_id])
+
     log.info("  %d systems have NPC stations", len(systems_with_stations))
 
     # ── 3. Solar systems ─────────────────────────────────────────────────
@@ -153,6 +186,8 @@ def build(use_cache: bool):
             "regId": reg_id,
             "regName": regions.get(reg_id, ""),
             "hasStation": sid in systems_with_stations,
+            "stns": system_station_count.get(sid, 0),
+            "svcs": sorted(system_services.get(sid, [])),
         })
 
     if missing_pos:
@@ -202,6 +237,8 @@ def build(use_cache: bool):
             "regId": s["regId"],
             "regName": s["regName"],
             "hasStation": s["hasStation"],
+            "stns": s["stns"],
+            "svcs": s["svcs"],
             "x3": round(p3[0] / LY_IN_METERS, 4),
             "y3": round(p3[1] / LY_IN_METERS, 4),
             "z3": round(p3[2] / LY_IN_METERS, 4),

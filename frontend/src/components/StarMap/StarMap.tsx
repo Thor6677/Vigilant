@@ -724,6 +724,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       {/* Search bar */}
       <SystemSearch
         systems={data.systems}
+        characters={characters}
         onSelectSystem={handleSearchSelectSystem}
         onSelectArea={handleSearchSelectArea}
       />

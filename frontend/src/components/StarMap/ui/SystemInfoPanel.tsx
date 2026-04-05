@@ -9,6 +9,17 @@ const TEXT = '#dedede';
 const MUTED = '#474747';
 const ACCENT = '#c8a951';
 
+const SVC_LABELS: Record<string, string> = {
+  cloning: 'CLONE',
+  factory: 'MFG',
+  lab: 'LAB',
+  market: 'MKT',
+  refinery: 'REF',
+  repair: 'RPR',
+  reprocessing: 'REPR',
+  jumpClone: 'JC',
+};
+
 interface Props {
   system: SystemData;
   position: { x: number; y: number };
@@ -99,7 +110,24 @@ export function SystemInfoPanel({
         <div><span style={{ color: MUTED }}>RGN </span>{system.regName}</div>
         <div><span style={{ color: MUTED }}>CON </span>{system.conName}</div>
         {system.hasStation && (
-          <div style={{ color: '#33aa55', marginTop: 2 }}>NPC STATION</div>
+          <div style={{ marginTop: 3 }}>
+            <span style={{ color: '#33aa55' }}>
+              {system.stns} NPC STATION{system.stns > 1 ? 'S' : ''}
+            </span>
+          </div>
+        )}
+        {system.svcs.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
+            {system.svcs.map(svc => (
+              <span key={svc} style={{
+                fontSize: 7, padding: '1px 4px', letterSpacing: '0.08em',
+                background: 'rgba(51, 170, 85, 0.08)',
+                color: '#33aa55', border: '1px solid rgba(51, 170, 85, 0.15)',
+              }}>
+                {SVC_LABELS[svc] ?? svc.toUpperCase()}
+              </span>
+            ))}
+          </div>
         )}
         {sov?.alliance_id && (
           <div style={{ marginTop: 2 }}>

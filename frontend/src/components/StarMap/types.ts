@@ -9,6 +9,8 @@ export interface SystemData {
   regId: number;
   regName: string;
   hasStation: boolean;
+  stns: number;    // NPC station count
+  svcs: string[];  // Available services: cloning, factory, lab, market, refinery, repair, reprocessing, jumpClone
   x3: number;  // 3D position in light-years (for jump drive calculations)
   y3: number;
   z3: number;

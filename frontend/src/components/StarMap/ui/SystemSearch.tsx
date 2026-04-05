@@ -1,49 +1,71 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import type { SystemData } from '../types';
+import type { CharacterLocation } from '../useCharacterLocations';
 import { securityColorCSS } from '../utils/colors';
+import { jumpDistanceLY } from '../jump/distance';
 
 const FONT = "'JetBrains Mono', monospace";
 const MAX_RESULTS = 15;
 
-export type SearchResultType = 'system' | 'constellation' | 'region';
+export type SearchResultType = 'system' | 'constellation' | 'region' | 'service';
 
 export interface SearchResult {
   type: SearchResultType;
   id: number;
   name: string;
-  // System-specific
   system?: SystemData;
-  // Area-specific (constellation/region)
   systemCount?: number;
   secRange?: string;
+  // Service search
+  serviceName?: string;
+  distanceLY?: number;
+  characterName?: string;
 }
+
+// Service keywords users might search for
+const SERVICE_KEYWORDS: Record<string, { key: string; label: string }> = {
+  'clone': { key: 'cloning', label: 'Cloning' },
+  'cloning': { key: 'cloning', label: 'Cloning' },
+  'jump clone': { key: 'jumpClone', label: 'Jump Clone' },
+  'jumpclone': { key: 'jumpClone', label: 'Jump Clone' },
+  'jc': { key: 'jumpClone', label: 'Jump Clone' },
+  'factory': { key: 'factory', label: 'Manufacturing' },
+  'manufacturing': { key: 'factory', label: 'Manufacturing' },
+  'mfg': { key: 'factory', label: 'Manufacturing' },
+  'lab': { key: 'lab', label: 'Research Lab' },
+  'laboratory': { key: 'lab', label: 'Research Lab' },
+  'research': { key: 'lab', label: 'Research Lab' },
+  'market': { key: 'market', label: 'Market' },
+  'refinery': { key: 'refinery', label: 'Refinery' },
+  'repair': { key: 'repair', label: 'Repair' },
+  'reprocessing': { key: 'reprocessing', label: 'Reprocessing' },
+  'reprocess': { key: 'reprocessing', label: 'Reprocessing' },
+};
 
 interface Props {
   systems: SystemData[];
+  characters: CharacterLocation[];
   onSelectSystem: (system: SystemData) => void;
   onSelectArea: (type: 'constellation' | 'region', id: number, name: string) => void;
 }
 
-export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
+export function SystemSearch({ systems, characters, onSelectSystem, onSelectArea }: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Pre-compute unique regions and constellations
   const { regionList, constellationList } = useMemo(() => {
     const regMap = new Map<number, { name: string; count: number; minSec: number; maxSec: number }>();
     const conMap = new Map<number, { name: string; regName: string; count: number; minSec: number; maxSec: number }>();
 
     for (const sys of systems) {
-      // Regions
       let r = regMap.get(sys.regId);
       if (!r) { r = { name: sys.regName, count: 0, minSec: sys.sec, maxSec: sys.sec }; regMap.set(sys.regId, r); }
       r.count++;
       r.minSec = Math.min(r.minSec, sys.sec);
       r.maxSec = Math.max(r.maxSec, sys.sec);
 
-      // Constellations
       let c = conMap.get(sys.conId);
       if (!c) { c = { name: sys.conName, regName: sys.regName, count: 0, minSec: sys.sec, maxSec: sys.sec }; conMap.set(sys.conId, c); }
       c.count++;
@@ -57,22 +79,77 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
     };
   }, [systems]);
 
-  // Unified search results
+  // System map for character lookups
+  const systemMap = useMemo(() => {
+    const m = new Map<number, SystemData>();
+    for (const sys of systems) m.set(sys.id, sys);
+    return m;
+  }, [systems]);
+
   const { results, totalCount } = useMemo(() => {
     if (!query || query.length < 2) return { results: [] as SearchResult[], totalCount: 0 };
     const q = query.toLowerCase();
     const out: SearchResult[] = [];
     let total = 0;
 
-    // 1. Matching regions (show first)
+    // Check if query matches a service keyword
+    const matchedService = SERVICE_KEYWORDS[q] ?? Object.entries(SERVICE_KEYWORDS).find(([kw]) => kw.startsWith(q))?.[1];
+
+    if (matchedService) {
+      // Find nearest systems with this service, sorted by distance from each character
+      const charsWithLoc = characters.filter(c => c.system_id !== null);
+      const withService = systems.filter(s => s.svcs.includes(matchedService.key));
+
+      if (charsWithLoc.length > 0) {
+        // For each character, find the closest systems with this service
+        for (const char of charsWithLoc) {
+          const charSys = systemMap.get(char.system_id!);
+          if (!charSys) continue;
+
+          const sorted = withService
+            .map(s => ({ sys: s, dist: jumpDistanceLY(charSys, s) }))
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 5);
+
+          for (const { sys, dist } of sorted) {
+            total++;
+            if (out.length < MAX_RESULTS) {
+              out.push({
+                type: 'service',
+                id: sys.id,
+                name: sys.name,
+                system: sys,
+                serviceName: matchedService.label,
+                distanceLY: dist,
+                characterName: char.character_name,
+              });
+            }
+          }
+        }
+      } else {
+        // No character location — just list systems with the service
+        for (const sys of withService.slice(0, MAX_RESULTS)) {
+          total++;
+          out.push({
+            type: 'service',
+            id: sys.id,
+            name: sys.name,
+            system: sys,
+            serviceName: matchedService.label,
+          });
+        }
+      }
+
+      return { results: out, totalCount: total };
+    }
+
+    // 1. Matching regions
     for (const reg of regionList) {
       if (reg.name.toLowerCase().includes(q)) {
         total++;
         if (out.length < MAX_RESULTS) {
           out.push({
-            type: 'region',
-            id: reg.id,
-            name: reg.name,
+            type: 'region', id: reg.id, name: reg.name,
             systemCount: reg.count,
             secRange: `${reg.minSec.toFixed(1)} – ${reg.maxSec.toFixed(1)}`,
           });
@@ -86,9 +163,7 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
         total++;
         if (out.length < MAX_RESULTS) {
           out.push({
-            type: 'constellation',
-            id: con.id,
-            name: con.name,
+            type: 'constellation', id: con.id, name: con.name,
             systemCount: con.count,
             secRange: `${con.minSec.toFixed(1)} – ${con.maxSec.toFixed(1)}`,
           });
@@ -107,14 +182,14 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
     }
 
     return { results: out, totalCount: total };
-  }, [query, systems, regionList, constellationList]);
+  }, [query, systems, regionList, constellationList, characters, systemMap]);
 
   const handleSelect = useCallback((result: SearchResult) => {
     setQuery('');
     setFocused(false);
     inputRef.current?.blur();
 
-    if (result.type === 'system' && result.system) {
+    if ((result.type === 'system' || result.type === 'service') && result.system) {
       onSelectSystem(result.system);
     } else if (result.type === 'constellation' || result.type === 'region') {
       onSelectArea(result.type, result.id, result.name);
@@ -173,8 +248,8 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
           onKeyDown={handleKeyDown}
-          placeholder="SEARCH SYSTEMS, REGIONS... (F)"
-          aria-label="Search systems, regions, constellations"
+          placeholder="SEARCH SYSTEMS, SERVICES... (F)"
+          aria-label="Search systems, regions, services"
           style={{
             width: '100%',
             padding: '7px 28px 7px 10px',
@@ -225,7 +300,7 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
         }}>
           {results.map((result, i) => (
             <div
-              key={`${result.type}-${result.id}`}
+              key={`${result.type}-${result.id}-${result.characterName ?? ''}`}
               onMouseDown={() => handleSelect(result)}
               style={{
                 padding: '6px 10px',
@@ -233,15 +308,12 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
                 fontFamily: FONT,
                 cursor: 'pointer',
                 background: i === activeIndex ? 'rgba(200,169,81,0.07)' : 'transparent',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
                 letterSpacing: '0.08em',
                 borderTop: i > 0 && result.type !== results[i - 1].type ? '1px solid #191919' : 'none',
               }}
             >
               {result.type === 'system' && result.system ? (
-                <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ color: '#dedede' }}>{result.name}</span>
                   <span style={{ fontSize: 9, color: '#474747' }}>
                     <span style={{ color: securityColorCSS(result.system.sec), marginRight: 6 }}>
@@ -249,9 +321,29 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
                     </span>
                     {result.system.regName}
                   </span>
-                </>
+                </div>
+              ) : result.type === 'service' && result.system ? (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ fontSize: 8, color: '#33aa55', letterSpacing: '0.1em' }}>
+                        {result.serviceName}
+                      </span>
+                      <span style={{ color: '#dedede' }}>{result.name}</span>
+                    </span>
+                    <span style={{ color: securityColorCSS(result.system.sec), fontSize: 9 }}>
+                      {result.system.sec.toFixed(1)}
+                    </span>
+                  </div>
+                  {result.distanceLY !== undefined && (
+                    <div style={{ fontSize: 8, color: '#3a3a3a', marginTop: 1 }}>
+                      {result.distanceLY.toFixed(1)} LY from {result.characterName}
+                      {result.system.hasStation && <span style={{ color: '#33aa55', marginLeft: 4 }}>STN</span>}
+                    </div>
+                  )}
+                </div>
               ) : (
-                <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{
                       fontSize: 8,
@@ -266,7 +358,7 @@ export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
                   <span style={{ fontSize: 9, color: '#474747' }}>
                     {result.systemCount} sys · {result.secRange}
                   </span>
-                </>
+                </div>
               )}
             </div>
           ))}
