@@ -12,7 +12,7 @@ import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
 
-import type { SystemData, MapData, RoutePreference, OverlayType } from './types';
+import type { SystemData, MapData, RoutePreference, OverlayType, GroupMode } from './types';
 import { LODTier } from './types';
 import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
 import { heatmapColor, allianceColor, FACTION_COLORS } from './utils/colors';
@@ -29,6 +29,8 @@ import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
 import { MapToolbar } from './ui/MapToolbar';
 import { OverlayControls } from './ui/OverlayControls';
+import { GroupModeControls } from './ui/GroupModeControls';
+import type { GroupData } from './renderer/LabelRenderer';
 
 export interface StarMapHandle {
   focusSystem: (id: number) => void;
@@ -62,6 +64,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
   const [routePreference, setRoutePreference] = useState<RoutePreference>('shortest');
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
+  const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
   const overlayBarRef = useRef<HTMLDivElement>(null);
   const currentLODRef = useRef<LODTier>(LODTier.Galaxy);
@@ -155,6 +158,26 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   useEffect(() => {
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
+
+  // Apply group mode changes
+  useEffect(() => {
+    const lr = labelRendererRef.current;
+    const sr = systemRendererRef.current;
+    const er = edgeRendererRef.current;
+    if (!lr || !sr || !er) return;
+
+    lr.setGroupMode(groupMode);
+
+    // In group mode, hide individual systems and edges
+    sr.container.visible = groupMode === 'systems';
+    er.container.visible = groupMode === 'systems';
+
+    // Re-trigger LOD update
+    if (viewportRef.current) {
+      lr.updateLOD(currentLODRef.current, viewportRef.current.scaled);
+      lr.updateViewport(viewportRef.current);
+    }
+  }, [groupMode]);
 
   // Measure overlay bar height
   useEffect(() => {
@@ -277,9 +300,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
 
-      // Add to viewport in draw order: edges → region labels → systems → system labels → route
+      // Add to viewport in draw order: edges → region labels → group labels → systems → system labels → route
       vp.addChild(edgeRenderer.container);
       vp.addChild(labelRenderer.regionLabels);
+      vp.addChild(labelRenderer.groupLabels);
       vp.addChild(systemRenderer.container);
       vp.addChild(labelRenderer.systemLabels);
       vp.addChild(routeRenderer.graphics);
@@ -349,6 +373,56 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       vp.on('clicked', (e: any) => {
         const worldPos = e.world;
         const hitRadius = 30 / vp.scaled;
+
+        // In group mode, check for group clicks first
+        const currentGroupMode = labelRenderer.getCurrentGroupMode();
+        if (currentGroupMode !== 'systems') {
+          const groups = currentGroupMode === 'constellation'
+            ? labelRenderer.constellationGroups
+            : labelRenderer.regionGroups;
+
+          // Find nearest group centroid
+          let nearestGroup: GroupData | null = null;
+          let nearestDist = Infinity;
+          for (const g of groups) {
+            const dx = worldPos.x - g.cx;
+            const dy = worldPos.y - g.cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist && dist < hitRadius * 3) {
+              nearestDist = dist;
+              nearestGroup = g;
+            }
+          }
+
+          if (nearestGroup) {
+            // Zoom to fit this group and switch to systems (or constellation for region)
+            const pad = 50;
+            const gw = nearestGroup.maxX - nearestGroup.minX + pad * 2;
+            const gh = nearestGroup.maxY - nearestGroup.minY + pad * 2;
+            const cx = (nearestGroup.minX + nearestGroup.maxX) / 2;
+            const cy = (nearestGroup.minY + nearestGroup.maxY) / 2;
+            const sx = vp.screenWidth / gw;
+            const sy = vp.screenHeight / gh;
+            const targetScale = Math.min(sx, sy, MAX_ZOOM);
+
+            vp.animate({
+              position: { x: cx, y: cy },
+              scale: targetScale,
+              time: 600,
+              ease: 'easeInOutCubic',
+            });
+
+            // Expand: region → constellation, constellation → systems
+            if (currentGroupMode === 'region') {
+              setGroupMode('constellation');
+            } else {
+              setGroupMode('systems');
+            }
+            return;
+          }
+        }
+
+        // Normal system click
         const found = qt.find(worldPos.x, worldPos.y, hitRadius);
 
         if (found) {
@@ -504,6 +578,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
       {/* Search bar */}
       <SystemSearch systems={data.systems} onSelect={handleSearchSelect} />
+
+      {/* Group mode selector */}
+      <GroupModeControls mode={groupMode} onModeChange={setGroupMode} />
 
       {/* Character location markers */}
       {characters.map(char => {

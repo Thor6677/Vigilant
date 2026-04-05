@@ -39,6 +39,8 @@ export type OverlayType =
 
 export type RoutePreference = 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
 
+export type GroupMode = 'systems' | 'constellation' | 'region';
+
 export const LODTier = {
   Galaxy: 0,
   Region: 1,
