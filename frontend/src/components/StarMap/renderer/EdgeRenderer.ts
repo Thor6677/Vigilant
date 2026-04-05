@@ -139,6 +139,58 @@ export class EdgeRenderer {
     }
   }
 
+  // ── Hover highlight ──────────────────────────────────────────────
+
+  private hoverGfx = new Graphics();
+  private hoverActive = false;
+
+  initHoverLayer() {
+    this.hoverGfx.visible = false;
+    this.container.addChild(this.hoverGfx);
+  }
+
+  /** Highlight edges connected to the hovered system, dim the rest. */
+  setHoverHighlight(systemId: number | null, neighborIds: Set<number> | null) {
+    if (systemId === null || neighborIds === null) {
+      if (this.hoverActive) {
+        this.hoverGfx.visible = false;
+        this.hoverGfx.clear();
+        // Restore batch alpha
+        this.applyLOD(this.currentLOD);
+        this.hoverActive = false;
+      }
+      return;
+    }
+
+    this.hoverActive = true;
+
+    // Dim the batched edges
+    this.constellationGfx.alpha = 0.04;
+    this.regionGfx.alpha = 0.04;
+    this.crossRegionGfx.alpha = 0.06;
+
+    // Draw highlighted edges
+    this.hoverGfx.clear();
+    this.hoverGfx.visible = true;
+
+    const connected = new Set(neighborIds);
+    connected.add(systemId);
+
+    for (const [srcId, dstId] of this.edges) {
+      if (!connected.has(srcId) && !connected.has(dstId)) continue;
+      // Must have at least one endpoint as the hovered system
+      if (srcId !== systemId && dstId !== systemId) continue;
+
+      const src = this.systemMap.get(srcId);
+      const dst = this.systemMap.get(dstId);
+      if (!src || !dst) continue;
+
+      this.hoverGfx.moveTo(src.x, src.y);
+      this.hoverGfx.lineTo(dst.x, dst.y);
+    }
+    this.hoverGfx.stroke({ width: 1.5, color: 0x88aacc, alpha: 0.7 });
+  }
+
   destroy() {
     this.container.destroy({ children: true });
   }

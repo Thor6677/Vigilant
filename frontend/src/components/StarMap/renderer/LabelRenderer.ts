@@ -2,7 +2,7 @@ import { Container, BitmapText, BitmapFont } from 'pixi.js';
 import type { Viewport } from 'pixi-viewport';
 import type { SystemData, RegionData } from '../types';
 import { LODTier } from '../types';
-import { LOD_THRESHOLDS } from '../utils/constants';
+import { LOD_THRESHOLDS, LABEL_FADE_START, LABEL_FADE_END } from '../utils/constants';
 import { securityColor } from '../utils/colors';
 
 interface SystemLabel {
@@ -222,7 +222,8 @@ export class LabelRenderer {
 
     // Systems mode
     this.groupLabels.visible = false;
-    this.systemLabels.visible = tier >= LODTier.Region;
+    // Labels appear at Constellation zoom (0.5+), not Region — prevents clutter
+    this.systemLabels.visible = tier >= LODTier.Constellation;
 
     if (scale !== undefined) {
       const fadeStart = LOD_THRESHOLDS[LODTier.Region];
@@ -251,10 +252,13 @@ export class LabelRenderer {
     const minY = bounds.y - pad;
     const maxY = bounds.y + bounds.height + pad;
 
-    // System labels: scale + viewport cull + group filter
-    if (this.systemLabels.visible && this._tier >= LODTier.Region) {
+    // System labels: scale + viewport cull + smooth alpha fade + group filter
+    if (this.systemLabels.visible && this._tier >= LODTier.Constellation) {
       const targetScreenPx = 10 + Math.min(4, scale * 2);
       const labelScale = targetScreenPx / (14 * scale);
+
+      // Smooth fade-in: 0 alpha at LABEL_FADE_START, 1 alpha at LABEL_FADE_END
+      const labelAlpha = Math.min(1, Math.max(0, (scale - LABEL_FADE_START) / (LABEL_FADE_END - LABEL_FADE_START)));
 
       const expandedSystems = this.groupMode !== 'systems' ? this.getVisibleSystemIds() : null;
 
@@ -262,7 +266,6 @@ export class LabelRenderer {
         const sl = this.systemLabelMap.get(sys.id);
         if (!sl) continue;
 
-        // In group mode, only show labels for expanded group's systems
         if (expandedSystems !== null && !expandedSystems.has(sys.id)) {
           sl.container.visible = false;
           continue;
@@ -272,6 +275,7 @@ export class LabelRenderer {
         sl.container.visible = inView;
         if (inView) {
           sl.container.scale.set(labelScale);
+          sl.container.alpha = labelAlpha;
         }
       }
     }

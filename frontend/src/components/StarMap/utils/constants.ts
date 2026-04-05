@@ -39,7 +39,14 @@ export const EDGE_WIDTH: Record<LODTierType, number> = {
 // Edge colors by type
 export const EDGE_COLOR_SAME_CONSTELLATION = 0x2a2a3a;
 export const EDGE_COLOR_SAME_REGION = 0x3a3a5a;
-export const EDGE_COLOR_CROSS_REGION = 0x6644aa;
+export const EDGE_COLOR_CROSS_REGION = 0x7755bb;
+
+// Label fade thresholds (system labels fade in between these zoom scales)
+export const LABEL_FADE_START = 0.5;
+export const LABEL_FADE_END = 0.8;
+
+// Glow texture radius (larger than node for ambient glow)
+export const GLOW_TEXTURE_RADIUS = 32;
 
 // Viewport
 export const MIN_ZOOM = 0.02;

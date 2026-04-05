@@ -48,6 +48,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const appRef = useRef<Application | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const graphRef = useRef<Graph | null>(null);
+  const adjacencyRef = useRef<Map<number, Set<number>> | null>(null);
+  const tooltipTimerRef = useRef<number | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const qtRef = useRef<Quadtree<SystemData> | null>(null);
 
   const systemRendererRef = useRef<SystemRenderer | null>(null);
@@ -323,7 +326,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
       vp.drag({ mouseButtons: 'left' })
         .pinch()
-        .wheel({ smooth: 5 })
+        .wheel({ smooth: 10 })
         .decelerate({ friction: 0.92 })
         .clampZoom({ minScale: MIN_ZOOM, maxScale: MAX_ZOOM })
         .clamp({ direction: 'all', underflow: 'center' });
@@ -344,6 +347,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
       // Init renderers
       edgeRenderer.init(data.systemMap, data.edges);
+      edgeRenderer.initHoverLayer();
       systemRenderer.init(app, data.systems);
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
@@ -363,9 +367,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         .addAll(data.systems);
       qtRef.current = qt;
 
-      // Build graph
-      const graph = buildGraph(data.systems, data.edges);
+      // Build graph + adjacency map
+      const { graph, adjacency } = buildGraph(data.systems, data.edges);
       graphRef.current = graph;
+      adjacencyRef.current = adjacency;
 
       // Initial view setup
       vp.fit(true);
@@ -405,15 +410,34 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         const found = qt.find(worldPos.x, worldPos.y, hitRadius);
 
         if (found) {
-          setHoveredSystem(found);
+          setHoveredSystem(prev => {
+            // Start tooltip delay when hovering a new system
+            if (!prev || prev.id !== found.id) {
+              setTooltipVisible(false);
+              if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+              tooltipTimerRef.current = window.setTimeout(() => setTooltipVisible(true), 150);
+            }
+            return found;
+          });
           const screenPos = vp.toScreen(found.x, found.y);
           setTooltipPos({ x: screenPos.x, y: screenPos.y });
           systemRenderer.setHovered(found.id);
           el.style.cursor = 'pointer';
+
+          // Neighbor highlighting
+          const neighbors = adjacencyRef.current?.get(found.id);
+          if (neighbors) {
+            systemRenderer.setHoverHighlight(found.id, neighbors);
+            edgeRenderer.setHoverHighlight(found.id, neighbors);
+          }
         } else {
+          if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+          setTooltipVisible(false);
           setHoveredSystem(null);
           setTooltipPos(null);
           systemRenderer.setHovered(null);
+          systemRenderer.setHoverHighlight(null, null);
+          edgeRenderer.setHoverHighlight(null, null);
           el.style.cursor = 'grab';
         }
       });
@@ -469,9 +493,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
-      // Animation loop
+      // Animation loop (route + selection ring + smooth alpha transitions)
       app.ticker.add((ticker) => {
         routeRenderer.tick(ticker.deltaTime);
+        systemRenderer.tick(ticker.deltaTime);
       });
 
       // ResizeObserver
@@ -486,6 +511,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       (el as any).__mapCleanup = () => {
         resizeObserver.disconnect();
         if (hoverThrottleId !== null) clearTimeout(hoverThrottleId);
+        if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
       };
     }
 
@@ -725,6 +751,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             color: '#dedede',
             whiteSpace: 'nowrap',
             zIndex: 10,
+            opacity: tooltipVisible ? 1 : 0,
+            transform: tooltipVisible ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'opacity 120ms ease-out, transform 120ms ease-out',
           }}
         >
           <strong>{hoveredSystem.name}</strong>
