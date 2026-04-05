@@ -28,6 +28,21 @@ interface Props {
 export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem, onHighlightSystems }: Props) {
   const shipEntries = Object.entries(JUMP_SHIPS) as [JumpShipClass, typeof JUMP_SHIPS[JumpShipClass]][];
   const charsWithLocation = characters.filter(c => c.system_id !== null);
+  const [showRange, setShowRange] = useState(false);
+
+  // When range view is toggled, highlight reachable systems
+  useEffect(() => {
+    if (showRange && planner.reachableSystems.length > 0) {
+      onHighlightSystems(new Set(planner.reachableSystems.map(s => s.id)));
+    } else if (!showRange) {
+      // Restore route highlight if route exists
+      if (planner.jumpRoute && planner.jumpRoute.length > 1) {
+        onHighlightSystems(new Set(planner.jumpRoute.map(wp => wp.system.id)));
+      } else {
+        onHighlightSystems(null);
+      }
+    }
+  }, [showRange, planner.reachableSystems, planner.jumpRoute, onHighlightSystems]);
 
   return (
     <div style={{
@@ -144,22 +159,37 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
         />
       </div>
 
-      {/* Calculate button */}
-      <button
-        onClick={planner.calculate}
-        disabled={planner.jumpOrigin === null || planner.jumpDest === null}
-        style={{
-          width: '100%', padding: '6px', fontSize: 10, letterSpacing: '0.12em',
-          fontFamily: FONT, textTransform: 'uppercase', marginTop: 10,
-          background: planner.jumpOrigin && planner.jumpDest ? 'rgba(255,136,0,0.15)' : 'transparent',
-          color: planner.jumpOrigin && planner.jumpDest ? JUMP_COLOR : MUTED,
-          border: `1px solid ${planner.jumpOrigin && planner.jumpDest ? JUMP_COLOR : BORDER}`,
-          cursor: planner.jumpOrigin && planner.jumpDest ? 'pointer' : 'default',
-          marginBottom: 8,
-        }}
-      >
-        Calculate Route
-      </button>
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 4, marginTop: 10, marginBottom: 8 }}>
+        <button
+          onClick={planner.calculate}
+          disabled={planner.jumpOrigin === null || planner.jumpDest === null}
+          style={{
+            flex: 1, padding: '6px', fontSize: 10, letterSpacing: '0.12em',
+            fontFamily: FONT, textTransform: 'uppercase',
+            background: planner.jumpOrigin && planner.jumpDest ? 'rgba(255,136,0,0.15)' : 'transparent',
+            color: planner.jumpOrigin && planner.jumpDest ? JUMP_COLOR : MUTED,
+            border: `1px solid ${planner.jumpOrigin && planner.jumpDest ? JUMP_COLOR : BORDER}`,
+            cursor: planner.jumpOrigin && planner.jumpDest ? 'pointer' : 'default',
+          }}
+        >
+          Route
+        </button>
+        <button
+          onClick={() => setShowRange(prev => !prev)}
+          disabled={planner.jumpOrigin === null}
+          style={{
+            flex: 1, padding: '6px', fontSize: 10, letterSpacing: '0.12em',
+            fontFamily: FONT, textTransform: 'uppercase',
+            background: showRange ? 'rgba(255,136,0,0.15)' : 'transparent',
+            color: planner.jumpOrigin ? JUMP_COLOR : MUTED,
+            border: `1px solid ${planner.jumpOrigin ? (showRange ? JUMP_COLOR : BORDER) : BORDER}`,
+            cursor: planner.jumpOrigin ? 'pointer' : 'default',
+          }}
+        >
+          Range
+        </button>
+      </div>
 
       {planner.routeError && (
         <div style={{ fontSize: 9, color: '#cc3333', marginBottom: 8 }}>
@@ -167,8 +197,37 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
         </div>
       )}
 
+      {/* Range list */}
+      {showRange && planner.reachableSystems.length > 0 && (
+        <div>
+          <div style={{ fontSize: 8, color: '#3a3a3a', letterSpacing: '0.1em', marginBottom: 4 }}>
+            IN RANGE [{planner.reachableSystems.length}]
+          </div>
+          <div style={{ maxHeight: 250, overflowY: 'auto', border: `1px solid ${BORDER}`, background: '#0a0a0a' }}>
+            {planner.reachableSystems
+              .slice()
+              .sort((a, b) => {
+                // Stations first, then by name
+                if (a.hasStation !== b.hasStation) return a.hasStation ? -1 : 1;
+                return a.name.localeCompare(b.name);
+              })
+              .map(sys => (
+                <SystemRowWithStats
+                  key={sys.id}
+                  system={sys}
+                  stats={stats}
+                  onClick={() => {
+                    planner.setJumpDest(sys.id);
+                    setShowRange(false);
+                  }}
+                />
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Route results */}
-      {planner.jumpRoute && planner.jumpRoute.length > 1 && (
+      {!showRange && planner.jumpRoute && planner.jumpRoute.length > 1 && (
         <RouteResults
           planner={planner}
           stats={stats}
