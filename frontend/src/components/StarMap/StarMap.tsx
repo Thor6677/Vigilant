@@ -185,16 +185,16 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.reachableIds, jumpPlanner.reachableSystems, data.systemMap]);
 
-  // Apply jump route visualization
+  // Apply jump route visualization (only when planner is active)
   useEffect(() => {
     const jr = jumpRangeRendererRef.current;
     if (!jr) return;
-    if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+    if (jumpPlanner.active && jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
       jr.setRoute(jumpPlanner.jumpRoute.map(wp => wp.system));
     } else {
-      jr.routeGraphics.clear();
+      jr.clearAll();
     }
-  }, [jumpPlanner.jumpRoute]);
+  }, [jumpPlanner.active, jumpPlanner.jumpRoute]);
 
   // Apply group mode changes
   useEffect(() => {
@@ -785,6 +785,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           systems={data.systems}
           systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
           characters={characters}
+          stats={stats}
           onFocusSystem={(sys) => {
             if (viewportRef.current) {
               viewportRef.current.animate({

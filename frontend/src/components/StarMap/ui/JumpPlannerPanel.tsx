@@ -2,6 +2,7 @@ import { useState, useRef, useMemo } from 'react';
 import type { SystemData, JumpShipClass } from '../types';
 import type { JumpPlannerState } from '../useJumpPlanner';
 import type { CharacterLocation } from '../useCharacterLocations';
+import type { MapStats } from '../useOverlayData';
 import { JUMP_SHIPS } from '../jump/constants';
 import { securityColorCSS } from '../utils/colors';
 import { canLightCyno } from '../jump/distance';
@@ -19,10 +20,11 @@ interface Props {
   systems: SystemData[];
   systemName: (id: number) => string;
   characters: CharacterLocation[];
+  stats: MapStats | null;
   onFocusSystem: (system: SystemData) => void;
 }
 
-export function JumpPlannerPanel({ planner, systems, systemName, characters, onFocusSystem }: Props) {
+export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem }: Props) {
   const shipEntries = Object.entries(JUMP_SHIPS) as [JumpShipClass, typeof JUMP_SHIPS[JumpShipClass]][];
   const charsWithLocation = characters.filter(c => c.system_id !== null);
 
@@ -31,7 +33,7 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
       position: 'absolute',
       top: 48,
       left: 10,
-      width: 270,
+      width: 280,
       maxHeight: 'calc(100% - 100px)',
       overflowY: 'auto',
       background: BG,
@@ -47,10 +49,16 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', color: JUMP_COLOR }}>
           JUMP PLANNER
         </span>
-        <button onClick={() => planner.setActive(false)} style={{
-          background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
-          fontSize: 14, fontFamily: FONT, lineHeight: 1,
-        }}>×</button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={planner.reset} title="Reset" style={{
+            background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
+            fontSize: 9, fontFamily: FONT, letterSpacing: '0.08em',
+          }}>RESET</button>
+          <button onClick={() => planner.setActive(false)} style={{
+            background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
+            fontSize: 14, fontFamily: FONT, lineHeight: 1,
+          }}>×</button>
+        </div>
       </div>
 
       {/* Ship class */}
@@ -98,7 +106,7 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
         systems={systems}
         systemName={systemName}
         characters={charsWithLocation}
-        onSelect={(id) => { planner.setJumpOrigin(id); }}
+        onSelect={(id) => planner.setJumpOrigin(id)}
         onClear={() => planner.setJumpOrigin(null)}
         onFocusSystem={onFocusSystem}
         placeholder="Search or click map..."
@@ -113,7 +121,7 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
           systems={systems}
           systemName={systemName}
           characters={charsWithLocation}
-          onSelect={(id) => { planner.setJumpDest(id); }}
+          onSelect={(id) => planner.setJumpDest(id)}
           onClear={() => planner.setJumpDest(null)}
           onFocusSystem={onFocusSystem}
           placeholder="Search or click map..."
@@ -137,7 +145,6 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
         Calculate Route
       </button>
 
-      {/* Error */}
       {planner.routeError && (
         <div style={{ fontSize: 9, color: '#cc3333', marginBottom: 8 }}>
           {planner.routeError}
@@ -146,17 +153,29 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, onF
 
       {/* Route results */}
       {planner.jumpRoute && planner.jumpRoute.length > 1 && (
-        <RouteResults planner={planner} onFocusSystem={onFocusSystem} />
+        <RouteResults
+          planner={planner}
+          systems={systems}
+          stats={stats}
+          onFocusSystem={onFocusSystem}
+        />
       )}
     </div>
   );
 }
 
-/* ── Route Results ─────────────────────────────────────────────── */
+/* ── Route Results with editable midpoints ──────────────────────── */
 
-function RouteResults({ planner, onFocusSystem }: { planner: JumpPlannerState; onFocusSystem: (s: SystemData) => void }) {
+function RouteResults({ planner, systems, stats, onFocusSystem }: {
+  planner: JumpPlannerState;
+  systems: SystemData[];
+  stats: MapStats | null;
+  onFocusSystem: (s: SystemData) => void;
+}) {
   const route = planner.jumpRoute!;
   const last = route[route.length - 1];
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [insertAfterIndex, setInsertAfterIndex] = useState<number | null>(null);
 
   return (
     <div>
@@ -164,41 +183,121 @@ function RouteResults({ planner, onFocusSystem }: { planner: JumpPlannerState; o
         ROUTE: {route.length - 1} JUMP{route.length > 2 ? 'S' : ''}
       </div>
 
-      {route.map((wp, i) => (
-        <div key={wp.system.id} style={{
-          padding: '4px 0',
-          borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
-          fontSize: 9,
-          cursor: 'pointer',
-        }} onClick={() => onFocusSystem(wp.system)}>
-          <div style={{ color: i === 0 ? ACCENT : TEXT }}>
-            {i + 1}. {wp.system.name}
-            <span style={{ color: securityColorCSS(wp.system.sec), marginLeft: 4, fontSize: 8 }}>
-              {wp.system.sec.toFixed(1)}
-            </span>
-            {wp.distanceLY > 0 && (
-              <span style={{ color: MUTED, marginLeft: 6 }}>
-                {wp.distanceLY.toFixed(2)} LY
-              </span>
-            )}
-          </div>
-          {wp.fuelThisHop > 0 && (
-            <div style={{ color: MUTED, fontSize: 8, marginTop: 1 }}>
-              FUEL {wp.fuelThisHop.toLocaleString()}
-              {wp.waitMinutes > 0 && (
-                <span style={{ marginLeft: 8, color: '#cc8833' }}>
-                  WAIT {wp.waitMinutes.toFixed(1)}m
+      {route.map((wp, i) => {
+        const isOrigin = i === 0;
+        const isDest = i === route.length - 1;
+        const isMidpoint = !isOrigin && !isDest;
+        const sid = String(wp.system.id);
+        const kills = stats?.kills[sid];
+        const jumps = stats?.jumps[sid];
+
+        return (
+          <div key={`${wp.system.id}-${i}`}>
+            <div style={{
+              padding: '5px 0',
+              borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
+              fontSize: 9,
+            }}>
+              {/* System name row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span
+                  style={{ color: isOrigin ? ACCENT : TEXT, cursor: 'pointer', flex: 1 }}
+                  onClick={() => onFocusSystem(wp.system)}
+                >
+                  {i + 1}. {wp.system.name}
+                  <span style={{ color: securityColorCSS(wp.system.sec), marginLeft: 3, fontSize: 8 }}>
+                    {wp.system.sec.toFixed(1)}
+                  </span>
                 </span>
+
+                {/* NPC Station badge */}
+                {wp.system.hasStation && (
+                  <span style={{ fontSize: 7, color: '#33aa55', letterSpacing: '0.08em' }} title="NPC Station">
+                    STN
+                  </span>
+                )}
+
+                {/* Distance */}
+                {wp.distanceLY > 0 && (
+                  <span style={{ color: MUTED, fontSize: 8 }}>
+                    {wp.distanceLY.toFixed(2)}LY
+                  </span>
+                )}
+
+                {/* Midpoint edit controls */}
+                {isMidpoint && (
+                  <span style={{ display: 'flex', gap: 2 }}>
+                    <MiniBtn title="Swap midpoint" onClick={() => setEditingIndex(editingIndex === i ? null : i)}>↔</MiniBtn>
+                    <MiniBtn title="Remove midpoint" onClick={() => { planner.removeMidpoint(i); setEditingIndex(null); }}>×</MiniBtn>
+                  </span>
+                )}
+              </div>
+
+              {/* Activity stats */}
+              {(kills || jumps) && (
+                <div style={{ fontSize: 7, color: '#3a3a3a', marginTop: 2, display: 'flex', gap: 6 }}>
+                  {jumps !== undefined && jumps > 0 && <span>JMP {jumps.toLocaleString()}</span>}
+                  {kills?.ship !== undefined && kills.ship > 0 && <span style={{ color: '#993333' }}>SK {kills.ship}</span>}
+                  {kills?.npc !== undefined && kills.npc > 0 && <span>NK {kills.npc.toLocaleString()}</span>}
+                  {kills?.pod !== undefined && kills.pod > 0 && <span style={{ color: '#993333' }}>PK {kills.pod}</span>}
+                </div>
               )}
-              {wp.blueFatigue > 0 && (
-                <span style={{ marginLeft: 8, color: '#4488cc' }}>
-                  FAT {wp.blueFatigue.toFixed(0)}m
-                </span>
+
+              {/* Fuel / fatigue */}
+              {wp.fuelThisHop > 0 && (
+                <div style={{ color: MUTED, fontSize: 8, marginTop: 2 }}>
+                  FUEL {wp.fuelThisHop.toLocaleString()}
+                  {wp.waitMinutes > 0 && (
+                    <span style={{ marginLeft: 6, color: '#cc8833' }}>WAIT {wp.waitMinutes.toFixed(1)}m</span>
+                  )}
+                  {wp.blueFatigue > 0 && (
+                    <span style={{ marginLeft: 6, color: '#4488cc' }}>FAT {wp.blueFatigue.toFixed(0)}m</span>
+                  )}
+                </div>
+              )}
+
+              {/* Midpoint swap search */}
+              {editingIndex === i && (
+                <MidpointSearch
+                  alternatives={planner.getAlternatives(i)}
+                  allSystems={systems}
+                  onSelect={(id) => { planner.replaceMidpoint(i, id); setEditingIndex(null); }}
+                  onCancel={() => setEditingIndex(null)}
+                />
               )}
             </div>
-          )}
-        </div>
-      ))}
+
+            {/* Insert midpoint button between hops */}
+            {!isDest && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '1px 0' }}>
+                <button
+                  onClick={() => setInsertAfterIndex(insertAfterIndex === i ? null : i)}
+                  title="Add midpoint here"
+                  style={{
+                    background: 'none', border: 'none', color: insertAfterIndex === i ? JUMP_COLOR : '#1a1a1a',
+                    cursor: 'pointer', fontSize: 10, fontFamily: FONT, padding: '0 4px',
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            {/* Insert midpoint search */}
+            {insertAfterIndex === i && (
+              <div style={{ padding: '4px 0' }}>
+                <MidpointSearch
+                  alternatives={planner.getAlternatives(i + 1)}
+                  allSystems={systems}
+                  isInsert
+                  onSelect={(id) => { planner.insertMidpoint(i, id); setInsertAfterIndex(null); }}
+                  onCancel={() => setInsertAfterIndex(null)}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {/* Totals */}
       <div style={{
@@ -212,7 +311,101 @@ function RouteResults({ planner, onFocusSystem }: { planner: JumpPlannerState; o
   );
 }
 
-/* ── System Slot with Inline Search + Character Locations ──────── */
+/* ── Midpoint search dropdown ──────────────────────────────────── */
+
+function MidpointSearch({ alternatives, allSystems, onSelect, onCancel, isInsert }: {
+  alternatives: SystemData[];
+  allSystems: SystemData[];
+  onSelect: (id: number) => void;
+  onCancel: () => void;
+  isInsert?: boolean;
+}) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Show alternatives first, then search results
+  const searchResults = useMemo(() => {
+    if (query.length < 2) return [];
+    const q = query.toLowerCase();
+    return allSystems.filter(s => s.name.toLowerCase().includes(q) && canLightCyno(s)).slice(0, 6);
+  }, [query, allSystems]);
+
+  const showAlts = query.length < 2 && alternatives.length > 0;
+
+  return (
+    <div style={{
+      marginTop: 4, background: '#0a0a0a', border: `1px solid ${BORDER}`,
+      padding: 4, fontSize: 9,
+    }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        <input
+          ref={inputRef}
+          autoFocus
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder={isInsert ? 'Search system to add...' : 'Search replacement...'}
+          style={{
+            flex: 1, background: 'none', border: `1px solid ${BORDER}`, outline: 'none',
+            color: TEXT, fontSize: 9, fontFamily: FONT, padding: '2px 4px',
+          }}
+        />
+        <button onClick={onCancel} style={{
+          background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
+          fontSize: 10, fontFamily: FONT,
+        }}>×</button>
+      </div>
+
+      <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+        {showAlts && (
+          <>
+            <div style={{ fontSize: 7, color: '#2a2a2a', letterSpacing: '0.1em', padding: '2px 0' }}>
+              REACHABLE ALTERNATIVES
+            </div>
+            {alternatives.slice(0, 8).map(sys => (
+              <SystemRow key={sys.id} system={sys} onClick={() => onSelect(sys.id)} />
+            ))}
+            {alternatives.length > 8 && (
+              <div style={{ fontSize: 7, color: '#2a2a2a', padding: '2px 4px' }}>
+                ... {alternatives.length - 8} more
+              </div>
+            )}
+          </>
+        )}
+        {searchResults.map(sys => (
+          <SystemRow key={sys.id} system={sys} onClick={() => onSelect(sys.id)} />
+        ))}
+        {query.length >= 2 && searchResults.length === 0 && (
+          <div style={{ color: '#2a2a2a', padding: '2px 4px', fontSize: 8 }}>No results</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SystemRow({ system, onClick }: { system: SystemData; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: '3px 4px', cursor: 'pointer', display: 'flex',
+        justifyContent: 'space-between', alignItems: 'center', fontSize: 9,
+      }}
+    >
+      <span style={{ color: TEXT }}>
+        {system.name}
+        {system.hasStation && (
+          <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+        )}
+      </span>
+      <span style={{ color: securityColorCSS(system.sec), fontSize: 8 }}>
+        {system.sec.toFixed(1)}
+      </span>
+    </div>
+  );
+}
+
+/* ── Shared Components ─────────────────────────────────────────── */
 
 function SystemSlotWithSearch({
   systemId, systems, systemName, characters, onSelect, onClear, onFocusSystem, placeholder, isOrigin,
@@ -229,7 +422,6 @@ function SystemSlotWithSearch({
 }) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const results = useMemo(() => {
     if (!query || query.length < 2) return [];
@@ -255,13 +447,17 @@ function SystemSlotWithSearch({
         <span
           style={{ color: TEXT, cursor: 'pointer' }}
           onClick={() => { if (sys) onFocusSystem(sys); }}
-          title="Click to focus on map"
         >
           {systemName(systemId)}
           {sys && (
-            <span style={{ color: securityColorCSS(sys.sec), marginLeft: 4, fontSize: 9 }}>
-              {sys.sec.toFixed(1)}
-            </span>
+            <>
+              <span style={{ color: securityColorCSS(sys.sec), marginLeft: 4, fontSize: 9 }}>
+                {sys.sec.toFixed(1)}
+              </span>
+              {sys.hasStation && (
+                <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+              )}
+            </>
           )}
         </span>
         <button onClick={onClear} style={{
@@ -274,7 +470,6 @@ function SystemSlotWithSearch({
 
   return (
     <div style={{ position: 'relative' }}>
-      {/* Character location shortcuts */}
       {characters.length > 0 && !searching && (
         <div style={{ display: 'flex', gap: 3, marginBottom: 3, flexWrap: 'wrap' }}>
           {characters.map(ch => (
@@ -295,14 +490,11 @@ function SystemSlotWithSearch({
         </div>
       )}
 
-      {/* Search input */}
       <div style={{
         display: 'flex', alignItems: 'center',
-        padding: '3px 6px', background: '#080808', border: `1px solid ${BORDER}`,
-        minHeight: 26,
+        padding: '3px 6px', background: '#080808', border: `1px solid ${BORDER}`, minHeight: 26,
       }}>
         <input
-          ref={inputRef}
           type="text"
           value={query}
           onChange={e => { setQuery(e.target.value); setSearching(true); }}
@@ -316,7 +508,6 @@ function SystemSlotWithSearch({
         />
       </div>
 
-      {/* Search dropdown */}
       {searching && results.length > 0 && (
         <div style={{
           position: 'absolute', left: 0, right: 0, top: '100%',
@@ -330,21 +521,19 @@ function SystemSlotWithSearch({
               <div
                 key={sys.id}
                 onMouseDown={() => {
-                  if (!disabled) {
-                    onSelect(sys.id);
-                    setQuery('');
-                    setSearching(false);
-                  }
+                  if (!disabled) { onSelect(sys.id); setQuery(''); setSearching(false); }
                 }}
                 style={{
-                  padding: '4px 6px', fontSize: 9, fontFamily: FONT, letterSpacing: '0.06em',
+                  padding: '4px 6px', fontSize: 9, fontFamily: FONT,
                   cursor: disabled ? 'default' : 'pointer',
                   display: 'flex', justifyContent: 'space-between',
                   color: disabled ? '#2a2a2a' : TEXT,
                 }}
-                title={disabled ? 'Highsec — cannot light cyno' : ''}
               >
-                <span>{sys.name}</span>
+                <span>
+                  {sys.name}
+                  {sys.hasStation && <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>}
+                </span>
                 <span style={{ color: securityColorCSS(sys.sec), fontSize: 8 }}>
                   {sys.sec.toFixed(1)}
                   {disabled && <span style={{ color: '#cc3333', marginLeft: 4 }}>HS</span>}
@@ -357,8 +546,6 @@ function SystemSlotWithSearch({
     </div>
   );
 }
-
-/* ── Shared Components ─────────────────────────────────────────── */
 
 function Label({ text }: { text: string }) {
   return (
@@ -390,5 +577,21 @@ function SkillButtons({ value, onChange }: { value: number; onChange: (v: number
         </button>
       ))}
     </div>
+  );
+}
+
+function MiniBtn({ children, onClick, title }: { children: string; onClick: () => void; title: string }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      title={title}
+      style={{
+        background: 'none', border: `1px solid ${BORDER}`, color: MUTED,
+        cursor: 'pointer', fontSize: 9, fontFamily: FONT, padding: '0 3px',
+        lineHeight: '14px',
+      }}
+    >
+      {children}
+    </button>
   );
 }
