@@ -3,6 +3,7 @@ import type { SystemData } from '../types';
 import { securityColorCSS } from '../utils/colors';
 
 const FONT = "'JetBrains Mono', monospace";
+const MAX_RESULTS = 15;
 
 interface Props {
   systems: SystemData[];
@@ -15,22 +16,35 @@ export function SystemSearch({ systems, onSelect }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const sortedSystems = useMemo(() => {
-    return [...systems].sort((a, b) => a.name.localeCompare(b.name));
-  }, [systems]);
-
-  const results = useMemo(() => {
-    if (!query || query.length < 2) return [];
+  // Search results: match system name, region name, or constellation name
+  const { results, totalCount } = useMemo(() => {
+    if (!query || query.length < 2) return { results: [], totalCount: 0 };
     const q = query.toLowerCase();
     const matches: SystemData[] = [];
-    for (const sys of sortedSystems) {
+    let total = 0;
+
+    // First: exact system name matches
+    for (const sys of systems) {
       if (sys.name.toLowerCase().includes(q)) {
-        matches.push(sys);
-        if (matches.length >= 15) break;
+        total++;
+        if (matches.length < MAX_RESULTS) matches.push(sys);
       }
     }
-    return matches;
-  }, [query, sortedSystems]);
+
+    // Then: region/constellation name matches (only add systems not already matched)
+    if (matches.length < MAX_RESULTS) {
+      const matchedIds = new Set(matches.map(s => s.id));
+      for (const sys of systems) {
+        if (matchedIds.has(sys.id)) continue;
+        if (sys.regName.toLowerCase().includes(q) || sys.conName.toLowerCase().includes(q)) {
+          total++;
+          if (matches.length < MAX_RESULTS) matches.push(sys);
+        }
+      }
+    }
+
+    return { results: matches, totalCount: total };
+  }, [query, systems]);
 
   const handleSelect = useCallback((sys: SystemData) => {
     setQuery('');
@@ -72,6 +86,7 @@ export function SystemSearch({ systems, onSelect }: Props) {
   }, []);
 
   const showDropdown = focused && results.length > 0;
+  const hasMore = totalCount > MAX_RESULTS;
 
   return (
     <div style={{
@@ -81,29 +96,57 @@ export function SystemSearch({ systems, onSelect }: Props) {
       zIndex: 30,
       width: 260,
     }}>
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setTimeout(() => setFocused(false), 150)}
-        onKeyDown={handleKeyDown}
-        placeholder="SEARCH SYSTEMS (F)"
-        aria-label="Search solar systems"
-        style={{
-          width: '100%',
-          padding: '7px 10px',
-          fontSize: 10,
-          letterSpacing: '0.1em',
-          fontFamily: FONT,
-          background: 'rgba(14, 14, 14, 0.95)',
-          color: '#dedede',
-          border: '1px solid #191919',
-          outline: 'none',
-          textTransform: 'uppercase',
-        }}
-      />
+      <div style={{ position: 'relative' }}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          onKeyDown={handleKeyDown}
+          placeholder="SEARCH SYSTEMS (F)"
+          aria-label="Search solar systems"
+          style={{
+            width: '100%',
+            padding: '7px 28px 7px 10px',
+            fontSize: 10,
+            letterSpacing: '0.1em',
+            fontFamily: FONT,
+            background: 'rgba(14, 14, 14, 0.95)',
+            color: '#dedede',
+            border: '1px solid #191919',
+            outline: 'none',
+            textTransform: 'uppercase',
+          }}
+        />
+        {/* Clear button */}
+        {query.length > 0 && (
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setQuery('');
+              inputRef.current?.focus();
+            }}
+            style={{
+              position: 'absolute',
+              right: 6,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              color: '#474747',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontFamily: FONT,
+              padding: '0 2px',
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {showDropdown && (
         <div style={{
@@ -138,6 +181,18 @@ export function SystemSearch({ systems, onSelect }: Props) {
               </span>
             </div>
           ))}
+          {hasMore && (
+            <div style={{
+              padding: '5px 10px',
+              fontSize: 9,
+              fontFamily: FONT,
+              color: '#3a3a3a',
+              letterSpacing: '0.1em',
+              textAlign: 'center',
+            }}>
+              ... AND {totalCount - MAX_RESULTS} MORE
+            </div>
+          )}
         </div>
       )}
     </div>

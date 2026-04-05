@@ -1,7 +1,7 @@
 import type { SystemData, RoutePreference } from '../types';
+import type { MapStats } from '../useOverlayData';
 import { securityColorCSS } from '../utils/colors';
 
-// Vigilant design tokens
 const FONT = "'JetBrains Mono', monospace";
 const BG = 'rgba(14, 14, 14, 0.97)';
 const BORDER = '#191919';
@@ -12,6 +12,7 @@ const ACCENT = '#c8a951';
 interface Props {
   system: SystemData;
   position: { x: number; y: number };
+  stats: MapStats | null;
   routeOrigin: number | null;
   routeDest: number | null;
   activeRoute: number[] | null;
@@ -25,6 +26,7 @@ interface Props {
 export function SystemInfoPanel({
   system,
   position,
+  stats,
   routeOrigin,
   routeDest,
   activeRoute,
@@ -35,11 +37,18 @@ export function SystemInfoPanel({
   onClose,
 }: Props) {
   const left = Math.min(position.x + 20, window.innerWidth - 280);
-  const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 350);
+  const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 400);
 
   const isOrigin = routeOrigin === system.id;
   const isDest = routeDest === system.id;
   const jumpCount = activeRoute ? activeRoute.length - 1 : null;
+
+  // Get stats for this system
+  const sid = String(system.id);
+  const kills = stats?.kills[sid];
+  const jumps = stats?.jumps[sid];
+  const sov = stats?.sovereignty[sid];
+  const hasStats = kills || jumps;
 
   return (
     <div
@@ -88,7 +97,47 @@ export function SystemInfoPanel({
         {system.hasStation && (
           <div style={{ color: '#33aa55', marginTop: 2 }}>NPC STATION</div>
         )}
+        {sov?.alliance_id && (
+          <div style={{ marginTop: 2 }}>
+            <span style={{ color: MUTED }}>SOV </span>
+            <span style={{ color: '#6688aa' }}>Alliance {sov.alliance_id}</span>
+          </div>
+        )}
       </div>
+
+      {/* Activity stats */}
+      {hasStats && (
+        <div style={{
+          marginTop: 8, padding: '6px 8px', background: '#0a0a0a',
+          border: `1px solid ${BORDER}`, fontSize: 9, letterSpacing: '0.1em',
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px',
+        }}>
+          {jumps !== undefined && jumps > 0 && (
+            <>
+              <span style={{ color: MUTED }}>JUMPS</span>
+              <span style={{ textAlign: 'right' }}>{jumps.toLocaleString()}</span>
+            </>
+          )}
+          {kills?.ship !== undefined && kills.ship > 0 && (
+            <>
+              <span style={{ color: '#cc3333' }}>SHIP KILLS</span>
+              <span style={{ textAlign: 'right', color: '#cc3333' }}>{kills.ship.toLocaleString()}</span>
+            </>
+          )}
+          {kills?.npc !== undefined && kills.npc > 0 && (
+            <>
+              <span style={{ color: MUTED }}>NPC KILLS</span>
+              <span style={{ textAlign: 'right' }}>{kills.npc.toLocaleString()}</span>
+            </>
+          )}
+          {kills?.pod !== undefined && kills.pod > 0 && (
+            <>
+              <span style={{ color: '#cc3333' }}>POD KILLS</span>
+              <span style={{ textAlign: 'right', color: '#cc3333' }}>{kills.pod.toLocaleString()}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Route info */}
       {activeRoute && activeRoute.length > 1 && (isOrigin || isDest) && (

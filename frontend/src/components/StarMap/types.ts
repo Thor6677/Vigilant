@@ -33,7 +33,9 @@ export type OverlayType =
   | 'shipKills'
   | 'podKills'
   | 'npcKills'
-  | 'jumps';
+  | 'jumps'
+  | 'incursions'
+  | 'factionWarfare';
 
 export type RoutePreference = 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
 

@@ -2,9 +2,11 @@ interface Props {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitAll: () => void;
+  onLocate?: () => void;
+  hasCharacterLocation?: boolean;
 }
 
-export function MapToolbar({ onZoomIn, onZoomOut, onFitAll }: Props) {
+export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharacterLocation }: Props) {
   const btnStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -38,6 +40,21 @@ export function MapToolbar({ onZoomIn, onZoomOut, onFitAll }: Props) {
           <line x1="5" y1="8" x2="11" y2="8" />
         </svg>
       </button>
+      {hasCharacterLocation && onLocate && (
+        <button
+          style={{ ...btnStyle, color: '#c8a951' }}
+          onClick={onLocate}
+          title="Locate character"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="8" cy="8" r="3" />
+            <line x1="8" y1="1" x2="8" y2="4" />
+            <line x1="8" y1="12" x2="8" y2="15" />
+            <line x1="1" y1="8" x2="4" y2="8" />
+            <line x1="12" y1="8" x2="15" y2="8" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

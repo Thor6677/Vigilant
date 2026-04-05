@@ -23,6 +23,7 @@ import { RouteRenderer } from './renderer/RouteRenderer';
 import { buildGraph } from './graph/buildGraph';
 import { findRoute } from './graph/pathfinding';
 import { useOverlayData } from './useOverlayData';
+import { useCharacterLocations } from './useCharacterLocations';
 
 import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
@@ -61,10 +62,17 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
   const [routePreference, setRoutePreference] = useState<RoutePreference>('shortest');
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
+  const [overlayBarHeight, setOverlayBarHeight] = useState(36);
+  const overlayBarRef = useRef<HTMLDivElement>(null);
   const currentLODRef = useRef<LODTier>(LODTier.Galaxy);
+  const selectedSystemRef = useRef<SystemData | null>(null);
+
+  // Keep ref in sync for use in Pixi callbacks
+  selectedSystemRef.current = selectedSystem;
 
   // Fetch ESI overlay stats
   const { stats, loading: statsLoading } = useOverlayData();
+  const { characters } = useCharacterLocations();
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {
@@ -77,7 +85,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const max = Math.max(1, ...values);
       for (const sys of data.systems) {
         const v = stats.jumps[String(sys.id)] ?? 0;
-        tints.set(sys.id, heatmapColor(Math.sqrt(v / max))); // sqrt for better distribution
+        tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
       }
     } else if (activeOverlay === 'shipKills') {
       const values = Object.values(stats.kills).map(k => k.ship);
@@ -111,6 +119,33 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           tints.set(sys.id, 0x222233);
         }
       }
+    } else if (activeOverlay === 'incursions') {
+      // Build set of infested systems
+      const infested = new Set<number>();
+      const staging = new Set<number>();
+      for (const inc of stats.incursions) {
+        for (const sid of inc.systems) infested.add(sid);
+        if (inc.staging_system_id) staging.add(inc.staging_system_id);
+      }
+      for (const sys of data.systems) {
+        if (staging.has(sys.id)) {
+          tints.set(sys.id, 0xff8800);
+        } else if (infested.has(sys.id)) {
+          tints.set(sys.id, 0xff4444);
+        } else {
+          tints.set(sys.id, 0x1a1a2a);
+        }
+      }
+    } else if (activeOverlay === 'factionWarfare') {
+      for (const sys of data.systems) {
+        const fw = stats.fw[String(sys.id)];
+        if (fw?.occupier) {
+          const base = FACTION_COLORS[fw.occupier] ?? 0x555577;
+          tints.set(sys.id, fw.contested !== 'uncontested' ? brighten(base, 1.4) : base);
+        } else {
+          tints.set(sys.id, 0x1a1a2a);
+        }
+      }
     }
 
     return tints;
@@ -120,6 +155,16 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   useEffect(() => {
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
+
+  // Measure overlay bar height
+  useEffect(() => {
+    if (!overlayBarRef.current) return;
+    const obs = new ResizeObserver(([entry]) => {
+      setOverlayBarHeight(entry.contentRect.height);
+    });
+    obs.observe(overlayBarRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   // Expose imperative API
   useImperativeHandle(ref, () => ({
@@ -143,8 +188,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     getViewport: () => viewportRef.current,
   }));
 
-  // LOD detection
-  const updateLOD = useCallback((scale: number) => {
+  // LOD detection + scale update
+  const updateView = useCallback((vp: Viewport) => {
+    const scale = vp.scaled;
     let tier: LODTier = LODTier.Galaxy;
     if (scale >= LOD_THRESHOLDS[LODTier.System]) tier = LODTier.System;
     else if (scale >= LOD_THRESHOLDS[LODTier.Constellation]) tier = LODTier.Constellation;
@@ -154,7 +200,20 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       currentLODRef.current = tier;
       systemRendererRef.current?.updateLOD(tier);
       edgeRendererRef.current?.updateLOD(tier);
-      labelRendererRef.current?.updateLOD(tier);
+      labelRendererRef.current?.updateLOD(tier, scale);
+    }
+
+    // Always update node scale for screen-space consistency
+    systemRendererRef.current?.updateScale(scale);
+
+    // Update label viewport culling
+    labelRendererRef.current?.updateViewport(vp);
+
+    // Update panel position if a system is selected
+    const sel = selectedSystemRef.current;
+    if (sel) {
+      const sp = vp.toScreen(sel.x, sel.y);
+      setPanelPos({ x: sp.x, y: sp.y });
     }
   }, []);
 
@@ -183,7 +242,6 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       el.appendChild(app.canvas as HTMLCanvasElement);
       appRef.current = app;
 
-      // Viewport
       const vp = new Viewport({
         screenWidth: el.clientWidth,
         screenHeight: el.clientHeight,
@@ -219,8 +277,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
 
-      // Add to viewport in draw order
-      vp.addChild(edgeRenderer.graphics);
+      // Add to viewport in draw order: edges → region labels → systems → system labels → route
+      vp.addChild(edgeRenderer.container);
       vp.addChild(labelRenderer.regionLabels);
       vp.addChild(systemRenderer.container);
       vp.addChild(labelRenderer.systemLabels);
@@ -237,16 +295,22 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const graph = buildGraph(data.systems, data.edges);
       graphRef.current = graph;
 
-      // Set initial LOD
-      updateLOD(vp.scaled);
-      labelRenderer.updateLOD(LODTier.Galaxy);
-
-      // Zoom to fit
+      // Initial view setup
       vp.fit(true);
       vp.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+      updateView(vp);
 
-      // LOD updates on zoom
-      vp.on('zoomed', () => updateLOD(vp.scaled));
+      // Update on zoom/pan
+      vp.on('zoomed', () => updateView(vp));
+      vp.on('moved', () => {
+        // Update labels and panel on pan
+        labelRendererRef.current?.updateViewport(vp);
+        const sel = selectedSystemRef.current;
+        if (sel) {
+          const sp = vp.toScreen(sel.x, sel.y);
+          setPanelPos({ x: sp.x, y: sp.y });
+        }
+      });
 
       // Close panel on drag
       vp.on('drag-start', () => {
@@ -300,7 +364,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
-      // Animation loop for route
+      // Animation loop
       app.ticker.add((ticker) => {
         routeRenderer.tick(ticker.deltaTime);
       });
@@ -338,7 +402,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         appRef.current = null;
       }
     };
-  }, [data, updateLOD, onSystemClick]);
+  }, [data, updateView, onSystemClick]);
 
   // Route calculation
   useEffect(() => {
@@ -409,27 +473,73 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, []);
 
-  // Build tooltip stat info for hovered system
+  // Tooltip stat info
   const hoveredStatInfo = useMemo(() => {
     if (!hoveredSystem || !stats) return null;
     const sid = String(hoveredSystem.id);
     const k = stats.kills[sid];
     const j = stats.jumps[sid];
-    return {
-      jumps: j ?? 0,
-      shipKills: k?.ship ?? 0,
-      npcKills: k?.npc ?? 0,
-      podKills: k?.pod ?? 0,
-    };
+    return { jumps: j ?? 0, shipKills: k?.ship ?? 0, npcKills: k?.npc ?? 0, podKills: k?.pod ?? 0 };
   }, [hoveredSystem, stats]);
+
+  // Clamp tooltip to container bounds
+  const clampedTooltipPos = useMemo(() => {
+    if (!tooltipPos || !containerRef.current) return tooltipPos;
+    const cw = containerRef.current.clientWidth;
+    const ch = containerRef.current.clientHeight;
+    let x = tooltipPos.x + 16;
+    let y = tooltipPos.y - 12;
+    // Approximate tooltip size
+    if (x + 220 > cw) x = tooltipPos.x - 230;
+    if (y + 60 > ch) y = tooltipPos.y - 60;
+    if (x < 4) x = 4;
+    if (y < 4) y = 4;
+    return { x, y };
+  }, [tooltipPos]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {/* Canvas container — leave room for bottom overlay bar */}
-      <div ref={containerRef} style={{ width: '100%', height: 'calc(100% - 36px)' }} />
+      {/* Canvas container — height adjusts for overlay bar */}
+      <div ref={containerRef} style={{ width: '100%', height: `calc(100% - ${overlayBarHeight}px)` }} />
 
       {/* Search bar */}
       <SystemSearch systems={data.systems} onSelect={handleSearchSelect} />
+
+      {/* Character location markers */}
+      {characters.map(char => {
+        if (!char.system_id) return null;
+        const sys = data.systemMap.get(char.system_id);
+        if (!sys || !viewportRef.current) return null;
+        const sp = viewportRef.current.toScreen(sys.x, sys.y);
+        return (
+          <div
+            key={char.character_id}
+            style={{
+              position: 'absolute',
+              left: sp.x,
+              top: sp.y,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16,
+              border: '2px solid #c8a951',
+              borderRadius: '50%',
+              animation: 'charPulse 2s ease-in-out infinite',
+            }} />
+            <div style={{
+              position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)',
+              fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+              color: '#c8a951', whiteSpace: 'nowrap', letterSpacing: '0.05em',
+            }}>
+              {char.character_name}
+            </div>
+            <style>{`@keyframes charPulse { 0%,100% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 50% { opacity: 0.5; transform: translate(-50%,-50%) scale(1.3); } }`}</style>
+          </div>
+        );
+      })}
 
       {/* Zoom toolbar */}
       <MapToolbar
@@ -439,15 +549,30 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           viewportRef.current?.fit(true);
           viewportRef.current?.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
         }}
+        onLocate={() => {
+          const main = characters.find(c => c.is_main) || characters[0];
+          if (main?.system_id) {
+            const sys = data.systemMap.get(main.system_id);
+            if (sys && viewportRef.current) {
+              viewportRef.current.animate({
+                position: { x: sys.x, y: sys.y },
+                scale: 2,
+                time: 600,
+                ease: 'easeInOutCubic',
+              });
+            }
+          }
+        }}
+        hasCharacterLocation={characters.some(c => c.system_id !== null)}
       />
 
       {/* Hover tooltip */}
-      {hoveredSystem && tooltipPos && !selectedSystem && (
+      {hoveredSystem && clampedTooltipPos && !selectedSystem && (
         <div
           style={{
             position: 'absolute',
-            left: tooltipPos.x + 16,
-            top: tooltipPos.y - 12,
+            left: clampedTooltipPos.x,
+            top: clampedTooltipPos.y,
             pointerEvents: 'none',
             background: 'rgba(8, 8, 8, 0.95)',
             border: '1px solid #191919',
@@ -464,11 +589,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             {hoveredSystem.sec.toFixed(1)} · {hoveredSystem.regName}
           </span>
           {hoveredStatInfo && (hoveredStatInfo.jumps > 0 || hoveredStatInfo.shipKills > 0 || hoveredStatInfo.npcKills > 0) && (
-            <div style={{ fontSize: 10, color: '#474747', marginTop: 2 }}>
-              {hoveredStatInfo.jumps > 0 && <span>J:{hoveredStatInfo.jumps} </span>}
-              {hoveredStatInfo.shipKills > 0 && <span style={{ color: '#cc3333' }}>SK:{hoveredStatInfo.shipKills} </span>}
-              {hoveredStatInfo.npcKills > 0 && <span>NK:{hoveredStatInfo.npcKills} </span>}
-              {hoveredStatInfo.podKills > 0 && <span style={{ color: '#cc3333' }}>PK:{hoveredStatInfo.podKills}</span>}
+            <div style={{ fontSize: 9, color: '#5a5a5a', marginTop: 3, display: 'flex', gap: 8 }}>
+              {hoveredStatInfo.jumps > 0 && <span>JUMPS {hoveredStatInfo.jumps.toLocaleString()}</span>}
+              {hoveredStatInfo.shipKills > 0 && <span style={{ color: '#cc3333' }}>SK {hoveredStatInfo.shipKills.toLocaleString()}</span>}
+              {hoveredStatInfo.npcKills > 0 && <span>NK {hoveredStatInfo.npcKills.toLocaleString()}</span>}
+              {hoveredStatInfo.podKills > 0 && <span style={{ color: '#cc3333' }}>PK {hoveredStatInfo.podKills.toLocaleString()}</span>}
             </div>
           )}
         </div>
@@ -479,6 +604,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         <SystemInfoPanel
           system={selectedSystem}
           position={panelPos}
+          stats={stats}
           routeOrigin={routeOrigin}
           routeDest={routeDest}
           activeRoute={activeRoute}
@@ -495,13 +621,23 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       )}
 
       {/* Bottom overlay controls */}
-      <OverlayControls
-        activeOverlay={activeOverlay}
-        onOverlayChange={setActiveOverlay}
-        statsLoaded={!statsLoading && stats !== null}
-      />
+      <div ref={overlayBarRef}>
+        <OverlayControls
+          activeOverlay={activeOverlay}
+          onOverlayChange={(o) => setActiveOverlay(o === activeOverlay ? 'security' : o)}
+          statsLoaded={!statsLoading && stats !== null}
+        />
+      </div>
     </div>
   );
 });
 
 StarMap.displayName = 'StarMap';
+
+/** Brighten a hex color by a factor */
+function brighten(hex: number, factor: number): number {
+  const r = Math.min(255, Math.round(((hex >> 16) & 0xff) * factor));
+  const g = Math.min(255, Math.round(((hex >> 8) & 0xff) * factor));
+  const b = Math.min(255, Math.round((hex & 0xff) * factor));
+  return (r << 16) | (g << 8) | b;
+}

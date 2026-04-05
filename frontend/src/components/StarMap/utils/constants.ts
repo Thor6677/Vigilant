@@ -9,13 +9,17 @@ export const LOD_THRESHOLDS: Record<LODTierType, number> = {
   [LODTier.System]: 2.0,
 };
 
-// System node sizes at each LOD tier
-export const NODE_SIZES: Record<LODTierType, number> = {
-  [LODTier.Galaxy]: 1.5,
-  [LODTier.Region]: 3,
-  [LODTier.Constellation]: 5,
+// Target screen-pixel size for system nodes at each LOD tier.
+// Nodes scale inversely with zoom to maintain consistent screen size.
+export const NODE_SCREEN_PX: Record<LODTierType, number> = {
+  [LODTier.Galaxy]: 3,
+  [LODTier.Region]: 4,
+  [LODTier.Constellation]: 6,
   [LODTier.System]: 8,
 };
+
+// Circle texture radius (must match the radius in SystemRenderer.init)
+export const NODE_TEXTURE_RADIUS = 16;
 
 // Edge rendering
 export const EDGE_ALPHA: Record<LODTierType, number> = {

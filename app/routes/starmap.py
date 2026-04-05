@@ -166,6 +166,49 @@ async def map_data(file_path: str):
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
 
+@router.get("/api/map/characters")
+async def map_characters(request: Request):
+    """Return current user's character locations from dashboard cache."""
+    import json as _json
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.db.models import AsyncSessionLocal, Character, CharacterDashboardCache
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        chars = (await db.execute(
+            select(Character).where(Character.user_id == user_id, Character.is_active == True)
+        )).scalars().all()
+
+        result = []
+        for char in chars:
+            cache = (await db.execute(
+                select(CharacterDashboardCache).where(
+                    CharacterDashboardCache.character_id == char.character_id
+                )
+            )).scalar_one_or_none()
+
+            loc = None
+            if cache and cache.location_json:
+                try:
+                    loc = _json.loads(cache.location_json)
+                except Exception:
+                    pass
+
+            result.append({
+                "character_id": char.character_id,
+                "character_name": char.character_name,
+                "system_id": loc.get("solar_system_id") if loc else None,
+                "system_name": loc.get("system_name") if loc else None,
+                "is_main": bool(char.is_main),
+            })
+
+    return JSONResponse(result)
+
+
 @router.get("/api/map/stats")
 async def map_stats(request: Request):
     """Return all cached map statistics for overlay rendering."""

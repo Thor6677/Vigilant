@@ -2,7 +2,7 @@ import { Application, Container, Sprite, Texture, Graphics } from 'pixi.js';
 import type { SystemData } from '../types';
 import { LODTier } from '../types';
 import { securityColor } from '../utils/colors';
-import { NODE_SIZES } from '../utils/constants';
+import { NODE_SCREEN_PX, NODE_TEXTURE_RADIUS } from '../utils/constants';
 
 export class SystemRenderer {
   readonly container = new Container();
@@ -10,6 +10,7 @@ export class SystemRenderer {
   private systems: SystemData[] = [];
   private circleTexture: Texture | null = null;
   private currentLOD: LODTier = LODTier.Galaxy;
+  private currentBaseScale = 0.1;
 
   // Selection / hover state
   private hoveredId: number | null = null;
@@ -20,9 +21,9 @@ export class SystemRenderer {
     this.container.label = 'systems';
     this.container.cullable = true;
 
-    // Generate shared circle texture (32x32 soft circle)
+    // Generate shared circle texture
     const g = new Graphics();
-    g.circle(0, 0, 16);
+    g.circle(0, 0, NODE_TEXTURE_RADIUS);
     g.fill({ color: 0xffffff });
     this.circleTexture = app.renderer.generateTexture({
       target: g,
@@ -36,72 +37,64 @@ export class SystemRenderer {
       sprite.anchor.set(0.5);
       sprite.position.set(sys.x, sys.y);
       sprite.tint = securityColor(sys.sec);
-      sprite.scale.set(NODE_SIZES[LODTier.Galaxy] / 16);
+      sprite.scale.set(0.1); // will be set properly by updateScale()
       sprite.label = String(sys.id);
       this.container.addChild(sprite);
       this.sprites.set(sys.id, sprite);
     }
   }
 
-  updateLOD(tier: LODTier) {
-    if (tier === this.currentLOD) return;
-    this.currentLOD = tier;
+  /** Recompute sprite scale for screen-space consistency. Call on every zoom change. */
+  updateScale(viewportScale: number) {
+    const targetPx = NODE_SCREEN_PX[this.currentLOD];
+    const baseScale = targetPx / (NODE_TEXTURE_RADIUS * viewportScale);
+    this.currentBaseScale = baseScale;
 
-    const size = NODE_SIZES[tier];
-    const scale = size / 16;
-
-    for (const sprite of this.sprites.values()) {
-      sprite.scale.set(scale);
+    for (const [id, sprite] of this.sprites) {
+      let s = baseScale;
+      if (id === this.hoveredId) s *= 1.5;
+      if (id === this.selectedId) s *= 2;
+      sprite.scale.set(s);
     }
   }
 
+  updateLOD(tier: LODTier) {
+    this.currentLOD = tier;
+    // Scale will be recalculated by updateScale() called from StarMap
+  }
+
   setHovered(systemId: number | null) {
-    // Restore previous hovered
+    // Restore previous
     if (this.hoveredId !== null && this.hoveredId !== this.selectedId) {
       const prev = this.sprites.get(this.hoveredId);
-      if (prev) {
-        const size = NODE_SIZES[this.currentLOD];
-        prev.scale.set(size / 16);
-        prev.alpha = 1;
-      }
+      if (prev) prev.scale.set(this.currentBaseScale);
     }
 
     this.hoveredId = systemId;
 
     if (systemId !== null) {
       const sprite = this.sprites.get(systemId);
-      if (sprite) {
-        const size = NODE_SIZES[this.currentLOD];
-        sprite.scale.set((size * 1.5) / 16);
-      }
+      if (sprite) sprite.scale.set(this.currentBaseScale * 1.5);
     }
   }
 
   setSelected(systemId: number | null) {
-    // Restore previous selected
+    // Restore previous
     if (this.selectedId !== null) {
       const prev = this.sprites.get(this.selectedId);
-      if (prev) {
-        const size = NODE_SIZES[this.currentLOD];
-        prev.scale.set(size / 16);
-        prev.alpha = 1;
-      }
+      if (prev) prev.scale.set(this.currentBaseScale);
     }
 
     this.selectedId = systemId;
 
     if (systemId !== null) {
       const sprite = this.sprites.get(systemId);
-      if (sprite) {
-        const size = NODE_SIZES[this.currentLOD];
-        sprite.scale.set((size * 2) / 16);
-      }
+      if (sprite) sprite.scale.set(this.currentBaseScale * 2);
     }
   }
 
   setOverlayTint(tints: Map<number, number> | null) {
     if (!tints) {
-      // Restore security tints
       for (const sys of this.systems) {
         const sprite = this.sprites.get(sys.id);
         if (sprite) sprite.tint = securityColor(sys.sec);
