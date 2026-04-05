@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { SystemData, JumpShipClass } from '../types';
 import type { JumpPlannerState } from '../useJumpPlanner';
 import type { CharacterLocation } from '../useCharacterLocations';
@@ -171,7 +171,6 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
       {planner.jumpRoute && planner.jumpRoute.length > 1 && (
         <RouteResults
           planner={planner}
-          systems={systems}
           stats={stats}
           onFocusSystem={onFocusSystem}
           onHighlightSystems={onHighlightSystems}
@@ -183,9 +182,8 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
 
 /* ── Route Results with editable midpoints ──────────────────────── */
 
-function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSystems }: {
+function RouteResults({ planner, stats, onFocusSystem, onHighlightSystems }: {
   planner: JumpPlannerState;
-  systems: SystemData[];
   stats: MapStats | null;
   onFocusSystem: (s: SystemData) => void;
   onHighlightSystems: (ids: Set<number> | null) => void;
@@ -278,9 +276,8 @@ function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSyste
               {editingIndex === i && (
                 <MidpointSearch
                   alternatives={planner.getAlternatives(i)}
-                  allSystems={systems}
                   stats={stats}
-                  onSelect={(id) => { planner.replaceMidpoint(i, id); setEditingIndex(null); onHighlightSystems(null); }}
+                  onSelect={(id) => { planner.replaceMidpoint(i, id); setEditingIndex(null); }}
                   onCancel={() => { setEditingIndex(null); onHighlightSystems(null); }}
                   onHighlightSystems={onHighlightSystems}
                 />
@@ -308,10 +305,8 @@ function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSyste
               <div style={{ padding: '4px 0' }}>
                 <MidpointSearch
                   alternatives={planner.getInsertAlternatives(i)}
-                  allSystems={systems}
                   stats={stats}
-                  isInsert
-                  onSelect={(id) => { planner.insertMidpoint(i, id); setInsertAfterIndex(null); onHighlightSystems(null); }}
+                  onSelect={(id) => { planner.insertMidpoint(i, id); setInsertAfterIndex(null); }}
                   onCancel={() => { setInsertAfterIndex(null); onHighlightSystems(null); }}
                   onHighlightSystems={onHighlightSystems}
                 />
@@ -335,82 +330,45 @@ function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSyste
 
 /* ── Midpoint search dropdown ──────────────────────────────────── */
 
-function MidpointSearch({ alternatives, allSystems, stats, onSelect, onCancel, onHighlightSystems, isInsert }: {
+function MidpointSearch({ alternatives, stats, onSelect, onCancel, onHighlightSystems }: {
   alternatives: SystemData[];
-  allSystems: SystemData[];
   stats: MapStats | null;
   onSelect: (id: number) => void;
   onCancel: () => void;
   onHighlightSystems: (ids: Set<number> | null) => void;
-  isInsert?: boolean;
 }) {
-  const [query, setQuery] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const searchResults = useMemo(() => {
-    if (query.length < 2) return [];
-    const q = query.toLowerCase();
-    return allSystems.filter(s => s.name.toLowerCase().includes(q) && canLightCyno(s)).slice(0, 6);
-  }, [query, allSystems]);
-
-  const showAlts = query.length < 2 && alternatives.length > 0;
-
-  // Highlight alternatives on map when dropdown opens
+  // Highlight all alternatives on the map
   useEffect(() => {
-    const systemsToShow = showAlts ? alternatives : searchResults;
-    if (systemsToShow.length > 0) {
-      onHighlightSystems(new Set(systemsToShow.map(s => s.id)));
-    } else {
-      onHighlightSystems(null);
+    if (alternatives.length > 0) {
+      onHighlightSystems(new Set(alternatives.map(s => s.id)));
     }
-  }, [showAlts, alternatives, searchResults, onHighlightSystems]);
+    return () => { onHighlightSystems(null); };
+  }, [alternatives, onHighlightSystems]);
 
   return (
     <div style={{
       marginTop: 4, background: '#0a0a0a', border: `1px solid ${BORDER}`,
       padding: 4, fontSize: 9,
     }}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-        <input
-          ref={inputRef}
-          autoFocus
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder={isInsert ? 'Search system to add...' : 'Search replacement...'}
-          style={{
-            flex: 1, background: 'none', border: `1px solid ${BORDER}`, outline: 'none',
-            color: TEXT, fontSize: 9, fontFamily: FONT, padding: '2px 4px',
-          }}
-        />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 7, color: '#3a3a3a', letterSpacing: '0.1em' }}>
+          ALTERNATIVES [{alternatives.length}]
+        </span>
         <button onClick={onCancel} style={{
           background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
           fontSize: 10, fontFamily: FONT,
         }}>×</button>
       </div>
 
-      <div style={{ maxHeight: 150, overflowY: 'auto' }}>
-        {showAlts && (
-          <>
-            <div style={{ fontSize: 7, color: '#2a2a2a', letterSpacing: '0.1em', padding: '2px 0' }}>
-              REACHABLE ALTERNATIVES ({alternatives.length})
-            </div>
-            {alternatives.slice(0, 10).map(sys => (
-              <SystemRowWithStats key={sys.id} system={sys} stats={stats} onClick={() => onSelect(sys.id)} />
-            ))}
-            {alternatives.length > 10 && (
-              <div style={{ fontSize: 7, color: '#2a2a2a', padding: '2px 4px' }}>
-                ... {alternatives.length - 10} more
-              </div>
-            )}
-          </>
+      <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+        {alternatives.length === 0 && (
+          <div style={{ color: '#2a2a2a', padding: '2px 4px', fontSize: 8 }}>
+            No reachable alternatives
+          </div>
         )}
-        {searchResults.map(sys => (
+        {alternatives.map(sys => (
           <SystemRowWithStats key={sys.id} system={sys} stats={stats} onClick={() => onSelect(sys.id)} />
         ))}
-        {query.length >= 2 && searchResults.length === 0 && (
-          <div style={{ color: '#2a2a2a', padding: '2px 4px', fontSize: 8 }}>No results</div>
-        )}
       </div>
     </div>
   );
