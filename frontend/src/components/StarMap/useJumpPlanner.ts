@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useCallback } from 'react';
 import type { SystemData, JumpShipClass } from './types';
 import { JUMP_SHIPS } from './jump/constants';
-import { effectiveRange, canLightCyno, jumpDistanceLY } from './jump/distance';
+import { effectiveRange, canLightCyno, canJumpFrom, jumpDistanceLY } from './jump/distance';
 import { JumpSpatialIndex } from './jump/spatialIndex';
 import { findJumpRoute } from './jump/routeFinder';
 import { calculateJumpRoute } from './jump/calculator';
@@ -90,7 +90,8 @@ export function useJumpPlanner(
     const origin = systemMap.get(jumpOrigin);
     const dest = systemMap.get(jumpDest);
     if (!origin || !dest) { setRouteError('Invalid system'); return; }
-    if (!canLightCyno(dest)) { setRouteError('Destination is highsec — cannot light cyno'); return; }
+    if (!canJumpFrom(origin)) { setRouteError('Cannot jump from Pochven'); return; }
+    if (!canLightCyno(dest)) { setRouteError('Cannot jump to this system (highsec or Pochven)'); return; }
 
     const index = getSpatialIndex();
     const route = findJumpRoute(origin, dest, systems, range, index, { preferStation, preferHsGate }, adjacency);

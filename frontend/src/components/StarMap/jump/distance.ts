@@ -18,7 +18,16 @@ export function fuelCost(distanceLY: number, baseFuelPerLY: number, jfcLevel: nu
   return Math.ceil(distanceLY * baseFuelPerLY * (1 - 0.10 * jfcLevel));
 }
 
-/** Can a cynosural field be lit in this system? (lowsec + nullsec only) */
+// Pochven region — cannot be jumped into or out of
+const POCHVEN_REGION_ID = 10000070;
+
+/** Can a cynosural field be lit in this system? (lowsec + nullsec only, not Pochven) */
 export function canLightCyno(system: SystemData): boolean {
+  if (system.regId === POCHVEN_REGION_ID) return false;
   return system.sec < 0.45; // Systems round to 0.4 or below = lowsec/null
+}
+
+/** Can a jump drive be activated FROM this system? (not Pochven) */
+export function canJumpFrom(system: SystemData): boolean {
+  return system.regId !== POCHVEN_REGION_ID;
 }

@@ -1,5 +1,5 @@
 import type { SystemData } from '../types';
-import { jumpDistanceLY, canLightCyno } from './distance';
+import { jumpDistanceLY, canLightCyno, canJumpFrom } from './distance';
 import type { JumpSpatialIndex } from './spatialIndex';
 
 export interface JumpRoutePreferences {
@@ -28,12 +28,14 @@ export function findJumpRoute(
   preferences?: JumpRoutePreferences,
   adjacency?: Map<number, Set<number>>,
 ): SystemData[] | null {
+  // Pochven check
+  if (!canJumpFrom(origin)) return null;
+  if (!canLightCyno(destination)) return null;
+
   // Direct jump?
   if (jumpDistanceLY(origin, destination) <= rangeLY && canLightCyno(destination)) {
     return [origin, destination];
   }
-
-  if (!canLightCyno(destination)) return null;
 
   const prefs = preferences ?? { preferStation: true, preferHsGate: false };
 
