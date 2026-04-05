@@ -109,6 +109,13 @@ export class SystemRenderer {
     }
   }
 
+  /** Show only a subset of systems (null = show all). */
+  setVisibleSystems(ids: Set<number> | null) {
+    for (const [id, sprite] of this.sprites) {
+      sprite.visible = ids === null || ids.has(id);
+    }
+  }
+
   getSprite(systemId: number): Sprite | undefined {
     return this.sprites.get(systemId);
   }

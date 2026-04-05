@@ -168,9 +168,17 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
     lr.setGroupMode(groupMode);
 
-    // In group mode, hide individual systems and edges
-    sr.container.visible = groupMode === 'systems';
-    er.container.visible = groupMode === 'systems';
+    if (groupMode === 'systems') {
+      // Show everything
+      sr.container.visible = true;
+      sr.setVisibleSystems(null);
+      er.container.visible = true;
+    } else {
+      // Group mode: hide edges, show no systems initially (until a group is expanded)
+      er.container.visible = false;
+      sr.container.visible = true;
+      sr.setVisibleSystems(lr.getVisibleSystemIds());
+    }
 
     // Re-trigger LOD update
     if (viewportRef.current) {
@@ -178,6 +186,50 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       lr.updateViewport(viewportRef.current);
     }
   }, [groupMode]);
+
+  // Handle group expansion — called when a group is clicked
+  const handleExpandGroup = useCallback((groupId: number) => {
+    const lr = labelRendererRef.current;
+    const sr = systemRendererRef.current;
+    if (!lr || !sr) return;
+
+    // Toggle: clicking the already-expanded group collapses it
+    const newId = lr.getExpandedGroupId() === groupId ? null : groupId;
+    lr.setExpandedGroup(newId);
+
+    // Update system visibility to match
+    sr.setVisibleSystems(lr.getVisibleSystemIds());
+
+    // Re-trigger viewport update for labels
+    if (viewportRef.current) {
+      lr.updateLOD(currentLODRef.current, viewportRef.current.scaled);
+      lr.updateViewport(viewportRef.current);
+    }
+
+    // If expanding, zoom to fit the group
+    if (newId !== null && viewportRef.current) {
+      const groups = lr.getCurrentGroupMode() === 'constellation'
+        ? lr.constellationGroups : lr.regionGroups;
+      const group = groups.find(g => g.id === newId);
+      if (group) {
+        const pad = 80;
+        const gw = group.maxX - group.minX + pad * 2;
+        const gh = group.maxY - group.minY + pad * 2;
+        const cx = (group.minX + group.maxX) / 2;
+        const cy = (group.minY + group.maxY) / 2;
+        const sx = viewportRef.current.screenWidth / gw;
+        const sy = viewportRef.current.screenHeight / gh;
+        const targetScale = Math.min(sx, sy, MAX_ZOOM);
+
+        viewportRef.current.animate({
+          position: { x: cx, y: cy },
+          scale: targetScale,
+          time: 600,
+          ease: 'easeInOutCubic',
+        });
+      }
+    }
+  }, []);
 
   // Measure overlay bar height
   useEffect(() => {
@@ -374,7 +426,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         const worldPos = e.world;
         const hitRadius = 30 / vp.scaled;
 
-        // In group mode, check for group clicks first
+        // In group mode, check for group clicks
         const currentGroupMode = labelRenderer.getCurrentGroupMode();
         if (currentGroupMode !== 'systems') {
           const groups = currentGroupMode === 'constellation'
@@ -385,6 +437,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           let nearestGroup: GroupData | null = null;
           let nearestDist = Infinity;
           for (const g of groups) {
+            // Skip the expanded group — its systems are clickable individually
+            if (g.id === labelRenderer.getExpandedGroupId()) continue;
             const dx = worldPos.x - g.cx;
             const dy = worldPos.y - g.cy;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -395,31 +449,12 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }
 
           if (nearestGroup) {
-            // Zoom to fit this group and switch to systems (or constellation for region)
-            const pad = 50;
-            const gw = nearestGroup.maxX - nearestGroup.minX + pad * 2;
-            const gh = nearestGroup.maxY - nearestGroup.minY + pad * 2;
-            const cx = (nearestGroup.minX + nearestGroup.maxX) / 2;
-            const cy = (nearestGroup.minY + nearestGroup.maxY) / 2;
-            const sx = vp.screenWidth / gw;
-            const sy = vp.screenHeight / gh;
-            const targetScale = Math.min(sx, sy, MAX_ZOOM);
-
-            vp.animate({
-              position: { x: cx, y: cy },
-              scale: targetScale,
-              time: 600,
-              ease: 'easeInOutCubic',
-            });
-
-            // Expand: region → constellation, constellation → systems
-            if (currentGroupMode === 'region') {
-              setGroupMode('constellation');
-            } else {
-              setGroupMode('systems');
-            }
+            handleExpandGroup(nearestGroup.id);
             return;
           }
+
+          // If inside the expanded group, allow normal system clicks
+          // (fall through to the system click logic below)
         }
 
         // Normal system click
