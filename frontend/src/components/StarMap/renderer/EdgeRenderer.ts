@@ -9,18 +9,26 @@ import {
 } from '../utils/constants';
 
 /**
- * Renders all ~7K stargate edges using 3 batched Graphics objects
- * (one per edge type). Edges are drawn once at init; LOD changes
- * only update alpha and are fast (no redraw).
+ * Renders stargate edges. The main container has 3 batched Graphics
+ * (constellation/region/cross-region) drawn once at init.
+ * A separate filteredGfx Graphics is used in group mode to show
+ * only edges connected to the expanded group's systems.
  */
 export class EdgeRenderer {
   readonly container = new Container();
   private constellationGfx = new Graphics();
   private regionGfx = new Graphics();
   private crossRegionGfx = new Graphics();
+  private filteredGfx = new Graphics();
   private currentLOD: LODTier = LODTier.Galaxy;
 
+  // Store raw data for filtered redraw
+  private systemMap = new Map<number, SystemData>();
+  private edges: Edge[] = [];
+
   init(systemMap: Map<number, SystemData>, edges: Edge[]) {
+    this.systemMap = systemMap;
+    this.edges = edges;
     this.container.label = 'edges';
 
     // Sort edges into 3 groups
@@ -42,7 +50,6 @@ export class EdgeRenderer {
       }
     }
 
-    // Draw each group once with a single stroke call
     this.drawGroup(this.constellationGfx, conEdges, EDGE_COLOR_SAME_CONSTELLATION, 0.8);
     this.drawGroup(this.regionGfx, regEdges, EDGE_COLOR_SAME_REGION, 0.8);
     this.drawGroup(this.crossRegionGfx, crossEdges, EDGE_COLOR_CROSS_REGION, 0.8);
@@ -50,8 +57,9 @@ export class EdgeRenderer {
     this.container.addChild(this.constellationGfx);
     this.container.addChild(this.regionGfx);
     this.container.addChild(this.crossRegionGfx);
+    this.container.addChild(this.filteredGfx);
 
-    // Set initial LOD alpha
+    this.filteredGfx.visible = false;
     this.applyLOD(LODTier.Galaxy);
   }
 
@@ -72,8 +80,63 @@ export class EdgeRenderer {
   private applyLOD(tier: LODTier) {
     const alpha = EDGE_ALPHA[tier];
     this.constellationGfx.alpha = alpha;
-    this.regionGfx.alpha = alpha * 0.8; // slightly dimmer for same-region
-    this.crossRegionGfx.alpha = Math.min(1, alpha * 1.5); // brighter for cross-region
+    this.regionGfx.alpha = alpha * 0.8;
+    this.crossRegionGfx.alpha = Math.min(1, alpha * 1.5);
+    this.filteredGfx.alpha = Math.max(alpha, 0.35);
+  }
+
+  /**
+   * Show only edges where at least one endpoint is in the given set.
+   * Pass null to show all edges (normal mode).
+   */
+  setVisibleSystems(ids: Set<number> | null) {
+    if (ids === null) {
+      // Normal mode: show batched edges, hide filtered
+      this.constellationGfx.visible = true;
+      this.regionGfx.visible = true;
+      this.crossRegionGfx.visible = true;
+      this.filteredGfx.visible = false;
+      return;
+    }
+
+    // Group mode: hide batched edges, draw filtered edges
+    this.constellationGfx.visible = false;
+    this.regionGfx.visible = false;
+    this.crossRegionGfx.visible = false;
+
+    this.filteredGfx.clear();
+
+    if (ids.size === 0) {
+      this.filteredGfx.visible = false;
+      return;
+    }
+
+    this.filteredGfx.visible = true;
+
+    // Draw edges where at least one endpoint is in the expanded group
+    for (const [srcId, dstId] of this.edges) {
+      if (!ids.has(srcId) && !ids.has(dstId)) continue;
+
+      const src = this.systemMap.get(srcId);
+      const dst = this.systemMap.get(dstId);
+      if (!src || !dst) continue;
+
+      // Color: internal edges vs cross-group edges
+      let color: number;
+      if (ids.has(srcId) && ids.has(dstId)) {
+        // Both in group — use constellation/region coloring
+        if (src.conId === dst.conId) color = EDGE_COLOR_SAME_CONSTELLATION;
+        else if (src.regId === dst.regId) color = EDGE_COLOR_SAME_REGION;
+        else color = EDGE_COLOR_CROSS_REGION;
+      } else {
+        // One endpoint outside — cross-group connection (brighter)
+        color = EDGE_COLOR_CROSS_REGION;
+      }
+
+      this.filteredGfx.moveTo(src.x, src.y);
+      this.filteredGfx.lineTo(dst.x, dst.y);
+      this.filteredGfx.stroke({ width: 1, color, alpha: 0.5 });
+    }
   }
 
   destroy() {

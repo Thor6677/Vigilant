@@ -168,17 +168,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
     lr.setGroupMode(groupMode);
 
-    if (groupMode === 'systems') {
-      // Show everything
-      sr.container.visible = true;
-      sr.setVisibleSystems(null);
-      er.container.visible = true;
-    } else {
-      // Group mode: hide edges, show no systems initially (until a group is expanded)
-      er.container.visible = false;
-      sr.container.visible = true;
-      sr.setVisibleSystems(lr.getVisibleSystemIds());
-    }
+    const visibleIds = lr.getVisibleSystemIds();
+    sr.container.visible = true;
+    sr.setVisibleSystems(visibleIds);
+    er.setVisibleSystems(visibleIds);
 
     // Re-trigger LOD update
     if (viewportRef.current) {
@@ -191,14 +184,17 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const handleExpandGroup = useCallback((groupId: number) => {
     const lr = labelRendererRef.current;
     const sr = systemRendererRef.current;
-    if (!lr || !sr) return;
+    const er = edgeRendererRef.current;
+    if (!lr || !sr || !er) return;
 
     // Toggle: clicking the already-expanded group collapses it
     const newId = lr.getExpandedGroupId() === groupId ? null : groupId;
     lr.setExpandedGroup(newId);
 
-    // Update system visibility to match
-    sr.setVisibleSystems(lr.getVisibleSystemIds());
+    // Update system and edge visibility to match
+    const visibleIds = lr.getVisibleSystemIds();
+    sr.setVisibleSystems(visibleIds);
+    er.setVisibleSystems(visibleIds);
 
     // Re-trigger viewport update for labels
     if (viewportRef.current) {
