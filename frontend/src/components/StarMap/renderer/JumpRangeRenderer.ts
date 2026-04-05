@@ -64,7 +64,7 @@ export class JumpRangeRenderer {
       this.routeGraphics.moveTo(a.x, a.y);
       this.routeGraphics.quadraticCurveTo(cx, cy, b.x, b.y);
     }
-    this.routeGraphics.stroke({ width: 2.5, color: JUMP_ROUTE_COLOR, alpha: 0.8 });
+    this.routeGraphics.stroke({ width: 5, color: JUMP_ROUTE_COLOR, alpha: 0.9 });
 
     // Waypoint markers: triangles
     for (const sys of route) {

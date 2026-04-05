@@ -24,6 +24,10 @@ export interface JumpPlannerState {
   reachableSystems: SystemData[];
   reachableIds: Set<number>;
   jumpRoute: JumpWaypoint[] | null;
+  preferStation: boolean;
+  setPreferStation: (v: boolean) => void;
+  preferHsGate: boolean;
+  setPreferHsGate: (v: boolean) => void;
   routeError: string | null;
   calculate: () => void;
   /** Replace a midpoint at route index with a different system, then recalculate fatigue/fuel. */
@@ -41,11 +45,14 @@ export interface JumpPlannerState {
 export function useJumpPlanner(
   systemMap: Map<number, SystemData>,
   systems: SystemData[],
+  adjacency?: Map<number, Set<number>>,
 ): JumpPlannerState {
   const [active, setActive] = useState(false);
   const [shipClass, setShipClass] = useState<JumpShipClass>('carrier');
   const [jdcLevel, setJdcLevel] = useState(5);
   const [jfcLevel, setJfcLevel] = useState(4);
+  const [preferStation, setPreferStation] = useState(true);
+  const [preferHsGate, setPreferHsGate] = useState(false);
   const [jumpOrigin, setJumpOrigin] = useState<number | null>(null);
   const [jumpDest, setJumpDest] = useState<number | null>(null);
   const [jumpRoute, setJumpRoute] = useState<JumpWaypoint[] | null>(null);
@@ -86,7 +93,7 @@ export function useJumpPlanner(
     if (!canLightCyno(dest)) { setRouteError('Destination is highsec — cannot light cyno'); return; }
 
     const index = getSpatialIndex();
-    const route = findJumpRoute(origin, dest, systems, range, index);
+    const route = findJumpRoute(origin, dest, systems, range, index, { preferStation, preferHsGate }, adjacency);
     if (!route) {
       setRouteError(`No route found within ${range.toFixed(1)} LY range`);
       setJumpRoute(null);
@@ -95,7 +102,7 @@ export function useJumpPlanner(
     const waypoints = calculateJumpRoute(route, shipClass, jdcLevel, jfcLevel);
     setJumpRoute(waypoints);
     setRouteError(null);
-  }, [jumpOrigin, jumpDest, range, shipClass, jdcLevel, jfcLevel, systems, systemMap, getSpatialIndex]);
+  }, [jumpOrigin, jumpDest, range, shipClass, jdcLevel, jfcLevel, preferStation, preferHsGate, systems, systemMap, getSpatialIndex, adjacency]);
 
   /** Replace a midpoint and recalculate fatigue/fuel for the modified route. */
   const replaceMidpoint = useCallback((index: number, newSystemId: number) => {
@@ -191,6 +198,8 @@ export function useJumpPlanner(
     jfcLevel, setJfcLevel,
     jumpOrigin, setJumpOrigin,
     jumpDest, setJumpDest,
+    preferStation, setPreferStation,
+    preferHsGate, setPreferHsGate,
     range,
     reachableSystems,
     reachableIds,

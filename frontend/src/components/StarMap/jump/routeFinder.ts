@@ -2,14 +2,22 @@ import type { SystemData } from '../types';
 import { jumpDistanceLY, canLightCyno } from './distance';
 import type { JumpSpatialIndex } from './spatialIndex';
 
+export interface JumpRoutePreferences {
+  preferStation: boolean;   // prefer systems with NPC stations
+  preferHsGate: boolean;    // prefer lowsec systems with highsec stargate connections
+}
+
 /**
  * Find the shortest (fewest-hop) jump drive route between two systems.
- * Uses BFS on the virtual jump-range graph with spatial indexing.
+ * Uses weighted BFS (Dijkstra-like) on the virtual jump-range graph.
  *
  * Rules:
  * - Origin can be any sec status (you jump OUT of it)
  * - All midpoints and destination must be cyno-capable (sec < 0.5)
  * - Each hop must be within the effective jump range
+ *
+ * Preferences reduce the cost of preferred systems, making the search
+ * favor them without excluding non-preferred ones.
  */
 export function findJumpRoute(
   origin: SystemData,
@@ -17,55 +25,86 @@ export function findJumpRoute(
   systems: SystemData[],
   rangeLY: number,
   spatialIndex: JumpSpatialIndex,
+  preferences?: JumpRoutePreferences,
+  adjacency?: Map<number, Set<number>>,
 ): SystemData[] | null {
   // Direct jump?
   if (jumpDistanceLY(origin, destination) <= rangeLY && canLightCyno(destination)) {
     return [origin, destination];
   }
 
-  // Destination must be cyno-capable
   if (!canLightCyno(destination)) return null;
 
-  // BFS
-  const visited = new Set<number>();
-  const parent = new Map<number, number>(); // system ID → parent system ID
-  const queue: SystemData[] = [origin];
-  visited.add(origin.id);
+  const prefs = preferences ?? { preferStation: true, preferHsGate: false };
 
   const systemMap = new Map<number, SystemData>();
   for (const sys of systems) systemMap.set(sys.id, sys);
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-
-    // Find all systems within jump range
-    const reachable = spatialIndex.findInRange(current, rangeLY);
-
-    for (const next of reachable) {
-      if (visited.has(next.id)) continue;
-
-      // Midpoints must be cyno-capable (can jump TO them)
-      if (!canLightCyno(next) && next.id !== destination.id) continue;
-
-      visited.add(next.id);
-      parent.set(next.id, current.id);
-
-      // Found destination?
-      if (next.id === destination.id) {
-        // Reconstruct path
-        const path: SystemData[] = [];
-        let cur = destination.id;
-        while (cur !== origin.id) {
-          path.unshift(systemMap.get(cur)!);
-          cur = parent.get(cur)!;
+  // Pre-compute which systems have a highsec gate neighbor
+  let hsGateSystems: Set<number> | null = null;
+  if (prefs.preferHsGate && adjacency) {
+    hsGateSystems = new Set<number>();
+    for (const [sysId, neighbors] of adjacency) {
+      const sys = systemMap.get(sysId);
+      if (!sys || !canLightCyno(sys)) continue;
+      for (const nId of neighbors) {
+        const neighbor = systemMap.get(nId);
+        if (neighbor && neighbor.sec >= 0.45) {
+          hsGateSystems.add(sysId);
+          break;
         }
-        path.unshift(origin);
-        return path;
       }
-
-      queue.push(next);
     }
   }
 
-  return null; // No route found
+  // Weighted BFS (priority queue via sorted insertion)
+  const costs = new Map<number, number>();
+  const parent = new Map<number, number>();
+  costs.set(origin.id, 0);
+
+  // Simple priority queue
+  const queue: { sys: SystemData; cost: number }[] = [{ sys: origin, cost: 0 }];
+
+  while (queue.length > 0) {
+    // Get lowest cost
+    queue.sort((a, b) => a.cost - b.cost);
+    const { sys: current, cost: currentCost } = queue.shift()!;
+
+    if (current.id === destination.id) {
+      // Reconstruct path
+      const path: SystemData[] = [];
+      let cur = destination.id;
+      while (cur !== origin.id) {
+        path.unshift(systemMap.get(cur)!);
+        cur = parent.get(cur)!;
+      }
+      path.unshift(origin);
+      return path;
+    }
+
+    // Already found a better path?
+    if (currentCost > (costs.get(current.id) ?? Infinity)) continue;
+
+    const reachable = spatialIndex.findInRange(current, rangeLY);
+
+    for (const next of reachable) {
+      if (!canLightCyno(next) && next.id !== destination.id) continue;
+
+      // Base cost: 1 per hop
+      let hopCost = 1;
+
+      // Preferences reduce cost for preferred systems (making them favored)
+      if (prefs.preferStation && next.hasStation) hopCost *= 0.5;
+      if (prefs.preferHsGate && hsGateSystems?.has(next.id)) hopCost *= 0.6;
+
+      const newCost = currentCost + hopCost;
+      if (newCost < (costs.get(next.id) ?? Infinity)) {
+        costs.set(next.id, newCost);
+        parent.set(next.id, current.id);
+        queue.push({ sys: next, cost: newCost });
+      }
+    }
+  }
+
+  return null;
 }

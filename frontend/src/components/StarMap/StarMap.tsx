@@ -84,7 +84,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   // Fetch ESI overlay stats
   const { stats, loading: statsLoading } = useOverlayData();
   const { characters } = useCharacterLocations();
-  const jumpPlanner = useJumpPlanner(data.systemMap, data.systems);
+  const jumpPlanner = useJumpPlanner(data.systemMap, data.systems, adjacencyRef.current ?? undefined);
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {

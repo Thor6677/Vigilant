@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import type { SystemData, JumpShipClass } from '../types';
 import type { JumpPlannerState } from '../useJumpPlanner';
 import type { CharacterLocation } from '../useCharacterLocations';
@@ -98,6 +98,21 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
             REACHABLE: <span style={{ color: TEXT }}>{planner.reachableIds.size}</span>
           </span>
         )}
+      </div>
+
+      {/* Route preferences */}
+      <Label text="PREFERENCES" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+        <ToggleRow
+          label="PREFER NPC STATION"
+          active={planner.preferStation}
+          onToggle={() => planner.setPreferStation(!planner.preferStation)}
+        />
+        <ToggleRow
+          label="PREFER HIGHSEC GATE"
+          active={planner.preferHsGate}
+          onToggle={() => planner.setPreferHsGate(!planner.preferHsGate)}
+        />
       </div>
 
       {/* Origin */}
@@ -341,12 +356,14 @@ function MidpointSearch({ alternatives, allSystems, stats, onSelect, onCancel, o
   const showAlts = query.length < 2 && alternatives.length > 0;
 
   // Highlight alternatives on map when dropdown opens
-  useMemo(() => {
+  useEffect(() => {
     const systemsToShow = showAlts ? alternatives : searchResults;
     if (systemsToShow.length > 0) {
       onHighlightSystems(new Set(systemsToShow.map(s => s.id)));
+    } else {
+      onHighlightSystems(null);
     }
-  }, [showAlts, alternatives, searchResults]);
+  }, [showAlts, alternatives, searchResults, onHighlightSystems]);
 
   return (
     <div style={{
@@ -610,6 +627,29 @@ function SkillButtons({ value, onChange }: { value: number; onChange: (v: number
           {level}
         </button>
       ))}
+    </div>
+  );
+}
+
+function ToggleRow({ label, active, onToggle }: { label: string; active: boolean; onToggle: () => void }) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+        fontSize: 8, letterSpacing: '0.1em', color: active ? TEXT : MUTED,
+      }}
+    >
+      <span style={{
+        width: 12, height: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: `1px solid ${active ? JUMP_COLOR : BORDER}`,
+        background: active ? 'rgba(255,136,0,0.15)' : 'transparent',
+        color: active ? JUMP_COLOR : 'transparent',
+        fontSize: 9, fontFamily: FONT,
+      }}>
+        {active ? '✓' : ''}
+      </span>
+      {label}
     </div>
   );
 }
