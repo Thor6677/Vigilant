@@ -20,16 +20,19 @@ import { SystemRenderer } from './renderer/SystemRenderer';
 import { EdgeRenderer } from './renderer/EdgeRenderer';
 import { LabelRenderer } from './renderer/LabelRenderer';
 import { RouteRenderer } from './renderer/RouteRenderer';
+import { JumpRangeRenderer } from './renderer/JumpRangeRenderer';
 import { buildGraph } from './graph/buildGraph';
 import { findRoute } from './graph/pathfinding';
 import { useOverlayData } from './useOverlayData';
 import { useCharacterLocations } from './useCharacterLocations';
+import { useJumpPlanner } from './useJumpPlanner';
 
 import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
 import { MapToolbar } from './ui/MapToolbar';
 import { OverlayControls } from './ui/OverlayControls';
 import { GroupModeControls } from './ui/GroupModeControls';
+import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
 import type { GroupData } from './renderer/LabelRenderer';
 
 export interface StarMapHandle {
@@ -57,6 +60,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const edgeRendererRef = useRef<EdgeRenderer | null>(null);
   const labelRendererRef = useRef<LabelRenderer | null>(null);
   const routeRendererRef = useRef<RouteRenderer | null>(null);
+  const jumpRangeRendererRef = useRef<JumpRangeRenderer | null>(null);
 
   const [selectedSystem, setSelectedSystem] = useState<SystemData | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
@@ -79,6 +83,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   // Fetch ESI overlay stats
   const { stats, loading: statsLoading } = useOverlayData();
   const { characters } = useCharacterLocations();
+  const jumpPlanner = useJumpPlanner(data.systemMap, data.systems);
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {
@@ -161,6 +166,35 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   useEffect(() => {
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
+
+  // Apply jump planner range highlight
+  useEffect(() => {
+    const sr = systemRendererRef.current;
+    const jr = jumpRangeRendererRef.current;
+    if (!sr || !jr) return;
+
+    if (jumpPlanner.active && jumpPlanner.jumpOrigin !== null) {
+      const origin = data.systemMap.get(jumpPlanner.jumpOrigin);
+      if (origin) {
+        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
+        jr.setReachable(origin, jumpPlanner.reachableSystems);
+      }
+    } else {
+      sr.setJumpRangeHighlight(null, null);
+      jr.setReachable(null, []);
+    }
+  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.reachableIds, jumpPlanner.reachableSystems, data.systemMap]);
+
+  // Apply jump route visualization
+  useEffect(() => {
+    const jr = jumpRangeRendererRef.current;
+    if (!jr) return;
+    if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+      jr.setRoute(jumpPlanner.jumpRoute.map(wp => wp.system));
+    } else {
+      jr.routeGraphics.clear();
+    }
+  }, [jumpPlanner.jumpRoute]);
 
   // Apply group mode changes
   useEffect(() => {
@@ -339,11 +373,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const edgeRenderer = new EdgeRenderer();
       const labelRenderer = new LabelRenderer();
       const routeRenderer = new RouteRenderer();
+      const jumpRangeRenderer = new JumpRangeRenderer();
 
       systemRendererRef.current = systemRenderer;
       edgeRendererRef.current = edgeRenderer;
       labelRendererRef.current = labelRenderer;
       routeRendererRef.current = routeRenderer;
+      jumpRangeRendererRef.current = jumpRangeRenderer;
 
       // Init renderers
       edgeRenderer.init(data.systemMap, data.edges);
@@ -351,6 +387,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       systemRenderer.init(app, data.systems);
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
+      jumpRangeRenderer.init();
 
       // Add to viewport in draw order: edges → region labels → group labels → systems → system labels → route
       vp.addChild(edgeRenderer.container);
@@ -358,6 +395,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       vp.addChild(labelRenderer.groupLabels);
       vp.addChild(systemRenderer.container);
       vp.addChild(labelRenderer.systemLabels);
+      vp.addChild(jumpRangeRenderer.rangeGraphics);
+      vp.addChild(jumpRangeRenderer.routeGraphics);
       vp.addChild(routeRenderer.graphics);
 
       // Build quadtree
@@ -493,10 +532,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
-      // Animation loop (route + selection ring + smooth alpha transitions)
+      // Animation loop
       app.ticker.add((ticker) => {
         routeRenderer.tick(ticker.deltaTime);
         systemRenderer.tick(ticker.deltaTime);
+        jumpRangeRenderer.tick(ticker.deltaTime);
       });
 
       // ResizeObserver
@@ -524,6 +564,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       edgeRendererRef.current?.destroy();
       labelRendererRef.current?.destroy();
       routeRendererRef.current?.destroy();
+      jumpRangeRendererRef.current?.destroy();
       if (viewportRef.current) {
         viewportRef.current.destroy();
         viewportRef.current = null;
@@ -733,7 +774,17 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }
         }}
         hasCharacterLocation={characters.some(c => c.system_id !== null)}
+        jumpPlannerActive={jumpPlanner.active}
+        onToggleJumpPlanner={() => jumpPlanner.setActive(!jumpPlanner.active)}
       />
+
+      {/* Jump planner panel */}
+      {jumpPlanner.active && (
+        <JumpPlannerPanel
+          planner={jumpPlanner}
+          systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+        />
+      )}
 
       {/* Hover tooltip */}
       {hoveredSystem && clampedTooltipPos && !selectedSystem && (
@@ -789,6 +840,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             setPanelPos(null);
             systemRendererRef.current?.setSelected(null);
           }}
+          jumpPlannerActive={jumpPlanner.active}
+          onSetJumpOrigin={(id) => jumpPlanner.setJumpOrigin(id)}
+          onSetJumpDest={(id) => jumpPlanner.setJumpDest(id)}
         />
       )}
 

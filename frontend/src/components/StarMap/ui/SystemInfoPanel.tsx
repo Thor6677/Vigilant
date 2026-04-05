@@ -21,6 +21,9 @@ interface Props {
   onSetDestination: (id: number) => void;
   onSetRoutePreference: (pref: RoutePreference) => void;
   onClose: () => void;
+  jumpPlannerActive?: boolean;
+  onSetJumpOrigin?: (id: number) => void;
+  onSetJumpDest?: (id: number) => void;
 }
 
 export function SystemInfoPanel({
@@ -35,6 +38,9 @@ export function SystemInfoPanel({
   onSetDestination,
   onSetRoutePreference,
   onClose,
+  jumpPlannerActive,
+  onSetJumpOrigin,
+  onSetJumpDest,
 }: Props) {
   const left = Math.min(position.x + 20, window.innerWidth - 280);
   const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 400);
@@ -173,7 +179,7 @@ export function SystemInfoPanel({
         </div>
       )}
 
-      {/* Action buttons */}
+      {/* Gate route buttons */}
       <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <ActionButton
           label={isOrigin ? '● ORIGIN' : 'SET ORIGIN'}
@@ -186,6 +192,32 @@ export function SystemInfoPanel({
           onClick={() => onSetDestination(system.id)}
         />
       </div>
+
+      {/* Jump planner buttons */}
+      {jumpPlannerActive && onSetJumpOrigin && onSetJumpDest && (
+        <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => onSetJumpOrigin(system.id)}
+            style={{
+              padding: '4px 10px', fontSize: 9, letterSpacing: '0.1em', fontFamily: FONT,
+              background: 'rgba(255,136,0,0.1)', color: '#ff8800',
+              border: '1px solid rgba(255,136,0,0.3)', cursor: 'pointer',
+            }}
+          >
+            JUMP ORIGIN
+          </button>
+          <button
+            onClick={() => onSetJumpDest(system.id)}
+            style={{
+              padding: '4px 10px', fontSize: 9, letterSpacing: '0.1em', fontFamily: FONT,
+              background: 'rgba(255,136,0,0.1)', color: '#ff8800',
+              border: '1px solid rgba(255,136,0,0.3)', cursor: 'pointer',
+            }}
+          >
+            JUMP DEST
+          </button>
+        </div>
+      )}
 
       {/* External links */}
       <div style={{ marginTop: 8, display: 'flex', gap: 12, fontSize: 10 }}>

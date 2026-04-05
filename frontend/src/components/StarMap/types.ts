@@ -9,6 +9,9 @@ export interface SystemData {
   regId: number;
   regName: string;
   hasStation: boolean;
+  x3: number;  // 3D position in light-years (for jump drive calculations)
+  y3: number;
+  z3: number;
 }
 
 export interface RegionData {
@@ -40,6 +43,16 @@ export type OverlayType =
 export type RoutePreference = 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
 
 export type GroupMode = 'systems' | 'constellation' | 'region';
+
+export type JumpShipClass =
+  | 'carrier'
+  | 'dreadnought'
+  | 'fax'
+  | 'supercarrier'
+  | 'titan'
+  | 'jumpFreighter'
+  | 'rorqual'
+  | 'blackOps';
 
 export const LODTier = {
   Galaxy: 0,

@@ -36,6 +36,8 @@ OUTPUT_DIR = Path("frontend/public/data")
 MAX_KSPACE_ID = 30_999_999
 # Coordinate canvas size (systems normalized into 0..CANVAS_SIZE)
 CANVAS_SIZE = 10_000
+# 1 light-year in meters (EVE's definition)
+LY_IN_METERS = 9.461e15
 
 
 def download_sde(use_cache: bool) -> zipfile.ZipFile:
@@ -118,17 +120,22 @@ def build(use_cache: bool):
         con_id = item.get("constellationID")
         reg_id = item.get("regionID")
 
-        # Prefer position2D (CCP's hand-curated 2-D map coords, added Catalyst expansion)
+        # 3-D position (always present — needed for jump drive distance calculations)
+        pos = item.get("position", {})
+        pos3_x = float(pos.get("x", 0))
+        pos3_y = float(pos.get("y", 0))
+        pos3_z = float(pos.get("z", 0))
+
+        # 2-D position: prefer position2D (CCP's hand-curated 2-D map coords)
         pos2d = item.get("position2D")
         if pos2d and pos2d.get("x") is not None and pos2d.get("y") is not None:
             raw_x = float(pos2d["x"])
             raw_y = float(pos2d["y"])
         else:
             # Fallback: project 3-D position (x → horizontal, z → vertical)
-            pos = item.get("position", {})
             if pos.get("x") is not None and pos.get("z") is not None:
-                raw_x = float(pos["x"])
-                raw_y = float(pos["z"])
+                raw_x = pos3_x
+                raw_y = pos3_z
             else:
                 missing_pos += 1
                 continue
@@ -139,6 +146,7 @@ def build(use_cache: bool):
             "name": name,
             "rawX": raw_x,
             "rawY": raw_y,
+            "pos3": (pos3_x, pos3_y, pos3_z),
             "sec": sec,
             "conId": con_id,
             "conName": con_info.get("name", ""),
@@ -180,6 +188,8 @@ def build(use_cache: bool):
         nx = round((s["rawX"] - min_x) * scale + offset_x, 1)
         # Flip Y: EVE's Y increases northward, screen Y increases downward
         ny = round(CANVAS_SIZE - ((s["rawY"] - min_y) * scale + offset_y), 1)
+        # 3D position in light-years for jump drive calculations
+        p3 = s["pos3"]
         system_id_set.add(s["id"])
         systems_out.append({
             "id": s["id"],
@@ -192,6 +202,9 @@ def build(use_cache: bool):
             "regId": s["regId"],
             "regName": s["regName"],
             "hasStation": s["hasStation"],
+            "x3": round(p3[0] / LY_IN_METERS, 4),
+            "y3": round(p3[1] / LY_IN_METERS, 4),
+            "z3": round(p3[2] / LY_IN_METERS, 4),
         })
 
     systems_out.sort(key=lambda s: s["id"])

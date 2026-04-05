@@ -162,6 +162,27 @@ export class SystemRenderer {
     }
   }
 
+  /** Highlight origin + reachable systems for jump planner, dim the rest. */
+  setJumpRangeHighlight(originId: number | null, reachableIds: Set<number> | null) {
+    if (originId === null || reachableIds === null) {
+      // Restore alphas smoothly
+      for (const sys of this.systems) {
+        this.targetAlphas.set(sys.id, 1);
+      }
+      return;
+    }
+
+    for (const sys of this.systems) {
+      if (sys.id === originId) {
+        this.targetAlphas.set(sys.id, 1);
+      } else if (reachableIds.has(sys.id)) {
+        this.targetAlphas.set(sys.id, 0.9);
+      } else {
+        this.targetAlphas.set(sys.id, 0.08);
+      }
+    }
+  }
+
   setSelected(systemId: number | null) {
     // Restore previous
     if (this.selectedId !== null) {

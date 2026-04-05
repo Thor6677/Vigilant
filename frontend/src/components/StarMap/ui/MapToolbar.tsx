@@ -4,9 +4,11 @@ interface Props {
   onFitAll: () => void;
   onLocate?: () => void;
   hasCharacterLocation?: boolean;
+  jumpPlannerActive?: boolean;
+  onToggleJumpPlanner?: () => void;
 }
 
-export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharacterLocation }: Props) {
+export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharacterLocation, jumpPlannerActive, onToggleJumpPlanner }: Props) {
   const btnStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -52,6 +54,19 @@ export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharact
             <line x1="8" y1="12" x2="8" y2="15" />
             <line x1="1" y1="8" x2="4" y2="8" />
             <line x1="12" y1="8" x2="15" y2="8" />
+          </svg>
+        </button>
+      )}
+      {onToggleJumpPlanner && (
+        <button
+          style={{ ...btnStyle, color: jumpPlannerActive ? '#ff8800' : '#474747', marginTop: 6 }}
+          onClick={onToggleJumpPlanner}
+          title="Jump Planner"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M8 2 L8 6 M8 10 L8 14" />
+            <path d="M5 5 L11 11 M11 5 L5 11" />
+            <circle cx="8" cy="8" r="2" fill={jumpPlannerActive ? 'currentColor' : 'none'} />
           </svg>
         </button>
       )}
