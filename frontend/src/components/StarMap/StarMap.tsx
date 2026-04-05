@@ -782,7 +782,19 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       {jumpPlanner.active && (
         <JumpPlannerPanel
           planner={jumpPlanner}
+          systems={data.systems}
           systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+          characters={characters}
+          onFocusSystem={(sys) => {
+            if (viewportRef.current) {
+              viewportRef.current.animate({
+                position: { x: sys.x, y: sys.y },
+                scale: 2,
+                time: 600,
+                ease: 'easeInOutCubic',
+              });
+            }
+          }}
         />
       )}
 
@@ -840,9 +852,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             setPanelPos(null);
             systemRendererRef.current?.setSelected(null);
           }}
-          jumpPlannerActive={jumpPlanner.active}
-          onSetJumpOrigin={(id) => jumpPlanner.setJumpOrigin(id)}
-          onSetJumpDest={(id) => jumpPlanner.setJumpDest(id)}
+          onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
+          onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
         />
       )}
 

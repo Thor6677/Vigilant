@@ -21,7 +21,6 @@ interface Props {
   onSetDestination: (id: number) => void;
   onSetRoutePreference: (pref: RoutePreference) => void;
   onClose: () => void;
-  jumpPlannerActive?: boolean;
   onSetJumpOrigin?: (id: number) => void;
   onSetJumpDest?: (id: number) => void;
 }
@@ -38,7 +37,6 @@ export function SystemInfoPanel({
   onSetDestination,
   onSetRoutePreference,
   onClose,
-  jumpPlannerActive,
   onSetJumpOrigin,
   onSetJumpDest,
 }: Props) {
@@ -193,15 +191,15 @@ export function SystemInfoPanel({
         />
       </div>
 
-      {/* Jump planner buttons */}
-      {jumpPlannerActive && onSetJumpOrigin && onSetJumpDest && (
+      {/* Jump planner buttons — always visible */}
+      {onSetJumpOrigin && onSetJumpDest && (
         <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <button
             onClick={() => onSetJumpOrigin(system.id)}
             style={{
               padding: '4px 10px', fontSize: 9, letterSpacing: '0.1em', fontFamily: FONT,
-              background: 'rgba(255,136,0,0.1)', color: '#ff8800',
-              border: '1px solid rgba(255,136,0,0.3)', cursor: 'pointer',
+              background: 'rgba(255,136,0,0.08)', color: '#ff8800',
+              border: '1px solid rgba(255,136,0,0.2)', cursor: 'pointer',
             }}
           >
             JUMP ORIGIN
@@ -210,8 +208,8 @@ export function SystemInfoPanel({
             onClick={() => onSetJumpDest(system.id)}
             style={{
               padding: '4px 10px', fontSize: 9, letterSpacing: '0.1em', fontFamily: FONT,
-              background: 'rgba(255,136,0,0.1)', color: '#ff8800',
-              border: '1px solid rgba(255,136,0,0.3)', cursor: 'pointer',
+              background: 'rgba(255,136,0,0.08)', color: '#ff8800',
+              border: '1px solid rgba(255,136,0,0.2)', cursor: 'pointer',
             }}
           >
             JUMP DEST
