@@ -36,6 +36,8 @@ export interface JumpPlannerState {
   removeMidpoint: (index: number) => void;
   /** Get alternative systems reachable from a specific waypoint (for midpoint swapping). */
   getAlternatives: (fromIndex: number) => SystemData[];
+  /** Get systems that can be inserted between two hops. */
+  getInsertAlternatives: (afterIndex: number) => SystemData[];
   /** Insert a new midpoint between two existing hops. */
   insertMidpoint: (afterIndex: number, systemId: number) => void;
   /** Reset the planner to initial state. */
@@ -165,6 +167,22 @@ export function useJumpPlanner(
     );
   }, [jumpRoute, range, getSpatialIndex]);
 
+  /** Get systems that can be inserted between route[afterIndex] and route[afterIndex+1]. */
+  const getInsertAlternatives = useCallback((afterIndex: number): SystemData[] => {
+    if (!jumpRoute || afterIndex < 0 || afterIndex >= jumpRoute.length - 1) return [];
+
+    const from = jumpRoute[afterIndex].system;
+    const to = jumpRoute[afterIndex + 1].system;
+    const index = getSpatialIndex();
+
+    const fromReachable = index.findInRange(from, range).filter(canLightCyno);
+    return fromReachable.filter(sys =>
+      sys.id !== from.id &&
+      sys.id !== to.id &&
+      jumpDistanceLY(sys, to) <= range
+    );
+  }, [jumpRoute, range, getSpatialIndex]);
+
   /** Insert a new midpoint between hops at afterIndex and afterIndex+1. */
   const insertMidpoint = useCallback((afterIndex: number, systemId: number) => {
     if (!jumpRoute || afterIndex < 0 || afterIndex >= jumpRoute.length - 1) return;
@@ -210,6 +228,7 @@ export function useJumpPlanner(
     replaceMidpoint,
     removeMidpoint,
     getAlternatives,
+    getInsertAlternatives,
     insertMidpoint,
     reset,
   };

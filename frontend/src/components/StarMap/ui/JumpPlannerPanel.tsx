@@ -307,7 +307,7 @@ function RouteResults({ planner, systems, stats, onFocusSystem, onHighlightSyste
             {insertAfterIndex === i && (
               <div style={{ padding: '4px 0' }}>
                 <MidpointSearch
-                  alternatives={planner.getAlternatives(i + 1)}
+                  alternatives={planner.getInsertAlternatives(i)}
                   allSystems={systems}
                   stats={stats}
                   isInsert
