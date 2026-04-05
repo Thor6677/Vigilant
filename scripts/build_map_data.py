@@ -178,7 +178,8 @@ def build(use_cache: bool):
 
     for s in raw_systems:
         nx = round((s["rawX"] - min_x) * scale + offset_x, 1)
-        ny = round((s["rawY"] - min_y) * scale + offset_y, 1)
+        # Flip Y: EVE's Y increases northward, screen Y increases downward
+        ny = round(CANVAS_SIZE - ((s["rawY"] - min_y) * scale + offset_y), 1)
         system_id_set.add(s["id"])
         systems_out.append({
             "id": s["id"],
