@@ -20,3 +20,8 @@ CLAUDE.md
 repo/
 wanderer-compose.yml
 wanderer-conf.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+scripts/.sde_cache.zip
