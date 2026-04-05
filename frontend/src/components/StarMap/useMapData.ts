@@ -12,10 +12,12 @@ export function useMapData() {
     async function load() {
       try {
         const base = import.meta.env.BASE_URL;
+        // Cache bust to ensure fresh data after deploys
+        const v = '2';
         const [systemsRes, edgesRes, regionsRes] = await Promise.all([
-          fetch(`${base}data/systems.json`),
-          fetch(`${base}data/edges.json`),
-          fetch(`${base}data/regions.json`),
+          fetch(`${base}data/systems.json?v=${v}`),
+          fetch(`${base}data/edges.json?v=${v}`),
+          fetch(`${base}data/regions.json?v=${v}`),
         ]);
 
         if (!systemsRes.ok || !edgesRes.ok || !regionsRes.ok) {
