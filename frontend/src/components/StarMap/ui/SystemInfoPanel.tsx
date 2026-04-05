@@ -112,11 +112,11 @@ export function SystemInfoPanel({
         {system.hasStation && (
           <div style={{ marginTop: 3 }}>
             <span style={{ color: '#33aa55' }}>
-              {system.stns} NPC STATION{system.stns > 1 ? 'S' : ''}
+              {system.stns || 1} NPC STATION{(system.stns || 1) > 1 ? 'S' : ''}
             </span>
           </div>
         )}
-        {system.svcs.length > 0 && (
+        {system.svcs?.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
             {system.svcs.map(svc => (
               <span key={svc} style={{
