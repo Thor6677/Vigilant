@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import type { SystemData, JumpShipClass } from './types';
 import { JUMP_SHIPS } from './jump/constants';
 import { effectiveRange, canLightCyno, canJumpFrom, jumpDistanceLY } from './jump/distance';
@@ -59,6 +59,10 @@ export function useJumpPlanner(
   const [jumpDest, setJumpDest] = useState<number | null>(null);
   const [jumpRoute, setJumpRoute] = useState<JumpWaypoint[] | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const jumpRouteRef = useRef<JumpWaypoint[] | null>(null);
+
+  // Keep ref in sync for use in callbacks that need current route
+  useEffect(() => { jumpRouteRef.current = jumpRoute; }, [jumpRoute]);
 
   const spatialIndexRef = useRef<JumpSpatialIndex | null>(null);
   const getSpatialIndex = useCallback(() => {
@@ -109,94 +113,95 @@ export function useJumpPlanner(
 
   /** Replace a midpoint and recalculate fatigue/fuel for the modified route. */
   const replaceMidpoint = useCallback((index: number, newSystemId: number) => {
-    if (!jumpRoute || index <= 0 || index >= jumpRoute.length - 1) return;
+    const route = jumpRouteRef.current;
+    if (!route || index <= 0 || index >= route.length - 1) return;
     const newSys = systemMap.get(newSystemId);
     if (!newSys) return;
 
-    // Validate: new system must be within range of both prev and next hop
-    const prev = jumpRoute[index - 1].system;
-    const next = jumpRoute[index + 1].system;
+    const prev = route[index - 1].system;
+    const next = route[index + 1].system;
     if (jumpDistanceLY(prev, newSys) > range || jumpDistanceLY(newSys, next) > range) {
       setRouteError(`${newSys.name} is out of range from adjacent hops`);
       return;
     }
 
-    // Build new route array
-    const newRoute = jumpRoute.map(wp => wp.system);
+    const newRoute = route.map(wp => wp.system);
     newRoute[index] = newSys;
 
     // Recalculate fatigue/fuel
     const waypoints = calculateJumpRoute(newRoute, shipClass, jdcLevel, jfcLevel);
     setJumpRoute(waypoints);
     setRouteError(null);
-  }, [jumpRoute, range, shipClass, jdcLevel, jfcLevel, systemMap]);
+  }, [range, shipClass, jdcLevel, jfcLevel, systemMap]);
 
   /** Remove a midpoint if the adjacent hops can still reach each other. */
   const removeMidpoint = useCallback((index: number) => {
-    if (!jumpRoute || index <= 0 || index >= jumpRoute.length - 1) return;
+    const route = jumpRouteRef.current;
+    if (!route || index <= 0 || index >= route.length - 1) return;
 
-    const prev = jumpRoute[index - 1].system;
-    const next = jumpRoute[index + 1].system;
+    const prev = route[index - 1].system;
+    const next = route[index + 1].system;
     if (jumpDistanceLY(prev, next) > range) {
       setRouteError(`Cannot remove — ${prev.name} to ${next.name} exceeds ${range.toFixed(1)} LY range`);
       return;
     }
 
-    const newRoute = jumpRoute.filter((_, i) => i !== index).map(wp => wp.system);
+    const newRoute = route.filter((_, i) => i !== index).map(wp => wp.system);
     const waypoints = calculateJumpRoute(newRoute, shipClass, jdcLevel, jfcLevel);
     setJumpRoute(waypoints);
     setRouteError(null);
-  }, [jumpRoute, range, shipClass, jdcLevel, jfcLevel]);
+  }, [range, shipClass, jdcLevel, jfcLevel]);
 
   /** Get cyno-capable systems reachable from the previous waypoint AND that can reach the next waypoint. */
   const getAlternatives = useCallback((fromIndex: number): SystemData[] => {
-    if (!jumpRoute || fromIndex <= 0 || fromIndex >= jumpRoute.length - 1) return [];
+    const route = jumpRouteRef.current;
+    if (!route || fromIndex <= 0 || fromIndex >= route.length - 1) return [];
 
-    const prev = jumpRoute[fromIndex - 1].system;
-    const next = jumpRoute[fromIndex + 1].system;
-    const index = getSpatialIndex();
+    const prev = route[fromIndex - 1].system;
+    const next = route[fromIndex + 1].system;
+    const idx = getSpatialIndex();
 
-    // Systems reachable from the previous hop
-    const fromPrev = index.findInRange(prev, range).filter(canLightCyno);
+    const fromPrev = idx.findInRange(prev, range).filter(canLightCyno);
 
-    // Filter to those that can also reach the next hop
     return fromPrev.filter(sys =>
       sys.id !== prev.id &&
       sys.id !== next.id &&
       jumpDistanceLY(sys, next) <= range
     );
-  }, [jumpRoute, range, getSpatialIndex]);
+  }, [range, getSpatialIndex]);
 
   /** Get systems that can be inserted between route[afterIndex] and route[afterIndex+1]. */
   const getInsertAlternatives = useCallback((afterIndex: number): SystemData[] => {
-    if (!jumpRoute || afterIndex < 0 || afterIndex >= jumpRoute.length - 1) return [];
+    const route = jumpRouteRef.current;
+    if (!route || afterIndex < 0 || afterIndex >= route.length - 1) return [];
 
-    const from = jumpRoute[afterIndex].system;
-    const to = jumpRoute[afterIndex + 1].system;
-    const index = getSpatialIndex();
+    const from = route[afterIndex].system;
+    const to = route[afterIndex + 1].system;
+    const idx = getSpatialIndex();
 
-    const fromReachable = index.findInRange(from, range).filter(canLightCyno);
+    const fromReachable = idx.findInRange(from, range).filter(canLightCyno);
     return fromReachable.filter(sys =>
       sys.id !== from.id &&
       sys.id !== to.id &&
       jumpDistanceLY(sys, to) <= range
     );
-  }, [jumpRoute, range, getSpatialIndex]);
+  }, [range, getSpatialIndex]);
 
   /** Insert a new midpoint between hops at afterIndex and afterIndex+1. */
   const insertMidpoint = useCallback((afterIndex: number, systemId: number) => {
-    if (!jumpRoute || afterIndex < 0 || afterIndex >= jumpRoute.length - 1) return;
+    const route = jumpRouteRef.current;
+    if (!route || afterIndex < 0 || afterIndex >= route.length - 1) return;
     const newSys = systemMap.get(systemId);
     if (!newSys) return;
 
-    const prev = jumpRoute[afterIndex].system;
-    const next = jumpRoute[afterIndex + 1].system;
+    const prev = route[afterIndex].system;
+    const next = route[afterIndex + 1].system;
     if (jumpDistanceLY(prev, newSys) > range || jumpDistanceLY(newSys, next) > range) {
       setRouteError(`${newSys.name} is out of range from adjacent hops`);
       return;
     }
 
-    const newRoute = jumpRoute.map(wp => wp.system);
+    const newRoute = route.map(wp => wp.system);
     newRoute.splice(afterIndex + 1, 0, newSys);
     const waypoints = calculateJumpRoute(newRoute, shipClass, jdcLevel, jfcLevel);
     setJumpRoute(waypoints);

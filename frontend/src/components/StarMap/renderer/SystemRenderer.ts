@@ -176,7 +176,8 @@ export class SystemRenderer {
       if (sys.id === originId || highlightIds.has(sys.id)) {
         this.targetAlphas.set(sys.id, 1);
       } else {
-        this.targetAlphas.set(sys.id, 0.08);
+        // Keep systems visible enough to see sec colors
+        this.targetAlphas.set(sys.id, 0.25);
       }
     }
   }
