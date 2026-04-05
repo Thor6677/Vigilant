@@ -209,6 +209,54 @@ async def map_characters(request: Request):
     return JSONResponse(result)
 
 
+# ── Alliance name cache ───────────────────────────────────────────────────
+_alliance_cache: dict[int, str] = {}
+
+
+@router.get("/api/map/alliances")
+async def map_alliances(request: Request):
+    """Resolve alliance IDs to names. Accepts ?ids=123,456,789."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    ids_param = request.query_params.get("ids", "")
+    if not ids_param:
+        return JSONResponse({})
+
+    try:
+        ids = [int(x) for x in ids_param.split(",") if x.strip()]
+    except ValueError:
+        return JSONResponse({"error": "Invalid IDs"}, status_code=400)
+
+    # Check cache first
+    result = {}
+    missing = []
+    for aid in ids:
+        if aid in _alliance_cache:
+            result[str(aid)] = _alliance_cache[aid]
+        else:
+            missing.append(aid)
+
+    # Fetch missing from ESI
+    if missing:
+        async with httpx.AsyncClient(
+            base_url=ESI_BASE, timeout=10,
+            headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
+        ) as client:
+            for aid in missing[:50]:  # Limit batch size
+                try:
+                    resp = await client.get(f"/alliances/{aid}/")
+                    if resp.status_code == 200:
+                        name = resp.json().get("name", f"Alliance {aid}")
+                        _alliance_cache[aid] = name
+                        result[str(aid)] = name
+                except Exception:
+                    result[str(aid)] = f"Alliance {aid}"
+
+    return JSONResponse(result)
+
+
 @router.get("/api/map/stats")
 async def map_stats(request: Request):
     """Return all cached map statistics for overlay rendering."""

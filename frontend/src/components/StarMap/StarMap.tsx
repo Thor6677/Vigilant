@@ -85,6 +85,32 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const { stats, loading: statsLoading } = useOverlayData();
   const { characters } = useCharacterLocations();
   const jumpPlanner = useJumpPlanner(data.systemMap, data.systems, adjacencyRef.current ?? undefined);
+  const [allianceNames, setAllianceNames] = useState<Map<string, string>>(new Map());
+
+  // Fetch alliance names for sovereignty data
+  useEffect(() => {
+    if (!stats?.sovereignty) return;
+    const ids = new Set<number>();
+    for (const sov of Object.values(stats.sovereignty)) {
+      if (sov.alliance_id) ids.add(sov.alliance_id);
+    }
+    // Filter out already-resolved
+    const missing = [...ids].filter(id => !allianceNames.has(String(id)));
+    if (missing.length === 0) return;
+
+    // Batch fetch in groups of 50
+    const batch = missing.slice(0, 50);
+    fetch(`/api/map/alliances?ids=${batch.join(',')}`)
+      .then(r => r.ok ? r.json() : {})
+      .then((names: Record<string, string>) => {
+        setAllianceNames(prev => {
+          const next = new Map(prev);
+          for (const [id, name] of Object.entries(names)) next.set(id, name);
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, [stats?.sovereignty]);
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {
@@ -877,6 +903,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           system={selectedSystem}
           position={panelPos}
           stats={stats}
+          allianceNames={allianceNames}
           routeOrigin={routeOrigin}
           routeDest={routeDest}
           activeRoute={activeRoute}

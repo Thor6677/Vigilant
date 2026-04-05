@@ -31,6 +31,7 @@ interface Props {
   onSetOrigin: (id: number) => void;
   onSetDestination: (id: number) => void;
   onSetRoutePreference: (pref: RoutePreference) => void;
+  allianceNames: Map<string, string>;
   onClose: () => void;
   onSetJumpOrigin?: (id: number) => void;
   onSetJumpDest?: (id: number) => void;
@@ -47,6 +48,7 @@ export function SystemInfoPanel({
   onSetOrigin,
   onSetDestination,
   onSetRoutePreference,
+  allianceNames,
   onClose,
   onSetJumpOrigin,
   onSetJumpDest,
@@ -130,9 +132,16 @@ export function SystemInfoPanel({
           </div>
         )}
         {sov?.alliance_id && (
-          <div style={{ marginTop: 2 }}>
-            <span style={{ color: MUTED }}>SOV </span>
-            <span style={{ color: '#6688aa' }}>Alliance {sov.alliance_id}</span>
+          <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <img
+              src={`https://images.evetech.net/alliances/${sov.alliance_id}/logo?size=32`}
+              alt=""
+              style={{ width: 16, height: 16 }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+            <span style={{ color: '#6688aa', fontSize: 10 }}>
+              {allianceNames.get(String(sov.alliance_id)) ?? `Alliance ${sov.alliance_id}`}
+            </span>
           </div>
         )}
       </div>
