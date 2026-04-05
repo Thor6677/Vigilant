@@ -31,22 +31,51 @@ export function securityColorCSS(sec: number): string {
 }
 
 /**
- * Heatmap color ramp: 0 = dim blue, 1 = bright yellow/red.
+ * Heatmap color ramp: 0 = dim blue/gray, 1 = bright yellow/red.
  */
 export function heatmapColor(t: number): number {
   t = Math.max(0, Math.min(1, t));
+  if (t === 0) return 0x1a1a40; // No activity — dim
   if (t < 0.5) {
-    // Blue to yellow
     const s = t * 2;
     const r = Math.round(s * 0xef);
     const g = Math.round(s * 0xef);
-    const b = Math.round((1 - s) * 0x80 + 0x20);
+    const b = Math.round((1 - s) * 0x60 + 0x20);
     return (r << 16) | (g << 8) | b;
   }
-  // Yellow to red
   const s = (t - 0.5) * 2;
   const r = 0xef;
   const g = Math.round((1 - s) * 0xef);
   const b = Math.round((1 - s) * 0x20);
   return (r << 16) | (g << 8) | b;
 }
+
+/**
+ * Deterministic color from an alliance/corp ID.
+ * Produces consistent, visually distinct colors.
+ */
+export function allianceColor(id: number): number {
+  // Simple hash to spread IDs across hue space
+  let h = ((id * 2654435761) >>> 0) % 360;
+  const s = 0.55 + (((id * 31) % 100) / 100) * 0.3; // 0.55-0.85
+  const l = 0.45 + (((id * 17) % 100) / 100) * 0.2; // 0.45-0.65
+  return hslToHex(h, s, l);
+}
+
+function hslToHex(h: number, s: number, l: number): number {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color);
+  };
+  return (f(0) << 16) | (f(8) << 8) | f(4);
+}
+
+/** Faction warfare faction colors */
+export const FACTION_COLORS: Record<number, number> = {
+  500001: 0x4488cc, // Caldari — blue
+  500002: 0xcc6633, // Minmatar — rust
+  500003: 0xccaa33, // Amarr — gold
+  500004: 0x33aa66, // Gallente — green
+};

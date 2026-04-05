@@ -47,4 +47,4 @@ export const ROUTE_COLOR = 0x00d4ff;
 export const ROUTE_WIDTH = 3;
 
 // Map background
-export const BG_COLOR = 0x0a0e1a;
+export const BG_COLOR = 0x080808;

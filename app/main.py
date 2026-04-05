@@ -26,7 +26,7 @@ from app.routes.gatecheck import router as gatecheck_router
 from app.routes.admin import router as admin_router
 from app.routes.skill_plans import router as skill_plans_router
 from app.routes.structure_timers import router as structure_timers_router
-from app.routes.starmap import router as starmap_router
+from app.routes.starmap import router as starmap_router, start_map_poller
 
 settings = get_settings()
 
@@ -147,3 +147,4 @@ async def startup():
     import asyncio
     asyncio.create_task(ensure_sde_loaded())
     asyncio.create_task(_background_scheduler())
+    start_map_poller()

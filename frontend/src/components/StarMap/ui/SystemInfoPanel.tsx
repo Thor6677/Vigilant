@@ -1,6 +1,14 @@
 import type { SystemData, RoutePreference } from '../types';
 import { securityColorCSS } from '../utils/colors';
 
+// Vigilant design tokens
+const FONT = "'JetBrains Mono', monospace";
+const BG = 'rgba(14, 14, 14, 0.97)';
+const BORDER = '#191919';
+const TEXT = '#dedede';
+const MUTED = '#474747';
+const ACCENT = '#c8a951';
+
 interface Props {
   system: SystemData;
   position: { x: number; y: number };
@@ -26,8 +34,7 @@ export function SystemInfoPanel({
   onSetRoutePreference,
   onClose,
 }: Props) {
-  // Clamp panel position to viewport
-  const left = Math.min(position.x + 20, window.innerWidth - 300);
+  const left = Math.min(position.x + 20, window.innerWidth - 280);
   const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 350);
 
   const isOrigin = routeOrigin === system.id;
@@ -40,80 +47,73 @@ export function SystemInfoPanel({
         position: 'absolute',
         left,
         top,
-        width: 270,
-        background: 'rgba(10, 14, 30, 0.95)',
-        border: '1px solid #2a3a5a',
-        borderRadius: 8,
-        padding: '14px 16px',
-        fontFamily: 'DM Sans, sans-serif',
-        color: '#C8D8E8',
+        width: 260,
+        background: BG,
+        border: `1px solid ${BORDER}`,
+        padding: '12px 14px',
+        fontFamily: FONT,
+        fontSize: 11,
+        color: TEXT,
         zIndex: 20,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
       }}
     >
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <h3 style={{
-          margin: 0, fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, fontSize: 18,
-          color: '#e0eaf4',
-        }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: TEXT }}>
           {system.name}
-        </h3>
+        </span>
         <button
           onClick={onClose}
           style={{
-            background: 'none', border: 'none', color: '#6a7a8a',
-            cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px',
+            background: 'none', border: 'none', color: MUTED,
+            cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px',
+            fontFamily: FONT,
           }}
         >
-          &times;
+          ×
         </button>
       </div>
 
       {/* Details */}
-      <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+      <div style={{ lineHeight: 1.8 }}>
         <div>
-          <span style={{ color: '#6a7a8a' }}>Security: </span>
-          <span style={{ color: securityColorCSS(system.sec), fontWeight: 700 }}>
+          <span style={{ color: MUTED }}>SEC </span>
+          <span style={{ color: securityColorCSS(system.sec), fontWeight: 600 }}>
             {system.sec.toFixed(1)}
           </span>
         </div>
-        <div>
-          <span style={{ color: '#6a7a8a' }}>Region: </span>
-          {system.regName}
-        </div>
-        <div>
-          <span style={{ color: '#6a7a8a' }}>Constellation: </span>
-          {system.conName}
-        </div>
+        <div><span style={{ color: MUTED }}>RGN </span>{system.regName}</div>
+        <div><span style={{ color: MUTED }}>CON </span>{system.conName}</div>
         {system.hasStation && (
-          <div style={{ color: '#48f148', marginTop: 2 }}>NPC Station</div>
+          <div style={{ color: '#33aa55', marginTop: 2 }}>NPC STATION</div>
         )}
       </div>
 
       {/* Route info */}
       {activeRoute && activeRoute.length > 1 && (isOrigin || isDest) && (
         <div style={{
-          marginTop: 10, padding: '6px 8px', background: 'rgba(0, 212, 255, 0.08)',
-          borderRadius: 4, fontSize: 12, color: '#00d4ff',
+          marginTop: 8, padding: '4px 8px', background: 'rgba(200,169,81,0.08)',
+          fontSize: 10, color: ACCENT, border: `1px solid rgba(200,169,81,0.2)`,
         }}>
-          Route: {jumpCount} jump{jumpCount !== 1 ? 's' : ''}
+          ROUTE: {jumpCount} JUMP{jumpCount !== 1 ? 'S' : ''}
         </div>
       )}
 
       {/* Route preference */}
       {(routeOrigin !== null || routeDest !== null) && (
         <div style={{ marginTop: 8 }}>
-          <label style={{ fontSize: 11, color: '#6a7a8a', display: 'block', marginBottom: 4 }}>
-            Route Preference:
+          <label style={{ fontSize: 9, color: MUTED, display: 'block', marginBottom: 3, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Route Preference
           </label>
           <select
             value={routePreference}
             onChange={(e) => onSetRoutePreference(e.target.value as RoutePreference)}
             style={{
-              width: '100%', padding: '4px 6px', fontSize: 12,
-              background: '#141828', color: '#C8D8E8', border: '1px solid #2a3a5a',
-              borderRadius: 4, cursor: 'pointer',
+              width: '100%', padding: '3px 4px', fontSize: 10,
+              fontFamily: FONT,
+              background: '#080808', color: TEXT, border: `1px solid ${BORDER}`,
+              cursor: 'pointer',
             }}
           >
             <option value="shortest">Shortest</option>
@@ -125,36 +125,36 @@ export function SystemInfoPanel({
       )}
 
       {/* Action buttons */}
-      <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <ActionButton
-          label={isOrigin ? 'Origin' : 'Set Origin'}
+          label={isOrigin ? '● ORIGIN' : 'SET ORIGIN'}
           active={isOrigin}
           onClick={() => onSetOrigin(system.id)}
         />
         <ActionButton
-          label={isDest ? 'Destination' : 'Set Dest'}
+          label={isDest ? '● DEST' : 'SET DEST'}
           active={isDest}
           onClick={() => onSetDestination(system.id)}
         />
       </div>
 
       {/* External links */}
-      <div style={{ marginTop: 10, display: 'flex', gap: 10, fontSize: 12 }}>
+      <div style={{ marginTop: 8, display: 'flex', gap: 12, fontSize: 10 }}>
         <a
           href={`https://evemaps.dotlan.net/system/${system.name}`}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: '#5a8ab5', textDecoration: 'none' }}
+          style={{ color: MUTED, textDecoration: 'none', letterSpacing: '0.08em' }}
         >
-          DOTLAN
+          DOTLAN ↗
         </a>
         <a
           href={`https://zkillboard.com/system/${system.id}/`}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: '#5a8ab5', textDecoration: 'none' }}
+          style={{ color: MUTED, textDecoration: 'none', letterSpacing: '0.08em' }}
         >
-          zKillboard
+          ZKILL ↗
         </a>
       </div>
     </div>
@@ -166,13 +166,13 @@ function ActionButton({ label, active, onClick }: { label: string; active: boole
     <button
       onClick={onClick}
       style={{
-        padding: '5px 12px',
-        fontSize: 12,
-        fontFamily: 'DM Sans, sans-serif',
-        background: active ? 'rgba(0, 212, 255, 0.15)' : 'rgba(42, 58, 90, 0.4)',
-        color: active ? '#00d4ff' : '#8a9ab0',
-        border: `1px solid ${active ? '#00d4ff' : '#2a3a5a'}`,
-        borderRadius: 4,
+        padding: '4px 10px',
+        fontSize: 9,
+        letterSpacing: '0.1em',
+        fontFamily: FONT,
+        background: active ? 'rgba(200,169,81,0.1)' : 'transparent',
+        color: active ? ACCENT : MUTED,
+        border: `1px solid ${active ? ACCENT : BORDER}`,
         cursor: 'pointer',
       }}
     >

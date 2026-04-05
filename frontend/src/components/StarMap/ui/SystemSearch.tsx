@@ -2,6 +2,8 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import type { SystemData } from '../types';
 import { securityColorCSS } from '../utils/colors';
 
+const FONT = "'JetBrains Mono', monospace";
+
 interface Props {
   systems: SystemData[];
   onSelect: (system: SystemData) => void;
@@ -13,12 +15,10 @@ export function SystemSearch({ systems, onSelect }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sorted names for fast prefix search
   const sortedSystems = useMemo(() => {
     return [...systems].sort((a, b) => a.name.localeCompare(b.name));
   }, [systems]);
 
-  // Filter results
   const results = useMemo(() => {
     if (!query || query.length < 2) return [];
     const q = query.toLowerCase();
@@ -39,7 +39,6 @@ export function SystemSearch({ systems, onSelect }: Props) {
     onSelect(sys);
   }, [onSelect]);
 
-  // Keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -57,10 +56,8 @@ export function SystemSearch({ systems, onSelect }: Props) {
     }
   }, [results, activeIndex, handleSelect]);
 
-  // Reset active index when results change
   useEffect(() => setActiveIndex(0), [results]);
 
-  // Global keyboard shortcut: F or / to focus search
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -79,10 +76,10 @@ export function SystemSearch({ systems, onSelect }: Props) {
   return (
     <div style={{
       position: 'absolute',
-      top: 12,
-      left: 12,
+      top: 10,
+      left: 10,
       zIndex: 30,
-      width: 280,
+      width: 260,
     }}>
       <input
         ref={inputRef}
@@ -92,28 +89,28 @@ export function SystemSearch({ systems, onSelect }: Props) {
         onFocus={() => setFocused(true)}
         onBlur={() => setTimeout(() => setFocused(false), 150)}
         onKeyDown={handleKeyDown}
-        placeholder="Search systems... (F)"
+        placeholder="SEARCH SYSTEMS (F)"
         aria-label="Search solar systems"
         style={{
           width: '100%',
-          padding: '8px 12px',
-          fontSize: 14,
-          fontFamily: 'DM Sans, sans-serif',
-          background: 'rgba(10, 14, 30, 0.92)',
-          color: '#C8D8E8',
-          border: '1px solid #2a3a5a',
-          borderRadius: showDropdown ? '6px 6px 0 0' : 6,
+          padding: '7px 10px',
+          fontSize: 10,
+          letterSpacing: '0.1em',
+          fontFamily: FONT,
+          background: 'rgba(14, 14, 14, 0.95)',
+          color: '#dedede',
+          border: '1px solid #191919',
           outline: 'none',
+          textTransform: 'uppercase',
         }}
       />
 
       {showDropdown && (
         <div style={{
-          background: 'rgba(10, 14, 30, 0.95)',
-          border: '1px solid #2a3a5a',
+          background: 'rgba(14, 14, 14, 0.97)',
+          border: '1px solid #191919',
           borderTop: 'none',
-          borderRadius: '0 0 6px 6px',
-          maxHeight: 300,
+          maxHeight: 280,
           overflowY: 'auto',
         }}>
           {results.map((sys, i) => (
@@ -121,18 +118,19 @@ export function SystemSearch({ systems, onSelect }: Props) {
               key={sys.id}
               onMouseDown={() => handleSelect(sys)}
               style={{
-                padding: '7px 12px',
-                fontSize: 13,
-                fontFamily: 'DM Sans, sans-serif',
+                padding: '6px 10px',
+                fontSize: 10,
+                fontFamily: FONT,
                 cursor: 'pointer',
-                background: i === activeIndex ? 'rgba(42, 58, 90, 0.5)' : 'transparent',
+                background: i === activeIndex ? 'rgba(200,169,81,0.07)' : 'transparent',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                letterSpacing: '0.08em',
               }}
             >
-              <span style={{ color: '#e0eaf4' }}>{sys.name}</span>
-              <span style={{ fontSize: 11, color: '#6a7a8a' }}>
+              <span style={{ color: '#dedede' }}>{sys.name}</span>
+              <span style={{ fontSize: 9, color: '#474747' }}>
                 <span style={{ color: securityColorCSS(sys.sec), marginRight: 6 }}>
                   {sys.sec.toFixed(1)}
                 </span>

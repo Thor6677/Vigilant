@@ -3,6 +3,7 @@ import {
   useEffect,
   useCallback,
   useState,
+  useMemo,
   useImperativeHandle,
   forwardRef,
 } from 'react';
@@ -11,19 +12,22 @@ import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
 
-import type { SystemData, MapData, RoutePreference } from './types';
+import type { SystemData, MapData, RoutePreference, OverlayType } from './types';
 import { LODTier } from './types';
 import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
+import { heatmapColor, allianceColor, FACTION_COLORS } from './utils/colors';
 import { SystemRenderer } from './renderer/SystemRenderer';
 import { EdgeRenderer } from './renderer/EdgeRenderer';
 import { LabelRenderer } from './renderer/LabelRenderer';
 import { RouteRenderer } from './renderer/RouteRenderer';
 import { buildGraph } from './graph/buildGraph';
 import { findRoute } from './graph/pathfinding';
+import { useOverlayData } from './useOverlayData';
 
 import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
 import { MapToolbar } from './ui/MapToolbar';
+import { OverlayControls } from './ui/OverlayControls';
 
 export interface StarMapHandle {
   focusSystem: (id: number) => void;
@@ -56,7 +60,66 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [routeDest, setRouteDest] = useState<number | null>(null);
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
   const [routePreference, setRoutePreference] = useState<RoutePreference>('shortest');
+  const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
   const currentLODRef = useRef<LODTier>(LODTier.Galaxy);
+
+  // Fetch ESI overlay stats
+  const { stats, loading: statsLoading } = useOverlayData();
+
+  // Compute overlay tints when overlay or stats change
+  const overlayTints = useMemo(() => {
+    if (activeOverlay === 'security' || !stats) return null;
+
+    const tints = new Map<number, number>();
+
+    if (activeOverlay === 'jumps') {
+      const values = Object.values(stats.jumps);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const v = stats.jumps[String(sys.id)] ?? 0;
+        tints.set(sys.id, heatmapColor(Math.sqrt(v / max))); // sqrt for better distribution
+      }
+    } else if (activeOverlay === 'shipKills') {
+      const values = Object.values(stats.kills).map(k => k.ship);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.ship ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'podKills') {
+      const values = Object.values(stats.kills).map(k => k.pod);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.pod ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'npcKills') {
+      const values = Object.values(stats.kills).map(k => k.npc);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.npc ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'sovereignty') {
+      for (const sys of data.systems) {
+        const sov = stats.sovereignty[String(sys.id)];
+        if (sov?.alliance_id) {
+          tints.set(sys.id, allianceColor(sov.alliance_id));
+        } else if (sov?.faction_id) {
+          tints.set(sys.id, FACTION_COLORS[sov.faction_id] ?? 0x555577);
+        } else {
+          tints.set(sys.id, 0x222233);
+        }
+      }
+    }
+
+    return tints;
+  }, [activeOverlay, stats, data.systems]);
+
+  // Apply overlay tints to renderer
+  useEffect(() => {
+    systemRendererRef.current?.setOverlayTint(overlayTints);
+  }, [overlayTints]);
 
   // Expose imperative API
   useImperativeHandle(ref, () => ({
@@ -156,14 +219,14 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
 
-      // Add to viewport in draw order: edges → region labels → systems → system labels → route
+      // Add to viewport in draw order
       vp.addChild(edgeRenderer.graphics);
       vp.addChild(labelRenderer.regionLabels);
       vp.addChild(systemRenderer.container);
       vp.addChild(labelRenderer.systemLabels);
       vp.addChild(routeRenderer.graphics);
 
-      // Build quadtree for spatial hit testing
+      // Build quadtree
       const qt = quadtree<SystemData>()
         .x(d => d.x)
         .y(d => d.y)
@@ -192,7 +255,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         systemRenderer.setSelected(null);
       });
 
-      // Pointer events for hover / click
+      // Pointer events
       let hoverThrottleId: number | null = null;
 
       vp.on('pointermove', (e) => {
@@ -202,7 +265,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }, 16);
 
         const worldPos = vp.toWorld(e.global);
-        const hitRadius = 30 / vp.scaled; // Adjust hit radius by zoom
+        const hitRadius = 30 / vp.scaled;
         const found = qt.find(worldPos.x, worldPos.y, hitRadius);
 
         if (found) {
@@ -251,7 +314,6 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       });
       resizeObserver.observe(el);
 
-      // Store cleanup ref
       (el as any).__mapCleanup = () => {
         resizeObserver.disconnect();
         if (hoverThrottleId !== null) clearTimeout(hoverThrottleId);
@@ -298,7 +360,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   // Keyboard shortcuts
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
 
       switch (e.key) {
         case 'Escape':
@@ -347,14 +409,29 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, []);
 
+  // Build tooltip stat info for hovered system
+  const hoveredStatInfo = useMemo(() => {
+    if (!hoveredSystem || !stats) return null;
+    const sid = String(hoveredSystem.id);
+    const k = stats.kills[sid];
+    const j = stats.jumps[sid];
+    return {
+      jumps: j ?? 0,
+      shipKills: k?.ship ?? 0,
+      npcKills: k?.npc ?? 0,
+      podKills: k?.pod ?? 0,
+    };
+  }, [hoveredSystem, stats]);
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {/* Canvas container — leave room for bottom overlay bar */}
+      <div ref={containerRef} style={{ width: '100%', height: 'calc(100% - 36px)' }} />
 
       {/* Search bar */}
       <SystemSearch systems={data.systems} onSelect={handleSearchSelect} />
 
-      {/* Toolbar */}
+      {/* Zoom toolbar */}
       <MapToolbar
         onZoomIn={() => viewportRef.current?.zoomPercent(0.3, true)}
         onZoomOut={() => viewportRef.current?.zoomPercent(-0.3, true)}
@@ -372,21 +449,28 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             left: tooltipPos.x + 16,
             top: tooltipPos.y - 12,
             pointerEvents: 'none',
-            background: 'rgba(10, 14, 30, 0.92)',
-            border: '1px solid #2a3a5a',
-            borderRadius: 6,
-            padding: '6px 10px',
-            fontSize: 13,
-            fontFamily: 'DM Sans, sans-serif',
-            color: '#C8D8E8',
+            background: 'rgba(8, 8, 8, 0.95)',
+            border: '1px solid #191919',
+            padding: '5px 10px',
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: '#dedede',
             whiteSpace: 'nowrap',
             zIndex: 10,
           }}
         >
           <strong>{hoveredSystem.name}</strong>
-          <span style={{ marginLeft: 8, color: '#8a9ab0' }}>
-            {hoveredSystem.sec.toFixed(1)} &middot; {hoveredSystem.regName}
+          <span style={{ marginLeft: 8, color: '#474747' }}>
+            {hoveredSystem.sec.toFixed(1)} · {hoveredSystem.regName}
           </span>
+          {hoveredStatInfo && (hoveredStatInfo.jumps > 0 || hoveredStatInfo.shipKills > 0 || hoveredStatInfo.npcKills > 0) && (
+            <div style={{ fontSize: 10, color: '#474747', marginTop: 2 }}>
+              {hoveredStatInfo.jumps > 0 && <span>J:{hoveredStatInfo.jumps} </span>}
+              {hoveredStatInfo.shipKills > 0 && <span style={{ color: '#cc3333' }}>SK:{hoveredStatInfo.shipKills} </span>}
+              {hoveredStatInfo.npcKills > 0 && <span>NK:{hoveredStatInfo.npcKills} </span>}
+              {hoveredStatInfo.podKills > 0 && <span style={{ color: '#cc3333' }}>PK:{hoveredStatInfo.podKills}</span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -409,6 +493,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }}
         />
       )}
+
+      {/* Bottom overlay controls */}
+      <OverlayControls
+        activeOverlay={activeOverlay}
+        onOverlayChange={setActiveOverlay}
+        statsLoaded={!statsLoading && stats !== null}
+      />
     </div>
   );
 });
