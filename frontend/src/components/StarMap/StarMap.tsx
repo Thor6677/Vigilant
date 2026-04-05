@@ -560,7 +560,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const handleSetOrigin = useCallback((id: number) => setRouteOrigin(id), []);
   const handleSetDest = useCallback((id: number) => setRouteDest(id), []);
 
-  const handleSearchSelect = useCallback((system: SystemData) => {
+  const handleSearchSelectSystem = useCallback((system: SystemData) => {
     if (viewportRef.current) {
       viewportRef.current.animate({
         position: { x: system.x, y: system.y },
@@ -576,6 +576,37 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const sp = vp.toScreen(system.x, system.y);
       setPanelPos({ x: sp.x, y: sp.y });
     }
+  }, []);
+
+  const handleSearchSelectArea = useCallback((type: 'constellation' | 'region', id: number) => {
+    const lr = labelRendererRef.current;
+    if (!lr || !viewportRef.current) return;
+
+    const groups = type === 'constellation' ? lr.constellationGroups : lr.regionGroups;
+    const group = groups.find(g => g.id === id);
+    if (!group) return;
+
+    // Zoom to fit the area
+    const pad = 80;
+    const gw = group.maxX - group.minX + pad * 2;
+    const gh = group.maxY - group.minY + pad * 2;
+    const cx = (group.minX + group.maxX) / 2;
+    const cy = (group.minY + group.maxY) / 2;
+    const sx = viewportRef.current.screenWidth / gw;
+    const sy = viewportRef.current.screenHeight / gh;
+    const targetScale = Math.min(sx, sy, MAX_ZOOM);
+
+    viewportRef.current.animate({
+      position: { x: cx, y: cy },
+      scale: targetScale,
+      time: 600,
+      ease: 'easeInOutCubic',
+    });
+
+    // Clear any system selection
+    setSelectedSystem(null);
+    setPanelPos(null);
+    systemRendererRef.current?.setSelected(null);
   }, []);
 
   // Tooltip stat info
@@ -608,7 +639,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       <div ref={containerRef} style={{ width: '100%', height: `calc(100% - ${overlayBarHeight}px)` }} />
 
       {/* Search bar */}
-      <SystemSearch systems={data.systems} onSelect={handleSearchSelect} />
+      <SystemSearch
+        systems={data.systems}
+        onSelectSystem={handleSearchSelectSystem}
+        onSelectArea={handleSearchSelectArea}
+      />
 
       {/* Group mode selector */}
       <GroupModeControls mode={groupMode} onModeChange={setGroupMode} />

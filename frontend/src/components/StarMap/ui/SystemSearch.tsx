@@ -5,53 +5,121 @@ import { securityColorCSS } from '../utils/colors';
 const FONT = "'JetBrains Mono', monospace";
 const MAX_RESULTS = 15;
 
-interface Props {
-  systems: SystemData[];
-  onSelect: (system: SystemData) => void;
+export type SearchResultType = 'system' | 'constellation' | 'region';
+
+export interface SearchResult {
+  type: SearchResultType;
+  id: number;
+  name: string;
+  // System-specific
+  system?: SystemData;
+  // Area-specific (constellation/region)
+  systemCount?: number;
+  secRange?: string;
 }
 
-export function SystemSearch({ systems, onSelect }: Props) {
+interface Props {
+  systems: SystemData[];
+  onSelectSystem: (system: SystemData) => void;
+  onSelectArea: (type: 'constellation' | 'region', id: number, name: string) => void;
+}
+
+export function SystemSearch({ systems, onSelectSystem, onSelectArea }: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Search results: match system name, region name, or constellation name
-  const { results, totalCount } = useMemo(() => {
-    if (!query || query.length < 2) return { results: [], totalCount: 0 };
-    const q = query.toLowerCase();
-    const matches: SystemData[] = [];
-    let total = 0;
+  // Pre-compute unique regions and constellations
+  const { regionList, constellationList } = useMemo(() => {
+    const regMap = new Map<number, { name: string; count: number; minSec: number; maxSec: number }>();
+    const conMap = new Map<number, { name: string; regName: string; count: number; minSec: number; maxSec: number }>();
 
-    // First: exact system name matches
     for (const sys of systems) {
-      if (sys.name.toLowerCase().includes(q)) {
-        total++;
-        if (matches.length < MAX_RESULTS) matches.push(sys);
-      }
+      // Regions
+      let r = regMap.get(sys.regId);
+      if (!r) { r = { name: sys.regName, count: 0, minSec: sys.sec, maxSec: sys.sec }; regMap.set(sys.regId, r); }
+      r.count++;
+      r.minSec = Math.min(r.minSec, sys.sec);
+      r.maxSec = Math.max(r.maxSec, sys.sec);
+
+      // Constellations
+      let c = conMap.get(sys.conId);
+      if (!c) { c = { name: sys.conName, regName: sys.regName, count: 0, minSec: sys.sec, maxSec: sys.sec }; conMap.set(sys.conId, c); }
+      c.count++;
+      c.minSec = Math.min(c.minSec, sys.sec);
+      c.maxSec = Math.max(c.maxSec, sys.sec);
     }
 
-    // Then: region/constellation name matches (only add systems not already matched)
-    if (matches.length < MAX_RESULTS) {
-      const matchedIds = new Set(matches.map(s => s.id));
-      for (const sys of systems) {
-        if (matchedIds.has(sys.id)) continue;
-        if (sys.regName.toLowerCase().includes(q) || sys.conName.toLowerCase().includes(q)) {
-          total++;
-          if (matches.length < MAX_RESULTS) matches.push(sys);
+    return {
+      regionList: Array.from(regMap.entries()).map(([id, r]) => ({ id, ...r })),
+      constellationList: Array.from(conMap.entries()).map(([id, c]) => ({ id, ...c })),
+    };
+  }, [systems]);
+
+  // Unified search results
+  const { results, totalCount } = useMemo(() => {
+    if (!query || query.length < 2) return { results: [] as SearchResult[], totalCount: 0 };
+    const q = query.toLowerCase();
+    const out: SearchResult[] = [];
+    let total = 0;
+
+    // 1. Matching regions (show first)
+    for (const reg of regionList) {
+      if (reg.name.toLowerCase().includes(q)) {
+        total++;
+        if (out.length < MAX_RESULTS) {
+          out.push({
+            type: 'region',
+            id: reg.id,
+            name: reg.name,
+            systemCount: reg.count,
+            secRange: `${reg.minSec.toFixed(1)} – ${reg.maxSec.toFixed(1)}`,
+          });
         }
       }
     }
 
-    return { results: matches, totalCount: total };
-  }, [query, systems]);
+    // 2. Matching constellations
+    for (const con of constellationList) {
+      if (con.name.toLowerCase().includes(q)) {
+        total++;
+        if (out.length < MAX_RESULTS) {
+          out.push({
+            type: 'constellation',
+            id: con.id,
+            name: con.name,
+            systemCount: con.count,
+            secRange: `${con.minSec.toFixed(1)} – ${con.maxSec.toFixed(1)}`,
+          });
+        }
+      }
+    }
 
-  const handleSelect = useCallback((sys: SystemData) => {
+    // 3. Matching systems
+    for (const sys of systems) {
+      if (sys.name.toLowerCase().includes(q)) {
+        total++;
+        if (out.length < MAX_RESULTS) {
+          out.push({ type: 'system', id: sys.id, name: sys.name, system: sys });
+        }
+      }
+    }
+
+    return { results: out, totalCount: total };
+  }, [query, systems, regionList, constellationList]);
+
+  const handleSelect = useCallback((result: SearchResult) => {
     setQuery('');
     setFocused(false);
     inputRef.current?.blur();
-    onSelect(sys);
-  }, [onSelect]);
+
+    if (result.type === 'system' && result.system) {
+      onSelectSystem(result.system);
+    } else if (result.type === 'constellation' || result.type === 'region') {
+      onSelectArea(result.type, result.id, result.name);
+    }
+  }, [onSelectSystem, onSelectArea]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -94,7 +162,7 @@ export function SystemSearch({ systems, onSelect }: Props) {
       top: 10,
       left: 10,
       zIndex: 30,
-      width: 260,
+      width: 280,
     }}>
       <div style={{ position: 'relative' }}>
         <input
@@ -105,8 +173,8 @@ export function SystemSearch({ systems, onSelect }: Props) {
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
           onKeyDown={handleKeyDown}
-          placeholder="SEARCH SYSTEMS (F)"
-          aria-label="Search solar systems"
+          placeholder="SEARCH SYSTEMS, REGIONS... (F)"
+          aria-label="Search systems, regions, constellations"
           style={{
             width: '100%',
             padding: '7px 28px 7px 10px',
@@ -120,7 +188,6 @@ export function SystemSearch({ systems, onSelect }: Props) {
             textTransform: 'uppercase',
           }}
         />
-        {/* Clear button */}
         {query.length > 0 && (
           <button
             onMouseDown={(e) => {
@@ -153,13 +220,13 @@ export function SystemSearch({ systems, onSelect }: Props) {
           background: 'rgba(14, 14, 14, 0.97)',
           border: '1px solid #191919',
           borderTop: 'none',
-          maxHeight: 280,
+          maxHeight: 300,
           overflowY: 'auto',
         }}>
-          {results.map((sys, i) => (
+          {results.map((result, i) => (
             <div
-              key={sys.id}
-              onMouseDown={() => handleSelect(sys)}
+              key={`${result.type}-${result.id}`}
+              onMouseDown={() => handleSelect(result)}
               style={{
                 padding: '6px 10px',
                 fontSize: 10,
@@ -170,15 +237,37 @@ export function SystemSearch({ systems, onSelect }: Props) {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 letterSpacing: '0.08em',
+                borderTop: i > 0 && result.type !== results[i - 1].type ? '1px solid #191919' : 'none',
               }}
             >
-              <span style={{ color: '#dedede' }}>{sys.name}</span>
-              <span style={{ fontSize: 9, color: '#474747' }}>
-                <span style={{ color: securityColorCSS(sys.sec), marginRight: 6 }}>
-                  {sys.sec.toFixed(1)}
-                </span>
-                {sys.regName}
-              </span>
+              {result.type === 'system' && result.system ? (
+                <>
+                  <span style={{ color: '#dedede' }}>{result.name}</span>
+                  <span style={{ fontSize: 9, color: '#474747' }}>
+                    <span style={{ color: securityColorCSS(result.system.sec), marginRight: 6 }}>
+                      {result.system.sec.toFixed(1)}
+                    </span>
+                    {result.system.regName}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                      fontSize: 8,
+                      color: result.type === 'region' ? '#c8a951' : '#6688aa',
+                      letterSpacing: '0.12em',
+                      minWidth: 28,
+                    }}>
+                      {result.type === 'region' ? 'RGN' : 'CON'}
+                    </span>
+                    <span style={{ color: '#dedede' }}>{result.name}</span>
+                  </span>
+                  <span style={{ fontSize: 9, color: '#474747' }}>
+                    {result.systemCount} sys · {result.secRange}
+                  </span>
+                </>
+              )}
             </div>
           ))}
           {hasMore && (
