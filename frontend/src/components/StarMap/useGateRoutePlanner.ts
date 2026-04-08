@@ -299,10 +299,17 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   }, [reloadAvoid, reloadSavedRoutes]);
 
   // ── Auto-fetch per-hop intel whenever the active route changes ──────────
+  //
+  // The dep is the comma-joined system-id string (NOT the array reference)
+  // so that re-computes producing an identical set of hops don't refetch.
+  // Otherwise: route compute → setActiveRoute(newArray) → fetch intel →
+  // setHopIntel → killWeights changes → compute re-runs → setActiveRoute
+  // (new array, same content) → fetch intel → … infinite loop.
+  const routeKey = activeRoute ? activeRoute.join(',') : '';
 
   useEffect(() => {
     if (!activeRoute || activeRoute.length < 2) {
-      setHopIntel(new Map());
+      setHopIntel(prev => (prev.size === 0 ? prev : new Map()));
       setHopIntelLoading(false);
       return;
     }
@@ -336,7 +343,8 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       });
 
     return () => { cancelled = true; };
-  }, [activeRoute]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey]);
 
   // Build per-system kill weights for the 'safest' preference from the
   // current hopIntel. Empty until a route has been computed once and intel
@@ -355,7 +363,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   useEffect(() => {
     const graph = getGraph();
     if (!graph || origin === null || dest === null) {
-      setActiveRoute(null);
+      setActiveRoute(prev => (prev === null ? prev : null));
       return;
     }
 
@@ -379,7 +387,20 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
         fullPath.push(...seg.slice(1));
       }
     }
-    setActiveRoute(fullPath);
+    // Bail out of state updates if the new path is identical to the previous
+    // one (same systems in the same order). This prevents the infinite loop:
+    // compute → setActiveRoute(newArr) → intel re-fetch → killWeights changes
+    // → compute again → setActiveRoute(newArr) → ...
+    setActiveRoute(prev => {
+      if (prev && prev.length === fullPath.length) {
+        let same = true;
+        for (let i = 0; i < prev.length; i++) {
+          if (prev[i] !== fullPath[i]) { same = false; break; }
+        }
+        if (same) return prev;
+      }
+      return fullPath;
+    });
     setErrorMessage(null);
   }, [origin, dest, waypoints, preference, avoidSystems, killWeights, getGraph]);
 
