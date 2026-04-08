@@ -156,9 +156,10 @@ export function GateRoutePlannerPanel({
           </div>
           <RouteStopList
             stops={stops}
+            systems={systems}
             systemMap={systemMap}
-            waypoints={planner.waypoints}
-            onMoveWaypoint={planner.moveWaypoint}
+            onReorderWaypoint={planner.reorderWaypoint}
+            onInsertWaypointAt={planner.insertWaypointAt}
             onRemoveWaypoint={planner.removeWaypoint}
             onFocusSystem={onFocusSystem}
           />
@@ -307,23 +308,29 @@ export function GateRoutePlannerPanel({
   );
 }
 
-/* ── Route stop list with reorder + remove ───────────────────────── */
+/* ── Route stop list with drag-reorder + insert + remove ─────────── */
 
 function RouteStopList({
   stops,
+  systems,
   systemMap,
-  waypoints,
-  onMoveWaypoint,
+  onReorderWaypoint,
+  onInsertWaypointAt,
   onRemoveWaypoint,
   onFocusSystem,
 }: {
   stops: number[];
+  systems: SystemData[];
   systemMap: Map<number, SystemData>;
-  waypoints: number[];
-  onMoveWaypoint: (index: number, direction: 'up' | 'down') => void;
+  onReorderWaypoint: (from: number, to: number) => void;
+  onInsertWaypointAt: (index: number, systemId: number) => void;
   onRemoveWaypoint: (id: number) => void;
   onFocusSystem: (system: SystemData) => void;
 }) {
+  const [draggingWaypointIdx, setDraggingWaypointIdx] = useState<number | null>(null);
+  const [dragOverWaypointIdx, setDragOverWaypointIdx] = useState<number | null>(null);
+  const [insertAfterStopIdx, setInsertAfterStopIdx] = useState<number | null>(null);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {stops.map((id, i) => {
@@ -334,51 +341,193 @@ function RouteStopList({
         const isWaypoint = !isOrigin && !isDest;
         // Index in the waypoints[] array (origin at i=0, waypoints start at i=1)
         const waypointIndex = i - 1;
+        const isDragSource = isWaypoint && draggingWaypointIdx === waypointIndex;
+        const isDropTarget = isWaypoint && dragOverWaypointIdx === waypointIndex && draggingWaypointIdx !== null && draggingWaypointIdx !== waypointIndex;
+
         return (
-          <div
-            key={`${id}-${i}`}
-            style={{
-              padding: '4px 0',
-              borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
-              fontSize: 9,
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            <span
-              onClick={() => onFocusSystem(sys)}
+          <div key={`${id}-${i}`}>
+            <div
+              draggable={isWaypoint}
+              onDragStart={isWaypoint ? (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(waypointIndex));
+                setDraggingWaypointIdx(waypointIndex);
+              } : undefined}
+              onDragEnd={isWaypoint ? () => {
+                setDraggingWaypointIdx(null);
+                setDragOverWaypointIdx(null);
+              } : undefined}
+              onDragOver={isWaypoint ? (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (waypointIndex !== draggingWaypointIdx) {
+                  setDragOverWaypointIdx(waypointIndex);
+                }
+              } : undefined}
+              onDragLeave={isWaypoint ? () => {
+                if (dragOverWaypointIdx === waypointIndex) {
+                  setDragOverWaypointIdx(null);
+                }
+              } : undefined}
+              onDrop={isWaypoint ? (e) => {
+                e.preventDefault();
+                const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+                if (!Number.isNaN(fromIdx) && fromIdx !== waypointIndex) {
+                  onReorderWaypoint(fromIdx, waypointIndex);
+                }
+                setDraggingWaypointIdx(null);
+                setDragOverWaypointIdx(null);
+              } : undefined}
               style={{
-                color: isOrigin ? '#33aa55' : isDest ? '#cc5533' : TEXT,
-                cursor: 'pointer', flex: 1,
+                padding: '4px 0',
+                borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
+                borderBottom: isDropTarget ? `1px solid ${GATE_COLOR}` : undefined,
+                fontSize: 9,
+                display: 'flex', alignItems: 'center', gap: 4,
+                opacity: isDragSource ? 0.4 : 1,
+                cursor: isWaypoint ? 'grab' : 'default',
               }}
             >
-              {i + 1}. {sys.name}
-              <span style={{
-                color: securityColorCSS(sys.sec), marginLeft: 4, fontSize: 8,
-              }}>
-                {sys.sec.toFixed(1)}
+              <span
+                onClick={() => onFocusSystem(sys)}
+                style={{
+                  color: isOrigin ? '#33aa55' : isDest ? '#cc5533' : TEXT,
+                  cursor: 'pointer', flex: 1,
+                }}
+              >
+                {i + 1}. {sys.name}
+                <span style={{
+                  color: securityColorCSS(sys.sec), marginLeft: 4, fontSize: 8,
+                }}>
+                  {sys.sec.toFixed(1)}
+                </span>
+                {sys.hasStation && (
+                  <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+                )}
               </span>
-              {sys.hasStation && (
-                <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
-              )}
-            </span>
-            {isWaypoint && (
-              <span style={{ display: 'flex', gap: 2 }}>
-                <MiniBtn
-                  title="Move up"
-                  disabled={waypointIndex === 0}
-                  onClick={() => onMoveWaypoint(waypointIndex, 'up')}
-                >↑</MiniBtn>
-                <MiniBtn
-                  title="Move down"
-                  disabled={waypointIndex === waypoints.length - 1}
-                  onClick={() => onMoveWaypoint(waypointIndex, 'down')}
-                >↓</MiniBtn>
+              {isWaypoint && (
                 <MiniBtn title="Remove waypoint" onClick={() => onRemoveWaypoint(id)}>×</MiniBtn>
-              </span>
+              )}
+            </div>
+
+            {/* Insert button between this stop and the next */}
+            {!isDest && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '1px 0' }}>
+                <button
+                  onClick={() => setInsertAfterStopIdx(insertAfterStopIdx === i ? null : i)}
+                  title="Insert waypoint here"
+                  style={{
+                    background: 'none', border: 'none',
+                    color: insertAfterStopIdx === i ? GATE_COLOR : '#1a1a1a',
+                    cursor: 'pointer', fontSize: 10, fontFamily: FONT, padding: '0 4px',
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            {/* Inline insert search */}
+            {insertAfterStopIdx === i && (
+              <InsertWaypointSearch
+                systems={systems}
+                onSelect={(systemId) => {
+                  // Insert at waypoints[i] — the new waypoint goes BEFORE the
+                  // current waypoints[i], because i is the stops-index of the
+                  // stop AFTER which we're inserting (origin = stop 0, so to
+                  // insert after origin we want waypoints[0], etc.)
+                  onInsertWaypointAt(i, systemId);
+                  setInsertAfterStopIdx(null);
+                }}
+                onCancel={() => setInsertAfterStopIdx(null)}
+              />
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function InsertWaypointSearch({
+  systems,
+  onSelect,
+  onCancel,
+}: {
+  systems: SystemData[];
+  onSelect: (systemId: number) => void;
+  onCancel: () => void;
+}) {
+  const [query, setQuery] = useState('');
+
+  const results: SystemData[] = (() => {
+    if (!query || query.length < 2) return [];
+    const q = query.toLowerCase();
+    const matches: SystemData[] = [];
+    for (const sys of systems) {
+      if (sys.name.toLowerCase().includes(q)) {
+        matches.push(sys);
+        if (matches.length >= 6) break;
+      }
+    }
+    return matches;
+  })();
+
+  return (
+    <div style={{
+      padding: '4px 0', background: '#0a0a0a',
+      border: `1px solid ${BORDER}`, marginBottom: 4,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '2px 6px' }}>
+        <input
+          type="text"
+          value={query}
+          autoFocus
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onCancel();
+            if (e.key === 'Enter' && results[0]) onSelect(results[0].id);
+          }}
+          placeholder="Insert system..."
+          style={{
+            flex: 1, background: 'none', border: 'none', outline: 'none',
+            color: TEXT, fontSize: 9, fontFamily: FONT, letterSpacing: '0.08em',
+          }}
+        />
+        <button
+          onClick={onCancel}
+          style={{
+            background: 'none', border: 'none', color: MUTED, cursor: 'pointer',
+            fontSize: 11, fontFamily: FONT, lineHeight: 1,
+          }}
+        >×</button>
+      </div>
+      {results.length > 0 && (
+        <div style={{ maxHeight: 140, overflowY: 'auto' }}>
+          {results.map(sys => (
+            <div
+              key={sys.id}
+              onMouseDown={() => onSelect(sys.id)}
+              style={{
+                padding: '3px 6px', fontSize: 9, fontFamily: FONT,
+                cursor: 'pointer',
+                display: 'flex', justifyContent: 'space-between',
+                color: TEXT,
+              }}
+            >
+              <span>
+                {sys.name}
+                {sys.hasStation && (
+                  <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+                )}
+              </span>
+              <span style={{ color: securityColorCSS(sys.sec), fontSize: 8 }}>
+                {sys.sec.toFixed(1)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

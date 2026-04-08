@@ -38,6 +38,8 @@ export interface GateRoutePlannerState {
   addWaypoint: (id: number) => void;
   removeWaypoint: (id: number) => void;
   moveWaypoint: (index: number, direction: 'up' | 'down') => void;
+  reorderWaypoint: (fromIndex: number, toIndex: number) => void;
+  insertWaypointAt: (index: number, systemId: number) => void;
   clearWaypoints: () => void;
 
   preference: RoutePreference;
@@ -58,6 +60,14 @@ export interface GateRoutePlannerState {
   loadSavedRoute: (id: number) => void;
   toggleShareSavedRoute: (id: number) => Promise<SavedRoute | null>;
   reloadSavedRoutes: () => Promise<void>;
+
+  /** Load a route directly from a saved-route payload (e.g. from a share link). */
+  loadRouteData: (data: {
+    origin_system_id: number;
+    dest_system_id: number;
+    waypoints: number[];
+    preference: RoutePreference;
+  }) => void;
 
   /** Computed route — null when origin/dest not both set or no path exists. */
   activeRoute: number[] | null;
@@ -306,7 +316,44 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     });
   }, []);
 
+  const reorderWaypoint = useCallback((fromIndex: number, toIndex: number) => {
+    setWaypoints(prev => {
+      if (
+        fromIndex < 0 || fromIndex >= prev.length ||
+        toIndex < 0 || toIndex >= prev.length ||
+        fromIndex === toIndex
+      ) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const insertWaypointAt = useCallback((index: number, systemId: number) => {
+    setWaypoints(prev => {
+      if (prev.includes(systemId)) return prev;
+      const clamped = Math.max(0, Math.min(index, prev.length));
+      const next = [...prev];
+      next.splice(clamped, 0, systemId);
+      return next;
+    });
+  }, []);
+
   const clearWaypoints = useCallback(() => setWaypoints([]), []);
+
+  const loadRouteData = useCallback((data: {
+    origin_system_id: number;
+    dest_system_id: number;
+    waypoints: number[];
+    preference: RoutePreference;
+  }) => {
+    setOrigin(data.origin_system_id);
+    setDest(data.dest_system_id);
+    setWaypoints(data.waypoints);
+    setPreference(data.preference);
+    setErrorMessage(null);
+  }, []);
 
   const swapEndpoints = useCallback(() => {
     setOrigin(dest);
@@ -328,10 +375,11 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     origin, setOrigin,
     dest, setDest,
     swapEndpoints,
-    waypoints, addWaypoint, removeWaypoint, moveWaypoint, clearWaypoints,
+    waypoints, addWaypoint, removeWaypoint, moveWaypoint, reorderWaypoint, insertWaypointAt, clearWaypoints,
     preference, setPreference,
     avoidEntries, avoidSystems, addAvoid, removeAvoid, clearAvoid, reloadAvoid,
     savedRoutes, saveCurrentRoute, deleteSavedRoute, loadSavedRoute, toggleShareSavedRoute, reloadSavedRoutes,
+    loadRouteData,
     activeRoute,
     errorMessage, clearError,
     reset,

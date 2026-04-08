@@ -34,6 +34,7 @@ import { OverlayControls } from './ui/OverlayControls';
 import { GroupModeControls } from './ui/GroupModeControls';
 import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
 import { GateRoutePlannerPanel } from './ui/GateRoutePlannerPanel';
+import { SystemContextMenu } from './ui/SystemContextMenu';
 import type { GroupData } from './renderer/LabelRenderer';
 
 export interface StarMapHandle {
@@ -67,6 +68,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    system: SystemData;
+    position: { x: number; y: number };
+  } | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
@@ -575,6 +580,26 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
+      // Right-click context menu on systems
+      const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        const worldPos = vp.toWorld(localX, localY);
+        const hitRadius = 30 / vp.scaled;
+        const found = qt.find(worldPos.x, worldPos.y, hitRadius);
+        if (found) {
+          setContextMenu({
+            system: found,
+            position: { x: e.clientX, y: e.clientY },
+          });
+        } else {
+          setContextMenu(null);
+        }
+      };
+      el.addEventListener('contextmenu', handleContextMenu);
+
       // Animation loop
       app.ticker.add((ticker) => {
         routeRenderer.tick(ticker.deltaTime);
@@ -593,6 +618,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
       (el as any).__mapCleanup = () => {
         resizeObserver.disconnect();
+        el.removeEventListener('contextmenu', handleContextMenu);
         if (hoverThrottleId !== null) clearTimeout(hoverThrottleId);
         if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
       };
@@ -644,6 +670,77 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   useEffect(() => {
     routeRendererRef.current?.setAvoidSystems(gateRoutePlanner.avoidSystems);
   }, [gateRoutePlanner.avoidSystems]);
+
+  // Parse URL params on mount and pre-populate the gate route planner.
+  // Supports two forms:
+  //   /map?route=<share_token>          → fetch shared SavedGateRoute and load
+  //   /map?origin=X&dest=Y&waypoints=A,B&prefs=highsec → direct deep link
+  // After loading, clean the URL via history.replaceState so a refresh
+  // doesn't reload the same route.
+  const urlHandledRef = useRef(false);
+  useEffect(() => {
+    if (urlHandledRef.current) return;
+    urlHandledRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const shareToken = params.get('route');
+    const originParam = params.get('origin');
+    const destParam = params.get('dest');
+    const waypointsParam = params.get('waypoints');
+    const prefsParam = params.get('prefs');
+
+    const cleanUrl = () => {
+      window.history.replaceState({}, '', window.location.pathname);
+    };
+
+    if (shareToken) {
+      // Fetch the shared route from the public endpoint
+      fetch(`/api/map/routes/shared/${encodeURIComponent(shareToken)}`)
+        .then(resp => {
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return resp.json();
+        })
+        .then((route: {
+          origin_system_id: number;
+          dest_system_id: number;
+          waypoints: number[];
+          preference: 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
+        }) => {
+          gateRoutePlanner.loadRouteData({
+            origin_system_id: route.origin_system_id,
+            dest_system_id: route.dest_system_id,
+            waypoints: route.waypoints || [],
+            preference: route.preference || 'shortest',
+          });
+          gateRoutePlanner.setActive(true);
+          cleanUrl();
+        })
+        .catch(() => {
+          // Silent — user can still use the planner manually
+          cleanUrl();
+        });
+    } else if (originParam && destParam) {
+      const origin = Number(originParam);
+      const dest = Number(destParam);
+      if (!Number.isNaN(origin) && !Number.isNaN(dest)) {
+        const waypoints = waypointsParam
+          ? waypointsParam.split(',').map(Number).filter(n => !Number.isNaN(n))
+          : [];
+        const validPrefs = new Set(['shortest', 'highsec', 'lowsec', 'nullsec']);
+        const preference = (prefsParam && validPrefs.has(prefsParam))
+          ? (prefsParam as 'shortest' | 'highsec' | 'lowsec' | 'nullsec')
+          : 'shortest';
+        gateRoutePlanner.loadRouteData({
+          origin_system_id: origin,
+          dest_system_id: dest,
+          waypoints,
+          preference,
+        });
+        gateRoutePlanner.setActive(true);
+        cleanUrl();
+      }
+    }
+  }, [gateRoutePlanner]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -915,6 +1012,19 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             }}
           />
         </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <SystemContextMenu
+          system={contextMenu.system}
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+          onSetOrigin={handleSetOrigin}
+          onSetDestination={handleSetDest}
+          onAddWaypoint={handleAddWaypoint}
+          onAvoidSystem={handleAvoidSystem}
+        />
       )}
 
       {/* Hover tooltip */}
