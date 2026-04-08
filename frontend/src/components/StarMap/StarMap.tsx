@@ -33,6 +33,7 @@ import { MapToolbar } from './ui/MapToolbar';
 import { OverlayControls } from './ui/OverlayControls';
 import { GroupModeControls } from './ui/GroupModeControls';
 import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
+import { GateRoutePlannerPanel } from './ui/GateRoutePlannerPanel';
 import type { GroupData } from './renderer/LabelRenderer';
 
 export interface StarMapHandle {
@@ -667,10 +668,22 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  const handleSetOrigin = useCallback((id: number) => gateRoutePlanner.setOrigin(id), [gateRoutePlanner]);
-  const handleSetDest = useCallback((id: number) => gateRoutePlanner.setDest(id), [gateRoutePlanner]);
-  const handleAddWaypoint = useCallback((id: number) => gateRoutePlanner.addWaypoint(id), [gateRoutePlanner]);
-  const handleAvoidSystem = useCallback((id: number) => gateRoutePlanner.addAvoid(id), [gateRoutePlanner]);
+  const handleSetOrigin = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.setOrigin(id);
+  }, [gateRoutePlanner]);
+  const handleSetDest = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.setDest(id);
+  }, [gateRoutePlanner]);
+  const handleAddWaypoint = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.addWaypoint(id);
+  }, [gateRoutePlanner]);
+  const handleAvoidSystem = useCallback((id: number) => {
+    // Don't auto-open the panel for avoid — user might just be marking a no-go
+    gateRoutePlanner.addAvoid(id);
+  }, [gateRoutePlanner]);
 
   const handleSearchSelectSystem = useCallback((system: SystemData) => {
     if (viewportRef.current) {
@@ -826,7 +839,35 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         hasCharacterLocation={characters.some(c => c.system_id !== null)}
         jumpPlannerActive={jumpPlanner.active}
         onToggleJumpPlanner={() => jumpPlanner.setActive(!jumpPlanner.active)}
+        gatePlannerActive={gateRoutePlanner.active}
+        onToggleGatePlanner={() => gateRoutePlanner.setActive(!gateRoutePlanner.active)}
       />
+
+      {/* Gate route planner panel */}
+      {gateRoutePlanner.active && (
+        <div
+          onPointerEnter={() => { panelHoverRef.current = true; }}
+          onPointerLeave={() => { panelHoverRef.current = false; }}
+        >
+          <GateRoutePlannerPanel
+            planner={gateRoutePlanner}
+            systems={data.systems}
+            systemMap={data.systemMap}
+            systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+            characters={characters}
+            onFocusSystem={(sys) => {
+              if (viewportRef.current) {
+                viewportRef.current.animate({
+                  position: { x: sys.x, y: sys.y },
+                  scale: 2,
+                  time: 600,
+                  ease: 'easeInOutCubic',
+                });
+              }
+            }}
+          />
+        </div>
+      )}
 
       {/* Jump planner panel */}
       {jumpPlanner.active && (

@@ -6,9 +6,21 @@ interface Props {
   hasCharacterLocation?: boolean;
   jumpPlannerActive?: boolean;
   onToggleJumpPlanner?: () => void;
+  gatePlannerActive?: boolean;
+  onToggleGatePlanner?: () => void;
 }
 
-export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharacterLocation, jumpPlannerActive, onToggleJumpPlanner }: Props) {
+export function MapToolbar({
+  onZoomIn,
+  onZoomOut,
+  onFitAll,
+  onLocate,
+  hasCharacterLocation,
+  jumpPlannerActive,
+  onToggleJumpPlanner,
+  gatePlannerActive,
+  onToggleGatePlanner,
+}: Props) {
   const btnStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -67,6 +79,22 @@ export function MapToolbar({ onZoomIn, onZoomOut, onFitAll, onLocate, hasCharact
             <path d="M8 2 L8 6 M8 10 L8 14" />
             <path d="M5 5 L11 11 M11 5 L5 11" />
             <circle cx="8" cy="8" r="2" fill={jumpPlannerActive ? 'currentColor' : 'none'} />
+          </svg>
+        </button>
+      )}
+      {onToggleGatePlanner && (
+        <button
+          style={{ ...btnStyle, color: gatePlannerActive ? '#00d4ff' : '#474747' }}
+          onClick={onToggleGatePlanner}
+          title="Gate Route Planner"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            {/* Three connected nodes representing a gate route */}
+            <circle cx="3" cy="8" r="1.5" fill={gatePlannerActive ? 'currentColor' : 'none'} />
+            <circle cx="8" cy="4" r="1.5" fill={gatePlannerActive ? 'currentColor' : 'none'} />
+            <circle cx="13" cy="11" r="1.5" fill={gatePlannerActive ? 'currentColor' : 'none'} />
+            <line x1="3" y1="8" x2="8" y2="4" />
+            <line x1="8" y1="4" x2="13" y2="11" />
           </svg>
         </button>
       )}

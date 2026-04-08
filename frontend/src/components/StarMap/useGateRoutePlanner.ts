@@ -1,10 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type Graph from 'graphology';
 import type { RoutePreference } from './types';
 import { findRoute } from './graph/pathfinding';
 
+export interface AvoidEntry {
+  id: number;
+  kind: 'system' | 'constellation' | 'region';
+  entity_id: number;
+}
+
+export interface SavedRoute {
+  id: number;
+  name: string;
+  origin_system_id: number;
+  dest_system_id: number;
+  waypoints: number[];
+  preference: RoutePreference;
+  avoid: number[];
+  share_token: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface GateRoutePlannerState {
-  /** Whether the planner panel is visible (used by Phase 1C panel toggle). */
+  /** Whether the planner panel is visible. */
   active: boolean;
   setActive: (v: boolean) => void;
 
@@ -13,32 +32,48 @@ export interface GateRoutePlannerState {
   setOrigin: (id: number | null) => void;
   dest: number | null;
   setDest: (id: number | null) => void;
+  swapEndpoints: () => void;
+
   waypoints: number[];
-  setWaypoints: (ids: number[]) => void;
   addWaypoint: (id: number) => void;
   removeWaypoint: (id: number) => void;
+  moveWaypoint: (index: number, direction: 'up' | 'down') => void;
   clearWaypoints: () => void;
 
   preference: RoutePreference;
   setPreference: (p: RoutePreference) => void;
 
-  /** Avoid list (in-memory for Phase 1A; DB-backed in Phase 1B). */
+  /** DB-backed avoid list. avoidSystems is derived from entries with kind='system'. */
+  avoidEntries: AvoidEntry[];
   avoidSystems: Set<number>;
-  addAvoid: (id: number) => void;
-  removeAvoid: (id: number) => void;
-  clearAvoid: () => void;
+  addAvoid: (systemId: number) => Promise<void>;
+  removeAvoid: (entryId: number) => Promise<void>;
+  clearAvoid: () => Promise<void>;
+  reloadAvoid: () => Promise<void>;
+
+  /** DB-backed saved routes. */
+  savedRoutes: SavedRoute[];
+  saveCurrentRoute: (name: string) => Promise<SavedRoute | null>;
+  deleteSavedRoute: (id: number) => Promise<void>;
+  loadSavedRoute: (id: number) => void;
+  toggleShareSavedRoute: (id: number) => Promise<SavedRoute | null>;
+  reloadSavedRoutes: () => Promise<void>;
 
   /** Computed route — null when origin/dest not both set or no path exists. */
   activeRoute: number[] | null;
+
+  /** Last error from a route compute or API call (for UI display). */
+  errorMessage: string | null;
+  clearError: () => void;
 
   reset: () => void;
 }
 
 /**
  * Owns all gate-route planning state and computes the active route whenever
- * inputs change. The graph is provided via a stable accessor so that the
- * hook can read the latest graph reference at compute time without forcing
- * the parent to convert its graph ref to state.
+ * inputs change. The graph is provided via a stable accessor so the hook
+ * can read the latest graph reference at compute time without forcing the
+ * parent to convert its graph ref to state.
  */
 export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlannerState {
   const [active, setActive] = useState(false);
@@ -46,10 +81,181 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   const [dest, setDest] = useState<number | null>(null);
   const [waypoints, setWaypoints] = useState<number[]>([]);
   const [preference, setPreference] = useState<RoutePreference>('shortest');
-  const [avoidSystems, setAvoidSystems] = useState<Set<number>>(new Set());
+  const [avoidEntries, setAvoidEntries] = useState<AvoidEntry[]>([]);
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Recompute the active route whenever inputs change.
+  // Derived: only system-kind entries contribute to routing avoidance for now.
+  // Constellation/region expansion will come later (needs SDE lookup).
+  const avoidSystems = useMemo(() => {
+    const set = new Set<number>();
+    for (const entry of avoidEntries) {
+      if (entry.kind === 'system') set.add(entry.entity_id);
+    }
+    return set;
+  }, [avoidEntries]);
+
+  // ── Avoid list API ───────────────────────────────────────────────────────
+
+  const reloadAvoid = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/map/avoid');
+      if (!resp.ok) return;
+      const data: AvoidEntry[] = await resp.json();
+      setAvoidEntries(data);
+    } catch {
+      // Silent — avoid list is non-critical to map rendering
+    }
+  }, []);
+
+  const addAvoid = useCallback(async (systemId: number) => {
+    // Optimistic insertion with a temporary negative id, replaced on response.
+    const tempId = -Date.now();
+    const optimistic: AvoidEntry = { id: tempId, kind: 'system', entity_id: systemId };
+    setAvoidEntries(prev => {
+      if (prev.some(e => e.kind === 'system' && e.entity_id === systemId)) return prev;
+      return [...prev, optimistic];
+    });
+    try {
+      const resp = await fetch('/api/map/avoid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'system', entity_id: systemId }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const saved: AvoidEntry = await resp.json();
+      // Replace the temp entry with the persisted one
+      setAvoidEntries(prev => prev.map(e => (e.id === tempId ? saved : e)));
+    } catch (e) {
+      // Roll back the optimistic insert
+      setAvoidEntries(prev => prev.filter(e => e.id !== tempId));
+      setErrorMessage(`Could not save avoid entry: ${String(e)}`);
+    }
+  }, []);
+
+  const removeAvoid = useCallback(async (entryId: number) => {
+    let removed: AvoidEntry | undefined;
+    setAvoidEntries(prev => {
+      removed = prev.find(e => e.id === entryId);
+      return prev.filter(e => e.id !== entryId);
+    });
+    try {
+      const resp = await fetch(`/api/map/avoid/${entryId}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 404) throw new Error(`HTTP ${resp.status}`);
+    } catch (e) {
+      // Roll back
+      if (removed) setAvoidEntries(prev => [...prev, removed!]);
+      setErrorMessage(`Could not remove avoid entry: ${String(e)}`);
+    }
+  }, []);
+
+  const clearAvoid = useCallback(async () => {
+    const previous = avoidEntries;
+    setAvoidEntries([]);
+    try {
+      await Promise.all(previous.map(e =>
+        fetch(`/api/map/avoid/${e.id}`, { method: 'DELETE' })
+      ));
+    } catch (e) {
+      setAvoidEntries(previous);
+      setErrorMessage(`Could not clear avoid list: ${String(e)}`);
+    }
+  }, [avoidEntries]);
+
+  // ── Saved routes API ─────────────────────────────────────────────────────
+
+  const reloadSavedRoutes = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/map/routes');
+      if (!resp.ok) return;
+      const data: SavedRoute[] = await resp.json();
+      setSavedRoutes(data);
+    } catch {
+      // Silent
+    }
+  }, []);
+
+  const saveCurrentRoute = useCallback(async (name: string): Promise<SavedRoute | null> => {
+    if (origin === null || dest === null) {
+      setErrorMessage('Set origin and destination before saving');
+      return null;
+    }
+    try {
+      const resp = await fetch('/api/map/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          origin_system_id: origin,
+          dest_system_id: dest,
+          waypoints,
+          preference,
+          avoid: Array.from(avoidSystems),
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const saved: SavedRoute = await resp.json();
+      setSavedRoutes(prev => [saved, ...prev]);
+      return saved;
+    } catch (e) {
+      setErrorMessage(`Could not save route: ${String(e)}`);
+      return null;
+    }
+  }, [origin, dest, waypoints, preference, avoidSystems]);
+
+  const deleteSavedRoute = useCallback(async (id: number) => {
+    let removed: SavedRoute | undefined;
+    setSavedRoutes(prev => {
+      removed = prev.find(r => r.id === id);
+      return prev.filter(r => r.id !== id);
+    });
+    try {
+      const resp = await fetch(`/api/map/routes/${id}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 404) throw new Error(`HTTP ${resp.status}`);
+    } catch (e) {
+      if (removed) setSavedRoutes(prev => [...prev, removed!]);
+      setErrorMessage(`Could not delete saved route: ${String(e)}`);
+    }
+  }, []);
+
+  const loadSavedRoute = useCallback((id: number) => {
+    const route = savedRoutes.find(r => r.id === id);
+    if (!route) return;
+    setOrigin(route.origin_system_id);
+    setDest(route.dest_system_id);
+    setWaypoints(route.waypoints);
+    setPreference(route.preference);
+    // Note: we do NOT overwrite the user's current avoid list with the
+    // saved route's avoid snapshot — the avoid list is per-user, not per-route.
+    setErrorMessage(null);
+  }, [savedRoutes]);
+
+  const toggleShareSavedRoute = useCallback(async (id: number): Promise<SavedRoute | null> => {
+    try {
+      const resp = await fetch(`/api/map/routes/${id}/share`, { method: 'POST' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const updated: SavedRoute = await resp.json();
+      setSavedRoutes(prev => prev.map(r => (r.id === id ? updated : r)));
+      return updated;
+    } catch (e) {
+      setErrorMessage(`Could not toggle sharing: ${String(e)}`);
+      return null;
+    }
+  }, []);
+
+  // ── Initial hydration on mount ───────────────────────────────────────────
+
+  useEffect(() => {
+    reloadAvoid();
+    reloadSavedRoutes();
+  }, [reloadAvoid, reloadSavedRoutes]);
+
+  // ── Route compute ────────────────────────────────────────────────────────
+
   useEffect(() => {
     const graph = getGraph();
     if (!graph || origin === null || dest === null) {
@@ -64,6 +270,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       const seg = findRoute(graph, stops[i], stops[i + 1], preference, avoidSystems);
       if (!seg) {
         setActiveRoute(null);
+        setErrorMessage(`No path between system ${stops[i]} and ${stops[i + 1]}`);
         return;
       }
       if (i === 0) {
@@ -75,7 +282,10 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       }
     }
     setActiveRoute(fullPath);
+    setErrorMessage(null);
   }, [origin, dest, waypoints, preference, avoidSystems, getGraph]);
+
+  // ── Waypoint helpers ─────────────────────────────────────────────────────
 
   const addWaypoint = useCallback((id: number) => {
     setWaypoints(prev => (prev.includes(id) ? prev : [...prev, id]));
@@ -85,43 +295,45 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     setWaypoints(prev => prev.filter(w => w !== id));
   }, []);
 
+  const moveWaypoint = useCallback((index: number, direction: 'up' | 'down') => {
+    setWaypoints(prev => {
+      if (index < 0 || index >= prev.length) return prev;
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
   const clearWaypoints = useCallback(() => setWaypoints([]), []);
 
-  const addAvoid = useCallback((id: number) => {
-    setAvoidSystems(prev => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  }, []);
-
-  const removeAvoid = useCallback((id: number) => {
-    setAvoidSystems(prev => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
-  const clearAvoid = useCallback(() => setAvoidSystems(new Set()), []);
+  const swapEndpoints = useCallback(() => {
+    setOrigin(dest);
+    setDest(origin);
+  }, [origin, dest]);
 
   const reset = useCallback(() => {
     setOrigin(null);
     setDest(null);
     setWaypoints([]);
     setActiveRoute(null);
+    setErrorMessage(null);
   }, []);
+
+  const clearError = useCallback(() => setErrorMessage(null), []);
 
   return {
     active, setActive,
     origin, setOrigin,
     dest, setDest,
-    waypoints, setWaypoints, addWaypoint, removeWaypoint, clearWaypoints,
+    swapEndpoints,
+    waypoints, addWaypoint, removeWaypoint, moveWaypoint, clearWaypoints,
     preference, setPreference,
-    avoidSystems, addAvoid, removeAvoid, clearAvoid,
+    avoidEntries, avoidSystems, addAvoid, removeAvoid, clearAvoid, reloadAvoid,
+    savedRoutes, saveCurrentRoute, deleteSavedRoute, loadSavedRoute, toggleShareSavedRoute, reloadSavedRoutes,
     activeRoute,
+    errorMessage, clearError,
     reset,
   };
 }
