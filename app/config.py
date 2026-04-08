@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     eve_callback_url: str = "http://localhost:8000/auth/callback"
     secret_key: str
     database_url: str = "sqlite+aiosqlite:///./vigilant.db"
+    uploads_dir: str = "./uploads"
     debug: bool = False
 
     eve_sso_auth_url: str = "https://login.eveonline.com/v2/oauth/authorize"

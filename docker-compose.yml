@@ -5,6 +5,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
+      - UPLOADS_DIR=/data/uploads
     volumes:
       - app_data:/data
     networks:

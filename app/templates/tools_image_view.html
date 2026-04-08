@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{% if img and img.label %}{{ img.label }} — {% endif %}Image — VIGILANT{% endblock %}
+{% block head %}
+{% if img %}
+{% set scheme = request.headers.get('x-forwarded-proto', request.url.scheme) %}
+<meta property="og:title" content="{{ img.label or 'Vigilant Image' }}">
+<meta property="og:image" content="{{ scheme }}://{{ request.url.netloc }}/i/{{ img.id }}.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ scheme }}://{{ request.url.netloc }}/i/{{ img.id }}.jpg">
+{% endif %}
+{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">{{ error }}</span>
+</div>
+<div style="text-align:center;">
+    <a href="/tools/images" class="b-btn" style="display:inline-block;padding:0.4rem 1rem;border:1px solid var(--border);">Back to Image Host</a>
+</div>
+{% else %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">{{ img.label or 'Image' }}</h1>
+</div>
+
+<div class="b-section" style="text-align:center;">
+    <a href="/i/{{ img.id }}.jpg" target="_blank">
+        <img src="/i/{{ img.id }}.jpg" alt="{{ img.label or '' }}"
+             style="max-width:100%;max-height:80vh;border:1px solid var(--border);display:inline-block;">
+    </a>
+</div>
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Share</span></div>
+        <div style="padding:0.75rem;display:flex;flex-direction:column;gap:0.6rem;">
+            {% set scheme = request.headers.get('x-forwarded-proto', request.url.scheme) %}
+            {% set share_url = scheme + '://' + request.url.netloc + '/i/' + img.id %}
+            {% set raw_url   = scheme + '://' + request.url.netloc + '/i/' + img.id + '.jpg' %}
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Share URL</label>
+                <div style="display:flex;gap:0.4rem;">
+                    <input type="text" id="share-url" value="{{ share_url }}" readonly
+                           style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <button type="button" onclick="copyField('share-url', this)" class="b-btn"
+                            style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
+                </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Direct image URL</label>
+                <div style="display:flex;gap:0.4rem;">
+                    <input type="text" id="raw-url" value="{{ raw_url }}" readonly
+                           style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <button type="button" onclick="copyField('raw-url', this)" class="b-btn"
+                            style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Details</span></div>
+        <div class="b-row"><span class="b-row-label">Dimensions</span><span class="b-row-val">{{ img.width }} × {{ img.height }}</span></div>
+        <div class="b-row"><span class="b-row-label">Size</span><span class="b-row-val">{{ '%.0f'|format(img.size_bytes / 1024) }} KB</span></div>
+        <div class="b-row"><span class="b-row-label">Views</span><span class="b-row-val">{{ img.view_count }}</span></div>
+        <div class="b-row"><span class="b-row-label">Uploaded</span><span class="b-row-val">{{ img.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></div>
+        <div class="b-row">
+            <span class="b-row-label">Expires</span>
+            <span class="b-row-val">
+                {% if img.expires_at %}{{ img.expires_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}<span class="is-muted">Never</span>{% endif %}
+            </span>
+        </div>
+    </div>
+</div>
+
+{% if is_owner %}
+<div class="b-section" style="display:flex;gap:0.5rem;">
+    <a href="/tools/images" class="b-btn" style="flex:1;padding:0.5rem;border:1px solid var(--border);">Back to Image Host</a>
+    <form method="POST" action="/tools/images/{{ img.id }}/delete" style="flex:1;margin:0;"
+          onsubmit="return confirm('Delete this image?');">
+        <button type="submit" class="b-btn is-danger"
+                style="width:100%;padding:0.5rem;border:1px solid var(--danger);color:var(--danger);">Delete</button>
+    </form>
+</div>
+{% endif %}
+
+<script>
+function copyField(id, btn) {
+    var el = document.getElementById(id);
+    el.select();
+    el.setSelectionRange(0, 99999);
+    try {
+        navigator.clipboard.writeText(el.value);
+    } catch (e) {
+        document.execCommand('copy');
+    }
+    var orig = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(function(){ btn.textContent = orig; }, 1200);
+}
+</script>
+
+{% endif %}
+
+{% endblock %}

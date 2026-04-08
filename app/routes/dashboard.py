@@ -1323,6 +1323,14 @@ async def _background_scheduler():
                     _last_cleanup = now
                 except Exception as e:
                     logger.warning("Snapshot cleanup error: %s", e)
+                try:
+                    from app.routes.images import cleanup_expired_images
+                    async with AsyncSessionLocal() as cleanup_db:
+                        removed = await cleanup_expired_images(cleanup_db)
+                        if removed:
+                            logger.info("Cleaned up %d expired hosted image(s)", removed)
+                except Exception as e:
+                    logger.warning("Hosted image cleanup error: %s", e)
 
             await asyncio.sleep(60)
     except Exception as e:

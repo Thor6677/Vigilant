@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Image Host — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Image Host</h1>
+</div>
+
+{% if error %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">{{ error }}</span>
+</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Upload Image</span></div>
+        <form method="POST" action="/tools/images/upload" enctype="multipart/form-data">
+            <div style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
+
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">File (max {{ max_mb }} MB — converted to JPEG)</label>
+                    <input type="file" name="file" accept="image/*" required
+                           style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                </div>
+
+                <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+                    <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:200px;">
+                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Label (optional)</label>
+                        <input type="text" name="label" maxlength="128" placeholder="e.g. Tristan fit screenshot"
+                               style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
+                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Expires</label>
+                        <select name="expiry"
+                                style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                            {% for key, label in expiry_options.items() %}
+                            <option value="{{ key }}" {% if key == 'never' %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" class="b-btn"
+                        style="width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Upload & Share
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if images %}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Your Uploads</span>
+        <span class="b-label" style="color:var(--muted);">{{ images|length }}</span>
+    </div>
+    <div class="b-panel">
+        {% for img in images %}
+        <div class="b-table-row" style="gap:0.75rem;">
+            <a href="/i/{{ img.id }}" style="flex-shrink:0;">
+                <img src="/i/{{ img.id }}.jpg" alt="" style="width:48px;height:48px;object-fit:cover;border:1px solid var(--border);display:block;">
+            </a>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    {% if img.label %}{{ img.label }}{% else %}<span class="is-muted">{{ img.original_filename or img.id }}</span>{% endif %}
+                </div>
+                <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-top:2px;">
+                    {{ img.width }}×{{ img.height }} ·
+                    {{ '%.0f'|format(img.size_bytes / 1024) }} KB ·
+                    {{ img.view_count }} view{{ '' if img.view_count == 1 else 's' }} ·
+                    {% if img.expires_at %}expires {{ img.expires_at.strftime('%Y-%m-%d') }}{% else %}permanent{% endif %}
+                </div>
+            </div>
+            <a href="/i/{{ img.id }}" class="b-link" style="flex-shrink:0;">View</a>
+            <form method="POST" action="/tools/images/{{ img.id }}/delete" style="flex-shrink:0;margin:0;"
+                  onsubmit="return confirm('Delete this image?');">
+                <button type="submit" class="b-btn is-danger"
+                        style="border:1px solid var(--border);padding:0.25rem 0.5rem;font-size:9px;">Delete</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

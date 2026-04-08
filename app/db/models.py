@@ -277,6 +277,22 @@ class AdminAuditLog(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class HostedImage(Base):
+    """User-uploaded image converted to JPEG and served via short URL."""
+    __tablename__ = "hosted_images"
+
+    id = Column(String(12), primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    label = Column(String(128), nullable=True)
+    original_filename = Column(String(256), nullable=True)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    view_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)  # NULL = never expires
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
