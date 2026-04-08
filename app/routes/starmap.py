@@ -141,7 +141,13 @@ async def map_page(request: Request):
     if not user_id:
         return RedirectResponse("/")
     assets = _read_vite_assets()
-    return templates.TemplateResponse("map.html", {"request": request, **assets})
+    response = templates.TemplateResponse("map.html", {"request": request, **assets})
+    # Never cache the HTML — it embeds content-hashed bundle filenames that
+    # change on every deploy. Caching the HTML causes the browser/Cloudflare
+    # to reference deleted bundle hashes after a deploy, leaving a black map.
+    response.headers["Cache-Control"] = "no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ── React built assets ───────────────────────────────────────────────────────
