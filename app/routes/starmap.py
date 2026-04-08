@@ -645,6 +645,78 @@ async def get_shared_route(share_token: str):
         return JSONResponse(_serialize_saved_route(route))
 
 
+# ── ESI autopilot waypoint push ──────────────────────────────────────────────
+
+@router.post("/api/character/{character_id}/autopilot/waypoint")
+async def set_autopilot_waypoint(character_id: int, request: Request):
+    """Push a destination or waypoint to the in-game autopilot.
+
+    Body: {system_id: int, clear: bool, add_to_beginning: bool}
+      - clear=True replaces the entire route with this single destination
+      - clear=False, add_to_beginning=False appends as the next waypoint
+      - add_to_beginning=True inserts as the very next stop (override current)
+
+    Returns 204 on success, 403 if the character lacks the
+    esi-ui.write_waypoint.v1 scope (re-auth required).
+    """
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, Character
+    from app.esi.client import get_client_safe
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    system_id = body.get("system_id")
+    clear = bool(body.get("clear", False))
+    add_to_beginning = bool(body.get("add_to_beginning", False))
+    if not isinstance(system_id, int):
+        return JSONResponse({"error": "system_id must be an integer"}, status_code=400)
+
+    # Verify the character belongs to the current user AND has the scope
+    async with AsyncSessionLocal() as db:
+        char = (await db.execute(
+            select(Character).where(
+                Character.character_id == character_id,
+                Character.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not char:
+            return JSONResponse({"error": "Character not found"}, status_code=404)
+        if "esi-ui.write_waypoint.v1" not in (char.scopes or ""):
+            return JSONResponse({
+                "error": "missing_scope",
+                "message": "This character needs to be re-authorized to enable the autopilot push feature.",
+                "character_name": char.character_name,
+            }, status_code=403)
+
+    try:
+        client = await get_client_safe(char)
+        status = await client.post(
+            "/ui/autopilot/waypoint/",
+            params={
+                "destination_id": system_id,
+                "clear_other_waypoints": str(clear).lower(),
+                "add_to_beginning": str(add_to_beginning).lower(),
+            },
+        )
+        if status >= 400:
+            log.warning("Autopilot waypoint push failed: char=%s status=%s", character_id, status)
+            return JSONResponse(
+                {"error": f"ESI returned HTTP {status}"},
+                status_code=status if 400 <= status < 600 else 502,
+            )
+        return JSONResponse({"ok": True}, status_code=200)
+    except Exception as e:
+        log.warning("Autopilot waypoint push exception: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
 # ── Gate route safety: per-hop kill / threat intel ───────────────────────────
 
 @router.post("/api/map/route-safety")

@@ -104,6 +104,18 @@ export interface GateRoutePlannerState {
   hopIntel: Map<number, HopIntel>;
   hopIntelLoading: boolean;
 
+  /** Active character — used by auto-trim and the Set Destination button. */
+  activeCharacterId: number | null;
+  setActiveCharacterId: (id: number | null) => void;
+  followCharacter: boolean;
+  setFollowCharacter: (v: boolean) => void;
+
+  /** Push the route's destination + waypoints to the active character's
+   *  in-game autopilot. Returns null on success, an error message on failure. */
+  pushRouteToAutopilot: () => Promise<string | null>;
+  /** Push a single system as the next waypoint (additive). */
+  pushWaypointToAutopilot: (systemId: number) => Promise<string | null>;
+
   /** Last error from a route compute or API call (for UI display). */
   errorMessage: string | null;
   clearError: () => void;
@@ -128,6 +140,8 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
   const [hopIntel, setHopIntel] = useState<Map<number, HopIntel>>(() => new Map());
   const [hopIntelLoading, setHopIntelLoading] = useState(false);
+  const [activeCharacterId, setActiveCharacterId] = useState<number | null>(null);
+  const [followCharacter, setFollowCharacter] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Derived: only system-kind entries contribute to routing avoidance for now.
@@ -469,6 +483,84 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     setDest(origin);
   }, [origin, dest]);
 
+  // ── ESI autopilot push ───────────────────────────────────────────────────
+
+  const pushRouteToAutopilot = useCallback(async (): Promise<string | null> => {
+    if (activeCharacterId === null) {
+      return 'Pick a character first.';
+    }
+    if (origin === null || dest === null) {
+      return 'Set origin and destination first.';
+    }
+    const stops = [origin, ...waypoints, dest];
+    try {
+      // First call: clear existing route, set the FINAL destination as the
+      // primary destination. Then add each intermediate stop as a waypoint.
+      // Note: ESI's add_to_beginning lets us insert before the destination,
+      // so we add waypoints in reverse from dest backwards to maintain order.
+      const finalDest = stops[stops.length - 1];
+      const intermediateStops = stops.slice(0, stops.length - 1);
+
+      let resp = await fetch(`/api/character/${activeCharacterId}/autopilot/waypoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_id: finalDest,
+          clear: true,
+          add_to_beginning: false,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return err.message || err.error || `HTTP ${resp.status}`;
+      }
+      // Add intermediate stops in reverse order with add_to_beginning so they
+      // queue up in the right sequence between origin and dest in-game
+      for (let i = intermediateStops.length - 1; i >= 0; i--) {
+        resp = await fetch(`/api/character/${activeCharacterId}/autopilot/waypoint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_id: intermediateStops[i],
+            clear: false,
+            add_to_beginning: true,
+          }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          return err.message || err.error || `HTTP ${resp.status}`;
+        }
+      }
+      return null;
+    } catch (e) {
+      return String(e);
+    }
+  }, [activeCharacterId, origin, dest, waypoints]);
+
+  const pushWaypointToAutopilot = useCallback(async (systemId: number): Promise<string | null> => {
+    if (activeCharacterId === null) {
+      return 'Pick a character first.';
+    }
+    try {
+      const resp = await fetch(`/api/character/${activeCharacterId}/autopilot/waypoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_id: systemId,
+          clear: false,
+          add_to_beginning: false,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return err.message || err.error || `HTTP ${resp.status}`;
+      }
+      return null;
+    } catch (e) {
+      return String(e);
+    }
+  }, [activeCharacterId]);
+
   const reset = useCallback(() => {
     setOrigin(null);
     setDest(null);
@@ -491,6 +583,9 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     loadRouteData,
     activeRoute,
     hopIntel, hopIntelLoading,
+    activeCharacterId, setActiveCharacterId,
+    followCharacter, setFollowCharacter,
+    pushRouteToAutopilot, pushWaypointToAutopilot,
     errorMessage, clearError,
     reset,
   };

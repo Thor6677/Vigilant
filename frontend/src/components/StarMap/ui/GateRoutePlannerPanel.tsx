@@ -185,6 +185,15 @@ export function GateRoutePlannerPanel({
             onInsertWaypointAt={planner.insertWaypointAt}
             onRemoveWaypoint={planner.removeWaypoint}
             onFocusSystem={onFocusSystem}
+            onAddWaypointToAutopilot={planner.activeCharacterId !== null
+              ? planner.pushWaypointToAutopilot
+              : undefined}
+          />
+
+          {/* Set Destination in EVE + character picker + auto-trim toggle */}
+          <AutopilotControls
+            planner={planner}
+            characters={characters}
           />
         </div>
       )}
@@ -344,6 +353,7 @@ function RouteHopList({
   onInsertWaypointAt,
   onRemoveWaypoint,
   onFocusSystem,
+  onAddWaypointToAutopilot,
 }: {
   /** Full pathfinding result — every gate hop. */
   route: number[];
@@ -358,6 +368,7 @@ function RouteHopList({
   onInsertWaypointAt: (index: number, systemId: number) => void;
   onRemoveWaypoint: (id: number) => void;
   onFocusSystem: (system: SystemData) => void;
+  onAddWaypointToAutopilot?: (systemId: number) => Promise<string | null>;
 }) {
   const [draggingWaypointIdx, setDraggingWaypointIdx] = useState<number | null>(null);
   const [dragOverWaypointIdx, setDragOverWaypointIdx] = useState<number | null>(null);
@@ -517,6 +528,14 @@ function RouteHopList({
                   fontSize: 7, color: '#cc3333', fontWeight: 'bold',
                   border: '1px solid #cc3333', padding: '0 2px',
                 }}>DIC</span>
+              )}
+
+              {/* Add to in-game autopilot (if scope available) */}
+              {onAddWaypointToAutopilot && (
+                <MiniBtn
+                  title="Add as waypoint in EVE autopilot"
+                  onClick={() => { onAddWaypointToAutopilot(id); }}
+                >+EVE</MiniBtn>
               )}
 
               {/* Remove (waypoints only) */}
@@ -803,6 +822,131 @@ function MiniBtn({
     >
       {children}
     </button>
+  );
+}
+
+/* ── Autopilot controls (character picker + Set Destination + follow) ─ */
+
+function AutopilotControls({
+  planner,
+  characters,
+}: {
+  planner: GateRoutePlannerState;
+  characters: CharacterLocation[];
+}) {
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null);
+  const charsWithLocation = characters.filter(c => c.system_id !== null);
+  const activeChar = charsWithLocation.find(c => c.character_id === planner.activeCharacterId);
+
+  const onClickPush = async () => {
+    setPushing(true);
+    setPushResult(null);
+    const err = await planner.pushRouteToAutopilot();
+    setPushing(false);
+    if (err) {
+      setPushResult({ kind: 'err', message: err });
+    } else {
+      setPushResult({ kind: 'ok', message: 'Route sent to in-game autopilot' });
+      window.setTimeout(() => setPushResult(null), 4000);
+    }
+  };
+
+  return (
+    <div style={{
+      marginTop: 8, padding: '6px 0', borderTop: `1px solid ${BORDER}`,
+    }}>
+      {/* Character picker */}
+      {charsWithLocation.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <Label text="ACTIVE CHARACTER" />
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            {charsWithLocation.map(ch => {
+              const isActive = ch.character_id === planner.activeCharacterId;
+              return (
+                <button
+                  key={ch.character_id}
+                  onClick={() => planner.setActiveCharacterId(ch.character_id)}
+                  title={`${ch.character_name} @ ${ch.system_name ?? '?'}`}
+                  style={{
+                    padding: '2px 6px', fontSize: 8, fontFamily: FONT,
+                    background: isActive ? 'rgba(0,212,255,0.15)' : 'transparent',
+                    color: isActive ? GATE_COLOR : MUTED,
+                    border: `1px solid ${isActive ? GATE_COLOR : BORDER}`,
+                    cursor: 'pointer', letterSpacing: '0.05em',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {ch.character_name.split(' ')[0]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Following indicator */}
+      {activeChar && (
+        <div style={{
+          fontSize: 8, color: MUTED, letterSpacing: '0.06em',
+          marginBottom: 4, display: 'flex', gap: 4, alignItems: 'center',
+        }}>
+          <input
+            type="checkbox"
+            checked={planner.followCharacter}
+            onChange={e => planner.setFollowCharacter(e.target.checked)}
+            id="follow-char"
+            style={{ margin: 0 }}
+          />
+          <label htmlFor="follow-char" style={{ cursor: 'pointer', flex: 1 }}>
+            FOLLOW <span style={{ color: GATE_COLOR }}>{activeChar.character_name}</span> @ {activeChar.system_name ?? '?'}
+          </label>
+        </div>
+      )}
+
+      {/* Set Destination button */}
+      <button
+        onClick={onClickPush}
+        disabled={pushing || planner.activeCharacterId === null || planner.origin === null || planner.dest === null}
+        style={{
+          width: '100%', padding: '6px', fontSize: 10, letterSpacing: '0.12em',
+          fontFamily: FONT, textTransform: 'uppercase',
+          background: pushing ? 'transparent' : 'rgba(0,212,255,0.15)',
+          color: planner.activeCharacterId !== null && planner.origin !== null && planner.dest !== null
+            ? GATE_COLOR : MUTED,
+          border: `1px solid ${planner.activeCharacterId !== null && planner.origin !== null && planner.dest !== null
+            ? GATE_COLOR : BORDER}`,
+          cursor: pushing ? 'default' : 'pointer',
+        }}
+      >
+        {pushing ? 'Sending…' : 'Set Destination in EVE'}
+      </button>
+
+      {/* Toast */}
+      {pushResult && (
+        <div style={{
+          marginTop: 4, padding: '4px 6px', fontSize: 8, letterSpacing: '0.06em',
+          color: pushResult.kind === 'ok' ? '#33aa55' : '#cc3333',
+          background: pushResult.kind === 'ok' ? 'rgba(51,170,85,0.08)' : 'rgba(204,51,51,0.08)',
+          border: `1px solid ${pushResult.kind === 'ok' ? '#1d3a25' : '#441818'}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4,
+        }}>
+          <span style={{ flex: 1 }}>{pushResult.message}</span>
+          {pushResult.kind === 'err' && pushResult.message.toLowerCase().includes('re-author') && (
+            <a
+              href="/auth/add-character"
+              style={{ color: GATE_COLOR, textDecoration: 'none', whiteSpace: 'nowrap' }}
+            >
+              RE-AUTH ↗
+            </a>
+          )}
+          <button onClick={() => setPushResult(null)} style={{
+            background: 'none', border: 'none', color: 'inherit', cursor: 'pointer',
+            fontSize: 11, lineHeight: 1, padding: '0 2px', fontFamily: FONT,
+          }}>×</button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -216,6 +216,43 @@ class ESIClient:
 
         return data
 
+    async def post(
+        self,
+        path: str,
+        params: dict = None,
+        body: dict | list | None = None,
+    ) -> int:
+        """Authenticated POST. Returns the HTTP status code.
+
+        Used for endpoints like /ui/autopilot/waypoint/ that take query params
+        and return 204 No Content. The caller decides how to interpret the
+        status code (the ESI client doesn't try to JSON-decode the body).
+        """
+        await self._throttle_if_needed()
+        url = f"{self.base}{path}"
+        client = get_http_client()
+        kwargs: dict = {"headers": self.headers, "params": params or {}}
+        if body is not None:
+            kwargs["json"] = body
+        resp = await client.post(url, **kwargs)
+        events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        for e in events:
+            asyncio.create_task(log_event(e["event_type"], e["path"], dict(resp.headers)))
+
+        if resp.status_code == 429:
+            retry_after = int(float(resp.headers.get("retry-after", "60")))
+            asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
+            await asyncio.sleep(retry_after)
+            resp = await client.post(url, **kwargs)
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code == 420:
+            asyncio.create_task(log_event("420", path, dict(resp.headers)))
+            await asyncio.sleep(60)
+            resp = await client.post(url, **kwargs)
+            rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+
+        return resp.status_code
+
     async def post_public(self, path: str, body: list | dict) -> dict | list:
         """Public POST with cache (used for name resolution)."""
         cache_key_params = {"_body": json.dumps(body, sort_keys=True)}

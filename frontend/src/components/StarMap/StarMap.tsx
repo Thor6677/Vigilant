@@ -680,6 +680,42 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     routeRendererRef.current?.setHopThreats(threats);
   }, [gateRoutePlanner.hopIntel]);
 
+  // Auto-trim: when the active character is in a system on the route,
+  // advance the route's origin to that system so the panel shows
+  // "remaining hops" rather than the full original route.
+  useEffect(() => {
+    if (!gateRoutePlanner.followCharacter) return;
+    if (gateRoutePlanner.activeCharacterId === null) return;
+    if (!gateRoutePlanner.activeRoute || gateRoutePlanner.activeRoute.length < 2) return;
+
+    const char = characters.find(c => c.character_id === gateRoutePlanner.activeCharacterId);
+    if (!char || char.system_id === null) return;
+
+    // If the active character is in a system on the route AFTER the
+    // current origin, advance the origin to it.
+    const idx = gateRoutePlanner.activeRoute.indexOf(char.system_id);
+    if (idx > 0 && char.system_id !== gateRoutePlanner.origin) {
+      // The character has reached a hop further along the route.
+      // Trim by setting the origin to the character's current system.
+      gateRoutePlanner.setOrigin(char.system_id);
+    }
+  }, [
+    characters,
+    gateRoutePlanner.followCharacter,
+    gateRoutePlanner.activeCharacterId,
+    gateRoutePlanner.activeRoute,
+    gateRoutePlanner.origin,
+    gateRoutePlanner,
+  ]);
+
+  // Default the active character to the user's main once characters load
+  useEffect(() => {
+    if (gateRoutePlanner.activeCharacterId !== null) return;
+    if (characters.length === 0) return;
+    const main = characters.find(c => c.is_main) || characters[0];
+    if (main) gateRoutePlanner.setActiveCharacterId(main.character_id);
+  }, [characters, gateRoutePlanner.activeCharacterId, gateRoutePlanner]);
+
   // Parse URL params on mount and pre-populate the gate route planner.
   // Supports two forms:
   //   /map?route=<share_token>          → fetch shared SavedGateRoute and load

@@ -43,6 +43,8 @@ EVE_SCOPES = " ".join([
     "esi-contracts.read_character_contracts.v1",
     "esi-planets.manage_planets.v1",
     "esi-search.search_structures.v1",
+    # Star map gate route planner — push routes to in-game autopilot
+    "esi-ui.write_waypoint.v1",
     # Corp-level scopes — only granted by EVE SSO if the character holds the
     # appropriate in-game corporation role (Accountant, Factory Manager, etc.)
     "esi-wallet.read_corporation_wallets.v1",

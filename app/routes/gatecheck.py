@@ -154,6 +154,13 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
     dangerous = sum(1 for s in systems if s["threat"] in ("dangerous", "smartbomb"))
     caution = sum(1 for s in systems if s["threat"] == "caution")
 
+    # Map ESI flag (shortest/secure/insecure) to the star map's preference vocab
+    # so the "Open in Star Map" link pre-selects the equivalent preference.
+    starmap_pref = {
+        "secure": "highsec",
+        "insecure": "lowsec",
+    }.get(flag, "shortest")
+
     return templates.TemplateResponse("partials/gatecheck_route.html", {
         "request": request,
         "systems": systems,
@@ -163,6 +170,8 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
         "caution_count": caution,
         "origin": origin,
         "destination": dest,
+        "avoid_ids": avoid_ids,
+        "starmap_pref": starmap_pref,
     })
 
 
