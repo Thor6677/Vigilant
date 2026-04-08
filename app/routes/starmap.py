@@ -338,3 +338,308 @@ async def map_stats(request: Request):
     result["_freshness"] = freshness
 
     return JSONResponse(result)
+
+
+# ── Gate route planner: avoid list ───────────────────────────────────────────
+
+_VALID_AVOID_KINDS = {"system", "constellation", "region"}
+
+
+@router.get("/api/map/avoid")
+async def list_avoid_entries(request: Request):
+    """List the current user's avoid entries."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, UserAvoidEntry
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(UserAvoidEntry).where(UserAvoidEntry.user_id == user_id)
+        )).scalars().all()
+
+    return JSONResponse([
+        {"id": r.id, "kind": r.kind, "entity_id": r.entity_id}
+        for r in rows
+    ])
+
+
+@router.post("/api/map/avoid")
+async def add_avoid_entry(request: Request):
+    """Add an avoid entry. Body: {kind, entity_id}."""
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+    from app.db.models import AsyncSessionLocal, UserAvoidEntry
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    kind = body.get("kind")
+    entity_id = body.get("entity_id")
+    if kind not in _VALID_AVOID_KINDS or not isinstance(entity_id, int):
+        return JSONResponse({"error": "Invalid kind or entity_id"}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        entry = UserAvoidEntry(user_id=user_id, kind=kind, entity_id=entity_id)
+        db.add(entry)
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Already exists — fetch and return existing row
+            await db.rollback()
+            existing = (await db.execute(
+                select(UserAvoidEntry).where(
+                    UserAvoidEntry.user_id == user_id,
+                    UserAvoidEntry.kind == kind,
+                    UserAvoidEntry.entity_id == entity_id,
+                )
+            )).scalar_one()
+            return JSONResponse({"id": existing.id, "kind": existing.kind, "entity_id": existing.entity_id})
+        await db.refresh(entry)
+        return JSONResponse({"id": entry.id, "kind": entry.kind, "entity_id": entry.entity_id}, status_code=201)
+
+
+@router.delete("/api/map/avoid/{entry_id}")
+async def delete_avoid_entry(entry_id: int, request: Request):
+    """Remove an avoid entry. Only the owner can delete."""
+    from sqlalchemy import select, delete
+    from app.db.models import AsyncSessionLocal, UserAvoidEntry
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        existing = (await db.execute(
+            select(UserAvoidEntry).where(
+                UserAvoidEntry.id == entry_id,
+                UserAvoidEntry.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+
+        await db.execute(
+            delete(UserAvoidEntry).where(UserAvoidEntry.id == entry_id)
+        )
+        await db.commit()
+
+    return JSONResponse({"deleted": entry_id})
+
+
+# ── Gate route planner: saved routes ─────────────────────────────────────────
+
+import json as _route_json
+import secrets as _route_secrets
+
+
+def _serialize_saved_route(r) -> dict:
+    return {
+        "id": r.id,
+        "name": r.name,
+        "origin_system_id": r.origin_system_id,
+        "dest_system_id": r.dest_system_id,
+        "waypoints": _route_json.loads(r.waypoints_json or "[]"),
+        "preference": r.preference,
+        "avoid": _route_json.loads(r.avoid_json or "[]"),
+        "share_token": r.share_token,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+def _validate_route_body(body: dict) -> tuple[dict | None, str | None]:
+    """Returns (clean_dict, error_message). Either is None."""
+    if not isinstance(body, dict):
+        return None, "Invalid body"
+    name = body.get("name")
+    origin = body.get("origin_system_id")
+    dest = body.get("dest_system_id")
+    waypoints = body.get("waypoints", [])
+    preference = body.get("preference", "shortest")
+    avoid = body.get("avoid", [])
+
+    if not isinstance(name, str) or not name.strip() or len(name) > 128:
+        return None, "Invalid name"
+    if not isinstance(origin, int) or not isinstance(dest, int):
+        return None, "origin_system_id and dest_system_id must be integers"
+    if not isinstance(waypoints, list) or not all(isinstance(w, int) for w in waypoints):
+        return None, "waypoints must be a list of integers"
+    if preference not in {"shortest", "highsec", "lowsec", "nullsec", "safest"}:
+        return None, "Invalid preference"
+    if not isinstance(avoid, list) or not all(isinstance(a, int) for a in avoid):
+        return None, "avoid must be a list of integers"
+
+    return {
+        "name": name.strip(),
+        "origin_system_id": origin,
+        "dest_system_id": dest,
+        "waypoints_json": _route_json.dumps(waypoints),
+        "preference": preference,
+        "avoid_json": _route_json.dumps(avoid),
+    }, None
+
+
+@router.get("/api/map/routes")
+async def list_saved_routes(request: Request):
+    """List the current user's saved gate routes."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(SavedGateRoute)
+            .where(SavedGateRoute.user_id == user_id)
+            .order_by(SavedGateRoute.updated_at.desc())
+        )).scalars().all()
+
+    return JSONResponse([_serialize_saved_route(r) for r in rows])
+
+
+@router.post("/api/map/routes")
+async def create_saved_route(request: Request):
+    """Create a new saved gate route."""
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    clean, err = _validate_route_body(body)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        route = SavedGateRoute(user_id=user_id, **clean)
+        db.add(route)
+        await db.commit()
+        await db.refresh(route)
+        return JSONResponse(_serialize_saved_route(route), status_code=201)
+
+
+@router.put("/api/map/routes/{route_id}")
+async def update_saved_route(route_id: int, request: Request):
+    """Update a saved route. Owner only."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    clean, err = _validate_route_body(body)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        route = (await db.execute(
+            select(SavedGateRoute).where(
+                SavedGateRoute.id == route_id,
+                SavedGateRoute.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not route:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+
+        for key, value in clean.items():
+            setattr(route, key, value)
+        route.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(route)
+        return JSONResponse(_serialize_saved_route(route))
+
+
+@router.delete("/api/map/routes/{route_id}")
+async def delete_saved_route(route_id: int, request: Request):
+    """Delete a saved route. Owner only."""
+    from sqlalchemy import select, delete
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        existing = (await db.execute(
+            select(SavedGateRoute).where(
+                SavedGateRoute.id == route_id,
+                SavedGateRoute.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+
+        await db.execute(
+            delete(SavedGateRoute).where(SavedGateRoute.id == route_id)
+        )
+        await db.commit()
+
+    return JSONResponse({"deleted": route_id})
+
+
+@router.post("/api/map/routes/{route_id}/share")
+async def toggle_share_saved_route(route_id: int, request: Request):
+    """Toggle sharing on a saved route. Generates a share_token if not set,
+    clears it if already set."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        route = (await db.execute(
+            select(SavedGateRoute).where(
+                SavedGateRoute.id == route_id,
+                SavedGateRoute.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not route:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+
+        if route.share_token:
+            route.share_token = None
+        else:
+            route.share_token = _route_secrets.token_urlsafe(12)
+        route.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(route)
+        return JSONResponse(_serialize_saved_route(route))
+
+
+@router.get("/api/map/routes/shared/{share_token}")
+async def get_shared_route(share_token: str):
+    """Public read of a shared saved route. No auth required."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SavedGateRoute
+
+    async with AsyncSessionLocal() as db:
+        route = (await db.execute(
+            select(SavedGateRoute).where(SavedGateRoute.share_token == share_token)
+        )).scalar_one_or_none()
+        if not route:
+            return JSONResponse({"error": "Not found or sharing disabled"}, status_code=404)
+        return JSONResponse(_serialize_saved_route(route))

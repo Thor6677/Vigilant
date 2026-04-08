@@ -293,6 +293,39 @@ class HostedImage(Base):
     expires_at = Column(DateTime, nullable=True)  # NULL = never expires
 
 
+class UserAvoidEntry(Base):
+    """A system, constellation, or region the user has marked to avoid in
+    gate route planning. Per-user, applies to all of that user's characters."""
+    __tablename__ = "user_avoid_entries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "entity_id", name="uq_user_avoid_entry"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # 'system' | 'constellation' | 'region'
+    entity_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class SavedGateRoute(Base):
+    """User-saved gate route with origin, destination, intermediate waypoints,
+    routing preference, and per-route avoid list. Optionally shareable via token."""
+    __tablename__ = "saved_gate_routes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    origin_system_id = Column(Integer, nullable=False)
+    dest_system_id = Column(Integer, nullable=False)
+    waypoints_json = Column(Text, nullable=False, default="[]")     # JSON list[int]
+    preference = Column(String(16), nullable=False, default="shortest")
+    avoid_json = Column(Text, nullable=False, default="[]")         # JSON list[int]
+    share_token = Column(String(16), nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
