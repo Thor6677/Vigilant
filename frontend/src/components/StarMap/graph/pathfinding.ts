@@ -1,5 +1,5 @@
 import Graph from 'graphology';
-import { bidirectional } from 'graphology-shortest-path';
+import { bidirectional as dijkstraBidirectional } from 'graphology-shortest-path/dijkstra';
 import type { RoutePreference } from '../types';
 
 /**
@@ -72,7 +72,11 @@ export function findRoute(
   const restore = applyWeights(graph, preference, avoidSystems);
 
   try {
-    const path = bidirectional(graph, srcKey, dstKey);
+    // Use Dijkstra (weighted) so the per-edge weights set by applyWeights
+    // actually influence the path. The unweighted bidirectional BFS that
+    // used to be imported here ignored edge weights entirely, which silently
+    // disabled the highsec / lowsec / nullsec preferences.
+    const path = dijkstraBidirectional(graph, srcKey, dstKey, 'weight');
     if (!path) return null;
     return path.map(Number);
   } catch {
