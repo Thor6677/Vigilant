@@ -29,14 +29,19 @@ function applyWeights(
 
     switch (preference) {
       case 'highsec':
-        if (minSec < 0.5) weight = minSec < 0 ? 50 : 10;
+        // Make non-highsec edges essentially impassable so the planner
+        // detours through long highsec routes (e.g. Jita→Amarr via Khanid)
+        // rather than dipping through a single lowsec system. The previous
+        // weights (10 for lowsec / 50 for null) were small enough that any
+        // direct lowsec route still beat the highsec alternative on cost.
+        if (minSec < 0.5) weight = minSec < 0 ? 5000 : 1000;
         break;
       case 'lowsec':
-        if (minSec >= 0.5) weight = 5;
+        if (minSec >= 0.5) weight = 100;
         break;
       case 'nullsec':
-        if (minSec >= 0.5) weight = 10;
-        else if (minSec > 0) weight = 3;
+        if (minSec >= 0.5) weight = 1000;
+        else if (minSec > 0) weight = 100;
         break;
       case 'safest': {
         // Mild highsec preference as a baseline (we want safety, and high
