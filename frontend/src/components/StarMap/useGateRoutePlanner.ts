@@ -22,6 +22,34 @@ export interface SavedRoute {
   updated_at: string | null;
 }
 
+export type ThreatLevel = 'safe' | 'caution' | 'dangerous' | 'smartbomb';
+
+export interface HopKill {
+  killmail_id: number;
+  time_str: string;
+  victim_ship: string;
+  victim_ship_id: number;
+  victim_char_id: number | null;
+  attacker_count: number;
+  attacker_ships: { name: string; type_id: number; count: number }[];
+  attacker_weapons: Record<string, number>;
+  value: number;
+  value_str: string;
+  is_npc: boolean;
+}
+
+export interface HopIntel {
+  kills: number;
+  pvp_kills: number;
+  threat: ThreatLevel;
+  has_smartbombs: boolean;
+  has_dictors: boolean;
+  has_hics: boolean;
+  total_value: number;
+  total_value_str: string;
+  top_kills: HopKill[];
+}
+
 export interface GateRoutePlannerState {
   /** Whether the planner panel is visible. */
   active: boolean;
@@ -72,6 +100,10 @@ export interface GateRoutePlannerState {
   /** Computed route — null when origin/dest not both set or no path exists. */
   activeRoute: number[] | null;
 
+  /** Per-hop intel from /api/map/route-safety, keyed by system_id. */
+  hopIntel: Map<number, HopIntel>;
+  hopIntelLoading: boolean;
+
   /** Last error from a route compute or API call (for UI display). */
   errorMessage: string | null;
   clearError: () => void;
@@ -94,6 +126,8 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   const [avoidEntries, setAvoidEntries] = useState<AvoidEntry[]>([]);
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
+  const [hopIntel, setHopIntel] = useState<Map<number, HopIntel>>(() => new Map());
+  const [hopIntelLoading, setHopIntelLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Derived: only system-kind entries contribute to routing avoidance for now.
@@ -264,6 +298,58 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     reloadSavedRoutes();
   }, [reloadAvoid, reloadSavedRoutes]);
 
+  // ── Auto-fetch per-hop intel whenever the active route changes ──────────
+
+  useEffect(() => {
+    if (!activeRoute || activeRoute.length < 2) {
+      setHopIntel(new Map());
+      setHopIntelLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setHopIntelLoading(true);
+
+    const systemIds = activeRoute;
+    fetch('/api/map/route-safety', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system_ids: systemIds }),
+    })
+      .then(resp => {
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+      })
+      .then((data: Record<string, HopIntel>) => {
+        if (cancelled) return;
+        const map = new Map<number, HopIntel>();
+        for (const [sidStr, intel] of Object.entries(data)) {
+          map.set(Number(sidStr), intel);
+        }
+        setHopIntel(map);
+        setHopIntelLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Silent — intel is non-critical
+        setHopIntelLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [activeRoute]);
+
+  // Build per-system kill weights for the 'safest' preference from the
+  // current hopIntel. Empty until a route has been computed once and intel
+  // has come back. Stable across renders thanks to useMemo.
+  const killWeights = useMemo(() => {
+    const w = new Map<number, number>();
+    for (const [sid, intel] of hopIntel) {
+      // Use PvP kills only — NPC kills don't represent player threat.
+      if (intel.pvp_kills > 0) w.set(sid, intel.pvp_kills);
+    }
+    return w;
+  }, [hopIntel]);
+
   // ── Route compute ────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -277,7 +363,9 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     const stops = [origin, ...waypoints, dest];
     const fullPath: number[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
-      const seg = findRoute(graph, stops[i], stops[i + 1], preference, avoidSystems);
+      const seg = findRoute(
+        graph, stops[i], stops[i + 1], preference, avoidSystems, killWeights,
+      );
       if (!seg) {
         setActiveRoute(null);
         setErrorMessage(`No path between system ${stops[i]} and ${stops[i + 1]}`);
@@ -293,7 +381,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     }
     setActiveRoute(fullPath);
     setErrorMessage(null);
-  }, [origin, dest, waypoints, preference, avoidSystems, getGraph]);
+  }, [origin, dest, waypoints, preference, avoidSystems, killWeights, getGraph]);
 
   // ── Waypoint helpers ─────────────────────────────────────────────────────
 
@@ -381,6 +469,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     savedRoutes, saveCurrentRoute, deleteSavedRoute, loadSavedRoute, toggleShareSavedRoute, reloadSavedRoutes,
     loadRouteData,
     activeRoute,
+    hopIntel, hopIntelLoading,
     errorMessage, clearError,
     reset,
   };

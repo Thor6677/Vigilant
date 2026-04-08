@@ -643,3 +643,54 @@ async def get_shared_route(share_token: str):
         if not route:
             return JSONResponse({"error": "Not found or sharing disabled"}, status_code=404)
         return JSONResponse(_serialize_saved_route(route))
+
+
+# ── Gate route safety: per-hop kill / threat intel ───────────────────────────
+
+@router.post("/api/map/route-safety")
+async def route_safety(request: Request):
+    """Enrich a list of system IDs with last-hour kill data, threat level,
+    and smartbomb / interdictor / heavy-interdictor warning flags. Used by
+    the gate route planner panel to show per-hop danger info.
+
+    Body: {system_ids: [int]}
+    Returns: dict keyed by system_id (string) → safety info
+    """
+    from app.db.models import AsyncSessionLocal
+    from app.intel.safety import check_route_systems
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    system_ids = body.get("system_ids")
+    if not isinstance(system_ids, list) or not all(isinstance(s, int) for s in system_ids):
+        return JSONResponse({"error": "system_ids must be a list of ints"}, status_code=400)
+    if len(system_ids) == 0:
+        return JSONResponse({})
+    if len(system_ids) > 200:
+        return JSONResponse({"error": "Too many systems (max 200)"}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        results = await check_route_systems(system_ids, db)
+
+    # Re-key by system_id (string) so the frontend can lookup by ID directly
+    return JSONResponse({
+        str(r["system_id"]): {
+            "kills": r["kill_count"],
+            "pvp_kills": r["pvp_kills"],
+            "threat": r["threat"],
+            "has_smartbombs": r["has_smartbombs"],
+            "has_dictors": r["has_dictors"],
+            "has_hics": r["has_hics"],
+            "total_value": r["total_value"],
+            "total_value_str": r["total_value_str"],
+            "top_kills": r["kills"][:5],
+        }
+        for r in results
+    })

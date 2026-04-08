@@ -42,7 +42,7 @@ export type OverlayType =
   | 'incursions'
   | 'factionWarfare';
 
-export type RoutePreference = 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
+export type RoutePreference = 'shortest' | 'highsec' | 'lowsec' | 'nullsec' | 'safest';
 
 export type GroupMode = 'systems' | 'constellation' | 'region';
 

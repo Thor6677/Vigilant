@@ -671,6 +671,15 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     routeRendererRef.current?.setAvoidSystems(gateRoutePlanner.avoidSystems);
   }, [gateRoutePlanner.avoidSystems]);
 
+  // Push per-hop threat levels to the renderer so the diamonds get tinted.
+  useEffect(() => {
+    const threats = new Map<number, string>();
+    for (const [sid, intel] of gateRoutePlanner.hopIntel) {
+      threats.set(sid, intel.threat);
+    }
+    routeRendererRef.current?.setHopThreats(threats);
+  }, [gateRoutePlanner.hopIntel]);
+
   // Parse URL params on mount and pre-populate the gate route planner.
   // Supports two forms:
   //   /map?route=<share_token>          → fetch shared SavedGateRoute and load

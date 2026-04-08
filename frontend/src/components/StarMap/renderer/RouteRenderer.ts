@@ -6,10 +6,19 @@ const ORIGIN_RING_COLOR = 0x33aa55; // green
 const DEST_RING_COLOR = 0xcc5533;   // orange-red
 const AVOID_COLOR = 0xcc3333;       // red
 
+// Threat color tints for the per-hop diamonds (Phase 2 intel)
+const THREAT_TINTS: Record<string, number> = {
+  safe: 0x33aa55,
+  caution: 0xcc8844,
+  dangerous: 0xcc3333,
+  smartbomb: 0xcc33cc,
+};
+
 export class RouteRenderer {
   readonly graphics = new Graphics();
   private route: number[] = [];
   private avoid: Set<number> = new Set();
+  private hopThreats: Map<number, string> = new Map();
   private systemMap = new Map<number, SystemData>();
   private dashOffset = 0;
 
@@ -20,6 +29,12 @@ export class RouteRenderer {
 
   setRoute(systemIds: number[]) {
     this.route = systemIds;
+    this.draw();
+  }
+
+  /** Set per-system threat levels (Phase 2). Map of system_id → threat string. */
+  setHopThreats(threats: Map<number, string>) {
+    this.hopThreats = threats;
     this.draw();
   }
 
@@ -69,6 +84,11 @@ export class RouteRenderer {
         const isOrigin = i === 0;
         const isDest = i === this.route.length - 1;
 
+        // Pick the diamond color: threat tint if intel is available,
+        // otherwise the default cyan ROUTE_COLOR.
+        const threat = this.hopThreats.get(id);
+        const fillColor = (threat && THREAT_TINTS[threat]) ?? ROUTE_COLOR;
+
         // Diamond marker — slightly larger for endpoints
         const s = isOrigin || isDest ? 8 : 6;
         g.moveTo(sys.x, sys.y - s);
@@ -76,7 +96,7 @@ export class RouteRenderer {
         g.lineTo(sys.x, sys.y + s);
         g.lineTo(sys.x - s, sys.y);
         g.closePath();
-        g.fill({ color: ROUTE_COLOR, alpha: 0.9 });
+        g.fill({ color: fillColor, alpha: 0.9 });
 
         // Distinct origin / destination ring
         if (isOrigin) {

@@ -2,6 +2,12 @@ import Graph from 'graphology';
 import { bidirectional as dijkstraBidirectional } from 'graphology-shortest-path/dijkstra';
 import type { RoutePreference } from '../types';
 
+/** Per-system kill counts used by the 'safest' preference. */
+export type KillWeights = Map<number, number>;
+
+/** Multiplier applied to the kill count when computing 'safest' edge weight. */
+const SAFEST_KILL_MULTIPLIER = 5;
+
 /**
  * Apply routing preference weights to the graph edges.
  * Returns a cleanup function to restore original weights.
@@ -10,6 +16,7 @@ function applyWeights(
   graph: Graph,
   preference: RoutePreference,
   avoidSystems?: Set<number>,
+  killWeights?: KillWeights,
 ): () => void {
   const originalWeights = new Map<string, number>();
 
@@ -31,6 +38,20 @@ function applyWeights(
         if (minSec >= 0.5) weight = 10;
         else if (minSec > 0) weight = 3;
         break;
+      case 'safest': {
+        // Mild highsec preference as a baseline (we want safety, and high
+        // sec is a reasonable prior). Then add a heavy per-edge surcharge
+        // proportional to the kill count of either endpoint, if known.
+        if (minSec < 0.5) weight = 3;
+        if (killWeights) {
+          const srcId = Number(src);
+          const dstId = Number(dst);
+          const srcKills = killWeights.get(srcId) ?? 0;
+          const dstKills = killWeights.get(dstId) ?? 0;
+          weight += (srcKills + dstKills) * SAFEST_KILL_MULTIPLIER;
+        }
+        break;
+      }
     }
 
     // Heavily penalize avoided systems
@@ -63,13 +84,14 @@ export function findRoute(
   destId: number,
   preference: RoutePreference = 'shortest',
   avoidSystems?: Set<number>,
+  killWeights?: KillWeights,
 ): number[] | null {
   const srcKey = String(originId);
   const dstKey = String(destId);
 
   if (!graph.hasNode(srcKey) || !graph.hasNode(dstKey)) return null;
 
-  const restore = applyWeights(graph, preference, avoidSystems);
+  const restore = applyWeights(graph, preference, avoidSystems, killWeights);
 
   try {
     // Use Dijkstra (weighted) so the per-edge weights set by applyWeights

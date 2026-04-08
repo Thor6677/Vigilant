@@ -1,10 +1,23 @@
 import { useState } from 'react';
 import type { SystemData, RoutePreference } from '../types';
-import type { GateRoutePlannerState, AvoidEntry, SavedRoute } from '../useGateRoutePlanner';
+import type {
+  GateRoutePlannerState,
+  AvoidEntry,
+  SavedRoute,
+  HopIntel,
+  ThreatLevel,
+} from '../useGateRoutePlanner';
 import type { CharacterLocation } from '../useCharacterLocations';
 import { securityColorCSS } from '../utils/colors';
 import { SystemSlotWithSearch } from './SystemSlotWithSearch';
 import { FONT, BG, BORDER, TEXT, MUTED, GATE_COLOR } from './plannerStyles';
+
+const THREAT_COLORS: Record<ThreatLevel, string> = {
+  safe: '#33aa55',
+  caution: '#cc8844',
+  dangerous: '#cc3333',
+  smartbomb: '#cc33cc',
+};
 
 interface Props {
   planner: GateRoutePlannerState;
@@ -17,6 +30,7 @@ interface Props {
 
 const PREFERENCE_OPTIONS: { value: RoutePreference; label: string }[] = [
   { value: 'shortest', label: 'Shortest' },
+  { value: 'safest', label: 'Safest (kill data)' },
   { value: 'highsec', label: 'Prefer Highsec' },
   { value: 'lowsec', label: 'Prefer Lowsec' },
   { value: 'nullsec', label: 'Prefer Nullsec' },
@@ -151,13 +165,22 @@ export function GateRoutePlannerPanel({
       {/* Route results */}
       {planner.activeRoute && jumpCount !== null && jumpCount >= 1 && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 9, color: MUTED, letterSpacing: '0.1em', marginBottom: 6 }}>
-            ROUTE: {jumpCount} JUMP{jumpCount !== 1 ? 'S' : ''}
+          <div style={{
+            fontSize: 9, color: MUTED, letterSpacing: '0.1em', marginBottom: 6,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span>ROUTE: {jumpCount} JUMP{jumpCount !== 1 ? 'S' : ''}</span>
+            {planner.hopIntelLoading && (
+              <span style={{ fontSize: 8, color: '#3a3a3a' }}>checking intel…</span>
+            )}
           </div>
-          <RouteStopList
+          <RouteHopList
+            route={planner.activeRoute}
             stops={stops}
+            waypoints={planner.waypoints}
             systems={systems}
             systemMap={systemMap}
+            hopIntel={planner.hopIntel}
             onReorderWaypoint={planner.reorderWaypoint}
             onInsertWaypointAt={planner.insertWaypointAt}
             onRemoveWaypoint={planner.removeWaypoint}
@@ -308,20 +331,29 @@ export function GateRoutePlannerPanel({
   );
 }
 
-/* ── Route stop list with drag-reorder + insert + remove ─────────── */
+/* ── Route hop list with intel + drag-reorder + insert + remove ─── */
 
-function RouteStopList({
+function RouteHopList({
+  route,
   stops,
+  waypoints,
   systems,
   systemMap,
+  hopIntel,
   onReorderWaypoint,
   onInsertWaypointAt,
   onRemoveWaypoint,
   onFocusSystem,
 }: {
+  /** Full pathfinding result — every gate hop. */
+  route: number[];
+  /** User-set stops in order: [origin, ...waypoints, dest]. */
   stops: number[];
+  /** Just the waypoint system IDs (origin / dest excluded). */
+  waypoints: number[];
   systems: SystemData[];
   systemMap: Map<number, SystemData>;
+  hopIntel: Map<number, HopIntel>;
   onReorderWaypoint: (from: number, to: number) => void;
   onInsertWaypointAt: (index: number, systemId: number) => void;
   onRemoveWaypoint: (id: number) => void;
@@ -330,46 +362,77 @@ function RouteStopList({
   const [draggingWaypointIdx, setDraggingWaypointIdx] = useState<number | null>(null);
   const [dragOverWaypointIdx, setDragOverWaypointIdx] = useState<number | null>(null);
   const [insertAfterStopIdx, setInsertAfterStopIdx] = useState<number | null>(null);
+  const [expandedHop, setExpandedHop] = useState<number | null>(null);
+
+  // Pre-compute classification for every system in the route:
+  // is it origin / a user waypoint / dest / intermediate?
+  // We also track the user-stop ordinal (1-based) so the user can see
+  // "stop 3" vs every-hop count.
+  const originId = stops[0];
+  const destId = stops[stops.length - 1];
+  const waypointSet = new Set(waypoints);
+  // Map from waypoint system_id → its index in waypoints[] (for drag-reorder)
+  const waypointIndexById = new Map<number, number>();
+  waypoints.forEach((id, idx) => waypointIndexById.set(id, idx));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {stops.map((id, i) => {
+      {route.map((id, i) => {
         const sys = systemMap.get(id);
         if (!sys) return null;
-        const isOrigin = i === 0;
-        const isDest = i === stops.length - 1;
-        const isWaypoint = !isOrigin && !isDest;
-        // Index in the waypoints[] array (origin at i=0, waypoints start at i=1)
-        const waypointIndex = i - 1;
-        const isDragSource = isWaypoint && draggingWaypointIdx === waypointIndex;
-        const isDropTarget = isWaypoint && dragOverWaypointIdx === waypointIndex && draggingWaypointIdx !== null && draggingWaypointIdx !== waypointIndex;
+        const isOrigin = id === originId && i === 0;
+        const isDest = id === destId && i === route.length - 1;
+        const isUserWaypoint = !isOrigin && !isDest && waypointSet.has(id);
+        const isIntermediate = !isOrigin && !isDest && !isUserWaypoint;
+
+        // For drag-reorder, the row only acts as draggable if it's a user
+        // waypoint. We use the waypoints[] index, not the route index.
+        const waypointIndex = isUserWaypoint ? (waypointIndexById.get(id) ?? -1) : -1;
+        const isDragSource = isUserWaypoint && draggingWaypointIdx === waypointIndex;
+        const isDropTarget = isUserWaypoint
+          && dragOverWaypointIdx === waypointIndex
+          && draggingWaypointIdx !== null
+          && draggingWaypointIdx !== waypointIndex;
+
+        // Insert-button between hops only fires AFTER user stops (origin or
+        // a waypoint). Inserting after an intermediate hop doesn't make sense
+        // because intermediates are computed, not user-set.
+        const isStopBeforeAnother = (isOrigin || isUserWaypoint) && !isDest;
+        // The waypoints[] index where the new waypoint should land if the
+        // user clicks "+" after this row.
+        const insertAtWaypointIdx = isOrigin
+          ? 0
+          : isUserWaypoint ? waypointIndex + 1 : -1;
+
+        const intel = hopIntel.get(id);
+        const threatColor = intel ? THREAT_COLORS[intel.threat] : null;
 
         return (
           <div key={`${id}-${i}`}>
             <div
-              draggable={isWaypoint}
-              onDragStart={isWaypoint ? (e) => {
+              draggable={isUserWaypoint}
+              onDragStart={isUserWaypoint ? (e) => {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', String(waypointIndex));
                 setDraggingWaypointIdx(waypointIndex);
               } : undefined}
-              onDragEnd={isWaypoint ? () => {
+              onDragEnd={isUserWaypoint ? () => {
                 setDraggingWaypointIdx(null);
                 setDragOverWaypointIdx(null);
               } : undefined}
-              onDragOver={isWaypoint ? (e) => {
+              onDragOver={isUserWaypoint ? (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
                 if (waypointIndex !== draggingWaypointIdx) {
                   setDragOverWaypointIdx(waypointIndex);
                 }
               } : undefined}
-              onDragLeave={isWaypoint ? () => {
+              onDragLeave={isUserWaypoint ? () => {
                 if (dragOverWaypointIdx === waypointIndex) {
                   setDragOverWaypointIdx(null);
                 }
               } : undefined}
-              onDrop={isWaypoint ? (e) => {
+              onDrop={isUserWaypoint ? (e) => {
                 e.preventDefault();
                 const fromIdx = Number(e.dataTransfer.getData('text/plain'));
                 if (!Number.isNaN(fromIdx) && fromIdx !== waypointIndex) {
@@ -379,20 +442,36 @@ function RouteStopList({
                 setDragOverWaypointIdx(null);
               } : undefined}
               style={{
-                padding: '4px 0',
+                padding: '3px 0',
                 borderTop: i > 0 ? `1px solid ${BORDER}` : 'none',
                 borderBottom: isDropTarget ? `1px solid ${GATE_COLOR}` : undefined,
                 fontSize: 9,
                 display: 'flex', alignItems: 'center', gap: 4,
                 opacity: isDragSource ? 0.4 : 1,
-                cursor: isWaypoint ? 'grab' : 'default',
+                cursor: isUserWaypoint ? 'grab' : 'default',
               }}
             >
+              {/* Threat dot */}
+              <span
+                title={intel ? `${intel.threat} — ${intel.kills} kills last hour` : 'no intel'}
+                style={{
+                  width: 6, height: 6, borderRadius: '50%' as const,
+                  background: threatColor ?? '#1a1a1a',
+                  flexShrink: 0, marginLeft: 1,
+                }}
+              />
+
+              {/* System name + sec + stop role */}
               <span
                 onClick={() => onFocusSystem(sys)}
                 style={{
-                  color: isOrigin ? '#33aa55' : isDest ? '#cc5533' : TEXT,
+                  color: isOrigin ? '#33aa55'
+                    : isDest ? '#cc5533'
+                    : isUserWaypoint ? GATE_COLOR
+                    : isIntermediate ? '#5a5a5a'
+                    : TEXT,
                   cursor: 'pointer', flex: 1,
+                  fontSize: isIntermediate ? 8 : 9,
                 }}
               >
                 {i + 1}. {sys.name}
@@ -401,17 +480,85 @@ function RouteStopList({
                 }}>
                   {sys.sec.toFixed(1)}
                 </span>
-                {sys.hasStation && (
+                {sys.hasStation && !isIntermediate && (
                   <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
                 )}
               </span>
-              {isWaypoint && (
+
+              {/* Intel badges */}
+              {intel && intel.kills > 0 && (
+                <button
+                  onClick={() => setExpandedHop(expandedHop === i ? null : i)}
+                  title={`${intel.kills} kills (${intel.pvp_kills} PvP) — click for details`}
+                  style={{
+                    background: 'none', border: `1px solid ${threatColor || BORDER}`,
+                    color: threatColor || MUTED,
+                    fontSize: 7, fontFamily: FONT, padding: '0 3px',
+                    cursor: 'pointer', letterSpacing: '0.05em',
+                  }}
+                >
+                  {intel.kills}K
+                </button>
+              )}
+              {intel?.has_smartbombs && (
+                <span title="Smartbombs detected!" style={{
+                  fontSize: 7, color: '#cc33cc', fontWeight: 'bold',
+                  border: '1px solid #cc33cc', padding: '0 2px',
+                }}>SB</span>
+              )}
+              {intel?.has_hics && (
+                <span title="Heavy interdictor!" style={{
+                  fontSize: 7, color: '#cc3333', fontWeight: 'bold',
+                  border: '1px solid #cc3333', padding: '0 2px',
+                }}>HIC</span>
+              )}
+              {intel?.has_dictors && (
+                <span title="Interdictor!" style={{
+                  fontSize: 7, color: '#cc3333', fontWeight: 'bold',
+                  border: '1px solid #cc3333', padding: '0 2px',
+                }}>DIC</span>
+              )}
+
+              {/* Remove (waypoints only) */}
+              {isUserWaypoint && (
                 <MiniBtn title="Remove waypoint" onClick={() => onRemoveWaypoint(id)}>×</MiniBtn>
               )}
             </div>
 
+            {/* Expanded killmail details */}
+            {expandedHop === i && intel && intel.top_kills.length > 0 && (
+              <div style={{
+                padding: '4px 8px 6px', background: '#0a0a0a',
+                borderBottom: `1px solid ${BORDER}`, fontSize: 8,
+              }}>
+                {intel.top_kills.slice(0, 5).map(km => (
+                  <div key={km.killmail_id} style={{
+                    padding: '2px 0', display: 'flex', justifyContent: 'space-between',
+                    gap: 4, color: km.is_npc ? '#3a3a3a' : TEXT,
+                  }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {km.victim_ship} <span style={{ color: MUTED }}>({km.attacker_count})</span>
+                    </span>
+                    <span style={{ color: MUTED, whiteSpace: 'nowrap' }}>{km.value_str}</span>
+                    <span style={{ color: MUTED, whiteSpace: 'nowrap' }}>{km.time_str}</span>
+                  </div>
+                ))}
+                <a
+                  href={`https://zkillboard.com/system/${id}/`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'block', marginTop: 4, fontSize: 7, color: GATE_COLOR,
+                    textDecoration: 'none', letterSpacing: '0.08em',
+                  }}
+                >
+                  VIEW ALL ON ZKILLBOARD ↗
+                </a>
+              </div>
+            )}
+
             {/* Insert button between this stop and the next */}
-            {!isDest && (
+            {isStopBeforeAnother && (
               <div style={{ display: 'flex', justifyContent: 'center', padding: '1px 0' }}>
                 <button
                   onClick={() => setInsertAfterStopIdx(insertAfterStopIdx === i ? null : i)}
@@ -428,15 +575,11 @@ function RouteStopList({
             )}
 
             {/* Inline insert search */}
-            {insertAfterStopIdx === i && (
+            {insertAfterStopIdx === i && insertAtWaypointIdx >= 0 && (
               <InsertWaypointSearch
                 systems={systems}
                 onSelect={(systemId) => {
-                  // Insert at waypoints[i] — the new waypoint goes BEFORE the
-                  // current waypoints[i], because i is the stops-index of the
-                  // stop AFTER which we're inserting (origin = stop 0, so to
-                  // insert after origin we want waypoints[0], etc.)
-                  onInsertWaypointAt(i, systemId);
+                  onInsertWaypointAt(insertAtWaypointIdx, systemId);
                   setInsertAfterStopIdx(null);
                 }}
                 onCancel={() => setInsertAfterStopIdx(null)}
