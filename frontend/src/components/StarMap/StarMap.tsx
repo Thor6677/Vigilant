@@ -620,17 +620,25 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   }, [data, updateView, onSystemClick]);
 
   // Sync the gate route planner's computed activeRoute → the Pixi renderer.
-  // The hook owns all routing state (origin/dest/waypoints/preference/avoid)
-  // and recomputes activeRoute internally; this effect just pushes the result.
+  // Also dim non-route systems so the highlighted path stands out (mirrors
+  // the jump planner's range-highlight effect).
   useEffect(() => {
     const r = routeRendererRef.current;
-    if (!r) return;
-    if (gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
-      r.setRoute(gateRoutePlanner.activeRoute);
+    const sr = systemRendererRef.current;
+    const route = gateRoutePlanner.activeRoute;
+    if (route && route.length >= 2) {
+      r?.setRoute(route);
+      // Highlight the route systems, dim everything else
+      sr?.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(route));
     } else {
-      r.clearRoute();
+      r?.clearRoute();
+      // Clear the highlight if there's no active route AND no jump-planner
+      // highlight is currently active
+      if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
+        sr?.setJumpRangeHighlight(null, null);
+      }
     }
-  }, [gateRoutePlanner.activeRoute]);
+  }, [gateRoutePlanner.activeRoute, gateRoutePlanner.origin, jumpPlanner.active, jumpPlanner.jumpRoute, jumpPlanner.reachableIds]);
 
   // Push the avoid set to the renderer so the red ❌ overlays appear/update.
   useEffect(() => {
