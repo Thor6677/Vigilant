@@ -47,9 +47,24 @@ interface Props {
   characters: CharacterLocation[];
   onSelectSystem: (system: SystemData) => void;
   onSelectArea: (type: 'constellation' | 'region', id: number, name: string) => void;
+  /** Optional gate-route action callbacks. When provided, small action buttons
+   *  appear on each system/service result row. */
+  onSetRouteOrigin?: (id: number) => void;
+  onSetRouteDest?: (id: number) => void;
+  onAddRouteWaypoint?: (id: number) => void;
+  onAvoidSystem?: (id: number) => void;
 }
 
-export function SystemSearch({ systems, characters, onSelectSystem, onSelectArea }: Props) {
+export function SystemSearch({
+  systems,
+  characters,
+  onSelectSystem,
+  onSelectArea,
+  onSetRouteOrigin,
+  onSetRouteDest,
+  onAddRouteWaypoint,
+  onAvoidSystem,
+}: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -315,11 +330,20 @@ export function SystemSearch({ systems, characters, onSelectSystem, onSelectArea
               {result.type === 'system' && result.system ? (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ color: '#dedede' }}>{result.name}</span>
-                  <span style={{ fontSize: 9, color: '#474747' }}>
-                    <span style={{ color: securityColorCSS(result.system.sec), marginRight: 6 }}>
-                      {result.system.sec.toFixed(1)}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <RouteActionGroup
+                      systemId={result.id}
+                      onSetRouteOrigin={onSetRouteOrigin}
+                      onSetRouteDest={onSetRouteDest}
+                      onAddRouteWaypoint={onAddRouteWaypoint}
+                      onAvoidSystem={onAvoidSystem}
+                    />
+                    <span style={{ fontSize: 9, color: '#474747' }}>
+                      <span style={{ color: securityColorCSS(result.system.sec), marginRight: 6 }}>
+                        {result.system.sec.toFixed(1)}
+                      </span>
+                      {result.system.regName}
                     </span>
-                    {result.system.regName}
                   </span>
                 </div>
               ) : result.type === 'service' && result.system ? (
@@ -331,8 +355,17 @@ export function SystemSearch({ systems, characters, onSelectSystem, onSelectArea
                       </span>
                       <span style={{ color: '#dedede' }}>{result.name}</span>
                     </span>
-                    <span style={{ color: securityColorCSS(result.system.sec), fontSize: 9 }}>
-                      {result.system.sec.toFixed(1)}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <RouteActionGroup
+                        systemId={result.id}
+                        onSetRouteOrigin={onSetRouteOrigin}
+                        onSetRouteDest={onSetRouteDest}
+                        onAddRouteWaypoint={onAddRouteWaypoint}
+                        onAvoidSystem={onAvoidSystem}
+                      />
+                      <span style={{ color: securityColorCSS(result.system.sec), fontSize: 9 }}>
+                        {result.system.sec.toFixed(1)}
+                      </span>
                     </span>
                   </div>
                   {result.distanceLY !== undefined && (
@@ -377,5 +410,104 @@ export function SystemSearch({ systems, characters, onSelectSystem, onSelectArea
         </div>
       )}
     </div>
+  );
+}
+
+/* ── Route action buttons (origin / dest / waypoint / avoid) ──── */
+
+function RouteActionGroup({
+  systemId,
+  onSetRouteOrigin,
+  onSetRouteDest,
+  onAddRouteWaypoint,
+  onAvoidSystem,
+}: {
+  systemId: number;
+  onSetRouteOrigin?: (id: number) => void;
+  onSetRouteDest?: (id: number) => void;
+  onAddRouteWaypoint?: (id: number) => void;
+  onAvoidSystem?: (id: number) => void;
+}) {
+  // Render nothing if no callbacks were provided.
+  if (!onSetRouteOrigin && !onSetRouteDest && !onAddRouteWaypoint && !onAvoidSystem) {
+    return null;
+  }
+  return (
+    <span style={{ display: 'flex', gap: 2 }} onMouseDown={(e) => e.stopPropagation()}>
+      {onSetRouteOrigin && (
+        <RouteActionBtn
+          title="Set as gate route origin"
+          color="#33aa55"
+          onClick={() => onSetRouteOrigin(systemId)}
+        >
+          O
+        </RouteActionBtn>
+      )}
+      {onSetRouteDest && (
+        <RouteActionBtn
+          title="Set as gate route destination"
+          color="#cc5533"
+          onClick={() => onSetRouteDest(systemId)}
+        >
+          D
+        </RouteActionBtn>
+      )}
+      {onAddRouteWaypoint && (
+        <RouteActionBtn
+          title="Add as gate route waypoint"
+          color="#00d4ff"
+          onClick={() => onAddRouteWaypoint(systemId)}
+        >
+          W
+        </RouteActionBtn>
+      )}
+      {onAvoidSystem && (
+        <RouteActionBtn
+          title="Avoid this system"
+          color="#cc3333"
+          onClick={() => onAvoidSystem(systemId)}
+        >
+          ×
+        </RouteActionBtn>
+      )}
+    </span>
+  );
+}
+
+function RouteActionBtn({
+  children,
+  title,
+  color,
+  onClick,
+}: {
+  children: string;
+  title: string;
+  color: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onMouseDown={(e) => {
+        // Prevent the parent row's onMouseDown from firing.
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        background: 'transparent',
+        border: `1px solid ${color}`,
+        color,
+        cursor: 'pointer',
+        fontSize: 8,
+        fontFamily: FONT,
+        lineHeight: 1,
+        padding: '1px 4px',
+        letterSpacing: '0.05em',
+      }}
+    >
+      {children}
+    </button>
   );
 }

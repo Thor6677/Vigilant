@@ -12,7 +12,7 @@ import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
 
-import type { SystemData, MapData, RoutePreference, OverlayType, GroupMode } from './types';
+import type { SystemData, MapData, OverlayType, GroupMode } from './types';
 import { LODTier } from './types';
 import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
 import { heatmapColor, allianceColor, FACTION_COLORS } from './utils/colors';
@@ -22,10 +22,10 @@ import { LabelRenderer } from './renderer/LabelRenderer';
 import { RouteRenderer } from './renderer/RouteRenderer';
 import { JumpRangeRenderer } from './renderer/JumpRangeRenderer';
 import { buildGraph } from './graph/buildGraph';
-import { findRoute } from './graph/pathfinding';
 import { useOverlayData } from './useOverlayData';
 import { useCharacterLocations } from './useCharacterLocations';
 import { useJumpPlanner } from './useJumpPlanner';
+import { useGateRoutePlanner } from './useGateRoutePlanner';
 
 import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
@@ -66,10 +66,6 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
-  const [routeOrigin, setRouteOrigin] = useState<number | null>(null);
-  const [routeDest, setRouteDest] = useState<number | null>(null);
-  const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
-  const [routePreference, setRoutePreference] = useState<RoutePreference>('shortest');
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
@@ -85,6 +81,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const { stats, loading: statsLoading } = useOverlayData();
   const { characters } = useCharacterLocations();
   const jumpPlanner = useJumpPlanner(data.systemMap, data.systems, adjacencyRef.current ?? undefined);
+  const getGraph = useCallback(() => graphRef.current, []);
+  const gateRoutePlanner = useGateRoutePlanner(getGraph);
   const [allianceNames, setAllianceNames] = useState<Map<string, string>>(new Map());
 
   // Fetch alliance names for sovereignty data
@@ -329,8 +327,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       }
     },
     setRoute: (systemIds: number[]) => {
+      // Imperative escape hatch: push a path directly to the renderer
+      // without going through the gate route planner state. Used by
+      // external callers that want to display a specific pre-computed path.
       routeRendererRef.current?.setRoute(systemIds);
-      setActiveRoute(systemIds);
     },
     getViewport: () => viewportRef.current,
   }));
@@ -618,22 +618,23 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     };
   }, [data, updateView, onSystemClick]);
 
-  // Route calculation
+  // Sync the gate route planner's computed activeRoute → the Pixi renderer.
+  // The hook owns all routing state (origin/dest/waypoints/preference/avoid)
+  // and recomputes activeRoute internally; this effect just pushes the result.
   useEffect(() => {
-    if (routeOrigin === null || routeDest === null || !graphRef.current) {
-      routeRendererRef.current?.clearRoute();
-      setActiveRoute(null);
-      return;
-    }
-    const path = findRoute(graphRef.current, routeOrigin, routeDest, routePreference);
-    if (path) {
-      routeRendererRef.current?.setRoute(path);
-      setActiveRoute(path);
+    const r = routeRendererRef.current;
+    if (!r) return;
+    if (gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
+      r.setRoute(gateRoutePlanner.activeRoute);
     } else {
-      routeRendererRef.current?.clearRoute();
-      setActiveRoute(null);
+      r.clearRoute();
     }
-  }, [routeOrigin, routeDest, routePreference]);
+  }, [gateRoutePlanner.activeRoute]);
+
+  // Push the avoid set to the renderer so the red ❌ overlays appear/update.
+  useEffect(() => {
+    routeRendererRef.current?.setAvoidSystems(gateRoutePlanner.avoidSystems);
+  }, [gateRoutePlanner.avoidSystems]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -666,8 +667,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  const handleSetOrigin = useCallback((id: number) => setRouteOrigin(id), []);
-  const handleSetDest = useCallback((id: number) => setRouteDest(id), []);
+  const handleSetOrigin = useCallback((id: number) => gateRoutePlanner.setOrigin(id), [gateRoutePlanner]);
+  const handleSetDest = useCallback((id: number) => gateRoutePlanner.setDest(id), [gateRoutePlanner]);
+  const handleAddWaypoint = useCallback((id: number) => gateRoutePlanner.addWaypoint(id), [gateRoutePlanner]);
+  const handleAvoidSystem = useCallback((id: number) => gateRoutePlanner.addAvoid(id), [gateRoutePlanner]);
 
   const handleSearchSelectSystem = useCallback((system: SystemData) => {
     if (viewportRef.current) {
@@ -753,6 +756,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         characters={characters}
         onSelectSystem={handleSearchSelectSystem}
         onSelectArea={handleSearchSelectArea}
+        onSetRouteOrigin={handleSetOrigin}
+        onSetRouteDest={handleSetDest}
+        onAddRouteWaypoint={handleAddWaypoint}
+        onAvoidSystem={handleAvoidSystem}
       />
 
       {/* Group mode selector */}
@@ -904,13 +911,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           position={panelPos}
           stats={stats}
           allianceNames={allianceNames}
-          routeOrigin={routeOrigin}
-          routeDest={routeDest}
-          activeRoute={activeRoute}
-          routePreference={routePreference}
+          routeOrigin={gateRoutePlanner.origin}
+          routeDest={gateRoutePlanner.dest}
+          activeRoute={gateRoutePlanner.activeRoute}
+          routePreference={gateRoutePlanner.preference}
           onSetOrigin={handleSetOrigin}
           onSetDestination={handleSetDest}
-          onSetRoutePreference={setRoutePreference}
+          onSetRoutePreference={gateRoutePlanner.setPreference}
           onClose={() => {
             setSelectedSystem(null);
             setPanelPos(null);
