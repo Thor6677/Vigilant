@@ -708,12 +708,22 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     gateRoutePlanner,
   ]);
 
-  // Default the active character to the user's main once characters load
+  // Default the active character to the user's main (or first) online
+  // character. If the current selection isn't online anymore, switch to
+  // whoever IS online so the dropdown isn't pointing at a stale entry.
   useEffect(() => {
-    if (gateRoutePlanner.activeCharacterId !== null) return;
-    if (characters.length === 0) return;
-    const main = characters.find(c => c.is_main) || characters[0];
-    if (main) gateRoutePlanner.setActiveCharacterId(main.character_id);
+    const online = characters.filter(c => c.system_id !== null);
+    if (online.length === 0) {
+      if (gateRoutePlanner.activeCharacterId !== null) {
+        gateRoutePlanner.setActiveCharacterId(null);
+      }
+      return;
+    }
+    const currentIsOnline = online.some(c => c.character_id === gateRoutePlanner.activeCharacterId);
+    if (!currentIsOnline) {
+      const main = online.find(c => c.is_main) || online[0];
+      gateRoutePlanner.setActiveCharacterId(main.character_id);
+    }
   }, [characters, gateRoutePlanner.activeCharacterId, gateRoutePlanner]);
 
   // Parse URL params on mount and pre-populate the gate route planner.

@@ -856,32 +856,34 @@ function AutopilotControls({
     <div style={{
       marginTop: 8, padding: '6px 0', borderTop: `1px solid ${BORDER}`,
     }}>
-      {/* Character picker */}
-      {charsWithLocation.length > 0 && (
+      {/* Character picker — dropdown of online characters (those with a
+          known current location) */}
+      {charsWithLocation.length > 0 ? (
         <div style={{ marginBottom: 6 }}>
           <Label text="ACTIVE CHARACTER" />
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            {charsWithLocation.map(ch => {
-              const isActive = ch.character_id === planner.activeCharacterId;
-              return (
-                <button
-                  key={ch.character_id}
-                  onClick={() => planner.setActiveCharacterId(ch.character_id)}
-                  title={`${ch.character_name} @ ${ch.system_name ?? '?'}`}
-                  style={{
-                    padding: '2px 6px', fontSize: 8, fontFamily: FONT,
-                    background: isActive ? 'rgba(0,212,255,0.15)' : 'transparent',
-                    color: isActive ? GATE_COLOR : MUTED,
-                    border: `1px solid ${isActive ? GATE_COLOR : BORDER}`,
-                    cursor: 'pointer', letterSpacing: '0.05em',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {ch.character_name.split(' ')[0]}
-                </button>
-              );
-            })}
-          </div>
+          <select
+            value={planner.activeCharacterId ?? ''}
+            onChange={e => {
+              const v = e.target.value;
+              planner.setActiveCharacterId(v === '' ? null : Number(v));
+            }}
+            style={{
+              width: '100%', padding: '4px 6px', fontSize: 10, fontFamily: FONT,
+              background: '#080808', color: TEXT, border: `1px solid ${BORDER}`,
+              cursor: 'pointer',
+            }}
+          >
+            {charsWithLocation.map(ch => (
+              <option key={ch.character_id} value={ch.character_id}>
+                {ch.character_name} @ {ch.system_name ?? '?'}
+                {ch.is_main ? ' ★' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 6, fontSize: 9, color: MUTED }}>
+          No characters online (no recent location data).
         </div>
       )}
 
