@@ -9,6 +9,23 @@ export type KillWeights = Map<number, number>;
 const SAFEST_KILL_MULTIPLIER = 5;
 
 /**
+ * Systems excluded from routing by default. The Glorification gates that
+ * connect Zarzakh (the Deathless's home in Yasna Zakh) to Curse, Venal,
+ * Metropolis, and Placid produce unrealistic shortcuts between high-sec
+ * trade hubs and dangerous null-sec pockets — players don't normally
+ * transit there. Excluded unless the user explicitly sets it as origin,
+ * destination, or a waypoint (each routing segment computes its own
+ * bypass list from its endpoints).
+ */
+const DEFAULT_EXCLUDED_SYSTEMS: ReadonlySet<number> = new Set([
+  30100000, // Zarzakh — Yasna Zakh, sec -1
+]);
+
+/** Edge weight for default-excluded systems. Finite so a path is still
+ *  found if the user's avoid list / preferences leave no alternative. */
+const EXCLUDED_SYSTEM_WEIGHT = 100000;
+
+/**
  * Apply routing preference weights to the graph edges.
  * Returns a cleanup function to restore original weights.
  */
@@ -17,6 +34,9 @@ function applyWeights(
   preference: RoutePreference,
   avoidSystems?: Set<number>,
   killWeights?: KillWeights,
+  /** Systems for which the default exclusion is bypassed (origin/dest/waypoints
+   *  of the current routing segment). */
+  bypassExclusion?: Set<number>,
 ): () => void {
   const originalWeights = new Map<string, number>();
 
@@ -59,13 +79,20 @@ function applyWeights(
       }
     }
 
+    const srcId = Number(src);
+    const dstId = Number(dst);
+
     // Heavily penalize avoided systems
-    if (avoidSystems) {
-      const srcId = Number(src);
-      const dstId = Number(dst);
-      if (avoidSystems.has(srcId) || avoidSystems.has(dstId)) {
-        weight = 10000;
-      }
+    if (avoidSystems && (avoidSystems.has(srcId) || avoidSystems.has(dstId))) {
+      weight = 10000;
+    }
+
+    // Default-excluded systems (e.g. Zarzakh). Bypassed when the system is
+    // explicitly an endpoint of the current routing segment.
+    const srcExcluded = DEFAULT_EXCLUDED_SYSTEMS.has(srcId) && !(bypassExclusion?.has(srcId));
+    const dstExcluded = DEFAULT_EXCLUDED_SYSTEMS.has(dstId) && !(bypassExclusion?.has(dstId));
+    if (srcExcluded || dstExcluded) {
+      weight = EXCLUDED_SYSTEM_WEIGHT;
     }
 
     if (weight !== 1) {
@@ -96,7 +123,12 @@ export function findRoute(
 
   if (!graph.hasNode(srcKey) || !graph.hasNode(dstKey)) return null;
 
-  const restore = applyWeights(graph, preference, avoidSystems, killWeights);
+  // If origin or dest IS a default-excluded system, allow routing through it.
+  const bypassExclusion = new Set<number>();
+  if (DEFAULT_EXCLUDED_SYSTEMS.has(originId)) bypassExclusion.add(originId);
+  if (DEFAULT_EXCLUDED_SYSTEMS.has(destId)) bypassExclusion.add(destId);
+
+  const restore = applyWeights(graph, preference, avoidSystems, killWeights, bypassExclusion);
 
   try {
     // Use Dijkstra (weighted) so the per-edge weights set by applyWeights
