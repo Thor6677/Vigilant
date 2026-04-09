@@ -666,6 +666,14 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, [gateRoutePlanner.activeRoute, gateRoutePlanner.origin, jumpPlanner.active, jumpPlanner.jumpRoute, jumpPlanner.reachableIds]);
 
+  // Clear route/service highlight when the gate planner panel closes.
+  useEffect(() => {
+    if (!gateRoutePlanner.active) {
+      const sr = systemRendererRef.current;
+      if (sr) sr.setJumpRangeHighlight(null, null);
+    }
+  }, [gateRoutePlanner.active]);
+
   // Push the avoid set to the renderer so the red ❌ overlays appear/update.
   useEffect(() => {
     routeRendererRef.current?.setAvoidSystems(gateRoutePlanner.avoidSystems);
