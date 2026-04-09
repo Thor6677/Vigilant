@@ -207,6 +207,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     if (!jumpPlanner.active) {
       sr.setJumpRangeHighlight(null, null);
       jr.setReachable(null, []);
+      // Same panelHoverRef fix as the gate planner — onPointerLeave won't
+      // fire when the panel DOM element is removed while the cursor is over it.
+      panelHoverRef.current = false;
       return;
     }
 
@@ -671,6 +674,12 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
         sr.setJumpRangeHighlight(null, null);
       }
+      // CRITICAL: reset panelHoverRef. When the user clicks × with their
+      // cursor over the panel, onPointerLeave never fires (the DOM element
+      // is removed before the event can propagate). This leaves the ref
+      // stuck at true, which blocks ALL map hover processing in the
+      // viewport pointermove handler (if (panelHoverRef.current) return).
+      panelHoverRef.current = false;
       return;
     }
 
