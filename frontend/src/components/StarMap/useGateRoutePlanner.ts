@@ -343,11 +343,17 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       })
       .then((data: Record<string, HopIntel>) => {
         if (cancelled) return;
-        const map = new Map<number, HopIntel>();
-        for (const [sidStr, intel] of Object.entries(data)) {
-          map.set(Number(sidStr), intel);
-        }
-        setHopIntel(map);
+        // MERGE new intel into existing rather than replacing. This prevents
+        // the "safest" oscillation: route A → intel for A → route B (avoids A)
+        // → intel for B (loses A's data) → route A again. By accumulating,
+        // the router eventually sees danger on BOTH paths and converges.
+        setHopIntel(prev => {
+          const merged = new Map(prev);
+          for (const [sidStr, intel] of Object.entries(data)) {
+            merged.set(Number(sidStr), intel);
+          }
+          return merged;
+        });
         setHopIntelLoading(false);
       })
       .catch(() => {
@@ -361,16 +367,25 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   }, [routeKey]);
 
   // Build per-system kill weights for the 'safest' preference from the
-  // current hopIntel. Empty until a route has been computed once and intel
-  // has come back. Stable across renders thanks to useMemo.
-  const killWeights = useMemo(() => {
+  // accumulated hopIntel. Uses a string key for stability: the compute
+  // effect only re-runs when the actual PvP values change, not on every
+  // merge that adds 0-kill systems.
+  const killWeightsKey = useMemo(() => {
+    const parts: string[] = [];
+    for (const [sid, intel] of hopIntel) {
+      if (intel.pvp_kills > 0) parts.push(`${sid}:${intel.pvp_kills}`);
+    }
+    return parts.sort().join(',');
+  }, [hopIntel]);
+
+  const stableKillWeights = useMemo(() => {
     const w = new Map<number, number>();
     for (const [sid, intel] of hopIntel) {
-      // Use PvP kills only — NPC kills don't represent player threat.
       if (intel.pvp_kills > 0) w.set(sid, intel.pvp_kills);
     }
     return w;
-  }, [hopIntel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [killWeightsKey]);
 
   // ── Route compute ────────────────────────────────────────────────────────
 
@@ -386,7 +401,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     const fullPath: number[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
       const seg = findRoute(
-        graph, stops[i], stops[i + 1], preference, avoidSystems, killWeights,
+        graph, stops[i], stops[i + 1], preference, avoidSystems, stableKillWeights,
       );
       if (!seg) {
         setActiveRoute(null);
@@ -416,7 +431,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       return fullPath;
     });
     setErrorMessage(null);
-  }, [origin, dest, waypoints, preference, avoidSystems, killWeights, getGraph]);
+  }, [origin, dest, waypoints, preference, avoidSystems, stableKillWeights, getGraph]);
 
   // ── Waypoint helpers ─────────────────────────────────────────────────────
 
