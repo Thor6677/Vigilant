@@ -646,33 +646,52 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   }, [data, updateView, onSystemClick]);
 
   // Sync the gate route planner's computed activeRoute → the Pixi renderer.
-  // Also dim non-route systems so the highlighted path stands out (mirrors
-  // the jump planner's range-highlight effect).
   useEffect(() => {
     const r = routeRendererRef.current;
-    const sr = systemRendererRef.current;
     const route = gateRoutePlanner.activeRoute;
     if (route && route.length >= 2) {
       r?.setRoute(route);
-      // Highlight the route systems, dim everything else
-      sr?.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(route));
     } else {
       r?.clearRoute();
-      // Clear the highlight if there's no active route AND no jump-planner
-      // highlight is currently active
+    }
+  }, [gateRoutePlanner.activeRoute]);
+
+  // Single consolidated highlight effect for the gate route planner.
+  // Derives the correct persistent highlight from the current state so
+  // competing effects can't step on each other:
+  //   panel closed → clear
+  //   route active → highlight route systems
+  //   neither → clear (unless jump planner owns the highlight)
+  useEffect(() => {
+    const sr = systemRendererRef.current;
+    if (!sr) return;
+
+    if (!gateRoutePlanner.active) {
+      // Panel closed — clear gate-planner highlight (don't touch jump planner)
       if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
-        sr?.setJumpRangeHighlight(null, null);
+        sr.setJumpRangeHighlight(null, null);
+      }
+      return;
+    }
+
+    // Panel is open — derive highlight from state
+    const route = gateRoutePlanner.activeRoute;
+    if (route && route.length >= 2) {
+      sr.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(route));
+    } else {
+      // No active route — clear unless jump planner owns highlight
+      if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
+        sr.setJumpRangeHighlight(null, null);
       }
     }
-  }, [gateRoutePlanner.activeRoute, gateRoutePlanner.origin, jumpPlanner.active, jumpPlanner.jumpRoute, jumpPlanner.reachableIds]);
-
-  // Clear route/service highlight when the gate planner panel closes.
-  useEffect(() => {
-    if (!gateRoutePlanner.active) {
-      const sr = systemRendererRef.current;
-      if (sr) sr.setJumpRangeHighlight(null, null);
-    }
-  }, [gateRoutePlanner.active]);
+  }, [
+    gateRoutePlanner.active,
+    gateRoutePlanner.activeRoute,
+    gateRoutePlanner.origin,
+    jumpPlanner.active,
+    jumpPlanner.jumpRoute,
+    jumpPlanner.reachableIds,
+  ]);
 
   // Push the avoid set to the renderer so the red ❌ overlays appear/update.
   useEffect(() => {
