@@ -4,108 +4,153 @@
   <img src="static/logo.png" alt="Vigilant" width="180">
 </p>
 
-An EVE Online dashboard that gives you a unified view of all your characters — wallet, location, industry, orders, skills, mail, and kill history all in one place.
+An EVE Online companion dashboard that gives you a unified view of all your characters — wallet, skills, industry, intel, a full interactive star map, and much more, all in one place.
 
 ![EVE Online](https://img.shields.io/badge/EVE%20Online-ESI-blue)
-![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
+![React](https://img.shields.io/badge/React-TypeScript-61dafb)
+![Pixi.js](https://img.shields.io/badge/Pixi.js-v8-e72264)
 
 ---
 
 ## Features
 
-### Dashboard
-- **Multi-character overview** — character cards with portrait, corp/alliance, online status (green/grey dot), wallet, location, current ship, skill training with progress bars, and sync status
-- **Account grouping** — organize alts into named account groups with drag-and-drop reordering (SortableJS)
+### Dashboard (`/dashboard`)
+- **Multi-character overview** — character cards with portrait, corp/alliance, online status, wallet, location, current ship, skill training with progress bars, and sync status
+- **Account grouping** — organize alts into named account groups with drag-and-drop reordering
 - **Sort modes** — Grouped (custom), Name, Corp, Training, Queue End
 - **Wealth breakdown** — per-character wallet bars with proportion visualization
-- **Automatic background sync** — scheduler refreshes 12 ESI data fields per character on their cache timers (30s–1h); page loads never trigger ESI calls
+- **Automatic background sync** — scheduler refreshes 12 ESI data fields per character on their cache timers (30s-1h); page loads never trigger ESI calls
 - **Aggregated panels** — industry jobs, market orders, jump clones, planetary industry, mail, notifications, contracts, and zKillboard kills all on one page
+- **Alert banners** — persistent banners for structure attacks, fuel alerts, sovereignty events, and critical inventory thresholds
 
-### Character Detail
+### Star Map (`/map`)
+- **Interactive 2D WebGL map** — ~5,485 K-space systems rendered with Pixi.js v8, ~6,984 stargate edges, pan/zoom/pinch with pixi-viewport
+- **Data overlays** — Security status, Jumps, Ship/Pod/NPC Kills, Sovereignty (with alliance names and logos), Faction Warfare, Incursions — bottom bar selector with color legends
+- **System info panel** — security, region, constellation, NPC station count, service badges (Clone/Manufacturing/Lab/Market/Refinery/Repair/Reprocessing/Jump Clone), sovereignty holder, kill/jump stats, DOTLAN and zKillboard links
+- **Gate routing** — shortest path via Graphology with preferences (shortest/highsec/lowsec/nullsec)
+- **Jump drive planner** — capital ship jump calculator with 8 ship classes, JDC/JFC skill levels, route preferences (prefer NPC station, prefer highsec gate), fatigue and fuel calculator, editable midpoints, alternative system lists, range viewer
+- **Search** — find systems, regions, constellations, and services (type "cloning", "factory", "jc" etc. to find nearest service to a character)
+- **Grouping modes** — System/Constellation/Region with expand-in-place
+- **Character locations** — pulsing gold markers at character positions with "Locate Me" button
+- **Live ESI data** — background polling for kills, jumps, sovereignty, faction warfare, and incursions with ETag caching
+
+### Skill Plans (`/skill-plans`)
+- **Create and edit skill plans** — add skills from search, ship requirements, mastery levels, or fittings
+- **Gap analysis** — per-character skill gap with training time estimates
+- **Import/Export** — import from EVE text format, export skill plans, share via public link
+- **Drag-and-drop reorder** — sort by name, optimal training order, or level
+
+### Ship Mastery (`/skill-plans/ship/{id}`)
+- **Full prerequisite tree** — every skill required to fly a ship, expanded recursively
+- **Mastery levels I-V** — CCP's official mastery certificates with progress tracking per character
+
+### Intel
+
+#### Gate Check (`/intel/gatecheck`)
+- **Route safety analysis** — paste or search a route to check for gatecamps and danger
+- **Gatecamp finder** — identifies likely gatecamp systems using zKillboard data
+- **War target detection** — highlights systems with active war targets along your route
+
+#### D-Scan (`/intel/dscan`)
+- **Paste parser** — paste your directional scan results from the EVE client
+- **Ship categorization** — groups results by ship class and type with counts
+- **Shareable results** — generate a link to share D-Scan results with others
+
+### Character Detail (`/character/{id}`)
 - **Wallet history chart** — interactive Chart.js graph with time ranges (1d/5d/1w/1m/6m/1y)
 - **Wallet journal** — last 20 entries inline + "Full Journal" link to dedicated page
-- **Mail reader** — htmx-loaded mail list with click-to-read body and sender name resolution
+- **Skills** — trained skills with remap optimizer, what-if simulator, per-skill comparison
+- **Mail reader** — mail list with click-to-read body and sender name resolution
 - **Notification feed** — parsed notification types with human-readable labels and summaries
 - **Implants & jump clones** — attribute enhancers sorted by slot, hardwirings, per-clone implant sets
 - **Assets** — background-synced asset browser grouped by location
-
-### Skill Planner (`/character/{id}/skills`)
-- **Current attributes** — visual bars with implant bonuses
-- **Optimal remap calculator** — brute-force finds the best attribute distribution for your queue
-- **What-if remap simulator** — 5 attribute sliders, live recalculation of per-skill training times
-- **Per-skill comparison** — current vs proposed time for every queued skill
+- **Corp history** — full employment timeline
 
 ### Fitting Viewer (`/character/{id}/fittings`)
 - **Slot-organized display** — High/Mid/Low/Rig/Subsystem/Drone/Cargo with ship slot counts
 - **Ship render images** — grouped by ship type
 - **EFT export** — "Copy EFT" button for pasting into EVE client or Pyfa
 
-### Blueprint Library (`/character/{id}/blueprints` + `/corporations/{id}/blueprints`)
+### Blueprint Library (`/character/{id}/blueprints`)
 - **BPO/BPC display** — ME/TE research levels, remaining runs for copies
 - **Filters** — All, BPO Only, BPC Only, Unresearched; group by Type or Location
 - **Stats** — total count, originals, copies, researched, fully maxed (ME10/TE20)
-- **Corp blueprints** — corporation blueprint library (requires Director role)
-
-### Mining Ledger (`/character/{id}/mining` + `/corporations/{id}/mining`)
-- **30-day rolling history** — ore/system/daily breakdown with ISK value estimates
-- **Corporation view** — aggregates mining from all your characters in the corp
-- **Visualizations** — per-ore proportion bars, daily activity chart, ISK/day average
-- **Full detail** — expandable table with every individual mining entry
-
-### Wallet Journal (`/character/{id}/journal` + `/corporations/{id}/journal`)
-- **Full journal history** — multi-page fetch with entity name resolution
-- **Category filtering** — Market, Bounties, Industry, Contracts, Insurance, Transfers, Warfare, LP Store
-- **Summary stats** — income/expenses/net with entry count
-- **Corp journal** — 7 wallet divisions with division selector
 
 ### Manufacturing Calculator (`/industry`)
-- **Blueprint search** — htmx-powered search with live results
-- **Full modifier support** — ME (0-10), TE (0-20), Structure (NPC/Raitaru/Azbel/Sotiyo), Rig (T1/T2 Basic/Specialized), Security (Hi/Low/Null)
-- **Nested build/buy** — click "Build" on any component to see its sub-BOM with independent settings; recursive for sub-sub-components
+- **Blueprint search** — live search with full modifier support (ME, TE, structure, rig, security)
+- **Nested build/buy** — click "Build" on any component to see its sub-BOM; recursive for sub-components
 - **Build time estimates** — parallel build (components simultaneous + final assembly), sequential build, per-component times
-- **Build All / Buy All** — one-click toggle to expand all buildable components
-- **Copy Parent Settings** — inherit ME/structure/rig/security from parent blueprint
-- **Shopping list** — aggregated materials with multibuy-compatible copy ("Item Name xQty" format)
+- **Shopping list** — aggregated materials with multibuy-compatible copy
 - **Send to Compressor** — one-click transfer of mineral requirements to the compression calculator
-- **Persistent state** — settings saved in localStorage, Reset button to start fresh
+- **Persistent state** — settings saved in localStorage
 
 ### Compression Calculator (`/industry/compression`)
 - **LP solver** — scipy linear programming finds mathematically optimal compressed ore mix
-- **Three optimization modes** — Lowest ISK, Lowest Volume, Lowest Waste (minimizes surplus minerals)
-- **Character skill integration** — auto-fetches reprocessing skills (Simple/Coherent/Variegated/Complex/Abyssal/Mercoxit processing)
-- **Full reprocessing yield calculation** — structure (NPC/Athanor/Tatara), rig (T1/T2), security multiplier, implant (RX-801/802/804)
+- **Three optimization modes** — Lowest ISK, Lowest Volume, Lowest Waste
+- **Character skill integration** — auto-fetches reprocessing skills
+- **Full reprocessing yield calculation** — structure, rig, security, implant modifiers
 - **Trade hub selection** — Jita, Amarr, Dodixie, Hek, Rens
-- **Results** — ore quantities with prices, minerals produced vs target with surplus, multibuy-compatible copy
-- **Persistent state** — settings and mineral values saved in localStorage
-- **Overwrite warning** — confirms before replacing saved compression state from manufacturing
+
+### Mining Ledger (`/industry/mining-ledger`)
+- **Unified cross-character/corp mining** — aggregated view across all characters and corps
+- **Stacked ore chart** — visual breakdown by ore type over time
+- **Date range filters** — 7d, 30d, 90d, 6m, 1y
+- **Per-character/corp views** also available at `/character/{id}/mining` and `/corporations/{id}/mining`
+
+### Structure Timers (`/structure-timers`)
+- **Shared timer board** — manual entry with countdown or absolute UTC time
+- **ESI auto-detection** — automatically detects structure reinforcement from ESI
+- **Live countdown** — real-time JavaScript countdown timers
+- **ACL groups** — control visibility by corporation, alliance, or individual character
+- **Role-based permissions** — edit and delete access based on user roles
 
 ### Corporation Features
 - **Corp overview** — wallet divisions, industry jobs, market orders, structures (fuel/reinforcement status), contracts, member list
 - **Corp wallet journal** — 7 divisions with full filtering
-- **Corp blueprints** — with ME/TE, location, BPO/BPC filters
+- **Corp blueprints** — ME/TE, location, BPO/BPC filters
 - **Corp mining** — aggregated across all characters with mining scope
+- **Inventory tracker** — monitor corp hangar items with configurable alert thresholds
+
+### Notifications & Alerts
+- **Browser notifications** — bell icon with dropdown for skill completions, industry jobs, PI, mail, structure alerts, and inventory alerts
+- **Structure alert banners** — persistent banners for structure attacks, fuel, sovereignty events, and moonmining. Deduped across characters
+- **Inventory alert banners** — critical corp inventory thresholds shown as persistent banners
+- **Granular muting** — per-type notification muting (structure attacks, fuel, sov, moonmining, POCO independently)
+
+### Admin Panel (`/admin`)
+- **System health** — scheduler status, DB stats, ESI health monitoring
+- **User management** — view and manage users with role assignment (Admin/Manager/User)
+- **Character management** — view all registered characters
+- **SDE management** — trigger Static Data Export reimports
+- **Audit log** — logins, sync errors, admin actions
+- **Registration allowlist** — restrict registration by character, corporation, or alliance
 
 ### Other Features
 - **ESI rate limit monitoring** — real-time dashboard with request activity chart and per-group tracking
 - **Sync diagnostics** — per-field warnings, stale data indicators, manual resync buttons
 - **Server status** — Tranquility online/offline indicator with player count and EVE time (UTC) clock
+- **Cross-character asset search** — search assets across all your characters from `/assets`
 
- (Local)
+---
+
+## Quick Start (Local)
 
 ### Prerequisites
 
-- **Python 3.11+** — [python.org](https://www.python.org/)
+- **Python 3.12+** — [python.org](https://www.python.org/downloads/)
+- **Node.js 22+** — [nodejs.org](https://nodejs.org/) (needed to build the star map frontend)
 - **An EVE Online developer application** — [create one here](https://developers.eveonline.com/)
   - Set the callback URL to `http://localhost:8000/auth/callback`
   - You will need the **Client ID** and **Client Secret**
 
-### Installation & Setup
+### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/vigilant.git
-cd vigilant
+git clone https://github.com/Thor6677/Vigilant.git
+cd Vigilant
 
 # Run the startup script
 ./start.sh
@@ -113,147 +158,286 @@ cd vigilant
 
 The `start.sh` script will:
 
-1. **Check for `.env` file** — Creates one from `.env.example` if it doesn't exist
-2. **Generate `SECRET_KEY`** — Auto-generates a secure session signing key
-3. **Prompt for EVE credentials** — Asks for your EVE SSO Client ID and Secret if they're not configured
-4. **Set up Python environment** — Creates a virtual environment and installs dependencies
-5. **Launch Vigilant** — Starts the server in the background
-6. **Verify startup** — Waits for the app to confirm it's listening before returning
+1. Create a `.env` file from `.env.example` if one doesn't exist
+2. Auto-generate a secure `SECRET_KEY`
+3. Prompt you for your EVE SSO Client ID and Secret
+4. Create a Python virtual environment and install dependencies
+5. Launch Vigilant in the background
+6. Wait for the app to confirm it's listening
 
 Vigilant will be available at **http://localhost:8000** once startup is complete.
 
-#### View Logs
+> **Note:** The local startup script runs the Python backend directly. The star map (`/map`) requires the React frontend to be built separately. To build it locally: `cd frontend && npm ci && npm run build`. The Docker deployment handles this automatically.
+
+### View Logs
 
 ```bash
-# Stream all logs
 tail -f vigilant.log
-
-# Filter for errors and warnings only
-tail -f vigilant.log | grep -i 'error\|warning\|critical'
 ```
 
-#### Stop the App
+### Stop
 
 ```bash
 ./stop.sh
 ```
 
-Or manually:
-```bash
-kill $(cat vigilant.pid)
-```
-
 ---
 
-## Detailed Setup
+## VPS / Server Deployment (Docker)
 
-### 1. EVE Online Developer Application
+This section walks you through deploying Vigilant on a VPS (Virtual Private Server) from scratch. If you've never set up a server before, follow each step — everything you need is covered here.
 
-1. Go to [https://developers.eveonline.com/](https://developers.eveonline.com/)
-2. Log in with your EVE Online account (or create one)
-3. Click **"Applications"** → **"Create New Application"**
-4. Fill in the form:
-   - **Application Name**: `Vigilant` (or your preferred name)
-   - **Description**: Personal EVE character dashboard
-   - **Connection Type**: Select **"Authentication & API Access"**
-   - **Permissions**: Select the scope level (see [EVE SSO Scopes](#eve-sso-scopes) below)
-5. Set the **Callback URL** to `http://localhost:8000/auth/callback`
-6. Create the application and copy your **Client ID** and **Client Secret**
+### What You'll Need
 
-For local/personal use with Vigilant, you can use a broad scope. For VPS deployment, consider restricting to specific scopes for security.
+- A **VPS** from any provider (DigitalOcean, Linode, Hetzner, Vultr, etc.) running **Ubuntu 24.04**
+  - Minimum: 1 CPU, 1 GB RAM, 25 GB disk
+  - Recommended: 2 CPU, 2 GB RAM (the star map build uses some memory)
+- A **domain name** pointed at your VPS IP address (e.g., `vigilant.yourdomain.com`)
+- An **EVE Online developer application** — [create one here](https://developers.eveonline.com/)
+  - Set the callback URL to `https://vigilant.yourdomain.com/auth/callback` (use your actual domain)
 
-### 2. Configure `.env`
+### Step 1: Get a VPS
 
-The `start.sh` script will prompt you for credentials interactively, but you can also manually edit `.env`:
+If you don't have a VPS yet:
+
+1. Sign up at a provider like [DigitalOcean](https://www.digitalocean.com/), [Linode](https://www.linode.com/), [Hetzner](https://www.hetzner.com/cloud/), or [Vultr](https://www.vultr.com/)
+2. Create an Ubuntu 24.04 server (called a "Droplet" on DigitalOcean, "Linode" on Linode, etc.)
+3. Choose the cheapest plan that meets the minimum specs above
+4. During creation, add your SSH key (or the provider will email you a root password)
+
+**Connecting to your VPS:**
+```bash
+# From your local terminal (replace with your VPS IP)
+ssh root@YOUR_VPS_IP
+```
+
+If you're on Windows, use [Windows Terminal](https://aka.ms/terminal) with the built-in SSH client, or [PuTTY](https://www.putty.org/).
+
+### Step 2: Set Up the Server
+
+Once connected to your VPS, run the included setup script:
 
 ```bash
-# .env file (required)
+# Download and run the setup script (as root)
+curl -fsSL https://raw.githubusercontent.com/Thor6677/Vigilant/main/setup_vps.sh -o setup_vps.sh
+chmod +x setup_vps.sh
+./setup_vps.sh
+```
+
+This installs Docker, Docker Compose, git, and creates a `vigilant` system user with the app directory at `/opt/vigilant`.
+
+### Step 3: Point Your Domain
+
+Before getting an SSL certificate, your domain needs to point to your VPS:
+
+1. Go to your domain registrar's DNS settings (Cloudflare, Namecheap, etc.)
+2. Add an **A record**:
+   - **Name**: `vigilant` (or whatever subdomain you want)
+   - **Value**: Your VPS IP address
+   - **TTL**: Auto or 300
+3. Wait a few minutes for DNS to propagate. You can check with:
+   ```bash
+   dig vigilant.yourdomain.com
+   ```
+
+### Step 4: Get an SSL Certificate
+
+Vigilant requires HTTPS. You have two options:
+
+#### Option A: Let's Encrypt (free, auto-renewing)
+
+```bash
+# Make sure port 80 is free, then run (as root):
+docker run --rm -p 80:80 -v /opt/vigilant/nginx/ssl:/etc/letsencrypt certbot/certbot certonly \
+  --standalone \
+  -d vigilant.yourdomain.com \
+  --email your@email.com \
+  --agree-tos
+
+# Copy certs to the expected location
+cp /opt/vigilant/nginx/ssl/live/vigilant.yourdomain.com/fullchain.pem /opt/vigilant/nginx/ssl/origin.pem
+cp /opt/vigilant/nginx/ssl/live/vigilant.yourdomain.com/privkey.pem /opt/vigilant/nginx/ssl/origin.key
+```
+
+#### Option B: Cloudflare Origin Certificate (if using Cloudflare proxy)
+
+1. In Cloudflare dashboard, go to **SSL/TLS** > **Origin Server**
+2. Create a certificate for your domain
+3. Save the certificate and key to your VPS:
+   ```bash
+   mkdir -p /opt/vigilant/nginx/ssl
+   nano /opt/vigilant/nginx/ssl/origin.pem   # Paste the certificate
+   nano /opt/vigilant/nginx/ssl/origin.key    # Paste the private key
+   ```
+
+### Step 5: Clone and Configure
+
+```bash
+# Switch to the vigilant user
+su - vigilant
+
+# Clone the repository
+git clone https://github.com/Thor6677/Vigilant.git /opt/vigilant
+cd /opt/vigilant
+
+# Create your config file
+cp .env.example .env
+nano .env
+```
+
+Edit `.env` with your settings:
+```bash
 EVE_CLIENT_ID=your_eve_client_id
 EVE_CLIENT_SECRET=your_eve_client_secret
-EVE_CALLBACK_URL=http://localhost:8000/auth/callback
-SECRET_KEY=auto-generated-by-start-sh
-DATABASE_URL=sqlite+aiosqlite:///./vigilant.db
+EVE_CALLBACK_URL=https://vigilant.yourdomain.com/auth/callback
+SECRET_KEY=generate_a_random_key_see_below
 DEBUG=false
 ```
 
-All configuration is read from `.env` at startup. Never commit `.env` to git.
+Generate a secure `SECRET_KEY`:
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+```
 
-### 3. Authentication
+### Step 6: Update the Nginx Config
 
-1. Start Vigilant: `./start.sh`
-2. Navigate to **http://localhost:8000**
-3. Click **"Add Character"** or the EVE SSO button
-4. You'll be redirected to EVE's login page
-5. Authorize Vigilant to access your character
-6. You'll be returned to the app with your character added
+The included nginx config references a specific domain. Update it to match yours:
 
-Characters are stored in the SQLite database. Each character has its own authentication token, which is refreshed as needed.
+```bash
+nano /opt/vigilant/nginx/vigilant.conf
+```
+
+Replace `vigilant.thunderborn.dev` with your domain on the `server_name` lines (there are two `server` blocks — update both).
+
+### Step 7: Deploy
+
+```bash
+cd /opt/vigilant
+docker compose up -d --build
+```
+
+The first build takes a few minutes (it installs Python dependencies, builds the React frontend, and pulls the nginx image). Subsequent builds are faster thanks to Docker's layer cache.
+
+**Verify everything is working:**
+```bash
+# Check containers are running
+docker compose ps
+
+# Check app logs for errors
+docker compose logs app
+
+# Validate nginx config
+docker exec vigilant-nginx-1 nginx -t
+```
+
+Visit `https://vigilant.yourdomain.com` — you should see the login page.
+
+### Managing Your Deployment
+
+```bash
+# View live logs
+docker compose logs -f
+
+# View just app logs
+docker compose logs -f app
+
+# Restart (does NOT apply code changes)
+docker compose restart
+
+# Rebuild and redeploy (REQUIRED for code changes)
+docker compose down && docker compose up -d --build
+
+# Stop everything
+docker compose down
+```
+
+> **Important:** `docker compose restart` does NOT apply code or template changes. Always use `docker compose down && docker compose up -d --build` after pulling new code.
+
+### Updating to a New Version
+
+```bash
+cd /opt/vigilant
+git pull origin main
+docker compose down && docker compose up -d --build
+```
+
+The app automatically migrates the database schema on startup.
 
 ---
 
-## Configuration
+## EVE Online Developer Application Setup
 
-All settings are read from `.env`. Here's a complete reference:
+1. Go to [developers.eveonline.com](https://developers.eveonline.com/)
+2. Log in with your EVE Online account
+3. Click **"Applications"** > **"Create New Application"**
+4. Fill in the form:
+   - **Application Name**: `Vigilant` (or any name you like)
+   - **Description**: Personal EVE character dashboard
+   - **Connection Type**: **Authentication & API Access**
+   - **Permissions**: Select all scopes listed in [ESI Scopes](#esi-scopes) below
+5. Set the **Callback URL**:
+   - Local: `http://localhost:8000/auth/callback`
+   - VPS: `https://vigilant.yourdomain.com/auth/callback`
+6. Create the application and save your **Client ID** and **Client Secret**
+
+---
+
+## Configuration Reference
+
+All settings are read from `.env`:
 
 | Variable | Default | Description |
 |---|---|---|
 | `EVE_CLIENT_ID` | *(required)* | EVE SSO application client ID |
 | `EVE_CLIENT_SECRET` | *(required)* | EVE SSO application client secret |
-| `EVE_CALLBACK_URL` | `http://localhost:8000/auth/callback` | OAuth callback URL — must match your ESI app config |
-| `SECRET_KEY` | *(auto-generated)* | Session cookie signing key — generated by `start.sh` if not present |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./vigilant.db` | SQLite database path |
-| `DEBUG` | `false` | Enable FastAPI debug mode and `/api/docs` endpoint |
-
-### Environment-Specific Notes
-
-**Local development:**
-- Use `DEBUG=true` to enable FastAPI docs and see verbose logs
-- `EVE_CALLBACK_URL` should be `http://localhost:8000/auth/callback`
-
-**VPS/Server deployment:**
-- Use `DEBUG=false` in production
-- Set `EVE_CALLBACK_URL` to your public domain (e.g., `https://vigilant.example.com/auth/callback`)
-- Set `SECRET_KEY` to a strong random value (use `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
-- Use HTTPS for all endpoints
+| `EVE_CALLBACK_URL` | `http://localhost:8000/auth/callback` | OAuth callback URL — must match your ESI app |
+| `SECRET_KEY` | *(auto-generated locally)* | Session and token encryption key |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./vigilant.db` | Database path (Docker overrides to `/data/vigilant.db`) |
+| `DEBUG` | `false` | Enables FastAPI docs at `/api/docs` and verbose logging |
 
 ---
 
-## EVE SSO Scopes
+## ESI Scopes
 
-Vigilant requests the following ESI scopes when you authenticate a character:
+Vigilant requests the following ESI scopes when authenticating a character:
+
+<details>
+<summary>Click to expand full scope list</summary>
 
 | Scope | Purpose |
 |---|---|
 | `esi-wallet.read_character_wallet.v1` | Wallet balance and journal |
 | `esi-location.read_location.v1` | Current system location |
 | `esi-location.read_ship_type.v1` | Current ship type |
+| `esi-location.read_online.v1` | Character online status |
 | `esi-assets.read_assets.v1` | Character assets |
-| `esi-industry.read_character_jobs.v1` | Industry jobs (manufacturing, research, etc.) |
+| `esi-industry.read_character_jobs.v1` | Industry jobs |
 | `esi-clones.read_clones.v1` | Clone locations |
 | `esi-clones.read_implants.v1` | Implant data |
-| `esi-markets.read_character_orders.v1` | Buy/sell orders |
-| `esi-mail.read_mail.v1` | Mail headers and labels |
+| `esi-markets.read_character_orders.v1` | Market orders |
+| `esi-mail.read_mail.v1` | Mail headers and bodies |
 | `esi-characters.read_notifications.v1` | In-game notifications |
 | `esi-contracts.read_character_contracts.v1` | Contracts |
 | `esi-planets.manage_planets.v1` | Planetary interaction data |
 | `esi-skills.read_skillqueue.v1` | Skill queue |
-| `esi-characters.read_corporation_roles.v1` | Determine if character holds corp roles |
-| `esi-corporations.read_corporation_membership.v1` | Corporation member list |
-| `esi-wallet.read_corporation_wallets.v1` | Corporation wallet divisions |
-| `esi-industry.read_corporation_jobs.v1` | Corporation industry jobs |
-| `esi-markets.read_corporation_orders.v1` | Corporation market orders |
-| `esi-corporations.read_structures.v1` | Corporation structures |
-| `esi-contracts.read_corporation_contracts.v1` | Corporation contracts |
-| `esi-assets.read_corporation_assets.v1` | Corporation assets |
-| `esi-location.read_online.v1` | Character online status |
+| `esi-skills.read_skills.v1` | Trained skills and attributes |
 | `esi-fittings.read_fittings.v1` | Saved ship fittings |
 | `esi-characters.read_blueprints.v1` | Character blueprints |
-| `esi-corporations.read_blueprints.v1` | Corporation blueprints |
+| `esi-characters.read_corporation_roles.v1` | Corporation role check |
 | `esi-industry.read_character_mining.v1` | Mining ledger |
-| `esi-industry.read_corporation_mining.v1` | Corporation mining observers |
-| `esi-skills.read_skills.v1` | Trained skills and attributes |
+| `esi-corporations.read_corporation_membership.v1` | Corp member list |
+| `esi-wallet.read_corporation_wallets.v1` | Corp wallet divisions |
+| `esi-industry.read_corporation_jobs.v1` | Corp industry jobs |
+| `esi-markets.read_corporation_orders.v1` | Corp market orders |
+| `esi-corporations.read_structures.v1` | Corp structures |
+| `esi-contracts.read_corporation_contracts.v1` | Corp contracts |
+| `esi-assets.read_corporation_assets.v1` | Corp assets |
+| `esi-corporations.read_blueprints.v1` | Corp blueprints |
+| `esi-industry.read_corporation_mining.v1` | Corp mining observers |
 
-Character-level scopes are always requested. Corporation-level scopes are only usable if EVE SSO grants them based on the character's in-game roles. You can view CCP's scope documentation at [EVE Swagger Interface Docs](https://esi.evetech.net/).
+</details>
+
+Character-level scopes are always requested. Corporation-level scopes are only usable if the character has the required in-game roles (e.g., Director). See [ESI documentation](https://esi.evetech.net/) for details.
 
 ---
 
@@ -261,299 +445,144 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 
 | Route | Description |
 |---|---|
-| `/dashboard` | Main dashboard — character cards, grouping, wealth breakdown, all summary panels |
-| `/character/{id}` | Character detail — wallet chart, journal, skills, implants, clones, assets, mail, notifications |
-| `/character/{id}/journal` | Full wallet journal with category filtering and pagination |
-| `/character/{id}/skills` | Skill planner with attribute remap optimizer |
+| `/dashboard` | Main dashboard with character cards, grouping, wealth, summary panels |
+| `/map` | Interactive star map with overlays, routing, jump planner |
+| `/skill-plans` | Skill plan manager with create/edit/share/gap analysis |
+| `/skill-plans/ship/{id}` | Ship mastery viewer with prereq tree |
+| `/intel/gatecheck` | Route safety checker with gatecamp and war target detection |
+| `/intel/dscan` | D-Scan paste parser with ship categorization |
+| `/structure-timers` | Shared structure timer board with ACL |
+| `/industry` | Manufacturing calculator with nested build/buy |
+| `/industry/compression` | Compression calculator with LP solver |
+| `/industry/mining-ledger` | Unified cross-character/corp mining ledger |
+| `/character/{id}` | Character detail — wallet, skills, mail, notifications, assets |
+| `/character/{id}/journal` | Full wallet journal with category filtering |
+| `/character/{id}/skills` | Skill remap optimizer and what-if simulator |
 | `/character/{id}/fittings` | Ship fitting viewer with EFT export |
-| `/character/{id}/blueprints` | Blueprint library (BPO/BPC, ME/TE, filters) |
-| `/character/{id}/mining` | Mining ledger with ore/system/daily breakdown |
+| `/character/{id}/blueprints` | Blueprint library with ME/TE and filters |
+| `/character/{id}/mining` | Character mining ledger |
 | `/assets` | Cross-character asset search |
-| `/corporations/{id}` | Corporation overview (wallet, structures, jobs, orders, members) |
+| `/corporations/{id}` | Corp overview — wallet, structures, jobs, orders, members |
 | `/corporations/{id}/journal` | Corp wallet journal (7 divisions) |
 | `/corporations/{id}/blueprints` | Corp blueprint library |
-| `/corporations/{id}/mining` | Corp aggregated mining ledger |
-| `/industry` | Manufacturing calculator with nested build/buy and build times |
-| `/industry/compression` | Compression calculator with LP solver |
+| `/corporations/{id}/mining` | Corp mining ledger |
 | `/status` | ESI rate limits, sync health, request activity |
-
----
-
-## Docker / VPS Deployment
-
-Vigilant includes Docker configuration for server deployment.
-
-### Prerequisites for Docker Deployment
-
-- Docker and Docker Compose installed
-- A public domain or IP address
-- An HTTPS certificate (use Let's Encrypt with nginx reverse proxy)
-
-### Deployment Steps
-
-1. **Copy environment template:**
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Edit `.env` with your production settings:**
-   ```bash
-   EVE_CLIENT_ID=your_eve_client_id
-   EVE_CLIENT_SECRET=your_eve_client_secret
-   EVE_CALLBACK_URL=https://vigilant.example.com/auth/callback
-   SECRET_KEY=your-secure-random-key
-   DATABASE_URL=sqlite+aiosqlite:///./vigilant.db
-   DEBUG=false
-   ```
-
-3. **Start with Docker Compose:**
-   ```bash
-   docker compose up -d
-   ```
-
-4. **View logs:**
-   ```bash
-   docker compose logs -f
-   ```
-
-5. **Stop:**
-   ```bash
-   docker compose down
-   ```
-
-### Using `setup_vps.sh`
-
-A helper script is provided for fresh Ubuntu 24.04 VPS setup (run as root):
-
-```bash
-chmod +x setup_vps.sh
-./setup_vps.sh
-```
-
-This will:
-- Install Docker and Docker Compose
-- Install git
-- Create a `vigilant` system user
-- Create `/opt/vigilant` and set ownership
-
-After running it, follow the printed next steps to clone the repo, configure `.env`, obtain an SSL certificate, and start the app.
-
----
-
-## FAQ
-
-### General Questions
-
-**Q: Is my data safe?**
-
-A: Vigilant stores data locally on your machine or server. ESI access and refresh tokens are encrypted at rest in the SQLite database using Fernet symmetric encryption (AES-128-CBC), with a key derived from your `SECRET_KEY` via PBKDF2-SHA256. Session cookies are signed with `SECRET_KEY`. For production, use HTTPS and a strong, randomly generated `SECRET_KEY`.
-
-**Q: Can I use Vigilant with multiple characters?**
-
-A: Yes. You can authenticate multiple characters by clicking "Add Character" and going through the EVE SSO flow again. Characters are grouped and managed from the `/characters` page.
-
-**Q: How often is data refreshed?**
-
-A: The app uses ESI's recommended cache times:
-- Location: 30 seconds
-- Wallet: 2 minutes
-- Skills: 5 minutes
-- Industry: 2 minutes
-- Markets: 5 minutes
-- Clones/Implants: 1 hour
-- Mail: 30 seconds
-
-Background sync runs every 60 seconds, refreshing fields whose cache has expired.
-
-**Q: Does this violate EVE Online's Terms of Service?**
-
-A: No. Vigilant is a personal dashboard that uses only official ESI endpoints. It doesn't automate gameplay or interact with the EVE client — it simply provides a better view of your character data. All functionality uses official APIs and complies with CCP's guidelines.
-
-**Q: Can I host Vigilant on a VPS?**
-
-A: Yes. Use the Docker deployment steps above. Make sure to:
-- Use HTTPS with a valid certificate
-- Set `EVE_CALLBACK_URL` to your public domain
-- Keep your `.env` secure (don't share or commit to git)
-
-### Troubleshooting
-
-**Q: Vigilant won't start ("App did not confirm startup within 10 seconds")**
-
-A: Check the logs:
-```bash
-tail -30 vigilant.log
-```
-
-Common causes:
-- Python version too old (need 3.11+)
-- Missing dependencies (run `pip install -r requirements.txt` in `.venv`)
-- Port 8000 already in use (change `--port` in `start.sh` or kill the other process)
-- Database locked (delete `vigilant.db` and restart)
-
-**Q: "connection refused" when accessing http://localhost:8000**
-
-A: The app may not be running. Check:
-```bash
-ps aux | grep uvicorn
-cat vigilant.log  # Check for startup errors
-./start.sh           # Start it again
-```
-
-**Q: ESI data isn't updating**
-
-A: Check the `/status` page:
-- Look for warnings in the sync table
-- Check ESI rate limit usage
-- Check character authentication status
-
-If a character has an expired token, click the "Re-authenticate" link on the dashboard.
-
-**Q: How do I remove a character?**
-
-A: Go to `/characters` and click the remove (X) button next to the character. This will:
-- Delete the character from your database
-- Remove stored tokens
-- Remove cached ESI data
-
-**Q: Can I change my EVE SSO credentials?**
-
-A: Yes. Edit `.env` and update `EVE_CLIENT_ID` and `EVE_CLIENT_SECRET`, then restart the app.
-
-**Q: Database file got corrupted ("database disk image malformed")**
-
-A: Delete the `.db` file and restart:
-```bash
-rm vigilant.db
-./start.sh
-```
-
-You'll need to re-authenticate your characters.
-
-**Q: How do I upgrade to a new version?**
-
-A: Pull the latest code and restart:
-```bash
-./stop.sh
-git pull origin main
-./start.sh
-```
-
-The app will automatically migrate the database schema if needed.
+| `/admin` | Admin panel — health, users, SDE, audit log (admin/manager only) |
 
 ---
 
 ## Security
 
-### Authentication & Authorization
+### Authentication & Encryption
 
-- **EVE Online SSO** — Login is handled entirely by CCP's official OAuth2 SSO. No passwords are stored by Vigilant.
-- **User isolation** — Every database query is scoped to the authenticated user's `user_id`. One user cannot access another user's characters, assets, or ESI data.
-- **Character ownership** — A character already claimed by one account cannot be added to another.
-- **State validation** — OAuth callbacks validate a CSRF-like state token stored in the session to prevent redirect hijacking.
+- **EVE Online SSO** — login handled entirely by CCP's official OAuth2. No passwords stored.
+- **Token encryption** — ESI access and refresh tokens are encrypted at rest using Fernet (AES-128-CBC + HMAC-SHA256), with the key derived from `SECRET_KEY` via PBKDF2-SHA256 (100k iterations).
+- **User isolation** — every database query is scoped to the authenticated user. One user cannot access another's data.
+- **Session security** — signed cookies via `itsdangerous`, `HttpOnly`, `SameSite=Lax`, `Secure` in production, 30-day expiry.
+- **State validation** — OAuth callbacks validate a CSRF state token to prevent redirect hijacking.
 
-### ESI Token Encryption (At Rest)
+### Transport & Docker Hardening
 
-ESI access tokens and refresh tokens are encrypted in the SQLite database using **Fernet symmetric encryption** (AES-128-CBC with HMAC-SHA256 authentication):
-
-- The encryption key is derived from your `SECRET_KEY` using **PBKDF2-SHA256** (100,000 iterations) with a fixed application salt.
-- Encryption and decryption are transparent — implemented as a SQLAlchemy `TypeDecorator` on the `access_token` and `refresh_token` columns. No application code outside `app/db/encryption.py` handles raw token bytes.
-- On startup, any plaintext tokens from older versions are detected and automatically encrypted in-place.
-- **Important:** If `SECRET_KEY` changes, all stored tokens become unreadable. Users would need to re-authenticate via EVE SSO. Never change `SECRET_KEY` in a running deployment without first decrypting tokens.
-
-### Session Security
-
-- Sessions are signed with `SECRET_KEY` using `itsdangerous` (via Starlette's `SessionMiddleware`).
-- Session cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` (HTTPS-only in production).
-- Sessions expire after 30 days.
-- `SECRET_KEY` is auto-generated by `start.sh` if not set — use a minimum of 32 random bytes for production.
-
-### Transport Security (HTTPS)
-
-The included nginx configuration enforces:
-- HTTP → HTTPS redirect (301)
-- TLS 1.2 and 1.3 only
-- `Strict-Transport-Security` (HSTS, 1 year)
-- `X-Frame-Options: DENY`
-- `X-Content-Type-Options: nosniff`
-
-### Docker Hardening
-
-The production Docker container runs with:
-- `read_only: true` filesystem
-- `no-new-privileges: true`
-- `cap_drop: ALL`
-- Memory (512MB), CPU (0.5), and PID limits
-- No host-mounted volumes for application code
+- **HTTPS enforced** — nginx redirects HTTP to HTTPS, TLS 1.2/1.3 only, HSTS (1 year)
+- **Security headers** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
+- **Container hardening** — read-only filesystem, `no-new-privileges`, `cap_drop: ALL`, memory/CPU/PID limits
 
 ### Production Checklist
 
-1. **HTTPS** — use a valid TLS certificate; set `EVE_CALLBACK_URL` to your `https://` domain
-2. **`SECRET_KEY`** — generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"` and never change it while the database has active users
-3. **`.env` permissions** — `chmod 600 .env`; never commit to git
-4. **Database backups** — the SQLite file (`/data/vigilant.db` in Docker) should be backed up regularly
-5. **`DEBUG=false`** — disables the `/api/docs` endpoint in production
+1. Use HTTPS with a valid TLS certificate
+2. Generate a strong `SECRET_KEY` and never change it while the database has active users
+3. Set `.env` permissions: `chmod 600 .env`
+4. Never commit `.env` to git
+5. Set `DEBUG=false` in production
+6. Back up the SQLite database regularly (`/data/vigilant.db` in Docker)
 
 ### Data Privacy
 
-- **Your character data is stored locally** — not sent to external servers (except EVE's ESI and zKillboard for public kill data)
-- **No telemetry or analytics** — Vigilant doesn't track usage or send data anywhere
-- **Open source** — all code is transparent and auditable
-
-### Reporting Security Issues
-
-If you discover a security vulnerability, **do not open a public issue**. Instead:
-1. Email the project maintainer with details
-2. Provide time for a patch before public disclosure
-3. Do not exploit the vulnerability for personal gain
+- Your data is stored on your own server — not sent to external servers (except EVE's ESI and zKillboard for public kill data)
+- No telemetry or analytics
+- Fully open source and auditable
 
 ---
 
 ## Tech Stack
 
-- **Backend**: FastAPI, SQLAlchemy (async/aiosqlite), Uvicorn, scipy (LP solver)
-- **Frontend**: Jinja2 templates, HTMX, Tailwind CSS (CDN), Chart.js
-- **Data**: EVE ESI REST API, zKillboard API, EVE SDE (Static Data Export)
-- **DevOps**: Docker, Docker Compose, systemd (optional)
+| Layer | Technology |
+|---|---|
+| **Backend** | FastAPI, SQLAlchemy (async), aiosqlite, Uvicorn, scipy (LP solver) |
+| **Templates** | Jinja2, htmx, Tailwind CSS (CDN), Chart.js |
+| **Star Map** | React, TypeScript, Vite, Pixi.js v8 (WebGL), pixi-viewport, d3-quadtree, Graphology |
+| **Data** | EVE ESI REST API, zKillboard API, EVE SDE (Static Data Export) |
+| **Deployment** | Docker, Docker Compose, Nginx (reverse proxy + TLS) |
+
+---
+
+## FAQ
+
+**Is my data safe?**
+Yes. All data is stored on your own machine or server. ESI tokens are encrypted at rest. Use HTTPS and a strong `SECRET_KEY` in production.
+
+**Can I use Vigilant with multiple characters?**
+Yes. Click "Add Character" and authenticate through EVE SSO. You can add as many characters as you want and organize them into account groups.
+
+**How often is data refreshed?**
+The background sync runs every 60 seconds, respecting ESI cache timers: location (30s), wallet (2m), skills (5m), industry (2m), markets (5m), clones/implants (1h).
+
+**Does this violate EVE Online's Terms of Service?**
+No. Vigilant uses only official ESI endpoints. It doesn't automate gameplay or interact with the EVE client.
+
+**How do I remove a character?**
+Go to `/characters` and click the remove button next to the character.
+
+**How do I access the admin panel?**
+The first user to register is automatically an admin. Admins can promote other users to Manager or Admin roles from `/admin`.
+
+---
+
+## Troubleshooting
+
+**App won't start:**
+```bash
+# Local
+tail -30 vigilant.log
+
+# Docker
+docker compose logs app
+```
+Common causes: Python too old (need 3.12+), port 8000 in use, missing `.env` values.
+
+**ESI data not updating:**
+Check the `/status` page for sync errors and rate limit usage. If a character's token is expired, re-authenticate from the dashboard.
+
+**Star map shows a black screen:**
+After deploying, do a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`). Cached HTML can reference stale asset hashes.
+
+**"502 Bad Gateway" on VPS:**
+The app container may still be starting. Check `docker compose logs app` — the first startup can take a minute to initialize the SDE import.
+
+**Database corruption ("database disk image malformed"):**
+Delete the database and restart. You'll need to re-authenticate characters:
+```bash
+# Local
+rm vigilant.db && ./start.sh
+
+# Docker
+docker compose down
+docker volume rm vigilant_app_data
+docker compose up -d --build
+```
 
 ---
 
 ## Contributing
 
-Vigilant is open source and contributions are welcome:
+Contributions are welcome:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-Please include tests and update documentation for new features.
+4. Push and open a Pull Request
 
 ---
 
 ## License
 
-Vigilant is an independent project. EVE Online and all related assets are property of CCP Games.
-
-The Vigilant code is provided as-is. Use at your own risk.
-
----
-
-## Troubleshooting Tips
-
-- **Check logs frequently**: `tail -f vigilant.log`
-- **Monitor the `/status` page** for sync errors and ESI rate limits
-- **Test EVE SSO**: Log into [https://esi.evetech.net/](https://esi.evetech.net/) to verify your app is registered
-- **Verify Python version**: `python --version` (must be 3.11+)
-- **Clean reinstall**: `rm -rf .venv vigilant.db && ./start.sh`
-
----
-
-## Getting Help
-
-- Check the [FAQ](#faq) section above
-- Review logs in `vigilant.log`
-- Check the `/status` page for sync errors
-- Open an issue on GitHub with logs and error details
-
-**Vigilant is not affiliated with or endorsed by CCP Games.**
+Vigilant is an independent project provided as-is. EVE Online and all related assets are property of CCP Games. Vigilant is not affiliated with or endorsed by CCP Games.
