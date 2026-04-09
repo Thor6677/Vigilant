@@ -19,6 +19,8 @@ export class SystemRenderer {
 
   // Neighbor highlight state
   private highlightedNeighbors: Set<number> | null = null;
+  private persistentHighlightOrigin: number | null = null;
+  private persistentHighlightIds: Set<number> | null = null;
   private targetAlphas = new Map<number, number>(); // for smooth transitions
 
   // Selection ring
@@ -138,16 +140,17 @@ export class SystemRenderer {
     }
   }
 
-  /** Highlight hovered system + its neighbors, dim everything else. */
+  /** Highlight hovered system + its neighbors, dim everything else.
+   *  When cleared (null), restores the persistent highlight if one is active
+   *  rather than setting everything to alpha 1.0. */
   setHoverHighlight(systemId: number | null, neighborIds: Set<number> | null) {
     if (systemId === null || neighborIds === null) {
-      // Restore all to full alpha (smoothly)
       if (this.highlightedNeighbors !== null) {
-        for (const sys of this.systems) {
-          this.targetAlphas.set(sys.id, 1);
-        }
+        this.highlightedNeighbors = null;
+        // Restore to the persistent highlight (route/planner) if one exists,
+        // otherwise restore everything to full alpha.
+        this._applyPersistentHighlight();
       }
-      this.highlightedNeighbors = null;
       return;
     }
 
@@ -162,21 +165,31 @@ export class SystemRenderer {
     }
   }
 
-  /** Highlight a set of systems (for jump planner), dim everything else. */
+  /** Highlight a set of systems (for jump/gate planner), dim everything else.
+   *  This is a "persistent" highlight that survives hover events. */
   setJumpRangeHighlight(originId: number | null, highlightIds: Set<number> | null) {
-    if (highlightIds === null || highlightIds.size === 0) {
-      // Restore alphas smoothly
+    this.persistentHighlightOrigin = originId;
+    this.persistentHighlightIds = highlightIds;
+    // Only apply if no hover is active — hover takes visual priority
+    if (this.highlightedNeighbors === null) {
+      this._applyPersistentHighlight();
+    }
+  }
+
+  /** Internal: apply the stored persistent highlight, or restore all to 1. */
+  private _applyPersistentHighlight() {
+    const ids = this.persistentHighlightIds;
+    const origin = this.persistentHighlightOrigin;
+    if (ids === null || ids.size === 0) {
       for (const sys of this.systems) {
         this.targetAlphas.set(sys.id, 1);
       }
       return;
     }
-
     for (const sys of this.systems) {
-      if (sys.id === originId || highlightIds.has(sys.id)) {
+      if (sys.id === origin || ids.has(sys.id)) {
         this.targetAlphas.set(sys.id, 1);
       } else {
-        // Keep systems visible enough to see sec colors
         this.targetAlphas.set(sys.id, 0.25);
       }
     }
