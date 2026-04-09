@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { SystemData, RoutePreference } from '../types';
 import type {
   GateRoutePlannerState,
@@ -64,6 +64,17 @@ export function GateRoutePlannerPanel({
   const [saveName, setSaveName] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
+
+  // Clear highlight when this panel unmounts (closes) so the map returns to
+  // normal hover behavior. Without this, any service-filter or route highlight
+  // persists after close because onHighlightSystems was called during a
+  // previous render and nothing clears it on unmount.
+  useEffect(() => {
+    return () => {
+      onHighlightSystems(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stops: number[] = planner.origin !== null && planner.dest !== null
     ? [planner.origin, ...planner.waypoints, planner.dest]
