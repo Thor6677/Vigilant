@@ -1025,6 +1025,21 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
                 });
               }
             }}
+            onHighlightSystems={(ids) => {
+              const sr = systemRendererRef.current;
+              if (!sr) return;
+              if (ids && ids.size > 0) {
+                sr.setJumpRangeHighlight(null, ids);
+              } else if (gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
+                // Restore route highlight
+                sr.setJumpRangeHighlight(
+                  gateRoutePlanner.origin,
+                  new Set(gateRoutePlanner.activeRoute),
+                );
+              } else {
+                sr.setJumpRangeHighlight(null, null);
+              }
+            }}
           />
         </div>
       )}

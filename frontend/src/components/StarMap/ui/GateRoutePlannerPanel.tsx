@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { SystemData, RoutePreference } from '../types';
 import type {
   GateRoutePlannerState,
@@ -9,6 +9,7 @@ import type {
 } from '../useGateRoutePlanner';
 import type { CharacterLocation } from '../useCharacterLocations';
 import { securityColorCSS } from '../utils/colors';
+import { jumpDistanceLY } from '../jump/distance';
 import { SystemSlotWithSearch } from './SystemSlotWithSearch';
 import { FONT, BG, BORDER, TEXT, MUTED, GATE_COLOR } from './plannerStyles';
 
@@ -19,6 +20,17 @@ const THREAT_COLORS: Record<ThreatLevel, string> = {
   smartbomb: '#cc33cc',
 };
 
+const SERVICE_OPTIONS: { key: string; label: string }[] = [
+  { key: 'cloning', label: 'CLONE' },
+  { key: 'factory', label: 'MFG' },
+  { key: 'lab', label: 'LAB' },
+  { key: 'market', label: 'MKT' },
+  { key: 'refinery', label: 'REF' },
+  { key: 'repair', label: 'RPR' },
+  { key: 'reprocessing', label: 'REPR' },
+  { key: 'jumpClone', label: 'JC' },
+];
+
 interface Props {
   planner: GateRoutePlannerState;
   systems: SystemData[];
@@ -26,6 +38,8 @@ interface Props {
   systemName: (id: number) => string;
   characters: CharacterLocation[];
   onFocusSystem: (system: SystemData) => void;
+  /** Callback to highlight a set of systems on the map (for service filter). */
+  onHighlightSystems: (ids: Set<number> | null) => void;
 }
 
 const PREFERENCE_OPTIONS: { value: RoutePreference; label: string }[] = [
@@ -43,11 +57,13 @@ export function GateRoutePlannerPanel({
   systemName,
   characters,
   onFocusSystem,
+  onHighlightSystems,
 }: Props) {
   const charsWithLocation = characters.filter(c => c.system_id !== null);
   const [savingMode, setSavingMode] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [selectedService, setSelectedService] = useState<string | null>(null);
 
   const stops: number[] = planner.origin !== null && planner.dest !== null
     ? [planner.origin, ...planner.waypoints, planner.dest]
@@ -197,6 +213,30 @@ export function GateRoutePlannerPanel({
           />
         </div>
       )}
+
+      {/* Service finder */}
+      <ServiceFinder
+        selectedService={selectedService}
+        onSelectService={(svc) => {
+          setSelectedService(svc);
+          if (svc) {
+            const ids = new Set(systems.filter(s => s.svcs.includes(svc)).map(s => s.id));
+            onHighlightSystems(ids);
+          } else {
+            // Restore route highlight or clear
+            onHighlightSystems(null);
+          }
+        }}
+        systems={systems}
+        systemMap={systemMap}
+        activeChar={charsWithLocation.find(c => c.character_id === planner.activeCharacterId) ?? null}
+        onSetDestination={(systemId) => {
+          planner.setDest(systemId);
+          setSelectedService(null);
+          onHighlightSystems(null);
+        }}
+        onFocusSystem={onFocusSystem}
+      />
 
       {/* Avoid list */}
       <div style={{ marginTop: 14 }}>
@@ -822,6 +862,131 @@ function MiniBtn({
     >
       {children}
     </button>
+  );
+}
+
+/* ── Service finder ──────────────────────────────────────────────────── */
+
+function ServiceFinder({
+  selectedService,
+  onSelectService,
+  systems,
+  systemMap,
+  activeChar,
+  onSetDestination,
+  onFocusSystem,
+}: {
+  selectedService: string | null;
+  onSelectService: (svc: string | null) => void;
+  systems: SystemData[];
+  systemMap: Map<number, SystemData>;
+  activeChar: CharacterLocation | null;
+  onSetDestination: (systemId: number) => void;
+  onFocusSystem: (system: SystemData) => void;
+}) {
+  // Find nearest systems with the selected service from the active character
+  const nearest = useMemo(() => {
+    if (!selectedService || !activeChar || activeChar.system_id === null) return [];
+    const charSys = systemMap.get(activeChar.system_id);
+    if (!charSys) return [];
+    const withService = systems.filter(s => s.svcs.includes(selectedService));
+    return withService
+      .map(s => ({ sys: s, dist: jumpDistanceLY(charSys, s) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 8);
+  }, [selectedService, activeChar, systems, systemMap]);
+
+  const serviceLabel = selectedService
+    ? SERVICE_OPTIONS.find(o => o.key === selectedService)?.label ?? selectedService
+    : null;
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <Label text="FIND SERVICE" />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 4 }}>
+        {SERVICE_OPTIONS.map(opt => {
+          const isActive = selectedService === opt.key;
+          return (
+            <button
+              key={opt.key}
+              onClick={() => onSelectService(isActive ? null : opt.key)}
+              style={{
+                padding: '2px 6px', fontSize: 8, fontFamily: FONT,
+                letterSpacing: '0.06em',
+                background: isActive ? 'rgba(0,212,255,0.15)' : 'transparent',
+                color: isActive ? GATE_COLOR : MUTED,
+                border: `1px solid ${isActive ? GATE_COLOR : BORDER}`,
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedService && (
+        <div>
+          {activeChar && activeChar.system_id !== null ? (
+            <>
+              <div style={{ fontSize: 8, color: MUTED, letterSpacing: '0.08em', marginBottom: 3 }}>
+                NEAREST {serviceLabel} TO {activeChar.character_name.split(' ')[0].toUpperCase()}
+              </div>
+              {nearest.length === 0 ? (
+                <div style={{ fontSize: 9, color: '#2a2a2a' }}>No systems with this service found.</div>
+              ) : (
+                <div style={{
+                  maxHeight: 160, overflowY: 'auto',
+                  border: `1px solid ${BORDER}`, background: '#0a0a0a',
+                }}>
+                  {nearest.map(({ sys, dist }) => (
+                    <div
+                      key={sys.id}
+                      style={{
+                        padding: '3px 6px', fontSize: 9, fontFamily: FONT,
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        cursor: 'pointer', borderBottom: `1px solid ${BORDER}`,
+                      }}
+                      onClick={() => onFocusSystem(sys)}
+                    >
+                      <span style={{ color: TEXT, flex: 1 }}>
+                        {sys.name}
+                        <span style={{ color: securityColorCSS(sys.sec), marginLeft: 4, fontSize: 8 }}>
+                          {sys.sec.toFixed(1)}
+                        </span>
+                      </span>
+                      <span style={{ color: MUTED, fontSize: 8, marginRight: 4 }}>
+                        {dist.toFixed(1)}LY
+                      </span>
+                      <button
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onSetDestination(sys.id);
+                        }}
+                        title={`Route to ${sys.name}`}
+                        style={{
+                          background: 'rgba(0,212,255,0.15)', border: `1px solid ${GATE_COLOR}`,
+                          color: GATE_COLOR, cursor: 'pointer',
+                          fontSize: 7, fontFamily: FONT, padding: '1px 4px',
+                          letterSpacing: '0.06em',
+                        }}
+                      >
+                        ROUTE
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 9, color: MUTED }}>
+              Select an active character to find nearest {serviceLabel} systems.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
