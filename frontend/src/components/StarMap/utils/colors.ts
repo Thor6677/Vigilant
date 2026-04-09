@@ -1,21 +1,27 @@
 /**
  * EVE Online security status color scale.
  * Returns a hex number suitable for Pixi.js tinting.
+ *
+ * Raw sec values from the SDE (e.g. 0.46) are rounded to one decimal
+ * to match the in-game display. Without rounding, a 0.46 system would
+ * show as "0.5" in the UI but get the orange 0.4 color — confusing.
  */
 export function securityColor(sec: number): number {
-  if (sec >= 1.0) return 0x2fefef;
-  if (sec >= 0.9) return 0x48f148;
-  if (sec >= 0.8) return 0x48f148;
-  if (sec >= 0.7) return 0x00ef47;
-  if (sec >= 0.6) return 0x00ef47;
-  if (sec >= 0.5) return 0xefef00;
-  if (sec >= 0.4) return 0xd77700;
-  if (sec >= 0.3) return 0xef6f00;
-  if (sec >= 0.2) return 0xef0000;
-  if (sec >= 0.1) return 0xd73000;
-  if (sec > 0.0) return 0xf05050;
+  // Round to 1 decimal to match EVE's displayed sec value
+  const s = Math.round(sec * 10) / 10;
+  if (s >= 1.0) return 0x2fefef;
+  if (s >= 0.9) return 0x48f148;
+  if (s >= 0.8) return 0x48f148;
+  if (s >= 0.7) return 0x00ef47;
+  if (s >= 0.6) return 0x00ef47;
+  if (s >= 0.5) return 0xefef00;
+  if (s >= 0.4) return 0xd77700;
+  if (s >= 0.3) return 0xef6f00;
+  if (s >= 0.2) return 0xef0000;
+  if (s >= 0.1) return 0xd73000;
+  if (s > 0.0) return 0xf05050;
   // 0.0 and below: gradient toward deep red
-  const t = Math.min(1, Math.abs(sec)); // 0..1
+  const t = Math.min(1, Math.abs(sec));
   const r = Math.round(0xf0 - t * 0x70);
   const g = Math.round(0x50 - t * 0x50);
   const b = Math.round(0x50 - t * 0x50);
