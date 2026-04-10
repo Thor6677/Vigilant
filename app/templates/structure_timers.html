@@ -235,8 +235,13 @@
 
             {# Countdown + times #}
             <div style="flex:0 0 200px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
-                <span class="timer-countdown" data-expires="{{ t.timer_expires.isoformat() }}"
-                      style="font-size:16px;font-weight:300;color:var(--text);font-variant-numeric:tabular-nums;"></span>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <span class="timer-countdown" data-expires="{{ t.timer_expires.isoformat() }}"
+                          style="font-size:16px;font-weight:300;color:var(--text);font-variant-numeric:tabular-nums;"></span>
+                    <a href="/tools/discordtime#t={{ t.timer_expires.timestamp() | int }}" title="Generate Discord timestamp"
+                       style="color:var(--muted);text-decoration:none;font-size:12px;line-height:1;transition:color 0.15s;"
+                       onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">&#x1f517;</a>
+                </div>
                 <span style="font-size:9px;color:var(--muted);">
                     EVE: {{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }}
                 </span>
