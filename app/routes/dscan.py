@@ -392,8 +392,49 @@ async def resolve_local_scan(names: list[str]) -> dict:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/intel", response_class=HTMLResponse)
-async def intel_page(request: Request):
-    return templates.TemplateResponse("intel.html", {"request": request})
+async def intel_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    history = []
+    if user_id:
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(DScanResult)
+            .where(DScanResult.user_id == user_id, DScanResult.expires_at > now)
+            .order_by(DScanResult.created_at.desc())
+            .limit(50)
+        )
+        rows = result.scalars().all()
+        for r in rows:
+            summary = json.loads(r.summary_json) if r.summary_json else {}
+            scan_type = summary.get("type", "dscan")
+            total = summary.get("total", 0)
+            ships = summary.get("ships", 0)
+            if scan_type == "dscan":
+                detail = f"{ships} ships / {total} total"
+            else:
+                detail = f"{total} pilots"
+            expires = r.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            remaining = expires - now
+            if remaining.days > 0:
+                exp_str = f"{remaining.days}d"
+            elif remaining.seconds >= 3600:
+                exp_str = f"{remaining.seconds // 3600}h"
+            else:
+                exp_str = f"{(remaining.seconds % 3600) // 60}m"
+            history.append({
+                "id": r.id,
+                "label": r.label,
+                "scan_type": scan_type,
+                "detail": detail,
+                "created_at": r.created_at,
+                "expires_in": exp_str,
+            })
+    return templates.TemplateResponse("intel.html", {
+        "request": request,
+        "history": history,
+    })
 
 
 # Keep old /dscan URL working

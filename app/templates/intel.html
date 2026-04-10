@@ -12,7 +12,10 @@
 </div>
 {% endif %}
 
-<div class="b-section">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;">
+
+{# ── Paste Form ─────────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-bottom:0;">
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">Paste D-Scan or Local</span></div>
         <form method="POST" action="/intel/parse">
@@ -32,6 +35,51 @@
             </div>
         </form>
     </div>
+</div>
+
+{# ── Scan History ───────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-bottom:0;">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">History</span></div>
+        <div style="padding:0.5rem 0.75rem;">
+        {% if history %}
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Type</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Label</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Detail</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:right;">Expires</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for scan in history %}
+                    <tr style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;"
+                        onclick="window.location='/intel/{{ scan.id }}'"
+                        onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background='transparent'">
+                        <td style="padding:0.4rem 0.5rem;">
+                            {% if scan.scan_type == 'dscan' %}
+                                <span style="color:var(--accent);">D-Scan</span>
+                            {% else %}
+                                <span style="color:#a78bfa;">Local</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding:0.4rem 0.5rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            {{ scan.label or '—' }}
+                        </td>
+                        <td style="padding:0.4rem 0.5rem;color:var(--muted);">{{ scan.detail }}</td>
+                        <td style="padding:0.4rem 0.5rem;text-align:right;color:var(--muted);">{{ scan.expires_in }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <span style="color:var(--muted);font-size:11px;">No recent scans.</span>
+        {% endif %}
+        </div>
+    </div>
+</div>
+
 </div>
 
 {% endblock %}
