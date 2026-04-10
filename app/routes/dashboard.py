@@ -1150,6 +1150,35 @@ async def _sync_task(character_id: int):
                             warnings[field] = warn
                         field_synced[field] = now.isoformat()
 
+                # Refresh corp/alliance info from public endpoint (no scope needed)
+                if "location" in stale_fields:
+                    try:
+                        pub_client = ESIClient("")
+                        pub_info = await esi_char.get_public_info(pub_client, character_id)
+                        new_corp_id = pub_info.get("corporation_id")
+                        new_alliance_id = pub_info.get("alliance_id")
+                        if new_corp_id and new_corp_id != char.corporation_id:
+                            try:
+                                corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
+                                char.corporation_id = new_corp_id
+                                char.corporation_name = corp_info.get("name")
+                            except Exception:
+                                char.corporation_id = new_corp_id
+                                char.corporation_name = None
+                            logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, new_corp_id)
+                        if new_alliance_id != char.alliance_id:
+                            char.alliance_id = new_alliance_id
+                            if new_alliance_id:
+                                try:
+                                    ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
+                                    char.alliance_name = ally_info.get("name")
+                                except Exception:
+                                    char.alliance_name = None
+                            else:
+                                char.alliance_name = None
+                    except Exception as pub_err:
+                        logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+
                 cache.field_synced_json = json.dumps(field_synced)
                 cache.sync_warnings_json = json.dumps(warnings) if warnings else None
                 cache.last_synced = now
