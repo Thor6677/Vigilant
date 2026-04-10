@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+{% block title %}Discord Time — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/tools/discordtime">Tools</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Discord Time</span></div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .dt-tabs { display: flex; gap: 1px; margin-bottom: 0.75rem; }
+    .dt-tab {
+        background: var(--surface); border: 1px solid var(--border);
+        color: var(--muted); padding: 0.4rem 0.75rem;
+        font: inherit; font-size: 10px; letter-spacing: 0.12em;
+        text-transform: uppercase; cursor: pointer;
+    }
+    .dt-tab.is-active { color: var(--accent); border-color: var(--accent); }
+    .dt-tab:hover { color: var(--text); }
+
+    .dt-mode { display: none; }
+    .dt-mode.is-active { display: block; }
+
+    .dt-lbl {
+        display: block; font-size: 9px; letter-spacing: 0.12em;
+        text-transform: uppercase; color: var(--muted); margin-bottom: 3px;
+    }
+    .dt-input {
+        padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 11px;
+    }
+    .dt-input:focus { outline: none; border-color: var(--accent); }
+    .dt-input.is-invalid { border-color: var(--danger); }
+    select.dt-input { cursor: pointer; }
+
+    .dt-format-row {
+        display: flex; align-items: center; padding: 0.45rem 0.75rem;
+        border-bottom: 1px solid var(--border); gap: 0.75rem; min-height: 36px;
+    }
+    .dt-format-row:last-child { border-bottom: none; }
+
+    .dt-fmt-label {
+        width: 140px; flex-shrink: 0; font-size: 9px; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--muted);
+    }
+    .dt-tag {
+        font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px;
+        color: var(--accent); user-select: all; cursor: text;
+        background: var(--bg); padding: 0.2rem 0.5rem;
+        border: 1px solid var(--border); white-space: nowrap;
+    }
+    .dt-preview {
+        flex: 1; font-size: 11px; color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        min-width: 0;
+    }
+    .dt-copy-btn {
+        background: none; border: 1px solid var(--border); color: var(--muted);
+        padding: 0.2rem 0.5rem; font: inherit; font-size: 9px;
+        letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s; flex-shrink: 0;
+    }
+    .dt-copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    .dt-quick-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .dt-quick-btn {
+        background: none; border: 1px solid var(--border); color: var(--muted);
+        padding: 0.4rem 0.5rem; font: inherit; font-size: 10px; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s; text-align: center;
+    }
+    .dt-quick-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    .dt-unix-row {
+        display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
+        border-top: 1px solid var(--border); margin-top: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Discord Time</h1>
+    <span style="font-size:10px;color:var(--muted);">Generate Discord timestamp tags that display in each user's local timezone</span>
+</div>
+
+{# ── Two-Column: Input + Quick Actions ──────────────────────────────────── #}
+<div class="b-grid-2" style="gap:1rem;align-items:start;">
+
+    {# ── LEFT: Time Input ────────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Time Input</span></div>
+        <div style="padding:0.75rem;">
+
+            {# Mode tabs #}
+            <div class="dt-tabs">
+                <button class="dt-tab is-active" onclick="dtSetMode('utc', this)">EVE Time (UTC)</button>
+                <button class="dt-tab" onclick="dtSetMode('local', this)">Local Time</button>
+                <button class="dt-tab" onclick="dtSetMode('offset', this)">From Now</button>
+            </div>
+
+            {# ── UTC mode ────────────────────────────────────────────────── #}
+            <div id="dt-mode-utc" class="dt-mode is-active">
+                <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:140px;">
+                        <label class="dt-lbl">Date</label>
+                        <input type="date" id="dt-utc-date" class="dt-input" style="width:100%;" oninput="dtUpdate()">
+                    </div>
+                    <div style="width:100px;">
+                        <label class="dt-lbl">Time (24hr)</label>
+                        <input type="text" id="dt-utc-time" class="dt-input" style="width:100%;" placeholder="HH:MM" maxlength="8" oninput="dtUpdate()">
+                    </div>
+                </div>
+                <div id="dt-utc-error" style="display:none;font-size:10px;color:var(--danger);margin-top:4px;"></div>
+            </div>
+
+            {# ── Local mode ──────────────────────────────────────────────── #}
+            <div id="dt-mode-local" class="dt-mode">
+                <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:140px;">
+                        <label class="dt-lbl">Date</label>
+                        <input type="date" id="dt-local-date" class="dt-input" style="width:100%;" oninput="dtUpdate()">
+                    </div>
+                    <div style="display:flex;gap:4px;align-items:end;">
+                        <div>
+                            <label class="dt-lbl">Hour</label>
+                            <input type="number" id="dt-local-hour" class="dt-input" style="width:50px;" min="1" max="12" placeholder="12" oninput="dtUpdate()">
+                        </div>
+                        <span style="color:var(--muted);padding-bottom:0.4rem;">:</span>
+                        <div>
+                            <label class="dt-lbl">Min</label>
+                            <input type="number" id="dt-local-min" class="dt-input" style="width:50px;" min="0" max="59" placeholder="00" oninput="dtUpdate()">
+                        </div>
+                        <div>
+                            <label class="dt-lbl">&nbsp;</label>
+                            <select id="dt-local-ampm" class="dt-input" onchange="dtUpdate()">
+                                <option value="AM">AM</option>
+                                <option value="PM">PM</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top:0.5rem;">
+                    <label class="dt-lbl">Timezone</label>
+                    <select id="dt-local-tz" class="dt-input" style="width:100%;max-width:300px;" onchange="dtUpdate()"></select>
+                </div>
+            </div>
+
+            {# ── Offset mode ─────────────────────────────────────────────── #}
+            <div id="dt-mode-offset" class="dt-mode">
+                <div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
+                    <div>
+                        <label class="dt-lbl">Days</label>
+                        <input type="number" id="dt-off-days" class="dt-input" style="width:60px;" min="0" value="0" oninput="dtUpdate()">
+                    </div>
+                    <div>
+                        <label class="dt-lbl">Hours</label>
+                        <input type="number" id="dt-off-hours" class="dt-input" style="width:60px;" min="0" max="23" value="0" oninput="dtUpdate()">
+                    </div>
+                    <div>
+                        <label class="dt-lbl">Minutes</label>
+                        <input type="number" id="dt-off-mins" class="dt-input" style="width:60px;" min="0" max="59" value="0" oninput="dtUpdate()">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    {# ── RIGHT: Quick Actions ────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Quick Actions</span></div>
+        <div style="padding:0.75rem;">
+            <div class="dt-quick-grid">
+                <button class="dt-quick-btn" onclick="dtQuick('now')">Now</button>
+                <button class="dt-quick-btn" onclick="dtQuick('1h')">+ 1 Hour</button>
+                <button class="dt-quick-btn" onclick="dtQuick('2h')">+ 2 Hours</button>
+                <button class="dt-quick-btn" onclick="dtQuick('1d')">+ 1 Day</button>
+                <button class="dt-quick-btn" onclick="dtQuick('2d')">+ 2 Days</button>
+                <button class="dt-quick-btn" onclick="dtQuick('downtime')">Next Downtime</button>
+            </div>
+            <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border);">
+                <a href="/structure-timers" style="font-size:10px;color:var(--muted);text-decoration:none;">Have a timer? View <span style="color:var(--accent);">Structure Timers</span></a>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+{# ── Output: All 7 Formats ──────────────────────────────────────────────── #}
+<div class="b-panel" style="margin-top:1rem;">
+    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="b-label">Discord Timestamps</span>
+        <div style="display:flex;gap:0.5rem;">
+            <button class="dt-copy-btn" onclick="dtCopyAll()" id="dt-copy-all-btn" style="display:none;">Copy All</button>
+            <button class="dt-copy-btn" onclick="dtShareLink()" id="dt-share-btn" style="display:none;">Share Link</button>
+        </div>
+    </div>
+    <div id="dt-output">
+        <div class="b-empty" id="dt-empty">Select a time above to generate Discord timestamps.</div>
+    </div>
+    <div id="dt-unix-row" class="dt-unix-row" style="display:none;">
+        <span class="dt-lbl" style="margin-bottom:0;">Unix Timestamp</span>
+        <span id="dt-unix-val" style="font-family:monospace;font-size:11px;color:var(--muted);"></span>
+    </div>
+</div>
+
+<script>
+/* ── State ───────────────────────────────────────────────────────────────── */
+var dtCurrentMode = 'utc';
+var dtCurrentTs = null;
+var dtRelativeInterval = null;
+
+/* ── Format definitions ──────────────────────────────────────────────────── */
+var DT_FORMATS = [
+    { key: 'F', label: 'Full Date & Time' },
+    { key: 'f', label: 'Short Date/Time' },
+    { key: 'D', label: 'Long Date' },
+    { key: 'd', label: 'Short Date' },
+    { key: 'T', label: 'Long Time' },
+    { key: 't', label: 'Short Time' },
+    { key: 'R', label: 'Relative' },
+];
+
+/* ── Timezone population ─────────────────────────────────────────────────── */
+(function() {
+    var sel = document.getElementById('dt-local-tz');
+    var localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    var tzList;
+    try {
+        tzList = Intl.supportedValuesOf('timeZone');
+    } catch(e) {
+        tzList = [localTz, 'UTC', 'America/New_York', 'America/Chicago', 'America/Denver',
+                  'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+                  'Asia/Tokyo', 'Asia/Shanghai', 'Australia/Sydney'];
+    }
+    tzList.forEach(function(tz) {
+        var opt = document.createElement('option');
+        opt.value = tz;
+        opt.textContent = tz.replace(/_/g, ' ');
+        if (tz === localTz) opt.selected = true;
+        sel.appendChild(opt);
+    });
+})();
+
+/* ── Mode switching ──────────────────────────────────────────────────────── */
+function dtSetMode(mode, btn) {
+    dtCurrentMode = mode;
+    document.querySelectorAll('.dt-tab').forEach(function(t) { t.classList.remove('is-active'); });
+    btn.classList.add('is-active');
+    document.querySelectorAll('.dt-mode').forEach(function(m) { m.classList.remove('is-active'); });
+    document.getElementById('dt-mode-' + mode).classList.add('is-active');
+    dtUpdate();
+}
+
+/* ── UTC time parsing ────────────────────────────────────────────────────── */
+function dtParseUTC(input) {
+    var m = input.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) return null;
+    var h = +m[1], min = +m[2], s = +(m[3] || 0);
+    if (h > 23 || min > 59 || s > 59) return null;
+    return { hours: h, minutes: min, seconds: s };
+}
+
+/* ── Date computation per mode ───────────────────────────────────────────── */
+function dtGetDate() {
+    if (dtCurrentMode === 'utc') {
+        var dateVal = document.getElementById('dt-utc-date').value;
+        var timeVal = document.getElementById('dt-utc-time').value.trim();
+        var errEl = document.getElementById('dt-utc-error');
+        document.getElementById('dt-utc-time').classList.remove('is-invalid');
+        errEl.style.display = 'none';
+        if (!dateVal) return null;
+        if (!timeVal) {
+            /* Default to 00:00 if date set but no time yet */
+            return new Date(dateVal + 'T00:00:00Z');
+        }
+        var p = dtParseUTC(timeVal);
+        if (!p) {
+            document.getElementById('dt-utc-time').classList.add('is-invalid');
+            errEl.textContent = 'Use HH:MM or HH:MM:SS (0-23 hours, 0-59 min/sec)';
+            errEl.style.display = 'block';
+            return null;
+        }
+        var d = new Date(dateVal + 'T00:00:00Z');
+        d.setUTCHours(p.hours, p.minutes, p.seconds, 0);
+        return d;
+
+    } else if (dtCurrentMode === 'local') {
+        var dateVal = document.getElementById('dt-local-date').value;
+        var h = Number(document.getElementById('dt-local-hour').value);
+        var m = Number(document.getElementById('dt-local-min').value);
+        var ampm = document.getElementById('dt-local-ampm').value;
+        var tz = document.getElementById('dt-local-tz').value;
+        if (!dateVal || isNaN(h) || isNaN(m)) return null;
+        var hr = h % 12;
+        if (ampm === 'PM') hr += 12;
+        var parts = dateVal.split('-').map(Number);
+        var y = parts[0], mo = parts[1], d = parts[2];
+        try {
+            var formatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false
+            });
+            var localDate = new Date(y, mo - 1, d, hr, m, 0);
+            var targetParts = formatter.formatToParts(localDate);
+            var getP = function(type) { return +targetParts.find(function(p) { return p.type === type; }).value; };
+            var targetDate = new Date(getP('year'), getP('month') - 1, getP('day'), getP('hour'), getP('minute'), getP('second'));
+            var offsetMs = targetDate.getTime() - localDate.getTime();
+            return new Date(localDate.getTime() - offsetMs);
+        } catch(e) {
+            return new Date(y, mo - 1, d, hr, m, 0);
+        }
+
+    } else {
+        /* offset / from now */
+        var days = Number(document.getElementById('dt-off-days').value) || 0;
+        var hrs = Number(document.getElementById('dt-off-hours').value) || 0;
+        var mins = Number(document.getElementById('dt-off-mins').value) || 0;
+        return new Date(Date.now() + days * 86400000 + hrs * 3600000 + mins * 60000);
+    }
+}
+
+/* ── Preview rendering ───────────────────────────────────────────────────── */
+function dtPreview(fmt, dateObj) {
+    if (!dateObj) return '';
+    if (fmt === 'R') return dtRelativePreview(dateObj);
+    var opts = {};
+    if (fmt === 't') { opts.hour = '2-digit'; opts.minute = '2-digit'; }
+    if (fmt === 'T') { opts.hour = '2-digit'; opts.minute = '2-digit'; opts.second = '2-digit'; }
+    if (fmt === 'd') return dateObj.toLocaleDateString();
+    if (fmt === 'D') return dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    if (fmt === 'f') { opts.dateStyle = 'long'; opts.timeStyle = 'short'; }
+    if (fmt === 'F') { opts.dateStyle = 'full'; opts.timeStyle = 'short'; }
+    return new Intl.DateTimeFormat(navigator.language, opts).format(dateObj);
+}
+
+function dtRelativePreview(dateObj) {
+    var diff = Math.floor((dateObj.getTime() - Date.now()) / 1000);
+    try {
+        var rtf = new Intl.RelativeTimeFormat(navigator.language, { numeric: 'auto' });
+        var units = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+        for (var i = 0; i < units.length; i++) {
+            if (Math.abs(diff) >= units[i][1] || units[i][0] === 'second') {
+                return rtf.format(Math.round(diff / units[i][1]), units[i][0]);
+            }
+        }
+    } catch(e) {
+        return diff >= 0 ? 'in the future' : 'in the past';
+    }
+    return '';
+}
+
+/* ── Build output rows ───────────────────────────────────────────────────── */
+function dtRenderOutput(ts, dateObj) {
+    var container = document.getElementById('dt-output');
+    var html = '';
+    DT_FORMATS.forEach(function(f) {
+        var tag = '&lt;t:' + ts + ':' + f.key + '&gt;';
+        var preview = dtPreview(f.key, dateObj);
+        html += '<div class="dt-format-row">' +
+            '<span class="dt-fmt-label">' + f.label + ' (' + f.key + ')</span>' +
+            '<span class="dt-tag" id="dt-tag-' + f.key + '">&lt;t:' + ts + ':' + f.key + '&gt;</span>' +
+            '<span class="dt-preview" id="dt-prev-' + f.key + '">' + preview + '</span>' +
+            '<button class="dt-copy-btn" onclick="dtCopy(\'' + f.key + '\')">Copy</button>' +
+            '</div>';
+    });
+    container.innerHTML = html;
+}
+
+/* ── Main update ─────────────────────────────────────────────────────────── */
+function dtUpdate() {
+    var dateObj = dtGetDate();
+    var emptyEl = document.getElementById('dt-empty');
+    var unixRow = document.getElementById('dt-unix-row');
+    var copyAllBtn = document.getElementById('dt-copy-all-btn');
+    var shareBtn = document.getElementById('dt-share-btn');
+
+    if (!dateObj) {
+        document.getElementById('dt-output').innerHTML = '<div class="b-empty">Select a time above to generate Discord timestamps.</div>';
+        unixRow.style.display = 'none';
+        copyAllBtn.style.display = 'none';
+        shareBtn.style.display = 'none';
+        dtCurrentTs = null;
+        if (dtRelativeInterval) { clearInterval(dtRelativeInterval); dtRelativeInterval = null; }
+        return;
+    }
+
+    var ts = Math.floor(dateObj.getTime() / 1000);
+    dtCurrentTs = ts;
+
+    dtRenderOutput(ts, dateObj);
+    document.getElementById('dt-unix-val').textContent = ts;
+    unixRow.style.display = '';
+    copyAllBtn.style.display = '';
+    shareBtn.style.display = '';
+
+    /* Update URL hash for sharing */
+    history.replaceState(null, '', '#t=' + ts);
+
+    /* Live-update relative preview every second */
+    if (dtRelativeInterval) clearInterval(dtRelativeInterval);
+    dtRelativeInterval = setInterval(function() {
+        var el = document.getElementById('dt-prev-R');
+        if (el && dtCurrentTs !== null) {
+            el.textContent = dtRelativePreview(new Date(dtCurrentTs * 1000));
+        }
+    }, 1000);
+}
+
+/* ── Copy helpers ────────────────────────────────────────────────────────── */
+function dtCopy(fmt) {
+    if (dtCurrentTs === null) return;
+    var text = '<t:' + dtCurrentTs + ':' + fmt + '>';
+    navigator.clipboard.writeText(text).then(function() {
+        var btns = document.querySelectorAll('.dt-format-row .dt-copy-btn');
+        /* Find the right button by matching the format row */
+        var row = document.getElementById('dt-tag-' + fmt);
+        if (row) {
+            var btn = row.parentElement.querySelector('.dt-copy-btn');
+            btn.textContent = 'Copied!';
+            btn.style.color = 'var(--success)';
+            btn.style.borderColor = 'var(--success)';
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.style.color = '';
+                btn.style.borderColor = '';
+            }, 1500);
+        }
+    });
+}
+
+function dtCopyAll() {
+    if (dtCurrentTs === null) return;
+    var lines = DT_FORMATS.map(function(f) {
+        return f.label + ': <t:' + dtCurrentTs + ':' + f.key + '>';
+    });
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        var btn = document.getElementById('dt-copy-all-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() {
+            btn.textContent = 'Copy All';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+        }, 1500);
+    });
+}
+
+function dtShareLink() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+        var btn = document.getElementById('dt-share-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() {
+            btn.textContent = 'Share Link';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+        }, 1500);
+    });
+}
+
+/* ── Quick presets ────────────────────────────────────────────────────────── */
+function dtQuick(preset) {
+    /* Switch to offset mode for relative presets */
+    if (preset !== 'downtime') {
+        dtCurrentMode = 'offset';
+        document.querySelectorAll('.dt-tab').forEach(function(t) { t.classList.remove('is-active'); });
+        document.querySelectorAll('.dt-tab')[2].classList.add('is-active');
+        document.querySelectorAll('.dt-mode').forEach(function(m) { m.classList.remove('is-active'); });
+        document.getElementById('dt-mode-offset').classList.add('is-active');
+
+        var d = 0, h = 0, m = 0;
+        if (preset === 'now')  { d = 0; h = 0; m = 0; }
+        if (preset === '1h')   { d = 0; h = 1; m = 0; }
+        if (preset === '2h')   { d = 0; h = 2; m = 0; }
+        if (preset === '1d')   { d = 1; h = 0; m = 0; }
+        if (preset === '2d')   { d = 2; h = 0; m = 0; }
+        document.getElementById('dt-off-days').value = d;
+        document.getElementById('dt-off-hours').value = h;
+        document.getElementById('dt-off-mins').value = m;
+    } else {
+        /* Next Downtime: 11:00 UTC. If past 11:00 today, use tomorrow */
+        dtCurrentMode = 'utc';
+        document.querySelectorAll('.dt-tab').forEach(function(t) { t.classList.remove('is-active'); });
+        document.querySelectorAll('.dt-tab')[0].classList.add('is-active');
+        document.querySelectorAll('.dt-mode').forEach(function(m) { m.classList.remove('is-active'); });
+        document.getElementById('dt-mode-utc').classList.add('is-active');
+
+        var now = new Date();
+        var dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 11, 0, 0));
+        if (dt.getTime() <= now.getTime()) {
+            dt.setUTCDate(dt.getUTCDate() + 1);
+        }
+        var y = dt.getUTCFullYear();
+        var mo = String(dt.getUTCMonth() + 1).padStart(2, '0');
+        var day = String(dt.getUTCDate()).padStart(2, '0');
+        document.getElementById('dt-utc-date').value = y + '-' + mo + '-' + day;
+        document.getElementById('dt-utc-time').value = '11:00';
+    }
+    dtUpdate();
+}
+
+/* ── Hash restoration ────────────────────────────────────────────────────── */
+function dtLoadFromHash() {
+    var hash = window.location.hash.slice(1);
+    if (!hash) return false;
+    var params = new URLSearchParams(hash);
+    var ts = params.get('t');
+    if (!ts || isNaN(+ts)) return false;
+
+    /* Show the timestamp by switching to UTC mode and filling in the date/time */
+    var dateObj = new Date(+ts * 1000);
+    dtCurrentMode = 'utc';
+    document.querySelectorAll('.dt-tab').forEach(function(t) { t.classList.remove('is-active'); });
+    document.querySelectorAll('.dt-tab')[0].classList.add('is-active');
+    document.querySelectorAll('.dt-mode').forEach(function(m) { m.classList.remove('is-active'); });
+    document.getElementById('dt-mode-utc').classList.add('is-active');
+
+    var y = dateObj.getUTCFullYear();
+    var mo = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+    var day = String(dateObj.getUTCDate()).padStart(2, '0');
+    var hr = String(dateObj.getUTCHours()).padStart(2, '0');
+    var min = String(dateObj.getUTCMinutes()).padStart(2, '0');
+    document.getElementById('dt-utc-date').value = y + '-' + mo + '-' + day;
+    document.getElementById('dt-utc-time').value = hr + ':' + min;
+    return true;
+}
+
+/* ── Init ────────────────────────────────────────────────────────────────── */
+(function() {
+    /* Prefill UTC date with today */
+    var now = new Date();
+    var y = now.getUTCFullYear();
+    var mo = String(now.getUTCMonth() + 1).padStart(2, '0');
+    var d = String(now.getUTCDate()).padStart(2, '0');
+    var todayUTC = y + '-' + mo + '-' + d;
+    document.getElementById('dt-utc-date').value = todayUTC;
+
+    /* Prefill local date with today (local) */
+    var ly = now.getFullYear();
+    var lmo = String(now.getMonth() + 1).padStart(2, '0');
+    var ld = String(now.getDate()).padStart(2, '0');
+    document.getElementById('dt-local-date').value = ly + '-' + lmo + '-' + ld;
+
+    /* Try to restore from hash first */
+    if (!dtLoadFromHash()) {
+        /* Default: prefill UTC time with current EVE time */
+        var hr = String(now.getUTCHours()).padStart(2, '0');
+        var min = String(now.getUTCMinutes()).padStart(2, '0');
+        document.getElementById('dt-utc-time').value = hr + ':' + min;
+    }
+
+    dtUpdate();
+})();
+</script>
+
+{% endblock %}

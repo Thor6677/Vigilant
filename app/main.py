@@ -28,6 +28,7 @@ from app.routes.skill_plans import router as skill_plans_router
 from app.routes.structure_timers import router as structure_timers_router
 from app.routes.starmap import router as starmap_router, start_map_poller
 from app.routes.images import router as images_router
+from app.routes.discordtime import router as discordtime_router
 
 settings = get_settings()
 
@@ -73,6 +74,7 @@ app.include_router(skill_plans_router)
 app.include_router(structure_timers_router)
 app.include_router(starmap_router)
 app.include_router(images_router)
+app.include_router(discordtime_router)
 
 
 @app.on_event("startup")
