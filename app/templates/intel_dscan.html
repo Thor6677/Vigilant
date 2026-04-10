@@ -18,10 +18,25 @@
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
         <button onclick="copyFleetComp()" id="copy-comp-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Copy Comp</button>
+        <button onclick="toggleRawPaste()" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
 </div>
 <input type="text" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+
+{# ── Raw Paste (hidden by default) ───────────────────────────────────────── #}
+<div id="raw-paste-section" style="display:none;margin-bottom:1rem;">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Raw Paste</span>
+            <button onclick="copyRawPaste()" id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+        </div>
+        <div style="padding:0.5rem 0.75rem;">
+            <textarea id="raw-paste-text" readonly rows="12"
+                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ dscan.paste_data }}</textarea>
+        </div>
+    </div>
+</div>
 
 {# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
 <div class="b-grid-2" style="gap:1rem;align-items:start;">
@@ -102,6 +117,31 @@ function copyShareUrl() {
         btn.style.color = 'var(--success)';
         btn.style.borderColor = 'var(--success)';
         setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
+    });
+}
+
+function toggleRawPaste() {
+    var section = document.getElementById('raw-paste-section');
+    var btn = document.getElementById('raw-paste-btn');
+    if (section.style.display === 'none') {
+        section.style.display = '';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+    } else {
+        section.style.display = 'none';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+    }
+}
+
+function copyRawPaste() {
+    var text = document.getElementById('raw-paste-text').value;
+    navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('copy-raw-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
     });
 }
 
