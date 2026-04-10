@@ -148,6 +148,36 @@
 </div>
 {% endif %}
 
+{# ── Skill Training Summary ────────────────────────────────────────────────── #}
+{% set ns_training = namespace(training=0, empty=0, warning=0) %}
+{% for group_name, items in skill_groups.items() %}
+    {% set ns_group = namespace(has_training=false, has_warning=false) %}
+    {% for item in items %}
+        {% if item.warning in ('ok', 'warning', 'critical') %}{% set ns_group.has_training = true %}{% endif %}
+        {% if item.warning in ('warning', 'critical') %}{% set ns_group.has_warning = true %}{% endif %}
+    {% endfor %}
+    {% if ns_group.has_training %}{% set ns_training.training = ns_training.training + 1 %}
+    {% else %}{% set ns_training.empty = ns_training.empty + 1 %}{% endif %}
+    {% if ns_group.has_warning %}{% set ns_training.warning = ns_training.warning + 1 %}{% endif %}
+{% endfor %}
+<div class="b-section" style="margin-bottom:0.75rem;">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+            {% if ns_training.empty > 0 %}
+            <span class="b-dot is-error pulse-anim"></span>
+            {% else %}
+            <span class="b-dot is-ok"></span>
+            {% endif %}
+            <span style="font-size:11px;color:var(--text);">
+                <strong>{{ ns_training.training }}</strong> / {{ skill_groups | length }} accounts training
+                {% if ns_training.empty > 0 %} · <span style="color:var(--danger);">{{ ns_training.empty }} no training</span>{% endif %}
+                {% if ns_training.warning > 0 %} · <span style="color:var(--accent);">{{ ns_training.warning }} expiring soon</span>{% endif %}
+            </span>
+        </div>
+        <a href="/characters?sort=training" class="b-link" style="font-size:10px;">Skill Queue →</a>
+    </div>
+</div>
+
 {# ── Sort Controls ──────────────────────────────────────────────────────── #}
 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
     <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Sort:</span>
@@ -296,36 +326,6 @@
     </div>
 </div>
 {% endif %}
-
-{# ── Skill Training Summary ────────────────────────────────────────────────── #}
-{% set ns_training = namespace(training=0, empty=0, warning=0) %}
-{% for group_name, items in skill_groups.items() %}
-    {% set ns_group = namespace(has_training=false, has_warning=false) %}
-    {% for item in items %}
-        {% if item.warning in ('ok', 'warning', 'critical') %}{% set ns_group.has_training = true %}{% endif %}
-        {% if item.warning in ('warning', 'critical') %}{% set ns_group.has_warning = true %}{% endif %}
-    {% endfor %}
-    {% if ns_group.has_training %}{% set ns_training.training = ns_training.training + 1 %}
-    {% else %}{% set ns_training.empty = ns_training.empty + 1 %}{% endif %}
-    {% if ns_group.has_warning %}{% set ns_training.warning = ns_training.warning + 1 %}{% endif %}
-{% endfor %}
-<div class="b-section">
-    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;">
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-            {% if ns_training.empty > 0 %}
-            <span class="b-dot is-error pulse-anim"></span>
-            {% else %}
-            <span class="b-dot is-ok"></span>
-            {% endif %}
-            <span style="font-size:11px;color:var(--text);">
-                <strong>{{ ns_training.training }}</strong> / {{ skill_groups | length }} accounts training
-                {% if ns_training.empty > 0 %} · <span style="color:var(--danger);">{{ ns_training.empty }} no training</span>{% endif %}
-                {% if ns_training.warning > 0 %} · <span style="color:var(--accent);">{{ ns_training.warning }} expiring soon</span>{% endif %}
-            </span>
-        </div>
-        <a href="/characters?sort=training" class="b-link" style="font-size:10px;">Skill Queue →</a>
-    </div>
-</div>
 
 {# ── Wealth Breakdown ─────────────────────────────────────────────────────── #}
 {% if char_rows %}
