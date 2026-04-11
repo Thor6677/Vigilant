@@ -196,7 +196,7 @@ function HeatmapLegend() {
   );
 }
 
-function SovLegend({ hasChanges, changesCount }: { hasChanges?: boolean; changesCount?: number }) {
+function SovLegend({ hasChanges }: { hasChanges?: boolean }) {
   return (
     <>
       <Dot color="#555577" label="NPC" />
