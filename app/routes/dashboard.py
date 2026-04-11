@@ -359,6 +359,11 @@ def _get_token_lock(character_id: int) -> asyncio.Lock:
         _token_locks[character_id] = asyncio.Lock()
     return _token_locks[character_id]
 
+# Track (character_id, corp_id) pairs that returned 403 on corp endpoints.
+# Avoids burning ESI requests on characters lacking in-game Director roles.
+# Resets on container restart; cleared for a character on re-auth.
+_corp_403_cache: set[tuple[int, int]] = set()
+
 # ── ESI cache timers (seconds) — from ESI swagger Cache-Control: max-age ─────
 # https://esi.evetech.net/latest/swagger.json
 FIELD_CACHE_SECONDS: dict[str, int] = {
@@ -526,6 +531,15 @@ async def fetch_wallet_data(characters: list[Character], db: AsyncSession) -> di
 
 
 async def fetch_location_data(characters: list[Character], db: AsyncSession) -> dict:
+    async def _safe_ship(client, char_id):
+        """Fetch ship data, returning {} on 404 instead of failing the whole location fetch."""
+        try:
+            return await esi_char.get_ship(client, char_id)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {}
+            raise
+
     async def _get(char):
         if not _has_scope(char, "esi-location.read_location.v1"):
             return char.character_id, None, "missing_scope"
@@ -535,7 +549,7 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
         try:
             loc, ship_data, online_data = await asyncio.gather(
                 esi_char.get_location(client, char.character_id),
-                esi_char.get_ship(client, char.character_id) if _has_scope(char, "esi-location.read_ship_type.v1") else asyncio.sleep(0, result={}),
+                _safe_ship(client, char.character_id) if _has_scope(char, "esi-location.read_ship_type.v1") else asyncio.sleep(0, result={}),
                 esi_char.get_online(client, char.character_id) if _has_scope(char, "esi-location.read_online.v1") else asyncio.sleep(0, result={}),
             )
             system_id = loc.get("solar_system_id")
@@ -1905,6 +1919,8 @@ async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db
     async def _try_corp_call(chars: list[Character], api_func, corp_id: int):
         """Try an ESI corp call with each character until one succeeds (has in-game role)."""
         for char in chars:
+            if (char.character_id, corp_id) in _corp_403_cache:
+                continue  # Already know this char lacks the role
             try:
                 client, err = await _client_for(char, db)
                 if err or not client:
@@ -1912,7 +1928,8 @@ async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db
                 return await api_func(client, corp_id)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 403:
-                    continue  # This char lacks the in-game role, try next
+                    _corp_403_cache.add((char.character_id, corp_id))
+                    continue
                 raise
             except Exception:
                 continue

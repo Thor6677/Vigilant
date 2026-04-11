@@ -133,7 +133,12 @@ class ESIClient:
 
     async def _raw_get(self, url: str, req_headers: dict, params: dict):
         client = get_http_client()
-        return await client.get(url, headers=req_headers, params=params)
+        try:
+            return await client.get(url, headers=req_headers, params=params)
+        except httpx.RemoteProtocolError:
+            # ESI sometimes drops connections mid-request; retry once after a short delay
+            await asyncio.sleep(1)
+            return await client.get(url, headers=req_headers, params=params)
 
     async def get(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
         """Authenticated GET with ETag support for 304 Not Modified."""
