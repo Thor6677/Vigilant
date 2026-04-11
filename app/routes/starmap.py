@@ -6,7 +6,7 @@ Provides API endpoints for live ESI statistics (kills, jumps, sov, fw, incursion
 """
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
@@ -23,6 +23,8 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "di
 # ── In-memory stats cache ────────────────────────────────────────────────────
 _stats_cache: dict[str, dict] = {}
 _poller_started = False
+_prev_sov_state: dict[int, tuple] | None = None
+_last_sov_cleanup: datetime | None = None
 
 ESI_BASE = "https://esi.evetech.net/latest"
 
@@ -49,6 +51,68 @@ FACTION_NAMES = {
     500019: "EDENCOM",
     500020: "CONCORD Assembly",
 }
+
+
+async def _diff_and_store_sov_changes(new_data: list[dict]):
+    """Compare new sov data against previous state, store change events."""
+    global _prev_sov_state, _last_sov_cleanup
+    from app.db.models import AsyncSessionLocal, SovereigntyChangeEvent
+
+    # Normalize to {system_id: (alliance_id, faction_id)}
+    new_state: dict[int, tuple] = {}
+    for entry in new_data:
+        sid = entry.get("system_id")
+        if sid:
+            new_state[sid] = (entry.get("alliance_id"), entry.get("faction_id"))
+
+    if _prev_sov_state is None:
+        _prev_sov_state = new_state
+        log.info("Sov baseline set: %d systems", len(new_state))
+        return
+
+    # Find changes
+    changes = []
+    now = datetime.now(timezone.utc)
+    all_sids = set(_prev_sov_state) | set(new_state)
+    for sid in all_sids:
+        old = _prev_sov_state.get(sid, (None, None))
+        new = new_state.get(sid, (None, None))
+        if old != new:
+            changes.append(SovereigntyChangeEvent(
+                system_id=sid,
+                old_alliance_id=old[0],
+                new_alliance_id=new[0],
+                old_faction_id=old[1],
+                new_faction_id=new[1],
+                changed_at=now,
+            ))
+
+    _prev_sov_state = new_state
+
+    if changes:
+        try:
+            async with AsyncSessionLocal() as db:
+                db.add_all(changes)
+                await db.commit()
+            log.info("Sov changes recorded: %d systems", len(changes))
+        except Exception as e:
+            log.warning("Failed to store sov changes: %s", e)
+
+    # Daily cleanup: remove rows older than 13 months
+    if _last_sov_cleanup is None or (now - _last_sov_cleanup).total_seconds() > 86400:
+        _last_sov_cleanup = now
+        try:
+            from sqlalchemy import delete as sa_delete
+            cutoff = now - timedelta(days=395)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    sa_delete(SovereigntyChangeEvent).where(SovereigntyChangeEvent.changed_at < cutoff)
+                )
+                await db.commit()
+                if result.rowcount:
+                    log.info("Cleaned up %d old sov change rows", result.rowcount)
+        except Exception as e:
+            log.warning("Sov cleanup failed: %s", e)
 
 
 async def _poll_esi_stats():
@@ -91,12 +155,19 @@ async def _poll_esi_stats():
                         continue
 
                     if resp.status_code == 200:
+                        new_data = resp.json()
                         _stats_cache[key] = {
-                            "data": resp.json(),
+                            "data": new_data,
                             "etag": resp.headers.get("ETag"),
                             "updated_at": datetime.now(timezone.utc),
                         }
-                        log.debug("Map stats updated: %s (%d items)", key, len(resp.json()))
+                        log.debug("Map stats updated: %s (%d items)", key, len(new_data))
+                        # Diff sovereignty changes
+                        if key == "sovereignty":
+                            try:
+                                await _diff_and_store_sov_changes(new_data)
+                            except Exception as sov_err:
+                                log.warning("Sov diff error: %s", sov_err)
                     else:
                         log.warning("ESI %s returned %d", path, resp.status_code)
 
@@ -261,6 +332,67 @@ async def map_alliances(request: Request):
                     result[str(aid)] = f"Alliance {aid}"
 
     return JSONResponse(result)
+
+
+SOV_RANGE_DELTAS = {
+    "24h": timedelta(hours=24),
+    "7d":  timedelta(days=7),
+    "1m":  timedelta(days=30),
+    "6m":  timedelta(days=182),
+    "1y":  timedelta(days=365),
+}
+
+
+@router.get("/api/map/sov-changes")
+async def map_sov_changes(request: Request):
+    """Return sovereignty changes within a time range."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    range_key = request.query_params.get("range", "7d")
+    delta = SOV_RANGE_DELTAS.get(range_key)
+    if not delta:
+        return JSONResponse({"error": "Invalid range"}, status_code=400)
+
+    cutoff = datetime.now(timezone.utc) - delta
+    from app.db.models import AsyncSessionLocal, SovereigntyChangeEvent
+    from sqlalchemy import select, func
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(SovereigntyChangeEvent)
+            .where(SovereigntyChangeEvent.changed_at >= cutoff)
+            .order_by(SovereigntyChangeEvent.changed_at.asc())
+        )
+        rows = result.scalars().all()
+
+    # Aggregate per system: earliest old_*, latest new_*, count
+    changes: dict[str, dict] = {}
+    for row in rows:
+        sid = str(row.system_id)
+        if sid not in changes:
+            changes[sid] = {
+                "old_alliance_id": row.old_alliance_id,
+                "new_alliance_id": row.new_alliance_id,
+                "old_faction_id": row.old_faction_id,
+                "new_faction_id": row.new_faction_id,
+                "first_change": row.changed_at.isoformat(),
+                "last_change": row.changed_at.isoformat(),
+                "change_count": 1,
+            }
+        else:
+            entry = changes[sid]
+            entry["new_alliance_id"] = row.new_alliance_id
+            entry["new_faction_id"] = row.new_faction_id
+            entry["last_change"] = row.changed_at.isoformat()
+            entry["change_count"] += 1
+
+    return JSONResponse({
+        "changes": changes,
+        "range": range_key,
+        "since": cutoff.isoformat(),
+    })
 
 
 @router.get("/api/map/stats")

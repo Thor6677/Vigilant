@@ -21,8 +21,10 @@ import { EdgeRenderer } from './renderer/EdgeRenderer';
 import { LabelRenderer } from './renderer/LabelRenderer';
 import { RouteRenderer } from './renderer/RouteRenderer';
 import { JumpRangeRenderer } from './renderer/JumpRangeRenderer';
+import { AllianceTerritoryRenderer } from './renderer/AllianceTerritoryRenderer';
 import { buildGraph } from './graph/buildGraph';
 import { useOverlayData } from './useOverlayData';
+import { useSovChanges, type SovTimeRange } from './useSovChanges';
 import { useCharacterLocations } from './useCharacterLocations';
 import { useJumpPlanner } from './useJumpPlanner';
 import { useGateRoutePlanner } from './useGateRoutePlanner';
@@ -63,6 +65,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const labelRendererRef = useRef<LabelRenderer | null>(null);
   const routeRendererRef = useRef<RouteRenderer | null>(null);
   const jumpRangeRendererRef = useRef<JumpRangeRenderer | null>(null);
+  const territoryRendererRef = useRef<AllianceTerritoryRenderer | null>(null);
 
   const [selectedSystem, setSelectedSystem] = useState<SystemData | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
@@ -90,6 +93,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const getGraph = useCallback(() => graphRef.current, []);
   const gateRoutePlanner = useGateRoutePlanner(getGraph);
   const [allianceNames, setAllianceNames] = useState<Map<string, string>>(new Map());
+  const [sovTimeRange, setSovTimeRange] = useState<SovTimeRange | null>(null);
+  const sovChanges = useSovChanges(activeOverlay === 'sovereignty', sovTimeRange);
 
   // Fetch alliance names for sovereignty data
   useEffect(() => {
@@ -151,14 +156,20 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         tints.set(sys.id, heatmapColor(Math.sqrt((k?.npc ?? 0) / max)));
       }
     } else if (activeOverlay === 'sovereignty') {
+      const changedIds = sovChanges.data ? new Set(Object.keys(sovChanges.data.changes)) : null;
+      const hasChanges = changedIds && changedIds.size > 0;
       for (const sys of data.systems) {
         const sov = stats.sovereignty[String(sys.id)];
+        let color = 0x222233;
         if (sov?.alliance_id) {
-          tints.set(sys.id, allianceColor(sov.alliance_id));
+          color = allianceColor(sov.alliance_id);
         } else if (sov?.faction_id) {
-          tints.set(sys.id, FACTION_COLORS[sov.faction_id] ?? 0x555577);
+          color = FACTION_COLORS[sov.faction_id] ?? 0x555577;
+        }
+        if (hasChanges) {
+          tints.set(sys.id, changedIds.has(String(sys.id)) ? brighten(color, 1.6) : brighten(color, 0.35));
         } else {
-          tints.set(sys.id, 0x222233);
+          tints.set(sys.id, color);
         }
       }
     } else if (activeOverlay === 'incursions') {
@@ -191,12 +202,30 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
 
     return tints;
-  }, [activeOverlay, stats, data.systems]);
+  }, [activeOverlay, stats, data.systems, sovChanges.data]);
 
   // Apply overlay tints to renderer
   useEffect(() => {
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
+
+  // Update alliance territory shading when sovereignty overlay is active
+  useEffect(() => {
+    const tr = territoryRendererRef.current;
+    if (!tr) return;
+    if (activeOverlay === 'sovereignty' && stats?.sovereignty) {
+      // When sov changes active, dim unchanged territory and brighten changed
+      const changedIds = sovChanges.data
+        ? new Set(Object.keys(sovChanges.data.changes).map(Number))
+        : null;
+      const dimSet = changedIds && changedIds.size > 0
+        ? new Set(data.systems.filter(s => !changedIds.has(s.id)).map(s => s.id))
+        : null;
+      tr.update(data.systems, stats.sovereignty, dimSet);
+    } else {
+      tr.clear();
+    }
+  }, [activeOverlay, stats, data.systems, sovChanges.data]);
 
   // Apply jump planner highlight: route systems stay bright, others dimmed
   useEffect(() => {
@@ -361,6 +390,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
     // Always update node scale for screen-space consistency
     systemRendererRef.current?.updateScale(scale);
+    territoryRendererRef.current?.setLODAlpha(scale);
 
     // Update label viewport culling
     labelRendererRef.current?.updateViewport(vp);
@@ -422,12 +452,14 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const labelRenderer = new LabelRenderer();
       const routeRenderer = new RouteRenderer();
       const jumpRangeRenderer = new JumpRangeRenderer();
+      const territoryRenderer = new AllianceTerritoryRenderer();
 
       systemRendererRef.current = systemRenderer;
       edgeRendererRef.current = edgeRenderer;
       labelRendererRef.current = labelRenderer;
       routeRendererRef.current = routeRenderer;
       jumpRangeRendererRef.current = jumpRangeRenderer;
+      territoryRendererRef.current = territoryRenderer;
 
       // Init renderers
       edgeRenderer.init(data.systemMap, data.edges);
@@ -437,7 +469,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       routeRenderer.init(data.systemMap);
       jumpRangeRenderer.init();
 
-      // Add to viewport in draw order: edges → region labels → group labels → systems → system labels → route
+      // Add to viewport in draw order: territory → edges → region labels → group labels → systems → system labels → route
+      vp.addChild(territoryRenderer.container);
       vp.addChild(edgeRenderer.container);
       vp.addChild(labelRenderer.regionLabels);
       vp.addChild(labelRenderer.groupLabels);
@@ -1166,6 +1199,15 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
               {hoveredStatInfo.podKills > 0 && <span style={{ color: '#cc3333' }}>PK {hoveredStatInfo.podKills.toLocaleString()}</span>}
             </div>
           )}
+          {sovChanges.data?.changes[String(hoveredSystem.id)] && (() => {
+            const sc = sovChanges.data!.changes[String(hoveredSystem.id)];
+            const oldName = sc.old_alliance_id ? (allianceNames.get(String(sc.old_alliance_id)) ?? `Alliance ${sc.old_alliance_id}`) : 'Unclaimed';
+            return (
+              <div style={{ fontSize: 9, color: '#c8a951', marginTop: 3 }}>
+                SOV CHANGED · was {oldName}{sc.change_count > 1 ? ` · ${sc.change_count} flips` : ''}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1190,6 +1232,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }}
           onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
           onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
+          sovChange={sovChanges.data?.changes[String(selectedSystem.id)] ?? null}
         />
       )}
 
@@ -1197,8 +1240,15 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       <div ref={overlayBarRef}>
         <OverlayControls
           activeOverlay={activeOverlay}
-          onOverlayChange={(o) => setActiveOverlay(o === activeOverlay ? 'security' : o)}
+          onOverlayChange={(o) => {
+            setActiveOverlay(o === activeOverlay ? 'security' : o);
+            if (o !== 'sovereignty') setSovTimeRange(null);
+          }}
           statsLoaded={!statsLoading && stats !== null}
+          sovTimeRange={sovTimeRange}
+          onSovTimeRangeChange={(r) => setSovTimeRange(r === sovTimeRange ? null : r)}
+          sovChangesCount={sovChanges.data ? Object.keys(sovChanges.data.changes).length : 0}
+          sovChangesLoading={sovChanges.loading}
         />
       </div>
     </div>

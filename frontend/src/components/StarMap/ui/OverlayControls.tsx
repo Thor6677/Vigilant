@@ -1,4 +1,5 @@
 import type { OverlayType } from '../types';
+import type { SovTimeRange } from '../useSovChanges';
 
 const OVERLAYS: { key: OverlayType; label: string }[] = [
   { key: 'security',        label: 'Security' },
@@ -11,81 +12,154 @@ const OVERLAYS: { key: OverlayType; label: string }[] = [
   { key: 'incursions',      label: 'Incursions' },
 ];
 
+const SOV_RANGES: { key: SovTimeRange; label: string }[] = [
+  { key: '24h', label: '24H' },
+  { key: '7d',  label: '7D' },
+  { key: '1m',  label: '1M' },
+  { key: '6m',  label: '6M' },
+  { key: '1y',  label: '1Y' },
+];
+
 interface Props {
   activeOverlay: OverlayType;
   onOverlayChange: (overlay: OverlayType) => void;
   statsLoaded: boolean;
+  sovTimeRange?: SovTimeRange | null;
+  onSovTimeRangeChange?: (range: SovTimeRange) => void;
+  sovChangesCount?: number;
+  sovChangesLoading?: boolean;
 }
 
 const FONT = "'JetBrains Mono', monospace";
 
-export function OverlayControls({ activeOverlay, onOverlayChange, statsLoaded }: Props) {
+export function OverlayControls({
+  activeOverlay, onOverlayChange, statsLoaded,
+  sovTimeRange, onSovTimeRangeChange, sovChangesCount = 0, sovChangesLoading = false,
+}: Props) {
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'stretch',
-      background: '#080808',
-      borderTop: '1px solid #191919',
-      fontFamily: FONT,
-    }}>
-      {/* Overlay selector buttons */}
+    <div style={{ fontFamily: FONT }}>
       <div style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 0,
-        overflowX: 'auto',
-        flex: 1,
+        alignItems: 'stretch',
+        background: '#080808',
+        borderTop: '1px solid #191919',
       }}>
-        {OVERLAYS.map(({ key, label }) => {
-          const isActive = activeOverlay === key;
-          const isDisabled = key !== 'security' && !statsLoaded;
-          return (
-            <button
-              key={key}
-              onClick={() => !isDisabled && onOverlayChange(key)}
-              disabled={isDisabled}
-              style={{
-                padding: '8px 12px',
-                fontSize: 9,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                fontFamily: FONT,
-                background: isActive ? '#0e0e0e' : 'transparent',
-                color: isActive ? '#c8a951' : isDisabled ? '#2a2a2a' : '#474747',
-                border: 'none',
-                borderTop: isActive ? '2px solid #c8a951' : '2px solid transparent',
-                cursor: isDisabled ? 'default' : 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'color 0.15s',
-              }}
-              title={isDisabled ? 'Loading stats...' : label}
-            >
-              {label}
-              {isDisabled && (
-                <span style={{ marginLeft: 4, opacity: 0.3 }}>·</span>
-              )}
-            </button>
-          );
-        })}
+        {/* Overlay selector buttons */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          overflowX: 'auto',
+          flex: 1,
+        }}>
+          {OVERLAYS.map(({ key, label }) => {
+            const isActive = activeOverlay === key;
+            const isDisabled = key !== 'security' && !statsLoaded;
+            return (
+              <button
+                key={key}
+                onClick={() => !isDisabled && onOverlayChange(key)}
+                disabled={isDisabled}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: 9,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  fontFamily: FONT,
+                  background: isActive ? '#0e0e0e' : 'transparent',
+                  color: isActive ? '#c8a951' : isDisabled ? '#2a2a2a' : '#474747',
+                  border: 'none',
+                  borderTop: isActive ? '2px solid #c8a951' : '2px solid transparent',
+                  cursor: isDisabled ? 'default' : 'pointer',
+                  whiteSpace: 'nowrap',
+                  transition: 'color 0.15s',
+                }}
+                title={isDisabled ? 'Loading stats...' : label}
+              >
+                {label}
+                {isDisabled && (
+                  <span style={{ marginLeft: 4, opacity: 0.3 }}>·</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Color legend */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '0 12px',
+          fontSize: 8,
+          color: '#474747',
+          letterSpacing: '0.1em',
+          flexShrink: 0,
+        }}>
+          {activeOverlay === 'security' && <SecurityLegend />}
+          {['jumps', 'shipKills', 'podKills', 'npcKills'].includes(activeOverlay) && <HeatmapLegend />}
+          {activeOverlay === 'sovereignty' && <SovLegend hasChanges={sovTimeRange != null && sovChangesCount > 0} changesCount={sovChangesCount} />}
+          {activeOverlay === 'factionWarfare' && <FWLegend />}
+          {activeOverlay === 'incursions' && <IncursionLegend />}
+        </div>
       </div>
 
-      {/* Color legend */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '0 12px',
-        fontSize: 8,
-        color: '#474747',
-        letterSpacing: '0.1em',
-        flexShrink: 0,
-      }}>
-        {activeOverlay === 'security' && <SecurityLegend />}
-        {['jumps', 'shipKills', 'podKills', 'npcKills'].includes(activeOverlay) && <HeatmapLegend />}
-        {activeOverlay === 'sovereignty' && <SovLegend />}
-        {activeOverlay === 'factionWarfare' && <FWLegend />}
-        {activeOverlay === 'incursions' && <IncursionLegend />}
-      </div>
+      {/* Sovereignty time range sub-bar */}
+      {activeOverlay === 'sovereignty' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          background: '#060606',
+          borderTop: '1px solid #131313',
+          padding: '0 4px',
+        }}>
+          <span style={{
+            padding: '6px 10px',
+            fontSize: 8,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#333',
+          }}>
+            Changes
+          </span>
+          {SOV_RANGES.map(({ key, label }) => {
+            const isActive = sovTimeRange === key;
+            return (
+              <button
+                key={key}
+                onClick={() => onSovTimeRangeChange?.(key)}
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 8,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  fontFamily: FONT,
+                  background: isActive ? '#0e0e0e' : 'transparent',
+                  color: isActive ? '#c8a951' : '#474747',
+                  border: 'none',
+                  borderTop: isActive ? '1px solid #c8a951' : '1px solid transparent',
+                  cursor: 'pointer',
+                  transition: 'color 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+          {sovChangesLoading && (
+            <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>loading...</span>
+          )}
+          {!sovChangesLoading && sovTimeRange && sovChangesCount > 0 && (
+            <span style={{ fontSize: 8, color: '#c8a951', marginLeft: 8 }}>
+              {sovChangesCount} system{sovChangesCount !== 1 ? 's' : ''}
+            </span>
+          )}
+          {!sovChangesLoading && sovTimeRange && sovChangesCount === 0 && (
+            <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>no changes</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -122,11 +196,12 @@ function HeatmapLegend() {
   );
 }
 
-function SovLegend() {
+function SovLegend({ hasChanges, changesCount }: { hasChanges?: boolean; changesCount?: number }) {
   return (
     <>
       <Dot color="#555577" label="NPC" />
       <Dot color="#44aaee" label="PLAYER" />
+      {hasChanges && <Dot color="#ffffff" label="CHANGED" />}
     </>
   );
 }

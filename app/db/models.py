@@ -164,6 +164,19 @@ class DScanResult(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class SovereigntyChangeEvent(Base):
+    """Records a sovereignty holder change for a solar system."""
+    __tablename__ = "sovereignty_changes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    old_alliance_id = Column(Integer, nullable=True)
+    new_alliance_id = Column(Integer, nullable=True)
+    old_faction_id = Column(Integer, nullable=True)
+    new_faction_id = Column(Integer, nullable=True)
+    changed_at = Column(DateTime, nullable=False, index=True)
+
+
 class StructureTimer(Base):
     """Shared structure reinforcement timer board."""
     __tablename__ = "structure_timers"

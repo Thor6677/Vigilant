@@ -35,6 +35,7 @@ interface Props {
   onClose: () => void;
   onSetJumpOrigin?: (id: number) => void;
   onSetJumpDest?: (id: number) => void;
+  sovChange?: { old_alliance_id: number | null; new_alliance_id: number | null; change_count: number; last_change: string } | null;
 }
 
 export function SystemInfoPanel({
@@ -52,6 +53,7 @@ export function SystemInfoPanel({
   onClose,
   onSetJumpOrigin,
   onSetJumpDest,
+  sovChange,
 }: Props) {
   const left = Math.min(position.x + 20, window.innerWidth - 280);
   const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 400);
@@ -142,6 +144,30 @@ export function SystemInfoPanel({
             <span style={{ color: '#6688aa', fontSize: 10 }}>
               {allianceNames.get(String(sov.alliance_id)) ?? `Alliance ${sov.alliance_id}`}
             </span>
+          </div>
+        )}
+        {sovChange && (
+          <div style={{ marginTop: 6, padding: '4px 6px', background: '#0c0c0c', border: '1px solid #1a1a1a', fontSize: 9 }}>
+            <div style={{ color: '#c8a951', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>Sov Changed</div>
+            {sovChange.old_alliance_id && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#666' }}>
+                <span>Was:</span>
+                <img src={`https://images.evetech.net/alliances/${sovChange.old_alliance_id}/logo?size=32`} alt="" style={{ width: 12, height: 12 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                <span>{allianceNames.get(String(sovChange.old_alliance_id)) ?? `Alliance ${sovChange.old_alliance_id}`}</span>
+              </div>
+            )}
+            {!sovChange.old_alliance_id && <div style={{ color: '#666' }}>Was: Unclaimed</div>}
+            {sovChange.new_alliance_id && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', marginTop: 2 }}>
+                <span>Now:</span>
+                <img src={`https://images.evetech.net/alliances/${sovChange.new_alliance_id}/logo?size=32`} alt="" style={{ width: 12, height: 12 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                <span>{allianceNames.get(String(sovChange.new_alliance_id)) ?? `Alliance ${sovChange.new_alliance_id}`}</span>
+              </div>
+            )}
+            {!sovChange.new_alliance_id && <div style={{ color: '#aaa', marginTop: 2 }}>Now: Unclaimed</div>}
+            {sovChange.change_count > 1 && (
+              <div style={{ color: '#555', marginTop: 2 }}>{sovChange.change_count} flips</div>
+            )}
           </div>
         )}
       </div>
