@@ -98,7 +98,7 @@ export function OverlayControls({
         }}>
           {activeOverlay === 'security' && <SecurityLegend />}
           {['jumps', 'shipKills', 'podKills', 'npcKills'].includes(activeOverlay) && <HeatmapLegend />}
-          {activeOverlay === 'sovereignty' && <SovLegend hasChanges={sovTimeRange != null && sovChangesCount > 0} changesCount={sovChangesCount} />}
+          {activeOverlay === 'sovereignty' && <SovLegend hasChanges={sovTimeRange != null && sovChangesCount > 0} />}
           {activeOverlay === 'factionWarfare' && <FWLegend />}
           {activeOverlay === 'incursions' && <IncursionLegend />}
         </div>
