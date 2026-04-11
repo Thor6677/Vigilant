@@ -53,13 +53,14 @@ class RateLimitTracker:
         err_rem = headers.get("x-esi-error-limit-remain")
         err_rst = headers.get("x-esi-error-limit-reset")
 
-        # Token cost
+        # Token cost (per CCP docs: 2xx=2, 3xx=1, 4xx=5, 5xx=0)
+        # 404 from valid endpoints typically costs 1, not 5
         if status_code < 300:
             tokens = int(used) if used else 2
         elif status_code < 400:
             tokens = int(used) if used else 1
         elif status_code < 500:
-            tokens = int(used) if used else 5
+            tokens = int(used) if used else (1 if status_code == 404 else 5)
         else:
             tokens = 0
 
@@ -69,16 +70,17 @@ class RateLimitTracker:
             new_rem = int(remain)
             if total > 0:
                 pct = new_rem / total
-                if pct < 0.05 and group not in self._warned_groups:
-                    self._warned_groups.add(group)
+                if pct < 0.05 and group + ":critical" not in self._warned_groups:
+                    self._warned_groups.add(group + ":critical")
+                    events.append({"event_type": "group_critical", "group_name": group,
+                                   "path": path, "remaining": new_rem, "limit_str": limit_s})
+                elif pct < 0.20 and group + ":warning" not in self._warned_groups:
+                    self._warned_groups.add(group + ":warning")
                     events.append({"event_type": "group_warning", "group_name": group,
                                    "path": path, "remaining": new_rem, "limit_str": limit_s})
-                elif pct < 0.20 and group not in self._warned_groups:
-                    self._warned_groups.add(group)
-                    events.append({"event_type": "group_warning", "group_name": group,
-                                   "path": path, "remaining": new_rem, "limit_str": limit_s})
-                elif pct >= 0.20:
-                    self._warned_groups.discard(group)  # recovered — allow future warnings
+                if pct >= 0.20:
+                    self._warned_groups.discard(group + ":critical")
+                    self._warned_groups.discard(group + ":warning")
             self.groups[group] = GroupState(
                 group=group, limit_total=total, limit_window=window,
                 remaining=new_rem, used_last=tokens, last_updated=now,
@@ -103,6 +105,15 @@ class RateLimitTracker:
     def throttle_delay(self) -> float:
         """Seconds to sleep before the next request. 0.0 = no delay."""
         worst = 0.0
+        # Check error budget (X-Esi-Error-Limit-Remain) — if near 0, hard throttle
+        if self.legacy:
+            if self.legacy.remaining <= 0:
+                worst = max(worst, float(self.legacy.reset_in_seconds))
+            elif self.legacy.remaining < 10:
+                worst = max(worst, 2.0)
+            elif self.legacy.remaining < 30:
+                worst = max(worst, 0.5)
+        # Check per-group rate limits
         for g in self.groups.values():
             if g.limit_total == 0:
                 continue

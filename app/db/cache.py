@@ -81,7 +81,6 @@ async def cache_get(db: AsyncSession, path: str, params: dict = None):
     expires = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
     if expires < now:
         await db.execute(delete(ESICache).where(ESICache.key == key))
-        await db.commit()
         return None
     return json.loads(row.data)
 

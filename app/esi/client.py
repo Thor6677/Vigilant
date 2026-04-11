@@ -14,6 +14,12 @@ from app.esi.rate_limit import rate_limit_tracker, log_event
 
 settings = get_settings()
 
+
+class TokenRevoked(Exception):
+    """Raised when ESI SSO returns 400/401 indicating a revoked or invalid refresh token."""
+    pass
+
+
 # ── Shared HTTP client with connection pooling ────────────────────────────────
 # Reused across all ESI requests to avoid TCP handshake overhead.
 _http_client: httpx.AsyncClient | None = None
@@ -70,18 +76,36 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
     ).decode()
 
     client = get_http_client()
-    resp = await client.post(
-        settings.eve_sso_token_url,
-        headers={
-            "Authorization": f"Basic {credentials}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": character.refresh_token,
-        },
-    )
-    resp.raise_for_status()
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = await client.post(
+                settings.eve_sso_token_url,
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": character.refresh_token,
+                },
+            )
+            if resp.status_code in (400, 401):
+                # Token revoked or invalid — user must re-authenticate
+                raise TokenRevoked(f"SSO returned {resp.status_code}: token revoked or invalid")
+            if resp.status_code >= 500 and attempt < 2:
+                # Transient SSO error — retry with backoff
+                await asyncio.sleep(1 * (2 ** attempt))
+                continue
+            resp.raise_for_status()
+            break
+        except TokenRevoked:
+            raise
+        except httpx.RemoteProtocolError:
+            if attempt < 2:
+                await asyncio.sleep(1 * (2 ** attempt))
+                continue
+            raise
     data = resp.json()
 
     character.access_token = data["access_token"]
@@ -173,6 +197,16 @@ class ESIClient:
             await asyncio.sleep(60)
             resp = await self._raw_get(url, self.headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code >= 500:
+            # 5xx costs 0 tokens per CCP — retry with exponential backoff + jitter
+            import random
+            for attempt in range(2):
+                delay = (1 << attempt) + random.uniform(0, 0.5)
+                await asyncio.sleep(delay)
+                resp = await self._raw_get(url, req_headers, params or {})
+                rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+                if resp.status_code < 500:
+                    break
 
         resp.raise_for_status()
         data = resp.json()
@@ -212,6 +246,15 @@ class ESIClient:
             await asyncio.sleep(60)
             resp = await self._raw_get(url, pub_headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+        elif resp.status_code >= 500:
+            import random
+            for attempt in range(2):
+                delay = (1 << attempt) + random.uniform(0, 0.5)
+                await asyncio.sleep(delay)
+                resp = await self._raw_get(url, pub_headers, params or {})
+                rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
+                if resp.status_code < 500:
+                    break
 
         resp.raise_for_status()
         data = resp.json()

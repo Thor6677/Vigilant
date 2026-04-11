@@ -499,12 +499,15 @@ async def _client_for(char: Character, db: AsyncSession) -> tuple[ESIClient | No
     fetches inside asyncio.gather() don't race on the same SQLAlchemy session
     or fire duplicate SSO refresh requests (EVE rotates refresh tokens).
     """
-    from app.esi.client import get_client_safe
+    from app.esi.client import get_client_safe, TokenRevoked
     async with _get_token_lock(char.character_id):
         try:
             client = await get_client_safe(char)
             client.db = db  # Attach request-scoped db for cache operations
             return client, None
+        except TokenRevoked as e:
+            logger.warning("Token revoked for char %s — user must re-authenticate: %s", char.character_id, e)
+            return None, "token_revoked"
         except Exception as e:
             logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
             return None, f"token_refresh_failed: {type(e).__name__}"
@@ -1134,9 +1137,15 @@ async def _sync_task(character_id: int):
 
                 if stale_fields:
                     results = await asyncio.gather(
-                        *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields]
+                        *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields],
+                        return_exceptions=True,
                     )
                     for field, result in zip(stale_fields, results):
+                        if isinstance(result, Exception):
+                            logger.warning("Field %s raised for char %s: %s", field, character_id, result)
+                            warnings[field] = f"exception: {type(result).__name__}"
+                            field_synced[field] = now.isoformat()
+                            continue
                         val, warn = result.get(character_id, (None, None))
                         col = _FIELD_DB_COLUMN[field]
                         if field == "assets":
