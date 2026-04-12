@@ -17,6 +17,7 @@
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        <button onclick="toggleAddScan()" id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
         <button onclick="toggleRawPaste()" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
@@ -35,6 +36,30 @@
                       style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ dscan.paste_data }}</textarea>
         </div>
     </div>
+</div>
+
+{# ── Add Scan (hidden by default) ─────────────────────────────────────────── #}
+<div id="add-scan-section" style="display:none;margin-bottom:1rem;">
+    <form method="POST" action="/intel/{{ scan_id }}/merge">
+        <div class="b-panel">
+            <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="b-label">Merge Additional D-Scan</span>
+            </div>
+            <div style="padding:0.5rem 0.75rem;">
+                <textarea name="paste_text" rows="8" placeholder="Paste additional d-scan here..."
+                          style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;"></textarea>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;">
+                    <label style="display:flex;align-items:center;gap:0.5rem;font-size:11px;color:var(--muted);cursor:pointer;">
+                        <input type="checkbox" name="dedup" value="on" checked
+                               style="accent-color:var(--accent);">
+                        <span>Filter duplicates</span>
+                        <span style="font-size:10px;color:var(--muted);opacity:0.7;" title="When enabled, if a ship type already exists in the scan, only extras beyond the existing count are added. Disable if the same ship type in both scans represents different ships.">(keeps max count per type)</span>
+                    </label>
+                    <button type="submit" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Merge Scan</button>
+                </div>
+            </div>
+        </div>
+    </form>
 </div>
 
 {# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
@@ -132,6 +157,20 @@ function copyShareUrl() {
         btn.style.borderColor = 'var(--success)';
         setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
     });
+}
+
+function toggleAddScan() {
+    var section = document.getElementById('add-scan-section');
+    var btn = document.getElementById('add-scan-btn');
+    if (section.style.display === 'none') {
+        section.style.display = '';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+    } else {
+        section.style.display = 'none';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+    }
 }
 
 function toggleRawPaste() {

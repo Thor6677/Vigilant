@@ -576,6 +576,69 @@ async def dscan_view_redirect(scan_id: str, request: Request):
     return RedirectResponse(f"/intel/{scan_id}")
 
 
+@router.post("/intel/{scan_id}/merge", response_class=HTMLResponse)
+async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Merge additional d-scan paste into an existing scan result."""
+    form = await request.form()
+    paste_text = form.get("paste_text", "")
+    dedup = form.get("dedup", "on") == "on"
+
+    result = await db.execute(select(DScanResult).where(DScanResult.id == scan_id))
+    dscan = result.scalar_one_or_none()
+    if not dscan:
+        return RedirectResponse("/intel", status_code=303)
+
+    # Parse the new paste
+    new_items = parse_dscan(paste_text)
+    if not new_items:
+        return RedirectResponse(f"/intel/{scan_id}", status_code=303)
+
+    # Enrich new items with SDE data
+    type_ids = list(set(item["type_id"] for item in new_items))
+    group_ids = await sde.get_type_group_ids(db, type_ids)
+    sde_names = await sde.type_ids_to_names(db, type_ids)
+    for item in new_items:
+        tid = item["type_id"]
+        gid = group_ids.get(tid)
+        hull_name = sde_names.get(tid, item["type_name"])
+        item["group_id"] = gid
+        item["hull_name"] = hull_name
+        item["category"] = categorize_item(hull_name, gid)
+
+    existing_items = json.loads(dscan.parsed_json) if dscan.parsed_json else []
+
+    if dedup:
+        # For each type_id, keep max(existing_count, new_count)
+        # This assumes overlapping ships are the same ones seen from a different position
+        existing_counts: dict[int, int] = Counter()
+        for item in existing_items:
+            existing_counts[item["type_id"]] += 1
+
+        new_counts: dict[int, list] = {}
+        for item in new_items:
+            new_counts.setdefault(item["type_id"], []).append(item)
+
+        for type_id, new_list in new_counts.items():
+            existing_n = existing_counts.get(type_id, 0)
+            extras = len(new_list) - existing_n
+            if extras > 0:
+                # Add only the difference — these are ships not in the first scan
+                existing_items.extend(new_list[:extras])
+    else:
+        existing_items.extend(new_items)
+
+    # Append new paste to raw data
+    dscan.paste_data = dscan.paste_data + "\n--- Merged Scan ---\n" + paste_text
+
+    # Rebuild summary and save
+    summary = build_dscan_summary(existing_items)
+    dscan.parsed_json = json.dumps(existing_items)
+    dscan.summary_json = json.dumps(summary)
+    await db.commit()
+
+    return RedirectResponse(f"/intel/{scan_id}", status_code=303)
+
+
 @router.post("/intel/{scan_id}/extend", response_class=HTMLResponse)
 async def intel_extend(scan_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     form = await request.form()
