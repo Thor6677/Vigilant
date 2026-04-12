@@ -9,7 +9,7 @@
      data-system="{{ timer.system_name }}"
      data-name="{{ timer.structure_name }}"
      data-phase="{{ timer.timer_phase | upper }}"
-     style="border-left:3px solid var(--border);background:transparent;">
+     style="display:none;border-left:3px solid var(--border);background:transparent;">
     <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
         <span class="alert-icon">&#9733;</span>
         <span class="alert-text">
@@ -52,7 +52,7 @@
         var el = document.querySelector('[data-alert-id="' + id + '"]');
         if (el) el.style.display = 'none';
     };
-    /* Hide dismissed banners */
+    /* Prune old dismissed entries */
     var dismissed = getDismissed();
     var cutoff = Date.now() - 2 * 86400000;
     var changed = false;
@@ -68,15 +68,17 @@
     }
     if (nChanged) setNotified(notified);
 
+    /* Show only non-dismissed banners */
     var banners = document.querySelectorAll('.timer-alert-banner[data-alert-id]');
     for (var i = 0; i < banners.length; i++) {
         var aid = banners[i].getAttribute('data-alert-id');
-        if (dismissed[aid]) banners[i].style.display = 'none';
+        if (!dismissed[aid]) banners[i].style.display = '';
     }
 
     /* Color tiers + browser notifications */
     function styleBanners() {
         document.querySelectorAll('.timer-alert-banner[data-expires]').forEach(function(el) {
+            if (el.style.display === 'none') return;
             var expires = new Date(el.dataset.expires + 'Z');
             var diff = expires - new Date();
             var countdown = el.querySelector('.timer-banner-countdown');
