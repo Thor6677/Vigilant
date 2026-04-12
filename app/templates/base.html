@@ -870,5 +870,37 @@
 {% endif %}
 
 <script src="/static/js/notifications.js?v=3"></script>
+<script>
+/* Global dismiss handler for alert banners — runs after every htmx swap */
+(function() {
+    function applyDismissState() {
+        /* Structure alerts */
+        try {
+            var sa = JSON.parse(localStorage.getItem('vigilant_dismissed_alerts') || '{}');
+            document.querySelectorAll('.structure-alert-banner[data-alert-id]:not(.timer-alert-banner)').forEach(function(el) {
+                var aid = el.getAttribute('data-alert-id');
+                el.style.display = sa[aid] ? 'none' : '';
+            });
+        } catch(e) {}
+        /* Timer alerts */
+        try {
+            var ta = JSON.parse(localStorage.getItem('vigilant_dismissed_timer_alerts') || '{}');
+            document.querySelectorAll('.timer-alert-banner[data-alert-id]').forEach(function(el) {
+                var aid = el.getAttribute('data-alert-id');
+                if (ta[aid]) el.style.display = 'none';
+                else if (el.style.display === 'none') el.style.display = '';
+            });
+        } catch(e) {}
+    }
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        var id = evt.detail.target.id || '';
+        if (id === 'structure-alerts' || id === 'timer-alerts' || id === 'inventory-alerts') {
+            applyDismissState();
+        }
+    });
+    /* Also run on initial page load after htmx processes */
+    document.addEventListener('htmx:load', function() { applyDismissState(); });
+})();
+</script>
 </body>
 </html>

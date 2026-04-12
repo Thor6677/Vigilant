@@ -52,15 +52,14 @@
         var el = document.querySelector('[data-alert-id="' + id + '"]');
         if (el) el.style.display = 'none';
     };
-    /* Prune old dismissed entries */
-    var dismissed = getDismissed();
+    /* Prune old entries */
     var cutoff = Date.now() - 2 * 86400000;
+    var dismissed = getDismissed();
     var changed = false;
     for (var k in dismissed) {
         if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
     }
     if (changed) setDismissed(dismissed);
-    /* Prune old notified entries */
     var notified = getNotified();
     var nChanged = false;
     for (var nk in notified) {
@@ -68,14 +67,7 @@
     }
     if (nChanged) setNotified(notified);
 
-    /* Show only non-dismissed banners */
-    var banners = document.querySelectorAll('.timer-alert-banner[data-alert-id]');
-    for (var i = 0; i < banners.length; i++) {
-        var aid = banners[i].getAttribute('data-alert-id');
-        if (!dismissed[aid]) banners[i].style.display = '';
-    }
-
-    /* Color tiers + browser notifications */
+    /* Color tiers */
     function styleBanners() {
         document.querySelectorAll('.timer-alert-banner[data-expires]').forEach(function(el) {
             if (el.style.display === 'none') return;
@@ -84,12 +76,10 @@
             var countdown = el.querySelector('.timer-banner-countdown');
 
             if (diff <= 0) {
-                /* Hide after 30 min past expiry */
                 if (diff < -1800000) {
                     el.style.display = 'none';
                     return;
                 }
-                /* Show 0m for up to 30 min after expiry */
                 el.style.borderLeftColor = 'var(--danger)';
                 el.style.background = 'rgba(204, 51, 51, 0.10)';
                 el.classList.add('is-danger');
@@ -108,21 +98,18 @@
             if (countdown) countdown.textContent = '(' + parts.join(' ') + ')';
 
             if (diff <= 3600000) {
-                /* Red: 1 hour or less */
                 el.style.borderLeftColor = 'var(--danger)';
                 el.style.background = 'rgba(204, 51, 51, 0.10)';
                 el.classList.add('is-danger');
                 el.classList.remove('is-warn');
                 if (countdown) countdown.style.color = 'var(--danger)';
             } else if (diff <= 7200000) {
-                /* Yellow: 1-2 hours */
                 el.style.borderLeftColor = 'var(--warn)';
                 el.style.background = 'rgba(200, 169, 81, 0.08)';
                 el.classList.add('is-warn');
                 el.classList.remove('is-danger');
                 if (countdown) countdown.style.color = '#c8a951';
             } else {
-                /* No highlight: 2-24 hours */
                 el.style.borderLeftColor = 'var(--border)';
                 el.style.background = 'transparent';
                 el.classList.remove('is-warn', 'is-danger');
@@ -131,7 +118,7 @@
         });
     }
 
-    /* Send browser notification when timer enters 1h window */
+    /* Browser notification when timer enters 1h window */
     function checkBrowserNotifications() {
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
         var notified = getNotified();
