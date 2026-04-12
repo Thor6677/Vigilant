@@ -273,9 +273,11 @@ async def create_timer(request: Request, db: AsyncSession = Depends(get_db)):
             timer_expires = datetime.now(timezone.utc).replace(tzinfo=None) + td
     elif mode == "absolute":
         try:
-            dt_str = form.get("datetime_utc", "")
+            dt_str = form.get("datetime_utc", "").strip()
             if dt_str:
-                timer_expires = datetime.fromisoformat(dt_str).replace(tzinfo=None)
+                # Support both "YYYY-MM-DD HH:MM" and "YYYY-MM-DDTHH:MM"
+                dt_str = dt_str.replace("T", " ")
+                timer_expires = datetime.strptime(dt_str, "%Y-%m-%d %H:%M").replace(tzinfo=None)
         except ValueError:
             pass
 
@@ -335,9 +337,10 @@ async def edit_timer(timer_id: int, request: Request, db: AsyncSession = Depends
             timer.timer_expires = datetime.now(timezone.utc).replace(tzinfo=None) + td
     elif mode == "absolute":
         try:
-            dt_str = form.get("datetime_utc", "")
+            dt_str = form.get("datetime_utc", "").strip()
             if dt_str:
-                timer.timer_expires = datetime.fromisoformat(dt_str).replace(tzinfo=None)
+                dt_str = dt_str.replace("T", " ")
+                timer.timer_expires = datetime.strptime(dt_str, "%Y-%m-%d %H:%M").replace(tzinfo=None)
         except ValueError:
             pass
 

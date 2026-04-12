@@ -99,7 +99,7 @@
                 </select>
                 <input type="text" id="countdown-input" name="countdown_text" placeholder="1d 4h 30m 15s"
                        style="flex:1;min-width:140px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                <input type="datetime-local" id="absolute-input" name="datetime_utc"
+                <input type="text" id="absolute-input" name="datetime_utc" placeholder="2026-04-15 18:30 (UTC)"
                        style="display:none;flex:1;min-width:180px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             </div>
 
@@ -212,19 +212,26 @@
 {% if active_timers %}
 <div class="b-section">
     <div class="b-panel">
-        <div class="b-panel-head">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Active Timers</span>
+            <button onclick="copyAllTimers(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
         </div>
 
         {% for t in active_timers %}
+        {% set type_labels = {'astrahus':'Astrahus','fortizar':'Fortizar','keepstar':'Keepstar','raitaru':'Raitaru','azbel':'Azbel','sotiyo':'Sotiyo','athanor':'Athanor','tatara':'Tatara','poco':'POCO','skyhook':'Skyhook','sov':'Sov','other':'Other','citadel':'Citadel','ec':'EC','refinery':'Refinery'} %}
         <div class="b-table-row timer-row" data-disposition="{{ t.disposition }}" data-priority="{{ t.priority }}"
+             data-expires="{{ t.timer_expires.isoformat() }}"
+             data-structure-type="{{ type_labels.get(t.structure_type, t.structure_type) }}"
+             data-system="{{ t.system_name }}"
+             data-name="{{ t.structure_name }}"
+             data-owner="{{ t.owner_name }}"
+             data-phase="{{ t.timer_phase }}"
              style="flex-wrap:wrap;gap:0.25rem 0.5rem;border-left:3px solid {% if t.disposition == 'hostile' %}var(--danger){% else %}var(--success){% endif %};">
 
             {# Row 1: Main info #}
             <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                     <span style="font-size:11px;font-weight:600;color:var(--text);">{{ t.structure_name }}</span>
-                    {% set type_labels = {'astrahus':'Astrahus','fortizar':'Fortizar','keepstar':'Keepstar','raitaru':'Raitaru','azbel':'Azbel','sotiyo':'Sotiyo','athanor':'Athanor','tatara':'Tatara','poco':'POCO','skyhook':'Skyhook','sov':'Sov','other':'Other','citadel':'Citadel','ec':'EC','refinery':'Refinery'} %}
                     <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);border-radius:2px;color:var(--muted);">{{ type_labels.get(t.structure_type, t.structure_type) }}</span>
                     {% set phase_colors = {'shield':'var(--accent)','armor':'var(--warn, var(--accent))','hull':'var(--danger)','anchoring':'var(--success)','unanchoring':'var(--muted)'} %}
                     <span style="font-size:8px;padding:1px 4px;border-radius:2px;color:#000;font-weight:600;background:{{ phase_colors.get(t.timer_phase, 'var(--muted)') }};">{{ t.timer_phase | upper }}</span>
@@ -313,7 +320,7 @@
                 </div>
                 <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <input type="hidden" name="timer_mode" value="absolute">
-                    <input type="datetime-local" name="datetime_utc" value="{{ t.timer_expires.strftime('%Y-%m-%dT%H:%M') }}"
+                    <input type="text" name="datetime_utc" value="{{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }}" placeholder="YYYY-MM-DD HH:MM (UTC)"
                            style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <span style="font-size:9px;color:var(--muted);">UTC</span>
                 </div>
@@ -481,6 +488,42 @@ function addACLEntry(groupId) {
 function editTimer(id) {
     var el = document.getElementById('edit-' + id);
     el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function copyAllTimers(btn) {
+    var lines = [];
+    document.querySelectorAll('.timer-row').forEach(function(row) {
+        if (row.style.display === 'none') return;
+        if (row.classList.contains('timer-expired')) return;
+        var disp = row.dataset.disposition || 'unknown';
+        disp = disp.charAt(0).toUpperCase() + disp.slice(1);
+        var stype = row.dataset.structureType || '';
+        var sys = row.dataset.system || '';
+        var name = row.dataset.name || '';
+        var owner = row.dataset.owner || '';
+        var phase = row.dataset.phase || '';
+        var expires = new Date(row.dataset.expires + 'Z');
+        var diff = expires - new Date();
+        if (diff <= 0) return;
+        var d = Math.floor(diff / 86400000);
+        var h = Math.floor((diff % 86400000) / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var parts = [];
+        if (d > 0) parts.push(d + 'd');
+        if (h > 0) parts.push(h + 'h');
+        parts.push(m + 'm');
+        var countdown = parts.join(' ');
+        lines.push(disp + ' ' + stype + ' in ' + sys + ' belonging to ' + owner + ' ' + phase + ' timer in ' + countdown);
+    });
+    if (lines.length === 0) {
+        lines.push('No active timers');
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy for Discord'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
 }
 
 function filterTimers(filter, btn) {
