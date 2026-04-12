@@ -842,6 +842,10 @@
      hx-get="/alerts/inventory-banners"
      hx-trigger="load, every 60s"
      hx-swap="outerHTML"></div>
+<div id="timer-alerts"
+     hx-get="/alerts/timer-banners"
+     hx-trigger="load, every 30s"
+     hx-swap="outerHTML"></div>
 {% endif %}
 
 {% block breadcrumbs %}{% endblock %}

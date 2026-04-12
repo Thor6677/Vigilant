@@ -358,9 +358,15 @@
 <style>
 @keyframes timer-pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
+    50% { opacity: 0.85; }
 }
-.timer-urgent { animation: timer-pulse 1.5s ease-in-out infinite; }
+.timer-urgent {
+    animation: timer-pulse 1.5s ease-in-out infinite;
+    background: rgba(230, 140, 20, 0.12) !important;
+    border-left-color: #e68c14 !important;
+    box-shadow: inset 0 0 0 1px rgba(230, 140, 20, 0.25);
+}
+.timer-urgent .timer-countdown { color: #e68c14 !important; }
 .timer-expired .timer-countdown { color: var(--muted) !important; }
 </style>
 

@@ -1,0 +1,68 @@
+<div id="timer-alerts" hx-get="/alerts/timer-banners" hx-trigger="every 30s" hx-swap="outerHTML">
+{% for timer in timers %}
+<div class="structure-alert-banner is-warn timer-alert-banner"
+     data-alert-id="timer-{{ timer.id }}" style="display:none;">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">&#9200;</span>
+        <span class="alert-text">
+            <strong>{{ timer.structure_name }}</strong>
+            {% if timer.system_name %} in <strong>{{ timer.system_name }}</strong>{% endif %}
+            {% if timer.region_name %} &middot; {{ timer.region_name }}{% endif %}
+            &mdash; {{ timer.timer_phase | upper }}
+            <span class="timer-banner-countdown" data-expires="{{ timer.timer_expires.isoformat() }}"
+                  style="font-weight:600;color:#e68c14;"></span>
+        </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+        <a href="/structure-timers" style="font-size:9px;color:var(--accent);text-decoration:none;">View</a>
+        <button class="alert-dismiss" onclick="dismissTimerAlert('timer-{{ timer.id }}')" title="Dismiss">&times;</button>
+    </div>
+</div>
+{% endfor %}
+<script>
+(function() {
+    var KEY = 'vigilant_dismissed_timer_alerts';
+    function getDismissed() {
+        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
+    }
+    function setDismissed(d) {
+        try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
+    }
+    window.dismissTimerAlert = function(id) {
+        var d = getDismissed();
+        d[id] = Date.now();
+        setDismissed(d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+    /* Show non-dismissed banners */
+    var dismissed = getDismissed();
+    /* Prune entries older than 2 days */
+    var cutoff = Date.now() - 2 * 86400000;
+    var changed = false;
+    for (var k in dismissed) {
+        if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
+    }
+    if (changed) setDismissed(dismissed);
+    var banners = document.querySelectorAll('.timer-alert-banner[data-alert-id]');
+    for (var i = 0; i < banners.length; i++) {
+        var aid = banners[i].getAttribute('data-alert-id');
+        if (!dismissed[aid]) banners[i].style.display = '';
+    }
+    /* Live countdown on banners */
+    function updateTimerBanners() {
+        document.querySelectorAll('.timer-banner-countdown').forEach(function(el) {
+            var expires = new Date(el.dataset.expires + 'Z');
+            var diff = expires - new Date();
+            if (diff <= 0) { el.textContent = '(EXPIRED)'; return; }
+            var h = Math.floor(diff / 3600000);
+            var m = Math.floor((diff % 3600000) / 60000);
+            var s = Math.floor((diff % 60000) / 1000);
+            el.textContent = '(' + h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(s).padStart(2, '0') + 's)';
+        });
+    }
+    updateTimerBanners();
+    setInterval(updateTimerBanners, 1000);
+})();
+</script>
+</div>

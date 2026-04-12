@@ -1895,6 +1895,44 @@ async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(g
     })
 
 
+@router.get("/alerts/timer-banners", response_class=HTMLResponse)
+async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
+    """Persistent banners for structure timers expiring within 1 hour."""
+    _empty = '<div id="timer-alerts" hx-get="/alerts/timer-banners" hx-trigger="every 30s" hx-swap="outerHTML"></div>'
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse(_empty)
+
+    from app.db.models import StructureTimer, TimerACLEntry
+    from app.routes.structure_timers import _visible_group_ids, _timer_visible
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    one_hour = now + timedelta(hours=1)
+
+    result = await db.execute(
+        select(StructureTimer).where(
+            StructureTimer.is_archived == False,
+            StructureTimer.timer_expires > now,
+            StructureTimer.timer_expires <= one_hour,
+        ).order_by(StructureTimer.timer_expires.asc())
+    )
+    timers = result.scalars().all()
+
+    if not timers:
+        return HTMLResponse(_empty)
+
+    # Filter by ACL visibility
+    visible_groups = await _visible_group_ids(db, user_id)
+    timers = [t for t in timers if _timer_visible(t, visible_groups)]
+
+    if not timers:
+        return HTMLResponse(_empty)
+
+    return templates.TemplateResponse("partials/timer_alert_banners.html", {
+        "request": request, "timers": timers,
+    })
+
+
 @router.get("/dashboard/corp-stats", response_class=HTMLResponse)
 async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
     """HTMX lazy-loaded corporation stats for the dashboard summary bar."""
