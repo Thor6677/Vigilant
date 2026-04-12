@@ -65,10 +65,19 @@
             <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
         </div>
         {% for group in summary.ships_grouped %}
-        <div class="b-table-row" style="padding:0.3rem 0.75rem;">
+        <div class="b-table-row" style="padding:0.3rem 0.75rem;border-bottom:1px solid var(--border);">
             <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ group.total }}</span>
-            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ group.group }}</span>
+            <span style="flex:1;font-size:12px;font-weight:600;color:var(--text);padding-left:0.75rem;">{{ group.group }}</span>
         </div>
+        {% for ship in group.ships %}
+        <div class="b-table-row" style="padding:0.2rem 0.75rem;padding-left:2.5rem;">
+            <span style="font-size:12px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ ship.count }}</span>
+            <span style="flex:1;font-size:11px;color:var(--muted);padding-left:0.75rem;display:flex;align-items:center;gap:4px;">
+                <img src="https://images.evetech.net/types/{{ ship.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" onerror="this.style.display='none'">
+                {{ ship.name }}
+            </span>
+        </div>
+        {% endfor %}
         {% endfor %}
     </div>
 
@@ -147,10 +156,13 @@ function copyRawPaste() {
 
 function copyFleetComp() {
     var lines = [];
-    {% for cls, count in summary.ship_classes.items() %}
-    lines.push('{{ count }}x {{ cls }}');
+    {% for group in summary.ships_grouped %}
+    lines.push('{{ group.group }} ({{ group.total }}):');
+    {% for ship in group.ships %}
+    lines.push('  {{ ship.count }}x {{ ship.name }} [{{ ship.class }}]');
     {% endfor %}
     lines.push('');
+    {% endfor %}
     lines.push('Total: {{ summary.ships }} ships');
     navigator.clipboard.writeText(lines.join('\n')).then(function() {
         var btn = document.getElementById('copy-comp-btn');
