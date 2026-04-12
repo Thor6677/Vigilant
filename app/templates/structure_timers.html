@@ -517,7 +517,7 @@ function updateCountdowns() {
         if (el.dataset.done) return;
         var expires = new Date(el.dataset.expires + 'Z');
         el.textContent = 'Local: ' + expires.toLocaleString(undefined, {
-            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
         });
         el.dataset.done = '1';
     });
