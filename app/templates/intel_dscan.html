@@ -17,7 +17,6 @@
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
-        <button onclick="copyFleetComp()" id="copy-comp-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Copy Comp</button>
         <button onclick="toggleRawPaste()" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
@@ -45,7 +44,10 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Ships</span>
-            <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+                <button onclick="copyShipClasses(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            </div>
         </div>
         {% for cls, count in summary.ship_classes.items() %}
         <div class="b-table-row" style="padding:0.3rem 0.75rem;">
@@ -62,7 +64,10 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">By Type</span>
-            <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+                <button onclick="copyByType(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            </div>
         </div>
         {% for group in summary.ships_grouped %}
         <div class="b-table-row" style="padding:0.3rem 0.75rem;border-bottom:1px solid var(--border);">
@@ -154,7 +159,22 @@ function copyRawPaste() {
     });
 }
 
-function copyFleetComp() {
+function copyShipClasses(btn) {
+    var lines = [];
+    {% for cls, count in summary.ship_classes.items() %}
+    lines.push('{{ count }}x {{ cls }}');
+    {% endfor %}
+    lines.push('');
+    lines.push('Total: {{ summary.ships }} ships');
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+
+function copyByType(btn) {
     var lines = [];
     {% for group in summary.ships_grouped %}
     lines.push('{{ group.group }} ({{ group.total }}):');
@@ -165,11 +185,10 @@ function copyFleetComp() {
     {% endfor %}
     lines.push('Total: {{ summary.ships }} ships');
     navigator.clipboard.writeText(lines.join('\n')).then(function() {
-        var btn = document.getElementById('copy-comp-btn');
         btn.textContent = 'Copied!';
         btn.style.color = 'var(--success)';
         btn.style.borderColor = 'var(--success)';
-        setTimeout(function() { btn.textContent = 'Copy Comp'; btn.style.color = 'var(--text)'; btn.style.borderColor = 'var(--border)'; }, 2000);
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
     });
 }
 </script>
