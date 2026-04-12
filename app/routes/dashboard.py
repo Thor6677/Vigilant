@@ -1908,11 +1908,12 @@ async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_d
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now + timedelta(hours=24)
+    grace = now - timedelta(minutes=30)  # Show 0m for 30 min after expiry
 
     result = await db.execute(
         select(StructureTimer).where(
             StructureTimer.is_archived == False,
-            StructureTimer.timer_expires > now,
+            StructureTimer.timer_expires > grace,
             StructureTimer.timer_expires <= cutoff,
         ).order_by(StructureTimer.timer_expires.asc())
     )

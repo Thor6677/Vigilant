@@ -82,9 +82,17 @@
             var countdown = el.querySelector('.timer-banner-countdown');
 
             if (diff <= 0) {
-                el.style.borderLeftColor = 'var(--muted)';
-                el.style.background = 'transparent';
-                if (countdown) { countdown.textContent = '(EXPIRED)'; countdown.style.color = 'var(--muted)'; }
+                /* Hide after 30 min past expiry */
+                if (diff < -1800000) {
+                    el.style.display = 'none';
+                    return;
+                }
+                /* Show 0m for up to 30 min after expiry */
+                el.style.borderLeftColor = 'var(--danger)';
+                el.style.background = 'rgba(204, 51, 51, 0.10)';
+                el.classList.add('is-danger');
+                el.classList.remove('is-warn');
+                if (countdown) { countdown.textContent = '(0m)'; countdown.style.color = 'var(--danger)'; }
                 return;
             }
 
