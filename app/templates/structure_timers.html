@@ -22,13 +22,26 @@
                 <input type="text" name="structure_name" placeholder="Structure name" required
                        style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 <select name="structure_type" style="flex:1;min-width:100px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                    <option value="citadel">Citadel</option>
-                    <option value="ec">Engineering Complex</option>
-                    <option value="refinery">Refinery</option>
-                    <option value="sov">Sov Structure</option>
-                    <option value="poco">POCO</option>
-                    <option value="skyhook">Skyhook</option>
-                    <option value="other">Other</option>
+                    <optgroup label="Citadels">
+                        <option value="astrahus">Astrahus</option>
+                        <option value="fortizar">Fortizar</option>
+                        <option value="keepstar">Keepstar</option>
+                    </optgroup>
+                    <optgroup label="Engineering">
+                        <option value="raitaru">Raitaru</option>
+                        <option value="azbel">Azbel</option>
+                        <option value="sotiyo">Sotiyo</option>
+                    </optgroup>
+                    <optgroup label="Refineries">
+                        <option value="athanor">Athanor</option>
+                        <option value="tatara">Tatara</option>
+                    </optgroup>
+                    <optgroup label="Other">
+                        <option value="poco">POCO</option>
+                        <option value="skyhook">Skyhook</option>
+                        <option value="sov">Sov Structure</option>
+                        <option value="other">Other</option>
+                    </optgroup>
                 </select>
             </div>
 
@@ -211,7 +224,7 @@
             <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                     <span style="font-size:11px;font-weight:600;color:var(--text);">{{ t.structure_name }}</span>
-                    {% set type_labels = {'citadel':'Citadel','ec':'EC','refinery':'Refinery','sov':'Sov','poco':'POCO','skyhook':'Skyhook','other':'Other'} %}
+                    {% set type_labels = {'astrahus':'Astrahus','fortizar':'Fortizar','keepstar':'Keepstar','raitaru':'Raitaru','azbel':'Azbel','sotiyo':'Sotiyo','athanor':'Athanor','tatara':'Tatara','poco':'POCO','skyhook':'Skyhook','sov':'Sov','other':'Other','citadel':'Citadel','ec':'EC','refinery':'Refinery'} %}
                     <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);border-radius:2px;color:var(--muted);">{{ type_labels.get(t.structure_type, t.structure_type) }}</span>
                     {% set phase_colors = {'shield':'var(--accent)','armor':'var(--warn, var(--accent))','hull':'var(--danger)','anchoring':'var(--success)','unanchoring':'var(--muted)'} %}
                     <span style="font-size:8px;padding:1px 4px;border-radius:2px;color:#000;font-weight:600;background:{{ phase_colors.get(t.timer_phase, 'var(--muted)') }};">{{ t.timer_phase | upper }}</span>
@@ -267,7 +280,7 @@
                     <input type="text" name="structure_name" value="{{ t.structure_name }}"
                            style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <select name="structure_type" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                        {% for val, label in [('citadel','Citadel'),('ec','EC'),('refinery','Refinery'),('sov','Sov'),('poco','POCO'),('skyhook','Skyhook'),('other','Other')] %}
+                        {% for val, label in [('astrahus','Astrahus'),('fortizar','Fortizar'),('keepstar','Keepstar'),('raitaru','Raitaru'),('azbel','Azbel'),('sotiyo','Sotiyo'),('athanor','Athanor'),('tatara','Tatara'),('poco','POCO'),('skyhook','Skyhook'),('sov','Sov'),('other','Other')] %}
                         <option value="{{ val }}" {% if t.structure_type == val %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>

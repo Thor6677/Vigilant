@@ -1,11 +1,13 @@
-<div id="timer-alerts" hx-get="/alerts/timer-banners" hx-trigger="every 30s" hx-swap="outerHTML">
+<div id="timer-alerts" hx-get="/alerts/timer-banners" hx-trigger="every 60s" hx-swap="outerHTML">
 {% for timer in timers %}
+{% set type_labels = {'astrahus':'Astrahus','fortizar':'Fortizar','keepstar':'Keepstar','raitaru':'Raitaru','azbel':'Azbel','sotiyo':'Sotiyo','athanor':'Athanor','tatara':'Tatara','poco':'POCO','skyhook':'Skyhook','sov':'Sov','other':'Other','citadel':'Citadel','ec':'EC','refinery':'Refinery'} %}
 <div class="structure-alert-banner is-warn timer-alert-banner"
-     data-alert-id="timer-{{ timer.id }}" style="display:none;">
+     data-alert-id="timer-{{ timer.id }}">
     <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
         <span class="alert-icon">&#9733;</span>
         <span class="alert-text">
             <strong>{{ timer.structure_name }}</strong>
+            <span style="font-size:9px;color:var(--muted);">({{ type_labels.get(timer.structure_type, timer.structure_type) }})</span>
             {% if timer.system_name %} in <strong>{{ timer.system_name }}</strong>{% endif %}
             {% if timer.region_name %} &middot; {{ timer.region_name }}{% endif %}
             &mdash; {{ timer.timer_phase | upper }}
@@ -35,7 +37,7 @@
         var el = document.querySelector('[data-alert-id="' + id + '"]');
         if (el) el.style.display = 'none';
     };
-    /* Show non-dismissed banners */
+    /* Hide dismissed banners */
     var dismissed = getDismissed();
     /* Prune entries older than 2 days */
     var cutoff = Date.now() - 2 * 86400000;
@@ -47,9 +49,10 @@
     var banners = document.querySelectorAll('.timer-alert-banner[data-alert-id]');
     for (var i = 0; i < banners.length; i++) {
         var aid = banners[i].getAttribute('data-alert-id');
-        if (!dismissed[aid]) banners[i].style.display = '';
+        if (dismissed[aid]) banners[i].style.display = 'none';
     }
-    /* Live countdown on banners */
+    /* Live countdown on banners — reuse existing interval if present */
+    if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
     function updateTimerBanners() {
         document.querySelectorAll('.timer-banner-countdown').forEach(function(el) {
             var expires = new Date(el.dataset.expires + 'Z');
@@ -62,7 +65,7 @@
         });
     }
     updateTimerBanners();
-    setInterval(updateTimerBanners, 1000);
+    window._timerBannerInterval = setInterval(updateTimerBanners, 1000);
 })();
 </script>
 </div>

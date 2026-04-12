@@ -76,12 +76,23 @@ async def _cleanup_timers(db: AsyncSession):
 def _classify_structure_type(type_name: str) -> str:
     """Classify a structure type from its SDE type name."""
     name = (type_name or "").lower()
-    if any(s in name for s in ("athanor", "tatara")):
-        return "refinery"
-    if any(s in name for s in ("raitaru", "azbel", "sotiyo")):
-        return "ec"
-    if any(s in name for s in ("astrahus", "fortizar", "keepstar")):
-        return "citadel"
+    # Specific structure matches
+    if "keepstar" in name:
+        return "keepstar"
+    if "fortizar" in name:
+        return "fortizar"
+    if "astrahus" in name:
+        return "astrahus"
+    if "sotiyo" in name:
+        return "sotiyo"
+    if "azbel" in name:
+        return "azbel"
+    if "raitaru" in name:
+        return "raitaru"
+    if "tatara" in name:
+        return "tatara"
+    if "athanor" in name:
+        return "athanor"
     if "customs" in name or "poco" in name:
         return "poco"
     if "skyhook" in name:
@@ -89,6 +100,17 @@ def _classify_structure_type(type_name: str) -> str:
     if any(s in name for s in ("sovereignty", "ihub", "tcu", "territorial")):
         return "sov"
     return "other"
+
+
+# Mapping from structure_type value to display label
+STRUCTURE_TYPE_LABELS = {
+    "astrahus": "Astrahus", "fortizar": "Fortizar", "keepstar": "Keepstar",
+    "raitaru": "Raitaru", "azbel": "Azbel", "sotiyo": "Sotiyo",
+    "athanor": "Athanor", "tatara": "Tatara",
+    "poco": "POCO", "skyhook": "Skyhook", "sov": "Sov", "other": "Other",
+    # Legacy values for existing timers
+    "citadel": "Citadel", "ec": "EC", "refinery": "Refinery",
+}
 
 
 async def _get_user_identities(db: AsyncSession, user_id: int) -> dict:
