@@ -513,10 +513,8 @@ function copyAllTimers(btn) {
         if (h > 0) parts.push(h + 'h');
         parts.push(m + 'm');
         var countdown = parts.join(' ');
-        var localTime = expires.toLocaleString(undefined, {
-            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
-        });
-        lines.push(disp + ' ' + stype + ' in ' + sys + ' belonging to ' + owner + ' ' + phase + ' timer in ' + countdown + ' (' + localTime + ')');
+        var unix = Math.floor(expires.getTime() / 1000);
+        lines.push(disp + ' ' + stype + ' in ' + sys + ' belonging to ' + owner + ' ' + phase + ' timer in ' + countdown + ' (<t:' + unix + ':F>)');
     });
     if (lines.length === 0) {
         lines.push('No active timers');
