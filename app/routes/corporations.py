@@ -1022,39 +1022,56 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
     if item_thresholds:
         wanted_type_ids = {t.type_id for t in item_thresholds if t.type_id}
 
-        # Fetch items for each outstanding contract (with semaphore + DB cache)
+        # Fetch items for outstanding contracts in small batches (cache-first)
         from app.db.cache import cache_get, cache_set
-        sem = asyncio.Semaphore(10)
-        contract_items_cache: dict[int, set[int]] = {}  # contract_id -> set of type_ids
+        contract_type_ids: dict[int, set[int]] = {}  # contract_id -> set of type_ids
 
-        async def fetch_items(contract: dict):
-            cid = contract.get("contract_id")
+        # Phase 1: check DB cache for all contracts (fast, no ESI calls)
+        uncached_contracts = []
+        for c in outstanding:
+            cid = c.get("contract_id")
             if not cid:
-                return
+                continue
             cache_path = f"/corporations/{corp_id}/contracts/{cid}/items/"
-            async with sem:
-                try:
-                    async with AsyncSessionLocal() as sess:
-                        # Check DB cache first
-                        cached = await cache_get(sess, cache_path)
-                        if cached is not None:
-                            contract_items_cache[cid] = {i.get("type_id") for i in cached}
-                            return
-                        char = scope_chars["contracts"][0]
-                        token = await refresh_token(char, sess)
-                        client = ESIClient(token, db=sess)
-                        items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
-                        if isinstance(items, list):
-                            contract_items_cache[cid] = {i.get("type_id") for i in items}
-                            await cache_set(sess, cache_path, items)
-                except Exception:
-                    pass
+            cached = await cache_get(db, cache_path)
+            if cached is not None:
+                contract_type_ids[cid] = {i.get("type_id") for i in cached}
+            else:
+                uncached_contracts.append(c)
 
-        await asyncio.gather(*[fetch_items(c) for c in outstanding])
+        # Phase 2: fetch uncached contract items in small batches (3 concurrent, 1s delay between batches)
+        if uncached_contracts:
+            sem = asyncio.Semaphore(3)
+
+            async def fetch_items(contract: dict):
+                cid = contract.get("contract_id")
+                if not cid:
+                    return
+                cache_path = f"/corporations/{corp_id}/contracts/{cid}/items/"
+                async with sem:
+                    try:
+                        async with AsyncSessionLocal() as sess:
+                            char = scope_chars["contracts"][0]
+                            token = await refresh_token(char, sess)
+                            client = ESIClient(token, db=sess)
+                            items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
+                            if isinstance(items, list):
+                                contract_type_ids[cid] = {i.get("type_id") for i in items}
+                                await cache_set(sess, cache_path, items)
+                    except Exception:
+                        pass
+
+            # Process in batches of 10 with a delay between batches
+            batch_size = 10
+            for i in range(0, len(uncached_contracts), batch_size):
+                batch = uncached_contracts[i:i + batch_size]
+                await asyncio.gather(*[fetch_items(c) for c in batch])
+                if i + batch_size < len(uncached_contracts):
+                    await asyncio.sleep(1)
 
         # Count contracts containing each wanted type
         for t in item_thresholds:
-            count = sum(1 for type_ids in contract_items_cache.values() if t.type_id in type_ids)
+            count = sum(1 for type_ids in contract_type_ids.values() if t.type_id in type_ids)
             item_counts[t.id] = count
 
     # Update all thresholds

@@ -26,7 +26,7 @@ TTL = {
     "killmail":         86400,        # killmails are immutable — 24h
     "search":           300,          # search results — 5 min
     "corp_contracts":   300,          # corp contracts list — 5 min
-    "contract_items":   3600,         # contract items (stable while outstanding) — 1h
+    "contract_items":   14400,        # contract items (stable while outstanding) — 4h
 }
 
 
