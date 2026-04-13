@@ -88,7 +88,7 @@ export function GateRoutePlannerPanel({
     <div style={{
       position: 'absolute',
       ...(isMobile
-        ? { bottom: overlayBarHeight, left: 0, width: '100%', maxHeight: '55vh', top: undefined }
+        ? { position: 'relative' as const, width: '100%', height: '100%', maxHeight: 'none', top: undefined, right: undefined }
         : { top: 48, right: 10, width: 280, maxHeight: 'calc(100% - 100px)' }),
       overflowY: 'auto',
       background: BG,

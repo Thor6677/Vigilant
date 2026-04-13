@@ -1002,10 +1002,22 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     return { x, y };
   }, [tooltipPos]);
 
+  const mobilePlannerOpen = isMobile && (gateRoutePlanner.active || jumpPlanner.active);
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      ...(mobilePlannerOpen ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
+    }}>
       {/* Canvas container — height adjusts for overlay bar */}
-      <div ref={containerRef} style={{ width: '100%', height: `calc(100% - ${overlayBarHeight}px)` }} />
+      <div ref={containerRef} style={{
+        width: '100%',
+        ...(mobilePlannerOpen
+          ? { height: '45%', flexShrink: 0 }
+          : { height: `calc(100% - ${overlayBarHeight}px)` }),
+      }} />
 
       {/* Search bar */}
       <SystemSearch
@@ -1094,6 +1106,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         <div
           onPointerEnter={() => { panelHoverRef.current = true; }}
           onPointerLeave={() => { panelHoverRef.current = false; }}
+          {...(isMobile ? { style: { flex: 1, minHeight: 0, overflow: 'hidden' } } : {})}
         >
           <GateRoutePlannerPanel
             planner={gateRoutePlanner}
@@ -1137,6 +1150,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         <div
           onPointerEnter={() => { panelHoverRef.current = true; }}
           onPointerLeave={() => { panelHoverRef.current = false; }}
+          {...(isMobile ? { style: { flex: 1, minHeight: 0, overflow: 'hidden' } } : {})}
         >
           <JumpPlannerPanel
             planner={jumpPlanner}

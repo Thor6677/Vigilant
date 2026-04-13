@@ -43,7 +43,7 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
     <div style={{
       position: 'absolute',
       ...(isMobile
-        ? { bottom: overlayBarHeight, left: 0, width: '100%', maxHeight: '55vh', top: undefined }
+        ? { position: 'relative' as const, width: '100%', height: '100%', maxHeight: 'none', top: undefined, left: undefined }
         : { top: 48, left: 10, width: 280, maxHeight: 'calc(100% - 100px)' }),
       overflowY: 'auto',
       background: BG,
