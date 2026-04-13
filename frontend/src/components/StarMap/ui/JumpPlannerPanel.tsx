@@ -17,10 +17,9 @@ interface Props {
   onFocusSystem: (system: SystemData) => void;
   onHighlightSystems: (ids: Set<number> | null) => void;
   isMobile?: boolean;
-  overlayBarHeight?: number;
 }
 
-export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem, onHighlightSystems, isMobile, overlayBarHeight = 36 }: Props) {
+export function JumpPlannerPanel({ planner, systems, systemName, characters, stats, onFocusSystem, onHighlightSystems, isMobile }: Props) {
   const shipEntries = Object.entries(JUMP_SHIPS) as [JumpShipClass, typeof JUMP_SHIPS[JumpShipClass]][];
   const charsWithLocation = characters.filter(c => c.system_id !== null);
   const [showRange, setShowRange] = useState(false);
@@ -41,9 +40,9 @@ export function JumpPlannerPanel({ planner, systems, systemName, characters, sta
 
   return (
     <div style={{
-      position: 'absolute',
+      position: isMobile ? 'relative' : 'absolute',
       ...(isMobile
-        ? { position: 'relative' as const, width: '100%', height: '100%', maxHeight: 'none', top: undefined, left: undefined }
+        ? { width: '100%', height: '100%' }
         : { top: 48, left: 10, width: 280, maxHeight: 'calc(100% - 100px)' }),
       overflowY: 'auto',
       background: BG,

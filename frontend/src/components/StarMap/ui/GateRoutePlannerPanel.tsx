@@ -40,7 +40,6 @@ interface Props {
   onFocusSystem: (system: SystemData) => void;
   onHighlightSystems: (ids: Set<number> | null) => void;
   isMobile?: boolean;
-  overlayBarHeight?: number;
 }
 
 const PREFERENCE_OPTIONS: { value: RoutePreference; label: string }[] = [
@@ -60,7 +59,6 @@ export function GateRoutePlannerPanel({
   onFocusSystem,
   onHighlightSystems,
   isMobile,
-  overlayBarHeight = 36,
 }: Props) {
   const charsWithLocation = characters.filter(c => c.system_id !== null);
   const [savingMode, setSavingMode] = useState(false);
@@ -86,9 +84,9 @@ export function GateRoutePlannerPanel({
 
   return (
     <div style={{
-      position: 'absolute',
+      position: isMobile ? 'relative' : 'absolute',
       ...(isMobile
-        ? { position: 'relative' as const, width: '100%', height: '100%', maxHeight: 'none', top: undefined, right: undefined }
+        ? { width: '100%', height: '100%' }
         : { top: 48, right: 10, width: 280, maxHeight: 'calc(100% - 100px)' }),
       overflowY: 'auto',
       background: BG,
