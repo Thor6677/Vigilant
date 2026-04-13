@@ -688,6 +688,10 @@
             .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }
             .b-footer-links { flex-wrap: wrap; justify-content: center; }
             .b-breadcrumbs { padding: 0.5rem 1rem; }
+            /* Touch-friendly form elements on tablets */
+            input, select, textarea, .b-btn, button { min-height: 38px; }
+            /* Page headers stack vertically */
+            .b-page-header { flex-direction: column; gap: 0.5rem; align-items: flex-start; }
         }
         @media (max-width: 640px) {
             .b-grid-3 { grid-template-columns: 1fr; }
@@ -696,6 +700,37 @@
             .b-main { padding: 1.5rem 1rem; }
             .b-stats { flex-wrap: wrap; }
             .b-stat { flex: 1 1 45%; }
+            /* Full touch compliance on phones (44px Apple HIG) */
+            input, select, textarea, .b-btn, button {
+                min-height: 44px;
+                font-size: max(12px, inherit);
+            }
+            /* Collapse inline 2-column grids to single column */
+            [style*="grid-template-columns:1fr 1fr"],
+            [style*="grid-template-columns: 1fr 1fr"] {
+                grid-template-columns: 1fr !important;
+            }
+            /* Prevent fixed-width inline elements from overflowing */
+            [style*="width:340px"], [style*="width: 340px"] {
+                width: 100% !important; max-width: 100% !important;
+            }
+            /* Reduce min-widths that cause horizontal overflow */
+            [style*="min-width:150px"], [style*="min-width:160px"],
+            [style*="min-width:180px"], [style*="min-width:200px"] {
+                min-width: 0 !important;
+            }
+            /* Slightly larger base font for phone readability */
+            body { font-size: 13px; }
+            .b-page-title { font-size: 16px; }
+            /* Alert banners wrap text */
+            .structure-alert-banner { flex-wrap: wrap; padding: 0.75rem 1rem; }
+            /* Exempt tiny icon buttons from min-height rule */
+            .alert-dismiss { min-height: auto !important; padding: 0.25rem; }
+        }
+        @media (max-width: 480px) {
+            .b-main { padding: 1rem 0.75rem; }
+            .b-nav { padding: 0 0.75rem; }
+            .b-stat { flex: 1 1 100%; }
         }
     </style>
     {% block head %}{% endblock %}
@@ -746,7 +781,7 @@
                 <line id="notif-slash" x1="1" y1="1" x2="23" y2="23" stroke="var(--danger)" stroke-width="2"/>
             </svg>
             <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:0;background:var(--danger);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center;">0</span>
-            <div id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;width:320px;max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:1000;">
+            <div id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;width:min(320px, calc(100vw - 2rem));max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:1000;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
                     <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Notifications</span>
                     <div style="display:flex;gap:0.5rem;">

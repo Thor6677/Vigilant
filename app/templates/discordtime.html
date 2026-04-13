@@ -63,6 +63,9 @@
     .dt-quick-grid {
         display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
     }
+    @media (max-width: 640px) {
+        .dt-quick-grid { grid-template-columns: 1fr; }
+    }
     .dt-quick-btn {
         background: none; border: 1px solid var(--border); color: var(--muted);
         padding: 0.4rem 0.5rem; font: inherit; font-size: 10px; cursor: pointer;
