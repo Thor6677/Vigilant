@@ -11,14 +11,16 @@ const MODES: { key: GroupMode; label: string }[] = [
 interface Props {
   mode: GroupMode;
   onModeChange: (mode: GroupMode) => void;
+  isMobile?: boolean;
 }
 
-export function GroupModeControls({ mode, onModeChange }: Props) {
+export function GroupModeControls({ mode, onModeChange, isMobile }: Props) {
   return (
     <div style={{
       position: 'absolute',
-      top: 10,
-      right: 12,
+      top: isMobile ? 48 : 10,
+      right: isMobile ? undefined : 12,
+      left: isMobile ? 10 : undefined,
       zIndex: 30,
       display: 'flex',
       gap: 0,

@@ -28,6 +28,7 @@ interface Props {
   onSovTimeRangeChange?: (range: SovTimeRange) => void;
   sovChangesCount?: number;
   sovChangesLoading?: boolean;
+  isMobile?: boolean;
 }
 
 const FONT = "'JetBrains Mono', monospace";
@@ -35,6 +36,7 @@ const FONT = "'JetBrains Mono', monospace";
 export function OverlayControls({
   activeOverlay, onOverlayChange, statsLoaded,
   sovTimeRange, onSovTimeRangeChange, sovChangesCount = 0, sovChangesLoading = false,
+  isMobile,
 }: Props) {
   return (
     <div style={{ fontFamily: FONT }}>
@@ -61,8 +63,8 @@ export function OverlayControls({
                 onClick={() => !isDisabled && onOverlayChange(key)}
                 disabled={isDisabled}
                 style={{
-                  padding: '8px 12px',
-                  fontSize: 9,
+                  padding: isMobile ? '10px 10px' : '8px 12px',
+                  fontSize: isMobile ? 10 : 9,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase',
                   fontFamily: FONT,
@@ -85,9 +87,9 @@ export function OverlayControls({
           })}
         </div>
 
-        {/* Color legend */}
+        {/* Color legend — hidden on mobile */}
         <div style={{
-          display: 'flex',
+          display: isMobile ? 'none' : 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '0 12px',

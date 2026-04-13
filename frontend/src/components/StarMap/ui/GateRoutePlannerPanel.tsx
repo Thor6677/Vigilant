@@ -38,8 +38,8 @@ interface Props {
   systemName: (id: number) => string;
   characters: CharacterLocation[];
   onFocusSystem: (system: SystemData) => void;
-  /** Callback to highlight a set of systems on the map (for service filter). */
   onHighlightSystems: (ids: Set<number> | null) => void;
+  isMobile?: boolean;
 }
 
 const PREFERENCE_OPTIONS: { value: RoutePreference; label: string }[] = [
@@ -58,6 +58,7 @@ export function GateRoutePlannerPanel({
   characters,
   onFocusSystem,
   onHighlightSystems,
+  isMobile,
 }: Props) {
   const charsWithLocation = characters.filter(c => c.system_id !== null);
   const [savingMode, setSavingMode] = useState(false);
@@ -84,10 +85,9 @@ export function GateRoutePlannerPanel({
   return (
     <div style={{
       position: 'absolute',
-      top: 48,
-      right: 10,
-      width: 280,
-      maxHeight: 'calc(100% - 100px)',
+      ...(isMobile
+        ? { bottom: 0, left: 0, width: '100%', maxHeight: '55vh', top: undefined }
+        : { top: 48, right: 10, width: 280, maxHeight: 'calc(100% - 100px)' }),
       overflowY: 'auto',
       background: BG,
       border: `1px solid ${BORDER}`,

@@ -37,6 +37,7 @@ import { GroupModeControls } from './ui/GroupModeControls';
 import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
 import { GateRoutePlannerPanel } from './ui/GateRoutePlannerPanel';
 import { SystemContextMenu } from './ui/SystemContextMenu';
+import { useIsMobile } from './useIsMobile';
 import type { GroupData } from './renderer/LabelRenderer';
 
 export interface StarMapHandle {
@@ -85,6 +86,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
 
   // Keep ref in sync for use in Pixi callbacks
   selectedSystemRef.current = selectedSystem;
+
+  const isMobile = useIsMobile();
 
   // Fetch ESI overlay stats
   const { stats, loading: statsLoading } = useOverlayData();
@@ -446,6 +449,17 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       app.stage.addChild(vp);
       viewportRef.current = vp;
 
+      // Resize viewport when container changes (orientation flip, window resize)
+      const vpResizeObserver = new ResizeObserver(() => {
+        if (viewportRef.current && el) {
+          const { clientWidth, clientHeight } = el;
+          viewportRef.current.resize(clientWidth, clientHeight);
+          app.renderer.resize(clientWidth, clientHeight);
+        }
+      });
+      vpResizeObserver.observe(el);
+      (el as any).__vpResizeObserver = vpResizeObserver;
+
       // Build renderers
       const systemRenderer = new SystemRenderer();
       const edgeRenderer = new EdgeRenderer();
@@ -665,6 +679,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     return () => {
       destroyed = true;
       (el as any).__mapCleanup?.();
+      (el as any).__vpResizeObserver?.disconnect();
       systemRendererRef.current?.destroy();
       edgeRendererRef.current?.destroy();
       labelRendererRef.current?.destroy();
@@ -1002,10 +1017,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         onSetRouteDest={handleSetDest}
         onAddRouteWaypoint={handleAddWaypoint}
         onAvoidSystem={handleAvoidSystem}
+        isMobile={isMobile}
       />
 
       {/* Group mode selector */}
-      <GroupModeControls mode={groupMode} onModeChange={setGroupMode} />
+      <GroupModeControls mode={groupMode} onModeChange={setGroupMode} isMobile={isMobile} />
 
       {/* Character location markers */}
       {characters.map(char => {
@@ -1070,6 +1086,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         onToggleJumpPlanner={() => jumpPlanner.setActive(!jumpPlanner.active)}
         gatePlannerActive={gateRoutePlanner.active}
         onToggleGatePlanner={() => gateRoutePlanner.setActive(!gateRoutePlanner.active)}
+        isMobile={isMobile}
       />
 
       {/* Gate route planner panel */}
@@ -1084,6 +1101,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             systemMap={data.systemMap}
             systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
             characters={characters}
+            isMobile={isMobile}
             onFocusSystem={(sys) => {
               if (viewportRef.current) {
                 viewportRef.current.animate({
@@ -1125,6 +1143,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
             characters={characters}
             stats={stats}
+            isMobile={isMobile}
             onFocusSystem={(sys) => {
               if (viewportRef.current) {
                 viewportRef.current.animate({
@@ -1249,6 +1268,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           onSovTimeRangeChange={(r) => setSovTimeRange(r === sovTimeRange ? null : r)}
           sovChangesCount={sovChanges.data ? Object.keys(sovChanges.data.changes).length : 0}
           sovChangesLoading={sovChanges.loading}
+          isMobile={isMobile}
         />
       </div>
     </div>

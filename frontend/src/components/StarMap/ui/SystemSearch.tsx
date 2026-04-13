@@ -47,12 +47,11 @@ interface Props {
   characters: CharacterLocation[];
   onSelectSystem: (system: SystemData) => void;
   onSelectArea: (type: 'constellation' | 'region', id: number, name: string) => void;
-  /** Optional gate-route action callbacks. When provided, small action buttons
-   *  appear on each system/service result row. */
   onSetRouteOrigin?: (id: number) => void;
   onSetRouteDest?: (id: number) => void;
   onAddRouteWaypoint?: (id: number) => void;
   onAvoidSystem?: (id: number) => void;
+  isMobile?: boolean;
 }
 
 export function SystemSearch({
@@ -64,6 +63,7 @@ export function SystemSearch({
   onSetRouteDest,
   onAddRouteWaypoint,
   onAvoidSystem,
+  isMobile,
 }: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
@@ -252,7 +252,7 @@ export function SystemSearch({
       top: 10,
       left: 10,
       zIndex: 30,
-      width: 280,
+      width: isMobile ? 'calc(100% - 20px)' : 280,
     }}>
       <div style={{ position: 'relative' }}>
         <input
@@ -267,8 +267,8 @@ export function SystemSearch({
           aria-label="Search systems, regions, services"
           style={{
             width: '100%',
-            padding: '7px 28px 7px 10px',
-            fontSize: 10,
+            padding: isMobile ? '10px 32px 10px 10px' : '7px 28px 7px 10px',
+            fontSize: isMobile ? 12 : 10,
             letterSpacing: '0.1em',
             fontFamily: FONT,
             background: 'rgba(14, 14, 14, 0.95)',
