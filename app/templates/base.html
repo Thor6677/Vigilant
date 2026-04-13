@@ -845,6 +845,9 @@
                         <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
                             <input type="checkbox" data-notif-type="inventory_low" onchange="saveNotifPrefs()" checked> Inventory Alerts
                         </label>
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="contract_low" onchange="saveNotifPrefs()" checked> Contract Alerts
+                        </label>
                     </div>
                 </div>
                 <div id="notif-list">
@@ -895,6 +898,10 @@
      hx-swap="outerHTML"></div>
 <div id="inventory-alerts"
      hx-get="/alerts/inventory-banners"
+     hx-trigger="load, every 60s"
+     hx-swap="outerHTML"></div>
+<div id="contract-alerts"
+     hx-get="/alerts/contract-banners"
      hx-trigger="load, every 60s"
      hx-swap="outerHTML"></div>
 <div id="timer-alerts"

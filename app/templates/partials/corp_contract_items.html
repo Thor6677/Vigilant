@@ -1,0 +1,42 @@
+{% if not thresholds %}
+<div class="b-empty">No contract thresholds set. Add one below to start monitoring.</div>
+{% else %}
+{% for t in thresholds %}
+<div class="b-row" style="gap:0.4rem;padding:0.35rem 0.75rem;">
+    {% if t.type_id %}
+    <img src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
+         style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
+         onerror="this.style.display='none'">
+    {% else %}
+    <span style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);flex-shrink:0;font-size:10px;color:var(--muted);">T</span>
+    {% endif %}
+    <span style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ t.match_label }}
+        <span style="color:var(--muted);font-size:9px;">{{ 'item' if t.match_type == 'item' else 'title' }}</span>
+    </span>
+    <span style="font-size:11px;min-width:50px;text-align:right;{% if t.alert_state == 'critical' %}color:var(--danger);font-weight:600;{% elif t.alert_state == 'low' %}color:var(--warn);font-weight:600;{% else %}color:var(--text);{% endif %}">
+        {{ t.current_count if t.current_count is not none else '—' }}
+    </span>
+    <span style="font-size:9px;color:var(--muted);min-width:90px;text-align:right;"
+          title="Low: {{ t.threshold_low }} / Critical: {{ t.threshold_critical }}">
+        L:{{ t.threshold_low }} C:{{ t.threshold_critical }}
+    </span>
+    {% if t.alert_state == 'critical' %}
+    <span class="b-badge is-danger" style="font-size:8px;">CRITICAL</span>
+    {% elif t.alert_state == 'low' %}
+    <span class="b-badge is-warn" style="font-size:8px;">LOW</span>
+    {% elif t.current_count is not none %}
+    <span class="b-badge" style="font-size:8px;color:var(--success);">OK</span>
+    {% else %}
+    <span class="b-badge" style="font-size:8px;color:var(--muted);">—</span>
+    {% endif %}
+    <button class="b-btn" style="flex:none;padding:0.2rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--danger);"
+            hx-post="/corporations/{{ corp_id }}/contracts/threshold/{{ t.id }}/delete"
+            hx-target="#contract-items"
+            hx-swap="innerHTML"
+            hx-confirm="Remove {{ t.match_label }} from tracking?">
+        &times;
+    </button>
+</div>
+{% endfor %}
+{% endif %}

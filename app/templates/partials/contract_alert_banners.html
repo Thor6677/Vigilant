@@ -1,0 +1,49 @@
+<div id="contract-alerts" hx-get="/alerts/contract-banners" hx-trigger="every 60s" hx-swap="outerHTML">
+{% for alert in alerts %}
+<div class="structure-alert-banner is-warn"
+     data-alert-id="contract-{{ alert.id }}" style="display:none;">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">&#9888;</span>
+        <span class="alert-text">
+            <strong>Contract {{ 'Critical' if alert.alert_state == 'critical' else 'Low' }}</strong>
+            &mdash; {{ alert.match_label }}
+            <span style="color:var(--text);font-size:10px;">[{{ alert.current_count }}/{{ alert.threshold_critical if alert.alert_state == 'critical' else alert.threshold_low }}]</span>
+        </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+        <a href="/corporations/{{ alert.corp_id }}/contracts" style="font-size:9px;color:var(--accent);text-decoration:none;">View</a>
+        <button class="alert-dismiss" onclick="dismissContractAlert('contract-{{ alert.id }}')" title="Dismiss">&times;</button>
+    </div>
+</div>
+{% endfor %}
+<script>
+(function() {
+    var KEY = 'vigilant_dismissed_contract_alerts';
+    function getDismissed() {
+        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
+    }
+    function setDismissed(d) {
+        try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
+    }
+    window.dismissContractAlert = function(id) {
+        var d = getDismissed();
+        d[id] = Date.now();
+        setDismissed(d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+    var dismissed = getDismissed();
+    var cutoff = Date.now() - 7 * 86400000;
+    var changed = false;
+    for (var k in dismissed) {
+        if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
+    }
+    if (changed) setDismissed(dismissed);
+    var banners = document.querySelectorAll('#contract-alerts .structure-alert-banner[data-alert-id]');
+    for (var i = 0; i < banners.length; i++) {
+        var aid = banners[i].getAttribute('data-alert-id');
+        if (!dismissed[aid]) banners[i].style.display = '';
+    }
+})();
+</script>
+</div>

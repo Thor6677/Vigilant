@@ -25,6 +25,7 @@
         moonmining: true,
         poco: true,
         inventory_low: true,
+        contract_low: true,
     };
 
     /* Human-readable type labels */
@@ -41,6 +42,8 @@
         poco: 'POCO',
         inventory_low: 'Inventory',
         inventory_critical: 'Inventory',
+        contract_low: 'Contracts',
+        contract_critical: 'Contracts',
         structure_alert: 'Structure',
     };
 
@@ -58,6 +61,8 @@
         structure_alert: 'var(--danger)',
         inventory_low: 'var(--accent)',
         inventory_critical: 'var(--danger)',
+        contract_low: 'var(--accent)',
+        contract_critical: 'var(--danger)',
     };
 
     function loadPrefs() {
@@ -87,6 +92,7 @@
     function isTypeEnabled(type) {
         var prefs = loadPrefs();
         if (type === 'inventory_critical') return prefs['inventory_low'] !== false;
+        if (type === 'contract_critical') return prefs['contract_low'] !== false;
         /* Legacy: old events with type 'structure_alert' follow structure_attack pref */
         if (type === 'structure_alert') return prefs['structure_attack'] !== false;
         return prefs[type] !== false;

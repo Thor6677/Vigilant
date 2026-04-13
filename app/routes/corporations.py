@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold
+from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold, CorpContractThreshold
 from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
 from app.esi import universe as esi_universe
@@ -852,5 +852,250 @@ async def _render_inventory_items(user_id: int, corp_id: int, db: AsyncSession, 
         "request": request,
         "corp_id": corp_id,
         "by_location": by_location,
+        "thresholds": thresholds,
+    })
+
+
+# ── Contract Threshold Monitoring ──────────────────────────────────────────────
+
+@router.get("/{corp_id}/contracts", response_class=HTMLResponse)
+async def corp_contracts_page(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Contract threshold monitoring page."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=302)
+
+    corp_name = await _get_corp_name(corp_id, user_id, db)
+
+    thresh_result = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.user_id == user_id,
+            CorpContractThreshold.corp_id == corp_id,
+        ).order_by(CorpContractThreshold.match_label)
+    )
+    thresholds = thresh_result.scalars().all()
+
+    return templates.TemplateResponse("corp_contracts.html", {
+        "request": request,
+        "corp_id": corp_id,
+        "corp_name": corp_name,
+        "thresholds": thresholds,
+    })
+
+
+@router.post("/{corp_id}/contracts/threshold", response_class=HTMLResponse)
+async def corp_contract_add_threshold(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Add or update a contract threshold."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    form = await request.form()
+    match_type = form.get("match_type", "title")  # "item" or "title"
+    threshold_low = int(form.get("threshold_low", 0))
+    threshold_critical = int(form.get("threshold_critical", 0))
+
+    if match_type == "item":
+        type_id = int(form.get("type_id", 0))
+        if not type_id:
+            return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Select an item type.</div>')
+        type_name = form.get("type_name", "")
+        if not type_name:
+            tn = await sde.type_id_to_name(db, type_id)
+            type_name = tn or f"Type {type_id}"
+        match_value = str(type_id)
+        match_label = type_name
+    else:
+        keyword = form.get("keyword", "").strip()
+        if not keyword:
+            return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Enter a title keyword.</div>')
+        match_value = keyword
+        match_label = f'Title: "{keyword}"'
+        type_id = None
+
+    # Check for existing threshold
+    existing = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.user_id == user_id,
+            CorpContractThreshold.corp_id == corp_id,
+            CorpContractThreshold.match_type == match_type,
+            CorpContractThreshold.match_value == match_value,
+        )
+    )
+    thresh = existing.scalar_one_or_none()
+    if thresh:
+        thresh.threshold_low = threshold_low
+        thresh.threshold_critical = threshold_critical
+    else:
+        thresh = CorpContractThreshold(
+            user_id=user_id,
+            corp_id=corp_id,
+            match_type=match_type,
+            match_value=match_value,
+            match_label=match_label,
+            type_id=type_id,
+            threshold_low=threshold_low,
+            threshold_critical=threshold_critical,
+        )
+        db.add(thresh)
+    await db.commit()
+
+    return await _render_contract_items(user_id, corp_id, db, request)
+
+
+@router.post("/{corp_id}/contracts/threshold/{threshold_id}/delete", response_class=HTMLResponse)
+async def corp_contract_delete_threshold(corp_id: int, threshold_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Remove a tracked contract threshold."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    result = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.id == threshold_id,
+            CorpContractThreshold.user_id == user_id,
+        )
+    )
+    thresh = result.scalar_one_or_none()
+    if thresh:
+        await db.delete(thresh)
+        await db.commit()
+
+    return await _render_contract_items(user_id, corp_id, db, request)
+
+
+@router.post("/{corp_id}/contracts/check", response_class=HTMLResponse)
+async def corp_contract_check(corp_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Manually refresh contract counts."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    await check_corp_contracts(user_id, corp_id, db)
+    return await _render_contract_items(user_id, corp_id, db, request)
+
+
+async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emit_notifications: bool = False):
+    """Check outstanding corp contracts against thresholds and update alert states."""
+    thresh_result = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.user_id == user_id,
+            CorpContractThreshold.corp_id == corp_id,
+        )
+    )
+    thresholds = thresh_result.scalars().all()
+    if not thresholds:
+        return
+
+    scope_chars = await _get_corp_scope_chars(user_id, corp_id, db)
+    if "contracts" not in scope_chars:
+        return
+
+    # Fetch all outstanding corp contracts
+    contracts, _ = await _try_api_call_with_fallback(
+        "contracts", scope_chars, esi_corp.get_corporation_contracts, corp_id, db
+    )
+    if contracts is None:
+        return
+
+    outstanding = [c for c in contracts if c.get("status") == "outstanding" and c.get("type") == "item_exchange"]
+
+    # Check which thresholds need item-level matching
+    item_thresholds = [t for t in thresholds if t.match_type == "item"]
+    title_thresholds = [t for t in thresholds if t.match_type == "title"]
+
+    # For title thresholds — simple keyword match on contract title
+    title_counts: dict[int, int] = {}
+    for t in title_thresholds:
+        keyword = t.match_value.lower()
+        count = sum(1 for c in outstanding if keyword in (c.get("title") or "").lower())
+        title_counts[t.id] = count
+
+    # For item thresholds — need to fetch contract items
+    item_counts: dict[int, int] = {}
+    if item_thresholds:
+        wanted_type_ids = {t.type_id for t in item_thresholds if t.type_id}
+
+        # Fetch items for each outstanding contract (with semaphore to limit concurrency)
+        sem = asyncio.Semaphore(10)
+        contract_items_cache: dict[int, set[int]] = {}  # contract_id -> set of type_ids
+
+        async def fetch_items(contract: dict):
+            cid = contract.get("contract_id")
+            if not cid:
+                return
+            async with sem:
+                try:
+                    # Use a fresh session for concurrent requests
+                    async with AsyncSessionLocal() as sess:
+                        char = scope_chars["contracts"][0]
+                        token = await refresh_token(char, sess)
+                        client = ESIClient(token, db=sess)
+                        items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
+                        if isinstance(items, list):
+                            contract_items_cache[cid] = {i.get("type_id") for i in items}
+                except Exception:
+                    pass
+
+        await asyncio.gather(*[fetch_items(c) for c in outstanding])
+
+        # Count contracts containing each wanted type
+        for t in item_thresholds:
+            count = sum(1 for type_ids in contract_items_cache.values() if t.type_id in type_ids)
+            item_counts[t.id] = count
+
+    # Update all thresholds
+    now = datetime.now(timezone.utc)
+    for t in thresholds:
+        count = title_counts.get(t.id) or item_counts.get(t.id, 0)
+        old_state = t.alert_state
+
+        if t.threshold_critical > 0 and count <= t.threshold_critical:
+            new_state = "critical"
+        elif t.threshold_low > 0 and count <= t.threshold_low:
+            new_state = "low"
+        else:
+            new_state = "ok"
+
+        t.current_count = count
+        t.alert_state = new_state
+        t.last_checked = now
+
+        if emit_notifications and new_state != old_state and new_state != "ok":
+            from app.routes.dashboard import _emit_notification
+            ntype = "contract_critical" if new_state == "critical" else "contract_low"
+            title = "Contracts Critical" if new_state == "critical" else "Contracts Low"
+            _emit_notification(user_id, {
+                "type": ntype,
+                "title": title,
+                "body": f"{t.match_label} — {count}/{t.threshold_critical if new_state == 'critical' else t.threshold_low} contracts",
+                "icon": f"https://images.evetech.net/types/{t.type_id}/icon?size=64" if t.type_id else "/static/logo.png",
+            })
+
+    await db.commit()
+
+
+async def _get_corp_name(corp_id: int, user_id: int, db: AsyncSession) -> str:
+    """Get corp name from user's characters."""
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    for char in result.scalars().all():
+        if char.corporation_id == corp_id and char.corporation_name:
+            return char.corporation_name
+    return f"Corp {corp_id}"
+
+
+async def _render_contract_items(user_id: int, corp_id: int, db: AsyncSession, request: Request) -> HTMLResponse:
+    """Render the contract threshold items partial."""
+    thresh_result = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.user_id == user_id,
+            CorpContractThreshold.corp_id == corp_id,
+        ).order_by(CorpContractThreshold.match_label)
+    )
+    thresholds = thresh_result.scalars().all()
+
+    return templates.TemplateResponse("partials/corp_contract_items.html", {
+        "request": request,
+        "corp_id": corp_id,
         "thresholds": thresholds,
     })

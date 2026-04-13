@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}CONTRACTS — {{ corp_name }} — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/corporations">Corporations</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ corp_name }} — Contracts</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Contract Monitor</h1>
+    <div style="display:flex;gap:0.75rem;align-items:center;">
+        <button class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);flex:none;font-size:10px;"
+                hx-post="/corporations/{{ corp_id }}/contracts/check"
+                hx-target="#contract-items"
+                hx-swap="innerHTML"
+                hx-indicator="#check-loader">
+            Check Now
+        </button>
+        <span id="check-loader" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Checking...</span>
+    </div>
+</div>
+
+{# ── Tracked Contracts ──────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Tracked Contracts</span>
+        <span class="b-label" style="color:var(--muted);">{{ thresholds|length }} threshold{{ 's' if thresholds|length != 1 else '' }}</span>
+    </div>
+    <div id="contract-items">
+        {% include "partials/corp_contract_items.html" %}
+    </div>
+</div>
+
+{# ── Add Threshold ──────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Add Contract Threshold</span>
+    </div>
+    <div style="padding:0.75rem;border:1px solid var(--border);background:var(--surface);">
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
+            {# Match type selector #}
+            <div style="min-width:120px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Match By</label>
+                <select id="ct-match-type" onchange="toggleContractMatchType()"
+                        style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                    <option value="title">Title Keyword</option>
+                    <option value="item">Item Type</option>
+                </select>
+            </div>
+
+            {# Title keyword input #}
+            <div id="ct-title-field" style="flex:1;min-width:180px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Keyword</label>
+                <input type="text" id="ct-keyword" placeholder="e.g. Doctrine Raven"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            </div>
+
+            {# Item type search (hidden by default) #}
+            <div id="ct-item-field" style="flex:1;min-width:180px;display:none;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Item Type</label>
+                <input type="text" id="ct-item-search" placeholder="Search items..."
+                       hx-get="/corporations/{{ corp_id }}/inventory/type-search"
+                       hx-trigger="keyup changed delay:300ms"
+                       hx-target="#ct-search-results"
+                       hx-swap="innerHTML"
+                       name="q"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <input type="hidden" id="ct-type-id" value="">
+                <input type="hidden" id="ct-type-name" value="">
+                <div id="ct-search-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
+            </div>
+
+            {# Thresholds #}
+            <div style="min-width:80px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Low</label>
+                <input type="number" id="ct-low" value="10" min="0"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            </div>
+            <div style="min-width:80px;">
+                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Critical</label>
+                <input type="number" id="ct-critical" value="5" min="0"
+                       style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+            </div>
+            <button onclick="addContractThreshold()" class="b-btn" style="padding:0.35rem 0.6rem;border:1px solid var(--accent);color:var(--accent);flex:none;font-size:10px;">Add</button>
+        </div>
+        <div style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
+            Monitors outstanding item exchange contracts. Title match counts contracts whose title contains the keyword. Item match counts contracts containing the item type.
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleContractMatchType() {
+    var type = document.getElementById('ct-match-type').value;
+    document.getElementById('ct-title-field').style.display = type === 'title' ? '' : 'none';
+    document.getElementById('ct-item-field').style.display = type === 'item' ? '' : 'none';
+}
+
+/* Item search result selection — reuse the same onclick pattern as inventory */
+window.selectSearchItem = function(typeId, typeName) {
+    var invSearch = document.getElementById('add-search');
+    var ctSearch = document.getElementById('ct-item-search');
+    if (ctSearch && document.getElementById('ct-item-field').style.display !== 'none') {
+        document.getElementById('ct-type-id').value = typeId;
+        document.getElementById('ct-type-name').value = typeName;
+        ctSearch.value = typeName;
+        document.getElementById('ct-search-results').style.display = 'none';
+    } else if (invSearch) {
+        document.getElementById('add-type-id').value = typeId;
+        document.getElementById('add-type-name').value = typeName;
+        invSearch.value = typeName;
+        document.getElementById('search-results').style.display = 'none';
+    }
+};
+
+var _ctSearchEl = document.getElementById('ct-item-search');
+if (_ctSearchEl) _ctSearchEl.addEventListener('input', function() {
+    document.getElementById('ct-search-results').style.display = this.value.length >= 2 ? '' : 'none';
+    if (this.value.length < 2) {
+        document.getElementById('ct-type-id').value = '';
+        document.getElementById('ct-type-name').value = '';
+    }
+});
+
+function addContractThreshold() {
+    var matchType = document.getElementById('ct-match-type').value;
+    var low = document.getElementById('ct-low').value;
+    var critical = document.getElementById('ct-critical').value;
+
+    var fd = new FormData();
+    fd.append('match_type', matchType);
+    fd.append('threshold_low', low);
+    fd.append('threshold_critical', critical);
+
+    if (matchType === 'title') {
+        var keyword = document.getElementById('ct-keyword').value.trim();
+        if (!keyword) { alert('Enter a title keyword.'); return; }
+        fd.append('keyword', keyword);
+    } else {
+        var typeId = document.getElementById('ct-type-id').value;
+        var typeName = document.getElementById('ct-type-name').value;
+        if (!typeId) { alert('Select an item type.'); return; }
+        fd.append('type_id', typeId);
+        fd.append('type_name', typeName);
+    }
+
+    htmx.ajax('POST', '/corporations/{{ corp_id }}/contracts/threshold', {
+        target: '#contract-items',
+        swap: 'innerHTML',
+        values: Object.fromEntries(fd),
+    });
+
+    /* Reset */
+    document.getElementById('ct-keyword').value = '';
+    document.getElementById('ct-item-search').value = '';
+    document.getElementById('ct-type-id').value = '';
+    document.getElementById('ct-type-name').value = '';
+}
+</script>
+{% endblock %}

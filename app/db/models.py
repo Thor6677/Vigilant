@@ -150,6 +150,25 @@ class CorpInventoryThreshold(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class CorpContractThreshold(Base):
+    """User-defined monitoring thresholds for outstanding corp contracts."""
+    __tablename__ = "corp_contract_thresholds"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    corp_id = Column(Integer, nullable=False, index=True)
+    match_type = Column(String(16), nullable=False)       # "item" or "title"
+    match_value = Column(String(256), nullable=False)      # type_id (as string) or title keyword
+    match_label = Column(String(256), nullable=True)       # display name
+    type_id = Column(Integer, nullable=True)               # only for item match
+    threshold_low = Column(Integer, nullable=False, default=0)
+    threshold_critical = Column(Integer, nullable=False, default=0)
+    current_count = Column(Integer, nullable=True)
+    last_checked = Column(DateTime, nullable=True)
+    alert_state = Column(String(16), nullable=False, default="ok")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class DScanResult(Base):
     """Stored d-scan parse result with shareable public URL."""
     __tablename__ = "dscan_results"

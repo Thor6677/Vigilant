@@ -1273,6 +1273,25 @@ async def _check_all_inventory_thresholds():
                 logger.debug("Inventory check failed for user %s corp %s: %s", user_id, corp_id, e)
 
 
+async def _check_all_contract_thresholds():
+    """Check all users' contract thresholds against live corp contracts."""
+    from app.db.models import CorpContractThreshold
+    from app.routes.corporations import check_corp_contracts
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(
+                CorpContractThreshold.user_id,
+                CorpContractThreshold.corp_id,
+            ).distinct()
+        )
+        pairs = result.fetchall()
+        for user_id, corp_id in pairs:
+            try:
+                await check_corp_contracts(user_id, corp_id, db, emit_notifications=True)
+            except Exception as e:
+                logger.debug("Contract check failed for user %s corp %s: %s", user_id, corp_id, e)
+
+
 async def _sync_all_task(character_ids: list[int]):
     """Process a batch of characters concurrently (up to _SYNC_CONCURRENCY at a time).
 
@@ -1367,6 +1386,15 @@ async def _background_scheduler():
                     _background_scheduler._last_inv_check = now
                 except Exception as e:
                     logger.warning("Inventory check error: %s", e)
+
+            # Contract threshold check (same 5-minute cycle)
+            if not hasattr(_background_scheduler, '_last_contract_check') or \
+               (now - _background_scheduler._last_contract_check).total_seconds() >= 300:
+                try:
+                    await _check_all_contract_thresholds()
+                    _background_scheduler._last_contract_check = now
+                except Exception as e:
+                    logger.warning("Contract check error: %s", e)
 
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
@@ -1892,6 +1920,31 @@ async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(g
 
     return templates.TemplateResponse("partials/inventory_alert_banners.html", {
         "request": request, "alerts": alerts,
+    })
+
+
+@router.get("/alerts/contract-banners", response_class=HTMLResponse)
+async def contract_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
+    """Persistent banners for critical contract thresholds."""
+    _empty = '<div id="contract-alerts" hx-get="/alerts/contract-banners" hx-trigger="every 60s" hx-swap="outerHTML"></div>'
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse(_empty)
+
+    from app.db.models import CorpContractThreshold
+    result = await db.execute(
+        select(CorpContractThreshold).where(
+            CorpContractThreshold.user_id == user_id,
+            CorpContractThreshold.alert_state.in_(["critical", "low"]),
+        )
+    )
+    alerts_list = result.scalars().all()
+
+    if not alerts_list:
+        return HTMLResponse(_empty)
+
+    return templates.TemplateResponse("partials/contract_alert_banners.html", {
+        "request": request, "alerts": alerts_list,
     })
 
 

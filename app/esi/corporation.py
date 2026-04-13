@@ -52,6 +52,10 @@ async def get_corporation_contracts(client: ESIClient, corporation_id: int) -> l
     return await client.get(f"/corporations/{corporation_id}/contracts/")
 
 
+async def get_corporation_contract_items(client: ESIClient, corporation_id: int, contract_id: int) -> list:
+    return await client.get(f"/corporations/{corporation_id}/contracts/{contract_id}/items/")
+
+
 async def get_corporation_wallet_journal(client: ESIClient, corporation_id: int, division: int = 1, page: int = 1) -> list:
     return await client.get(
         f"/corporations/{corporation_id}/wallets/{division}/journal/",
