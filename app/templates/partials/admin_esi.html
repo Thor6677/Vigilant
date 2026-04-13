@@ -165,7 +165,8 @@
     <div style="max-height:200px;overflow-y:auto;">
         {% for ev in recent_events[:20] %}
         <div class="b-row">
-            <span class="b-row-label" style="min-width:60px;">
+            <span style="flex:0 0 65px;font-size:10px;color:var(--muted);">{{ ev.occurred_at.strftime('%H:%M:%S') if ev.occurred_at else '—' }}</span>
+            <span class="b-row-label" style="min-width:40px;">
                 {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;">429</span>
                 {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;">420</span>
                 {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);">warn</span>{% endif %}
