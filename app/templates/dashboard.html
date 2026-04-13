@@ -179,8 +179,8 @@
 </div>
 
 {# ── Sort Controls ──────────────────────────────────────────────────────── #}
-<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
-    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Sort:</span>
+<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
+    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
     {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
     <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}

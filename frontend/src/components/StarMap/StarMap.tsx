@@ -1102,6 +1102,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
             characters={characters}
             isMobile={isMobile}
+            overlayBarHeight={overlayBarHeight}
             onFocusSystem={(sys) => {
               if (viewportRef.current) {
                 viewportRef.current.animate({
@@ -1144,6 +1145,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
             characters={characters}
             stats={stats}
             isMobile={isMobile}
+            overlayBarHeight={overlayBarHeight}
             onFocusSystem={(sys) => {
               if (viewportRef.current) {
                 viewportRef.current.animate({

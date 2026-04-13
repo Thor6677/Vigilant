@@ -659,12 +659,21 @@
             background: var(--surface);
             border-bottom: 1px solid var(--border);
             padding: 0.5rem 0;
+            position: fixed;
+            top: 46px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 49;
+            overflow-y: auto;
+            border-bottom: none;
+            border-top: 1px solid var(--border);
         }
         .b-mobile-menu.is-open { display: flex; }
         .b-mobile-menu a {
             display: block;
-            padding: 0.55rem 1.5rem;
-            font-size: 10px;
+            padding: 0.75rem 1.5rem;
+            font-size: 11px;
             letter-spacing: 0.14em;
             text-transform: uppercase;
             color: var(--muted);
@@ -726,6 +735,16 @@
             .structure-alert-banner { flex-wrap: wrap; padding: 0.75rem 1rem; }
             /* Exempt tiny icon buttons from min-height rule */
             .alert-dismiss { min-height: auto !important; padding: 0.25rem; }
+            /* Card rows: allow values to wrap for long text */
+            .b-row { flex-wrap: wrap; gap: 0.25rem; }
+            .b-row-val { white-space: normal; text-align: right; word-break: break-word; }
+            /* Card actions: buttons wrap if needed */
+            .b-actions { flex-wrap: wrap; }
+            .b-actions .b-btn { min-height: 36px; }
+            /* Card portraits slightly smaller on phones */
+            .b-card-portrait { width: 64px; height: 64px; }
+            /* Server bar stacks */
+            .b-server-bar { flex-direction: column; gap: 0.25rem; padding: 0.4rem 1rem; }
         }
         @media (max-width: 480px) {
             .b-main { padding: 1rem 0.75rem; }
