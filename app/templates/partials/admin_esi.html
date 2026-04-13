@@ -30,7 +30,7 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Request Activity</span>
-        <span style="font-size:9px;color:var(--muted);">last 30 min</span>
+        <span style="font-size:9px;color:var(--muted);">last 30 min — stacked bar showing ESI calls per minute</span>
     </div>
     <div style="padding:0.5rem;height:160px;">
         <canvas id="admin-request-chart"></canvas>
@@ -69,6 +69,10 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Rate Limit Groups</span>
+        <span style="font-size:9px;color:var(--muted);" title="CCP groups ESI endpoints by category, each with its own token budget. When a group's budget is exhausted, requests to that group are throttled until the window resets.">&#9432; How it works</span>
+    </div>
+    <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
+        Each row shows remaining tokens out of the total budget for that endpoint group. The progress bar fills as tokens are consumed. Stay below 80% to avoid throttling.
     </div>
     {% for g in groups %}
     {% if g.limit_total > 0 %}
@@ -96,6 +100,9 @@
         <span class="b-label">Legacy Error Limit</span>
         <span style="font-size:10px;color:var(--muted);">resets in {{ legacy.reset_in_seconds }}s</span>
     </div>
+    <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
+        CCP's legacy error budget. Each failed request (4xx/5xx) costs 1 point. At 0 remaining, all requests are blocked until the window resets.
+    </div>
     <div style="padding:0.5rem 0.75rem;">
         <div class="b-progress" style="height:6px;">
             <div class="b-progress-fill {% if legacy.remaining < 10 %}is-crit{% elif legacy.remaining < 20 %}is-warn{% else %}is-active{% endif %}"
@@ -110,6 +117,7 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Cache Utilization</span>
+        <span style="font-size:9px;color:var(--muted);" title="ETag cache stores response signatures in memory — if data hasn't changed, ESI returns 304 (no token cost). DB cache stores full responses in SQLite with TTLs per endpoint type.">&#9432; How it works</span>
     </div>
     <div class="b-row">
         <span class="b-row-label">ETag (in-memory)</span>
@@ -131,7 +139,13 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Recent Requests</span>
-        <span style="font-size:10px;color:var(--muted);">{{ request_log | length }}</span>
+        <span style="font-size:10px;color:var(--muted);">{{ request_log | length }} entries</span>
+    </div>
+    <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
+        Live log of ESI API calls. <span style="color:var(--success);">Green</span> = success,
+        <span style="color:var(--accent);">Gold</span> = cached (304),
+        <span style="color:var(--warn);">Yellow</span> = client error,
+        <span style="color:var(--danger);">Red</span> = rate limited.
     </div>
     {% if request_log %}
     <div style="max-height:250px;overflow-y:auto;">
@@ -144,7 +158,8 @@
         {% for e in request_log %}
         <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;">
             <span style="flex:0 0 65px;font-size:10px;color:var(--muted);">{{ e.timestamp.strftime('%H:%M:%S') }}</span>
-            <span style="flex:0 0 40px;font-size:10px;{% if e.status_code < 300 %}color:var(--success);{% elif e.status_code < 400 %}color:var(--accent);{% elif e.status_code in (429, 420) %}color:var(--danger);font-weight:600;{% else %}color:var(--warn);{% endif %}">{{ e.status_code }}</span>
+            <span style="flex:0 0 40px;font-size:10px;{% if e.status_code < 300 %}color:var(--success);{% elif e.status_code < 400 %}color:var(--accent);{% elif e.status_code in (429, 420) %}color:var(--danger);font-weight:600;{% else %}color:var(--warn);{% endif %}"
+                  title="{% if e.status_code == 200 %}OK — fresh data returned{% elif e.status_code == 304 %}Not Modified — data unchanged, served from ETag cache (no token cost){% elif e.status_code == 400 %}Bad Request — invalid parameters sent to ESI{% elif e.status_code == 401 %}Unauthorized — token expired, character needs re-auth{% elif e.status_code == 403 %}Forbidden — character lacks in-game role (e.g. Director) for this endpoint{% elif e.status_code == 404 %}Not Found — resource doesn't exist (ship destroyed, contract completed, etc.){% elif e.status_code == 420 %}Error Limited — too many errors, CCP temporarily blocked this app{% elif e.status_code == 429 %}Rate Limited — too many requests to this endpoint group, auto-retrying after delay{% elif e.status_code == 502 %}Bad Gateway — ESI server error, auto-retried{% elif e.status_code == 503 %}Service Unavailable — ESI is down or in maintenance{% elif e.status_code == 504 %}Gateway Timeout — ESI took too long to respond{% else %}HTTP {{ e.status_code }}{% endif %}">{{ e.status_code }}</span>
             <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.group or '—' }}</span>
             <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.path }}">{{ e.path }}</span>
         </div>
@@ -155,25 +170,38 @@
     {% endif %}
 </div>
 
-{# ── Significant events (from DB) ─────────────────────────────────────────── #}
+{# ── Rate limit events (from DB) ─────────────────────────────────────────── #}
 {% if recent_events %}
 <div class="b-panel">
     <div class="b-panel-head">
         <span class="b-label">Rate Limit Events</span>
-        <span style="font-size:10px;color:var(--muted);">{{ recent_events | length }}</span>
+        <span style="font-size:10px;color:var(--muted);">{{ recent_events | length }} events</span>
     </div>
-    <div style="max-height:200px;overflow-y:auto;">
+    <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
+        Persisted log of rate limit violations. These are saved to the database so they survive restarts.
+        <span style="color:var(--danger);">429</span> = too many requests (CCP throttled),
+        <span style="color:var(--warn);">420</span> = error limited (too many failed requests).
+        <strong>Retry</strong> = seconds ESI told us to wait before retrying.
+    </div>
+    <div style="max-height:250px;overflow-y:auto;">
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
+            <span style="flex:0 0 65px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Time</span>
+            <span style="flex:0 0 40px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
+            <span style="flex:0 0 80px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Group</span>
+            <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Path</span>
+            <span style="flex:0 0 50px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:right;">Retry</span>
+        </div>
         {% for ev in recent_events[:20] %}
-        <div class="b-row">
+        <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;">
             <span style="flex:0 0 65px;font-size:10px;color:var(--muted);">{{ ev.occurred_at.strftime('%H:%M:%S') if ev.occurred_at else '—' }}</span>
-            <span class="b-row-label" style="min-width:40px;">
-                {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;">429</span>
-                {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;">420</span>
-                {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);">warn</span>{% endif %}
+            <span style="flex:0 0 40px;">
+                {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;" title="Rate Limited — too many requests to this endpoint group. The app automatically waits and retries.">429</span>
+                {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;" title="Error Limited — too many failed requests (4xx errors). CCP temporarily blocks all requests. Fix: check for auth issues or missing roles.">420</span>
+                {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);" title="Warning — approaching rate limit threshold for this group.">warn</span>{% endif %}
             </span>
-            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);">{{ ev.group_name or '—' }}</span>
+            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ev.group_name or '—' }}</span>
             <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
-            <span style="flex:0 0 50px;font-size:10px;color:var(--muted);text-align:right;">{% if ev.retry_after %}{{ ev.retry_after }}s{% else %}—{% endif %}</span>
+            <span style="flex:0 0 50px;font-size:10px;color:var(--muted);text-align:right;" title="Seconds ESI told us to wait before retrying this request">{% if ev.retry_after %}{{ ev.retry_after }}s{% else %}—{% endif %}</span>
         </div>
         {% endfor %}
     </div>
