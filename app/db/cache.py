@@ -25,6 +25,8 @@ TTL = {
     "character_location": 60,         # location — 60 sec
     "killmail":         86400,        # killmails are immutable — 24h
     "search":           300,          # search results — 5 min
+    "corp_contracts":   300,          # corp contracts list — 5 min
+    "contract_items":   3600,         # contract items (stable while outstanding) — 1h
 }
 
 
@@ -55,6 +57,8 @@ def _ttl_for_path(path: str) -> int:
     import re as _re
     if _re.match(r'^/characters/\d+/?$', path):
         return TTL["character_public"]
+    if "/contracts/" in path and "/items" in path: return TTL["contract_items"]
+    if "/contracts/" in path:            return TTL["corp_contracts"]
     if "/corporations/" in path:         return TTL["corporation"]
     if "/alliances/" in path:            return TTL["alliance"]
     if "/killmails/" in path:            return TTL["killmail"]

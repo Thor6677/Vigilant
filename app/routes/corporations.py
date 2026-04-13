@@ -991,12 +991,18 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
     if "contracts" not in scope_chars:
         return
 
-    # Fetch all outstanding corp contracts
-    contracts, _ = await _try_api_call_with_fallback(
-        "contracts", scope_chars, esi_corp.get_corporation_contracts, corp_id, db
-    )
+    # Fetch all outstanding corp contracts (with DB cache)
+    from app.db.cache import cache_get, cache_set
+    contracts_cache_path = f"/corporations/{corp_id}/contracts/"
+    contracts = await cache_get(db, contracts_cache_path)
     if contracts is None:
-        return
+        contracts, _ = await _try_api_call_with_fallback(
+            "contracts", scope_chars, esi_corp.get_corporation_contracts, corp_id, db
+        )
+        if contracts is None:
+            return
+        await cache_set(db, contracts_cache_path, contracts)
+
 
     outstanding = [c for c in contracts if c.get("status") == "outstanding" and c.get("type") == "item_exchange"]
 
@@ -1016,7 +1022,8 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
     if item_thresholds:
         wanted_type_ids = {t.type_id for t in item_thresholds if t.type_id}
 
-        # Fetch items for each outstanding contract (with semaphore to limit concurrency)
+        # Fetch items for each outstanding contract (with semaphore + DB cache)
+        from app.db.cache import cache_get, cache_set
         sem = asyncio.Semaphore(10)
         contract_items_cache: dict[int, set[int]] = {}  # contract_id -> set of type_ids
 
@@ -1024,16 +1031,22 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
             cid = contract.get("contract_id")
             if not cid:
                 return
+            cache_path = f"/corporations/{corp_id}/contracts/{cid}/items/"
             async with sem:
                 try:
-                    # Use a fresh session for concurrent requests
                     async with AsyncSessionLocal() as sess:
+                        # Check DB cache first
+                        cached = await cache_get(sess, cache_path)
+                        if cached is not None:
+                            contract_items_cache[cid] = {i.get("type_id") for i in cached}
+                            return
                         char = scope_chars["contracts"][0]
                         token = await refresh_token(char, sess)
                         client = ESIClient(token, db=sess)
                         items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
                         if isinstance(items, list):
                             contract_items_cache[cid] = {i.get("type_id") for i in items}
+                            await cache_set(sess, cache_path, items)
                 except Exception:
                     pass
 

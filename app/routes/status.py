@@ -175,6 +175,12 @@ async def status_chart_json(request: Request):
 async def status_banner(request: Request):
     if not request.session.get("user_id"):
         return HTMLResponse('<div id="esi-banner"></div>')
+    # Only show ESI rate limit warnings to admins/managers
+    if not request.session.get("is_admin"):
+        return HTMLResponse(
+            '<div id="esi-banner" '
+            'hx-get="/status/banner" hx-trigger="every 30s" hx-swap="outerHTML"></div>'
+        )
     overall = rate_limit_tracker.overall_status()
 
     if overall == "ok":
