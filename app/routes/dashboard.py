@@ -1498,6 +1498,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     user_row = user_obj.scalar_one_or_none()
     if user_row:
         request.session["is_admin"] = user_row.role in ("admin", "manager")
+        request.session["role"] = user_row.role
 
     active_id = request.session.get("active_character_id")
 

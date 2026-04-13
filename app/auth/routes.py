@@ -244,6 +244,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         request.session["user_id"] = user.id
         request.session["active_character_id"] = character_id
         request.session["is_admin"] = user.role in ("admin", "manager")
+        request.session["role"] = user.role
 
     else:  # add_character
         current_user_id = request.session.get("user_id")
@@ -294,6 +295,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         current_user = user_result.scalar_one_or_none()
         if current_user:
             request.session["is_admin"] = current_user.role in ("admin", "manager")
+            request.session["role"] = current_user.role
 
     # Trigger an immediate sync for this character.
     from app.routes.dashboard import _sync_task, _queued_sync
