@@ -2001,6 +2001,21 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                     }
             items_by_char[cidx][tier] = sorted(merged.values(), key=lambda i: i["name"])
 
+    # Align P0 row to P1 row so intra-miner P0→P1 edges render as straight
+    # horizontal lines. P1 stays alphabetized; P0 sort key is "the P1 I feed"
+    # (which is the same alphabetical order). Each P0 ends up at the same
+    # row index as its counterpart P1.
+    for cidx in range(len(characters)):
+        p0_to_p1_name: dict[int, str] = {}
+        for (pcidx, p0_tid, p1_tid) in intra_miner_pairs:
+            if pcidx != cidx:
+                continue
+            if p0_tid not in p0_to_p1_name:
+                p0_to_p1_name[p0_tid] = name_map.get(p1_tid, "")
+        items_by_char[cidx][0].sort(
+            key=lambda it: p0_to_p1_name.get(it["tid"], it["name"])
+        )
+
     # ── Build edges ──────────────────────────────────────────────────────
     # Two kinds:
     #   intra=True  — producer + consumer on the SAME char (miner P0→P1, or
