@@ -1151,7 +1151,8 @@ P4_FACTORIES_PER_PLANET = 8          # HTPPs per P4 hub (DalShooth single-factor
 
 
 def _plan_colonies(bom: dict, system_p0_names: set[str],
-                   system_planet_types: set[str] | None = None) -> dict:
+                   system_planet_types: set[str] | None = None,
+                   include_target_factory: bool = True) -> dict:
     """Recommend a colony layout for the BOM's production rate.
 
     Strategy (per user preference — integrated miner+P1):
@@ -1294,9 +1295,9 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
     # cycle per target_cycle_time regardless of the user's N-cycle batch size.
     p2_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(2, []))
     p3_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(3, []))
-    if target.get("tier") == 2:
+    if include_target_factory and target.get("tier") == 2:
         p2_factories += 1
-    elif target.get("tier") == 3:
+    elif include_target_factory and target.get("tier") == 3:
         p3_factories += 1
     mid_total = p2_factories + p3_factories
 
@@ -1321,7 +1322,7 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
     # Target's own factory is rate-based — 1 factory sustains production,
     # larger N extends the run time rather than multiplying the colony.
     p4_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(4, []))
-    if target.get("tier") == 4:
+    if include_target_factory and target.get("tier") == 4:
         p4_factories += 1
 
     remaining = p4_factories
@@ -1528,92 +1529,122 @@ def _plan_characters(bom: dict, graph: dict,
             })
         return chars
 
-    # ── Decide slicing strategy ─────────────────────────────────────────
+    # ── Density-packed character plan ──────────────────────────────────
+    # User workflow: haul from all characters to a central station, then
+    # distribute to builders. Inter-character hauling is expected, so we
+    # don't preserve vertical-slice coherence. Instead, fill every
+    # character's 6 planet slots with useful work; the target's final
+    # factory lands on the last character ("Final assembly").
     characters: list[dict] = []
 
-    # Collect the system's P0 pool once (used by every colony-plan invocation).
     all_p0_names: set[str] = set()
     for p in system_planets:
         all_p0_names.update(pi_const.P0_BY_PLANET_TYPE.get(p["planet_type"].lower(), []))
 
-    # Baseline: compute the combined colony plan to count total planets.
-    combined = _plan_colonies(bom, all_p0_names, system_planet_types)
-    total_combined = combined["total_planets"]
+    # Combined BOM colonies WITHOUT the target's own factory (we'll add a
+    # dedicated colony for it so we can reserve its planet + tag the char).
+    combined = _plan_colonies(
+        bom, all_p0_names, system_planet_types, include_target_factory=False,
+    )
+    colonies: list[dict] = list(combined["colonies"])
 
-    # If tier ≤ 1 OR combined fits in one char: single Full chain.
-    if target_tier <= 1 or total_combined <= MAX_PLANETS_PER_CHARACTER:
-        characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
-    else:
-        # Vertical slice path: one producer per direct input + one assembler.
-        # Reserve the assembler's planet FIRST so it always has a home,
-        # regardless of how many slice-producer planets are consumed.
-        assembler_planet = _take_hub_planet() if target_tier in (2, 3, 4) else None
+    # Reserve the target factory's planet up front so the Final-assembly
+    # character always has a real planet, even when producer colonies
+    # exhaust the system inventory.
+    target_factory_colony = None
+    assembler_planet = None
+    if target_tier >= 2:
+        assembler_planet = _take_hub_planet()
+        target_factory_colony = {
+            "role": "p4_factory" if target_tier == 4 else "p2_p3_factory",
+            "planet_type": assembler_planet["planet_type"] if assembler_planet else "Barren",
+            "factory_count": 1,
+            "factory_tier": "P4" if target_tier == 4 else "P2/P3",
+            "factories": [
+                {"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1},
+            ],
+            "_is_target": True,
+            "_reserved_planet": assembler_planet,
+        }
+        colonies.append(target_factory_colony)
 
-        target_sch = canonical.get(target_tid)
-        if target_sch is None:
-            # Defensive: no recipe — fall back to full chain (release the assembler planet)
-            if assembler_planet is not None:
-                # Return the reserved planet to the free list so the fallback plan can use it
-                for p in free_planets:
-                    if p["planet_name"] == assembler_planet["planet_name"]:
-                        p["used"] = False
-                        break
-            characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
-        else:
-            direct_inputs = input_map.get(target_sch, [])
+    # Sort: miners first (most common), P2/P3 hubs, P4 hubs, target factory LAST
+    # so the last 6-slot chunk contains it and gets the "Final assembly" label.
+    def _plan_sort_key(c):
+        if c.get("_is_target"):
+            return (99, "")
+        role = c["role"]
+        if role == "miner_p1":
+            return (0, c.get("planet_type", ""))
+        if role == "p2_p3_factory":
+            return (1, "")
+        if role == "p4_factory":
+            return (2, "")
+        return (3, "")
+    colonies.sort(key=_plan_sort_key)
 
-            # Per-slice producer: each direct input of the target.
-            for di_tid, di_qty_per_target_cycle in direct_inputs:
-                di_name = name_map.get(di_tid, f"Type {di_tid}")
-                # Cycles this slice must run to feed the target's cycle count.
-                di_sch = canonical.get(di_tid)
-                di_out_qty = 1
-                if di_sch is not None:
-                    di_out_qty = output_map.get(di_sch, (di_tid, 1))[1] or 1
-                total_di_units = di_qty_per_target_cycle * target_cycles
-                slice_cycles = max(1, math.ceil(total_di_units / di_out_qty))
-                slice_bom = _expand_bom(graph, di_tid, slice_cycles, system_p0_ids)
-                slice_plan = _plan_colonies(slice_bom, all_p0_names, system_planet_types)
-                # Trim the slice to only include colonies producing this slice's
-                # commodities — _plan_colonies for a slice that IS a single tid
-                # already yields exactly the slice's colonies.
-                characters.extend(
-                    _pack_colonies_into_chars(slice_plan["colonies"], di_name, "producer")
-                )
+    # Pack into characters (6 planets each).
+    if not colonies:
+        # Nothing to plan (shouldn't happen given the route checks target
+        # earlier, but keep the function safe).
+        return {
+            "characters": [],
+            "total_characters": 0,
+            "total_planets_assigned": 0,
+            "unassignable_slots": 0,
+            "system_capacity_warning": None,
+        }
 
-            # Assembler character: target's own factory only.
-            # Build the assembler slot using the pre-reserved planet (or flag
-            # as unassigned if none could be reserved).
-            role = "p4_factory" if target_tier == 4 else "p2_p3_factory"
-            tier_label = "P4" if target_tier == 4 else "P2/P3"
-            if assembler_planet is None:
-                unassignable += 1
-                slot = {
-                    "planet_name": None,
-                    "planet_type": "Barren",
-                    "preferred": True,
-                    "role": role,
-                    "factory_count": 1,
-                    "factory_tier": tier_label,
-                    "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
-                }
+    total_chunks = math.ceil(len(colonies) / MAX_PLANETS_PER_CHARACTER)
+    for start in range(0, len(colonies), MAX_PLANETS_PER_CHARACTER):
+        chunk = colonies[start:start + MAX_PLANETS_PER_CHARACTER]
+        has_target = any(c.get("_is_target") for c in chunk)
+
+        slots = []
+        for c in chunk:
+            if c.get("_is_target"):
+                p = c.get("_reserved_planet")
+                if p is None:
+                    unassignable += 1
+                    slots.append({
+                        "planet_name": None,
+                        "planet_type": c["planet_type"],
+                        "preferred": True,
+                        "role": c["role"],
+                        "factory_count": 1,
+                        "factory_tier": c["factory_tier"],
+                        "factories": c.get("factories", []),
+                    })
+                else:
+                    slots.append({
+                        "planet_name": p["planet_name"],
+                        "planet_type": p["planet_type"],
+                        "preferred": True,
+                        "role": c["role"],
+                        "factory_count": 1,
+                        "factory_tier": c["factory_tier"],
+                        "factories": c.get("factories", []),
+                    })
             else:
-                slot = {
-                    "planet_name": assembler_planet["planet_name"],
-                    "planet_type": assembler_planet["planet_type"],
-                    "preferred": True,
-                    "role": role,
-                    "factory_count": 1,
-                    "factory_tier": tier_label,
-                    "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
-                }
-            characters.append({
-                "label": "Char {n} — Assembler",
-                "role": "assembler",
-                "slice_name": None,
-                "overflow_index": 0,
-                "slots": [slot],
-            })
+                slots.append(_colony_to_slot(c))
+
+        if has_target:
+            label = "Char {n} — Final assembly"
+            char_role = "assembler"
+        elif total_chunks == 1:
+            label = "Char {n} — Full chain"
+            char_role = "full_chain"
+        else:
+            label = "Char {n}"
+            char_role = "producer"
+
+        characters.append({
+            "label": label,
+            "role": char_role,
+            "slice_name": None,
+            "overflow_index": 0,
+            "slots": slots,
+        })
 
     # ── Finalize labels with running character number ──────────────────
     for i, ch in enumerate(characters, start=1):
