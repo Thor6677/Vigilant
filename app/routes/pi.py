@@ -1673,7 +1673,12 @@ def _plan_characters(bom: dict, graph: dict,
             "factory_count": 1,
             "factory_tier": "P4" if target_tier == 4 else "P2/P3",
             "factories": [
-                {"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1},
+                {
+                    "type_id": target_tid,
+                    "name": name_map.get(target_tid, "Target"),
+                    "tier": target_tier,
+                    "count": 1,
+                },
             ],
             "_is_target": True,
         })
@@ -1953,16 +1958,17 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
             else:
                 for fac in slot.get("factories", []):
                     tier = fac.get("tier", 0)
-                    if not (0 <= tier <= 4):
+                    tid = fac.get("type_id")
+                    if tid is None or not (0 <= tier <= 4):
                         continue
                     items_by_char[cidx][tier].append({
-                        "tid": fac["type_id"],
-                        "name": fac["name"],
+                        "tid": tid,
+                        "name": fac.get("name", f"Type {tid}"),
                         "count": fac.get("count", 1),
                     })
-                    producers_by_tid.setdefault(fac["type_id"], [])
-                    if cidx not in producers_by_tid[fac["type_id"]]:
-                        producers_by_tid[fac["type_id"]].append(cidx)
+                    producers_by_tid.setdefault(tid, [])
+                    if cidx not in producers_by_tid[tid]:
+                        producers_by_tid[tid].append(cidx)
 
     # Merge duplicate (cidx, tid) — e.g. two miner slots on same char both
     # produce Water; display as one node with combined count.
