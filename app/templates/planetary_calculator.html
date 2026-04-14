@@ -49,10 +49,15 @@
                 <input type="number" name="cycles" value="{{ cycles }}" min="1" max="10000" step="1"
                        style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
             </div>
-            <div>
+            <div style="display:flex;gap:0.4rem;">
                 <button type="submit" class="b-btn"
                         style="padding:0.5rem 1rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;">
                     Calculate →
+                </button>
+                <button type="button" class="b-btn" onclick="calcReset()"
+                        title="Clear the form and saved state"
+                        style="padding:0.5rem 0.8rem;border:1px solid var(--border);background:var(--bg);color:var(--muted);font-size:11px;cursor:pointer;">
+                    Reset
                 </button>
             </div>
         </div>
@@ -794,6 +799,11 @@
     window.calcSysPick = function(name) {
         document.getElementById('calc-sys').value = name;
         document.getElementById('calc-sys-dd').style.display = 'none';
+    };
+    // Reset — clear saved state and return to the empty calculator.
+    window.calcReset = function() {
+        try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
+        window.location.assign('/industry/planetary/calculator');
     };
     document.addEventListener('click', function(e){
         if (e.target.id !== 'calc-sys') {
