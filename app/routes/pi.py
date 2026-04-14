@@ -1398,45 +1398,64 @@ def _plan_characters(bom: dict, graph: dict,
     output_map = graph["output_map"]
     canonical = graph["canonical_schematic"]
 
-    # ── Planet free list ────────────────────────────────────────────────
-    # Each entry: {planet_id, planet_name, planet_type, planet_index, used: False}.
-    free_planets: list[dict] = [dict(p, used=False) for p in system_planets]
+    # ── Planet pool with cross-character sharing ──────────────────────────
+    # Multiple characters CAN each have their own colony on the same planet
+    # (different resource patches). The only per-character constraint is that
+    # one character can't have two colonies on the same planet. So each
+    # planet tracks `used_by` (set of char indices) and a planet is available
+    # to a given char iff that char isn't already in `used_by`. Preferred
+    # over shared: we pick the globally-least-shared planet first.
+    planet_pool: list[dict] = [dict(p, used_by=set()) for p in system_planets]
 
-    def _take_planet(preferred_type: str | None,
-                     allowed_types: set[str] | None) -> tuple[dict | None, bool]:
-        """Consume one free planet matching `preferred_type` if available,
-        else any type in `allowed_types`. Returns (planet or None, preferred_hit).
+    def _take_planet(char_id: int, preferred_type: str | None,
+                     allowed_types: set[str] | None) -> tuple[dict | None, bool, bool]:
+        """Pick a planet for this character's colony slot.
+
+        Returns (planet, preferred_hit, shared_with_others).
+        Priority:
+          1. Unused-by-anyone, preferred type
+          2. Unused-by-anyone, fallback type
+          3. Used by others (but not this char), preferred type — least-shared first
+          4. Used by others (but not this char), fallback type — least-shared first
         """
-        # Prefer exact type
-        if preferred_type:
-            for p in free_planets:
-                if p["used"]:
-                    continue
-                if p["planet_type"] == preferred_type:
-                    p["used"] = True
-                    return p, True
-        # Fallback: any allowed type
-        if allowed_types:
-            for p in free_planets:
-                if p["used"]:
-                    continue
-                if p["planet_type"] in allowed_types:
-                    p["used"] = True
-                    return p, False
-        return None, False
+        def _key(p):
+            in_pref = 0 if (preferred_type and p["planet_type"] == preferred_type) else 1
+            in_allowed = 0 if (allowed_types and p["planet_type"] in allowed_types) else 1
+            # 0 = preferred, 1 = fallback-allowed, 2 = neither
+            type_pri = 0 if in_pref == 0 else (1 if in_allowed == 0 else 2)
+            return (type_pri, len(p["used_by"]), p.get("planet_index") or 0)
 
-    def _take_hub_planet() -> dict | None:
-        """Pick any free planet for a factory hub; prefer Barren → Temperate → any."""
-        for pref in ("Barren", "Temperate"):
-            for p in free_planets:
-                if not p["used"] and p["planet_type"] == pref:
-                    p["used"] = True
-                    return p
-        for p in free_planets:
-            if not p["used"]:
-                p["used"] = True
-                return p
-        return None
+        cands = sorted(
+            (p for p in planet_pool if char_id not in p["used_by"]),
+            key=_key,
+        )
+        for p in cands:
+            is_pref = preferred_type and p["planet_type"] == preferred_type
+            is_allowed = allowed_types and p["planet_type"] in allowed_types
+            if not (is_pref or is_allowed):
+                continue  # this and later candidates are non-matching types
+            shared = bool(p["used_by"])
+            p["used_by"].add(char_id)
+            return p, bool(is_pref), shared
+        return None, False, False
+
+    def _take_hub_planet(char_id: int) -> tuple[dict | None, bool]:
+        """Pick a planet for a factory hub on this character.
+        Prefer Barren → Temperate → any; least-shared first. Returns (planet, shared)."""
+        def _key(p):
+            type_pri = {"Barren": 0, "Temperate": 1}.get(p["planet_type"], 2)
+            return (type_pri, len(p["used_by"]), p.get("planet_index") or 0)
+
+        cands = sorted(
+            (p for p in planet_pool if char_id not in p["used_by"]),
+            key=_key,
+        )
+        if not cands:
+            return None, False
+        p = cands[0]
+        shared = bool(p["used_by"])
+        p["used_by"].add(char_id)
+        return p, shared
 
     def _sources_for(p0_name: str) -> list[str]:
         return [pt.capitalize() for pt, mats in pi_const.P0_BY_PLANET_TYPE.items()
@@ -1444,56 +1463,55 @@ def _plan_characters(bom: dict, graph: dict,
 
     unassignable = 0
 
-    def _colony_to_slot(colony: dict) -> dict:
-        """Translate one `_plan_colonies` colony into a per-character slot with
-        a physical planet assignment. Mutates `unassignable` via closure."""
+    def _colony_to_slot(char_id: int, colony: dict) -> dict:
+        """Translate one `_plan_colonies` colony into a per-character slot,
+        picking a physical planet that this character hasn't already used."""
         nonlocal unassignable
         role = colony["role"]
         if role == "miner_p1":
-            # Miner+P1 colonies can contain 1-2 (P0, P1) slots; our unit of
-            # planning is one planet per colony. Pick a planet matching the
-            # colony's advertised planet_type; if that's exhausted, fall back
-            # to any in-system type that covers all of this colony's P0s.
             preferred = colony["planet_type"]
-            # Allowed = types that can extract EVERY P0 in this colony
             colony_p0_names = [s["p0_name"] for s in colony["slots"]]
             allowed: set[str] = set()
             if colony_p0_names:
                 allowed = set.intersection(*(set(_sources_for(n)) for n in colony_p0_names))
-            planet, preferred_hit = _take_planet(preferred, allowed)
+            planet, pref_hit, shared = _take_planet(char_id, preferred, allowed)
             if planet is None:
                 unassignable += 1
                 return {
                     "planet_name": None,
                     "planet_type": preferred,
                     "preferred": True,
+                    "shared": False,
                     "role": "miner_p1",
                     "slots": colony["slots"],
                 }
             return {
                 "planet_name": planet["planet_name"],
                 "planet_type": planet["planet_type"],
-                "preferred": preferred_hit,
+                "preferred": pref_hit,
+                "shared": shared,
                 "role": "miner_p1",
                 "slots": colony["slots"],
             }
         # Factory hub (p2_p3_factory or p4_factory)
-        planet = _take_hub_planet()
+        planet, shared = _take_hub_planet(char_id)
         if planet is None:
             unassignable += 1
             return {
                 "planet_name": None,
                 "planet_type": colony["planet_type"],
                 "preferred": True,
+                "shared": False,
                 "role": role,
                 "factory_count": colony["factory_count"],
                 "factory_tier": colony["factory_tier"],
-                "factories": colony.get("factories", []),  # optional breakdown
+                "factories": colony.get("factories", []),
             }
         return {
             "planet_name": planet["planet_name"],
             "planet_type": planet["planet_type"],
-            "preferred": True,  # hubs don't have a "preferred type" constraint
+            "preferred": True,
+            "shared": shared,
             "role": role,
             "factory_count": colony["factory_count"],
             "factory_tier": colony["factory_tier"],
@@ -1542,31 +1560,26 @@ def _plan_characters(bom: dict, graph: dict,
         all_p0_names.update(pi_const.P0_BY_PLANET_TYPE.get(p["planet_type"].lower(), []))
 
     # Combined BOM colonies WITHOUT the target's own factory (we'll add a
-    # dedicated colony for it so we can reserve its planet + tag the char).
+    # dedicated colony for it so we can tag which char holds it).
     combined = _plan_colonies(
         bom, all_p0_names, system_planet_types, include_target_factory=False,
     )
     colonies: list[dict] = list(combined["colonies"])
 
-    # Reserve the target factory's planet up front so the Final-assembly
-    # character always has a real planet, even when producer colonies
-    # exhaust the system inventory.
-    target_factory_colony = None
-    assembler_planet = None
+    # Target factory as a dedicated colony. Assigned in the packing loop
+    # like any other colony — cross-char sharing means the assembler char
+    # always has ≥ 1 planet available unless the system has <6 planets.
     if target_tier >= 2:
-        assembler_planet = _take_hub_planet()
-        target_factory_colony = {
+        colonies.append({
             "role": "p4_factory" if target_tier == 4 else "p2_p3_factory",
-            "planet_type": assembler_planet["planet_type"] if assembler_planet else "Barren",
+            "planet_type": "Barren",
             "factory_count": 1,
             "factory_tier": "P4" if target_tier == 4 else "P2/P3",
             "factories": [
                 {"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1},
             ],
             "_is_target": True,
-            "_reserved_planet": assembler_planet,
-        }
-        colonies.append(target_factory_colony)
+        })
 
     # Sort: miners first (most common), P2/P3 hubs, P4 hubs, target factory LAST
     # so the last 6-slot chunk contains it and gets the "Final assembly" label.
@@ -1596,20 +1609,22 @@ def _plan_characters(bom: dict, graph: dict,
         }
 
     total_chunks = math.ceil(len(colonies) / MAX_PLANETS_PER_CHARACTER)
-    for start in range(0, len(colonies), MAX_PLANETS_PER_CHARACTER):
+    for chunk_index, start in enumerate(range(0, len(colonies), MAX_PLANETS_PER_CHARACTER)):
+        char_id = chunk_index  # 0-based char index for planet-pool bookkeeping
         chunk = colonies[start:start + MAX_PLANETS_PER_CHARACTER]
         has_target = any(c.get("_is_target") for c in chunk)
 
         slots = []
         for c in chunk:
             if c.get("_is_target"):
-                p = c.get("_reserved_planet")
-                if p is None:
+                planet, shared = _take_hub_planet(char_id)
+                if planet is None:
                     unassignable += 1
                     slots.append({
                         "planet_name": None,
                         "planet_type": c["planet_type"],
                         "preferred": True,
+                        "shared": False,
                         "role": c["role"],
                         "factory_count": 1,
                         "factory_tier": c["factory_tier"],
@@ -1617,16 +1632,17 @@ def _plan_characters(bom: dict, graph: dict,
                     })
                 else:
                     slots.append({
-                        "planet_name": p["planet_name"],
-                        "planet_type": p["planet_type"],
+                        "planet_name": planet["planet_name"],
+                        "planet_type": planet["planet_type"],
                         "preferred": True,
+                        "shared": shared,
                         "role": c["role"],
                         "factory_count": 1,
                         "factory_tier": c["factory_tier"],
                         "factories": c.get("factories", []),
                     })
             else:
-                slots.append(_colony_to_slot(c))
+                slots.append(_colony_to_slot(char_id, c))
 
         if has_target:
             label = "Char {n} — Final assembly"
@@ -1653,6 +1669,9 @@ def _plan_characters(bom: dict, graph: dict,
     total_planets_assigned = sum(
         1 for ch in characters for s in ch["slots"] if s["planet_name"] is not None
     )
+    shared_slots = sum(
+        1 for ch in characters for s in ch["slots"] if s.get("shared")
+    )
 
     capacity_warning = None
     if unassignable > 0:
@@ -1666,6 +1685,7 @@ def _plan_characters(bom: dict, graph: dict,
         "characters": characters,
         "total_characters": len(characters),
         "total_planets_assigned": total_planets_assigned,
+        "shared_slots": shared_slots,
         "unassignable_slots": unassignable,
         "system_capacity_warning": capacity_warning,
     }

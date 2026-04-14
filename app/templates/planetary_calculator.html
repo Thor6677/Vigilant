@@ -179,6 +179,9 @@
         <span style="font-size:10px;color:var(--muted);">
             {{ character_plan.total_characters }} character{{ 's' if character_plan.total_characters != 1 else '' }}
             · {{ character_plan.total_planets_assigned }} planet{{ 's' if character_plan.total_planets_assigned != 1 else '' }} assigned
+            {% if character_plan.shared_slots %}
+            · <span style="color:#7ec6ff;">{{ character_plan.shared_slots }} shared</span>
+            {% endif %}
             {% if character_plan.unassignable_slots %}
             · <span style="color:var(--danger);">{{ character_plan.unassignable_slots }} unassigned</span>
             {% endif %}
@@ -220,6 +223,9 @@
                     {% if not slot.preferred %}
                     <span style="font-size:9px;padding:0 0.3rem;margin-left:0.2rem;background:rgba(200,169,81,0.18);color:var(--warn);border:1px solid rgba(200,169,81,0.4);">fallback</span>
                     {% endif %}
+                    {% if slot.shared %}
+                    <span style="font-size:9px;padding:0 0.3rem;margin-left:0.2rem;background:rgba(100,200,255,0.15);color:#7ec6ff;border:1px solid rgba(100,200,255,0.35);" title="Another character also has a colony on this planet — pick a different resource patch in-game.">shared</span>
+                    {% endif %}
                 {% else %}
                     <span style="color:#e58080;">[no planet available]</span>
                 {% endif %}
@@ -248,7 +254,7 @@
     {% endfor %}
 
     <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
-        Vertical-slice pattern: each producer owns the complete P0→tier-1 chain for one of the target's direct inputs, so there's minimum hand-off between characters. The Assembler only runs the final factory. <strong style="color:var(--text);">CCU V</strong> assumed; max 6 planets per character. <span style="color:var(--warn);">fallback</span> = no preferred planet type available in this system, using an alternate.
+        Each character has up to 6 planets, densely packed with extraction + factory work. The character holding the target's final factory is labeled <strong style="color:var(--text);">Final assembly</strong>. <strong style="color:var(--text);">CCU V</strong> assumed. <span style="color:var(--warn);">fallback</span> = preferred planet type exhausted in this system, using an alternate. <span style="color:#7ec6ff;">shared</span> = another character also has a colony on this planet (pick a different resource patch in-game; the ECU spots don't conflict).
     </div>
 </div>
 {% endif %}
