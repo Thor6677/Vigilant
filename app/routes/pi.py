@@ -397,8 +397,8 @@ async def planetary_lookup_system(
 
     sys_info = await sde.system_info(db, sys_id)
 
-    # Pull planets from SDE — may be empty if Phase 2 loader hasn't run yet.
-    from app.db.sde_models import SDEPlanet
+    # Pull planets + region_id from SDE — region_id drives the wormhole flag.
+    from app.db.sde_models import SDEPlanet, SDESystem
     try:
         result = await db.execute(
             select(SDEPlanet).where(SDEPlanet.system_id == sys_id).order_by(SDEPlanet.planet_index)
@@ -406,6 +406,10 @@ async def planetary_lookup_system(
         planets = list(result.scalars().all())
     except Exception:
         planets = []
+
+    rid_result = await db.execute(select(SDESystem.region_id).where(SDESystem.system_id == sys_id))
+    region_id = rid_result.scalar_one_or_none()
+    space_type = _space_type(region_id, sys_info.get("security") if sys_info else None)
 
     rendered_planets = []
     system_p0_names: set[str] = set()
@@ -433,7 +437,27 @@ async def planetary_lookup_system(
         "all_tiers": tier_view["all_tiers"],
         "tier_counts": tier_view["counts"],
         "system_p0_names": sorted(system_p0_names),
+        "space_type": space_type,
     })
+
+
+def _space_type(region_id: int | None, security: float | None) -> str:
+    """Classify a system as highsec / lowsec / nullsec / wormhole / pochven.
+
+    Region ID 11000000+ is CCP's w-space range (wormhole regions).
+    Pochven = region 10000070 (Triglavian, behaves like low-/null- for PI).
+    """
+    if region_id is not None and region_id >= 11000000:
+        return "wormhole"
+    if region_id == 10000070:
+        return "pochven"
+    if security is None:
+        return "unknown"
+    if security >= 0.5:
+        return "highsec"
+    if security > 0.0:
+        return "lowsec"
+    return "nullsec"
 
 
 async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) -> dict:
@@ -529,6 +553,51 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
     for sch_id, (out_tid, _qty) in output_map.items():
         canonical_schematic.setdefault(out_tid, sch_id)
 
+    # ── Graph relationships for hover highlighting ──
+    # direct_inputs[tid]: immediate recipe ingredients
+    # uses_of[tid]: schematics where tid is an input (reverse edge)
+    direct_inputs: dict[int, set[int]] = {}
+    for sch_id, (out_tid, _qty) in output_map.items():
+        direct_inputs.setdefault(out_tid, set())
+        for in_tid, _q in input_map.get(sch_id, []):
+            direct_inputs[out_tid].add(in_tid)
+
+    uses_of: dict[int, set[int]] = {}  # input_tid -> set of schematic_ids that use it
+    for sch_id, ins in input_map.items():
+        for in_tid, _q in ins:
+            uses_of.setdefault(in_tid, set()).add(sch_id)
+
+    # Transitive ancestors (all materials needed to produce tid, recursively)
+    def _ancestors(tid: int) -> set[int]:
+        seen: set[int] = set()
+        stack = list(direct_inputs.get(tid, set()))
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(direct_inputs.get(cur, set()) - seen)
+        return seen
+
+    # Transitive descendants (every commodity that can be built using tid)
+    def _descendants(tid: int) -> set[int]:
+        seen: set[int] = set()
+        stack: list[int] = []
+        for sch_id in uses_of.get(tid, set()):
+            out_tid, _ = output_map.get(sch_id, (None, None))
+            if out_tid is not None:
+                stack.append(out_tid)
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            for sch_id in uses_of.get(cur, set()):
+                out_tid, _ = output_map.get(sch_id, (None, None))
+                if out_tid is not None and out_tid not in seen:
+                    stack.append(out_tid)
+        return seen
+
     all_tiers: dict[int, list[dict]] = {0: [], 1: [], 2: [], 3: [], 4: []}
     for tid in all_ids:
         tier = tier_of.get(tid, 0)
@@ -560,6 +629,10 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
                 if name in mats_list
             ]
 
+        direct_in = sorted(direct_inputs.get(tid, set()))
+        ancestors = sorted(_ancestors(tid))
+        descendants = sorted(_descendants(tid))
+
         all_tiers[tier].append({
             "type_id": tid,
             "name": name,
@@ -569,6 +642,9 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
             "cycle_time": sch.cycle_time if sch else None,
             "output_qty": output_map.get(sch_id, (None, None))[1] if sch_id else None,
             "planet_sources": planet_sources,
+            "direct_input_ids": direct_in,
+            "ancestor_ids": ancestors,
+            "descendant_ids": descendants,
         })
 
     for t in all_tiers:

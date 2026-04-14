@@ -85,6 +85,20 @@
         document.getElementById('sys-dd').style.display = 'none';
         piSysSubmit();
     };
+    // innerHTML does NOT execute <script> tags in inserted HTML — re-parent
+    // them as fresh script nodes so the hover-graph wiring runs.
+    function injectHtml(el, html) {
+        el.innerHTML = html;
+        el.querySelectorAll('script').forEach(function(old) {
+            var s = document.createElement('script');
+            for (var i = 0; i < old.attributes.length; i++) {
+                s.setAttribute(old.attributes[i].name, old.attributes[i].value);
+            }
+            s.textContent = old.textContent;
+            old.parentNode.replaceChild(s, old);
+        });
+    }
+
     window.piSysSubmit = function() {
         var name = document.getElementById('sys-input').value.trim();
         if (!name) return;
@@ -92,7 +106,7 @@
         el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
         fetch('/industry/planetary/lookup/system?name=' + encodeURIComponent(name))
             .then(function(r){ return r.text(); })
-            .then(function(html){ el.innerHTML = html; })
+            .then(function(html){ injectHtml(el, html); })
             .catch(function(){ el.innerHTML = '<div class="b-empty" style="padding:0.75rem;">Lookup failed.</div>'; });
     };
     document.addEventListener('click', function(e) {

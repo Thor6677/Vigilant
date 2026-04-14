@@ -1,5 +1,5 @@
 {# htmx partial — planets in a system + full PI commodity tier grid with
-   producibility highlighted. Loaded into #sys-result. #}
+   producibility highlighting and interactive chain lines on hover. #}
 {% if no_sde %}
 <div style="padding:0.75rem;font-size:11px;color:var(--warn);">
     Planet SDE tables not yet loaded — the lookup will populate after the next SDE import.
@@ -14,15 +14,46 @@
     {% if system.security is not none %}
     <span style="font-size:11px;color:
         {%- if system.security >= 0.5 -%}var(--success)
-        {%- elif system.security >= 0 -%}var(--warn)
+        {%- elif system.security > 0 -%}var(--warn)
         {%- else -%}var(--danger)
         {%- endif -%};">{{ '%.1f' | format(system.security) }}</span>
+    {% endif %}
+    {% if space_type == 'wormhole' %}
+    <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(153,102,204,0.18);color:#b88ad4;border:1px solid rgba(153,102,204,0.4);">J-SPACE</span>
+    {% elif space_type == 'pochven' %}
+    <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(204,51,51,0.18);color:#e58080;border:1px solid rgba(204,51,51,0.4);">POCHVEN</span>
+    {% elif space_type == 'nullsec' %}
+    <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(204,51,51,0.15);color:#cc6666;border:1px solid rgba(204,51,51,0.35);">NULLSEC</span>
+    {% elif space_type == 'lowsec' %}
+    <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(200,169,81,0.15);color:var(--warn);border:1px solid rgba(200,169,81,0.35);">LOWSEC</span>
+    {% elif space_type == 'highsec' %}
+    <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(51,170,85,0.15);color:var(--success);border:1px solid rgba(51,170,85,0.35);">HIGHSEC</span>
     {% endif %}
     {% if system.region %}
     <span style="font-size:10px;color:var(--muted);">{{ system.constellation or '' }} · {{ system.region }}</span>
     {% endif %}
     <span style="margin-left:auto;font-size:10px;color:var(--muted);">{{ planets | length }} planet{{ 's' if planets|length != 1 else '' }}</span>
 </div>
+
+{# ── Equinox/Skyhook availability note ──────────────────────────────────── #}
+{% if space_type == 'wormhole' %}
+<div style="padding:0.5rem 0.75rem;background:rgba(153,102,204,0.06);border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);">
+    <strong style="color:#b88ad4;">J-space:</strong>
+    classic PI (P0–P4) works normally. Equinox Skyhook resources
+    (Power, Workforce, Reagents) and sovereignty upgrades are <strong>not available</strong> in wormholes.
+</div>
+{% elif space_type == 'highsec' or space_type == 'lowsec' %}
+<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);">
+    <strong style="color:var(--text);">{{ space_type | capitalize }}:</strong>
+    classic PI available. Orbital Skyhooks (Power / Workforce / Reagents) are
+    <strong>null-sec only</strong>.
+</div>
+{% elif space_type == 'pochven' %}
+<div style="padding:0.5rem 0.75rem;background:rgba(204,51,51,0.06);border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);">
+    <strong style="color:#e58080;">Pochven:</strong>
+    classic PI works, but Triglavian space uses its own sovereignty — no Skyhooks here.
+</div>
+{% endif %}
 
 {# ── Planets list — compact rows ────────────────────────────────────────── #}
 <div style="border-bottom:1px solid var(--border);">
@@ -35,66 +66,98 @@
     {% endfor %}
 </div>
 
-{# ── Tier grid — 5 columns (P0..P4), producible in white, unavailable grayed ─ #}
+{# ── Tier grid — 5 columns with chain hover lines + highlighting ────────── #}
 <div style="padding:0.75rem;">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Producible commodities</span>
         <span style="font-size:10px;color:var(--muted);">
-            <span style="color:var(--text);">●</span> available &nbsp;
-            <span style="color:var(--muted);opacity:0.55;">●</span> needs off-system inputs
+            <span style="color:var(--text);">●</span> producible &nbsp;
+            <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; · &nbsp;
+            hover to trace recipe
         </span>
     </div>
 
-    <div class="pi-tier-grid" style="display:grid;grid-template-columns:repeat(5, minmax(0,1fr));gap:0.4rem;">
-        {% for tier in [0,1,2,3,4] %}
-        {% set items = all_tiers.get(tier, []) %}
-        {% set c = tier_counts.get(tier, {"total":0,"producible":0}) %}
-        {% set ratio = (c.producible / c.total) if c.total else 0 %}
-        <div style="border:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column;min-width:0;">
-            <div style="padding:0.4rem 0.55rem;border-bottom:1px solid var(--border);background:#121212;">
-                <div style="font-size:11px;font-weight:600;color:var(--text);display:flex;justify-content:space-between;align-items:baseline;">
-                    <span>P{{ tier }}</span>
-                    <span style="font-size:10px;color:
-                        {%- if ratio == 1 -%}var(--success)
-                        {%- elif ratio >= 0.5 -%}var(--text)
-                        {%- elif ratio > 0 -%}var(--warn)
-                        {%- else -%}var(--muted)
-                        {%- endif -%};">{{ c.producible }}/{{ c.total }}</span>
+    <div class="pi-tier-container" style="position:relative;">
+        <svg class="pi-conn-lines" xmlns="http://www.w3.org/2000/svg"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;"></svg>
+
+        <div class="pi-tier-grid" style="display:grid;grid-template-columns:repeat(5, minmax(0,1fr));gap:0.4rem;">
+            {% for tier in [0,1,2,3,4] %}
+            {% set items = all_tiers.get(tier, []) %}
+            {% set c = tier_counts.get(tier, {"total":0,"producible":0}) %}
+            {% set ratio = (c.producible / c.total) if c.total else 0 %}
+            <div style="border:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-width:0;">
+                <div style="padding:0.4rem 0.55rem;border-bottom:1px solid var(--border);background:#121212;">
+                    <div style="font-size:11px;font-weight:600;color:var(--text);display:flex;justify-content:space-between;align-items:baseline;">
+                        <span>P{{ tier }}</span>
+                        <span style="font-size:10px;color:
+                            {%- if ratio == 1 -%}var(--success)
+                            {%- elif ratio >= 0.5 -%}var(--text)
+                            {%- elif ratio > 0 -%}var(--warn)
+                            {%- else -%}var(--muted)
+                            {%- endif -%};">{{ c.producible }}/{{ c.total }}</span>
+                    </div>
+                    <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:1px;">
+                        {% if tier == 0 %}Raw
+                        {% elif tier == 1 %}Basic
+                        {% elif tier == 2 %}Refined
+                        {% elif tier == 3 %}Specialized
+                        {% else %}Advanced{% endif %}
+                    </div>
                 </div>
-                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:1px;">
-                    {% if tier == 0 %}Raw
-                    {% elif tier == 1 %}Basic
-                    {% elif tier == 2 %}Refined
-                    {% elif tier == 3 %}Specialized
-                    {% else %}Advanced{% endif %}
+                <div style="flex:1;">
+                    {% for item in items %}
+                    <a href="/industry/planetary/chain#{{ item.type_id }}"
+                       class="pi-tier-item {% if item.producible %}is-producible{% else %}is-unavail{% endif %}"
+                       data-type-id="{{ item.type_id }}"
+                       data-direct-inputs="{{ item.direct_input_ids | join(',') }}"
+                       data-ancestors="{{ item.ancestor_ids | join(',') }}"
+                       data-descendants="{{ item.descendant_ids | join(',') }}"
+                       title="{% if item.producible %}{% if item.inputs %}Inputs: {% for inp in item.inputs %}{{ inp.quantity }}× {{ inp.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if item.cycle_time %} · {{ item.cycle_time // 60 }}min cycle{% endif %}{% elif item.planet_sources %}Found on: {{ item.planet_sources | join(', ') | capitalize }}{% else %}Raw material{% endif %}{% else %}{% if tier == 0 and item.planet_sources %}Only on {{ item.planet_sources | join(', ') }} planets — this system has none{% elif item.missing %}Missing: {{ item.missing | join(', ') }}{% else %}Inputs not available in this system{% endif %}{% endif %}"
+                       style="display:block;padding:0.25rem 0.55rem;border-top:1px solid var(--border);font-size:11px;text-decoration:none;line-height:1.3;">
+                        {{ item.name }}
+                    </a>
+                    {% endfor %}
                 </div>
             </div>
-            <div style="flex:1;">
-                {% for item in items %}
-                <a href="/industry/planetary/chain#{{ item.type_id }}"
-                   class="pi-tier-item {% if item.producible %}is-producible{% else %}is-unavail{% endif %}"
-                   title="{% if item.producible %}{% if item.inputs %}Inputs: {% for inp in item.inputs %}{{ inp.quantity }}× {{ inp.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if item.cycle_time %} · {{ item.cycle_time // 60 }}min cycle{% endif %}{% elif item.planet_sources %}Found on: {{ item.planet_sources | join(', ') | capitalize }}{% else %}Raw material{% endif %}{% else %}{% if tier == 0 and item.planet_sources %}Only on {{ item.planet_sources | join(', ') }} planets — this system has none{% elif item.missing %}Missing: {{ item.missing | join(', ') }}{% else %}Inputs not available in this system{% endif %}{% endif %}"
-                   style="display:block;padding:0.25rem 0.55rem;border-top:1px solid var(--border);font-size:11px;text-decoration:none;line-height:1.3;">
-                    {{ item.name }}
-                </a>
-                {% endfor %}
-            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
     </div>
 
     <div style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
-        P2+ requires shipping intermediates between planets in-system — the list reflects what
-        <em>can</em> be built using this system's combined P0 pool, not what fits on a single planet.
-        Hover a tile for recipe / sources. Click to open the Chain Explorer.
+        Hover a commodity to see its recipe chain — green = ingredients (inputs), cyan = downstream uses.
+        Click to open the Chain Explorer for full details.
     </div>
 </div>
 
 <style>
+    .pi-tier-item { transition:background 0.12s, color 0.12s, opacity 0.12s; }
     .pi-tier-item.is-producible { color:var(--text); }
-    .pi-tier-item.is-producible:hover { background:rgba(100,200,255,0.08); }
     .pi-tier-item.is-unavail { color:var(--muted); opacity:0.55; }
-    .pi-tier-item.is-unavail:hover { opacity:0.9; background:rgba(255,255,255,0.03); }
+
+    .pi-tier-item:hover { background:rgba(200,169,81,0.12); }
+
+    /* When any tile is hovered, dim all tiles by default. Relevant tiles
+       get their highlighting classes applied via JS. */
+    .pi-tier-container.is-tracing .pi-tier-item:not(.is-hover):not(.is-ancestor):not(.is-descendant) {
+        opacity:0.18;
+    }
+    .pi-tier-container.is-tracing .pi-tier-item.is-hover {
+        background:rgba(200,169,81,0.28);
+        color:var(--accent);
+        font-weight:600;
+        opacity:1;
+    }
+    .pi-tier-container.is-tracing .pi-tier-item.is-ancestor {
+        background:rgba(51,170,85,0.18);
+        color:var(--success);
+        opacity:1;
+    }
+    .pi-tier-container.is-tracing .pi-tier-item.is-descendant {
+        background:rgba(100,200,255,0.15);
+        color:#7ec6ff;
+        opacity:1;
+    }
 
     @media (max-width: 1100px) {
         .pi-tier-grid { grid-template-columns:repeat(3, minmax(0,1fr)) !important; }
@@ -103,4 +166,101 @@
         .pi-tier-grid { grid-template-columns:repeat(2, minmax(0,1fr)) !important; }
     }
 </style>
+
+<script>
+(function() {
+    var container = document.querySelector('.pi-tier-container');
+    if (!container) return;
+    var svg = container.querySelector('.pi-conn-lines');
+    var items = container.querySelectorAll('.pi-tier-item');
+    if (!items.length || !svg) return;
+
+    function parseIds(attr) {
+        if (!attr) return [];
+        return attr.split(',').filter(Boolean).map(function(s){ return s.trim(); });
+    }
+
+    function clearLines() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+    }
+
+    function drawLine(fromEl, toEl, color) {
+        var cRect = container.getBoundingClientRect();
+        var f = fromEl.getBoundingClientRect();
+        var t = toEl.getBoundingClientRect();
+        // Anchor: right-mid of input tile → left-mid of output tile (inputs are to the LEFT in lower tiers)
+        var inputIsLeft = t.left < f.left;
+        var x1 = (inputIsLeft ? f.left : f.right) - cRect.left;
+        var y1 = f.top + f.height / 2 - cRect.top;
+        var x2 = (inputIsLeft ? t.right : t.left) - cRect.left;
+        var y2 = t.top + t.height / 2 - cRect.top;
+        // Smooth bezier curve with horizontal handle distance
+        var dx = Math.abs(x2 - x1) * 0.5;
+        var d = 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + (inputIsLeft ? -dx : dx)) + ' ' + y1
+              + ', ' + (x2 + (inputIsLeft ? dx : -dx)) + ' ' + y2
+              + ', ' + x2 + ' ' + y2;
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', '1.5');
+        path.setAttribute('stroke-opacity', '0.9');
+        svg.appendChild(path);
+    }
+
+    function onEnter(e) {
+        var el = e.currentTarget;
+        var tid = el.dataset.typeId;
+        var ancestors = parseIds(el.dataset.ancestors);
+        var descendants = parseIds(el.dataset.descendants);
+        var direct = parseIds(el.dataset.directInputs);
+
+        container.classList.add('is-tracing');
+        el.classList.add('is-hover');
+
+        ancestors.forEach(function(aid) {
+            container.querySelectorAll('.pi-tier-item[data-type-id="' + aid + '"]').forEach(function(x){
+                x.classList.add('is-ancestor');
+            });
+        });
+        descendants.forEach(function(did) {
+            container.querySelectorAll('.pi-tier-item[data-type-id="' + did + '"]').forEach(function(x){
+                x.classList.add('is-descendant');
+            });
+        });
+
+        // Draw lines only to direct inputs (one level down) — cleaner than full tree
+        direct.forEach(function(iid) {
+            var target = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
+            if (target) drawLine(el, target, '#33aa55'); // green for inputs
+        });
+    }
+
+    function onLeave() {
+        container.classList.remove('is-tracing');
+        items.forEach(function(x){
+            x.classList.remove('is-hover', 'is-ancestor', 'is-descendant');
+        });
+        clearLines();
+    }
+
+    items.forEach(function(el) {
+        el.addEventListener('mouseenter', onEnter);
+        el.addEventListener('mouseleave', onLeave);
+    });
+
+    // Redraw lines on window resize if one is currently active
+    window.addEventListener('resize', function() {
+        if (!container.classList.contains('is-tracing')) return;
+        var hovered = container.querySelector('.pi-tier-item.is-hover');
+        if (!hovered) return;
+        clearLines();
+        parseIds(hovered.dataset.directInputs).forEach(function(iid) {
+            var t = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
+            if (t) drawLine(hovered, t, '#33aa55');
+        });
+    });
+})();
+</script>
+
 {% endif %}
