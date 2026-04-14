@@ -1,0 +1,23 @@
+{# htmx partial — planet types that produce a given raw material. #}
+<div style="padding:0.6rem 0.75rem;border-bottom:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;">
+    <span style="font-size:12px;color:var(--text);font-weight:600;">{{ material }}</span>
+    <span style="font-size:10px;color:var(--muted);">found on {{ producers | length }} planet type{{ 's' if producers|length != 1 else '' }}</span>
+</div>
+
+{% if producers %}
+<div style="padding:0.6rem 0.75rem;display:flex;gap:0.4rem;flex-wrap:wrap;">
+    {% for p in producers %}
+    <span style="font-size:11px;padding:0.25rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-transform:capitalize;">
+        {{ p }}
+    </span>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="padding:0.5rem 0.75rem;font-size:10px;color:var(--muted);">
+    {% if producers | length == 1 %}
+    <strong style="color:var(--warn);">Unique resource</strong> — only available on {{ producers[0] }} planets.
+    {% else %}
+    Use the system search to find specific planets with this resource.
+    {% endif %}
+</div>

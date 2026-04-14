@@ -5,7 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
 from app.db.cache import ESICache  # registers table with Base
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo  # registers SDE tables
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo, SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
@@ -15,6 +15,7 @@ from app.routes.character_detail import router as character_detail_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
+from app.routes.pi import router as pi_router
 from app.routes.journal import router as journal_router
 from app.routes.skills import router as skills_router
 from app.routes.fittings import router as fittings_router
@@ -61,6 +62,7 @@ app.include_router(character_detail_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
+app.include_router(pi_router)
 app.include_router(journal_router)
 app.include_router(skills_router)
 app.include_router(fittings_router)

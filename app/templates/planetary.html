@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}PLANETARY INDUSTRY — VIGILANT{% endblock %}
+
+{% block content %}
+<div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
+    <nav style="display:flex;gap:0.5rem;font-size:11px;">
+        <a href="/industry/planetary" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
+        <a href="/industry/planetary/lookup" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
+        <a href="/industry/planetary/chain" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
+    </nav>
+</div>
+
+<div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <span class="b-badge" style="background:var(--panel);border:1px solid var(--border);padding:0.3rem 0.6rem;">
+        {{ total_planets }} planet{{ 's' if total_planets != 1 else '' }}
+    </span>
+    {% if expiring_soon %}
+    <span class="b-badge is-danger" style="padding:0.3rem 0.6rem;">
+        {{ expiring_soon }} expiring / expired
+    </span>
+    {% endif %}
+    {% if warning_cnt %}
+    <span class="b-badge is-warn" style="padding:0.3rem 0.6rem;">
+        {{ warning_cnt }} &lt; 24h
+    </span>
+    {% endif %}
+    {% if missing_scope_chars %}
+    <span class="b-badge is-warn" style="padding:0.3rem 0.6rem;" title="These characters need PI scope re-auth">
+        {{ missing_scope_chars | length }} missing scope
+    </span>
+    {% endif %}
+</div>
+
+{% if missing_scope_chars %}
+<div class="b-panel b-section" style="padding:0.75rem;border-color:var(--warn);">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:0.3rem;">
+        Missing <code>esi-planets.manage_planets.v1</code> scope — re-auth to see their colonies:
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+        {% for char in missing_scope_chars %}
+        <span style="display:inline-flex;align-items:center;gap:0.3rem;font-size:11px;">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32" class="b-portrait-sm" alt="">
+            {{ char.character_name }}
+        </span>
+        {% endfor %}
+        <a href="/auth/add-character" class="b-link" style="color:var(--accent);font-size:11px;margin-left:auto;">Re-auth →</a>
+    </div>
+</div>
+{% endif %}
+
+<div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+    <form method="get" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">
+        <label style="font-size:10px;color:var(--muted);">Sort</label>
+        <select name="sort" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+            <option value="expiry" {% if sort == 'expiry' %}selected{% endif %}>Expiry (soonest)</option>
+            <option value="character" {% if sort == 'character' %}selected{% endif %}>Character</option>
+            <option value="system" {% if sort == 'system' %}selected{% endif %}>System</option>
+            <option value="type" {% if sort == 'type' %}selected{% endif %}>Planet type</option>
+        </select>
+        <label style="font-size:10px;color:var(--muted);">Type</label>
+        <select name="filter_type" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+            <option value="">All</option>
+            {% for t in all_types %}
+            <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ t | capitalize }}</option>
+            {% endfor %}
+        </select>
+        <label style="font-size:10px;color:var(--muted);">Expiry</label>
+        <select name="filter_warn" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+            <option value="">All</option>
+            <option value="expiring" {% if filter_warn == 'expiring' %}selected{% endif %}>Expiring / &lt; 24h</option>
+            <option value="expired" {% if filter_warn == 'expired' %}selected{% endif %}>Expired only</option>
+        </select>
+    </form>
+</div>
+
+<div class="b-panel b-section">
+    <div class="b-panel-head" style="display:grid;grid-template-columns:32px minmax(140px,1.5fr) minmax(90px,1fr) minmax(120px,1fr) 70px 90px 20px;gap:0.5rem;padding:0.4rem 0.75rem;">
+        <span></span>
+        <span class="b-label">Character</span>
+        <span class="b-label">Planet type</span>
+        <span class="b-label">System</span>
+        <span class="b-label" style="text-align:center;">Pins</span>
+        <span class="b-label" style="text-align:right;">Expiry</span>
+        <span></span>
+    </div>
+
+    {% if rows %}
+    {% for row in rows %}
+    {% set char = row.char %}
+    {% set planet = row.planet %}
+    <div class="pi-row" data-planet-id="{{ planet.planet_id }}" data-char-id="{{ char.character_id }}">
+        <div class="pi-row-top"
+             style="display:grid;grid-template-columns:32px minmax(140px,1.5fr) minmax(90px,1fr) minmax(120px,1fr) 70px 90px 20px;gap:0.5rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);cursor:pointer;align-items:center;"
+             hx-get="/industry/planetary/planet/{{ char.character_id }}/{{ planet.planet_id }}"
+             hx-trigger="click once"
+             hx-target="#pi-detail-{{ char.character_id }}-{{ planet.planet_id }}"
+             hx-swap="innerHTML"
+             onclick="this.closest('.pi-row').classList.toggle('is-expanded')">
+            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 class="b-portrait-sm" alt="" style="width:28px;height:28px;border-radius:2px;">
+            <span style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.character_name }}</span>
+            <span style="font-size:11px;color:var(--text);text-transform:capitalize;">{{ planet.planet_type }}</span>
+            <span style="font-size:11px;color:var(--muted);">{{ planet.system_name or '—' }}</span>
+            <span style="font-size:11px;color:var(--muted);text-align:center;">{{ planet.num_pins }}</span>
+            <span style="font-size:11px;text-align:right;{% if planet.expiry_warning == 'expired' %}color:var(--danger);{% elif planet.expiry_warning == 'critical' %}color:var(--danger);{% elif planet.expiry_warning == 'warning' %}color:var(--warn);{% else %}color:var(--muted);{% endif %}">
+                {% if planet.expiry_time_str %}{{ planet.expiry_time_str }}{% else %}no extractor{% endif %}
+            </span>
+            <span style="font-size:10px;color:var(--muted);" class="pi-arrow">▸</span>
+        </div>
+        <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail" style="display:none;"></div>
+    </div>
+    {% endfor %}
+    {% else %}
+    {% if filter_type or filter_warn %}
+    <div class="b-empty" style="padding:1rem;">
+        No planets match your filters.
+        <a href="/industry/planetary" style="color:var(--accent);margin-left:0.5rem;">Clear filters</a>
+    </div>
+    {% elif total_planets == 0 and not missing_scope_chars %}
+    <div class="b-empty" style="padding:1rem;">
+        No PI planets found across your characters.
+        Once a character has active colonies, they'll appear here on the next background sync.
+    </div>
+    {% else %}
+    <div class="b-empty" style="padding:1rem;">
+        No PI data cached yet.
+        <a href="/dashboard" style="color:var(--accent);margin-left:0.3rem;">Visit dashboard</a>
+        to trigger a sync, then return here.
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+
+<style>
+    .pi-row.is-expanded .pi-row-top { background:var(--panel-hover, rgba(255,255,255,0.02)); }
+    .pi-row.is-expanded .pi-arrow { transform:rotate(90deg); display:inline-block; }
+    .pi-row.is-expanded .pi-row-detail { display:block; }
+    .pi-row-top:hover { background:var(--panel-hover, rgba(255,255,255,0.02)); }
+</style>
+
+<div class="b-section" style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);">
+    <span>PI data syncs with dashboard background refresh. Click a row to load full pin detail.</span>
+    <span>ESI caveat: extractor state only updates when the character opens the planet in-game.</span>
+</div>
+
+{% endblock %}

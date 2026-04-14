@@ -1,0 +1,133 @@
+{# htmx partial — detail card for one PI commodity. #}
+<div style="padding:0.75rem;">
+    <div style="display:flex;gap:0.5rem;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;">
+        <h3 style="margin:0;font-size:14px;color:var(--text);">{{ name }}</h3>
+        <span style="font-size:10px;color:var(--muted);padding:0.1rem 0.4rem;background:var(--bg);border:1px solid var(--border);">
+            {% if tier == 0 %}P0 — Raw
+            {% elif tier == 1 %}P1 — Basic
+            {% elif tier == 2 %}P2 — Refined
+            {% elif tier == 3 %}P3 — Specialized
+            {% elif tier == 4 %}P4 — Advanced
+            {% else %}—{% endif %}
+        </span>
+    </div>
+
+    {# Price + economics strip #}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:11px;margin-bottom:0.75rem;padding-bottom:0.75rem;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Price (ESI avg)</div>
+            <div style="color:var(--text);">{{ '{:,.2f}'.format(price) }} ISK</div>
+        </div>
+        {% if cycle_time %}
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Cycle time</div>
+            <div style="color:var(--text);">{{ cycle_time // 60 }} min</div>
+        </div>
+        {% endif %}
+        {% if output_qty %}
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Output / cycle</div>
+            <div style="color:var(--text);">{{ output_qty }}</div>
+        </div>
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Revenue / cycle</div>
+            <div style="color:var(--text);">{{ '{:,.0f}'.format(revenue_per_cycle) }} ISK</div>
+        </div>
+        {% endif %}
+        {% if inputs %}
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Input cost / cycle</div>
+            <div style="color:var(--text);">{{ '{:,.0f}'.format(input_cost) }} ISK</div>
+        </div>
+        <div>
+            <div style="color:var(--muted);font-size:10px;">Margin / cycle</div>
+            <div style="color:
+                {%- if margin_per_cycle and margin_per_cycle > 0 -%}var(--success)
+                {%- elif margin_per_cycle and margin_per_cycle < 0 -%}var(--danger)
+                {%- else -%}var(--muted)
+                {%- endif -%};">
+                {% if margin_per_cycle is not none %}{{ '{:+,.0f}'.format(margin_per_cycle) }} ISK{% else %}—{% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Planet types (P0 only) #}
+    {% if planet_types %}
+    <div style="margin-bottom:0.75rem;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Available on</div>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+            {% for pt in planet_types %}
+            <span style="font-size:11px;padding:0.2rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-transform:capitalize;">
+                {{ pt }}
+            </span>
+            {% endfor %}
+        </div>
+        {% if planet_types | length == 1 %}
+        <div style="font-size:10px;color:var(--warn);margin-top:0.3rem;">
+            Unique resource — only one planet type produces this.
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# Recipe inputs #}
+    {% if inputs %}
+    <div style="margin-bottom:0.75rem;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Recipe inputs per cycle</div>
+        {% for inp in inputs %}
+        <div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:11px;border-bottom:1px dashed var(--border);">
+            <span style="color:var(--text);">
+                <a href="#" onclick="piLoadNode({{ inp.type_id }});return false;" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
+                    {{ inp.name }}
+                </a>
+            </span>
+            <span style="color:var(--muted);">× {{ inp.quantity }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Downstream uses #}
+    {% if uses %}
+    <div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Used to produce</div>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+            {% for u in uses %}
+            <a href="#" onclick="piLoadNode({{ u.type_id }});return false;"
+               style="font-size:11px;padding:0.2rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;">
+                {{ u.name }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not inputs and not uses and tier == 0 %}
+    <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
+        Raw material — extracted directly from planet surfaces.
+    </div>
+    {% elif not inputs and not uses %}
+    <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
+        No recipe data for this commodity. SDE schematics may not be loaded yet.
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    // Helper for intra-partial navigation between commodity nodes.
+    if (typeof piLoadNode === 'undefined') {
+        window.piLoadNode = function(typeId) {
+            var el = document.getElementById('chain-detail');
+            if (!el) return;
+            el.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">Loading…</div>';
+            // Clear active highlights + try to set the one we're loading
+            document.querySelectorAll('.chain-item').forEach(function(e){ e.classList.remove('is-active'); });
+            var target = document.querySelector('.chain-item[data-type-id="' + typeId + '"]');
+            if (target) target.classList.add('is-active');
+            fetch('/industry/planetary/chain/node/' + typeId)
+                .then(function(r){ return r.text(); })
+                .then(function(html){ el.innerHTML = html; });
+        };
+    }
+</script>

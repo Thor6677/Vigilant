@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}PI CHAIN — VIGILANT{% endblock %}
+
+{% block content %}
+<div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
+    <nav style="display:flex;gap:0.5rem;font-size:11px;">
+        <a href="/industry/planetary" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
+        <a href="/industry/planetary/lookup" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
+        <a href="/industry/planetary/chain" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
+    </nav>
+</div>
+
+<div class="b-section" style="font-size:11px;color:var(--muted);">
+    Click a commodity to see its recipe, planet-type sources, downstream uses, and live margin per cycle.
+    Prices are ESI global averages (15 min cache).
+</div>
+
+<div class="b-grid-2 b-section" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:1rem;">
+    <div>
+        {% for tier in [0,1,2,3,4] %}
+        {% set items = chain.get(tier, []) %}
+        {% if items %}
+        <div class="b-panel b-section" style="margin:0 0 0.75rem 0;">
+            <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="b-label">
+                    {% if tier == 0 %}P0 — Raw Materials
+                    {% elif tier == 1 %}P1 — Basic Products
+                    {% elif tier == 2 %}P2 — Refined Commodities
+                    {% elif tier == 3 %}P3 — Specialized Commodities
+                    {% elif tier == 4 %}P4 — Advanced Commodities
+                    {% endif %}
+                </span>
+                <span style="font-size:10px;color:var(--muted);">{{ items | length }} items</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0;">
+                {% for item in items %}
+                <div class="chain-item"
+                     data-type-id="{{ item.type_id }}"
+                     hx-get="/industry/planetary/chain/node/{{ item.type_id }}"
+                     hx-target="#chain-detail"
+                     hx-swap="innerHTML"
+                     onclick="document.querySelectorAll('.chain-item').forEach(function(el){el.classList.remove('is-active');});this.classList.add('is-active');"
+                     style="padding:0.45rem 0.6rem;border-top:1px solid var(--border);border-right:1px solid var(--border);cursor:pointer;">
+                    <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        {{ item.name }}
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px;">
+                        {% if item.price %}
+                        <span>{{ '{:,.2f}'.format(item.price) }} ISK</span>
+                        {% else %}
+                        <span>—</span>
+                        {% endif %}
+                        {% if item.margin_pct is not none %}
+                        <span style="color:
+                            {%- if item.margin_pct > 0 -%}var(--success)
+                            {%- else -%}var(--danger)
+                            {%- endif -%};">
+                            {{ '%+.0f' | format(item.margin_pct) }}%
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        {% if not chain.get(1) and not chain.get(2) and not chain.get(3) and not chain.get(4) %}
+        <div class="b-panel" style="padding:0.75rem;">
+            <div style="font-size:11px;color:var(--warn);">
+                PI schematic SDE tables are empty. Run the SDE reload (see <code>CLAUDE.md</code> "SDE Reload") to populate.
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div>
+        <div class="b-panel" style="position:sticky;top:1rem;">
+            <div class="b-panel-head"><span class="b-label">Detail</span></div>
+            <div id="chain-detail">
+                <div class="b-empty" style="padding:1rem;">Click a commodity on the left to see its details.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .chain-item:hover { background:var(--panel-hover, rgba(255,255,255,0.03)); }
+    .chain-item.is-active { background:var(--accent-bg, rgba(100,200,255,0.08)); border-left:2px solid var(--accent); }
+</style>
+
+{% endblock %}

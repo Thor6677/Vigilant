@@ -19,7 +19,26 @@ from app.db.sde_models import (
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
+    SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
 )
+
+# Planet type IDs that support PI (shattered / exotic types excluded).
+PI_PLANET_TYPE_IDS = {11, 12, 13, 2014, 2015, 2016, 2017, 2063}
+
+
+def _roman(n: int) -> str:
+    """Convert integer to Roman numeral (used for planet names: 'Jita IV')."""
+    if n is None or n <= 0:
+        return ""
+    mapping = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"),
+               (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"),
+               (5, "V"), (4, "IV"), (1, "I")]
+    out = ""
+    for val, sym in mapping:
+        while n >= val:
+            out += sym
+            n -= val
+    return out
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +67,28 @@ async def needs_update(db: AsyncSession) -> bool:
     updated = datetime.fromisoformat(last)
     if updated.tzinfo is None:
         updated = updated.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS)
+    if datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS):
+        return True
+
+    # Also force update if any NEW table (added after last import) is still empty
+    # while the base sde_types is populated. This catches additions like the PI
+    # tables without requiring manual `DELETE FROM sde_meta` steps.
+    try:
+        types_result = await db.execute(text("SELECT COUNT(1) FROM sde_types"))
+        types_count = types_result.scalar() or 0
+        if types_count > 0:
+            for table in ("sde_planets", "sde_planet_schematics"):
+                try:
+                    r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
+                    if (r.scalar() or 0) == 0:
+                        log.info(f"{table} is empty but sde_types is populated — forcing SDE reimport.")
+                        return True
+                except Exception:
+                    # Table doesn't exist yet — create_all will make it, next startup will populate
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 def _iter_jsonl(zf: zipfile.ZipFile, filename: str):
@@ -524,6 +564,92 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDEShipMastery.__table__, batch)
     count += len(batch)
     log.info(f"Imported {count} ship mastery entries")
+
+    # --- mapPlanets → planets supporting PI ---
+    # Fetch system name map first so we can materialize "Jita IV"-style planet names at load time.
+    log.info("Importing planets...")
+    sys_name_result = await db.execute(text("SELECT system_id, system_name FROM sde_systems"))
+    sys_name_map: dict[int, str] = {row[0]: row[1] for row in sys_name_result.fetchall()}
+
+    await db.execute(text("DELETE FROM sde_planets"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "mapPlanets.jsonl"):
+            try:
+                type_id = int(item.get("typeID") or 0)
+                if type_id not in PI_PLANET_TYPE_IDS:
+                    continue
+                system_id = int(item["solarSystemID"])
+                idx = int(item.get("celestialIndex") or 0)
+                sys_name = sys_name_map.get(system_id, f"System {system_id}")
+                planet_name = f"{sys_name} {_roman(idx)}".strip() if idx else sys_name
+                batch.append({
+                    "planet_id": int(item["_key"]),
+                    "system_id": system_id,
+                    "planet_type_id": type_id,
+                    "planet_name": planet_name,
+                    "planet_index": idx,
+                    "radius": item.get("radius"),
+                })
+            except (KeyError, ValueError, TypeError):
+                continue
+            if len(batch) >= 1000:
+                await _bulk_insert(db, SDEPlanet.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDEPlanet.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} planets")
+    except KeyError:
+        log.warning("mapPlanets.jsonl not present in SDE zip — skipping planet import")
+
+    # --- planetSchematics → PI recipes (name, cycle time, inputs/outputs) ---
+    log.info("Importing PI schematics...")
+    await db.execute(text("DELETE FROM sde_planet_schematics"))
+    await db.execute(text("DELETE FROM sde_planet_schematic_materials"))
+    await db.commit()
+    sch_count, mat_count = 0, 0
+    sch_batch, mat_batch = [], []
+    try:
+        for item in _iter_jsonl(zf, "planetSchematics.jsonl"):
+            try:
+                sid = int(item["_key"])
+                name = item.get("name", {})
+                if isinstance(name, dict):
+                    name = name.get("en") or f"Schematic {sid}"
+                sch_batch.append({
+                    "schematic_id": sid,
+                    "schematic_name": name,
+                    "cycle_time": item.get("cycleTime"),
+                })
+                for t in item.get("types", []):
+                    try:
+                        mat_batch.append({
+                            "schematic_id": sid,
+                            "type_id": int(t["_key"]),
+                            "quantity": int(t.get("quantity") or 0),
+                            "is_input": bool(t.get("isInput")),
+                        })
+                    except (KeyError, ValueError):
+                        continue
+            except (KeyError, ValueError):
+                continue
+            if len(sch_batch) >= 200:
+                await _bulk_insert(db, SDEPlanetSchematic.__table__, sch_batch)
+                sch_count += len(sch_batch)
+                sch_batch = []
+            if len(mat_batch) >= 500:
+                await _bulk_insert(db, SDEPlanetSchematicMaterial.__table__, mat_batch)
+                mat_count += len(mat_batch)
+                mat_batch = []
+        await _bulk_insert(db, SDEPlanetSchematic.__table__, sch_batch)
+        sch_count += len(sch_batch)
+        await _bulk_insert(db, SDEPlanetSchematicMaterial.__table__, mat_batch)
+        mat_count += len(mat_batch)
+        log.info(f"Imported {sch_count} PI schematics with {mat_count} material rows")
+    except KeyError:
+        log.warning("planetSchematics.jsonl not present in SDE zip — skipping")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")

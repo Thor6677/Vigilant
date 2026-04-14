@@ -172,3 +172,41 @@ class SDEShipMastery(Base):
     ship_type_id = Column(Integer, nullable=False, index=True)
     mastery_level = Column(Integer, nullable=False)  # 0-4 (I-V)
     certificate_id = Column(Integer, nullable=False)
+
+
+# ── Planetary Industry SDE tables ───────────────────────────────────────────
+
+class SDEPlanet(Base):
+    """mapDenormalize (planets only) — which planets exist in which systems.
+
+    `planet_type_id` is the SDE invType id for the planet type (e.g. 2016 Barren).
+    `planet_index` is the Roman-numeral ordinal within the system (I, II, III…).
+    """
+    __tablename__ = "sde_planets"
+
+    planet_id = Column(Integer, primary_key=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    planet_type_id = Column(Integer, nullable=False, index=True)
+    planet_name = Column(String, nullable=False)
+    planet_index = Column(Integer, nullable=True)
+    radius = Column(Float, nullable=True)
+
+
+class SDEPlanetSchematic(Base):
+    """planetSchematics — PI recipes (name + cycle time)."""
+    __tablename__ = "sde_planet_schematics"
+
+    schematic_id = Column(Integer, primary_key=True)
+    schematic_name = Column(String, nullable=False)
+    cycle_time = Column(Integer, nullable=True)   # seconds
+
+
+class SDEPlanetSchematicMaterial(Base):
+    """planetSchematicsTypeMap — inputs/outputs for each PI schematic."""
+    __tablename__ = "sde_planet_schematic_materials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    schematic_id = Column(Integer, nullable=False, index=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+    is_input = Column(Boolean, nullable=False, index=True)  # True = material, False = product

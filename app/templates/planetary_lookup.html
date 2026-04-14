@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}PI LOOKUP — VIGILANT{% endblock %}
+
+{% block content %}
+<div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
+    <nav style="display:flex;gap:0.5rem;font-size:11px;">
+        <a href="/industry/planetary" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
+        <a href="/industry/planetary/lookup" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
+        <a href="/industry/planetary/chain" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
+    </nav>
+</div>
+
+<div class="b-grid-2 b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">By System</span></div>
+        <div style="padding:0.75rem;">
+            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Search a system</label>
+            <div style="position:relative;">
+                <input type="text" id="sys-input" placeholder="e.g. Jita" autocomplete="off"
+                       oninput="piSysSearch(this)"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();piSysSubmit();}"
+                       style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+                <div id="sys-dd" class="gc-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--border);z-index:10;max-height:200px;overflow-y:auto;"></div>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
+                Planet types and their P0 outputs are shown once a system is selected.
+            </div>
+        </div>
+        <div id="sys-result" style="border-top:1px solid var(--border);"></div>
+    </div>
+
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">By Raw Material</span></div>
+        <div style="padding:0.75rem;">
+            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Pick a P0 resource</label>
+            <select id="mat-select" onchange="piMatPick(this.value)"
+                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;">
+                <option value="">— Select —</option>
+                {% for m in p0_materials %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+            </select>
+            <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
+                Find which planet types produce a specific raw material.
+            </div>
+        </div>
+        <div id="mat-result" style="border-top:1px solid var(--border);"></div>
+    </div>
+</div>
+
+<div class="b-panel b-section">
+    <div class="b-panel-head"><span class="b-label">Planet Type Reference</span></div>
+    <div style="padding:0.75rem;display:grid;grid-template-columns:repeat(auto-fit, minmax(220px,1fr));gap:0.75rem;">
+        {% for pt in planet_types %}
+        <div style="border:1px solid var(--border);padding:0.5rem;background:var(--bg);">
+            <div style="font-size:12px;color:var(--text);margin-bottom:0.3rem;font-weight:600;">{{ pt }}</div>
+            <div style="font-size:10px;color:var(--muted);line-height:1.6;">
+                {% for m in p0_by_type.get(pt, []) %}
+                <div>{{ m }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
+        Unique resources: Autotrophs (Temperate only), Felsic Magma (Lava only), Reactive Gas (Gas only).
+        Smaller planets (Lava ~2,000 km, Plasma ~5,000 km) have lower link costs than gas giants.
+    </div>
+</div>
+
+<script>
+(function() {
+    var _tmr;
+    window.piSysSearch = function(input) {
+        clearTimeout(_tmr);
+        var dd = document.getElementById('sys-dd');
+        var q = input.value.trim();
+        if (q.length < 2) { dd.style.display = 'none'; return; }
+        _tmr = setTimeout(function() {
+            fetch('/industry/planetary/lookup/search?q=' + encodeURIComponent(q))
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    if (!data.length) { dd.style.display = 'none'; return; }
+                    dd.innerHTML = data.map(function(s){
+                        var sec = s.security;
+                        var col = sec >= 0.5 ? 'var(--success)' : sec >= 0 ? 'var(--warn)' : 'var(--danger)';
+                        return '<div style="padding:0.4rem 0.6rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
+                            + ' onmousedown="piSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
+                            + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
+                            + '<span style="color:var(--text);">' + s.system_name + '</span>'
+                            + '</div>';
+                    }).join('');
+                    dd.style.display = 'block';
+                })
+                .catch(function(){ dd.style.display = 'none'; });
+        }, 200);
+    };
+    window.piSysPick = function(name) {
+        document.getElementById('sys-input').value = name;
+        document.getElementById('sys-dd').style.display = 'none';
+        piSysSubmit();
+    };
+    window.piSysSubmit = function() {
+        var name = document.getElementById('sys-input').value.trim();
+        if (!name) return;
+        var el = document.getElementById('sys-result');
+        el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
+        fetch('/industry/planetary/lookup/system?name=' + encodeURIComponent(name))
+            .then(function(r){ return r.text(); })
+            .then(function(html){ el.innerHTML = html; })
+            .catch(function(){ el.innerHTML = '<div class="b-empty" style="padding:0.75rem;">Lookup failed.</div>'; });
+    };
+    window.piMatPick = function(material) {
+        var el = document.getElementById('mat-result');
+        if (!material) { el.innerHTML = ''; return; }
+        el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
+        fetch('/industry/planetary/lookup/by-material?material=' + encodeURIComponent(material))
+            .then(function(r){ return r.text(); })
+            .then(function(html){ el.innerHTML = html; });
+    };
+    document.addEventListener('click', function(e) {
+        if (e.target.id !== 'sys-input') {
+            document.getElementById('sys-dd').style.display = 'none';
+        }
+    });
+})();
+</script>
+
+{% endblock %}

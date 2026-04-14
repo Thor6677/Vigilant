@@ -429,8 +429,8 @@
 
 </div>
 
-{# ── Jump Clones + PI ─────────────────────────────────────────────────────── #}
-<div class="b-grid-2 b-section">
+{# ── Jump Clones (PI moved to /industry/planetary) ────────────────────────── #}
+<div class="b-section">
 
     {# Jump Clones #}
     <div class="b-panel">
@@ -459,55 +459,6 @@
             {% endif %}
         </div>
         {% endfor %}
-    </div>
-
-    {# Planetary Industry #}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Planetary Industry</span>
-            {% if needs_pi_scope %}
-            <a href="/auth/add-character" class="b-link" style="color:var(--accent);">Re-auth →</a>
-            {% endif %}
-        </div>
-        {% if needs_pi_scope %}
-        <div class="b-empty">Re-authorize to view PI</div>
-        {% else %}
-        {% set has_pi = namespace(found=false) %}
-        {% for char in characters %}
-            {% set pi_list = pi.get(char.character_id) %}
-            {% if pi_list and pi_list is iterable and pi_list | length > 0 %}{% set has_pi.found = true %}{% endif %}
-        {% endfor %}
-
-        {% if has_pi.found %}
-        {% for char in characters %}
-        {% set pi_list = pi.get(char.character_id) %}
-        {% if pi_list and pi_list is iterable and pi_list | length > 0 %}
-            {% for planet in pi_list %}
-            <div class="b-table-row">
-                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                     class="b-portrait-sm" alt="">
-                <div style="flex:1;min-width:0;">
-                    <span style="font-size:11px;color:var(--text);text-transform:capitalize;">{{ planet.planet_type }}</span>
-                    {% if planet.system_name %}
-                    <span style="font-size:10px;color:var(--muted);"> · {{ planet.system_name }}</span>
-                    {% endif %}
-                </div>
-                {% if planet.expiry_time_str %}
-                <span style="font-size:11px;flex-shrink:0;"
-                      class="{% if planet.expiry_warning == 'expired' %}is-danger{% elif planet.expiry_warning in ('critical','warning') %}is-warn{% else %}is-muted{% endif %}">
-                    {{ planet.expiry_time_str }}
-                </span>
-                {% else %}
-                <span style="font-size:11px;color:var(--muted);">no extractor</span>
-                {% endif %}
-            </div>
-            {% endfor %}
-        {% endif %}
-        {% endfor %}
-        {% else %}
-        <div class="b-empty">No PI planets</div>
-        {% endif %}
-        {% endif %}
     </div>
 
 </div>

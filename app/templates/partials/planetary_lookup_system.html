@@ -1,0 +1,47 @@
+{# htmx partial — list planets in a system with their P0 outputs. #}
+{% if no_sde %}
+<div style="padding:0.75rem;font-size:11px;color:var(--warn);">
+    Planet SDE tables not yet loaded — the lookup will populate after the next SDE import.
+</div>
+{% elif not planets %}
+<div class="b-empty" style="padding:0.75rem;">No planets in this system.</div>
+{% else %}
+<div style="padding:0.6rem 0.75rem 0.3rem;display:flex;gap:0.75rem;align-items:center;border-bottom:1px solid var(--border);">
+    <span style="font-size:13px;color:var(--text);font-weight:600;">{{ system.system_name }}</span>
+    {% if system.security is not none %}
+    <span style="font-size:11px;color:
+        {%- if system.security >= 0.5 -%}var(--success)
+        {%- elif system.security >= 0 -%}var(--warn)
+        {%- else -%}var(--danger)
+        {%- endif -%};">{{ '%.1f' | format(system.security) }}</span>
+    {% endif %}
+    {% if system.region %}
+    <span style="font-size:10px;color:var(--muted);">{{ system.constellation or '' }} · {{ system.region }}</span>
+    {% endif %}
+    <span style="margin-left:auto;font-size:10px;color:var(--muted);">{{ planets | length }} planet{{ 's' if planets|length != 1 else '' }}</span>
+</div>
+
+{% for p in planets %}
+<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
+    <div style="display:flex;gap:0.5rem;align-items:center;font-size:12px;">
+        <span style="color:var(--text);font-weight:500;">{{ p.planet_name }}</span>
+        <span style="color:var(--muted);font-size:11px;">· {{ p.planet_type }}</span>
+    </div>
+    {% if p.p0_materials %}
+    <div style="margin-top:0.3rem;display:flex;gap:0.3rem;flex-wrap:wrap;">
+        {% for mat in p.p0_materials %}
+        <a href="/industry/planetary/lookup?material={{ mat }}"
+           onclick="document.getElementById('mat-select').value='{{ mat }}';piMatPick('{{ mat }}');return false;"
+           style="font-size:10px;padding:0.15rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;">
+            {{ mat }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+<div style="padding:0.5rem 0.75rem;font-size:10px;color:var(--muted);">
+    Click a resource to see which other planet types produce it.
+</div>
+{% endif %}

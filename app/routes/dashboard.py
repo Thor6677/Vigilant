@@ -758,11 +758,16 @@ async def fetch_contracts_data(characters: list[Character], db: AsyncSession) ->
 
 
 async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
-    async def _get_planet_expiry(client, character_id, planet_id):
+    """Fetch PI summary + full pin detail for each character's planets.
+
+    Returns list of planet dicts including `pins`, `extractor_products`, timing,
+    and expiry state. The dashboard uses the top-level expiry fields; the
+    `/industry/planetary` page uses the nested pin detail.
+    """
+    async def _get_planet_detail(client, character_id, planet_id):
         try:
             details = await esi_char.get_planet_details(client, character_id, planet_id)
-            expiry_times = [pin["expiry_time"] for pin in details.get("pins", []) if pin.get("expiry_time")]
-            return planet_id, min(expiry_times) if expiry_times else None
+            return planet_id, details
         except Exception:
             return planet_id, None
 
@@ -776,8 +781,8 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
             planets = await esi_char.get_planets(client, char.character_id)
             if not planets:
                 return char.character_id, [], None
-            expiry_map = dict(await asyncio.gather(*[
-                _get_planet_expiry(client, char.character_id, p["planet_id"]) for p in planets
+            detail_map = dict(await asyncio.gather(*[
+                _get_planet_detail(client, char.character_id, p["planet_id"]) for p in planets
             ]))
             system_ids = {p.get("solar_system_id") for p in planets if p.get("solar_system_id")}
             sys_name_map = {}
@@ -789,7 +794,11 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
             result = []
             for planet in planets:
                 pid = planet["planet_id"]
-                expiry_raw = expiry_map.get(pid)
+                details = detail_map.get(pid) or {}
+                raw_pins = details.get("pins") or []
+
+                expiry_times = [p["expiry_time"] for p in raw_pins if p.get("expiry_time")]
+                expiry_raw = min(expiry_times) if expiry_times else None
                 expiry_time_str, expiry_warning = None, None
                 if expiry_raw:
                     try:
@@ -799,13 +808,41 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
                         expiry_warning = "expired" if delta <= 0 else "critical" if delta < 3600 else "warning" if delta < 86400 else "ok"
                     except Exception:
                         pass
+
+                # Condense pin detail — keep only fields we render, skip geometry noise.
+                pins = []
+                for p in raw_pins:
+                    ext = p.get("extractor_details") or {}
+                    factory = p.get("factory_details") or {}
+                    pins.append({
+                        "pin_id": p.get("pin_id"),
+                        "type_id": p.get("type_id"),
+                        "schematic_id": p.get("schematic_id") or factory.get("schematic_id"),
+                        "expiry_time": p.get("expiry_time"),
+                        "install_time": p.get("install_time"),
+                        "last_cycle_start": p.get("last_cycle_start"),
+                        "extractor_product_type_id": ext.get("product_type_id"),
+                        "extractor_cycle_time": ext.get("cycle_time"),
+                        "extractor_qty_per_cycle": ext.get("qty_per_cycle"),
+                        "extractor_head_count": len(ext.get("heads") or []) if ext else 0,
+                        "contents": [
+                            {"type_id": c.get("type_id"), "amount": c.get("amount")}
+                            for c in (p.get("contents") or [])
+                        ],
+                    })
+
                 result.append({
                     "planet_id": pid,
                     "planet_type": planet.get("planet_type", "unknown"),
                     "num_pins": planet.get("num_pins", 0),
+                    "solar_system_id": planet.get("solar_system_id"),
                     "system_name": sys_name_map.get(planet.get("solar_system_id")),
+                    "upgrade_level": planet.get("upgrade_level", 0),
+                    "last_update": planet.get("last_update"),
+                    "expiry_time": expiry_raw,
                     "expiry_time_str": expiry_time_str,
                     "expiry_warning": expiry_warning,
+                    "pins": pins,
                 })
             return char.character_id, result, None
         except Exception as e:

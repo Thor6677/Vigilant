@@ -1,0 +1,89 @@
+{# htmx partial — expanded pin detail for one planet. #}
+<div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);background:rgba(0,0,0,0.12);">
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;font-size:10px;color:var(--muted);margin-bottom:0.5rem;">
+        {% if planet.upgrade_level is not none %}
+        <span>CC level: <span style="color:var(--text);">{{ planet.upgrade_level }}</span></span>
+        {% endif %}
+        {% if planet.last_update %}
+        <span>Last touched: <span style="color:var(--text);">{{ planet.last_update[:16].replace('T', ' ') }}</span></span>
+        {% endif %}
+        <span style="margin-left:auto;">{{ pins | length }} pin{{ 's' if pins|length != 1 else '' }}</span>
+    </div>
+
+    {% if pins %}
+    <div style="display:grid;grid-template-columns:110px minmax(160px,1.5fr) minmax(140px,1.2fr) minmax(100px,1fr) 90px;gap:0.5rem;padding:0.3rem 0.5rem;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);">
+        <span class="b-label">Kind</span>
+        <span class="b-label">Structure</span>
+        <span class="b-label">Schematic / Product</span>
+        <span class="b-label">Contents</span>
+        <span class="b-label" style="text-align:right;">Expiry</span>
+    </div>
+
+    {% for pin in pins %}
+    <div style="display:grid;grid-template-columns:110px minmax(160px,1.5fr) minmax(140px,1.2fr) minmax(100px,1fr) 90px;gap:0.5rem;padding:0.4rem 0.5rem;font-size:11px;border-bottom:1px solid var(--border);align-items:center;">
+        <span style="font-size:10px;text-transform:uppercase;color:
+            {%- if pin._kind == 'extractor' -%}var(--accent)
+            {%- elif pin._kind == 'factory' -%}var(--text)
+            {%- elif pin._kind in ('launchpad','storage') -%}var(--muted)
+            {%- elif pin._kind == 'command_center' -%}var(--success)
+            {%- else -%}var(--muted)
+            {%- endif -%};">
+            {{ pin_group_names[pin._kind] if pin._kind in pin_group_names else pin._kind }}
+        </span>
+
+        <span style="color:var(--text);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {{ pin._type_name }}
+        </span>
+
+        <span style="color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {% if pin._kind == 'extractor' and pin._product_name %}
+                → {{ pin._product_name }}
+                {% if pin.extractor_qty_per_cycle %}
+                <span style="color:var(--text);"> · {{ pin.extractor_qty_per_cycle }}/cycle</span>
+                {% endif %}
+            {% elif pin._schematic_name %}
+                {{ pin._schematic_name }}
+                {% if pin._schematic_output %}
+                <span style="color:var(--muted);"> → {{ pin._schematic_output }}
+                    {% if pin._schematic_output_qty %}×{{ pin._schematic_output_qty }}{% endif %}
+                </span>
+                {% endif %}
+            {% elif pin.schematic_id %}
+                Schematic {{ pin.schematic_id }}
+            {% else %}
+                —
+            {% endif %}
+        </span>
+
+        <span style="font-size:11px;color:var(--muted);">
+            {% if pin.contents %}
+                <details style="cursor:pointer;">
+                    <summary style="color:var(--text);">{{ pin.contents | length }} item{{ 's' if pin.contents|length != 1 else '' }}</summary>
+                    <div style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;overflow-y:auto;">
+                        {% for c in pin.contents %}
+                        <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:10px;">
+                            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(c.type_id) or 'Type ' ~ c.type_id }}</span>
+                            <span style="color:var(--text);flex-shrink:0;">{{ '{:,}'.format(c.amount) if c.amount else '—' }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </details>
+            {% else %}
+                —
+            {% endif %}
+        </span>
+
+        <span style="font-size:11px;text-align:right;
+            {%- if pin._expiry_warning == 'expired' or pin._expiry_warning == 'critical' -%}color:var(--danger);
+            {%- elif pin._expiry_warning == 'warning' -%}color:var(--warn);
+            {%- elif pin._expiry_str -%}color:var(--muted);
+            {%- else -%}color:var(--muted);
+            {%- endif -%}">
+            {% if pin._expiry_str %}{{ pin._expiry_str }}{% else %}—{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="b-empty" style="padding:0.5rem;">No pins on this planet.</div>
+    {% endif %}
+</div>
