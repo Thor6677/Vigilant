@@ -895,6 +895,7 @@ async def planetary_calculator_page(
     # Resolve system context if provided
     system_info = None
     system_p0_names: set[str] = set()
+    system_planet_types: set[str] = set()  # capitalized names: {"Barren", "Gas", ...}
     space_type = None
     if system:
         sys_id = await sde.system_name_to_id(db, system)
@@ -907,6 +908,9 @@ async def planetary_calculator_page(
             planet_result = await db.execute(select(SDEPlanet).where(SDEPlanet.system_id == sys_id))
             for p in planet_result.scalars().all():
                 ptype = pi_const.PLANET_TYPE_NAMES.get(p.planet_type_id, "")
+                if not ptype:
+                    continue
+                system_planet_types.add(ptype)
                 for mat in pi_const.P0_BY_PLANET_TYPE.get(ptype.lower(), []):
                     system_p0_names.add(mat)
 
@@ -937,7 +941,7 @@ async def planetary_calculator_page(
 
         # Colony layout recommendation — only meaningful once a system is picked,
         # but useful even without a system (treats all planet types as non-local).
-        colony_plan = _plan_colonies(bom, system_p0_names)
+        colony_plan = _plan_colonies(bom, system_p0_names, system_planet_types)
 
     return templates.TemplateResponse("planetary_calculator.html", {
         "request": request,
@@ -1114,7 +1118,8 @@ P2_P3_FACTORIES_PER_PLANET = 6       # shared Advanced Industrial Facilities (P2
 P4_FACTORIES_PER_PLANET = 2          # High-Tech Production Plants
 
 
-def _plan_colonies(bom: dict, system_p0_names: set[str]) -> dict:
+def _plan_colonies(bom: dict, system_p0_names: set[str],
+                   system_planet_types: set[str] | None = None) -> dict:
     """Recommend a colony layout for the BOM's production rate.
 
     Strategy (per user preference — integrated miner+P1):
@@ -1123,22 +1128,29 @@ def _plan_colonies(bom: dict, system_p0_names: set[str]) -> dict:
       - Slots are assigned to a planet type preferring local availability, then
         planet types that can host the widest variety of needed P0s.
       - Slots of the same planet type are packed 2-per-planet (CCU V budget).
+        Within a planet, different P0s are interleaved so the layout shows
+        2 distinct extractor programs where possible (not same P0 twice).
       - P2/P3 factories share dedicated "advanced factory hub" planets (6 AIFs).
       - P4 factories live on their own "P4 factory hub" planets (2 HTPPs).
       - Hub planet type defaults to Barren (falls back to Temperate) — both
         are universally common and have no extraction relevance for hubs.
 
-    All rates assume the BOM's production tempo (target cycles per
-    target_cycle_time window), and CCU V with Planetology V-ish skills.
+    `system_planet_types` is the authoritative set of planet types actually
+    present in the system (e.g. {"Barren","Gas","Lava","Temperate"}). If not
+    provided, falls back to inferring from P0 overlap (less accurate).
     """
     import math
     from collections import Counter, defaultdict
 
     # Planet types the system supports (capitalized)
-    system_planet_types: set[str] = set()
-    for ptype, mats in pi_const.P0_BY_PLANET_TYPE.items():
-        if any(m in system_p0_names for m in mats):
-            system_planet_types.add(ptype.capitalize())
+    if system_planet_types is None:
+        system_planet_types = set()
+        for ptype, mats in pi_const.P0_BY_PLANET_TYPE.items():
+            if any(m in system_p0_names for m in mats):
+                system_planet_types.add(ptype.capitalize())
+    else:
+        # Normalize capitalization
+        system_planet_types = {t.capitalize() for t in system_planet_types}
 
     def _sources_for(p0_name: str) -> list[str]:
         return [pt.capitalize() for pt, mats in pi_const.P0_BY_PLANET_TYPE.items()
@@ -1197,7 +1209,8 @@ def _plan_colonies(bom: dict, system_p0_names: set[str]) -> dict:
         slot["assigned_type"] = opts_sorted[0]
         slot["local"] = opts_sorted[0] in system_planet_types
 
-    # Step 3 — Pack slots (2 per planet) by type.
+    # Step 3 — Pack slots (2 per planet) by type, interleaving different P0s
+    # so planets get variety rather than 2× same extractor when possible.
     by_type: dict[str, list[dict]] = defaultdict(list)
     for slot in slots:
         by_type[slot["assigned_type"]].append(slot)
@@ -1205,8 +1218,19 @@ def _plan_colonies(bom: dict, system_p0_names: set[str]) -> dict:
     colonies: list[dict] = []
     for ptype, ptype_slots in by_type.items():
         local = ptype in system_planet_types
-        for i in range(0, len(ptype_slots), MINER_P1_SLOTS_PER_PLANET):
-            chunk = ptype_slots[i:i + MINER_P1_SLOTS_PER_PLANET]
+        # Round-robin interleave by P0 name so successive slots in the packing
+        # queue are for different P0s; a planet then naturally pairs distinct
+        # extractors. Trailing duplicates still pair together (unavoidable).
+        by_p0: dict[str, list[dict]] = defaultdict(list)
+        for s in ptype_slots:
+            by_p0[s["p0_name"]].append(s)
+        interleaved: list[dict] = []
+        while any(by_p0.values()):
+            for p0_name in list(by_p0.keys()):
+                if by_p0[p0_name]:
+                    interleaved.append(by_p0[p0_name].pop(0))
+        for i in range(0, len(interleaved), MINER_P1_SLOTS_PER_PLANET):
+            chunk = interleaved[i:i + MINER_P1_SLOTS_PER_PLANET]
             colonies.append({
                 "role": "miner_p1",
                 "planet_type": ptype,
