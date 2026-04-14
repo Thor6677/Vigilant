@@ -91,4 +91,33 @@
     .chain-item.is-active { background:var(--accent-bg, rgba(100,200,255,0.08)); border-left:2px solid var(--accent); }
 </style>
 
+<script>
+// Deep-linking from other PI pages: /industry/planetary/chain#12345 preloads
+// the node panel and scrolls the tile into view.
+(function() {
+    function loadFromHash() {
+        var h = window.location.hash.replace('#', '').trim();
+        if (!/^\d+$/.test(h)) return;
+        var tid = parseInt(h, 10);
+        var tile = document.querySelector('.chain-item[data-type-id="' + tid + '"]');
+        if (!tile) return;
+        document.querySelectorAll('.chain-item').forEach(function(el){ el.classList.remove('is-active'); });
+        tile.classList.add('is-active');
+        tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        fetch('/industry/planetary/chain/node/' + tid)
+            .then(function(r){ return r.text(); })
+            .then(function(html){
+                var el = document.getElementById('chain-detail');
+                if (el) el.innerHTML = html;
+            });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', loadFromHash);
+    } else {
+        loadFromHash();
+    }
+    window.addEventListener('hashchange', loadFromHash);
+})();
+</script>
+
 {% endblock %}

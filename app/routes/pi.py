@@ -408,9 +408,11 @@ async def planetary_lookup_system(
         planets = []
 
     rendered_planets = []
+    system_p0_names: set[str] = set()
     for p in planets:
         ptype = pi_const.PLANET_TYPE_NAMES.get(p.planet_type_id, f"type {p.planet_type_id}")
         p0_list = pi_const.P0_BY_PLANET_TYPE.get(ptype.lower(), [])
+        system_p0_names.update(p0_list)
         rendered_planets.append({
             "planet_id": p.planet_id,
             "planet_name": p.planet_name,
@@ -419,12 +421,105 @@ async def planetary_lookup_system(
             "p0_materials": p0_list,
         })
 
+    # Walk the schematic graph forward from this system's P0 pool to enumerate
+    # every P1/P2/P3/P4 product whose full input chain is satisfiable locally.
+    reachable = await _reachable_from_p0s(db, system_p0_names)
+
     return templates.TemplateResponse("partials/planetary_lookup_system.html", {
         "request": request,
         "system": sys_info,
         "planets": rendered_planets,
         "no_sde": not planets,
+        "reachable": reachable,
+        "system_p0_names": sorted(system_p0_names),
     })
+
+
+async def _reachable_from_p0s(db: AsyncSession, p0_names: set[str]) -> dict[int, list[dict]]:
+    """Return {tier: [{type_id, name, inputs, output_qty, cycle_time}]} for every
+    PI product reachable by iteratively applying schematic recipes starting from
+    the given P0 raw-material names. Empty dict if SDE tables aren't loaded.
+    """
+    from app.db.sde_models import SDEPlanetSchematic, SDEPlanetSchematicMaterial
+
+    # P0 names → type_ids using the authoritative constants table
+    p0_ids: set[int] = {
+        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in p0_names
+    }
+    if not p0_ids:
+        return {}
+
+    try:
+        mat_result = await db.execute(select(SDEPlanetSchematicMaterial))
+        mats = list(mat_result.scalars().all())
+        sch_result = await db.execute(select(SDEPlanetSchematic))
+        schematics = {s.schematic_id: s for s in sch_result.scalars().all()}
+    except Exception:
+        return {}
+
+    input_map: dict[int, list[tuple[int, int]]] = {}   # schematic_id -> [(type_id, qty)]
+    output_map: dict[int, tuple[int, int]] = {}        # schematic_id -> (type_id, qty)
+    for m in mats:
+        if m.is_input:
+            input_map.setdefault(m.schematic_id, []).append((m.type_id, m.quantity))
+        else:
+            output_map[m.schematic_id] = (m.type_id, m.quantity)
+
+    # Forward BFS: producible = P0 set initially. For each schematic, if all its
+    # inputs are producible, its output becomes producible. Loop until stable.
+    producible: set[int] = set(p0_ids)
+    producing_schematic: dict[int, int] = {}  # type_id -> schematic_id that makes it
+    tier_of: dict[int, int] = {tid: 0 for tid in p0_ids}
+
+    for _ in range(6):
+        changed = False
+        for sch_id, (out_tid, _qty) in output_map.items():
+            if out_tid in producible:
+                continue
+            inputs = input_map.get(sch_id, [])
+            if not inputs:
+                continue
+            if all(in_tid in producible for in_tid, _ in inputs):
+                producible.add(out_tid)
+                producing_schematic[out_tid] = sch_id
+                tier_of[out_tid] = min(max(tier_of[in_tid] for in_tid, _ in inputs) + 1, 4)
+                changed = True
+        if not changed:
+            break
+
+    # Resolve names for all producible types + their inputs
+    input_type_ids: set[int] = set()
+    for sch_id in producing_schematic.values():
+        for in_tid, _ in input_map.get(sch_id, []):
+            input_type_ids.add(in_tid)
+    name_map = await sde.type_ids_to_names(db, list(producible | input_type_ids))
+
+    # Group producible items by tier, omit P0 (leaves — already shown per planet)
+    out: dict[int, list[dict]] = {1: [], 2: [], 3: [], 4: []}
+    for tid in producible:
+        tier = tier_of.get(tid, 0)
+        if tier < 1 or tier > 4:
+            continue
+        sch_id = producing_schematic.get(tid)
+        sch = schematics.get(sch_id) if sch_id else None
+        inputs = [
+            {
+                "type_id": in_tid,
+                "name": name_map.get(in_tid, f"Type {in_tid}"),
+                "quantity": qty,
+            }
+            for in_tid, qty in (input_map.get(sch_id, []) if sch_id else [])
+        ]
+        out[tier].append({
+            "type_id": tid,
+            "name": name_map.get(tid, f"Type {tid}"),
+            "cycle_time": sch.cycle_time if sch else None,
+            "output_qty": output_map.get(sch_id, (None, None))[1] if sch_id else None,
+            "inputs": inputs,
+        })
+    for t in out:
+        out[t].sort(key=lambda x: x["name"])
+    return out
 
 
 @router.get("/industry/planetary/lookup/by-material", response_class=HTMLResponse)

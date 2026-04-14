@@ -41,6 +41,50 @@
 </div>
 {% endfor %}
 
+{% if reachable %}
+{% set tier_colors = {1: 'var(--muted)', 2: 'var(--text)', 3: 'var(--accent)', 4: 'var(--success)'} %}
+{% set any_reachable = reachable[1] or reachable[2] or reachable[3] or reachable[4] %}
+{% if any_reachable %}
+<div style="padding:0.75rem;border-top:1px solid var(--border);background:rgba(0,0,0,0.1);">
+    <div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.4rem;">
+        <span class="b-label">Producible in {{ system.system_name }}</span>
+        <span style="font-size:10px;color:var(--muted);">
+            {{ reachable[1]|length }} P1 · {{ reachable[2]|length }} P2 · {{ reachable[3]|length }} P3 · {{ reachable[4]|length }} P4
+        </span>
+    </div>
+
+    {% for tier in [1,2,3,4] %}
+    {% set items = reachable.get(tier, []) %}
+    {% if items %}
+    <div style="margin-bottom:0.6rem;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:0.25rem;">
+            <span style="color:{{ tier_colors[tier] }};">P{{ tier }}</span>
+            —
+            {% if tier == 1 %}basic products{% elif tier == 2 %}refined commodities{% elif tier == 3 %}specialized commodities{% elif tier == 4 %}advanced commodities{% endif %}
+            ({{ items|length }})
+        </div>
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap;">
+            {% for item in items %}
+            <a href="/industry/planetary/chain#{{ item.type_id }}"
+               title="{% if item.inputs %}Inputs: {% for inp in item.inputs %}{{ inp.quantity }}× {{ inp.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if item.cycle_time %} · {{ item.cycle_time // 60 }}min cycle{% endif %}{% endif %}"
+               style="font-size:10px;padding:0.2rem 0.45rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;white-space:nowrap;">
+                {{ item.name }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <div style="font-size:10px;color:var(--muted);margin-top:0.3rem;">
+        P2+ requires shipping intermediates between planets — the list reflects what
+        <em>can</em> be built using this system's combined P0 pool, not what fits on any single planet.
+        Hover a product for recipe inputs; click to open the chain explorer.
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
 <div style="padding:0.5rem 0.75rem;font-size:10px;color:var(--muted);">
     Click a resource to see which other planet types produce it.
 </div>
