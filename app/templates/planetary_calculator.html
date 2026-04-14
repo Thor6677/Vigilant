@@ -171,125 +171,84 @@
     {% endif %}
 </div>
 
-{# ── Recommended colony layout ─────────────────────────────────────────── #}
-{% if colony_plan and colony_plan.colonies %}
+{# ── Per-character colony plan ────────────────────────────────────────── #}
+{% if character_plan and character_plan.characters %}
 <div class="b-panel b-section">
-    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;">
-        <span class="b-label">Recommended colony layout</span>
+    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
+        <span class="b-label">Per-character colony plan</span>
         <span style="font-size:10px;color:var(--muted);">
-            {{ colony_plan.total_planets }} planet{{ 's' if colony_plan.total_planets != 1 else '' }}
-            · {{ colony_plan.characters_needed }} character{{ 's' if colony_plan.characters_needed != 1 else '' }} @ 6 planets max each
+            {{ character_plan.total_characters }} character{{ 's' if character_plan.total_characters != 1 else '' }}
+            · {{ character_plan.total_planets_assigned }} planet{{ 's' if character_plan.total_planets_assigned != 1 else '' }} assigned
+            {% if character_plan.unassignable_slots %}
+            · <span style="color:var(--danger);">{{ character_plan.unassignable_slots }} unassigned</span>
+            {% endif %}
         </span>
     </div>
 
-    {# Miner+P1 integrated planets #}
-    {% set miner_colonies = colony_plan.colonies | selectattr('role', 'equalto', 'miner_p1') | list %}
-    {% if miner_colonies %}
-    <div style="border-top:1px solid var(--border);">
-        <div style="padding:0.4rem 0.75rem;background:#121212;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">
-            Extractor + P1 (integrated) · {{ miner_colonies | length }} planet{{ 's' if miner_colonies|length != 1 else '' }}
-        </div>
-        {% for colony in miner_colonies %}
-        <div style="padding:0.45rem 0.75rem;display:grid;grid-template-columns:40px 110px 1fr 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
-            <span style="color:var(--muted);font-size:10px;">#{{ loop.index }}</span>
-            <span style="display:flex;gap:0.3rem;align-items:center;">
-                <span style="color:var(--text);text-transform:capitalize;">{{ colony.planet_type }}</span>
-                {% if system_info %}
-                <span style="font-size:9px;padding:0 0.3rem;background:
-                    {%- if colony.local -%}rgba(51,170,85,0.15)
-                    {%- else -%}rgba(204,51,51,0.15)
-                    {%- endif -%};color:
-                    {%- if colony.local -%}var(--success)
-                    {%- else -%}#e58080
-                    {%- endif -%};">
-                    {% if colony.local %}LOCAL{% else %}IMPORT{% endif %}
-                </span>
-                {% endif %}
-            </span>
-            <span style="color:var(--muted);font-size:11px;">
-                <span style="color:var(--accent);">ECU:</span>
-                {% for slot in colony.slots %}{{ slot.p0_name }}{% if not loop.last %}, {% endif %}{% endfor %}
-            </span>
-            <span style="color:var(--muted);font-size:11px;">
-                <span style="color:var(--accent);">P1:</span>
-                {% for slot in colony.slots %}{{ slot.p1_name }}{% if not loop.last %}, {% endif %}{% endfor %}
-            </span>
-        </div>
-        {% endfor %}
+    {% if character_plan.system_capacity_warning %}
+    <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);background:rgba(204,51,51,0.08);font-size:10px;color:#e58080;">
+        ⚠ {{ character_plan.system_capacity_warning }}
     </div>
     {% endif %}
 
-    {# P2/P3 factory hubs #}
-    {% set p23_colonies = colony_plan.colonies | selectattr('role', 'equalto', 'p2_p3_factory') | list %}
-    {% if p23_colonies %}
+    {% for char in character_plan.characters %}
     <div style="border-top:1px solid var(--border);">
-        <div style="padding:0.4rem 0.75rem;background:#121212;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">
-            P2/P3 factory hubs · {{ p23_colonies | length }} planet{{ 's' if p23_colonies|length != 1 else '' }}
+        <div style="padding:0.45rem 0.75rem;background:#121212;display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--text);font-weight:600;">
+                {% if char.role == 'assembler' %}<span style="color:var(--accent);">★ </span>{% endif %}
+                {{ char.label }}
+            </span>
+            <span style="font-size:10px;color:var(--muted);">
+                {{ char.slots | length }} planet{{ 's' if char.slots|length != 1 else '' }}
+            </span>
         </div>
-        {% for colony in p23_colonies %}
-        <div style="padding:0.45rem 0.75rem;display:grid;grid-template-columns:40px 110px 1fr 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
-            <span style="color:var(--muted);font-size:10px;">#{{ (miner_colonies | length) + loop.index }}</span>
-            <span style="display:flex;gap:0.3rem;align-items:center;">
-                <span style="color:var(--text);">{{ colony.planet_type }}</span>
-                {% if system_info %}
-                <span style="font-size:9px;padding:0 0.3rem;background:
-                    {%- if colony.local -%}rgba(51,170,85,0.15)
-                    {%- else -%}rgba(204,51,51,0.15)
-                    {%- endif -%};color:
-                    {%- if colony.local -%}var(--success)
-                    {%- else -%}#e58080
-                    {%- endif -%};">
-                    {% if colony.local %}LOCAL{% else %}IMPORT{% endif %}
-                </span>
+        <div style="display:grid;grid-template-columns:28px 130px 70px 1fr;gap:0.4rem;padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid var(--border);">
+            <span>#</span>
+            <span>Planet</span>
+            <span>Type</span>
+            <span>Role</span>
+        </div>
+        {% for slot in char.slots %}
+        <div style="padding:0.35rem 0.75rem;display:grid;grid-template-columns:28px 130px 70px 1fr;gap:0.4rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
+            <span style="color:var(--muted);font-size:10px;">{{ loop.index }}</span>
+            <span style="color:
+                {%- if slot.planet_name -%}var(--text)
+                {%- else -%}var(--danger)
+                {%- endif -%};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                {% if slot.planet_name %}
+                    {{ slot.planet_name }}
+                    {% if not slot.preferred %}
+                    <span style="font-size:9px;padding:0 0.3rem;margin-left:0.2rem;background:rgba(200,169,81,0.18);color:var(--warn);border:1px solid rgba(200,169,81,0.4);">fallback</span>
+                    {% endif %}
+                {% else %}
+                    <span style="color:#e58080;">[no planet available]</span>
                 {% endif %}
             </span>
-            <span style="color:var(--muted);font-size:11px;">Pure factory hub</span>
-            <span style="color:var(--text);font-size:11px;">
-                {{ colony.factory_count }} × Advanced Industrial Facility
+            <span style="color:var(--muted);font-size:10px;text-transform:capitalize;">{{ slot.planet_type }}</span>
+            <span style="color:var(--muted);font-size:11px;overflow:hidden;">
+                {% if slot.role == 'miner_p1' %}
+                    <span style="color:var(--accent);">Extract:</span>
+                    {% for s in slot.slots %}{{ s.p0_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    <span style="color:var(--muted);"> → </span>
+                    <span style="color:var(--text);">
+                    {% for s in slot.slots %}{{ s.p1_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    </span>
+                    <span style="color:var(--muted);"> (P1 factory)</span>
+                {% elif slot.role == 'p2_p3_factory' %}
+                    <span style="color:var(--accent);">P2/P3 hub:</span>
+                    <span style="color:var(--text);">{{ slot.factory_count }} × Advanced Industrial Facility</span>
+                {% elif slot.role == 'p4_factory' %}
+                    <span style="color:var(--accent);">P4 assembly:</span>
+                    <span style="color:var(--text);">{{ slot.factory_count }} × High-Tech Production Plant</span>
+                {% endif %}
             </span>
         </div>
         {% endfor %}
     </div>
-    {% endif %}
-
-    {# P4 factory hubs #}
-    {% set p4_colonies = colony_plan.colonies | selectattr('role', 'equalto', 'p4_factory') | list %}
-    {% if p4_colonies %}
-    <div style="border-top:1px solid var(--border);">
-        <div style="padding:0.4rem 0.75rem;background:#121212;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">
-            P4 factory hubs · {{ p4_colonies | length }} planet{{ 's' if p4_colonies|length != 1 else '' }}
-        </div>
-        {% for colony in p4_colonies %}
-        <div style="padding:0.45rem 0.75rem;display:grid;grid-template-columns:40px 110px 1fr 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
-            <span style="color:var(--muted);font-size:10px;">#{{ (miner_colonies | length) + (p23_colonies | length) + loop.index }}</span>
-            <span style="display:flex;gap:0.3rem;align-items:center;">
-                <span style="color:var(--text);">{{ colony.planet_type }}</span>
-                {% if system_info %}
-                <span style="font-size:9px;padding:0 0.3rem;background:
-                    {%- if colony.local -%}rgba(51,170,85,0.15)
-                    {%- else -%}rgba(204,51,51,0.15)
-                    {%- endif -%};color:
-                    {%- if colony.local -%}var(--success)
-                    {%- else -%}#e58080
-                    {%- endif -%};">
-                    {% if colony.local %}LOCAL{% else %}IMPORT{% endif %}
-                </span>
-                {% endif %}
-            </span>
-            <span style="color:var(--muted);font-size:11px;">P4 assembly hub</span>
-            <span style="color:var(--text);font-size:11px;">
-                {{ colony.factory_count }} × High-Tech Production Plant
-            </span>
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
+    {% endfor %}
 
     <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
-        Assumes <strong style="color:var(--text);">CCU V</strong>, ~{{ '{:,}'.format(colony_plan.assumptions.ecu_yield_per_hour) }} P0/hr per ECU, max {{ colony_plan.assumptions.miner_p1_slots_per_planet }} extractors per miner planet,
-        {{ colony_plan.assumptions.p2_p3_factories_per_planet }} AIFs per P2/P3 hub,
-        {{ colony_plan.assumptions.p4_factories_per_planet }} HTPPs per P4 hub.
-        Community-standard template — your yields vary with planet richness and skills.
+        Vertical-slice pattern: each producer owns the complete P0→tier-1 chain for one of the target's direct inputs, so there's minimum hand-off between characters. The Assembler only runs the final factory. <strong style="color:var(--text);">CCU V</strong> assumed; max 6 planets per character. <span style="color:var(--warn);">fallback</span> = no preferred planet type available in this system, using an alternate.
     </div>
 </div>
 {% endif %}

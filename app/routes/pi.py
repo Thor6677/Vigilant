@@ -896,6 +896,7 @@ async def planetary_calculator_page(
     system_info = None
     system_p0_names: set[str] = set()
     system_planet_types: set[str] = set()  # capitalized names: {"Barren", "Gas", ...}
+    system_planets: list[dict] = []        # ordered physical planets in the system
     space_type = None
     if system:
         sys_id = await sde.system_name_to_id(db, system)
@@ -905,7 +906,9 @@ async def planetary_calculator_page(
             rid_result = await db.execute(select(SDESystem.region_id).where(SDESystem.system_id == sys_id))
             region_id = rid_result.scalar_one_or_none()
             space_type = _space_type(region_id, system_info.get("security") if system_info else None)
-            planet_result = await db.execute(select(SDEPlanet).where(SDEPlanet.system_id == sys_id))
+            planet_result = await db.execute(
+                select(SDEPlanet).where(SDEPlanet.system_id == sys_id).order_by(SDEPlanet.planet_index)
+            )
             for p in planet_result.scalars().all():
                 ptype = pi_const.PLANET_TYPE_NAMES.get(p.planet_type_id, "")
                 if not ptype:
@@ -913,6 +916,12 @@ async def planetary_calculator_page(
                 system_planet_types.add(ptype)
                 for mat in pi_const.P0_BY_PLANET_TYPE.get(ptype.lower(), []):
                     system_p0_names.add(mat)
+                system_planets.append({
+                    "planet_id": p.planet_id,
+                    "planet_name": p.planet_name,
+                    "planet_type": ptype,
+                    "planet_index": p.planet_index,
+                })
 
     system_p0_ids: set[int] = {
         tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in system_p0_names
@@ -939,9 +948,16 @@ async def planetary_calculator_page(
         bom["margin"] = revenue - p0_cost
         bom["margin_pct"] = (revenue - p0_cost) / p0_cost * 100 if p0_cost > 0 else None
 
-        # Colony layout recommendation — only meaningful once a system is picked,
-        # but useful even without a system (treats all planet types as non-local).
+        # Colony layout recommendation (legacy flat view, retained for backward-
+        # compat of debug/dev paths; the template renders the per-character
+        # view in its place).
         colony_plan = _plan_colonies(bom, system_p0_names, system_planet_types)
+
+        # Per-character vertical-slice plan: assigns concrete system planets
+        # to specific roles, grouped per character. Primary UI view.
+        character_plan = _plan_characters(
+            bom, graph, system_planets, system_planet_types, system_p0_ids,
+        )
 
     return templates.TemplateResponse("planetary_calculator.html", {
         "request": request,
@@ -951,6 +967,7 @@ async def planetary_calculator_page(
         "product_options": product_options,
         "bom": bom,
         "colony_plan": colony_plan,
+        "character_plan": character_plan if bom else None,
         "system_info": system_info,
         "space_type": space_type,
         "system_p0_names": sorted(system_p0_names),
@@ -1334,6 +1351,311 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
             "p2_p3_factories_per_planet": P2_P3_FACTORIES_PER_PLANET,
             "p4_factories_per_planet": P4_FACTORIES_PER_PLANET,
         },
+    }
+
+
+MAX_PLANETS_PER_CHARACTER = 6   # CCU V + Interplanetary Consolidation V
+
+
+def _plan_characters(bom: dict, graph: dict,
+                     system_planets: list[dict],
+                     system_planet_types: set[str],
+                     system_p0_ids: set[int]) -> dict:
+    """Group the colony plan into per-character vertical slices with
+    concrete system-planet assignments.
+
+    Pattern (community-standard vertical-slice):
+      - Each direct input of the target becomes one producer "slice":
+        that producer owns the complete P0 → (tier-1) chain for its slice.
+      - One assembler character owns only the target's own factory.
+      - If the whole plan fits in one character (≤ MAX_PLANETS_PER_CHARACTER),
+        collapse into a single 'Full chain' character.
+      - Overflow (slice > cap) spawns another producer char with the same
+        slice name and an [overflow] suffix.
+
+    Planet assignment:
+      - Pop planets from a free list (consumed once each). Extractor slots
+      - prefer the colony's originally-chosen type; if that type is
+        exhausted in the system, fall back to any other in-system type
+        that can extract the same P0 (via P0_BY_PLANET_TYPE). Factory
+        hubs take any leftover planet, preferring Barren/Temperate.
+      - If no eligible planet remains, the slot gets `planet_name=None`
+        and bumps `unassignable_slots`.
+
+    Returns a grouped character structure — see plan file for the full shape.
+    """
+    import math
+    from collections import defaultdict
+
+    target = bom.get("target", {})
+    target_tid = target.get("type_id")
+    target_tier = target.get("tier", 0)
+    target_cycles = max(1, target.get("cycles", 1))
+    target_cycle_time = bom.get("target_cycle_time") or 3600
+    name_map = graph["name_map"]
+    input_map = graph["input_map"]
+    output_map = graph["output_map"]
+    canonical = graph["canonical_schematic"]
+
+    # ── Planet free list ────────────────────────────────────────────────
+    # Each entry: {planet_id, planet_name, planet_type, planet_index, used: False}.
+    free_planets: list[dict] = [dict(p, used=False) for p in system_planets]
+
+    def _take_planet(preferred_type: str | None,
+                     allowed_types: set[str] | None) -> tuple[dict | None, bool]:
+        """Consume one free planet matching `preferred_type` if available,
+        else any type in `allowed_types`. Returns (planet or None, preferred_hit).
+        """
+        # Prefer exact type
+        if preferred_type:
+            for p in free_planets:
+                if p["used"]:
+                    continue
+                if p["planet_type"] == preferred_type:
+                    p["used"] = True
+                    return p, True
+        # Fallback: any allowed type
+        if allowed_types:
+            for p in free_planets:
+                if p["used"]:
+                    continue
+                if p["planet_type"] in allowed_types:
+                    p["used"] = True
+                    return p, False
+        return None, False
+
+    def _take_hub_planet() -> dict | None:
+        """Pick any free planet for a factory hub; prefer Barren → Temperate → any."""
+        for pref in ("Barren", "Temperate"):
+            for p in free_planets:
+                if not p["used"] and p["planet_type"] == pref:
+                    p["used"] = True
+                    return p
+        for p in free_planets:
+            if not p["used"]:
+                p["used"] = True
+                return p
+        return None
+
+    def _sources_for(p0_name: str) -> list[str]:
+        return [pt.capitalize() for pt, mats in pi_const.P0_BY_PLANET_TYPE.items()
+                if p0_name in mats]
+
+    unassignable = 0
+
+    def _colony_to_slot(colony: dict) -> dict:
+        """Translate one `_plan_colonies` colony into a per-character slot with
+        a physical planet assignment. Mutates `unassignable` via closure."""
+        nonlocal unassignable
+        role = colony["role"]
+        if role == "miner_p1":
+            # Miner+P1 colonies can contain 1-2 (P0, P1) slots; our unit of
+            # planning is one planet per colony. Pick a planet matching the
+            # colony's advertised planet_type; if that's exhausted, fall back
+            # to any in-system type that covers all of this colony's P0s.
+            preferred = colony["planet_type"]
+            # Allowed = types that can extract EVERY P0 in this colony
+            colony_p0_names = [s["p0_name"] for s in colony["slots"]]
+            allowed: set[str] = set()
+            if colony_p0_names:
+                allowed = set.intersection(*(set(_sources_for(n)) for n in colony_p0_names))
+            planet, preferred_hit = _take_planet(preferred, allowed)
+            if planet is None:
+                unassignable += 1
+                return {
+                    "planet_name": None,
+                    "planet_type": preferred,
+                    "preferred": True,
+                    "role": "miner_p1",
+                    "slots": colony["slots"],
+                }
+            return {
+                "planet_name": planet["planet_name"],
+                "planet_type": planet["planet_type"],
+                "preferred": preferred_hit,
+                "role": "miner_p1",
+                "slots": colony["slots"],
+            }
+        # Factory hub (p2_p3_factory or p4_factory)
+        planet = _take_hub_planet()
+        if planet is None:
+            unassignable += 1
+            return {
+                "planet_name": None,
+                "planet_type": colony["planet_type"],
+                "preferred": True,
+                "role": role,
+                "factory_count": colony["factory_count"],
+                "factory_tier": colony["factory_tier"],
+                "factories": colony.get("factories", []),  # optional breakdown
+            }
+        return {
+            "planet_name": planet["planet_name"],
+            "planet_type": planet["planet_type"],
+            "preferred": True,  # hubs don't have a "preferred type" constraint
+            "role": role,
+            "factory_count": colony["factory_count"],
+            "factory_tier": colony["factory_tier"],
+            "factories": colony.get("factories", []),
+        }
+
+    def _pack_colonies_into_chars(colonies: list[dict], slice_name: str | None,
+                                   char_role: str) -> list[dict]:
+        """Split a slice's colonies into one or more characters (≤6 planets each)."""
+        chars: list[dict] = []
+        # Sort extractors first, then hubs — more intuitive per-planet ordering.
+        sorted_cols = sorted(
+            colonies,
+            key=lambda c: (0 if c["role"] == "miner_p1" else 1 if c["role"] == "p2_p3_factory" else 2,
+                           c.get("planet_type", "")),
+        )
+        for start in range(0, len(sorted_cols), MAX_PLANETS_PER_CHARACTER):
+            chunk = sorted_cols[start:start + MAX_PLANETS_PER_CHARACTER]
+            overflow_idx = start // MAX_PLANETS_PER_CHARACTER
+            suffix = " [overflow]" if overflow_idx > 0 else ""
+            if char_role == "full_chain":
+                label_tpl = "Char {n} — Full chain"
+            elif char_role == "assembler":
+                label_tpl = "Char {n} — Assembler"
+            else:
+                label_tpl = "Char {n} — " + (slice_name or "Producer") + " producer" + suffix
+            chars.append({
+                "label": label_tpl,  # the {n} placeholder is filled later
+                "role": char_role,
+                "slice_name": slice_name,
+                "overflow_index": overflow_idx,
+                "slots": [_colony_to_slot(c) for c in chunk],
+            })
+        return chars
+
+    # ── Decide slicing strategy ─────────────────────────────────────────
+    characters: list[dict] = []
+
+    # Collect the system's P0 pool once (used by every colony-plan invocation).
+    all_p0_names: set[str] = set()
+    for p in system_planets:
+        all_p0_names.update(pi_const.P0_BY_PLANET_TYPE.get(p["planet_type"].lower(), []))
+
+    # Baseline: compute the combined colony plan to count total planets.
+    combined = _plan_colonies(bom, all_p0_names, system_planet_types)
+    total_combined = combined["total_planets"]
+
+    # If tier ≤ 1 OR combined fits in one char: single Full chain.
+    if target_tier <= 1 or total_combined <= MAX_PLANETS_PER_CHARACTER:
+        characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
+    else:
+        # Vertical slice path: one producer per direct input + one assembler.
+        target_sch = canonical.get(target_tid)
+        if target_sch is None:
+            # Defensive: no recipe — fall back to full chain
+            characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
+        else:
+            direct_inputs = input_map.get(target_sch, [])
+
+            # Per-slice producer: each direct input of the target.
+            for di_tid, di_qty_per_target_cycle in direct_inputs:
+                di_name = name_map.get(di_tid, f"Type {di_tid}")
+                # Cycles this slice must run to feed the target's cycle count.
+                di_sch = canonical.get(di_tid)
+                di_out_qty = 1
+                if di_sch is not None:
+                    di_out_qty = output_map.get(di_sch, (di_tid, 1))[1] or 1
+                total_di_units = di_qty_per_target_cycle * target_cycles
+                slice_cycles = max(1, math.ceil(total_di_units / di_out_qty))
+                slice_bom = _expand_bom(graph, di_tid, slice_cycles, system_p0_ids)
+                slice_plan = _plan_colonies(slice_bom, all_p0_names, system_planet_types)
+                # Trim the slice to only include colonies producing this slice's
+                # commodities — _plan_colonies for a slice that IS a single tid
+                # already yields exactly the slice's colonies.
+                characters.extend(
+                    _pack_colonies_into_chars(slice_plan["colonies"], di_name, "producer")
+                )
+
+            # Assembler character: target's own factory only.
+            if target_tier == 4:
+                assembler_planet = _take_hub_planet()
+                if assembler_planet is None:
+                    unassignable += 1
+                    slot = {
+                        "planet_name": None,
+                        "planet_type": "Barren",
+                        "preferred": True,
+                        "role": "p4_factory",
+                        "factory_count": 1,
+                        "factory_tier": "P4",
+                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": 4, "count": 1}],
+                    }
+                else:
+                    slot = {
+                        "planet_name": assembler_planet["planet_name"],
+                        "planet_type": assembler_planet["planet_type"],
+                        "preferred": True,
+                        "role": "p4_factory",
+                        "factory_count": 1,
+                        "factory_tier": "P4",
+                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": 4, "count": 1}],
+                    }
+                characters.append({
+                    "label": "Char {n} — Assembler",
+                    "role": "assembler",
+                    "slice_name": None,
+                    "overflow_index": 0,
+                    "slots": [slot],
+                })
+            elif target_tier in (2, 3):
+                assembler_planet = _take_hub_planet()
+                tier_label = "P2/P3" if target_tier == 2 else "P2/P3"
+                if assembler_planet is None:
+                    unassignable += 1
+                    slot = {
+                        "planet_name": None,
+                        "planet_type": "Barren",
+                        "preferred": True,
+                        "role": "p2_p3_factory",
+                        "factory_count": 1,
+                        "factory_tier": tier_label,
+                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
+                    }
+                else:
+                    slot = {
+                        "planet_name": assembler_planet["planet_name"],
+                        "planet_type": assembler_planet["planet_type"],
+                        "preferred": True,
+                        "role": "p2_p3_factory",
+                        "factory_count": 1,
+                        "factory_tier": tier_label,
+                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
+                    }
+                characters.append({
+                    "label": "Char {n} — Assembler",
+                    "role": "assembler",
+                    "slice_name": None,
+                    "overflow_index": 0,
+                    "slots": [slot],
+                })
+
+    # ── Finalize labels with running character number ──────────────────
+    for i, ch in enumerate(characters, start=1):
+        ch["label"] = ch["label"].replace("{n}", str(i))
+
+    total_planets_assigned = sum(
+        1 for ch in characters for s in ch["slots"] if s["planet_name"] is not None
+    )
+
+    capacity_warning = None
+    if unassignable > 0:
+        capacity_warning = (
+            f"{unassignable} planet slot{'s' if unassignable != 1 else ''} couldn't be "
+            f"assigned — the selected system is at capacity for this plan. "
+            f"Reduce target cycles or pick a richer system."
+        )
+
+    return {
+        "characters": characters,
+        "total_characters": len(characters),
+        "total_planets_assigned": total_planets_assigned,
+        "unassignable_slots": unassignable,
+        "system_capacity_warning": capacity_warning,
     }
 
 
