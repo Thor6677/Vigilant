@@ -1932,29 +1932,38 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
     characters = character_plan.get("characters", [])
 
     # ── Build items_by_char + producers_by_tid ───────────────────────────
+    # items_by_char[cidx][tier] holds deduped nodes {tid, name, count, planets}
+    # where `planets` lists the planets contributing (for the hover tooltip).
     items_by_char: list[list[list[dict]]] = [
         [[] for _ in range(5)] for _ in characters
     ]
     # producers_by_tid: tid → list of char indices that produce it
     producers_by_tid: dict[int, list[int]] = {}
+    # Intra-char P0→P1 pairs: for every miner ECU, remember its P0→P1 link so
+    # we can draw intra-row edges for the extractor chain.
+    intra_miner_pairs: list[tuple[int, int, int]] = []  # (char_idx, p0_tid, p1_tid)
 
     for cidx, char in enumerate(characters):
         for slot in char["slots"]:
+            planet_name = slot.get("planet_name") or "—"
             if slot["role"] == "miner_p1":
                 for s in slot.get("slots", []):
                     items_by_char[cidx][0].append({
                         "tid": s["p0_tid"],
                         "name": s["p0_name"],
                         "count": 1,
+                        "planets": [planet_name],
                     })
                     items_by_char[cidx][1].append({
                         "tid": s["p1_tid"],
                         "name": s["p1_name"],
                         "count": 1,
+                        "planets": [planet_name],
                     })
                     producers_by_tid.setdefault(s["p1_tid"], [])
                     if cidx not in producers_by_tid[s["p1_tid"]]:
                         producers_by_tid[s["p1_tid"]].append(cidx)
+                    intra_miner_pairs.append((cidx, s["p0_tid"], s["p1_tid"]))
             else:
                 for fac in slot.get("factories", []):
                     tier = fac.get("tier", 0)
@@ -1965,13 +1974,14 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                         "tid": tid,
                         "name": fac.get("name", f"Type {tid}"),
                         "count": fac.get("count", 1),
+                        "planets": [planet_name],
                     })
                     producers_by_tid.setdefault(tid, [])
                     if cidx not in producers_by_tid[tid]:
                         producers_by_tid[tid].append(cidx)
 
     # Merge duplicate (cidx, tid) — e.g. two miner slots on same char both
-    # produce Water; display as one node with combined count.
+    # produce Water; display as one node with combined count + planet list.
     for cidx in range(len(characters)):
         for tier in range(5):
             merged: dict[int, dict] = {}
@@ -1979,23 +1989,56 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                 key = it["tid"]
                 if key in merged:
                     merged[key]["count"] += it["count"]
+                    for p in it.get("planets", []):
+                        if p not in merged[key]["planets"]:
+                            merged[key]["planets"].append(p)
                 else:
-                    merged[key] = dict(it)
+                    merged[key] = {
+                        "tid": it["tid"],
+                        "name": it["name"],
+                        "count": it["count"],
+                        "planets": list(it.get("planets", [])),
+                    }
             items_by_char[cidx][tier] = sorted(merged.values(), key=lambda i: i["name"])
 
     # ── Build edges ──────────────────────────────────────────────────────
-    # For each consumer factory, walk its inputs and pick a producer. Skip
-    # intra-char edges (same-char producer wins and consumes no handoff).
-    # Dedupe on (from_char, to_char, tid, consumer_tid) so repeat consumers
-    # on one char don't double up.
+    # Two kinds:
+    #   intra=True  — producer + consumer on the SAME char (miner P0→P1, or
+    #                  same-char factory→factory). Visually short/muted lines;
+    #                  they show the extractor chain so P0 nodes aren't orphans.
+    #   intra=False — cross-character hand-offs that require hauling.
+    # Cross edges dedupe on (from_char, to_char, tid, consumer_tid).
+    # Picker prefers same-char producer (→ intra edge); otherwise picks the
+    # cross-char producer with smallest current fan-out.
     edges: list[dict] = []
     fan_out: dict[int, int] = {}
-    seen_edge_keys: set[tuple] = set()
+    seen_cross_keys: set[tuple] = set()
+    seen_intra_keys: set[tuple] = set()
 
+    # First: intra-miner P0 → P1 edges (one per unique pair on each char,
+    # the node merging means the chart has a single P0 and P1 node per tid)
+    for (cidx, p0_tid, p1_tid) in intra_miner_pairs:
+        key = (cidx, p0_tid, p1_tid)
+        if key in seen_intra_keys:
+            continue
+        seen_intra_keys.add(key)
+        edges.append({
+            "from_char": cidx,
+            "to_char": cidx,
+            "tid": p0_tid,
+            "name": name_map.get(p0_tid, f"Type {p0_tid}"),
+            "consumer_tid": p1_tid,
+            "tier_from": 0,
+            "tier_to": 1,
+            "intra": True,
+        })
+
+    # Then: factory→factory edges. For each non-miner consumer slot, pick the
+    # best producer of each input; same-char wins (intra) else cross-char.
     for cidx, char in enumerate(characters):
         for slot in char["slots"]:
             if slot["role"] == "miner_p1":
-                continue  # miners extract P0 locally, no imports
+                continue
             for fac in slot.get("factories", []):
                 out_tid = fac.get("type_id")
                 if out_tid is None:
@@ -2008,12 +2051,27 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                     if not producers:
                         continue  # not produced in-plan (shortfall or P0 leaf)
                     if cidx in producers:
-                        continue  # intra-char — no cross-char edge drawn
+                        # Intra-char edge; dedupe on (cidx, in_tid, out_tid)
+                        key = (cidx, in_tid, out_tid)
+                        if key in seen_intra_keys:
+                            continue
+                        seen_intra_keys.add(key)
+                        edges.append({
+                            "from_char": cidx,
+                            "to_char": cidx,
+                            "tid": in_tid,
+                            "name": name_map.get(in_tid, f"Type {in_tid}"),
+                            "consumer_tid": out_tid,
+                            "tier_from": tier_of.get(in_tid, 0),
+                            "tier_to": tier_of.get(out_tid, 0),
+                            "intra": True,
+                        })
+                        continue
                     from_char = min(producers, key=lambda pc: fan_out.get(pc, 0))
                     key = (from_char, cidx, in_tid, out_tid)
-                    if key in seen_edge_keys:
+                    if key in seen_cross_keys:
                         continue
-                    seen_edge_keys.add(key)
+                    seen_cross_keys.add(key)
                     fan_out[from_char] = fan_out.get(from_char, 0) + 1
                     edges.append({
                         "from_char": from_char,
@@ -2023,12 +2081,17 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                         "consumer_tid": out_tid,
                         "tier_from": tier_of.get(in_tid, 0),
                         "tier_to": tier_of.get(out_tid, 0),
+                        "intra": False,
                     })
 
     # ── Aggregate imports/exports per character ─────────────────────────
+    # Only cross-char edges count as imports/exports; intra-char edges are
+    # on-planet or same-char handoffs that don't require hauling.
     imports_idx: list[dict[int, dict]] = [{} for _ in characters]
     exports_idx: list[dict[int, dict]] = [{} for _ in characters]
     for e in edges:
+        if e.get("intra"):
+            continue
         ii = imports_idx[e["to_char"]]
         if e["tid"] not in ii:
             ii[e["tid"]] = {"tid": e["tid"], "name": e["name"], "counterparts": []}
@@ -2042,6 +2105,24 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
 
     imports = [sorted(ii.values(), key=lambda x: x["name"]) for ii in imports_idx]
     exports = [sorted(ei.values(), key=lambda x: x["name"]) for ei in exports_idx]
+
+    # Mark "surplus" nodes: items produced on a char but never consumed by
+    # any (intra or cross) edge AND not the target. These are dead-end P1/P2
+    # factories the packer slotted to fill a planet but the chain doesn't need.
+    consumed_by_char: dict[tuple[int, int], bool] = {}
+    for e in edges:
+        consumed_by_char[(e["from_char"], e["tid"])] = True
+    for cidx in range(len(characters)):
+        for tier in range(5):
+            for node in items_by_char[cidx][tier]:
+                if tier == 0:
+                    # P0 nodes are always "consumed" locally by their miner's
+                    # P1 factory — the intra miner edge exists. The edge key
+                    # uses p0_tid so this flag should already be set, but
+                    # double-check in case of oddities.
+                    node["surplus"] = not consumed_by_char.get((cidx, node["tid"]), False)
+                else:
+                    node["surplus"] = not consumed_by_char.get((cidx, node["tid"]), False)
 
     return {
         "items_by_char": items_by_char,
