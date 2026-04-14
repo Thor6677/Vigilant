@@ -1165,6 +1165,79 @@ ECU_YIELD_PER_HOUR = 15_000          # P0 units/hr per ECU (balanced avg)
 P1_FACTORY_THROUGHPUT_PER_HOUR = 40  # P1 units/hr per Basic Industrial Facility (SDE)
 MINER_P1_SLOTS_PER_PLANET = 2        # 1 slot = 1 ECU + 1 P1 factory on an integrated planet
 P2_P3_FACTORIES_PER_PLANET = 12      # AIFs per shared P2/P3 hub (DalShooth single-factory)
+
+
+def _pack_items_into_hubs(items: list[dict], hubs: list[dict]) -> None:
+    """Pack `items` (each {type_id, name, tier, factories}) sequentially into
+    `hubs` using each hub's own `factory_count` as capacity. Appends to each
+    hub's `factories: [{type_id, name, tier, count}]` list in place.
+
+    A single item can span hubs if its factory count exceeds the current hub's
+    remaining capacity.
+    """
+    for hub in hubs:
+        hub.setdefault("factories", [])
+    caps = [(h, h.get("factory_count", 0)) for h in hubs]
+    hub_idx = 0
+    current_hub, current_capacity = caps[0] if caps else (None, 0)
+    for item in items:
+        remaining = item["factories"]
+        while remaining > 0 and current_hub is not None:
+            if current_capacity <= 0:
+                hub_idx += 1
+                if hub_idx >= len(caps):
+                    return
+                current_hub, current_capacity = caps[hub_idx]
+                continue
+            take = min(remaining, current_capacity)
+            current_hub["factories"].append({
+                "type_id": item["type_id"],
+                "name": item["name"],
+                "tier": item["tier"],
+                "count": take,
+            })
+            remaining -= take
+            current_capacity -= take
+
+
+def _distribute_factory_items(bom: dict, colonies: list[dict]) -> None:
+    """Assign specific P2/P3/P4 items (with factory counts) to each hub colony.
+
+    Mutates colonies in-place, adding `factories: [{type_id, name, tier, count}]`
+    to each p2_p3_factory and p4_factory colony. Greedy fattest-first packs
+    items into hubs so a single product's factories cluster on one planet — this
+    minimizes cross-character fan-out in the downstream flow graph.
+    """
+    # P2/P3 hubs hold items from tier_rows[2] + tier_rows[3]
+    p2_p3_hubs = [c for c in colonies if c["role"] == "p2_p3_factory"]
+    if p2_p3_hubs:
+        items = []
+        for tier in (2, 3):
+            for r in bom.get("tier_rows", {}).get(tier, []):
+                if r.get("factories", 0) > 0:
+                    items.append({
+                        "type_id": r["type_id"],
+                        "name": r["name"],
+                        "tier": tier,
+                        "factories": r["factories"],
+                    })
+        items.sort(key=lambda it: -it["factories"])
+        _pack_items_into_hubs(items, p2_p3_hubs)
+
+    # P4 hubs hold items from tier_rows[4]
+    p4_hubs = [c for c in colonies if c["role"] == "p4_factory"]
+    if p4_hubs:
+        items = []
+        for r in bom.get("tier_rows", {}).get(4, []):
+            if r.get("factories", 0) > 0:
+                items.append({
+                    "type_id": r["type_id"],
+                    "name": r["name"],
+                    "tier": 4,
+                    "factories": r["factories"],
+                })
+        items.sort(key=lambda it: -it["factories"])
+        _pack_items_into_hubs(items, p4_hubs)
 P4_FACTORIES_PER_PLANET = 8          # HTPPs per P4 hub (DalShooth single-factory)
 
 
@@ -1354,6 +1427,10 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
             "factory_tier": "P4",
         })
         remaining -= chunk
+
+    # Assign specific P2/P3/P4 items to each hub so downstream code (per-char
+    # flow chart) can label which factories live on which planet.
+    _distribute_factory_items(bom, colonies)
 
     total_planets = len(colonies)
     # Typical max 6 PI planets per character (CCU V + Interplanetary Consolidation V)
@@ -1808,7 +1885,7 @@ def _plan_characters(bom: dict, graph: dict,
     if is_capped and optimal_n > 0:
         achievable_ratio = round(effective_n / optimal_n, 2)
 
-    return {
+    result = {
         "characters": characters,
         "total_characters": len(characters),
         "total_planets_assigned": total_planets_assigned,
@@ -1822,6 +1899,149 @@ def _plan_characters(bom: dict, graph: dict,
         "dropped_count": len(dropped_colonies),
         "shortfalls": shortfall_list,
         "achievable_ratio": achievable_ratio,
+    }
+    # Attach flow graph: items per char per tier, edges for cross-char handoffs,
+    # and per-char imports/exports. Used by the template's flow chart panel.
+    result["flow"] = _build_flow(result, bom, graph)
+    return result
+
+
+def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
+    """Compute per-character production flow data for the swim-lane chart.
+
+    Walks each character's slots to build:
+      - `items_by_char[cidx][tier]`: list of {tid, name, count} the char
+        produces at that tier (miner P0/P1 and hub factories).
+      - `edges`: cross-character handoffs, one per (consumer slot, input tid).
+        Picks producer via "same char first; else smallest current fan-out"
+        to load-balance hauls.
+      - `imports[cidx]` / `exports[cidx]`: aggregated per-char chip data.
+
+    Returns dicts that are JSON-safe for embedding via Jinja |tojson.
+    """
+    name_map = graph["name_map"]
+    input_map = graph["input_map"]
+    canonical = graph["canonical_schematic"]
+    tier_of = graph["tier_of"]
+
+    characters = character_plan.get("characters", [])
+
+    # ── Build items_by_char + producers_by_tid ───────────────────────────
+    items_by_char: list[list[list[dict]]] = [
+        [[] for _ in range(5)] for _ in characters
+    ]
+    # producers_by_tid: tid → list of char indices that produce it
+    producers_by_tid: dict[int, list[int]] = {}
+
+    for cidx, char in enumerate(characters):
+        for slot in char["slots"]:
+            if slot["role"] == "miner_p1":
+                for s in slot.get("slots", []):
+                    items_by_char[cidx][0].append({
+                        "tid": s["p0_tid"],
+                        "name": s["p0_name"],
+                        "count": 1,
+                    })
+                    items_by_char[cidx][1].append({
+                        "tid": s["p1_tid"],
+                        "name": s["p1_name"],
+                        "count": 1,
+                    })
+                    producers_by_tid.setdefault(s["p1_tid"], [])
+                    if cidx not in producers_by_tid[s["p1_tid"]]:
+                        producers_by_tid[s["p1_tid"]].append(cidx)
+            else:
+                for fac in slot.get("factories", []):
+                    tier = fac.get("tier", 0)
+                    if not (0 <= tier <= 4):
+                        continue
+                    items_by_char[cidx][tier].append({
+                        "tid": fac["type_id"],
+                        "name": fac["name"],
+                        "count": fac.get("count", 1),
+                    })
+                    producers_by_tid.setdefault(fac["type_id"], [])
+                    if cidx not in producers_by_tid[fac["type_id"]]:
+                        producers_by_tid[fac["type_id"]].append(cidx)
+
+    # Merge duplicate (cidx, tid) — e.g. two miner slots on same char both
+    # produce Water; display as one node with combined count.
+    for cidx in range(len(characters)):
+        for tier in range(5):
+            merged: dict[int, dict] = {}
+            for it in items_by_char[cidx][tier]:
+                key = it["tid"]
+                if key in merged:
+                    merged[key]["count"] += it["count"]
+                else:
+                    merged[key] = dict(it)
+            items_by_char[cidx][tier] = sorted(merged.values(), key=lambda i: i["name"])
+
+    # ── Build edges ──────────────────────────────────────────────────────
+    # For each consumer factory, walk its inputs and pick a producer. Skip
+    # intra-char edges (same-char producer wins and consumes no handoff).
+    # Dedupe on (from_char, to_char, tid, consumer_tid) so repeat consumers
+    # on one char don't double up.
+    edges: list[dict] = []
+    fan_out: dict[int, int] = {}
+    seen_edge_keys: set[tuple] = set()
+
+    for cidx, char in enumerate(characters):
+        for slot in char["slots"]:
+            if slot["role"] == "miner_p1":
+                continue  # miners extract P0 locally, no imports
+            for fac in slot.get("factories", []):
+                out_tid = fac.get("type_id")
+                if out_tid is None:
+                    continue
+                sch_id = canonical.get(out_tid)
+                if sch_id is None:
+                    continue
+                for in_tid, _in_qty in input_map.get(sch_id, []):
+                    producers = producers_by_tid.get(in_tid, [])
+                    if not producers:
+                        continue  # not produced in-plan (shortfall or P0 leaf)
+                    if cidx in producers:
+                        continue  # intra-char — no cross-char edge drawn
+                    from_char = min(producers, key=lambda pc: fan_out.get(pc, 0))
+                    key = (from_char, cidx, in_tid, out_tid)
+                    if key in seen_edge_keys:
+                        continue
+                    seen_edge_keys.add(key)
+                    fan_out[from_char] = fan_out.get(from_char, 0) + 1
+                    edges.append({
+                        "from_char": from_char,
+                        "to_char": cidx,
+                        "tid": in_tid,
+                        "name": name_map.get(in_tid, f"Type {in_tid}"),
+                        "consumer_tid": out_tid,
+                        "tier_from": tier_of.get(in_tid, 0),
+                        "tier_to": tier_of.get(out_tid, 0),
+                    })
+
+    # ── Aggregate imports/exports per character ─────────────────────────
+    imports_idx: list[dict[int, dict]] = [{} for _ in characters]
+    exports_idx: list[dict[int, dict]] = [{} for _ in characters]
+    for e in edges:
+        ii = imports_idx[e["to_char"]]
+        if e["tid"] not in ii:
+            ii[e["tid"]] = {"tid": e["tid"], "name": e["name"], "counterparts": []}
+        if e["from_char"] + 1 not in ii[e["tid"]]["counterparts"]:
+            ii[e["tid"]]["counterparts"].append(e["from_char"] + 1)  # 1-based Char N
+        ei = exports_idx[e["from_char"]]
+        if e["tid"] not in ei:
+            ei[e["tid"]] = {"tid": e["tid"], "name": e["name"], "counterparts": []}
+        if e["to_char"] + 1 not in ei[e["tid"]]["counterparts"]:
+            ei[e["tid"]]["counterparts"].append(e["to_char"] + 1)
+
+    imports = [sorted(ii.values(), key=lambda x: x["name"]) for ii in imports_idx]
+    exports = [sorted(ei.values(), key=lambda x: x["name"]) for ei in exports_idx]
+
+    return {
+        "items_by_char": items_by_char,
+        "edges": edges,
+        "imports": imports,
+        "exports": exports,
     }
 
 

@@ -264,14 +264,21 @@
     {% endif %}
 
     {% for char in character_plan.characters %}
+    {% set _cidx = loop.index0 %}
     <div style="border-top:1px solid var(--border);">
         <div style="padding:0.45rem 0.75rem;background:#121212;display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap;">
             <span style="font-size:11px;color:var(--text);font-weight:600;">
                 {% if char.role == 'assembler' %}<span style="color:var(--accent);">★ </span>{% endif %}
                 {{ char.label }}
             </span>
-            <span style="font-size:10px;color:var(--muted);">
-                {{ char.slots | length }} planet{{ 's' if char.slots|length != 1 else '' }}
+            <span style="font-size:10px;color:var(--muted);display:inline-flex;gap:0.5rem;align-items:baseline;">
+                {% if character_plan.flow and character_plan.flow.imports[_cidx] %}
+                <span title="Imports from: {% for imp in character_plan.flow.imports[_cidx] %}{{ imp.name }} ← Char {{ imp.counterparts | join(', Char ') }}{% if not loop.last %}; {% endif %}{% endfor %}" style="color:var(--success);">← {{ character_plan.flow.imports[_cidx] | length }} in</span>
+                {% endif %}
+                {% if character_plan.flow and character_plan.flow.exports[_cidx] %}
+                <span title="Exports to: {% for exp in character_plan.flow.exports[_cidx] %}{{ exp.name }} → Char {{ exp.counterparts | join(', Char ') }}{% if not loop.last %}; {% endif %}{% endfor %}" style="color:#7ec6ff;">{{ character_plan.flow.exports[_cidx] | length }} out →</span>
+                {% endif %}
+                <span>{{ char.slots | length }} planet{{ 's' if char.slots|length != 1 else '' }}</span>
             </span>
         </div>
         <div style="display:grid;grid-template-columns:28px 130px 70px 1fr;gap:0.4rem;padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid var(--border);">
@@ -326,6 +333,329 @@
         Each character has up to 6 planets, densely packed with extraction + factory work. The character holding the target's final factory is labeled <strong style="color:var(--text);">Final assembly</strong>. <strong style="color:var(--text);">CCU V</strong> assumed. <span style="color:var(--warn);">fallback</span> = preferred planet type exhausted in this system, using an alternate. <span style="color:#7ec6ff;">shared</span> = another character also has a colony on this planet (pick a different resource patch in-game; the ECU spots don't conflict).
     </div>
 </div>
+{% endif %}
+
+{# ── Production flow chart — swim-lane per character ──────────────────── #}
+{% if character_plan and character_plan.flow and character_plan.characters %}
+<div class="b-panel b-section">
+    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
+        <span class="b-label">Production flow chart</span>
+        <span style="font-size:10px;color:var(--muted);">
+            {% if character_plan.flow.edges %}
+            {{ character_plan.flow.edges | length }} cross-character handoff{{ 's' if character_plan.flow.edges|length != 1 else '' }}
+            · <span style="color:var(--success);">green</span> = P1→P2,
+            <span style="color:var(--accent);">gold</span> = P2→P3,
+            <span style="color:#7ec6ff;">cyan</span> = P3→P4
+            · hover to trace
+            {% else %}
+            single-character plan — no cross-character handoffs
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="pi-flow-container" style="position:relative;overflow-x:auto;">
+        <svg class="pi-flow-lines" xmlns="http://www.w3.org/2000/svg"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;"></svg>
+        <div class="pi-flow-grid" style="display:grid;grid-template-columns:150px repeat(5, minmax(140px,1fr));gap:0;min-width:920px;">
+            {# Header row #}
+            <div style="padding:0.45rem 0.6rem;border-bottom:1px solid var(--border);background:#121212;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;">Character</div>
+            {% for tier in [0,1,2,3,4] %}
+            <div style="padding:0.45rem 0.5rem;border-bottom:1px solid var(--border);border-left:1px solid var(--border);background:#121212;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;text-align:center;">
+                P{{ tier }}
+                <span style="color:var(--muted);font-size:9px;text-transform:none;display:block;">
+                    {% if tier == 0 %}Raw
+                    {% elif tier == 1 %}Basic
+                    {% elif tier == 2 %}Refined
+                    {% elif tier == 3 %}Specialized
+                    {% else %}Advanced{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+
+            {# Character rows #}
+            {% for char in character_plan.characters %}
+            {% set cidx = loop.index0 %}
+            <div class="pi-flow-row-label" data-char-idx="{{ cidx }}"
+                 style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);background:var(--surface);font-size:11px;color:var(--text);display:flex;flex-direction:column;justify-content:center;cursor:default;">
+                <span style="font-weight:600;">
+                    {% if char.role == 'assembler' %}<span style="color:var(--accent);">★</span> {% endif %}
+                    {{ char.label }}
+                </span>
+                <span style="color:var(--muted);font-size:10px;margin-top:2px;">
+                    {% if character_plan.flow.imports[cidx] %}<span style="color:var(--success);">← {{ character_plan.flow.imports[cidx] | length }}</span>{% endif %}
+                    {% if character_plan.flow.exports[cidx] %}<span style="color:#7ec6ff;margin-left:0.3rem;">{{ character_plan.flow.exports[cidx] | length }} →</span>{% endif %}
+                </span>
+            </div>
+            {% for tier in [0,1,2,3,4] %}
+            <div class="pi-flow-cell" data-char-idx="{{ cidx }}" data-tier="{{ tier }}"
+                 style="padding:0.35rem;border-bottom:1px solid var(--border);border-left:1px solid var(--border);display:flex;flex-direction:column;gap:0.2rem;min-height:40px;">
+                {% for node in character_plan.flow.items_by_char[cidx][tier] %}
+                <div class="pi-flow-node"
+                     data-char-idx="{{ cidx }}" data-type-id="{{ node.tid }}" data-tier="{{ tier }}"
+                     style="font-size:10px;padding:0.2rem 0.4rem;border:1px solid var(--border);background:var(--bg);line-height:1.25;cursor:default;">
+                    <span style="color:var(--text);">{{ node.name }}</span>
+                    {% if node.count and node.count > 1 %}<span style="color:var(--muted);"> × {{ node.count }}</span>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+
+    {# Compact text handoff summary — parseable without reading the chart #}
+    {% set has_handoffs = false %}
+    {% for char in character_plan.characters %}{% if character_plan.flow.exports[loop.index0] %}{% set has_handoffs = true %}{% endif %}{% endfor %}
+    {% if character_plan.flow.edges %}
+    <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
+        <div style="font-size:10px;color:var(--text);margin-bottom:0.3rem;text-transform:uppercase;letter-spacing:0.03em;">Hand-off summary</div>
+        {% for char in character_plan.characters %}
+        {% set cidx = loop.index0 %}
+        {% if character_plan.flow.exports[cidx] %}
+        <div style="margin-bottom:0.2rem;line-height:1.5;">
+            <span style="color:var(--text);">{{ char.label }}</span> ships
+            {% for ex in character_plan.flow.exports[cidx] %}<span style="color:var(--accent);">{{ ex.name }}</span> → <span style="color:var(--text);">Char {{ ex.counterparts | join(', Char ') }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div style="padding:0.4rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
+        Each cell lists the items that character produces at that tier. Lines follow the recipe graph across characters. Hover a cell or a character label to trace its chain; other items dim.
+    </div>
+</div>
+
+{# JSON blob for JS — uses |tojson for safe embedding #}
+<script type="application/json" id="pi-flow-data">
+{{ character_plan.flow | tojson }}
+</script>
+
+<style>
+    .pi-flow-node { transition:opacity 0.12s, background 0.12s, border-color 0.12s; }
+    .pi-flow-node:hover { background:rgba(200,169,81,0.12); border-color:var(--accent); }
+    .pi-flow-row-label:hover { background:rgba(200,169,81,0.06); }
+
+    /* Tracing mode: dim everything that's not part of the hovered node's
+       chain so the highlighted path stands out. */
+    .pi-flow-container.is-tracing .pi-flow-node:not(.is-hover):not(.is-related) { opacity:0.22; }
+    .pi-flow-container.is-tracing .pi-flow-node.is-hover {
+        background:rgba(200,169,81,0.28);
+        border-color:var(--accent);
+        color:var(--text);
+    }
+    .pi-flow-container.is-tracing .pi-flow-node.is-related {
+        background:rgba(51,170,85,0.15);
+        border-color:var(--success);
+    }
+    .pi-flow-container.is-tracing .pi-flow-row-label:not(.is-related) { opacity:0.45; }
+</style>
+
+<script>
+(function() {
+    var container = document.querySelector('.pi-flow-container');
+    if (!container) return;
+    var svg = container.querySelector('.pi-flow-lines');
+    var dataEl = document.getElementById('pi-flow-data');
+    if (!svg || !dataEl) return;
+
+    var flow;
+    try { flow = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    var edges = (flow && flow.edges) || [];
+
+    // Tier→tier color (green for P1→P2, gold P2→P3, cyan P3→P4)
+    function edgeColor(tf, tt) {
+        if (tf === 1 && tt === 2) return '#33aa55';  // --success
+        if (tf === 2 && tt === 3) return '#c8a951';  // --accent
+        if (tf === 3 && tt === 4) return '#7ec6ff';
+        // Generic fallbacks
+        if (tt === 2) return '#33aa55';
+        if (tt === 3) return '#c8a951';
+        if (tt === 4) return '#7ec6ff';
+        return '#888888';
+    }
+
+    function findNode(charIdx, tid) {
+        return container.querySelector(
+            '.pi-flow-node[data-char-idx="' + charIdx + '"][data-type-id="' + tid + '"]'
+        );
+    }
+
+    function drawPath(fromEl, toEl, color, opacity) {
+        if (!fromEl || !toEl) return null;
+        var cRect = container.getBoundingClientRect();
+        var f = fromEl.getBoundingClientRect();
+        var t = toEl.getBoundingClientRect();
+        // Right edge of source → left edge of consumer (consumer is to the right
+        // in higher tier columns)
+        var x1 = f.right - cRect.left + container.scrollLeft;
+        var y1 = f.top + f.height / 2 - cRect.top + container.scrollTop;
+        var x2 = t.left - cRect.left + container.scrollLeft;
+        var y2 = t.top + t.height / 2 - cRect.top + container.scrollTop;
+        var dx = Math.max(40, Math.abs(x2 - x1) * 0.45);
+        var d = 'M ' + x1 + ' ' + y1
+              + ' C ' + (x1 + dx) + ' ' + y1
+              + ', ' + (x2 - dx) + ' ' + y2
+              + ', ' + x2 + ' ' + y2;
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', '1.5');
+        path.setAttribute('stroke-opacity', String(opacity));
+        path.setAttribute('data-from-char', fromEl.dataset.charIdx);
+        path.setAttribute('data-to-char', toEl.dataset.charIdx);
+        path.setAttribute('data-tid', fromEl.dataset.typeId);
+        svg.appendChild(path);
+        return path;
+    }
+
+    function clearLines() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+    }
+
+    // Size the SVG to match the scrollable grid so coords work in both axes.
+    function sizeSvg() {
+        var grid = container.querySelector('.pi-flow-grid');
+        if (!grid) return;
+        var w = grid.scrollWidth || grid.offsetWidth;
+        var h = grid.scrollHeight || grid.offsetHeight;
+        svg.setAttribute('width', String(w));
+        svg.setAttribute('height', String(h));
+        svg.style.width = w + 'px';
+        svg.style.height = h + 'px';
+    }
+
+    function drawAll(opacity) {
+        clearLines();
+        sizeSvg();
+        edges.forEach(function(e) {
+            var from = findNode(e.from_char, e.tid);
+            var to = findNode(e.to_char, e.consumer_tid);
+            if (!from || !to) return;
+            drawPath(from, to, edgeColor(e.tier_from, e.tier_to), opacity);
+        });
+    }
+
+    function highlightFromNode(node) {
+        container.classList.add('is-tracing');
+        node.classList.add('is-hover');
+        var cidx = node.dataset.charIdx;
+        var tid = node.dataset.typeId;
+
+        // An edge "touches" this node if it's an outbound edge from this exact
+        // producer node, or an inbound edge to this exact consumer node.
+        var related = []; // list of edges that touch this node
+        edges.forEach(function(e) {
+            var outbound = (String(e.from_char) === cidx && String(e.tid) === tid);
+            var inbound = (String(e.to_char) === cidx && String(e.consumer_tid) === tid);
+            if (outbound || inbound) related.push(e);
+        });
+
+        // Mark counterpart nodes and their row labels
+        var relatedChars = new Set([cidx]);
+        related.forEach(function(e) {
+            var counterNode, counterChar;
+            if (String(e.from_char) === cidx && String(e.tid) === tid) {
+                counterNode = findNode(e.to_char, e.consumer_tid);
+                counterChar = String(e.to_char);
+            } else {
+                counterNode = findNode(e.from_char, e.tid);
+                counterChar = String(e.from_char);
+            }
+            if (counterNode) counterNode.classList.add('is-related');
+            relatedChars.add(counterChar);
+        });
+        container.querySelectorAll('.pi-flow-row-label').forEach(function(lbl) {
+            if (relatedChars.has(String(lbl.dataset.charIdx))) {
+                lbl.classList.add('is-related');
+            }
+        });
+
+        // Redraw all edges; only the related set at full opacity
+        clearLines();
+        sizeSvg();
+        edges.forEach(function(e) {
+            var from = findNode(e.from_char, e.tid);
+            var to = findNode(e.to_char, e.consumer_tid);
+            if (!from || !to) return;
+            var involved = related.indexOf(e) !== -1;
+            drawPath(from, to, edgeColor(e.tier_from, e.tier_to), involved ? 1.0 : 0.08);
+        });
+    }
+
+    function highlightFromRow(lbl) {
+        container.classList.add('is-tracing');
+        var cidx = lbl.dataset.charIdx;
+        lbl.classList.add('is-related');
+        var relatedChars = new Set([cidx]);
+        edges.forEach(function(e) {
+            if (String(e.from_char) === cidx) relatedChars.add(String(e.to_char));
+            if (String(e.to_char) === cidx) relatedChars.add(String(e.from_char));
+        });
+        container.querySelectorAll('.pi-flow-row-label').forEach(function(l) {
+            if (relatedChars.has(String(l.dataset.charIdx))) l.classList.add('is-related');
+        });
+        container.querySelectorAll('.pi-flow-node').forEach(function(n) {
+            if (String(n.dataset.charIdx) === cidx) {
+                n.classList.add('is-related');
+            }
+        });
+        clearLines();
+        sizeSvg();
+        edges.forEach(function(e) {
+            var from = findNode(e.from_char, e.tid);
+            var to = findNode(e.to_char, e.consumer_tid);
+            if (!from || !to) return;
+            var involved = (
+                String(e.from_char) === cidx || String(e.to_char) === cidx
+            );
+            drawPath(from, to, edgeColor(e.tier_from, e.tier_to), involved ? 1.0 : 0.08);
+        });
+    }
+
+    function resetHighlight() {
+        container.classList.remove('is-tracing');
+        container.querySelectorAll('.pi-flow-node').forEach(function(n) {
+            n.classList.remove('is-hover', 'is-related');
+        });
+        container.querySelectorAll('.pi-flow-row-label').forEach(function(l) {
+            l.classList.remove('is-related');
+        });
+        drawAll(0.28);
+    }
+
+    container.querySelectorAll('.pi-flow-node').forEach(function(n) {
+        n.addEventListener('mouseenter', function() { highlightFromNode(n); });
+        n.addEventListener('mouseleave', resetHighlight);
+    });
+    container.querySelectorAll('.pi-flow-row-label').forEach(function(l) {
+        l.addEventListener('mouseenter', function() { highlightFromRow(l); });
+        l.addEventListener('mouseleave', resetHighlight);
+    });
+
+    // Initial draw + resize redraw
+    function initialDraw() { drawAll(0.28); }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialDraw);
+    } else {
+        initialDraw();
+    }
+    var _rtmr;
+    window.addEventListener('resize', function() {
+        clearTimeout(_rtmr);
+        _rtmr = setTimeout(function() {
+            if (container.classList.contains('is-tracing')) return;
+            drawAll(0.28);
+        }, 120);
+    });
+    // Redraw when the container scrolls horizontally (edges anchor to DOM rects)
+    container.addEventListener('scroll', function() {
+        if (container.classList.contains('is-tracing')) return;
+        drawAll(0.28);
+    });
+})();
+</script>
 {% endif %}
 
 {# ── Intermediate tier breakdown ────────────────────────────────────────── #}
