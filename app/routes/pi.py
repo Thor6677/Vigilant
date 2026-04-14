@@ -466,22 +466,26 @@ async def planetary_chain_page(
     all_type_ids = {c["type_id"] for tier in chain.values() for c in tier}
     price_map = await _get_pi_prices(db, all_type_ids)
 
-    # Attach price + profitability to each row
+    # Attach price + profitability to each row (always set keys so Jinja
+    # comparisons don't choke on Undefined).
     for tier_num, items in chain.items():
         for item in items:
             tid = item["type_id"]
             item["price"] = price_map.get(tid, 0.0)
+            item["input_cost_per_cycle"] = None
+            item["margin_per_cycle"] = None
+            item["margin_pct"] = None
             if item.get("inputs"):
                 total_input_cost = sum(
                     (price_map.get(inp["type_id"], 0.0) or 0.0) * (inp["quantity"] or 0)
                     for inp in item["inputs"]
                 )
-                # Per-cycle: cycle_time seconds produces output_qty * price
                 out_qty = item.get("output_qty") or 0
                 revenue = (item["price"] or 0.0) * out_qty
                 item["input_cost_per_cycle"] = total_input_cost
                 item["margin_per_cycle"] = revenue - total_input_cost
-                item["margin_pct"] = (item["margin_per_cycle"] / total_input_cost * 100) if total_input_cost > 0 else None
+                if total_input_cost > 0:
+                    item["margin_pct"] = item["margin_per_cycle"] / total_input_cost * 100
 
     return templates.TemplateResponse("planetary_chain.html", {
         "request": request,
