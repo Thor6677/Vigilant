@@ -916,6 +916,7 @@ async def planetary_calculator_page(
 
     # Run the BOM if the user picked a target
     bom = None
+    colony_plan = None
     if graph and target and target in graph["all_ids"]:
         bom = _expand_bom(graph, target, cycles, system_p0_ids)
         # Enrich with ISK economics
@@ -934,6 +935,10 @@ async def planetary_calculator_page(
         bom["margin"] = revenue - p0_cost
         bom["margin_pct"] = (revenue - p0_cost) / p0_cost * 100 if p0_cost > 0 else None
 
+        # Colony layout recommendation — only meaningful once a system is picked,
+        # but useful even without a system (treats all planet types as non-local).
+        colony_plan = _plan_colonies(bom, system_p0_names)
+
     return templates.TemplateResponse("planetary_calculator.html", {
         "request": request,
         "target": target,
@@ -941,6 +946,7 @@ async def planetary_calculator_page(
         "cycles": cycles,
         "product_options": product_options,
         "bom": bom,
+        "colony_plan": colony_plan,
         "system_info": system_info,
         "space_type": space_type,
         "system_p0_names": sorted(system_p0_names),
@@ -1085,6 +1091,7 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
             "cycles": target_cycles,
             "output_qty": target_output_qty,
             "total_output": total_target_output,
+            "tier": tier_of.get(target_tid, 0),
         },
         "target_cycle_time": target_cycle_time,
         "total_target_output": total_target_output,
@@ -1093,6 +1100,188 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
         "p0_sorted": p0_sorted,
         "missing_p0_count": missing_count,
         "total_p0_volume": total_p0_volume,
+    }
+
+
+# ── Colony planner ────────────────────────────────────────────────────────────
+
+# Community-standard template constants (see DalShooth/EVE_PI_Templates,
+# EVE-Uni Colony Management). Conservative values tuned for CCU V skills.
+ECU_YIELD_PER_HOUR = 15_000          # P0 units/hr per ECU (sustained avg)
+P1_FACTORY_THROUGHPUT_PER_HOUR = 40  # P1 units/hr per Basic Industrial Facility
+MINER_P1_SLOTS_PER_PLANET = 2        # 1 slot = 1 ECU + 1 P1 factory on an integrated planet
+P2_P3_FACTORIES_PER_PLANET = 6       # shared Advanced Industrial Facilities (P2+P3 hub)
+P4_FACTORIES_PER_PLANET = 2          # High-Tech Production Plants
+
+
+def _plan_colonies(bom: dict, system_p0_names: set[str]) -> dict:
+    """Recommend a colony layout for the BOM's production rate.
+
+    Strategy (per user preference — integrated miner+P1):
+      - Each needed P1 spawns `factories_needed` "slots".
+      - Each slot = 1 ECU (extract the P0 input) + 1 P1 factory.
+      - Slots are assigned to a planet type preferring local availability, then
+        planet types that can host the widest variety of needed P0s.
+      - Slots of the same planet type are packed 2-per-planet (CCU V budget).
+      - P2/P3 factories share dedicated "advanced factory hub" planets (6 AIFs).
+      - P4 factories live on their own "P4 factory hub" planets (2 HTPPs).
+      - Hub planet type defaults to Barren (falls back to Temperate) — both
+        are universally common and have no extraction relevance for hubs.
+
+    All rates assume the BOM's production tempo (target cycles per
+    target_cycle_time window), and CCU V with Planetology V-ish skills.
+    """
+    import math
+    from collections import Counter, defaultdict
+
+    # Planet types the system supports (capitalized)
+    system_planet_types: set[str] = set()
+    for ptype, mats in pi_const.P0_BY_PLANET_TYPE.items():
+        if any(m in system_p0_names for m in mats):
+            system_planet_types.add(ptype.capitalize())
+
+    def _sources_for(p0_name: str) -> list[str]:
+        return [pt.capitalize() for pt, mats in pi_const.P0_BY_PLANET_TYPE.items()
+                if p0_name in mats]
+
+    target_cycle_time = bom.get("target_cycle_time") or 3600
+
+    # Step 1 — Build miner+P1 slots from the P1 rows in the BOM plus
+    # (if the target itself is P1) the target's own factory needs.
+    slots: list[dict] = []
+    for p1_row in bom["tier_rows"].get(1, []):
+        if not p1_row.get("direct_inputs"):
+            continue
+        p0 = p1_row["direct_inputs"][0]
+        rate_per_hour = p1_row["qty"] / target_cycle_time * 3600
+        factories = max(1, math.ceil(rate_per_hour / P1_FACTORY_THROUGHPUT_PER_HOUR))
+        for _ in range(factories):
+            slots.append({
+                "p0_name": p0["name"],
+                "p0_tid": p0["type_id"],
+                "p1_name": p1_row["name"],
+                "p1_tid": p1_row["type_id"],
+                "options": _sources_for(p0["name"]),
+            })
+
+    # If the target itself is P1, its own factories are miner+P1 slots too.
+    target = bom.get("target", {})
+    if target.get("tier") == 1:
+        # Build synthetic slots for the target itself
+        target_tid = target.get("type_id")
+        target_row_inputs = None
+        # Look up the recipe inputs by asking the BOM's tier rows (fallback)
+        # direct_inputs for the target aren't in tier_rows since target isn't in demand.
+        # We rely on the graph — but the planner doesn't receive it. Skip this edge
+        # case for now: target P1 doesn't appear as a miner slot (rare — no-one
+        # calculates a single P1 in practice).
+
+    # Step 2 — Assign each slot a planet type. Priority:
+    #   (a) local to the selected system,
+    #   (b) highest coverage across all slots (greedy set-cover).
+    type_coverage = Counter()
+    for slot in slots:
+        for pt in slot["options"]:
+            type_coverage[pt] += 1
+
+    for slot in slots:
+        opts = slot["options"]
+        if not opts:
+            slot["assigned_type"] = "?"
+            slot["local"] = False
+            continue
+        opts_sorted = sorted(
+            opts,
+            key=lambda t: (0 if t in system_planet_types else 1, -type_coverage[t], t),
+        )
+        slot["assigned_type"] = opts_sorted[0]
+        slot["local"] = opts_sorted[0] in system_planet_types
+
+    # Step 3 — Pack slots (2 per planet) by type.
+    by_type: dict[str, list[dict]] = defaultdict(list)
+    for slot in slots:
+        by_type[slot["assigned_type"]].append(slot)
+
+    colonies: list[dict] = []
+    for ptype, ptype_slots in by_type.items():
+        local = ptype in system_planet_types
+        for i in range(0, len(ptype_slots), MINER_P1_SLOTS_PER_PLANET):
+            chunk = ptype_slots[i:i + MINER_P1_SLOTS_PER_PLANET]
+            colonies.append({
+                "role": "miner_p1",
+                "planet_type": ptype,
+                "local": local,
+                "slots": [
+                    {
+                        "p0_name": s["p0_name"],
+                        "p0_tid": s["p0_tid"],
+                        "p1_name": s["p1_name"],
+                        "p1_tid": s["p1_tid"],
+                    }
+                    for s in chunk
+                ],
+            })
+
+    # Step 4 — P2/P3 factory hubs (shared). Use target if target is P2/P3.
+    p2_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(2, []))
+    p3_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(3, []))
+    if target.get("tier") in (2, 3):
+        p2_p3_target_extra = max(1, target.get("cycles", 1))
+        if target.get("tier") == 2:
+            p2_factories += p2_p3_target_extra
+        else:
+            p3_factories += p2_p3_target_extra
+    mid_total = p2_factories + p3_factories
+
+    # Hub planet type: prefer Barren → Temperate → any local → Barren.
+    hub_candidates = ["Barren", "Temperate"]
+    hub_type = next((t for t in hub_candidates if t in system_planet_types), hub_candidates[0])
+    hub_local = hub_type in system_planet_types
+
+    remaining = mid_total
+    while remaining > 0:
+        chunk = min(P2_P3_FACTORIES_PER_PLANET, remaining)
+        colonies.append({
+            "role": "p2_p3_factory",
+            "planet_type": hub_type,
+            "local": hub_local,
+            "factory_count": chunk,
+            "factory_tier": "P2/P3",
+        })
+        remaining -= chunk
+
+    # Step 5 — P4 factory hubs (including the target itself if P4).
+    p4_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(4, []))
+    if target.get("tier") == 4:
+        p4_factories += max(1, target.get("cycles", 1))
+
+    remaining = p4_factories
+    while remaining > 0:
+        chunk = min(P4_FACTORIES_PER_PLANET, remaining)
+        colonies.append({
+            "role": "p4_factory",
+            "planet_type": hub_type,
+            "local": hub_local,
+            "factory_count": chunk,
+            "factory_tier": "P4",
+        })
+        remaining -= chunk
+
+    total_planets = len(colonies)
+    # Typical max 6 PI planets per character (CCU V + Interplanetary Consolidation V)
+    characters_needed = max(1, math.ceil(total_planets / 6)) if total_planets else 0
+
+    return {
+        "colonies": colonies,
+        "total_planets": total_planets,
+        "characters_needed": characters_needed,
+        "assumptions": {
+            "ecu_yield_per_hour": ECU_YIELD_PER_HOUR,
+            "p1_factory_throughput": P1_FACTORY_THROUGHPUT_PER_HOUR,
+            "miner_p1_slots_per_planet": MINER_P1_SLOTS_PER_PLANET,
+            "p2_p3_factories_per_planet": P2_P3_FACTORIES_PER_PLANET,
+            "p4_factories_per_planet": P4_FACTORIES_PER_PLANET,
+        },
     }
 
 
