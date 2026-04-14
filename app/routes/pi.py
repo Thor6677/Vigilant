@@ -2022,16 +2022,26 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
     #                  same-char factory→factory). Visually short/muted lines;
     #                  they show the extractor chain so P0 nodes aren't orphans.
     #   intra=False — cross-character hand-offs that require hauling.
-    # Cross edges dedupe on (from_char, to_char, tid, consumer_tid).
-    # Picker prefers same-char producer (→ intra edge); otherwise picks the
-    # cross-char producer with smallest current fan-out.
+    #
+    # Picker prefers same-char producer (→ intra edge). Otherwise load-balances
+    # across cross-char producers weighted by their factory count, so every
+    # producer ends up with proportional outgoing edges (avoiding the false-
+    # "surplus" effect where one producer got zero consumers just because the
+    # picker preferred another).
     edges: list[dict] = []
-    fan_out: dict[int, int] = {}
+    edges_by_producer: dict[tuple[int, int], int] = {}   # (cidx, tid) → edge count
     seen_cross_keys: set[tuple] = set()
     seen_intra_keys: set[tuple] = set()
 
-    # First: intra-miner P0 → P1 edges (one per unique pair on each char,
-    # the node merging means the chart has a single P0 and P1 node per tid)
+    # Producer capacity index: (tid, cidx) → factory count (how much this char
+    # produces). Built from merged items_by_char so duplicates are accounted for.
+    producer_capacity: dict[tuple[int, int], int] = {}
+    for cidx in range(len(characters)):
+        for tier in range(5):
+            for it in items_by_char[cidx][tier]:
+                producer_capacity[(it["tid"], cidx)] = it["count"]
+
+    # First: intra-miner P0 → P1 edges (one per unique pair on each char)
     for (cidx, p0_tid, p1_tid) in intra_miner_pairs:
         key = (cidx, p0_tid, p1_tid)
         if key in seen_intra_keys:
@@ -2064,9 +2074,8 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                 for in_tid, _in_qty in input_map.get(sch_id, []):
                     producers = producers_by_tid.get(in_tid, [])
                     if not producers:
-                        continue  # not produced in-plan (shortfall or P0 leaf)
+                        continue
                     if cidx in producers:
-                        # Intra-char edge; dedupe on (cidx, in_tid, out_tid)
                         key = (cidx, in_tid, out_tid)
                         if key in seen_intra_keys:
                             continue
@@ -2082,12 +2091,19 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                             "intra": True,
                         })
                         continue
-                    from_char = min(producers, key=lambda pc: fan_out.get(pc, 0))
+                    # Load-balanced pick: score = edges_assigned / capacity
+                    # (lower is better), tiebreak on raw edge count then cidx.
+                    def _score(pc: int) -> tuple:
+                        cap = max(1, producer_capacity.get((in_tid, pc), 1))
+                        used = edges_by_producer.get((pc, in_tid), 0)
+                        return (used / cap, used, pc)
+                    from_char = min(producers, key=_score)
                     key = (from_char, cidx, in_tid, out_tid)
                     if key in seen_cross_keys:
                         continue
                     seen_cross_keys.add(key)
-                    fan_out[from_char] = fan_out.get(from_char, 0) + 1
+                    edges_by_producer[(from_char, in_tid)] = \
+                        edges_by_producer.get((from_char, in_tid), 0) + 1
                     edges.append({
                         "from_char": from_char,
                         "to_char": cidx,
@@ -2121,20 +2137,20 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
     imports = [sorted(ii.values(), key=lambda x: x["name"]) for ii in imports_idx]
     exports = [sorted(ei.values(), key=lambda x: x["name"]) for ei in exports_idx]
 
-    # Mark "surplus" nodes: items produced on a char but never consumed by
-    # any (intra or cross) edge AND not the target. These are dead-end P1/P2
-    # factories the packer slotted to fill a planet but the chain doesn't need.
+    # Mark "surplus" nodes: items whose tid has NO consumer anywhere in the
+    # plan. A node with a zero outgoing edge on one char but consumed elsewhere
+    # isn't surplus — the load-balanced picker just routed the demand to a
+    # different producer. Only truly unused tids (no consumer factory in any
+    # char) get flagged.
     target_tid = bom.get("target", {}).get("type_id")
-    consumed_by_char: dict[tuple[int, int], bool] = {}
-    for e in edges:
-        consumed_by_char[(e["from_char"], e["tid"])] = True
+    consumed_tids: set[int] = {e["tid"] for e in edges}
     for cidx in range(len(characters)):
         for tier in range(5):
             for node in items_by_char[cidx][tier]:
                 if node["tid"] == target_tid:
-                    node["surplus"] = False  # target is the end product, not surplus
+                    node["surplus"] = False  # target is the end product
                 else:
-                    node["surplus"] = not consumed_by_char.get((cidx, node["tid"]), False)
+                    node["surplus"] = node["tid"] not in consumed_tids
 
     return {
         "items_by_char": items_by_char,
