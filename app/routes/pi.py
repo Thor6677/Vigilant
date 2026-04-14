@@ -867,11 +867,22 @@ async def planetary_calculator_page(
     target: int | None = Query(None),
     system: str | None = Query(None),
     cycles: int = Query(1, ge=1, le=10000),
+    max_chars: int | None = Query(None, ge=1, le=50),
+    ipc: int = Query(5, ge=0, le=5),  # Interplanetary Consolidation level
+    ccu: int = Query(5, ge=0, le=5),  # Command Center Upgrades level
     db: AsyncSession = Depends(get_db),
 ):
     """BOM calculator — pick a target PI product + optional system, see the
     full chain expansion with per-tier factory counts, P0 totals, ISK margins,
     and flags for any P0 the selected system can't produce locally.
+
+    Skill overrides:
+      - `ipc` (0-5) = Interplanetary Consolidation level → planets per character
+        (1 + ipc, i.e. IPC V → 6 planets, IPC 0 → 1 planet).
+      - `ccu` (0-5) = Command Center Upgrades level (currently baseline V; lower
+        reduces factories-per-hub, but v1 only surfaces it in UI).
+      - `max_chars` caps total character count — when below optimal, shows a
+        warning with shortfall details.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -953,10 +964,13 @@ async def planetary_calculator_page(
         # view in its place).
         colony_plan = _plan_colonies(bom, system_p0_names, system_planet_types)
 
-        # Per-character vertical-slice plan: assigns concrete system planets
-        # to specific roles, grouped per character. Primary UI view.
+        # Per-character plan: assigns concrete system planets to specific
+        # roles, grouped per character. Respects max_chars + ipc overrides.
+        planets_per_char = max(1, 1 + ipc)  # IPC V = 6, IPC 0 = 1
         character_plan = _plan_characters(
             bom, graph, system_planets, system_planet_types, system_p0_ids,
+            max_chars=max_chars,
+            planets_per_char=planets_per_char,
         )
 
     return templates.TemplateResponse("planetary_calculator.html", {
@@ -964,6 +978,10 @@ async def planetary_calculator_page(
         "target": target,
         "system": system,
         "cycles": cycles,
+        "max_chars": max_chars,
+        "ipc": ipc,
+        "ccu": ccu,
+        "planets_per_char": max(1, 1 + ipc),
         "product_options": product_options,
         "bom": bom,
         "colony_plan": colony_plan,
@@ -1361,7 +1379,9 @@ MAX_PLANETS_PER_CHARACTER = 6   # CCU V + Interplanetary Consolidation V
 def _plan_characters(bom: dict, graph: dict,
                      system_planets: list[dict],
                      system_planet_types: set[str],
-                     system_p0_ids: set[int]) -> dict:
+                     system_p0_ids: set[int],
+                     max_chars: int | None = None,
+                     planets_per_char: int = MAX_PLANETS_PER_CHARACTER) -> dict:
     """Group the colony plan into per-character vertical slices with
     concrete system-planet assignments.
 
@@ -1608,28 +1628,53 @@ def _plan_characters(bom: dict, graph: dict,
             "system_capacity_warning": None,
         }
 
-    # Round-robin distribute colonies across N characters so same-type
-    # colonies spread out. N is the tighter of two constraints:
-    #   (a) ceil(total / 6) — per-char 6-planet cap;
-    #   (b) per-type: for each miner planet type X with system supply S_X,
-    #       demand_X colonies need ≥ ceil(D_X / S_X) chars so no char has
-    #       more colonies of that type than the system has planets of it.
-    # Extra chars are fine — they just each host fewer planets.
+    # Optimal char count respects two constraints:
+    #   (a) ceil(total / planets_per_char) — per-char slot cap
+    #   (b) per-type miner demand: max over types X of ceil(D_X / S_X)
     from collections import Counter as _Counter
     supply_by_type: dict[str, int] = _Counter(p["planet_type"] for p in system_planets)
     miner_demand_by_type: dict[str, int] = _Counter(
         c["planet_type"] for c in colonies
         if c["role"] == "miner_p1" and c["planet_type"] in supply_by_type
     )
-    n_capacity = max(1, math.ceil(len(colonies) / MAX_PLANETS_PER_CHARACTER))
+    n_capacity = max(1, math.ceil(len(colonies) / planets_per_char))
     n_type = 1
     for ptype, demand in miner_demand_by_type.items():
         s = supply_by_type.get(ptype, 0)
         if s > 0:
             n_type = max(n_type, math.ceil(demand / s))
 
+    optimal_n = max(n_capacity, n_type, 1)
+    effective_n = min(optimal_n, max_chars) if (max_chars and max_chars > 0) else optimal_n
+    total_chunks = max(1, effective_n)
+    capacity_cap = total_chunks * planets_per_char
+    is_capped = effective_n < optimal_n
+
+    # If the char-count cap forces us to drop colonies, trim from the
+    # miner list (keep hubs + target factory which have downstream
+    # criticality). Collect dropped colonies so the UI can surface which
+    # P1 products lose factory capacity.
+    dropped_colonies: list[dict] = []
+    if len(colonies) > capacity_cap:
+        overflow = len(colonies) - capacity_cap
+        # Re-split into priority tiers so we drop the least-critical first.
+        target_cols = [c for c in colonies if c.get("_is_target")]
+        hub_cols = [c for c in colonies if c["role"] in ("p2_p3_factory", "p4_factory") and not c.get("_is_target")]
+        miner_cols = [c for c in colonies if c["role"] == "miner_p1"]
+        # Drop miners from the end of the miner list.
+        if overflow >= len(miner_cols):
+            # Even dropping all miners isn't enough — drop hubs too.
+            dropped_colonies = list(miner_cols)
+            remaining_overflow = overflow - len(miner_cols)
+            dropped_colonies.extend(hub_cols[-remaining_overflow:])
+            hub_cols = hub_cols[:-remaining_overflow] if remaining_overflow > 0 else hub_cols
+            miner_cols = []
+        else:
+            dropped_colonies = miner_cols[-overflow:]
+            miner_cols = miner_cols[:-overflow]
+        colonies = target_cols + hub_cols + miner_cols
+
     total = len(colonies)
-    total_chunks = max(n_capacity, n_type, 1)
     buckets: list[list[dict]] = [[] for _ in range(total_chunks)]
     # Target factory should land on the LAST char, so place it before
     # distributing; then everything else round-robins around it.
@@ -1652,7 +1697,7 @@ def _plan_characters(bom: dict, graph: dict,
         attempts = 0
         while attempts < total_chunks:
             idx = (i + attempts) % total_chunks
-            if len(buckets[idx]) < MAX_PLANETS_PER_CHARACTER:
+            if len(buckets[idx]) < planets_per_char:
                 buckets[idx].append(c)
                 i = (idx + 1) % total_chunks
                 break
@@ -1732,6 +1777,37 @@ def _plan_characters(bom: dict, graph: dict,
             f"Reduce target cycles or pick a richer system."
         )
 
+    # Shortfall summary: group dropped miner colonies by the P1 product they
+    # would have produced so the UI can list affected outputs.
+    shortfall_by_p1: dict[str, dict] = {}
+    for c in dropped_colonies:
+        if c["role"] == "miner_p1":
+            for s in c.get("slots", []):
+                p1_name = s.get("p1_name") or "?"
+                entry = shortfall_by_p1.setdefault(p1_name, {
+                    "p1_name": p1_name,
+                    "p0_name": s.get("p0_name"),
+                    "dropped_factories": 0,
+                })
+                entry["dropped_factories"] += 1
+        else:
+            # A dropped hub — attribute to its factory tier generically
+            tier_label = c.get("factory_tier") or "hub"
+            key = f"[{tier_label}] hub"
+            entry = shortfall_by_p1.setdefault(key, {
+                "p1_name": key,
+                "p0_name": None,
+                "dropped_factories": 0,
+            })
+            entry["dropped_factories"] += c.get("factory_count", 1)
+
+    shortfall_list = sorted(shortfall_by_p1.values(), key=lambda e: -e["dropped_factories"])
+
+    # Achievable ratio if capped
+    achievable_ratio = None
+    if is_capped and optimal_n > 0:
+        achievable_ratio = round(effective_n / optimal_n, 2)
+
     return {
         "characters": characters,
         "total_characters": len(characters),
@@ -1739,6 +1815,13 @@ def _plan_characters(bom: dict, graph: dict,
         "shared_slots": shared_slots,
         "unassignable_slots": unassignable,
         "system_capacity_warning": capacity_warning,
+        "optimal_chars": optimal_n,
+        "effective_chars": effective_n,
+        "planets_per_char": planets_per_char,
+        "is_capped": is_capped,
+        "dropped_count": len(dropped_colonies),
+        "shortfalls": shortfall_list,
+        "achievable_ratio": achievable_ratio,
     }
 
 

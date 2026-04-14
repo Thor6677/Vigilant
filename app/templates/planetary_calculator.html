@@ -21,39 +21,73 @@
 {# ── Input form ─────────────────────────────────────────────────────────── #}
 <div class="b-panel b-section" style="overflow:visible;">
     <div class="b-panel-head"><span class="b-label">Calculator</span></div>
-    <form method="get" action="/industry/planetary/calculator"
-          style="padding:0.75rem;display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.3fr) 90px auto;gap:0.5rem;align-items:end;">
-        <div style="position:relative;">
-            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">System (optional)</label>
-            <input type="text" id="calc-sys" name="system" value="{{ system or '' }}" placeholder="e.g. Jita" autocomplete="off"
-                   oninput="calcSysSearch(this)"
-                   style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
-            <div id="calc-sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:1000;max-height:220px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
-        </div>
-        <div>
-            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Target product</label>
-            <select name="target"
-                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;">
-                <option value="">— Select a product —</option>
-                {% for tier in [1,2,3,4] %}
-                <optgroup label="P{{ tier }} — {% if tier == 1 %}Basic{% elif tier == 2 %}Refined{% elif tier == 3 %}Specialized{% else %}Advanced{% endif %}">
-                    {% for item in product_options.get(tier, []) %}
-                    <option value="{{ item.type_id }}" {% if target == item.type_id %}selected{% endif %}>{{ item.name }}</option>
+    <form method="get" action="/industry/planetary/calculator" style="padding:0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+        <div style="display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.3fr) 90px auto;gap:0.5rem;align-items:end;">
+            <div style="position:relative;">
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">System (optional)</label>
+                <input type="text" id="calc-sys" name="system" value="{{ system or '' }}" placeholder="e.g. Jita" autocomplete="off"
+                       oninput="calcSysSearch(this)"
+                       style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+                <div id="calc-sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:1000;max-height:220px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
+            </div>
+            <div>
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Target product</label>
+                <select name="target"
+                        style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;">
+                    <option value="">— Select a product —</option>
+                    {% for tier in [1,2,3,4] %}
+                    <optgroup label="P{{ tier }} — {% if tier == 1 %}Basic{% elif tier == 2 %}Refined{% elif tier == 3 %}Specialized{% else %}Advanced{% endif %}">
+                        {% for item in product_options.get(tier, []) %}
+                        <option value="{{ item.type_id }}" {% if target == item.type_id %}selected{% endif %}>{{ item.name }}</option>
+                        {% endfor %}
+                    </optgroup>
                     {% endfor %}
-                </optgroup>
-                {% endfor %}
-            </select>
+                </select>
+            </div>
+            <div>
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Cycles</label>
+                <input type="number" name="cycles" value="{{ cycles }}" min="1" max="10000" step="1"
+                       style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+            </div>
+            <div>
+                <button type="submit" class="b-btn"
+                        style="padding:0.5rem 1rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;">
+                    Calculate →
+                </button>
+            </div>
         </div>
-        <div>
-            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Cycles</label>
-            <input type="number" name="cycles" value="{{ cycles }}" min="1" max="10000" step="1"
-                   style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
-        </div>
-        <div>
-            <button type="submit" class="b-btn"
-                    style="padding:0.5rem 1rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;">
-                Calculate →
-            </button>
+        {# Advanced overrides — second row #}
+        <div style="display:grid;grid-template-columns:120px 140px 140px auto;gap:0.5rem;align-items:end;padding-top:0.2rem;border-top:1px dashed var(--border);">
+            <div>
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Max chars</label>
+                <input type="number" name="max_chars" value="{{ max_chars or '' }}" min="1" max="50" placeholder="auto"
+                       style="width:100%;padding:0.4rem 0.55rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;outline:none;">
+            </div>
+            <div>
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;" title="Interplanetary Consolidation — each level unlocks +1 planet. V = 6 planets/char.">IPC skill</label>
+                <select name="ipc"
+                        style="width:100%;padding:0.4rem 0.55rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+                    {% for lvl in [0,1,2,3,4,5] %}
+                    <option value="{{ lvl }}" {% if ipc == lvl %}selected{% endif %}>
+                        {{ ['0 (untrained)','I','II','III','IV','V'][lvl] }} — {{ 1 + lvl }} planet{{ 's' if lvl > 0 else '' }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;" title="Command Center Upgrades — controls CPU/PG budget per planet. Baseline templates assume V.">CCU skill</label>
+                <select name="ccu"
+                        style="width:100%;padding:0.4rem 0.55rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+                    {% for lvl in [0,1,2,3,4,5] %}
+                    <option value="{{ lvl }}" {% if ccu == lvl %}selected{% endif %}>
+                        {{ ['0 (untrained)','I','II','III','IV','V'][lvl] }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="font-size:10px;color:var(--muted);padding-bottom:0.35rem;">
+                Leave Max chars blank for the optimal count. Lower IPC = fewer planets per char = more chars needed.
+            </div>
         </div>
     </form>
 
@@ -178,6 +212,9 @@
         <span class="b-label">Per-character colony plan</span>
         <span style="font-size:10px;color:var(--muted);">
             {{ character_plan.total_characters }} character{{ 's' if character_plan.total_characters != 1 else '' }}
+            {% if character_plan.is_capped %}
+            <span style="color:var(--warn);"> (optimal: {{ character_plan.optimal_chars }})</span>
+            {% endif %}
             · {{ character_plan.total_planets_assigned }} planet{{ 's' if character_plan.total_planets_assigned != 1 else '' }} assigned
             {% if character_plan.shared_slots %}
             · <span style="color:#7ec6ff;">{{ character_plan.shared_slots }} shared</span>
@@ -185,9 +222,41 @@
             {% if character_plan.unassignable_slots %}
             · <span style="color:var(--danger);">{{ character_plan.unassignable_slots }} unassigned</span>
             {% endif %}
+            {% if character_plan.dropped_count %}
+            · <span style="color:var(--warn);">{{ character_plan.dropped_count }} dropped</span>
+            {% endif %}
         </span>
     </div>
 
+    {% if character_plan.is_capped %}
+    <div style="padding:0.6rem 0.75rem;border-top:1px solid var(--border);background:rgba(200,169,81,0.08);font-size:11px;color:var(--warn);">
+        <div style="color:var(--text);font-weight:600;margin-bottom:0.25rem;">⚠ Plan exceeds your character cap</div>
+        <div style="color:var(--muted);font-size:10px;line-height:1.5;">
+            Optimal plan for {{ cycles }} cycle{{ 's' if cycles != 1 else '' }} of {{ bom.target.name }} needs
+            <strong style="color:var(--text);">{{ character_plan.optimal_chars }}</strong> character{{ 's' if character_plan.optimal_chars != 1 else '' }}
+            at IPC {{ ['0','I','II','III','IV','V'][ipc] }} ({{ character_plan.planets_per_char }} planets each).
+            You've capped at
+            <strong style="color:var(--warn);">{{ character_plan.effective_chars }}</strong> character{{ 's' if character_plan.effective_chars != 1 else '' }},
+            so {{ character_plan.dropped_count }} colon{{ 'ies' if character_plan.dropped_count != 1 else 'y' }} had to be dropped.
+            {% if character_plan.achievable_ratio %}
+            Achievable throughput with this cap: <strong style="color:var(--text);">~{{ (character_plan.achievable_ratio * 100) | round | int }}%</strong> of the requested rate.
+            {% endif %}
+        </div>
+        {% if character_plan.shortfalls %}
+        <div style="margin-top:0.4rem;padding-top:0.35rem;border-top:1px solid var(--border);">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:0.2rem;">Affected P0 → P1 production:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.3rem;">
+                {% for s in character_plan.shortfalls %}
+                <span style="font-size:10px;padding:0.15rem 0.4rem;background:rgba(204,51,51,0.12);border:1px solid rgba(204,51,51,0.3);color:#e58080;">
+                    {{ s.p1_name }}{% if s.p0_name %} <span style="color:var(--muted);">({{ s.p0_name }})</span>{% endif %}
+                    <span style="color:var(--warn);font-weight:600;"> −{{ s.dropped_factories }}</span>
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
     {% if character_plan.system_capacity_warning %}
     <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);background:rgba(204,51,51,0.08);font-size:10px;color:#e58080;">
         ⚠ {{ character_plan.system_capacity_warning }}
