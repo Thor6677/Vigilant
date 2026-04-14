@@ -1194,17 +1194,25 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
                 "options": _sources_for(p0["name"]),
             })
 
-    # If the target itself is P1, its own factories are miner+P1 slots too.
+    # If the target itself is P1, it doesn't appear in tier_rows (target is
+    # produced, not consumed). Synthesise one miner+P1 slot for the target.
     target = bom.get("target", {})
     if target.get("tier") == 1:
-        # Build synthetic slots for the target itself
+        # Resolve target's P0 input from the BOM's p0_totals (it has exactly one).
+        # If multiple P0 totals exist, pick the one that matches the target's recipe
+        # by falling back on P0_BY_PLANET_TYPE lookup.
         target_tid = target.get("type_id")
-        target_row_inputs = None
-        # Look up the recipe inputs by asking the BOM's tier rows (fallback)
-        # direct_inputs for the target aren't in tier_rows since target isn't in demand.
-        # We rely on the graph — but the planner doesn't receive it. Skip this edge
-        # case for now: target P1 doesn't appear as a miner slot (rare — no-one
-        # calculates a single P1 in practice).
+        target_name = target.get("name", "")
+        # The sole P0 input is the one present in bom.p0_totals
+        for p0_tid, p0_data in bom.get("p0_totals", {}).items():
+            slots.append({
+                "p0_name": p0_data["name"],
+                "p0_tid": p0_tid,
+                "p1_name": target_name,
+                "p1_tid": target_tid,
+                "options": _sources_for(p0_data["name"]),
+            })
+            break
 
     # Step 2 — Assign each slot a planet type. Priority:
     #   (a) local to the selected system,
