@@ -1031,11 +1031,16 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
         _, out_qty = output_map.get(sch_id, (tid, 1)) if sch_id else (tid, 1)
         item_cycles = cycles_of.get(tid, 0.0)
 
-        # Factory count: sustain demand_rate across the target's cycle_time window.
+        # Factory count: sustain the target's production rate (1 target cycle per
+        # target_cycle_time) regardless of `target_cycles` — N cycles is a BATCH
+        # metric for P0 volumes but factories scale to the per-cycle rate so the
+        # same colony supports longer runs. Using (cycles * target_cycle_time) as
+        # the time window normalises this.
         factories = 0
         if cycle_time and out_qty and target_cycle_time:
-            demand_rate = qty / target_cycle_time          # units/sec required
-            factory_rate = out_qty / cycle_time            # units/sec per factory
+            time_window = max(1, target_cycles) * target_cycle_time
+            demand_rate = qty / time_window              # units/sec at sustained rate
+            factory_rate = out_qty / cycle_time          # units/sec per factory
             if factory_rate > 0:
                 factories = max(1, math.ceil(demand_rate / factory_rate))
 
@@ -1109,13 +1114,23 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
 
 # ── Colony planner ────────────────────────────────────────────────────────────
 
-# Community-standard template constants (see DalShooth/EVE_PI_Templates,
-# EVE-Uni Colony Management). Conservative values tuned for CCU V skills.
-ECU_YIELD_PER_HOUR = 15_000          # P0 units/hr per ECU (sustained avg)
-P1_FACTORY_THROUGHPUT_PER_HOUR = 40  # P1 units/hr per Basic Industrial Facility
+# Community-standard template constants. Sourced from:
+#   - DalShooth EVE_PI_Templates ("Single Factory P2/P3" = 12 AIFs on CCU V,
+#     "Single P4 Factory" = 8 HTPPs, "Miner + P1 Factory" = 1-2 ECU + P1 BIF).
+#   - EVE-Uni wiki Planetary_buildings (CCU V budget = 25,415 CPU / 19,000 PG;
+#     ECU = 400/2600 + 110/550 per head, BIF = 200/800, AIF = 500/700,
+#     HTPP = 1100/400, Launchpad = 3600/700).
+#   - EVE-Uni Planetary_Industry: BIF outputs 20 P1 per 30 min (40 P1/hr).
+#
+# Yield per ECU varies 10k-40k P0/hr depending on security status, planet
+# richness, and skills — 15k/hr is a balanced midpoint (~6 heads in null/WH
+# or 10 heads in highsec). The calculator uses it only for the text footnote;
+# actual ECU count derives from P1 slot count (one ECU per P1 slot).
+ECU_YIELD_PER_HOUR = 15_000          # P0 units/hr per ECU (balanced avg)
+P1_FACTORY_THROUGHPUT_PER_HOUR = 40  # P1 units/hr per Basic Industrial Facility (SDE)
 MINER_P1_SLOTS_PER_PLANET = 2        # 1 slot = 1 ECU + 1 P1 factory on an integrated planet
-P2_P3_FACTORIES_PER_PLANET = 6       # shared Advanced Industrial Facilities (P2+P3 hub)
-P4_FACTORIES_PER_PLANET = 2          # High-Tech Production Plants
+P2_P3_FACTORIES_PER_PLANET = 12      # AIFs per shared P2/P3 hub (DalShooth single-factory)
+P4_FACTORIES_PER_PLANET = 8          # HTPPs per P4 hub (DalShooth single-factory)
 
 
 def _plan_colonies(bom: dict, system_p0_names: set[str],
@@ -1157,6 +1172,7 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
                 if p0_name in mats]
 
     target_cycle_time = bom.get("target_cycle_time") or 3600
+    target_cycles = max(1, bom.get("target", {}).get("cycles", 1))
 
     # Step 1 — Build miner+P1 slots from the P1 rows in the BOM plus
     # (if the target itself is P1) the target's own factory needs.
@@ -1165,7 +1181,9 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
         if not p1_row.get("direct_inputs"):
             continue
         p0 = p1_row["direct_inputs"][0]
-        rate_per_hour = p1_row["qty"] / target_cycle_time * 3600
+        # Rate is normalised by the full run window so N cycles just extend the
+        # run instead of inflating factory/ECU counts.
+        rate_per_hour = p1_row["qty"] / (target_cycles * target_cycle_time) * 3600
         factories = max(1, math.ceil(rate_per_hour / P1_FACTORY_THROUGHPUT_PER_HOUR))
         for _ in range(factories):
             slots.append({
