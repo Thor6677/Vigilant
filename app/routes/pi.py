@@ -1608,12 +1608,28 @@ def _plan_characters(bom: dict, graph: dict,
             "system_capacity_warning": None,
         }
 
-    # Round-robin distribute colonies across N characters so that same
-    # planet-type colonies spread out (avoids within-char collisions of
-    # same-type slots, which the planet pool can't resolve because a char
-    # can't double-up on one planet).
+    # Round-robin distribute colonies across N characters so same-type
+    # colonies spread out. N is the tighter of two constraints:
+    #   (a) ceil(total / 6) — per-char 6-planet cap;
+    #   (b) per-type: for each miner planet type X with system supply S_X,
+    #       demand_X colonies need ≥ ceil(D_X / S_X) chars so no char has
+    #       more colonies of that type than the system has planets of it.
+    # Extra chars are fine — they just each host fewer planets.
+    from collections import Counter as _Counter
+    supply_by_type: dict[str, int] = _Counter(p["planet_type"] for p in system_planets)
+    miner_demand_by_type: dict[str, int] = _Counter(
+        c["planet_type"] for c in colonies
+        if c["role"] == "miner_p1" and c["planet_type"] in supply_by_type
+    )
+    n_capacity = max(1, math.ceil(len(colonies) / MAX_PLANETS_PER_CHARACTER))
+    n_type = 1
+    for ptype, demand in miner_demand_by_type.items():
+        s = supply_by_type.get(ptype, 0)
+        if s > 0:
+            n_type = max(n_type, math.ceil(demand / s))
+
     total = len(colonies)
-    total_chunks = max(1, math.ceil(total / MAX_PLANETS_PER_CHARACTER))
+    total_chunks = max(n_capacity, n_type, 1)
     buckets: list[list[dict]] = [[] for _ in range(total_chunks)]
     # Target factory should land on the LAST char, so place it before
     # distributing; then everything else round-robins around it.
