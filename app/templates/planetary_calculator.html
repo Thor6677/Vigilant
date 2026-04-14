@@ -223,33 +223,35 @@
             · <span style="color:var(--danger);">{{ character_plan.unassignable_slots }} unassigned</span>
             {% endif %}
             {% if character_plan.dropped_count %}
-            · <span style="color:var(--warn);">{{ character_plan.dropped_count }} dropped</span>
+            · <span style="color:var(--warn);" title="Plan is running at a lower rate — these factories are not missing, the plan just produces each item more slowly.">{{ character_plan.dropped_count }} factor{{ 'ies' if character_plan.dropped_count != 1 else 'y' }} below full rate</span>
             {% endif %}
         </span>
     </div>
 
     {% if character_plan.is_capped %}
     <div style="padding:0.6rem 0.75rem;border-top:1px solid var(--border);background:rgba(200,169,81,0.08);font-size:11px;color:var(--warn);">
-        <div style="color:var(--text);font-weight:600;margin-bottom:0.25rem;">⚠ Plan exceeds your character cap</div>
+        <div style="color:var(--text);font-weight:600;margin-bottom:0.25rem;">⚠ Plan running below optimal rate</div>
         <div style="color:var(--muted);font-size:10px;line-height:1.5;">
-            Optimal plan for {{ cycles }} cycle{{ 's' if cycles != 1 else '' }} of {{ bom.target.name }} needs
+            A full-rate plan for {{ cycles }} cycle{{ 's' if cycles != 1 else '' }} of {{ bom.target.name }} would use
             <strong style="color:var(--text);">{{ character_plan.optimal_chars }}</strong> character{{ 's' if character_plan.optimal_chars != 1 else '' }}
             at IPC {{ ['0','I','II','III','IV','V'][ipc] }} ({{ character_plan.planets_per_char }} planets each).
             You've capped at
             <strong style="color:var(--warn);">{{ character_plan.effective_chars }}</strong> character{{ 's' if character_plan.effective_chars != 1 else '' }},
-            so {{ character_plan.dropped_count }} colon{{ 'ies' if character_plan.dropped_count != 1 else 'y' }} had to be dropped.
+            so {{ character_plan.dropped_count }} factor{{ 'ies' if character_plan.dropped_count != 1 else 'y' }} worth of capacity
+            {{ 'were' if character_plan.dropped_count != 1 else 'was' }} trimmed. The plan still produces every item —
+            just slower than the full-rate target.
             {% if character_plan.achievable_ratio %}
-            Achievable throughput with this cap: <strong style="color:var(--text);">~{{ (character_plan.achievable_ratio * 100) | round | int }}%</strong> of the requested rate.
+            Effective throughput: <strong style="color:var(--text);">~{{ (character_plan.achievable_ratio * 100) | round | int }}%</strong> of the full rate.
             {% endif %}
         </div>
         {% if character_plan.shortfalls %}
         <div style="margin-top:0.4rem;padding-top:0.35rem;border-top:1px solid var(--border);">
-            <div style="font-size:10px;color:var(--muted);margin-bottom:0.2rem;">Affected P0 → P1 production:</div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:0.2rem;">Items running at reduced rate (fewer factories than the full-rate plan):</div>
             <div style="display:flex;flex-wrap:wrap;gap:0.3rem;">
                 {% for s in character_plan.shortfalls %}
-                <span style="font-size:10px;padding:0.15rem 0.4rem;background:rgba(204,51,51,0.12);border:1px solid rgba(204,51,51,0.3);color:#e58080;">
+                <span style="font-size:10px;padding:0.15rem 0.4rem;background:rgba(200,169,81,0.10);border:1px solid rgba(200,169,81,0.32);color:var(--warn);" title="{{ s.p1_name }}: {{ s.dropped_factories }} factor{{ 'ies' if s.dropped_factories != 1 else 'y' }} fewer than the full-rate plan. Still produced, just at a lower rate.">
                     {{ s.p1_name }}{% if s.p0_name %} <span style="color:var(--muted);">({{ s.p0_name }})</span>{% endif %}
-                    <span style="color:var(--warn);font-weight:600;"> −{{ s.dropped_factories }}</span>
+                    <span style="color:var(--warn);font-weight:600;"> −{{ s.dropped_factories }} fact{{ 'ories' if s.dropped_factories != 1 else 'ory' }}</span>
                 </span>
                 {% endfor %}
             </div>
