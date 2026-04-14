@@ -22,7 +22,7 @@
                    oninput="piSysSearch(this)"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();piSysSubmit();}"
                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
-            <div id="sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--border);z-index:1000;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
+            <div id="sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:1000;max-height:240px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
         </div>
     </div>
     <div id="sys-result" style="border-top:1px solid var(--border);"></div>
@@ -48,6 +48,11 @@
     </div>
 </div>
 
+<style>
+    .sys-dd-item:hover { background:#222; }
+    .sys-dd-item:last-child { border-bottom:0; }
+</style>
+
 <script>
 (function() {
     var _tmr;
@@ -64,7 +69,7 @@
                     dd.innerHTML = data.map(function(s){
                         var sec = s.security;
                         var col = sec >= 0.5 ? 'var(--success)' : sec >= 0 ? 'var(--warn)' : 'var(--danger)';
-                        return '<div style="padding:0.4rem 0.6rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
+                        return '<div class="sys-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
                             + ' onmousedown="piSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
                             + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
                             + '<span style="color:var(--text);">' + s.system_name + '</span>'

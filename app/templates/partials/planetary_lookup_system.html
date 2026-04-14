@@ -51,7 +51,7 @@
         {% set c = tier_counts.get(tier, {"total":0,"producible":0}) %}
         {% set ratio = (c.producible / c.total) if c.total else 0 %}
         <div style="border:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column;min-width:0;">
-            <div style="padding:0.4rem 0.55rem;border-bottom:1px solid var(--border);background:var(--panel);">
+            <div style="padding:0.4rem 0.55rem;border-bottom:1px solid var(--border);background:#121212;">
                 <div style="font-size:11px;font-weight:600;color:var(--text);display:flex;justify-content:space-between;align-items:baseline;">
                     <span>P{{ tier }}</span>
                     <span style="font-size:10px;color:
