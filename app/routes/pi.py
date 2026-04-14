@@ -1943,9 +1943,17 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
     # we can draw intra-row edges for the extractor chain.
     intra_miner_pairs: list[tuple[int, int, int]] = []  # (char_idx, p0_tid, p1_tid)
 
+    def _short_planet(name: str) -> str:
+        """Strip the system prefix; keep only the trailing planet numeral."""
+        if not name:
+            return ""
+        parts = name.rsplit(" ", 1)
+        return parts[-1] if len(parts) > 1 else name
+
     for cidx, char in enumerate(characters):
         for slot in char["slots"]:
             planet_name = slot.get("planet_name") or "—"
+            planet_short = _short_planet(planet_name)
             if slot["role"] == "miner_p1":
                 for s in slot.get("slots", []):
                     items_by_char[cidx][0].append({
@@ -1953,12 +1961,14 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                         "name": s["p0_name"],
                         "count": 1,
                         "planets": [planet_name],
+                        "planets_short": [planet_short],
                     })
                     items_by_char[cidx][1].append({
                         "tid": s["p1_tid"],
                         "name": s["p1_name"],
                         "count": 1,
                         "planets": [planet_name],
+                        "planets_short": [planet_short],
                     })
                     producers_by_tid.setdefault(s["p1_tid"], [])
                     if cidx not in producers_by_tid[s["p1_tid"]]:
@@ -1975,6 +1985,7 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                         "name": fac.get("name", f"Type {tid}"),
                         "count": fac.get("count", 1),
                         "planets": [planet_name],
+                        "planets_short": [planet_short],
                     })
                     producers_by_tid.setdefault(tid, [])
                     if cidx not in producers_by_tid[tid]:
@@ -1992,12 +2003,16 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                     for p in it.get("planets", []):
                         if p not in merged[key]["planets"]:
                             merged[key]["planets"].append(p)
+                    for ps in it.get("planets_short", []):
+                        if ps not in merged[key]["planets_short"]:
+                            merged[key]["planets_short"].append(ps)
                 else:
                     merged[key] = {
                         "tid": it["tid"],
                         "name": it["name"],
                         "count": it["count"],
                         "planets": list(it.get("planets", [])),
+                        "planets_short": list(it.get("planets_short", [])),
                     }
             items_by_char[cidx][tier] = sorted(merged.values(), key=lambda i: i["name"])
 
