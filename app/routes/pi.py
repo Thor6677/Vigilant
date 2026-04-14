@@ -2109,18 +2109,15 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
     # Mark "surplus" nodes: items produced on a char but never consumed by
     # any (intra or cross) edge AND not the target. These are dead-end P1/P2
     # factories the packer slotted to fill a planet but the chain doesn't need.
+    target_tid = bom.get("target", {}).get("type_id")
     consumed_by_char: dict[tuple[int, int], bool] = {}
     for e in edges:
         consumed_by_char[(e["from_char"], e["tid"])] = True
     for cidx in range(len(characters)):
         for tier in range(5):
             for node in items_by_char[cidx][tier]:
-                if tier == 0:
-                    # P0 nodes are always "consumed" locally by their miner's
-                    # P1 factory — the intra miner edge exists. The edge key
-                    # uses p0_tid so this flag should already be set, but
-                    # double-check in case of oddities.
-                    node["surplus"] = not consumed_by_char.get((cidx, node["tid"]), False)
+                if node["tid"] == target_tid:
+                    node["surplus"] = False  # target is the end product, not surplus
                 else:
                     node["surplus"] = not consumed_by_char.get((cidx, node["tid"]), False)
 
