@@ -1265,14 +1265,14 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
             })
 
     # Step 4 — P2/P3 factory hubs (shared). Use target if target is P2/P3.
+    # Target's own factory count is rate-based: 1 factory sustains 1 target
+    # cycle per target_cycle_time regardless of the user's N-cycle batch size.
     p2_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(2, []))
     p3_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(3, []))
-    if target.get("tier") in (2, 3):
-        p2_p3_target_extra = max(1, target.get("cycles", 1))
-        if target.get("tier") == 2:
-            p2_factories += p2_p3_target_extra
-        else:
-            p3_factories += p2_p3_target_extra
+    if target.get("tier") == 2:
+        p2_factories += 1
+    elif target.get("tier") == 3:
+        p3_factories += 1
     mid_total = p2_factories + p3_factories
 
     # Hub planet type: prefer Barren → Temperate → any local → Barren.
@@ -1293,9 +1293,11 @@ def _plan_colonies(bom: dict, system_p0_names: set[str],
         remaining -= chunk
 
     # Step 5 — P4 factory hubs (including the target itself if P4).
+    # Target's own factory is rate-based — 1 factory sustains production,
+    # larger N extends the run time rather than multiplying the colony.
     p4_factories = sum(r.get("factories", 0) for r in bom["tier_rows"].get(4, []))
     if target.get("tier") == 4:
-        p4_factories += max(1, target.get("cycles", 1))
+        p4_factories += 1
 
     remaining = p4_factories
     while remaining > 0:
