@@ -1545,9 +1545,19 @@ def _plan_characters(bom: dict, graph: dict,
         characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
     else:
         # Vertical slice path: one producer per direct input + one assembler.
+        # Reserve the assembler's planet FIRST so it always has a home,
+        # regardless of how many slice-producer planets are consumed.
+        assembler_planet = _take_hub_planet() if target_tier in (2, 3, 4) else None
+
         target_sch = canonical.get(target_tid)
         if target_sch is None:
-            # Defensive: no recipe — fall back to full chain
+            # Defensive: no recipe — fall back to full chain (release the assembler planet)
+            if assembler_planet is not None:
+                # Return the reserved planet to the free list so the fallback plan can use it
+                for p in free_planets:
+                    if p["planet_name"] == assembler_planet["planet_name"]:
+                        p["used"] = False
+                        break
             characters = _pack_colonies_into_chars(combined["colonies"], None, "full_chain")
         else:
             direct_inputs = input_map.get(target_sch, [])
@@ -1572,67 +1582,38 @@ def _plan_characters(bom: dict, graph: dict,
                 )
 
             # Assembler character: target's own factory only.
-            if target_tier == 4:
-                assembler_planet = _take_hub_planet()
-                if assembler_planet is None:
-                    unassignable += 1
-                    slot = {
-                        "planet_name": None,
-                        "planet_type": "Barren",
-                        "preferred": True,
-                        "role": "p4_factory",
-                        "factory_count": 1,
-                        "factory_tier": "P4",
-                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": 4, "count": 1}],
-                    }
-                else:
-                    slot = {
-                        "planet_name": assembler_planet["planet_name"],
-                        "planet_type": assembler_planet["planet_type"],
-                        "preferred": True,
-                        "role": "p4_factory",
-                        "factory_count": 1,
-                        "factory_tier": "P4",
-                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": 4, "count": 1}],
-                    }
-                characters.append({
-                    "label": "Char {n} — Assembler",
-                    "role": "assembler",
-                    "slice_name": None,
-                    "overflow_index": 0,
-                    "slots": [slot],
-                })
-            elif target_tier in (2, 3):
-                assembler_planet = _take_hub_planet()
-                tier_label = "P2/P3" if target_tier == 2 else "P2/P3"
-                if assembler_planet is None:
-                    unassignable += 1
-                    slot = {
-                        "planet_name": None,
-                        "planet_type": "Barren",
-                        "preferred": True,
-                        "role": "p2_p3_factory",
-                        "factory_count": 1,
-                        "factory_tier": tier_label,
-                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
-                    }
-                else:
-                    slot = {
-                        "planet_name": assembler_planet["planet_name"],
-                        "planet_type": assembler_planet["planet_type"],
-                        "preferred": True,
-                        "role": "p2_p3_factory",
-                        "factory_count": 1,
-                        "factory_tier": tier_label,
-                        "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
-                    }
-                characters.append({
-                    "label": "Char {n} — Assembler",
-                    "role": "assembler",
-                    "slice_name": None,
-                    "overflow_index": 0,
-                    "slots": [slot],
-                })
+            # Build the assembler slot using the pre-reserved planet (or flag
+            # as unassigned if none could be reserved).
+            role = "p4_factory" if target_tier == 4 else "p2_p3_factory"
+            tier_label = "P4" if target_tier == 4 else "P2/P3"
+            if assembler_planet is None:
+                unassignable += 1
+                slot = {
+                    "planet_name": None,
+                    "planet_type": "Barren",
+                    "preferred": True,
+                    "role": role,
+                    "factory_count": 1,
+                    "factory_tier": tier_label,
+                    "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
+                }
+            else:
+                slot = {
+                    "planet_name": assembler_planet["planet_name"],
+                    "planet_type": assembler_planet["planet_type"],
+                    "preferred": True,
+                    "role": role,
+                    "factory_count": 1,
+                    "factory_tier": tier_label,
+                    "factories": [{"name": name_map.get(target_tid, "Target"), "tier": target_tier, "count": 1}],
+                }
+            characters.append({
+                "label": "Char {n} — Assembler",
+                "role": "assembler",
+                "slice_name": None,
+                "overflow_index": 0,
+                "slots": [slot],
+            })
 
     # ── Finalize labels with running character number ──────────────────
     for i, ch in enumerate(characters, start=1):
