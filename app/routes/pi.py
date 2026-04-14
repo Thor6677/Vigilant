@@ -460,36 +460,34 @@ def _space_type(region_id: int | None, security: float | None) -> str:
     return "nullsec"
 
 
-async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) -> dict:
-    """Build the full PI commodity universe with producibility flags for one system.
+async def _load_schematic_graph(db: AsyncSession) -> dict | None:
+    """Load the full PI schematic graph once. Shared by _tier_view_for_system
+    and _expand_bom so they stay in lock-step on canonical recipes and tiers.
 
-    Returns:
-        {
-          "all_tiers": {0..4: [{type_id, name, producible, inputs, missing,
-                                cycle_time, output_qty, planet_sources}]},
-          "counts":    {0..4: {total, producible}},
-        }
+    Returns None if the SDE PI tables aren't populated yet.
 
-    Every PI commodity P0-P4 is included; `producible=True` means the full input
-    chain is satisfiable from the given P0 pool. `missing` lists the direct
-    input names blocking production (only set when not producible).
+    Shape:
+      {
+        "input_map":           {schematic_id: [(in_type_id, qty), ...]},
+        "output_map":          {schematic_id: (out_type_id, qty)},
+        "schematics":          {schematic_id: SDEPlanetSchematic row},
+        "canonical_schematic": {type_id: schematic_id that produces it (first-seen)},
+        "name_map":            {type_id: human name},
+        "all_ids":             set of every type_id appearing in PI (P0..P4),
+        "tier_of":             {type_id: 0..4},
+      }
     """
     from app.db.sde_models import SDEPlanetSchematic, SDEPlanetSchematicMaterial
-
-    # System P0 type_ids (subset of the 15 known P0 names)
-    system_p0_ids: set[int] = {
-        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in p0_names_in_system
-    }
-
     try:
         mat_result = await db.execute(select(SDEPlanetSchematicMaterial))
         mats = list(mat_result.scalars().all())
         sch_result = await db.execute(select(SDEPlanetSchematic))
         schematics = {s.schematic_id: s for s in sch_result.scalars().all()}
     except Exception:
-        return {"all_tiers": {0: [], 1: [], 2: [], 3: [], 4: []}, "counts": {t: {"total": 0, "producible": 0} for t in range(5)}}
+        return None
+    if not mats:
+        return None
 
-    # Input / output maps
     input_map: dict[int, list[tuple[int, int]]] = {}
     output_map: dict[int, tuple[int, int]] = {}
     for m in mats:
@@ -498,7 +496,6 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
         else:
             output_map[m.schematic_id] = (m.type_id, m.quantity)
 
-    # Every commodity that appears in any schematic, plus the 15 canonical P0s
     all_ids: set[int] = set(pi_const.P0_TYPE_IDS.values())
     for _sch_id, (out_tid, _qty) in output_map.items():
         all_ids.add(out_tid)
@@ -508,8 +505,7 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
 
     produced_set: set[int] = {t for (t, _) in output_map.values()}
 
-    # Compute the absolute tier of every commodity (unrelated to the system)
-    # P0 = 0, else 1 + max(input tiers)
+    # Absolute tier: P0 = 0, else 1 + max(input tiers). Converges in ≤4 passes.
     tier_of: dict[int, int] = {tid: 0 for tid in pi_const.P0_TYPE_IDS.values()}
     for tid in all_ids:
         if tid not in produced_set:
@@ -526,6 +522,56 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
                 changed = True
         if not changed:
             break
+
+    # Canonical schematic per output (first seen wins). Each PI commodity has
+    # exactly one producing recipe in current EVE, but be defensive.
+    canonical_schematic: dict[int, int] = {}
+    for sch_id, (out_tid, _qty) in output_map.items():
+        canonical_schematic.setdefault(out_tid, sch_id)
+
+    name_map = await sde.type_ids_to_names(db, list(all_ids))
+
+    return {
+        "input_map": input_map,
+        "output_map": output_map,
+        "schematics": schematics,
+        "canonical_schematic": canonical_schematic,
+        "name_map": name_map,
+        "all_ids": all_ids,
+        "tier_of": tier_of,
+    }
+
+
+async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) -> dict:
+    """Build the full PI commodity universe with producibility flags for one system.
+
+    Returns:
+        {
+          "all_tiers": {0..4: [{type_id, name, producible, inputs, missing,
+                                cycle_time, output_qty, planet_sources}]},
+          "counts":    {0..4: {total, producible}},
+        }
+
+    Every PI commodity P0-P4 is included; `producible=True` means the full input
+    chain is satisfiable from the given P0 pool. `missing` lists the direct
+    input names blocking production (only set when not producible).
+    """
+    # System P0 type_ids (subset of the 15 known P0 names)
+    system_p0_ids: set[int] = {
+        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in p0_names_in_system
+    }
+
+    graph = await _load_schematic_graph(db)
+    if graph is None:
+        return {"all_tiers": {0: [], 1: [], 2: [], 3: [], 4: []}, "counts": {t: {"total": 0, "producible": 0} for t in range(5)}}
+
+    input_map = graph["input_map"]
+    output_map = graph["output_map"]
+    schematics = graph["schematics"]
+    all_ids = graph["all_ids"]
+    tier_of = graph["tier_of"]
+    canonical_schematic = graph["canonical_schematic"]
+    name_map = graph["name_map"]
 
     # Producibility BFS: seeded with the system's P0s
     producible: set[int] = set(system_p0_ids)
@@ -545,13 +591,6 @@ async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) 
                     changed = True
             if not changed:
                 break
-
-    name_map = await sde.type_ids_to_names(db, list(all_ids))
-
-    # For each commodity find ONE canonical recipe (the first schematic that produces it)
-    canonical_schematic: dict[int, int] = {}
-    for sch_id, (out_tid, _qty) in output_map.items():
-        canonical_schematic.setdefault(out_tid, sch_id)
 
     # ── Graph relationships for hover highlighting ──
     # direct_inputs[tid]: immediate recipe ingredients
@@ -818,6 +857,234 @@ async def planetary_chain_node(
         "revenue_per_cycle": revenue_per_cycle,
         "margin_per_cycle": margin_per_cycle,
     })
+
+
+# ── Phase 4: /industry/planetary/calculator ───────────────────────────────────
+
+@router.get("/industry/planetary/calculator", response_class=HTMLResponse)
+async def planetary_calculator_page(
+    request: Request,
+    target: int | None = Query(None),
+    system: str | None = Query(None),
+    cycles: int = Query(1, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+):
+    """BOM calculator — pick a target PI product + optional system, see the
+    full chain expansion with per-tier factory counts, P0 totals, ISK margins,
+    and flags for any P0 the selected system can't produce locally.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
+    graph = await _load_schematic_graph(db)
+
+    # Build the product picker options grouped by tier
+    product_options: dict[int, list[dict]] = {1: [], 2: [], 3: [], 4: []}
+    if graph:
+        for tid in graph["all_ids"]:
+            t = graph["tier_of"].get(tid, 0)
+            if 1 <= t <= 4:
+                product_options[t].append({
+                    "type_id": tid,
+                    "name": graph["name_map"].get(tid, f"Type {tid}"),
+                })
+        for t in product_options:
+            product_options[t].sort(key=lambda x: x["name"])
+
+    # Resolve system context if provided
+    system_info = None
+    system_p0_names: set[str] = set()
+    space_type = None
+    if system:
+        sys_id = await sde.system_name_to_id(db, system)
+        if sys_id:
+            system_info = await sde.system_info(db, sys_id)
+            from app.db.sde_models import SDEPlanet, SDESystem
+            rid_result = await db.execute(select(SDESystem.region_id).where(SDESystem.system_id == sys_id))
+            region_id = rid_result.scalar_one_or_none()
+            space_type = _space_type(region_id, system_info.get("security") if system_info else None)
+            planet_result = await db.execute(select(SDEPlanet).where(SDEPlanet.system_id == sys_id))
+            for p in planet_result.scalars().all():
+                ptype = pi_const.PLANET_TYPE_NAMES.get(p.planet_type_id, "")
+                for mat in pi_const.P0_BY_PLANET_TYPE.get(ptype.lower(), []):
+                    system_p0_names.add(mat)
+
+    system_p0_ids: set[int] = {
+        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in system_p0_names
+    }
+
+    # Run the BOM if the user picked a target
+    bom = None
+    if graph and target and target in graph["all_ids"]:
+        bom = _expand_bom(graph, target, cycles, system_p0_ids)
+        # Enrich with ISK economics
+        price_type_ids = set(bom["p0_totals"].keys()) | {target}
+        for tier_items in bom["tier_rows"].values():
+            for row in tier_items:
+                price_type_ids.add(row["type_id"])
+        prices = await _get_pi_prices(db, price_type_ids)
+        bom["prices"] = prices
+        p0_cost = sum((prices.get(tid, 0.0) or 0.0) * data["qty"]
+                      for tid, data in bom["p0_totals"].items())
+        target_price = prices.get(target, 0.0) or 0.0
+        revenue = target_price * bom["total_target_output"]
+        bom["p0_input_cost"] = p0_cost
+        bom["revenue"] = revenue
+        bom["margin"] = revenue - p0_cost
+        bom["margin_pct"] = (revenue - p0_cost) / p0_cost * 100 if p0_cost > 0 else None
+
+    return templates.TemplateResponse("planetary_calculator.html", {
+        "request": request,
+        "target": target,
+        "system": system,
+        "cycles": cycles,
+        "product_options": product_options,
+        "bom": bom,
+        "system_info": system_info,
+        "space_type": space_type,
+        "system_p0_names": sorted(system_p0_names),
+        "no_sde": graph is None,
+        "tier_names": {0: "P0 · Raw", 1: "P1 · Basic", 2: "P2 · Basic",
+                       3: "P3 · Specialized", 4: "P4 · Advanced"},
+    })
+
+
+def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
+                system_p0_ids: set[int]) -> dict:
+    """Recursively expand target product into its full P0 requirements.
+
+    Intermediate cycle counts are fractional (no rounding loss on raw-material
+    totals). Factory counts use ceil(demand_rate / factory_rate) with each
+    schematic's own cycle time so mixed-tier timing (e.g. 30min P1 vs 60min P2)
+    computes correctly.
+
+    Returns:
+      {
+        "target":              {type_id, name, cycles, output_qty, total_output},
+        "target_cycle_time":   seconds,
+        "total_target_output": int,
+        "tier_rows":           {tier: [{type_id, name, qty, cycles, factories,
+                                        cycle_time, output_qty, direct_inputs}]},
+        "p0_totals":           {type_id: {name, qty, producible, planet_sources}},
+        "total_p0_volume":     int (sum across all P0 demand, rounded),
+      }
+    """
+    input_map = graph["input_map"]
+    output_map = graph["output_map"]
+    schematics = graph["schematics"]
+    canonical = graph["canonical_schematic"]
+    name_map = graph["name_map"]
+    tier_of = graph["tier_of"]
+
+    target_sch = canonical.get(target_tid)
+    target_sch_row = schematics.get(target_sch) if target_sch else None
+    target_cycle_time = target_sch_row.cycle_time if target_sch_row else 3600
+    _t_out_tid, target_output_qty = output_map.get(target_sch, (target_tid, 1))
+    total_target_output = target_output_qty * target_cycles
+
+    # demand[tid] = total qty of tid needed (float; fractional if intermediate)
+    # cycles_of[tid] = total fractional production cycles required of tid
+    demand: dict[int, float] = {}
+    cycles_of: dict[int, float] = {target_tid: target_cycles}
+
+    # BFS down the recipe graph. Use queue semantics so we visit each commodity's
+    # contribution once; dedupe by accumulating demand additively.
+    queue: list[tuple[int, float]] = [(target_tid, float(target_cycles))]
+    while queue:
+        tid, cycles_needed = queue.pop(0)
+        sch_id = canonical.get(tid)
+        if sch_id is None:
+            continue  # P0 leaf — no recipe to expand
+        for in_tid, in_qty in input_map.get(sch_id, []):
+            qty_needed = in_qty * cycles_needed
+            demand[in_tid] = demand.get(in_tid, 0.0) + qty_needed
+            in_sch = canonical.get(in_tid)
+            if in_sch is not None:
+                _, in_out_qty = output_map.get(in_sch, (in_tid, 1))
+                sub_cycles = qty_needed / in_out_qty if in_out_qty else 0
+                cycles_of[in_tid] = cycles_of.get(in_tid, 0.0) + sub_cycles
+                queue.append((in_tid, sub_cycles))
+
+    # Per-tier rows (P1..P4 intermediates)
+    import math
+    tier_rows: dict[int, list[dict]] = {0: [], 1: [], 2: [], 3: [], 4: []}
+    seen_ids: set[int] = set()
+    for tid, qty in demand.items():
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+        tier = tier_of.get(tid, 0)
+        sch_id = canonical.get(tid)
+        sch_row = schematics.get(sch_id) if sch_id else None
+        cycle_time = sch_row.cycle_time if sch_row else None
+        _, out_qty = output_map.get(sch_id, (tid, 1)) if sch_id else (tid, 1)
+        item_cycles = cycles_of.get(tid, 0.0)
+
+        # Factory count: sustain demand_rate across the target's cycle_time window.
+        factories = 0
+        if cycle_time and out_qty and target_cycle_time:
+            demand_rate = qty / target_cycle_time          # units/sec required
+            factory_rate = out_qty / cycle_time            # units/sec per factory
+            if factory_rate > 0:
+                factories = max(1, math.ceil(demand_rate / factory_rate))
+
+        direct_inputs = []
+        if sch_id:
+            for in_tid, in_qty in input_map.get(sch_id, []):
+                direct_inputs.append({
+                    "type_id": in_tid,
+                    "name": name_map.get(in_tid, f"Type {in_tid}"),
+                    "per_cycle": in_qty,
+                })
+
+        tier_rows[tier].append({
+            "type_id": tid,
+            "name": name_map.get(tid, f"Type {tid}"),
+            "qty": qty,
+            "cycles": item_cycles,
+            "factories": factories,
+            "cycle_time": cycle_time,
+            "output_qty": out_qty,
+            "direct_inputs": direct_inputs,
+        })
+
+    for t in tier_rows:
+        tier_rows[t].sort(key=lambda x: x["name"])
+
+    # P0 totals with system availability
+    p0_totals: dict[int, dict] = {}
+    for tid, qty in demand.items():
+        if tier_of.get(tid, -1) == 0:
+            name = name_map.get(tid, f"Type {tid}")
+            producible = (tid in system_p0_ids) if system_p0_ids else True
+            planet_sources = [
+                ptype for ptype, mats in pi_const.P0_BY_PLANET_TYPE.items()
+                if name in mats
+            ]
+            p0_totals[tid] = {
+                "name": name,
+                "qty": qty,
+                "producible": producible,
+                "planet_sources": planet_sources,
+            }
+
+    total_p0_volume = sum(int(round(d["qty"])) for d in p0_totals.values())
+
+    return {
+        "target": {
+            "type_id": target_tid,
+            "name": name_map.get(target_tid, f"Type {target_tid}"),
+            "cycles": target_cycles,
+            "output_qty": target_output_qty,
+            "total_output": total_target_output,
+        },
+        "target_cycle_time": target_cycle_time,
+        "total_target_output": total_target_output,
+        "tier_rows": tier_rows,
+        "p0_totals": p0_totals,
+        "total_p0_volume": total_p0_volume,
+    }
 
 
 # ── Chain builders & pricing ─────────────────────────────────────────────────

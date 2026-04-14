@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% block title %}PI CALCULATOR — VIGILANT{% endblock %}
+
+{% block content %}
+<div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
+    <nav style="display:flex;gap:0.5rem;font-size:11px;">
+        <a href="/industry/planetary" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
+        <a href="/industry/planetary/lookup" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
+        <a href="/industry/planetary/calculator" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Calculator</a>
+        <a href="/industry/planetary/chain" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
+    </nav>
+</div>
+
+{% if no_sde %}
+<div class="b-panel b-section" style="padding:0.75rem;font-size:11px;color:var(--warn);">
+    PI schematic tables not loaded yet — calculator will populate after the next SDE import.
+</div>
+{% else %}
+
+{# ── Input form ─────────────────────────────────────────────────────────── #}
+<div class="b-panel b-section" style="overflow:visible;">
+    <div class="b-panel-head"><span class="b-label">Calculator</span></div>
+    <form method="get" action="/industry/planetary/calculator"
+          style="padding:0.75rem;display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.3fr) 90px auto;gap:0.5rem;align-items:end;">
+        <div style="position:relative;">
+            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">System (optional)</label>
+            <input type="text" id="calc-sys" name="system" value="{{ system or '' }}" placeholder="e.g. Jita" autocomplete="off"
+                   oninput="calcSysSearch(this)"
+                   style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+            <div id="calc-sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:1000;max-height:220px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
+        </div>
+        <div>
+            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Target product</label>
+            <select name="target"
+                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;">
+                <option value="">— Select a product —</option>
+                {% for tier in [1,2,3,4] %}
+                <optgroup label="P{{ tier }} — {% if tier == 1 %}Basic{% elif tier == 2 %}Refined{% elif tier == 3 %}Specialized{% else %}Advanced{% endif %}">
+                    {% for item in product_options.get(tier, []) %}
+                    <option value="{{ item.type_id }}" {% if target == item.type_id %}selected{% endif %}>{{ item.name }}</option>
+                    {% endfor %}
+                </optgroup>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Cycles</label>
+            <input type="number" name="cycles" value="{{ cycles }}" min="1" max="10000" step="1"
+                   style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+        </div>
+        <div>
+            <button type="submit" class="b-btn"
+                    style="padding:0.5rem 1rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;">
+                Calculate →
+            </button>
+        </div>
+    </form>
+
+    {% if system_info and space_type %}
+    <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);display:flex;gap:0.75rem;align-items:center;font-size:11px;flex-wrap:wrap;">
+        <span style="color:var(--text);font-weight:600;">{{ system_info.system_name }}</span>
+        {% if system_info.security is not none %}
+        <span style="color:
+            {%- if system_info.security >= 0.5 -%}var(--success)
+            {%- elif system_info.security > 0 -%}var(--warn)
+            {%- else -%}var(--danger)
+            {%- endif -%};">{{ '%.1f' | format(system_info.security) }}</span>
+        {% endif %}
+        {% if space_type == 'wormhole' %}
+        <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(153,102,204,0.18);color:#b88ad4;border:1px solid rgba(153,102,204,0.4);">J-SPACE</span>
+        {% elif space_type == 'pochven' %}
+        <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(204,51,51,0.18);color:#e58080;border:1px solid rgba(204,51,51,0.4);">POCHVEN</span>
+        {% elif space_type == 'nullsec' %}
+        <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(204,51,51,0.15);color:#cc6666;border:1px solid rgba(204,51,51,0.35);">NULLSEC</span>
+        {% elif space_type == 'lowsec' %}
+        <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(200,169,81,0.15);color:var(--warn);border:1px solid rgba(200,169,81,0.35);">LOWSEC</span>
+        {% elif space_type == 'highsec' %}
+        <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(51,170,85,0.15);color:var(--success);border:1px solid rgba(51,170,85,0.35);">HIGHSEC</span>
+        {% endif %}
+        <span style="color:var(--muted);font-size:10px;">{{ system_p0_names | length }} P0 types available locally</span>
+    </div>
+    {% endif %}
+</div>
+
+{% if bom %}
+{# ── Summary strip ──────────────────────────────────────────────────────── #}
+<div class="b-section" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.4rem;">
+    <div style="border:1px solid var(--border);background:var(--surface);padding:0.5rem 0.6rem;">
+        <div style="font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:0.05em;">Target</div>
+        <div style="font-size:13px;color:var(--text);margin-top:2px;">{{ bom.target.name }}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px;">
+            {{ bom.target.cycles }} cycle{{ 's' if bom.target.cycles != 1 else '' }} → {{ '{:,}'.format(bom.target.total_output) }} unit{{ 's' if bom.target.total_output != 1 else '' }}
+        </div>
+    </div>
+    <div style="border:1px solid var(--border);background:var(--surface);padding:0.5rem 0.6rem;">
+        <div style="font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:0.05em;">Cycle time (target)</div>
+        <div style="font-size:13px;color:var(--text);margin-top:2px;">
+            {% set tct = bom.target_cycle_time %}
+            {% if tct >= 3600 %}{{ (tct // 3600) }}h {{ ((tct % 3600) // 60) }}m{% else %}{{ tct // 60 }}m{% endif %}
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px;">per cycle</div>
+    </div>
+    <div style="border:1px solid var(--border);background:var(--surface);padding:0.5rem 0.6rem;">
+        <div style="font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:0.05em;">P0 input cost</div>
+        <div style="font-size:13px;color:var(--text);margin-top:2px;">{{ '{:,.0f}'.format(bom.p0_input_cost) }} ISK</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px;">raw materials @ ESI avg</div>
+    </div>
+    <div style="border:1px solid var(--border);background:var(--surface);padding:0.5rem 0.6rem;">
+        <div style="font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:0.05em;">Revenue</div>
+        <div style="font-size:13px;color:var(--text);margin-top:2px;">{{ '{:,.0f}'.format(bom.revenue) }} ISK</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px;">output × price</div>
+    </div>
+    <div style="border:1px solid var(--border);background:var(--surface);padding:0.5rem 0.6rem;">
+        <div style="font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:0.05em;">Margin</div>
+        <div style="font-size:13px;margin-top:2px;color:
+            {%- if bom.margin > 0 -%}var(--success)
+            {%- elif bom.margin < 0 -%}var(--danger)
+            {%- else -%}var(--muted)
+            {%- endif -%};">
+            {{ '{:+,.0f}'.format(bom.margin) }} ISK
+            {% if bom.margin_pct is not none %}<span style="font-size:10px;"> ({{ '%+.0f' | format(bom.margin_pct) }}%)</span>{% endif %}
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px;">per calculation</div>
+    </div>
+</div>
+
+{# ── P0 totals — the answer to the user's question ─────────────────────── #}
+<div class="b-panel b-section">
+    <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span class="b-label">P0 raw materials needed</span>
+        <span style="font-size:10px;color:var(--muted);">
+            {{ bom.p0_totals | length }} distinct · total ≈ {{ '{:,}'.format(bom.total_p0_volume) }} units
+        </span>
+    </div>
+    <div style="padding:0.5rem 0.75rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.4rem;">
+        {% for tid, p0 in bom.p0_totals | dictsort(by='value', case_sensitive=false) %}
+        <div style="border:1px solid var(--border);padding:0.4rem 0.55rem;background:var(--surface);
+             {%- if system_info and not p0.producible -%}border-color:rgba(204,51,51,0.5);{%- endif -%}">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.3rem;">
+                <span style="font-size:12px;color:
+                    {%- if system_info and not p0.producible -%}#e58080
+                    {%- else -%}var(--text)
+                    {%- endif -%};">{{ p0.name }}</span>
+                <span style="font-size:12px;color:var(--text);font-weight:600;">{{ '{:,}'.format(p0.qty | round | int) }}</span>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px;display:flex;justify-content:space-between;gap:0.3rem;">
+                <span>{{ p0.planet_sources | join(', ') | capitalize }}</span>
+                {% if system_info %}
+                <span style="color:
+                    {%- if p0.producible -%}var(--success)
+                    {%- else -%}var(--danger)
+                    {%- endif -%};">
+                    {% if p0.producible %}✓ local{% else %}⚠ import{% endif %}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% if system_info %}
+    {% set missing_count = bom.p0_totals.values() | rejectattr('producible') | list | length %}
+    {% if missing_count > 0 %}
+    <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:#e58080;">
+        ⚠ {{ missing_count }} raw material{{ 's' if missing_count != 1 else '' }} not available in {{ system_info.system_name }} — must be imported from elsewhere.
+    </div>
+    {% else %}
+    <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--success);">
+        ✓ All raw materials available locally in {{ system_info.system_name }}.
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+
+{# ── Intermediate tier breakdown ────────────────────────────────────────── #}
+<div class="b-panel b-section">
+    <div class="b-panel-head"><span class="b-label">Production pipeline</span></div>
+    {% for tier in [4,3,2,1] %}
+    {% set rows = bom.tier_rows.get(tier, []) %}
+    {% if rows %}
+    <div style="border-top:1px solid var(--border);">
+        <div style="padding:0.4rem 0.75rem;background:#121212;display:flex;justify-content:space-between;align-items:baseline;">
+            <span style="font-size:11px;color:var(--text);font-weight:600;">
+                {{ tier_names.get(tier, 'P' ~ tier) }}
+            </span>
+            <span style="font-size:10px;color:var(--muted);">{{ rows | length }} product{{ 's' if rows|length != 1 else '' }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(160px,2fr) 90px 90px 90px minmax(220px,2fr);gap:0.4rem;padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid var(--border);">
+            <span>Product</span>
+            <span style="text-align:right;">Qty needed</span>
+            <span style="text-align:right;">Cycles</span>
+            <span style="text-align:right;">Factories</span>
+            <span>Per-cycle recipe</span>
+        </div>
+        {% for row in rows %}
+        <div style="display:grid;grid-template-columns:minmax(160px,2fr) 90px 90px 90px minmax(220px,2fr);gap:0.4rem;padding:0.35rem 0.75rem;font-size:11px;border-top:1px solid var(--border);align-items:center;
+             {%- if row.type_id == bom.target.type_id -%}background:rgba(200,169,81,0.08);{%- endif -%}">
+            <span style="color:
+                {%- if row.type_id == bom.target.type_id -%}var(--accent)
+                {%- else -%}var(--text)
+                {%- endif -%};">
+                {% if row.type_id == bom.target.type_id %}★ {% endif %}{{ row.name }}
+            </span>
+            <span style="text-align:right;color:var(--text);">{{ '{:,}'.format(row.qty | round | int) }}</span>
+            <span style="text-align:right;color:var(--muted);">
+                {% if row.cycles < 10 %}{{ '%.2f' | format(row.cycles) }}{% else %}{{ '{:,.1f}'.format(row.cycles) }}{% endif %}
+            </span>
+            <span style="text-align:right;color:var(--text);">{{ row.factories }}</span>
+            <span style="color:var(--muted);font-size:10px;">
+                {% for inp in row.direct_inputs %}
+                {{ inp.per_cycle }}× <span style="color:var(--text);">{{ inp.name }}</span>{% if not loop.last %} + {% endif %}
+                {% endfor %}
+                {% if row.cycle_time and row.output_qty %}
+                <span style="color:var(--muted);"> → {{ row.output_qty }} per {{ row.cycle_time // 60 }}m</span>
+                {% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <div style="padding:0.4rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
+        Cycles are fractional so P0 totals match exactly — round up in practice per integer batch.
+        Factory counts sustain the target rate given each tier's own cycle time.
+    </div>
+</div>
+
+{% elif target %}
+<div class="b-panel b-section" style="padding:0.75rem;color:var(--warn);font-size:11px;">
+    Target {{ target }} not in the PI commodity graph.
+</div>
+{% else %}
+<div class="b-panel b-section" style="padding:0.75rem;color:var(--muted);font-size:11px;">
+    Pick a target product to see the raw-material breakdown. Optionally add a system to flag which P0s you can source locally.
+</div>
+{% endif %}
+
+<script>
+// Persist the last selection in localStorage so a reload keeps state.
+(function() {
+    var LS_KEY = 'vigilant_pi_calc_state';
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('target') || params.has('system')) {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+            target: params.get('target') || '',
+            system: params.get('system') || '',
+            cycles: params.get('cycles') || '1',
+        }));
+    } else {
+        // Empty URL → try to restore
+        try {
+            var saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+            if (saved && saved.target) {
+                var q = '?target=' + encodeURIComponent(saved.target);
+                if (saved.system) q += '&system=' + encodeURIComponent(saved.system);
+                if (saved.cycles) q += '&cycles=' + encodeURIComponent(saved.cycles);
+                window.location.replace('/industry/planetary/calculator' + q);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // System autocomplete (same pattern as planetary_lookup.html)
+    var _tmr;
+    window.calcSysSearch = function(input) {
+        clearTimeout(_tmr);
+        var dd = document.getElementById('calc-sys-dd');
+        var q = input.value.trim();
+        if (q.length < 2) { dd.style.display = 'none'; return; }
+        _tmr = setTimeout(function() {
+            fetch('/industry/planetary/lookup/search?q=' + encodeURIComponent(q))
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    if (!data.length) { dd.style.display = 'none'; return; }
+                    dd.innerHTML = data.map(function(s){
+                        var sec = s.security;
+                        var col = sec >= 0.5 ? 'var(--success)' : sec >= 0 ? 'var(--warn)' : 'var(--danger)';
+                        return '<div class="calc-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
+                            + ' onmousedown="calcSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
+                            + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
+                            + '<span style="color:var(--text);">' + s.system_name + '</span>'
+                            + '</div>';
+                    }).join('');
+                    dd.style.display = 'block';
+                }).catch(function(){ dd.style.display = 'none'; });
+        }, 200);
+    };
+    window.calcSysPick = function(name) {
+        document.getElementById('calc-sys').value = name;
+        document.getElementById('calc-sys-dd').style.display = 'none';
+    };
+    document.addEventListener('click', function(e){
+        if (e.target.id !== 'calc-sys') {
+            var dd = document.getElementById('calc-sys-dd');
+            if (dd) dd.style.display = 'none';
+        }
+    });
+})();
+</script>
+
+<style>
+    .calc-dd-item:hover { background:#222; }
+    .calc-dd-item:last-child { border-bottom:0; }
+</style>
+
+{% endif %}
+{% endblock %}

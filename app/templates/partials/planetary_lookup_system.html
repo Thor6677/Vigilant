@@ -107,7 +107,7 @@
                 </div>
                 <div style="flex:1;">
                     {% for item in items %}
-                    <a href="/industry/planetary/chain#{{ item.type_id }}"
+                    <a href="/industry/planetary/calculator?system={{ system.system_name | urlencode }}&target={{ item.type_id }}"
                        class="pi-tier-item {% if item.producible %}is-producible{% else %}is-unavail{% endif %}"
                        data-type-id="{{ item.type_id }}"
                        data-direct-inputs="{{ item.direct_input_ids | join(',') }}"
