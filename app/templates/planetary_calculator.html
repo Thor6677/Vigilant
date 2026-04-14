@@ -336,20 +336,18 @@
 {% endif %}
 
 {# ── Production flow chart — swim-lane per character ──────────────────── #}
-{% if character_plan and character_plan.flow and character_plan.characters %}
+{# Only render when there are cross-character handoffs; single-char plans
+   offer nothing to flow chart. #}
+{% if character_plan and character_plan.flow and character_plan.flow.edges %}
 <div class="b-panel b-section">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Production flow chart</span>
         <span style="font-size:10px;color:var(--muted);">
-            {% if character_plan.flow.edges %}
             {{ character_plan.flow.edges | length }} cross-character handoff{{ 's' if character_plan.flow.edges|length != 1 else '' }}
             · <span style="color:var(--success);">green</span> = P1→P2,
             <span style="color:var(--accent);">gold</span> = P2→P3,
             <span style="color:#7ec6ff;">cyan</span> = P3→P4
             · hover to trace
-            {% else %}
-            single-character plan — no cross-character handoffs
-            {% endif %}
         </span>
     </div>
 
@@ -404,9 +402,6 @@
     </div>
 
     {# Compact text handoff summary — parseable without reading the chart #}
-    {% set has_handoffs = false %}
-    {% for char in character_plan.characters %}{% if character_plan.flow.exports[loop.index0] %}{% set has_handoffs = true %}{% endif %}{% endfor %}
-    {% if character_plan.flow.edges %}
     <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
         <div style="font-size:10px;color:var(--text);margin-bottom:0.3rem;text-transform:uppercase;letter-spacing:0.03em;">Hand-off summary</div>
         {% for char in character_plan.characters %}
@@ -419,7 +414,6 @@
         {% endif %}
         {% endfor %}
     </div>
-    {% endif %}
 
     <div style="padding:0.4rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
         Each cell lists the items that character produces at that tier. Lines follow the recipe graph across characters. Hover a cell or a character label to trace its chain; other items dim.
