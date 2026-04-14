@@ -134,7 +134,7 @@
         </span>
     </div>
     <div style="padding:0.5rem 0.75rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.4rem;">
-        {% for tid, p0 in bom.p0_totals | dictsort(by='value', case_sensitive=false) %}
+        {% for p0 in bom.p0_sorted %}
         <div style="border:1px solid var(--border);padding:0.4rem 0.55rem;background:var(--surface);
              {%- if system_info and not p0.producible -%}border-color:rgba(204,51,51,0.5);{%- endif -%}">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.3rem;">
@@ -159,10 +159,9 @@
         {% endfor %}
     </div>
     {% if system_info %}
-    {% set missing_count = bom.p0_totals.values() | rejectattr('producible') | list | length %}
-    {% if missing_count > 0 %}
+    {% if bom.missing_p0_count > 0 %}
     <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:#e58080;">
-        ⚠ {{ missing_count }} raw material{{ 's' if missing_count != 1 else '' }} not available in {{ system_info.system_name }} — must be imported from elsewhere.
+        ⚠ {{ bom.missing_p0_count }} raw material{{ 's' if bom.missing_p0_count != 1 else '' }} not available in {{ system_info.system_name }} — must be imported from elsewhere.
     </div>
     {% else %}
     <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--success);">

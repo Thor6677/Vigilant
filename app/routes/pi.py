@@ -1071,6 +1071,13 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
 
     total_p0_volume = sum(int(round(d["qty"])) for d in p0_totals.values())
 
+    # Pre-sorted list view: highest qty first, with the type_id available.
+    p0_sorted = [
+        dict(type_id=tid, **data)
+        for tid, data in sorted(p0_totals.items(), key=lambda kv: -kv[1]["qty"])
+    ]
+    missing_count = sum(1 for d in p0_totals.values() if not d["producible"])
+
     return {
         "target": {
             "type_id": target_tid,
@@ -1083,6 +1090,8 @@ def _expand_bom(graph: dict, target_tid: int, target_cycles: int,
         "total_target_output": total_target_output,
         "tier_rows": tier_rows,
         "p0_totals": p0_totals,
+        "p0_sorted": p0_sorted,
+        "missing_p0_count": missing_count,
         "total_p0_volume": total_p0_volume,
     }
 
