@@ -1608,14 +1608,49 @@ def _plan_characters(bom: dict, graph: dict,
             "system_capacity_warning": None,
         }
 
-    total_chunks = math.ceil(len(colonies) / MAX_PLANETS_PER_CHARACTER)
-    for chunk_index, start in enumerate(range(0, len(colonies), MAX_PLANETS_PER_CHARACTER)):
-        char_id = chunk_index  # 0-based char index for planet-pool bookkeeping
-        chunk = colonies[start:start + MAX_PLANETS_PER_CHARACTER]
-        has_target = any(c.get("_is_target") for c in chunk)
+    # Round-robin distribute colonies across N characters so that same
+    # planet-type colonies spread out (avoids within-char collisions of
+    # same-type slots, which the planet pool can't resolve because a char
+    # can't double-up on one planet).
+    total = len(colonies)
+    total_chunks = max(1, math.ceil(total / MAX_PLANETS_PER_CHARACTER))
+    buckets: list[list[dict]] = [[] for _ in range(total_chunks)]
+    # Target factory should land on the LAST char, so place it before
+    # distributing; then everything else round-robins around it.
+    target_bucket_index = total_chunks - 1
+    target_colony_obj = None
+    non_target_colonies = []
+    for c in colonies:
+        if c.get("_is_target"):
+            target_colony_obj = c
+        else:
+            non_target_colonies.append(c)
+
+    if target_colony_obj is not None:
+        buckets[target_bucket_index].append(target_colony_obj)
+
+    # Round-robin: step through chars in order, skipping any that are at capacity.
+    # This balances type distribution while respecting the 6-planet cap.
+    i = 0
+    for c in non_target_colonies:
+        attempts = 0
+        while attempts < total_chunks:
+            idx = (i + attempts) % total_chunks
+            if len(buckets[idx]) < MAX_PLANETS_PER_CHARACTER:
+                buckets[idx].append(c)
+                i = (idx + 1) % total_chunks
+                break
+            attempts += 1
+        else:
+            # All chars full — shouldn't happen given total_chunks is sized
+            # to hold everything, but be defensive.
+            buckets[-1].append(c)
+
+    for char_id, bucket in enumerate(buckets):
+        has_target = any(c.get("_is_target") for c in bucket)
 
         slots = []
-        for c in chunk:
+        for c in bucket:
             if c.get("_is_target"):
                 planet, shared = _take_hub_planet(char_id)
                 if planet is None:
