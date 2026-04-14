@@ -26,14 +26,14 @@ PLANET_TYPES: list[str] = [
 
 # P0 raw materials each planet type produces (5 per planet).
 P0_BY_PLANET_TYPE: dict[str, list[str]] = {
-    "barren":    ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Micro Organisms", "Noble Metals"],
+    "barren":    ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Microorganisms", "Noble Metals"],
     "gas":       ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Reactive Gas"],
-    "ice":       ["Aqueous Liquids", "Heavy Metals", "Micro Organisms", "Noble Gas", "Planktic Colonies"],
+    "ice":       ["Aqueous Liquids", "Heavy Metals", "Microorganisms", "Noble Gas", "Planktic Colonies"],
     "lava":      ["Base Metals", "Felsic Magma", "Heavy Metals", "Non-CS Crystals", "Suspended Plasma"],
-    "oceanic":   ["Aqueous Liquids", "Carbon Compounds", "Complex Organisms", "Micro Organisms", "Planktic Colonies"],
+    "oceanic":   ["Aqueous Liquids", "Carbon Compounds", "Complex Organisms", "Microorganisms", "Planktic Colonies"],
     "plasma":    ["Base Metals", "Heavy Metals", "Noble Metals", "Non-CS Crystals", "Suspended Plasma"],
     "storm":     ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Suspended Plasma"],
-    "temperate": ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Micro Organisms"],
+    "temperate": ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
 }
 
 # Flat list of all P0 raw material names (15 total)
@@ -51,7 +51,7 @@ P0_TYPE_IDS: dict[str, int] = {
     "Felsic Magma":       2307,
     "Heavy Metals":       2272,
     "Ionic Solutions":    2309,
-    "Micro Organisms":    2286,
+    "Microorganisms":    2286,
     "Noble Gas":          2310,
     "Noble Metals":       2270,
     "Non-CS Crystals":    2306,
