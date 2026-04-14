@@ -2115,6 +2115,79 @@ def _build_flow(character_plan: dict, bom: dict, graph: dict) -> dict:
                         "intra": False,
                     })
 
+    # ── Second pass: guarantee every producer has ≥1 outgoing edge ───────
+    # After load-balanced picking some producers may still have zero edges —
+    # e.g. char with a single miner for a P1 that other chars already cover
+    # to matched consumers. For visual clarity every producing node should
+    # show where its output flows. Add a coverage edge per uncovered producer.
+    covered: set[tuple[int, int]] = {
+        (e["from_char"], e["tid"]) for e in edges
+    }
+    # Build consumers-by-tid index of potential targets for coverage edges.
+    consumers_by_tid: dict[int, list[tuple[int, int]]] = {}
+    for ccidx, cchar in enumerate(characters):
+        for cslot in cchar["slots"]:
+            if cslot["role"] == "miner_p1":
+                for s in cslot.get("slots", []):
+                    # Miners consume P0; the intra-miner pair covers that.
+                    # But we also register them as consumers so producer
+                    # coverage can point P0 → P1 if the miner is cross-char.
+                    consumers_by_tid.setdefault(s["p0_tid"], []).append((ccidx, s["p1_tid"]))
+                continue
+            for cfac in cslot.get("factories", []):
+                cout_tid = cfac.get("type_id")
+                if cout_tid is None:
+                    continue
+                csch = canonical.get(cout_tid)
+                if csch is None:
+                    continue
+                for cin_tid, _ in input_map.get(csch, []):
+                    consumers_by_tid.setdefault(cin_tid, []).append((ccidx, cout_tid))
+
+    inbound_by_consumer: dict[tuple[int, int, int], int] = {}
+    for e in edges:
+        k = (e["to_char"], e["consumer_tid"], e["tid"])
+        inbound_by_consumer[k] = inbound_by_consumer.get(k, 0) + 1
+
+    # Uncovered producers (deterministic order).
+    uncovered = sorted(
+        ((tid, cidx) for (tid, cidx) in producer_capacity
+         if (cidx, tid) not in covered),
+        key=lambda x: (x[1], x[0]),
+    )
+    for (tid, cidx) in uncovered:
+        pool = consumers_by_tid.get(tid, [])
+        if not pool:
+            continue  # no consumer anywhere — legitimately surplus
+        # Prefer cross-char consumers (cross edges are more informative);
+        # fall back to intra if none. Within chosen pool, pick the consumer
+        # with least existing inbound of this tid (spreads coverage edges).
+        cross_pool = [c for c in pool if c[0] != cidx]
+        pick_pool = cross_pool or pool
+        ccidx, ctid = min(
+            pick_pool,
+            key=lambda c: (inbound_by_consumer.get((c[0], c[1], tid), 0), c[0]),
+        )
+        is_intra = (cidx == ccidx)
+        key = (cidx, ccidx, tid, ctid)
+        key_set = seen_intra_keys if is_intra else seen_cross_keys
+        if key in key_set:
+            continue
+        key_set.add(key)
+        inbound_by_consumer[(ccidx, ctid, tid)] = \
+            inbound_by_consumer.get((ccidx, ctid, tid), 0) + 1
+        covered.add((cidx, tid))
+        edges.append({
+            "from_char": cidx,
+            "to_char": ccidx,
+            "tid": tid,
+            "name": name_map.get(tid, f"Type {tid}"),
+            "consumer_tid": ctid,
+            "tier_from": tier_of.get(tid, 0),
+            "tier_to": tier_of.get(ctid, 0),
+            "intra": is_intra,
+        })
+
     # ── Aggregate imports/exports per character ─────────────────────────
     # Only cross-char edges count as imports/exports; intra-char edges are
     # on-planet or same-char handoffs that don't require hauling.
