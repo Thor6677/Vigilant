@@ -11,47 +11,26 @@
     </nav>
 </div>
 
-<div class="b-grid-2 b-section">
-    <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">By System</span></div>
-        <div style="padding:0.75rem;">
-            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Search a system</label>
-            <div style="position:relative;">
-                <input type="text" id="sys-input" placeholder="e.g. Jita" autocomplete="off"
-                       oninput="piSysSearch(this)"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();piSysSubmit();}"
-                       style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
-                <div id="sys-dd" class="gc-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--border);z-index:10;max-height:200px;overflow-y:auto;"></div>
-            </div>
-            <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
-                Planet types and their P0 outputs are shown once a system is selected.
-            </div>
+<div class="b-panel b-section">
+    <div class="b-panel-head"><span class="b-label">System Lookup</span></div>
+    <div style="padding:0.75rem;">
+        <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">
+            Search a system to see its planets and every PI commodity it can produce
+        </label>
+        <div style="position:relative;max-width:360px;">
+            <input type="text" id="sys-input" placeholder="e.g. Jita" autocomplete="off"
+                   oninput="piSysSearch(this)"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();piSysSubmit();}"
+                   style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
+            <div id="sys-dd" class="gc-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--panel);border:1px solid var(--border);z-index:10;max-height:220px;overflow-y:auto;"></div>
         </div>
-        <div id="sys-result" style="border-top:1px solid var(--border);"></div>
     </div>
-
-    <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">By Raw Material</span></div>
-        <div style="padding:0.75rem;">
-            <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">Pick a P0 resource</label>
-            <select id="mat-select" onchange="piMatPick(this.value)"
-                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;">
-                <option value="">— Select —</option>
-                {% for m in p0_materials %}
-                <option value="{{ m }}">{{ m }}</option>
-                {% endfor %}
-            </select>
-            <div style="font-size:10px;color:var(--muted);margin-top:0.5rem;">
-                Find which planet types produce a specific raw material.
-            </div>
-        </div>
-        <div id="mat-result" style="border-top:1px solid var(--border);"></div>
-    </div>
+    <div id="sys-result" style="border-top:1px solid var(--border);"></div>
 </div>
 
 <div class="b-panel b-section">
     <div class="b-panel-head"><span class="b-label">Planet Type Reference</span></div>
-    <div style="padding:0.75rem;display:grid;grid-template-columns:repeat(auto-fit, minmax(220px,1fr));gap:0.75rem;">
+    <div style="padding:0.75rem;display:grid;grid-template-columns:repeat(auto-fit, minmax(220px,1fr));gap:0.5rem;">
         {% for pt in planet_types %}
         <div style="border:1px solid var(--border);padding:0.5rem;background:var(--bg);">
             <div style="font-size:12px;color:var(--text);margin-bottom:0.3rem;font-weight:600;">{{ pt }}</div>
@@ -110,14 +89,6 @@
             .then(function(r){ return r.text(); })
             .then(function(html){ el.innerHTML = html; })
             .catch(function(){ el.innerHTML = '<div class="b-empty" style="padding:0.75rem;">Lookup failed.</div>'; });
-    };
-    window.piMatPick = function(material) {
-        var el = document.getElementById('mat-result');
-        if (!material) { el.innerHTML = ''; return; }
-        el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
-        fetch('/industry/planetary/lookup/by-material?material=' + encodeURIComponent(material))
-            .then(function(r){ return r.text(); })
-            .then(function(html){ el.innerHTML = html; });
     };
     document.addEventListener('click', function(e) {
         if (e.target.id !== 'sys-input') {

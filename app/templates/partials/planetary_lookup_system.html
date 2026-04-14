@@ -1,4 +1,5 @@
-{# htmx partial — list planets in a system with their P0 outputs. #}
+{# htmx partial — planets in a system + full PI commodity tier grid with
+   producibility highlighted. Loaded into #sys-result. #}
 {% if no_sde %}
 <div style="padding:0.75rem;font-size:11px;color:var(--warn);">
     Planet SDE tables not yet loaded — the lookup will populate after the next SDE import.
@@ -6,8 +7,10 @@
 {% elif not planets %}
 <div class="b-empty" style="padding:0.75rem;">No planets in this system.</div>
 {% else %}
-<div style="padding:0.6rem 0.75rem 0.3rem;display:flex;gap:0.75rem;align-items:center;border-bottom:1px solid var(--border);">
-    <span style="font-size:13px;color:var(--text);font-weight:600;">{{ system.system_name }}</span>
+
+{# ── System header ──────────────────────────────────────────────────────── #}
+<div style="padding:0.6rem 0.75rem;display:flex;gap:0.75rem;align-items:baseline;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+    <span style="font-size:14px;color:var(--text);font-weight:600;">{{ system.system_name }}</span>
     {% if system.security is not none %}
     <span style="font-size:11px;color:
         {%- if system.security >= 0.5 -%}var(--success)
@@ -21,71 +24,83 @@
     <span style="margin-left:auto;font-size:10px;color:var(--muted);">{{ planets | length }} planet{{ 's' if planets|length != 1 else '' }}</span>
 </div>
 
-{% for p in planets %}
-<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
-    <div style="display:flex;gap:0.5rem;align-items:center;font-size:12px;">
-        <span style="color:var(--text);font-weight:500;">{{ p.planet_name }}</span>
-        <span style="color:var(--muted);font-size:11px;">· {{ p.planet_type }}</span>
+{# ── Planets list — compact rows ────────────────────────────────────────── #}
+<div style="border-bottom:1px solid var(--border);">
+    {% for p in planets %}
+    <div style="padding:0.35rem 0.75rem;display:grid;grid-template-columns:minmax(120px,160px) minmax(70px,90px) 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
+        <span style="color:var(--text);">{{ p.planet_name }}</span>
+        <span style="color:var(--muted);text-transform:capitalize;">{{ p.planet_type }}</span>
+        <span style="color:var(--muted);font-size:10px;">{{ p.p0_materials | join(' · ') }}</span>
     </div>
-    {% if p.p0_materials %}
-    <div style="margin-top:0.3rem;display:flex;gap:0.3rem;flex-wrap:wrap;">
-        {% for mat in p.p0_materials %}
-        <a href="/industry/planetary/lookup?material={{ mat }}"
-           onclick="document.getElementById('mat-select').value='{{ mat }}';piMatPick('{{ mat }}');return false;"
-           style="font-size:10px;padding:0.15rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;">
-            {{ mat }}
-        </a>
-        {% endfor %}
-    </div>
-    {% endif %}
+    {% endfor %}
 </div>
-{% endfor %}
 
-{% if reachable %}
-{% set tier_colors = {1: 'var(--muted)', 2: 'var(--text)', 3: 'var(--accent)', 4: 'var(--success)'} %}
-{% set any_reachable = reachable[1] or reachable[2] or reachable[3] or reachable[4] %}
-{% if any_reachable %}
-<div style="padding:0.75rem;border-top:1px solid var(--border);background:rgba(0,0,0,0.1);">
-    <div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:0.4rem;">
-        <span class="b-label">Producible in {{ system.system_name }}</span>
+{# ── Tier grid — 5 columns (P0..P4), producible in white, unavailable grayed ─ #}
+<div style="padding:0.75rem;">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+        <span class="b-label">Producible commodities</span>
         <span style="font-size:10px;color:var(--muted);">
-            {{ reachable[1]|length }} P1 · {{ reachable[2]|length }} P2 · {{ reachable[3]|length }} P3 · {{ reachable[4]|length }} P4
+            <span style="color:var(--text);">●</span> available &nbsp;
+            <span style="color:var(--muted);opacity:0.55;">●</span> needs off-system inputs
         </span>
     </div>
 
-    {% for tier in [1,2,3,4] %}
-    {% set items = reachable.get(tier, []) %}
-    {% if items %}
-    <div style="margin-bottom:0.6rem;">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:0.25rem;">
-            <span style="color:{{ tier_colors[tier] }};">P{{ tier }}</span>
-            —
-            {% if tier == 1 %}basic products{% elif tier == 2 %}refined commodities{% elif tier == 3 %}specialized commodities{% elif tier == 4 %}advanced commodities{% endif %}
-            ({{ items|length }})
+    <div class="pi-tier-grid" style="display:grid;grid-template-columns:repeat(5, minmax(0,1fr));gap:0.4rem;">
+        {% for tier in [0,1,2,3,4] %}
+        {% set items = all_tiers.get(tier, []) %}
+        {% set c = tier_counts.get(tier, {"total":0,"producible":0}) %}
+        {% set ratio = (c.producible / c.total) if c.total else 0 %}
+        <div style="border:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column;min-width:0;">
+            <div style="padding:0.4rem 0.55rem;border-bottom:1px solid var(--border);background:var(--panel);">
+                <div style="font-size:11px;font-weight:600;color:var(--text);display:flex;justify-content:space-between;align-items:baseline;">
+                    <span>P{{ tier }}</span>
+                    <span style="font-size:10px;color:
+                        {%- if ratio == 1 -%}var(--success)
+                        {%- elif ratio >= 0.5 -%}var(--text)
+                        {%- elif ratio > 0 -%}var(--warn)
+                        {%- else -%}var(--muted)
+                        {%- endif -%};">{{ c.producible }}/{{ c.total }}</span>
+                </div>
+                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:1px;">
+                    {% if tier == 0 %}Raw
+                    {% elif tier == 1 %}Basic
+                    {% elif tier == 2 %}Refined
+                    {% elif tier == 3 %}Specialized
+                    {% else %}Advanced{% endif %}
+                </div>
+            </div>
+            <div style="flex:1;">
+                {% for item in items %}
+                <a href="/industry/planetary/chain#{{ item.type_id }}"
+                   class="pi-tier-item {% if item.producible %}is-producible{% else %}is-unavail{% endif %}"
+                   title="{% if item.producible %}{% if item.inputs %}Inputs: {% for inp in item.inputs %}{{ inp.quantity }}× {{ inp.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if item.cycle_time %} · {{ item.cycle_time // 60 }}min cycle{% endif %}{% elif item.planet_sources %}Found on: {{ item.planet_sources | join(', ') | capitalize }}{% else %}Raw material{% endif %}{% else %}{% if tier == 0 and item.planet_sources %}Only on {{ item.planet_sources | join(', ') }} planets — this system has none{% elif item.missing %}Missing: {{ item.missing | join(', ') }}{% else %}Inputs not available in this system{% endif %}{% endif %}"
+                   style="display:block;padding:0.25rem 0.55rem;border-top:1px solid var(--border);font-size:11px;text-decoration:none;line-height:1.3;">
+                    {{ item.name }}
+                </a>
+                {% endfor %}
+            </div>
         </div>
-        <div style="display:flex;gap:0.25rem;flex-wrap:wrap;">
-            {% for item in items %}
-            <a href="/industry/planetary/chain#{{ item.type_id }}"
-               title="{% if item.inputs %}Inputs: {% for inp in item.inputs %}{{ inp.quantity }}× {{ inp.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if item.cycle_time %} · {{ item.cycle_time // 60 }}min cycle{% endif %}{% endif %}"
-               style="font-size:10px;padding:0.2rem 0.45rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;white-space:nowrap;">
-                {{ item.name }}
-            </a>
-            {% endfor %}
-        </div>
+        {% endfor %}
     </div>
-    {% endif %}
-    {% endfor %}
 
-    <div style="font-size:10px;color:var(--muted);margin-top:0.3rem;">
-        P2+ requires shipping intermediates between planets — the list reflects what
-        <em>can</em> be built using this system's combined P0 pool, not what fits on any single planet.
-        Hover a product for recipe inputs; click to open the chain explorer.
+    <div style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
+        P2+ requires shipping intermediates between planets in-system — the list reflects what
+        <em>can</em> be built using this system's combined P0 pool, not what fits on a single planet.
+        Hover a tile for recipe / sources. Click to open the Chain Explorer.
     </div>
 </div>
-{% endif %}
-{% endif %}
 
-<div style="padding:0.5rem 0.75rem;font-size:10px;color:var(--muted);">
-    Click a resource to see which other planet types produce it.
-</div>
+<style>
+    .pi-tier-item.is-producible { color:var(--text); }
+    .pi-tier-item.is-producible:hover { background:rgba(100,200,255,0.08); }
+    .pi-tier-item.is-unavail { color:var(--muted); opacity:0.55; }
+    .pi-tier-item.is-unavail:hover { opacity:0.9; background:rgba(255,255,255,0.03); }
+
+    @media (max-width: 1100px) {
+        .pi-tier-grid { grid-template-columns:repeat(3, minmax(0,1fr)) !important; }
+    }
+    @media (max-width: 700px) {
+        .pi-tier-grid { grid-template-columns:repeat(2, minmax(0,1fr)) !important; }
+    }
+</style>
 {% endif %}

@@ -421,33 +421,41 @@ async def planetary_lookup_system(
             "p0_materials": p0_list,
         })
 
-    # Walk the schematic graph forward from this system's P0 pool to enumerate
-    # every P1/P2/P3/P4 product whose full input chain is satisfiable locally.
-    reachable = await _reachable_from_p0s(db, system_p0_names)
+    # Full-tier producibility view: every PI commodity P0-P4, flagged as
+    # producible or not based on this system's combined P0 pool.
+    tier_view = await _tier_view_for_system(db, system_p0_names)
 
     return templates.TemplateResponse("partials/planetary_lookup_system.html", {
         "request": request,
         "system": sys_info,
         "planets": rendered_planets,
         "no_sde": not planets,
-        "reachable": reachable,
+        "all_tiers": tier_view["all_tiers"],
+        "tier_counts": tier_view["counts"],
         "system_p0_names": sorted(system_p0_names),
     })
 
 
-async def _reachable_from_p0s(db: AsyncSession, p0_names: set[str]) -> dict[int, list[dict]]:
-    """Return {tier: [{type_id, name, inputs, output_qty, cycle_time}]} for every
-    PI product reachable by iteratively applying schematic recipes starting from
-    the given P0 raw-material names. Empty dict if SDE tables aren't loaded.
+async def _tier_view_for_system(db: AsyncSession, p0_names_in_system: set[str]) -> dict:
+    """Build the full PI commodity universe with producibility flags for one system.
+
+    Returns:
+        {
+          "all_tiers": {0..4: [{type_id, name, producible, inputs, missing,
+                                cycle_time, output_qty, planet_sources}]},
+          "counts":    {0..4: {total, producible}},
+        }
+
+    Every PI commodity P0-P4 is included; `producible=True` means the full input
+    chain is satisfiable from the given P0 pool. `missing` lists the direct
+    input names blocking production (only set when not producible).
     """
     from app.db.sde_models import SDEPlanetSchematic, SDEPlanetSchematicMaterial
 
-    # P0 names → type_ids using the authoritative constants table
-    p0_ids: set[int] = {
-        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in p0_names
+    # System P0 type_ids (subset of the 15 known P0 names)
+    system_p0_ids: set[int] = {
+        tid for name, tid in pi_const.P0_TYPE_IDS.items() if name in p0_names_in_system
     }
-    if not p0_ids:
-        return {}
 
     try:
         mat_result = await db.execute(select(SDEPlanetSchematicMaterial))
@@ -455,92 +463,126 @@ async def _reachable_from_p0s(db: AsyncSession, p0_names: set[str]) -> dict[int,
         sch_result = await db.execute(select(SDEPlanetSchematic))
         schematics = {s.schematic_id: s for s in sch_result.scalars().all()}
     except Exception:
-        return {}
+        return {"all_tiers": {0: [], 1: [], 2: [], 3: [], 4: []}, "counts": {t: {"total": 0, "producible": 0} for t in range(5)}}
 
-    input_map: dict[int, list[tuple[int, int]]] = {}   # schematic_id -> [(type_id, qty)]
-    output_map: dict[int, tuple[int, int]] = {}        # schematic_id -> (type_id, qty)
+    # Input / output maps
+    input_map: dict[int, list[tuple[int, int]]] = {}
+    output_map: dict[int, tuple[int, int]] = {}
     for m in mats:
         if m.is_input:
             input_map.setdefault(m.schematic_id, []).append((m.type_id, m.quantity))
         else:
             output_map[m.schematic_id] = (m.type_id, m.quantity)
 
-    # Forward BFS: producible = P0 set initially. For each schematic, if all its
-    # inputs are producible, its output becomes producible. Loop until stable.
-    producible: set[int] = set(p0_ids)
-    producing_schematic: dict[int, int] = {}  # type_id -> schematic_id that makes it
-    tier_of: dict[int, int] = {tid: 0 for tid in p0_ids}
+    # Every commodity that appears in any schematic, plus the 15 canonical P0s
+    all_ids: set[int] = set(pi_const.P0_TYPE_IDS.values())
+    for _sch_id, (out_tid, _qty) in output_map.items():
+        all_ids.add(out_tid)
+    for _sch_id, ins in input_map.items():
+        for tid, _ in ins:
+            all_ids.add(tid)
 
+    produced_set: set[int] = {t for (t, _) in output_map.values()}
+
+    # Compute the absolute tier of every commodity (unrelated to the system)
+    # P0 = 0, else 1 + max(input tiers)
+    tier_of: dict[int, int] = {tid: 0 for tid in pi_const.P0_TYPE_IDS.values()}
+    for tid in all_ids:
+        if tid not in produced_set:
+            tier_of.setdefault(tid, 0)
     for _ in range(6):
         changed = False
         for sch_id, (out_tid, _qty) in output_map.items():
-            if out_tid in producible:
+            in_tiers = [tier_of.get(in_tid, 0) for in_tid, _ in input_map.get(sch_id, [])]
+            if not in_tiers:
                 continue
-            inputs = input_map.get(sch_id, [])
-            if not inputs:
-                continue
-            if all(in_tid in producible for in_tid, _ in inputs):
-                producible.add(out_tid)
-                producing_schematic[out_tid] = sch_id
-                tier_of[out_tid] = min(max(tier_of[in_tid] for in_tid, _ in inputs) + 1, 4)
+            new_tier = min(max(in_tiers) + 1, 4)
+            if tier_of.get(out_tid) != new_tier:
+                tier_of[out_tid] = new_tier
                 changed = True
         if not changed:
             break
 
-    # Resolve names for all producible types + their inputs
-    input_type_ids: set[int] = set()
-    for sch_id in producing_schematic.values():
-        for in_tid, _ in input_map.get(sch_id, []):
-            input_type_ids.add(in_tid)
-    name_map = await sde.type_ids_to_names(db, list(producible | input_type_ids))
+    # Producibility BFS: seeded with the system's P0s
+    producible: set[int] = set(system_p0_ids)
+    producing_schematic: dict[int, int] = {}
+    if system_p0_ids:
+        for _ in range(6):
+            changed = False
+            for sch_id, (out_tid, _qty) in output_map.items():
+                if out_tid in producible:
+                    continue
+                inputs = input_map.get(sch_id, [])
+                if not inputs:
+                    continue
+                if all(in_tid in producible for in_tid, _ in inputs):
+                    producible.add(out_tid)
+                    producing_schematic[out_tid] = sch_id
+                    changed = True
+            if not changed:
+                break
 
-    # Group producible items by tier, omit P0 (leaves — already shown per planet)
-    out: dict[int, list[dict]] = {1: [], 2: [], 3: [], 4: []}
-    for tid in producible:
+    name_map = await sde.type_ids_to_names(db, list(all_ids))
+
+    # For each commodity find ONE canonical recipe (the first schematic that produces it)
+    canonical_schematic: dict[int, int] = {}
+    for sch_id, (out_tid, _qty) in output_map.items():
+        canonical_schematic.setdefault(out_tid, sch_id)
+
+    all_tiers: dict[int, list[dict]] = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for tid in all_ids:
         tier = tier_of.get(tid, 0)
-        if tier < 1 or tier > 4:
+        if tier not in all_tiers:
             continue
-        sch_id = producing_schematic.get(tid)
+        sch_id = canonical_schematic.get(tid)
         sch = schematics.get(sch_id) if sch_id else None
-        inputs = [
-            {
-                "type_id": in_tid,
-                "name": name_map.get(in_tid, f"Type {in_tid}"),
-                "quantity": qty,
-            }
-            for in_tid, qty in (input_map.get(sch_id, []) if sch_id else [])
-        ]
-        out[tier].append({
+        inputs = []
+        if sch_id:
+            inputs = [
+                {
+                    "type_id": in_tid,
+                    "name": name_map.get(in_tid, f"Type {in_tid}"),
+                    "quantity": qty,
+                }
+                for in_tid, qty in input_map.get(sch_id, [])
+            ]
+        # Which direct inputs are blocking production?
+        missing = [
+            inp["name"] for inp in inputs if inp["type_id"] not in producible
+        ] if (system_p0_ids and tid not in producible) else []
+
+        # For P0 commodities, list the planet types that produce them
+        planet_sources = None
+        name = name_map.get(tid, f"Type {tid}")
+        if tier == 0:
+            planet_sources = [
+                ptype for ptype, mats_list in pi_const.P0_BY_PLANET_TYPE.items()
+                if name in mats_list
+            ]
+
+        all_tiers[tier].append({
             "type_id": tid,
-            "name": name_map.get(tid, f"Type {tid}"),
+            "name": name,
+            "producible": tid in producible,
+            "inputs": inputs,
+            "missing": missing,
             "cycle_time": sch.cycle_time if sch else None,
             "output_qty": output_map.get(sch_id, (None, None))[1] if sch_id else None,
-            "inputs": inputs,
+            "planet_sources": planet_sources,
         })
-    for t in out:
-        out[t].sort(key=lambda x: x["name"])
-    return out
 
+    for t in all_tiers:
+        all_tiers[t].sort(key=lambda x: x["name"])
 
-@router.get("/industry/planetary/lookup/by-material", response_class=HTMLResponse)
-async def planetary_lookup_by_material(
-    request: Request,
-    material: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """htmx partial — show which planet types produce a given P0 raw material."""
-    if not request.session.get("user_id"):
-        return HTMLResponse("")
+    counts = {
+        t: {
+            "total": len(items),
+            "producible": sum(1 for i in items if i["producible"]),
+        }
+        for t, items in all_tiers.items()
+    }
 
-    producers = [
-        ptype for ptype, mats in pi_const.P0_BY_PLANET_TYPE.items()
-        if material.lower() in (m.lower() for m in mats)
-    ]
-    return templates.TemplateResponse("partials/planetary_lookup_material.html", {
-        "request": request,
-        "material": material,
-        "producers": producers,
-    })
+    return {"all_tiers": all_tiers, "counts": counts}
 
 
 # ── Phase 3: /industry/planetary/chain ────────────────────────────────────────
