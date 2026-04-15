@@ -101,6 +101,12 @@ async def startup():
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+            # Skill plan sharing scopes (Phase 1 of corp/alliance/custom ACL rollout)
+            "ALTER TABLE skill_plans ADD COLUMN visibility TEXT NOT NULL DEFAULT 'personal'",
+            "ALTER TABLE skill_plans ADD COLUMN owner_corp_id INTEGER",
+            "ALTER TABLE skill_plans ADD COLUMN owner_alliance_id INTEGER",
+            "ALTER TABLE skill_plans ADD COLUMN last_edited_by_user_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE skill_plans ADD COLUMN last_edited_at DATETIME",
         ]:
             try:
                 await db.execute(text(stmt))

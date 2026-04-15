@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, AsyncSessionLocal
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.esi.client import ESIClient, refresh_token
@@ -379,6 +379,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "skillqueue":    120,   # ESI max-age: 120s
     "zkill":        3600,   # zkillboard — 1h is plenty
     "assets":       3600,   # ESI max-age: 3600s
+    "roles":        3600,   # corp roles — rarely change, cached for permission checks
 }
 
 FIELD_SCOPES: dict[str, str] = {
@@ -394,6 +395,7 @@ FIELD_SCOPES: dict[str, str] = {
     "skillqueue":    "esi-skills.read_skillqueue.v1",
     "zkill":         None,   # no ESI scope required
     "assets":        "esi-assets.read_assets.v1",
+    "roles":         "esi-characters.read_corporation_roles.v1",
 }
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
@@ -410,6 +412,7 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "skillqueue":    "skillqueue_json",
     "zkill":         "zkill_json",
     "assets":        None,
+    "roles":         None,   # roles stored in CharacterCorpRoles (separate table)
 }
 
 # UI staleness thresholds (based on last_synced, for indicator colours)
@@ -1088,6 +1091,34 @@ async def fetch_assets_data(characters: list[Character], db: AsyncSession) -> di
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def fetch_corp_roles_data(characters: list[Character], db: AsyncSession) -> dict:
+    """Fetch GET /characters/{id}/roles/ per character.
+    Returns {character_id: (roles_payload_dict | None, warning | None)}.
+    Roles payload shape: {"roles": [...], "roles_at_hq": [...], ...}.
+    """
+    async def _get(char):
+        if not _has_scope(char, "esi-characters.read_corporation_roles.v1"):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char, db)
+        if not client:
+            return char.character_id, None, err
+        try:
+            payload = await esi_char.get_roles(client, char.character_id)
+            return char.character_id, payload, None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403:
+                # Character not in a corp that grants roles (or NPC corp) — treat as no roles
+                return char.character_id, {"roles": [], "roles_at_hq": [],
+                                           "roles_at_base": [], "roles_at_other": []}, None
+            logger.warning("Roles fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+        except Exception as e:
+            logger.warning("Roles fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
 # Dispatch table — defined after all fetch functions
 _FIELD_FETCHERS = {
     "wallet":        fetch_wallet_data,
@@ -1102,6 +1133,7 @@ _FIELD_FETCHERS = {
     "skillqueue":    fetch_skillqueue_data,
     "zkill":         fetch_zkillboard_data,
     "assets":        fetch_assets_data,
+    "roles":         fetch_corp_roles_data,
 }
 
 
@@ -1189,6 +1221,31 @@ async def _sync_task(character_id: int):
                             if val is not None:
                                 asset_cache.assets_json = json.dumps(val)
                                 asset_cache.last_fetched = now
+                                warnings.pop(field, None)
+                            elif warn and warn != "missing_scope":
+                                warnings[field] = warn
+                            field_synced[field] = now.isoformat()
+                            continue
+                        if field == "roles":
+                            # Upsert into the CharacterCorpRoles cache table used
+                            # by skill-plan permission checks.
+                            if val is not None:
+                                roles_list = val.get("roles", []) if isinstance(val, dict) else []
+                                roles_res = await db.execute(
+                                    select(CharacterCorpRoles).where(
+                                        CharacterCorpRoles.character_id == character_id
+                                    )
+                                )
+                                roles_row = roles_res.scalar_one_or_none()
+                                if roles_row is None:
+                                    db.add(CharacterCorpRoles(
+                                        character_id=character_id,
+                                        roles_json=json.dumps(roles_list),
+                                        fetched_at=now,
+                                    ))
+                                else:
+                                    roles_row.roles_json = json.dumps(roles_list)
+                                    roles_row.fetched_at = now
                                 warnings.pop(field, None)
                             elif warn and warn != "missing_scope":
                                 warnings[field] = warn

@@ -49,6 +49,18 @@ async def get_planets(client: ESIClient, character_id: int) -> list:
     return await client.get(f"/characters/{character_id}/planets/")
 
 
+async def get_roles(client: ESIClient, character_id: int) -> dict:
+    """Return the character's in-game corp role payload.
+
+    Shape: {"roles": [...], "roles_at_hq": [...], "roles_at_base": [...],
+            "roles_at_other": [...]}
+    Requires the esi-characters.read_corporation_roles.v1 scope. Returns
+    whatever ESI gives back — caller is responsible for handling missing
+    scope (403) or the character having no roles.
+    """
+    return await client.get(f"/characters/{character_id}/roles/")
+
+
 async def get_planet_details(client: ESIClient, character_id: int, planet_id: int) -> dict:
     return await client.get(f"/characters/{character_id}/planets/{planet_id}/")
 

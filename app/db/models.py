@@ -268,7 +268,16 @@ class StructureNameCache(Base):
 
 
 class SkillPlan(Base):
-    """User-created skill training plans."""
+    """User-created skill training plans.
+
+    visibility controls who can see / edit the plan:
+      - "personal"     — owner only (legacy default)
+      - "corporation"  — members of owner_corp_id; editors need an EVE corp role
+      - "alliance"     — members of owner_alliance_id; editors need a Director/CEO
+                          role in any corp of the alliance
+      - "custom"       — access governed by SkillPlanACL entries (view/edit/admin)
+    share_token remains for the public read-only URL flow; works alongside scopes.
+    """
     __tablename__ = "skill_plans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -279,8 +288,18 @@ class SkillPlan(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Sharing scope — see class docstring for the semantics
+    visibility = Column(String(16), nullable=False, default="personal",
+                        server_default="personal")
+    owner_corp_id = Column(Integer, nullable=True, index=True)
+    owner_alliance_id = Column(Integer, nullable=True, index=True)
+    last_edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    last_edited_at = Column(DateTime, nullable=True)
+
     entries = relationship("SkillPlanEntry", back_populates="plan", cascade="all, delete-orphan",
                            order_by="SkillPlanEntry.sort_order")
+    acl_entries = relationship("SkillPlanACL", cascade="all, delete-orphan",
+                               backref="plan")
 
 
 class SkillPlanEntry(Base):
@@ -294,6 +313,47 @@ class SkillPlanEntry(Base):
     sort_order = Column(Integer, nullable=False, default=0)
 
     plan = relationship("SkillPlan", back_populates="entries")
+
+
+class SkillPlanACL(Base):
+    """Per-subject access control entries for custom-scope SkillPlans.
+
+    subject_type is one of: "character" | "corporation" | "alliance".
+    permission levels:
+      - "view"  — can see the plan on the list and detail pages
+      - "edit"  — can add/remove/reorder skills, rename, duplicate
+      - "admin" — edit + manage the ACL itself + delete the plan
+    """
+    __tablename__ = "skill_plan_acl"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("skill_plans.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    subject_type = Column(String(16), nullable=False)
+    subject_id = Column(Integer, nullable=False)
+    subject_name = Column(String, nullable=False)
+    permission = Column(String(8), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("plan_id", "subject_type", "subject_id",
+                         name="uq_skill_plan_acl_subject"),
+    )
+
+
+class CharacterCorpRoles(Base):
+    """Cached EVE corp roles from GET /characters/{id}/roles/.
+
+    Populated by the background sync scheduler (TTL ~1h). Used by the skill
+    plan permission helpers to gate corp/alliance edit access without firing
+    an ESI call on every request.
+    """
+    __tablename__ = "character_corp_roles"
+
+    character_id = Column(Integer, primary_key=True)
+    roles_json = Column(Text, nullable=False)  # JSON array of role strings
+    fetched_at = Column(DateTime, nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
 
 
 class AdminAuditLog(Base):
