@@ -2,11 +2,13 @@
 {% block title %}SKILL PLANS — VIGILANT{% endblock %}
 {% block content %}
 
+{% set total_plans = (groups.personal|length) + (groups.corporation|length) + (groups.alliance|length) + (groups.custom|length) %}
+
 <div class="b-page-header">
     <div>
         <h1 class="b-page-title">Skill Plans</h1>
         <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
-            {{ plans | length }} plan{{ 's' if plans | length != 1 else '' }}
+            {{ total_plans }} plan{{ 's' if total_plans != 1 else '' }} visible to you
         </div>
     </div>
 </div>
@@ -17,62 +19,169 @@
         <div class="b-panel-head">
             <span class="b-label">Create New Plan</span>
         </div>
-        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+        <div style="padding:0.5rem 0.75rem;display:grid;grid-template-columns:minmax(200px,1fr) 160px minmax(160px,1.2fr) auto;gap:0.5rem;align-items:center;">
             <input type="text" id="new-plan-name" placeholder="Plan name…"
-                   style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                   style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+
+            <select id="new-plan-scope" onchange="onScopeChange()"
+                    style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="personal">Personal</option>
+                <option value="corporation" {% if not eligible_corps %}disabled title="No corp where you hold Communications_Officer / Director / CEO"{% endif %}>Corporation</option>
+                <option value="alliance"    {% if not eligible_alliances %}disabled title="No alliance corp where you hold Director / CEO"{% endif %}>Alliance</option>
+            </select>
+
+            <select id="new-plan-target" style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;display:none;">
+                <option value="">— select —</option>
+                {% for c in eligible_corps %}
+                <option data-scope="corporation" value="{{ c.id }}">{{ c.name }}</option>
+                {% endfor %}
+                {% for a in eligible_alliances %}
+                <option data-scope="alliance" value="{{ a.id }}">{{ a.name }}</option>
+                {% endfor %}
+            </select>
+
             <button class="b-btn" onclick="createPlan()"
-                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                    style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
                 Create
             </button>
         </div>
+        <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);">
+            Corporation and alliance scopes require matching in-game roles. Members see the plan; editors need Communications_Officer / Director / CEO (corp) or Director / CEO in any alliance corp (alliance).
+        </div>
     </div>
 </div>
 
-{# ── Plan List ───────────────────────────────────────────────────────────── #}
-{% if plans %}
-<div class="b-section">
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Your Plans</span>
-        </div>
-        {% for plan in plans %}
-        <a href="/skill-plans/{{ plan.id }}" class="b-table-row" style="text-decoration:none;cursor:pointer;">
-            <span style="flex:3;display:flex;flex-direction:column;gap:2px;">
+{% macro scope_badge(plan) %}
+    {% set vis = plan.visibility or 'personal' %}
+    {% if vis == 'personal' %}
+        <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Personal</span>
+    {% elif vis == 'corporation' %}
+        <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(100,200,255,0.35);color:#7ec6ff;text-transform:uppercase;letter-spacing:0.04em;" title="Corp: {{ corp_names.get(plan.owner_corp_id, '?') }}">Corp · {{ corp_names.get(plan.owner_corp_id, '?') }}</span>
+    {% elif vis == 'alliance' %}
+        <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(200,169,81,0.4);color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;" title="Alliance: {{ alliance_names.get(plan.owner_alliance_id, '?') }}">Alliance · {{ alliance_names.get(plan.owner_alliance_id, '?') }}</span>
+    {% elif vis == 'custom' %}
+        <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(153,102,204,0.4);color:#b88ad4;text-transform:uppercase;letter-spacing:0.04em;">Custom ACL</span>
+    {% endif %}
+{% endmacro %}
+
+{% macro plan_row(plan) %}
+    <a href="/skill-plans/{{ plan.id }}" class="b-table-row" style="text-decoration:none;cursor:pointer;">
+        <span style="flex:3;display:flex;flex-direction:column;gap:2px;">
+            <span style="display:flex;align-items:baseline;gap:0.4rem;flex-wrap:wrap;">
                 <span style="font-size:11px;color:var(--text);">{{ plan.name }}</span>
-                {% if plan.description %}
-                <span style="font-size:9px;color:var(--muted);">{{ plan.description[:60] }}</span>
+                {{ scope_badge(plan) }}
+                {% if not editable.get(plan.id, False) %}
+                <span style="font-size:9px;color:var(--muted);" title="View-only: you don't have edit permission">🔒 view-only</span>
                 {% endif %}
             </span>
-            <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--accent);">
-                {{ plan.entries | length }} skill{{ 's' if plan.entries | length != 1 else '' }}
-            </span>
-            {% set stats = plan_stats.get(plan.id, {}) %}
-            <span style="flex:0 0 80px;text-align:right;font-size:9px;color:var(--text);">
-                {% if stats.get('total_sp', 0) > 0 %}{{ "{:,.0f}".format(stats['total_sp']) }} SP{% endif %}
-            </span>
-            <span style="flex:0 0 70px;text-align:right;font-size:9px;color:var(--muted);">
-                {% if stats.get('total_sp', 0) > 0 %}{{ stats['time_str'] }}{% endif %}
-            </span>
-        </a>
-        {% endfor %}
-    </div>
-</div>
-{% else %}
+            {% if plan.description %}
+            <span style="font-size:9px;color:var(--muted);">{{ plan.description[:60] }}</span>
+            {% endif %}
+        </span>
+        <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--accent);">
+            {{ plan.entries | length }} skill{{ 's' if plan.entries | length != 1 else '' }}
+        </span>
+        {% set stats = plan_stats.get(plan.id, {}) %}
+        <span style="flex:0 0 80px;text-align:right;font-size:9px;color:var(--text);">
+            {% if stats.get('total_sp', 0) > 0 %}{{ "{:,.0f}".format(stats['total_sp']) }} SP{% endif %}
+        </span>
+        <span style="flex:0 0 70px;text-align:right;font-size:9px;color:var(--muted);">
+            {% if stats.get('total_sp', 0) > 0 %}{{ stats['time_str'] }}{% endif %}
+        </span>
+    </a>
+{% endmacro %}
+
+{# ── Grouped Plan Lists ──────────────────────────────────────────────────── #}
+
+{% if total_plans == 0 %}
 <div class="b-empty">No skill plans yet. Create one above to get started.</div>
 {% endif %}
 
+{% if groups.personal %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">My Plans</span>
+            <span style="font-size:9px;color:var(--muted);">{{ groups.personal | length }}</span>
+        </div>
+        {% for plan in groups.personal %}{{ plan_row(plan) }}{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if groups.corporation %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label" style="color:#7ec6ff;">Corp Plans</span>
+            <span style="font-size:9px;color:var(--muted);">{{ groups.corporation | length }} shared by your corporation(s)</span>
+        </div>
+        {% for plan in groups.corporation %}{{ plan_row(plan) }}{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if groups.alliance %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label" style="color:var(--accent);">Alliance Plans</span>
+            <span style="font-size:9px;color:var(--muted);">{{ groups.alliance | length }} shared by your alliance(s)</span>
+        </div>
+        {% for plan in groups.alliance %}{{ plan_row(plan) }}{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if groups.custom %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label" style="color:#b88ad4;">Shared With Me</span>
+            <span style="font-size:9px;color:var(--muted);">{{ groups.custom | length }} via custom ACL</span>
+        </div>
+        {% for plan in groups.custom %}{{ plan_row(plan) }}{% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <script>
+function onScopeChange() {
+    var scope = document.getElementById('new-plan-scope').value;
+    var targetSel = document.getElementById('new-plan-target');
+    if (scope === 'personal') {
+        targetSel.style.display = 'none';
+        return;
+    }
+    // Show only matching-scope options
+    targetSel.style.display = '';
+    for (var i = 0; i < targetSel.options.length; i++) {
+        var o = targetSel.options[i];
+        if (i === 0) { o.hidden = false; continue; }  // leave the "— select —" placeholder
+        o.hidden = (o.getAttribute('data-scope') !== scope);
+    }
+    targetSel.value = '';
+}
 function createPlan() {
     var name = document.getElementById('new-plan-name').value.trim();
     if (!name) { alert('Enter a plan name.'); return; }
+    var scope = document.getElementById('new-plan-scope').value;
+    var target = document.getElementById('new-plan-target').value;
+    if (scope !== 'personal' && !target) {
+        alert('Pick a ' + scope + ' from the dropdown.');
+        return;
+    }
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = '/skill-plans/create';
-    var input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'name';
-    input.value = name;
-    form.appendChild(input);
+    var add = function (n, v) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = n; inp.value = v;
+        form.appendChild(inp);
+    };
+    add('name', name);
+    add('visibility', scope);
+    if (scope !== 'personal') add('target_id', target);
     document.body.appendChild(form);
     form.submit();
 }

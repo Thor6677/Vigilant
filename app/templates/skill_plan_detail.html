@@ -9,25 +9,42 @@
 {% endblock %}
 {% block content %}
 
+{% set vis = plan.visibility or 'personal' %}
+
 <div class="b-page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;">
     <div>
         <h1 class="b-page-title" id="plan-title">{{ plan.name }}</h1>
-        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
-            {{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <span>{{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}</span>
+            {# Scope badge #}
+            {% if vis == 'personal' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Personal</span>
+            {% elif vis == 'corporation' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(100,200,255,0.35);color:#7ec6ff;text-transform:uppercase;letter-spacing:0.04em;">Corp · {{ corp_names.get(plan.owner_corp_id, '?') }}</span>
+            {% elif vis == 'alliance' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(200,169,81,0.4);color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;">Alliance · {{ alliance_names.get(plan.owner_alliance_id, '?') }}</span>
+            {% elif vis == 'custom' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(153,102,204,0.4);color:#b88ad4;text-transform:uppercase;letter-spacing:0.04em;">Custom ACL</span>
+            {% endif %}
+            {% if not can_edit %}<span style="color:var(--warn);">🔒 view-only</span>{% endif %}
         </div>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        {# Duplicate-to-personal: always available to any viewer #}
         <form method="POST" action="/skill-plans/{{ plan.id }}/duplicate" style="display:inline;">
-            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
-                Save As Copy
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;"
+                    title="Fork into a personal copy owned by you">
+                Copy to Personal
             </button>
         </form>
+        {% if can_admin %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/share" style="display:inline;">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid {% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};color:{% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};font-size:9px;">
                 {% if plan.share_token %}Shared{% else %}Share{% endif %}
             </button>
         </form>
-        {% if entries %}
+        {% endif %}
+        {% if can_edit and entries %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/clear"
               onsubmit="return confirm('Remove all skills from this plan?');">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--warn);color:var(--warn);font-size:9px;">
@@ -35,14 +52,67 @@
             </button>
         </form>
         {% endif %}
+        {% if can_admin %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/delete"
               onsubmit="return confirm('Delete this plan?');">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;">
                 Delete
             </button>
         </form>
+        {% endif %}
     </div>
 </div>
+
+{# Promote / Demote scope controls — admin only #}
+{% if can_admin %}
+<div class="b-section">
+    <div class="b-panel" style="padding:0.4rem 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:10px;color:var(--muted);">Scope:</span>
+        {% if vis == 'personal' %}
+            {% if eligible_corps %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+                <input type="hidden" name="visibility" value="corporation">
+                <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    {% for c in eligible_corps %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                </select>
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid #7ec6ff;color:#7ec6ff;font-size:9px;">Move to Corp →</button>
+            </form>
+            {% endif %}
+            {% if eligible_alliances %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+                <input type="hidden" name="visibility" value="alliance">
+                <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    {% for a in eligible_alliances %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+                </select>
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Move to Alliance →</button>
+            </form>
+            {% endif %}
+            {% if not eligible_corps and not eligible_alliances %}
+            <span style="font-size:9px;color:var(--muted);">No corp/alliance roles grant you share rights.</span>
+            {% endif %}
+        {% elif vis in ('corporation', 'alliance') %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/demote" style="display:inline;"
+                  onsubmit="return confirm('Return this plan to personal scope? Other members will lose access.');">
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--muted);color:var(--muted);font-size:9px;">← Back to Personal</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# Read-only banner when the viewer can't edit #}
+{% if not can_edit %}
+<div class="b-section">
+    <div style="padding:0.5rem 0.75rem;background:rgba(200,169,81,0.08);border:1px solid rgba(200,169,81,0.3);color:var(--warn);font-size:10px;">
+        View-only — you don't have edit permission on this plan.
+        {% if vis == 'corporation' %}Editing requires Communications_Officer, Director, or CEO in this corporation.
+        {% elif vis == 'alliance' %}Editing requires Director or CEO in a corporation in this alliance.
+        {% elif vis == 'custom' %}Ask the plan owner for edit permission in the ACL.
+        {% endif %}
+        Use <strong>Copy to Personal</strong> to fork your own editable copy.
+    </div>
+</div>
+{% endif %}
 
 {% if plan.share_token %}
 <div class="b-section">
@@ -70,7 +140,7 @@
             <span class="b-label">Skills</span>
             <div style="display:flex;gap:0.5rem;font-size:9px;">
                 <a href="#" onclick="exportPlan(event)" style="color:var(--accent);text-decoration:none;">Export</a>
-                {% if entries | length > 1 %}
+                {% if can_edit and entries | length > 1 %}
                 <span style="color:var(--border);">|</span>
                 <span style="color:var(--muted);">Sort:</span>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
@@ -92,9 +162,13 @@
         {% if entries %}
         <div id="skill-list">
         {% for e in entries %}
-        <div class="b-table-row skill-row" draggable="true" data-id="{{ e.id }}"
-             style="cursor:grab;">
+        <div class="b-table-row skill-row" {% if can_edit %}draggable="true"{% endif %} data-id="{{ e.id }}"
+             style="cursor:{% if can_edit %}grab{% else %}default{% endif %};">
+            {% if can_edit %}
             <span style="flex:0 0 16px;color:var(--border);font-size:10px;cursor:grab;" title="Drag to reorder">&#9776;</span>
+            {% else %}
+            <span style="flex:0 0 16px;"></span>
+            {% endif %}
             <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
                 <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
                 <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
@@ -103,14 +177,16 @@
                 {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
                 <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
             </span>
+            {% if can_edit %}
             <form method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
                 <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
+            {% endif %}
         </div>
         {% endfor %}
         </div>
         {% else %}
-        <div class="b-empty">No skills added yet. Use the tools on the right to add skills.</div>
+        <div class="b-empty">No skills added yet.{% if can_edit %} Use the tools on the right to add skills.{% endif %}</div>
         {% endif %}
     </div>
 </div>
@@ -142,8 +218,10 @@
 
 </div>
 
-{# ── Right Column: Add Skills ────────────────────────────────────────────── #}
+{# ── Right Column: Add Skills (hidden for view-only users) ──────────────── #}
 <div>
+
+{% if can_edit %}
 
 {# Add individual skill #}
 <div class="b-section">
@@ -256,6 +334,14 @@
         </div>
     </div>
 </div>
+
+{% else %}
+<div class="b-section">
+    <div class="b-empty">
+        You don't have edit permission on this plan. Use <strong>Copy to Personal</strong> above to make an editable copy.
+    </div>
+</div>
+{% endif %}
 
 </div>
 </div>

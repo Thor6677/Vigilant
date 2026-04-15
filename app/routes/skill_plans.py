@@ -17,6 +17,7 @@ from app.db.models import get_db, Character, SkillPlan, SkillPlanEntry
 from app.esi.client import refresh_token
 from app.esi import character as esi_char
 from app.sde import lookup as sde
+from app.routes import skill_plan_perms as perms
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,38 @@ ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
 ROMAN_REV = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
 
 SP_CUMULATIVE = [0, 250, 1415, 8000, 45255, 256000]
+
+
+# ── Permission helpers ───────────────────────────────────────────────────────
+
+async def _load_plan_for(db: AsyncSession, plan_id: int, ident: perms.Identities,
+                          required: str):
+    """Load a plan and confirm the user has the required permission.
+
+    `required` is one of "view" | "edit" | "admin". Returns the plan with
+    entries + acl_entries eager-loaded, or None if the plan doesn't exist or
+    the user lacks the required permission.
+    """
+    result = await db.execute(
+        select(SkillPlan)
+        .where(SkillPlan.id == plan_id)
+        .options(selectinload(SkillPlan.entries),
+                 selectinload(SkillPlan.acl_entries))
+    )
+    plan = result.scalar_one_or_none()
+    if plan is None:
+        return None
+    checker = {"view": perms.can_view, "edit": perms.can_edit, "admin": perms.can_admin}[required]
+    if not checker(plan, ident):
+        return None
+    return plan
+
+
+def _touch_edit(plan: SkillPlan, user_id: int) -> None:
+    """Record who last edited the plan and when. Called before commit on mutations."""
+    plan.last_edited_by_user_id = user_id
+    plan.last_edited_at = datetime.now(timezone.utc)
+    plan.updated_at = datetime.now(timezone.utc)
 
 
 def _sp_for_level(level: int, rank: float) -> int:
@@ -66,23 +99,46 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
     if not user_id:
         return RedirectResponse("/", status_code=302)
 
-    result = await db.execute(
-        select(SkillPlan)
-        .where(SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-        .order_by(SkillPlan.updated_at.desc())
+    ident = await perms.resolve_identities(db, user_id)
+
+    # Fetch every plan the user could potentially see:
+    #   - owned by them (personal and anything else they created)
+    #   - corp plans for any corp they're in
+    #   - alliance plans for any alliance they're in
+    #   - custom plans with ACL entries matching any of their identities
+    # Then filter via can_view to handle edge cases (e.g. a custom plan with no
+    # matching ACL entry for this user).
+    query = select(SkillPlan).options(
+        selectinload(SkillPlan.entries),
+        selectinload(SkillPlan.acl_entries),
     )
-    plans = result.scalars().all()
+    all_plans = (await db.execute(query)).scalars().all()
+    visible = [p for p in all_plans if perms.can_view(p, ident)]
+
+    # Group by scope for the template
+    groups = {"personal": [], "corporation": [], "alliance": [], "custom": []}
+    for p in visible:
+        vis = p.visibility or "personal"
+        # "My Plans" section = ANY plan I own, regardless of scope, goes there.
+        # Otherwise scope determines the bucket.
+        if p.user_id == user_id:
+            groups["personal"].append(p)
+        else:
+            groups.setdefault(vis, []).append(p)
+
+    for k in groups:
+        groups[k].sort(key=lambda p: p.updated_at, reverse=True)
 
     # Calculate SP and training time for each plan
     all_skill_ids = set()
-    for p in plans:
+    for p in visible:
         for e in p.entries:
             all_skill_ids.add(e.skill_type_id)
     skill_infos = await sde.get_skill_infos(db, list(all_skill_ids)) if all_skill_ids else {}
 
     plan_stats = {}
-    for p in plans:
+    editable = {}
+    for p in visible:
         total_sp = 0
         total_mins = 0.0
         for e in p.entries:
@@ -90,25 +146,65 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
             rank = info.get("rank", 1.0)
             sp = _sp_for_level(e.target_level, rank)
             total_sp += sp
-            # Estimate time at 20 primary / 20 secondary (base 17 + 3 implants)
             total_mins += _training_time_minutes(sp, 20, 20)
         plan_stats[p.id] = {
             "total_sp": total_sp,
             "time_str": _format_duration(total_mins) if total_mins > 0 else "—",
         }
+        editable[p.id] = perms.can_edit(p, ident)
+
+    # Resolve corp/alliance names for scope badges
+    corp_ids = {p.owner_corp_id for p in visible if p.owner_corp_id}
+    alliance_ids = {p.owner_alliance_id for p in visible if p.owner_alliance_id}
+    corp_names, alliance_names = await _resolve_org_names(db, corp_ids, alliance_ids)
+
+    # Eligibility for create form (corps + alliances where user has the required role)
+    eligible_corps = perms.eligible_corps_for_create(ident)
+    eligible_alliances = perms.eligible_alliances_for_create(ident)
+    user_corp_ids = ident.corp_ids
+    user_alliance_ids = ident.alliance_ids
 
     # Get user's characters for the character selector
     char_result = await db.execute(
         select(Character).where(Character.user_id == user_id).order_by(Character.character_name)
     )
     characters = char_result.scalars().all()
+    eligible_corp_options = [
+        {"id": cid, "name": corp_names.get(cid, f"Corp {cid}")}
+        for cid in sorted(eligible_corps)
+    ]
+    eligible_alliance_options = [
+        {"id": aid, "name": alliance_names.get(aid, f"Alliance {aid}")}
+        for aid in sorted(eligible_alliances)
+    ]
 
     return templates.TemplateResponse("skill_plans.html", {
         "request": request,
-        "plans": plans,
+        "groups": groups,
         "plan_stats": plan_stats,
+        "editable": editable,
         "characters": characters,
+        "corp_names": corp_names,
+        "alliance_names": alliance_names,
+        "eligible_corps": eligible_corp_options,
+        "eligible_alliances": eligible_alliance_options,
     })
+
+
+async def _resolve_org_names(db: AsyncSession, corp_ids: set[int], alliance_ids: set[int]) -> tuple[dict, dict]:
+    """Pull corp + alliance display names from the Character table (cheap
+    cache — every character entry has name pairs kept fresh by sync)."""
+    corp_names: dict[int, str] = {}
+    alliance_names: dict[int, str] = {}
+    if not corp_ids and not alliance_ids:
+        return corp_names, alliance_names
+    char_rows = (await db.execute(select(Character))).scalars().all()
+    for c in char_rows:
+        if c.corporation_id and c.corporation_id in corp_ids and c.corporation_name:
+            corp_names.setdefault(c.corporation_id, c.corporation_name)
+        if c.alliance_id and c.alliance_id in alliance_ids and c.alliance_name:
+            alliance_names.setdefault(c.alliance_id, c.alliance_name)
+    return corp_names, alliance_names
 
 
 # ── Create plan ──────────────────────────────────────────────────────────────
@@ -120,11 +216,30 @@ async def create_plan(request: Request, db: AsyncSession = Depends(get_db)):
         return RedirectResponse("/", status_code=302)
 
     form = await request.form()
-    name = form.get("name", "").strip()
-    if not name:
-        name = "New Skill Plan"
+    name = (form.get("name") or "").strip() or "New Skill Plan"
+    scope = (form.get("visibility") or "personal").strip()
+    target_id_raw = (form.get("target_id") or "").strip()
 
-    plan = SkillPlan(user_id=user_id, name=name)
+    plan = SkillPlan(user_id=user_id, name=name, visibility="personal")
+
+    if scope in ("corporation", "alliance"):
+        ident = await perms.resolve_identities(db, user_id)
+        eligible = (perms.eligible_corps_for_create(ident) if scope == "corporation"
+                    else perms.eligible_alliances_for_create(ident))
+        try:
+            target_id = int(target_id_raw)
+        except ValueError:
+            target_id = 0
+        if target_id in eligible:
+            plan.visibility = scope
+            if scope == "corporation":
+                plan.owner_corp_id = target_id
+            else:
+                plan.owner_alliance_id = target_id
+        # else: silently fall back to personal — safer than 400ing
+    # "custom" is wired up in Phase 3; until then, anything other than
+    # personal/corp/alliance falls back to personal.
+
     db.add(plan)
     await db.commit()
     await db.refresh(plan)
@@ -140,13 +255,9 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
     if not user_id:
         return RedirectResponse("/", status_code=302)
 
-    result = await db.execute(
-        select(SkillPlan)
-        .where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
-    if not plan:
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "view")
+    if plan is None:
         return RedirectResponse("/skill-plans", status_code=302)
 
     # Resolve skill names
@@ -173,11 +284,46 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
     )
     characters = char_result.scalars().all()
 
+    # Scope-display context
+    corp_names, alliance_names = await _resolve_org_names(
+        db,
+        {plan.owner_corp_id} if plan.owner_corp_id else set(),
+        {plan.owner_alliance_id} if plan.owner_alliance_id else set(),
+    )
+
+    # Promote eligibility (only meaningful for personal plans owned by user)
+    eligible_corps = perms.eligible_corps_for_create(ident)
+    eligible_alliances = perms.eligible_alliances_for_create(ident)
+    corp_more_names, alliance_more_names = await _resolve_org_names(
+        db, eligible_corps, eligible_alliances,
+    )
+    corp_names.update(corp_more_names)
+    alliance_names.update(alliance_more_names)
+    eligible_corp_options = [
+        {"id": cid, "name": corp_names.get(cid, f"Corp {cid}")}
+        for cid in sorted(eligible_corps)
+    ]
+    eligible_alliance_options = [
+        {"id": aid, "name": alliance_names.get(aid, f"Alliance {aid}")}
+        for aid in sorted(eligible_alliances)
+    ]
+
+    can_edit = perms.can_edit(plan, ident)
+    can_admin = perms.can_admin(plan, ident)
+    is_owner = (plan.user_id == user_id)
+
     return templates.TemplateResponse("skill_plan_detail.html", {
         "request": request,
         "plan": plan,
         "entries": entries,
         "characters": characters,
+        "corp_names": corp_names,
+        "alliance_names": alliance_names,
+        "can_edit": can_edit,
+        "can_admin": can_admin,
+        "is_owner": is_owner,
+        "eligible_corps": eligible_corp_options,
+        "eligible_alliances": eligible_alliance_options,
     })
 
 
@@ -189,10 +335,8 @@ async def delete_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     if not user_id:
         return RedirectResponse("/", status_code=302)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
     if plan:
         await db.delete(plan)
         await db.commit()
@@ -208,21 +352,18 @@ async def clear_plan(plan_id: int, request: Request, db: AsyncSession = Depends(
     if not user_id:
         return RedirectResponse("/", status_code=302)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if plan:
         for entry in list(plan.entries):
             await db.delete(entry)
-        plan.updated_at = datetime.now(timezone.utc)
+        _touch_edit(plan, user_id)
         await db.commit()
 
     return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
 
 
-# ── Duplicate plan ───────────────────────────────────────────────────────────
+# ── Duplicate plan (always forks to the current user's personal scope) ───────
 
 @router.post("/{plan_id}/duplicate", response_class=HTMLResponse)
 async def duplicate_plan(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
@@ -230,15 +371,18 @@ async def duplicate_plan(plan_id: int, request: Request, db: AsyncSession = Depe
     if not user_id:
         return RedirectResponse("/", status_code=302)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    source = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    source = await _load_plan_for(db, plan_id, ident, "view")
     if not source:
         return RedirectResponse("/skill-plans", status_code=302)
 
-    new_plan = SkillPlan(user_id=user_id, name=f"{source.name} (Copy)")
+    # Always fork into a personal plan under the current user — viewers of a
+    # shared plan get their own copy without needing edit access on the source.
+    new_plan = SkillPlan(
+        user_id=user_id,
+        name=f"{source.name} (Copy)",
+        visibility="personal",
+    )
     db.add(new_plan)
     await db.flush()
 
@@ -267,15 +411,13 @@ async def rename_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     if not name:
         return HTMLResponse("", status_code=400)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
     plan.name = name
-    plan.updated_at = datetime.now(timezone.utc)
+    _touch_edit(plan, user_id)
     await db.commit()
     return HTMLResponse(f'<span class="b-label">{name}</span>')
 
@@ -300,11 +442,8 @@ async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(g
     except ValueError:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Invalid skill or level.</div>')
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -316,7 +455,7 @@ async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(g
                 return HTMLResponse(f'<div class="b-empty" style="color:var(--warn);">{name} {ROMAN_REV.get(e.target_level, "")} already in plan.</div>')
             # Update to higher level
             e.target_level = target_level
-            plan.updated_at = datetime.now(timezone.utc)
+            _touch_edit(plan, user_id)
             await db.commit()
             return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
 
@@ -328,7 +467,7 @@ async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(g
         target_level=target_level,
         sort_order=max_order + 1,
     ))
-    plan.updated_at = datetime.now(timezone.utc)
+    _touch_edit(plan, user_id)
     await db.commit()
     return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
 
@@ -341,19 +480,15 @@ async def remove_skill(plan_id: int, entry_id: int, request: Request, db: AsyncS
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlanEntry)
-        .join(SkillPlan)
-        .where(SkillPlanEntry.id == entry_id, SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-    )
-    entry = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
+    if not plan:
+        return HTMLResponse("", status_code=404)
+
+    entry = next((e for e in plan.entries if e.id == entry_id), None)
     if entry:
         await db.delete(entry)
-        # Update plan timestamp
-        plan_result = await db.execute(select(SkillPlan).where(SkillPlan.id == plan_id))
-        plan = plan_result.scalar_one_or_none()
-        if plan:
-            plan.updated_at = datetime.now(timezone.utc)
+        _touch_edit(plan, user_id)
         await db.commit()
 
     return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
@@ -370,11 +505,8 @@ async def sort_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
     form = await request.form()
     mode = form.get("mode", "name")  # "name", "optimal", "level"
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan or not plan.entries:
         return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
 
@@ -419,11 +551,8 @@ async def reorder_plan(plan_id: int, request: Request, db: AsyncSession = Depend
     except (json.JSONDecodeError, TypeError):
         return HTMLResponse("", status_code=400)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -432,12 +561,12 @@ async def reorder_plan(plan_id: int, request: Request, db: AsyncSession = Depend
         if eid in entry_map:
             entry_map[eid].sort_order = i
 
-    plan.updated_at = datetime.now(timezone.utc)
+    _touch_edit(plan, user_id)
     await db.commit()
     return HTMLResponse("")
 
 
-# ── Share / unshare plan ─────────────────────────────────────────────────────
+# ── Share / unshare plan (admin-only — changes plan-level access) ────────────
 
 @router.post("/{plan_id}/share", response_class=HTMLResponse)
 async def toggle_share(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
@@ -445,10 +574,8 @@ async def toggle_share(plan_id: int, request: Request, db: AsyncSession = Depend
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -457,6 +584,72 @@ async def toggle_share(plan_id: int, request: Request, db: AsyncSession = Depend
     else:
         plan.share_token = secrets.token_urlsafe(12)
 
+    await db.commit()
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+
+# ── Promote plan to corp/alliance scope ──────────────────────────────────────
+
+@router.post("/{plan_id}/promote", response_class=HTMLResponse)
+async def promote_plan(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Move a plan from personal scope to corporation or alliance scope.
+    Requires admin on the source (owner) AND the user must have permission
+    to create plans in the target scope (via eligibility helpers)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=302)
+
+    form = await request.form()
+    target_scope = (form.get("visibility") or "").strip()
+    target_id_raw = (form.get("target_id") or "").strip()
+    if target_scope not in ("corporation", "alliance"):
+        return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
+    if not plan:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    try:
+        target_id = int(target_id_raw)
+    except ValueError:
+        return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+    eligible = (perms.eligible_corps_for_create(ident) if target_scope == "corporation"
+                else perms.eligible_alliances_for_create(ident))
+    if target_id not in eligible:
+        return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+    plan.visibility = target_scope
+    if target_scope == "corporation":
+        plan.owner_corp_id = target_id
+        plan.owner_alliance_id = None
+    else:
+        plan.owner_alliance_id = target_id
+        plan.owner_corp_id = None
+    _touch_edit(plan, user_id)
+    await db.commit()
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+
+# ── Demote back to personal scope ────────────────────────────────────────────
+
+@router.post("/{plan_id}/demote", response_class=HTMLResponse)
+async def demote_plan(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Return a shared plan to personal scope. Admin only."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=302)
+
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
+    if not plan:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    plan.visibility = "personal"
+    plan.owner_corp_id = None
+    plan.owner_alliance_id = None
+    _touch_edit(plan, user_id)
     await db.commit()
     return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
 
@@ -517,11 +710,8 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -572,7 +762,7 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
             existing_skills[skill_id] = entry
             added += 1
 
-    plan.updated_at = datetime.now(timezone.utc)
+    _touch_edit(plan, user_id)
     await db.commit()
 
     msg = f"Imported {added} skill(s)."
@@ -629,11 +819,8 @@ async def import_from_fitting(plan_id: int, request: Request, db: AsyncSession =
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -720,11 +907,8 @@ async def add_from_ship(plan_id: int, request: Request, db: AsyncSession = Depen
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "edit")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -855,14 +1039,19 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    # Verify plan ownership or shared access
-    result = await db.execute(
-        select(SkillPlan).where(
-            SkillPlan.id == plan_id,
-            (SkillPlan.user_id == user_id) | (SkillPlan.share_token.isnot(None))
-        ).options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    # View permission: owner, any scope that grants access, or anyone with a
+    # valid share_token on the plan (read-only public URL flow).
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "view")
+    if plan is None:
+        # Fall back to share_token lookup — a viewer may arrive here from a
+        # shared link rather than scope membership.
+        result = await db.execute(
+            select(SkillPlan)
+            .where(SkillPlan.id == plan_id, SkillPlan.share_token.isnot(None))
+            .options(selectinload(SkillPlan.entries))
+        )
+        plan = result.scalar_one_or_none()
     if not plan or not plan.entries:
         return HTMLResponse('<div class="b-empty">No skills in this plan.</div>')
 
@@ -970,11 +1159,8 @@ async def export_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    result = await db.execute(
-        select(SkillPlan).where(SkillPlan.id == plan_id, SkillPlan.user_id == user_id)
-        .options(selectinload(SkillPlan.entries))
-    )
-    plan = result.scalar_one_or_none()
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "view")
     if not plan:
         return HTMLResponse("", status_code=404)
 
@@ -1040,11 +1226,14 @@ async def ship_detail(ship_type_id: int, request: Request, db: AsyncSession = De
     )
     characters = char_result.scalars().all()
 
-    # Get user's plans for "add to plan" dropdown
+    # Get plans the user can edit for the "add to plan" dropdown — scope-aware
+    ident = await perms.resolve_identities(db, user_id)
     plan_result = await db.execute(
-        select(SkillPlan).where(SkillPlan.user_id == user_id).order_by(SkillPlan.name)
+        select(SkillPlan)
+        .options(selectinload(SkillPlan.acl_entries))
+        .order_by(SkillPlan.name)
     )
-    plans = plan_result.scalars().all()
+    plans = [p for p in plan_result.scalars().all() if perms.can_edit(p, ident)]
 
     return templates.TemplateResponse("ship_mastery.html", {
         "request": request,
