@@ -6,6 +6,7 @@ import re
 import secrets
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.db.models import get_db, Character, SkillPlan, SkillPlanEntry
+from app.db.models import get_db, Character, SkillPlan, SkillPlanEntry, SkillPlanACL
 from app.esi.client import refresh_token
 from app.esi import character as esi_char
 from app.sde import lookup as sde
@@ -237,8 +238,10 @@ async def create_plan(request: Request, db: AsyncSession = Depends(get_db)):
             else:
                 plan.owner_alliance_id = target_id
         # else: silently fall back to personal — safer than 400ing
-    # "custom" is wired up in Phase 3; until then, anything other than
-    # personal/corp/alliance falls back to personal.
+    elif scope == "custom":
+        # Custom scope = owner is admin, ACL starts empty and is filled in
+        # from the plan detail page after creation.
+        plan.visibility = "custom"
 
     db.add(plan)
     await db.commit()
@@ -312,6 +315,11 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
     can_admin = perms.can_admin(plan, ident)
     is_owner = (plan.user_id == user_id)
 
+    # ACL entries for the custom-scope editor (sorted for stable UI)
+    acl_entries = sorted(plan.acl_entries or [],
+                         key=lambda e: (e.subject_type, e.subject_name.lower()))
+    acl_err = request.query_params.get("acl_err")
+
     return templates.TemplateResponse("skill_plan_detail.html", {
         "request": request,
         "plan": plan,
@@ -324,6 +332,8 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
         "is_owner": is_owner,
         "eligible_corps": eligible_corp_options,
         "eligible_alliances": eligible_alliance_options,
+        "acl_entries": acl_entries,
+        "acl_err": acl_err,
     })
 
 
@@ -1353,3 +1363,137 @@ async def ship_mastery_check(ship_type_id: int, character_id: int, request: Requ
         "mastery_results": mastery_results,
         "achieved_level": achieved_level,
     })
+
+
+# ── Custom ACL management (Phase 3) ──────────────────────────────────────────
+
+_ACL_SUBJECT_TYPES = {"character", "corporation", "alliance"}
+_ACL_PERMISSIONS = {"view", "edit", "admin"}
+_ACL_BUCKETS = {
+    "character": "characters",
+    "corporation": "corporations",
+    "alliance": "alliances",
+}
+
+
+async def _resolve_acl_subject(subject_type: str, name: str) -> tuple[int | None, str | None]:
+    """Resolve an EVE character / corporation / alliance name to (id, canonical_name)
+    via the public ESI /universe/ids/ endpoint. Returns (None, None) on no match
+    or on ESI failure — callers should surface a user-friendly error.
+    """
+    if subject_type not in _ACL_BUCKETS or not name:
+        return None, None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                "https://esi.evetech.net/latest/universe/ids/",
+                json=[name],
+                headers={"User-Agent": "Vigilant/1.0 (EVE Online personal dashboard)"},
+            )
+            r.raise_for_status()
+            data = r.json() if r.content else {}
+    except Exception as e:
+        logger.warning("ACL name resolve failed for %r: %s", name, e)
+        return None, None
+    bucket = data.get(_ACL_BUCKETS[subject_type]) or []
+    lowered = name.strip().lower()
+    for item in bucket:
+        if (item.get("name") or "").lower() == lowered:
+            return item.get("id"), item.get("name")
+    # Second pass: accept the first result even if case differs (ESI is case-
+    # insensitive on matching but returns canonical casing).
+    if bucket:
+        return bucket[0].get("id"), bucket[0].get("name")
+    return None, None
+
+
+@router.post("/{plan_id}/acl/add", response_class=HTMLResponse)
+async def acl_add(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Add a new ACL entry to a custom-scope plan. Admin only."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    form = await request.form()
+    subject_type = (form.get("subject_type") or "").strip()
+    name = (form.get("subject_name") or "").strip()
+    permission = (form.get("permission") or "view").strip()
+
+    if subject_type not in _ACL_SUBJECT_TYPES or permission not in _ACL_PERMISSIONS:
+        return RedirectResponse(f"/skill-plans/{plan_id}?acl_err=invalid", status_code=302)
+    if not name:
+        return RedirectResponse(f"/skill-plans/{plan_id}?acl_err=name_required", status_code=302)
+
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
+    if not plan:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    subject_id, canonical_name = await _resolve_acl_subject(subject_type, name)
+    if not subject_id:
+        return RedirectResponse(f"/skill-plans/{plan_id}?acl_err=not_found", status_code=302)
+
+    # Upsert: if a row for (plan, type, id) exists, update its permission
+    existing = next((e for e in plan.acl_entries
+                     if e.subject_type == subject_type and e.subject_id == subject_id), None)
+    if existing:
+        existing.permission = permission
+        existing.subject_name = canonical_name or existing.subject_name
+    else:
+        db.add(SkillPlanACL(
+            plan_id=plan.id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            subject_name=canonical_name or name,
+            permission=permission,
+        ))
+    _touch_edit(plan, user_id)
+    await db.commit()
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+
+@router.post("/{plan_id}/acl/{acl_id}/delete", response_class=HTMLResponse)
+async def acl_delete(plan_id: int, acl_id: int, request: Request,
+                     db: AsyncSession = Depends(get_db)):
+    """Remove an ACL entry. Admin only."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
+    if not plan:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    entry = next((e for e in plan.acl_entries if e.id == acl_id), None)
+    if entry:
+        await db.delete(entry)
+        _touch_edit(plan, user_id)
+        await db.commit()
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+
+@router.post("/{plan_id}/acl/{acl_id}/permission", response_class=HTMLResponse)
+async def acl_set_permission(plan_id: int, acl_id: int, request: Request,
+                              db: AsyncSession = Depends(get_db)):
+    """Change the permission level on an existing ACL entry. Admin only."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    form = await request.form()
+    permission = (form.get("permission") or "").strip()
+    if permission not in _ACL_PERMISSIONS:
+        return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+
+    ident = await perms.resolve_identities(db, user_id)
+    plan = await _load_plan_for(db, plan_id, ident, "admin")
+    if not plan:
+        return RedirectResponse("/skill-plans", status_code=302)
+
+    entry = next((e for e in plan.acl_entries if e.id == acl_id), None)
+    if entry:
+        entry.permission = permission
+        _touch_edit(plan, user_id)
+        await db.commit()
+    return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)

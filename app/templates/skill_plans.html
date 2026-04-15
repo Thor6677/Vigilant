@@ -28,6 +28,7 @@
                 <option value="personal">Personal</option>
                 <option value="corporation" {% if not eligible_corps %}disabled title="No corp where you hold Communications_Officer / Director / CEO"{% endif %}>Corporation</option>
                 <option value="alliance"    {% if not eligible_alliances %}disabled title="No alliance corp where you hold Director / CEO"{% endif %}>Alliance</option>
+                <option value="custom" title="Create with a custom ACL — you'll add characters / corps / alliances after creation">Custom</option>
             </select>
 
             <select id="new-plan-target" style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;display:none;">
@@ -46,7 +47,7 @@
             </button>
         </div>
         <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);">
-            Corporation and alliance scopes require matching in-game roles. Members see the plan; editors need Communications_Officer / Director / CEO (corp) or Director / CEO in any alliance corp (alliance).
+            Corporation and alliance scopes require matching in-game roles. Custom scope creates an empty ACL you fill in after creation (character / corp / alliance with view / edit / admin per entry).
         </div>
     </div>
 </div>
@@ -149,7 +150,8 @@
 function onScopeChange() {
     var scope = document.getElementById('new-plan-scope').value;
     var targetSel = document.getElementById('new-plan-target');
-    if (scope === 'personal') {
+    // Personal and custom don't need a target picker.
+    if (scope === 'personal' || scope === 'custom') {
         targetSel.style.display = 'none';
         return;
     }
@@ -167,7 +169,8 @@ function createPlan() {
     if (!name) { alert('Enter a plan name.'); return; }
     var scope = document.getElementById('new-plan-scope').value;
     var target = document.getElementById('new-plan-target').value;
-    if (scope !== 'personal' && !target) {
+    // Only corp / alliance need a target — personal and custom don't.
+    if ((scope === 'corporation' || scope === 'alliance') && !target) {
         alert('Pick a ' + scope + ' from the dropdown.');
         return;
     }
@@ -181,7 +184,7 @@ function createPlan() {
     };
     add('name', name);
     add('visibility', scope);
-    if (scope !== 'personal') add('target_id', target);
+    if (scope === 'corporation' || scope === 'alliance') add('target_id', target);
     document.body.appendChild(form);
     form.submit();
 }

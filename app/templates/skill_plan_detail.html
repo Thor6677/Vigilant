@@ -114,6 +114,95 @@
 </div>
 {% endif %}
 
+{# ── Custom ACL editor (admin only, visible on custom-scope plans) ──────── #}
+{% if vis == 'custom' and can_admin %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <span class="b-label">Access Control List</span>
+            <span style="font-size:9px;color:var(--muted);">
+                {{ (acl_entries or []) | length }} entr{{ 'ies' if (acl_entries or [])|length != 1 else 'y' }}
+                · owner always has admin
+            </span>
+        </div>
+
+        {% if acl_err %}
+        <div style="padding:0.4rem 0.75rem;background:rgba(204,51,51,0.08);border-bottom:1px solid var(--border);color:#e58080;font-size:10px;">
+            {% if acl_err == 'not_found' %}Couldn't resolve that name — check the spelling or use the exact EVE name.
+            {% elif acl_err == 'name_required' %}Enter a character / corporation / alliance name.
+            {% elif acl_err == 'invalid' %}Invalid subject type or permission.
+            {% else %}Couldn't add entry: {{ acl_err }}.
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if acl_entries %}
+        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.4rem 0.75rem;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border);">
+            <span>Type</span>
+            <span>Name</span>
+            <span>Permission</span>
+            <span></span>
+        </div>
+        {% for e in acl_entries %}
+        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.3rem 0.75rem;align-items:center;border-top:1px solid var(--border);font-size:10px;">
+            <span style="color:var(--muted);text-transform:capitalize;">{{ e.subject_type }}</span>
+            <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
+            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
+                <select name="permission" onchange="this.form.submit()"
+                        style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    <option value="view"  {% if e.permission == 'view' %}selected{% endif %}>View</option>
+                    <option value="edit"  {% if e.permission == 'edit' %}selected{% endif %}>Edit</option>
+                    <option value="admin" {% if e.permission == 'admin' %}selected{% endif %}>Admin</option>
+                </select>
+            </form>
+            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('Remove {{ e.subject_name | e }} from the ACL?');">
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            </form>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty" style="padding:0.6rem 0.75rem;">
+            No entries yet. Add a character, corporation, or alliance below.
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add"
+              style="display:grid;grid-template-columns:110px 1fr 110px auto;gap:0.4rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);align-items:center;">
+            <select name="subject_type"
+                    style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="character">Character</option>
+                <option value="corporation">Corporation</option>
+                <option value="alliance">Alliance</option>
+            </select>
+            <input type="text" name="subject_name" placeholder="Exact EVE name…" required
+                   style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <select name="permission"
+                    style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="view">View</option>
+                <option value="edit">Edit</option>
+                <option value="admin">Admin</option>
+            </select>
+            <button class="b-btn" style="padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Add
+            </button>
+        </form>
+        <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
+            Names are resolved via EVE ESI so they must match exactly. Permissions:
+            <span style="color:var(--text);">View</span> = read-only,
+            <span style="color:var(--text);">Edit</span> = can modify skills,
+            <span style="color:var(--text);">Admin</span> = edit + manage this ACL + delete the plan.
+        </div>
+    </div>
+</div>
+{% elif vis == 'custom' and can_edit and not can_admin %}
+<div class="b-section">
+    <div style="padding:0.5rem 0.75rem;background:rgba(153,102,204,0.08);border:1px solid rgba(153,102,204,0.3);color:#b88ad4;font-size:10px;">
+        You have edit access on this plan via its custom ACL.
+    </div>
+</div>
+{% endif %}
+
 {% if plan.share_token %}
 <div class="b-section">
     <div style="padding:0.4rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
