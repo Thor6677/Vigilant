@@ -989,10 +989,16 @@ async def export_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     from html import escape
     text = escape("\n".join(lines))
     return HTMLResponse(
-        f'<textarea readonly style="width:100%;height:150px;background:var(--bg);color:var(--text);'
+        '<div style="display:flex;gap:0.4rem;align-items:flex-start;">'
+        f'<textarea id="export-text" readonly style="flex:1;width:100%;height:150px;background:var(--bg);color:var(--text);'
         f'border:1px solid var(--border);font-family:inherit;font-size:10px;padding:0.5rem;"'
         f' onclick="this.select()">{text}</textarea>'
-        f'<div style="font-size:9px;color:var(--muted);margin-top:0.25rem;">Click to select, then copy to clipboard. Paste into EVE skill plans.</div>'
+        '<button type="button" onclick="copyExportText(this)" class="b-btn"'
+        ' style="padding:0.4rem 0.8rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;cursor:pointer;white-space:nowrap;">'
+        'Copy'
+        '</button>'
+        '</div>'
+        '<div style="font-size:9px;color:var(--muted);margin-top:0.25rem;">Copy to clipboard and paste into EVE skill plans.</div>'
     )
 
 
