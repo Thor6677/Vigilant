@@ -74,9 +74,7 @@ def _ttl_for_path(path: str) -> int:
     return 300  # default 5 min
 
 
-async def cache_get(db: AsyncSession, path: str, params: dict = None):
-    """Return cached data if present and not expired, else None."""
-    key = _cache_key(path, params)
+async def _cache_get_impl(db: AsyncSession, key: str):
     result = await db.execute(select(ESICache).where(ESICache.key == key))
     row = result.scalar_one_or_none()
     if row is None:
@@ -89,12 +87,27 @@ async def cache_get(db: AsyncSession, path: str, params: dict = None):
     return json.loads(row.data)
 
 
-async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
-    """Store data in cache with appropriate TTL."""
-    key = _cache_key(path, params)
-    ttl = _ttl_for_path(path)
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+async def cache_get(db: AsyncSession, path: str, params: dict = None):
+    """Return cached data if present and not expired, else None.
 
+    If the passed session is busy or broken (e.g. because of concurrent use
+    during a dashboard fan-out), transparently fall back to an isolated
+    session so cache reads never break the caller.
+    """
+    key = _cache_key(path, params)
+    try:
+        return await _cache_get_impl(db, key)
+    except Exception:
+        from app.db.models import AsyncSessionLocal
+        try:
+            async with AsyncSessionLocal() as fresh_db:
+                return await _cache_get_impl(fresh_db, key)
+        except Exception:
+            return None  # cache lookup must never break the caller
+
+
+async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
     result = await db.execute(select(ESICache).where(ESICache.key == key))
     row = result.scalar_one_or_none()
     if row:
@@ -107,6 +120,28 @@ async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
             expires_at=expires_at,
         ))
     await db.commit()
+
+
+async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
+    """Store data in cache with the appropriate TTL.
+
+    Falls back to an isolated session on session errors so a busy/broken
+    caller session never causes the cache write to throw.
+    """
+    key = _cache_key(path, params)
+    ttl = _ttl_for_path(path)
+    try:
+        await _cache_set_impl(db, key, data, ttl)
+        return
+    except Exception:
+        pass
+    # Fallback: isolated session
+    from app.db.models import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as fresh_db:
+            await _cache_set_impl(fresh_db, key, data, ttl)
+    except Exception:
+        pass  # cache writes must never break the caller
 
 
 async def cache_stats(db: AsyncSession) -> dict:
