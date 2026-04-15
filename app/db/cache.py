@@ -90,20 +90,18 @@ async def _cache_get_impl(db: AsyncSession, key: str):
 async def cache_get(db: AsyncSession, path: str, params: dict = None):
     """Return cached data if present and not expired, else None.
 
-    If the passed session is busy or broken (e.g. because of concurrent use
-    during a dashboard fan-out), transparently fall back to an isolated
-    session so cache reads never break the caller.
+    Always uses an isolated AsyncSessionLocal so concurrent cache operations
+    can never poison the caller's session. The `db` argument is accepted for
+    API compatibility but not used — previous behavior shared the caller's
+    session, which cascaded SQLAlchemy errors during dashboard fan-outs.
     """
     key = _cache_key(path, params)
+    from app.db.models import AsyncSessionLocal
     try:
-        return await _cache_get_impl(db, key)
+        async with AsyncSessionLocal() as fresh_db:
+            return await _cache_get_impl(fresh_db, key)
     except Exception:
-        from app.db.models import AsyncSessionLocal
-        try:
-            async with AsyncSessionLocal() as fresh_db:
-                return await _cache_get_impl(fresh_db, key)
-        except Exception:
-            return None  # cache lookup must never break the caller
+        return None  # cache lookup must never break the caller
 
 
 async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
@@ -125,17 +123,12 @@ async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
 async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
     """Store data in cache with the appropriate TTL.
 
-    Falls back to an isolated session on session errors so a busy/broken
-    caller session never causes the cache write to throw.
+    Always uses an isolated AsyncSessionLocal; see cache_get() for rationale.
+    Cache writes are best-effort: any failure is swallowed so the caller's
+    flow is never interrupted.
     """
     key = _cache_key(path, params)
     ttl = _ttl_for_path(path)
-    try:
-        await _cache_set_impl(db, key, data, ttl)
-        return
-    except Exception:
-        pass
-    # Fallback: isolated session
     from app.db.models import AsyncSessionLocal
     try:
         async with AsyncSessionLocal() as fresh_db:
