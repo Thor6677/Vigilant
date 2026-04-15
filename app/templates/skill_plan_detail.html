@@ -366,13 +366,43 @@ function runGap() {
 /* ── Export ───────────────────────────────────────────────────────────────── */
 function exportPlan(e) {
     e.preventDefault();
+    var link = e.target;
+    var originalText = link.textContent;
     var area = document.getElementById('export-area');
-    if (area.style.display === 'none') {
-        htmx.ajax('GET', '/skill-plans/' + planId + '/export', '#export-area');
-        area.style.display = '';
-    } else {
+
+    // If the panel is already open, close it (no copy).
+    if (area.style.display !== 'none') {
         area.style.display = 'none';
+        return;
     }
+
+    // Fetch the export HTML, render the panel, AND copy the plain text
+    // straight to the clipboard — the click itself is what the user expects
+    // to put the skills on their clipboard.
+    fetch('/skill-plans/' + planId + '/export')
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+            area.innerHTML = html;
+            area.style.display = '';
+            var ta = area.querySelector('#export-text');
+            if (!ta) { return; }
+            var text = ta.value;
+            var flash = function (msg) {
+                link.textContent = msg;
+                setTimeout(function () { link.textContent = originalText; }, 1500);
+            };
+            var onOk = function () { flash('Copied!'); };
+            var onFail = function () {
+                try { ta.select(); document.execCommand('copy'); flash('Copied!'); }
+                catch (err) { flash('Copy failed'); }
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(onOk).catch(onFail);
+            } else {
+                onFail();
+            }
+        })
+        .catch(function () { link.textContent = 'Export failed'; setTimeout(function(){ link.textContent = originalText; }, 2000); });
 }
 
 /* Copy the export textarea's contents to the clipboard. Lives on the parent
