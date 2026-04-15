@@ -165,12 +165,29 @@ class ESIClient:
             return await client.get(url, headers=req_headers, params=params)
 
     async def get(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
-        """Authenticated GET with ETag support for 304 Not Modified."""
+        """Authenticated GET with DB cache + ETag support for 304 Not Modified.
+
+        Caching is a two-tier fallthrough:
+          1. DB cache (persisted, TTL-based) — skips the network entirely when
+             a fresh copy is available. Survives restarts.
+          2. ETag cache (in-memory, wiped on restart) — on cache miss, sends
+             If-None-Match so the ESI server can short-circuit with 304.
+        """
+        # Tier 1: DB cache check — survives restarts, skips network entirely.
+        if self.db and not bypass_cache:
+            try:
+                cached = await cache_get(self.db, path, params)
+                if cached is not None:
+                    return cached
+            except Exception:
+                # Cache failures must never break the request; fall through.
+                pass
+
         await self._throttle_if_needed()
         url = f"{self.base}{path}"
         req_headers = dict(self.headers)
 
-        # Check ETag cache
+        # Tier 2: in-memory ETag cache — send If-None-Match for cheap 304.
         ek = _etag_key(path, self.token)
         cached_entry = _etag_cache.get(ek)
         if cached_entry and not bypass_cache:
@@ -184,6 +201,13 @@ class ESIClient:
         # Handle 304 Not Modified — return cached data (mark as recently used)
         if resp.status_code == 304 and cached_entry:
             _etag_cache.move_to_end(ek)
+            # Refresh the DB cache so subsequent (and post-restart) calls can
+            # skip the network entirely — we just confirmed the data is valid.
+            if self.db and not bypass_cache:
+                try:
+                    await cache_set(self.db, path, cached_entry["data"], params)
+                except Exception:
+                    pass
             return cached_entry["data"]
 
         if resp.status_code == 429:
@@ -217,6 +241,15 @@ class ESIClient:
             while len(_etag_cache) >= _ETAG_CACHE_MAX:
                 _etag_cache.popitem(last=False)  # Remove least-recently-used
             _etag_cache[ek] = {"etag": etag, "data": data}
+
+        # Persist to DB cache so the next restart (or concurrent caller) can
+        # skip the network entirely. TTL is resolved per-path in the cache
+        # module — see _ttl_for_path().
+        if self.db and not bypass_cache:
+            try:
+                await cache_set(self.db, path, data, params)
+            except Exception:
+                pass
 
         return data
 
