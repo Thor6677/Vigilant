@@ -1287,7 +1287,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }}
           statsLoaded={!statsLoading && stats !== null}
           sovTimeRange={sovTimeRange}
-          onSovTimeRangeChange={(r) => setSovTimeRange(r === sovTimeRange ? null : r)}
+          onSovTimeRangeChange={(r) => setSovTimeRange(r)}
           sovChangesCount={sovChanges.data ? Object.keys(sovChanges.data.changes).length : 0}
           sovChangesLoading={sovChanges.loading}
           isMobile={isMobile}

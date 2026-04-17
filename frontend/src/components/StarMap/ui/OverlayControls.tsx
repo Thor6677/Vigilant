@@ -25,7 +25,7 @@ interface Props {
   onOverlayChange: (overlay: OverlayType) => void;
   statsLoaded: boolean;
   sovTimeRange?: SovTimeRange | null;
-  onSovTimeRangeChange?: (range: SovTimeRange) => void;
+  onSovTimeRangeChange?: (range: SovTimeRange | null) => void;
   sovChangesCount?: number;
   sovChangesLoading?: boolean;
   isMobile?: boolean;
@@ -116,6 +116,31 @@ export function OverlayControls({
           borderTop: '1px solid #131313',
           padding: '0 4px',
         }}>
+          <button
+            onClick={() => onSovTimeRangeChange?.(null)}
+            style={{
+              padding: '6px 10px',
+              fontSize: 8,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              fontFamily: FONT,
+              background: !sovTimeRange ? '#0e0e0e' : 'transparent',
+              color: !sovTimeRange ? '#c8a951' : '#474747',
+              border: 'none',
+              borderTop: !sovTimeRange ? '1px solid #c8a951' : '1px solid transparent',
+              cursor: 'pointer',
+              transition: 'color 0.15s',
+            }}
+          >
+            Now
+          </button>
+          <span style={{
+            padding: '6px 4px',
+            fontSize: 8,
+            color: '#222',
+          }}>
+            |
+          </span>
           <span style={{
             padding: '6px 10px',
             fontSize: 8,
