@@ -296,33 +296,87 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
     heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
     heatmap_ids: dict[str, list[int]] = {}  # "d,h" -> [killmail_id, ...]
     heatmap_npc: dict[str, bool] = {}  # "d,h" -> True if ALL kills in cell are NPC
+    heatmap_age: dict[str, int] = {}  # "d,h" -> min age bucket (0=<7d, 1=8-14d, 2=15-30d)
     most_recent = None
+    recent_kills: list[dict] = []  # individual kill details for the feed
+    victim_type_ids: set[int] = set()
 
-    for km in full_kms:
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_14d = now - timedelta(days=14)
+
+    for i, km in enumerate(full_kms):
         if not km:
             continue
         kill_time_str = km.get("killmail_time", "")
         kid = km.get("killmail_id")
-        if kill_time_str:
-            try:
-                kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
-                if kill_time < cutoff:
-                    continue
-                d, h = kill_time.weekday(), kill_time.hour
-                heatmap[d][h] += 1
-                key = f"{d},{h}"
-                if kid:
-                    heatmap_ids.setdefault(key, []).append(kid)
-                    is_npc = npc_flags.get(kid, False)
-                    # Cell is NPC-only if all kills in it are NPC
-                    if key not in heatmap_npc:
-                        heatmap_npc[key] = is_npc
-                    elif not is_npc:
-                        heatmap_npc[key] = False
-                if most_recent is None or kill_time > most_recent:
-                    most_recent = kill_time
-            except (ValueError, TypeError):
-                pass
+        if not kill_time_str:
+            continue
+        try:
+            kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        if kill_time < cutoff:
+            continue
+
+        d, h = kill_time.weekday(), kill_time.hour
+        heatmap[d][h] += 1
+        key = f"{d},{h}"
+
+        # Age bucket: 0 = last 7d (bright), 1 = 8-14d, 2 = 15-30d (faded)
+        if kill_time >= cutoff_7d:
+            age = 0
+        elif kill_time >= cutoff_14d:
+            age = 1
+        else:
+            age = 2
+        # Keep the most recent (smallest) age bucket per cell
+        if key not in heatmap_age or age < heatmap_age[key]:
+            heatmap_age[key] = age
+
+        if kid:
+            heatmap_ids.setdefault(key, []).append(kid)
+            is_npc = npc_flags.get(kid, False)
+            if key not in heatmap_npc:
+                heatmap_npc[key] = is_npc
+            elif not is_npc:
+                heatmap_npc[key] = False
+
+        if most_recent is None or kill_time > most_recent:
+            most_recent = kill_time
+
+        # Build recent kills list (up to 15)
+        if len(recent_kills) < 15:
+            victim = km.get("victim", {})
+            ship_tid = victim.get("ship_type_id")
+            if ship_tid:
+                victim_type_ids.add(ship_tid)
+            zkb_stub = None
+            for stub in kills_data:
+                if stub.get("killmail_id") == kid:
+                    zkb_stub = stub.get("zkb", {})
+                    break
+            delta_kill = now - kill_time
+            if delta_kill.days >= 1:
+                time_ago = f"{delta_kill.days}d ago"
+            else:
+                hrs = delta_kill.seconds // 3600
+                time_ago = f"{hrs}h ago" if hrs > 0 else "just now"
+            recent_kills.append({
+                "killmail_id": kid,
+                "time": kill_time,
+                "time_ago": time_ago,
+                "ship_type_id": ship_tid,
+                "ship_name": None,  # resolved below
+                "value": zkb_stub.get("totalValue", 0) if zkb_stub else 0,
+                "is_npc": npc_flags.get(kid, False),
+            })
+
+    # Resolve ship names
+    if victim_type_ids:
+        ship_names = await sde.type_ids_to_names(db, list(victim_type_ids))
+        for kill in recent_kills:
+            if kill["ship_type_id"]:
+                kill["ship_name"] = ship_names.get(kill["ship_type_id"], f"Type {kill['ship_type_id']}")
 
     filtered_count = sum(sum(row) for row in heatmap)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -339,6 +393,8 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         "heatmap": heatmap,
         "heatmap_ids": heatmap_ids,
         "heatmap_npc": heatmap_npc,
+        "heatmap_age": heatmap_age,
+        "recent_kills": recent_kills,
         "day_names": day_names,
         "max_kills": max_kills,
         "most_recent": most_recent,

@@ -36,6 +36,8 @@
                     {% set cell_key = d|string + ',' + h|string %}
                     {% set cell_ids = heatmap_ids.get(cell_key, []) %}
                     {% set is_npc = heatmap_npc.get(cell_key, false) %}
+                    {% set age = heatmap_age.get(cell_key, 2) %}
+                    {% set opacity = 1.0 if age == 0 else (0.65 if age == 1 else 0.4) %}
                     <td style="padding:0;">
                         {% if cell_ids|length == 1 %}
                         <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" style="display:block;text-decoration:none;">
@@ -43,9 +45,9 @@
                         <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" title="{{ cell_ids|length }} kills — click for first" style="display:block;text-decoration:none;">
                         {% endif %}
                         {% if is_npc %}
-                        <div style="width:15px;height:15px;border-radius:2px;background:#b8960f;border:1px solid #d4ad20;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(200,169,81,0.6);{% if cell_ids %}cursor:pointer;{% endif %}" title="NPC kill">{{ val }}</div>
+                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(184,150,15,{{ opacity }});border:1px solid rgba(212,173,32,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(200,169,81,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="NPC kill{% if age == 1 %} (8-14d ago){% elif age == 2 %} (15-30d ago){% endif %}">{{ val }}</div>
                         {% else %}
-                        <div style="width:15px;height:15px;border-radius:2px;background:#cc3333;border:1px solid #ee5555;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,0.6);{% if cell_ids %}cursor:pointer;{% endif %}">{{ val }}</div>
+                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(204,51,51,{{ opacity }});border:1px solid rgba(238,85,85,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="PvP kill{% if age == 1 %} (8-14d ago){% elif age == 2 %} (15-30d ago){% endif %}">{{ val }}</div>
                         {% endif %}
                         {% if cell_ids %}</a>{% endif %}
                     </td>
@@ -60,13 +62,45 @@
             </tbody>
         </table>
     </div>
-    <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;font-size:9px;color:var(--muted);">
-        <div style="width:12px;height:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:2px;"></div>
+    <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;font-size:9px;color:var(--muted);flex-wrap:wrap;">
+        <div style="width:12px;height:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:2px;"></div>
         <span>None</span>
-        <div style="width:12px;height:12px;background:#cc3333;border:1px solid #ee5555;border-radius:2px;"></div>
+        <div style="width:12px;height:12px;background:#cc3333;border-radius:2px;"></div>
         <span>PvP</span>
-        <div style="width:12px;height:12px;background:#b8960f;border:1px solid #d4ad20;border-radius:2px;"></div>
+        <div style="width:12px;height:12px;background:#b8960f;border-radius:2px;"></div>
         <span>NPC</span>
+        <span style="margin-left:0.5rem;">|</span>
+        <div style="width:12px;height:12px;background:rgba(204,51,51,1.0);border-radius:2px;"></div>
+        <span>&lt;7d</span>
+        <div style="width:12px;height:12px;background:rgba(204,51,51,0.65);border-radius:2px;"></div>
+        <span>8-14d</span>
+        <div style="width:12px;height:12px;background:rgba(204,51,51,0.4);border-radius:2px;"></div>
+        <span>15-30d</span>
     </div>
+
+    <!-- Recent Kills Feed -->
+    {% if recent_kills %}
+    <div style="margin-top:1rem;font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Recent Kills</div>
+    <div style="display:flex;flex-direction:column;gap:1px;">
+        {% for kill in recent_kills %}
+        <a href="https://zkillboard.com/kill/{{ kill['killmail_id'] }}/" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.4rem;text-decoration:none;color:var(--text);background:var(--bg);transition:background 0.15s;"
+           onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='var(--bg)'">
+            {% if kill['ship_type_id'] %}
+            <img src="https://images.evetech.net/types/{{ kill['ship_type_id'] }}/icon?size=32"
+                 alt="" width="20" height="20" style="border-radius:2px;flex-shrink:0;">
+            {% else %}
+            <div style="width:20px;height:20px;background:var(--border);border-radius:2px;flex-shrink:0;"></div>
+            {% endif %}
+            <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ kill['ship_name'] or 'Unknown' }}</span>
+            <span style="font-size:9px;padding:1px 5px;border-radius:2px;flex-shrink:0;{% if kill['is_npc'] %}background:rgba(184,150,15,0.2);color:#d4ad20;{% else %}background:rgba(204,51,51,0.2);color:#ee5555;{% endif %}">{{ 'NPC' if kill['is_npc'] else 'PvP' }}</span>
+            {% if kill['value'] %}
+            <span style="font-size:10px;color:var(--accent);flex-shrink:0;min-width:55px;text-align:right;">{{ "%.1f"|format(kill['value'] / 1000000) }}M</span>
+            {% endif %}
+            <span style="font-size:9px;color:var(--muted);flex-shrink:0;min-width:45px;text-align:right;">{{ kill['time_ago'] }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% endif %}
 </div>
