@@ -199,6 +199,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
     # Possible wandering connections for this class
     wh_class = sys_detail.get("wh_class")
     wandering = []
+    seen_wandering: set[str] = set()
     if wh_class:
         class_key = f"c{wh_class}" if wh_class <= 6 else {7: "hs", 8: "ls", 9: "ns"}.get(wh_class, "")
         matrix = _wh_data.get("connection_matrix", {})
@@ -207,8 +208,11 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
             for dest_class, codes in destinations.items():
                 if dest_class == class_key:
                     for code in codes:
+                        if code in seen_wandering:
+                            continue
                         meta = _wh_data.get("wormhole_meta", {}).get(code, {})
                         if meta.get("respawn") != "static" or from_class == "?":
+                            seen_wandering.add(code)
                             wh_type = await sde.get_wormhole_type_by_name(db, code)
                             wandering.append({
                                 "code": code,
