@@ -279,24 +279,28 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
 
     full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:30]])
 
-    # Build activity heatmap (day-of-week × hour)
+    # Build activity heatmap (day-of-week × hour) with kill IDs per cell
     heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
+    heatmap_ids: dict[str, list[int]] = {}  # "d,h" -> [killmail_id, ...]
     most_recent = None
 
     for km in full_kms:
         if not km:
             continue
         kill_time_str = km.get("killmail_time", "")
+        kid = km.get("killmail_id")
         if kill_time_str:
             try:
                 kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
-                heatmap[kill_time.weekday()][kill_time.hour] += 1
+                d, h = kill_time.weekday(), kill_time.hour
+                heatmap[d][h] += 1
+                if kid:
+                    heatmap_ids.setdefault(f"{d},{h}", []).append(kid)
                 if most_recent is None or kill_time > most_recent:
                     most_recent = kill_time
             except (ValueError, TypeError):
                 pass
 
-    # Flatten heatmap for template
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     max_kills = max(max(row) for row in heatmap) if kills_data else 1
 
@@ -310,6 +314,7 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         "request": request,
         "kill_count": len(kills_data),
         "heatmap": heatmap,
+        "heatmap_ids": heatmap_ids,
         "day_names": day_names,
         "max_kills": max_kills,
         "most_recent": most_recent,

@@ -33,8 +33,15 @@
                     {% set val = heatmap[d][h] %}
                     {% if val > 0 %}
                     {% set intensity = (val / max_kills) if max_kills > 0 else 0 %}
+                    {% set cell_ids = heatmap_ids.get(d|string + ',' + h|string, []) %}
                     <td style="padding:0;">
-                        <div style="width:15px;height:15px;border-radius:2px;background:#cc3333;border:1px solid #ee5555;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,0.6);">{{ val }}</div>
+                        {% if cell_ids|length == 1 %}
+                        <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" style="display:block;text-decoration:none;">
+                        {% elif cell_ids|length > 1 %}
+                        <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" title="{{ cell_ids|length }} kills — click for first" style="display:block;text-decoration:none;">
+                        {% endif %}
+                        <div style="width:15px;height:15px;border-radius:2px;background:#cc3333;border:1px solid #ee5555;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,0.6);{% if cell_ids %}cursor:pointer;{% endif %}">{{ val }}</div>
+                        {% if cell_ids %}</a>{% endif %}
                     </td>
                     {% else %}
                     <td style="padding:0;">
