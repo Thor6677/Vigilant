@@ -793,15 +793,25 @@ async def get_system_celestials(db: AsyncSession, system_id: int) -> dict:
     )
     moon_counts = {r.planet_id: r.moon_count for r in moon_result.fetchall()}
 
+    # Fallback planet type names (SDE planet types are often unpublished)
+    PLANET_TYPE_FALLBACK = {
+        11: "Temperate", 12: "Ice", 13: "Gas",
+        2014: "Oceanic", 2015: "Lava", 2016: "Barren",
+        2017: "Storm", 2063: "Plasma", 30889: "Shattered",
+    }
+
     planets = []
     for p in planets_raw:
-        type_name = planet_type_names.get(p.planet_type_id, "Unknown")
+        type_name = planet_type_names.get(p.planet_type_id)
+        if not type_name or type_name == "Unknown":
+            type_name = PLANET_TYPE_FALLBACK.get(p.planet_type_id, "Unknown")
         planets.append({
             "planet_id": p.planet_id,
             "planet_name": p.planet_name,
             "planet_index": p.planet_index,
             "type_id": p.planet_type_id,
             "type_name": type_name,
+            "distance_au": p.distance_au,
             "moon_count": moon_counts.get(p.planet_id, 0),
         })
 

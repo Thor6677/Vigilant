@@ -190,6 +190,7 @@ class SDEPlanet(Base):
     planet_name = Column(String, nullable=False)
     planet_index = Column(Integer, nullable=True)
     radius = Column(Float, nullable=True)
+    distance_au = Column(Float, nullable=True)  # orbital distance from star in AU
 
 
 class SDEPlanetSchematic(Base):

@@ -23,15 +23,15 @@
     .ws-conn { display:inline-flex; align-items:center; gap:0.2rem; margin-right:0.75rem; margin-bottom:0.3rem; }
     .ws-conn a { text-decoration:none; font-weight:600; }
     .ws-conn-dest { font-size:10px; vertical-align:super; }
-    .ws-celestial { display:grid; grid-template-columns:auto 60px 1fr auto; gap:0.5rem; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:11px; }
+    .ws-celestial { display:grid; grid-template-columns:auto 55px 1fr auto; gap:0.5rem; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:11px; }
     .ws-celestial:last-child { border-bottom:none; }
-    .ws-planet-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
     .ws-effect-table { width:100%; border-collapse:collapse; font-size:11px; }
     .ws-effect-table th { text-align:left; padding:0.3rem 0.5rem; color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid var(--border); }
     .ws-effect-table td { padding:0.3rem 0.5rem; border-bottom:1px solid var(--border); }
     .ws-links { display:flex; gap:0.75rem; flex-wrap:wrap; }
     .ws-links a { font-size:11px; color:var(--accent); text-decoration:none; }
     .ws-links a:hover { text-decoration:underline; }
+    .ws-diagram-wrap { position:relative; width:100%; max-width:360px; margin:0 auto; }
     @media(max-width:768px) { .ws-grid { grid-template-columns:1fr; } }
 </style>
 {% endblock %}
@@ -109,14 +109,63 @@
         </div>
         {% endif %}
 
-        <!-- Celestials -->
+        <!-- System Diagram -->
+        {% if celestials['planets'] %}
+        {% set max_au = celestials['planets'][-1]['distance_au'] or 10 %}
+        {% set dscan_au = 14.3 %}
+        <div class="ws-section">
+            <div class="ws-section-title">System Diagram</div>
+            <div class="ws-diagram-wrap">
+                <svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;">
+                    <!-- Background -->
+                    <rect width="360" height="360" fill="var(--bg)" rx="4"/>
+                    <!-- D-scan range circle (14.3 AU) -->
+                    {% set dscan_r = (dscan_au / max_au * 155) if max_au > 0 else 155 %}
+                    {% if dscan_r < 160 and dscan_r > 10 %}
+                    <circle cx="180" cy="180" r="{{ dscan_r }}" fill="none" stroke="rgba(200,169,81,0.15)" stroke-width="1" stroke-dasharray="4,3"/>
+                    <text x="{{ 180 + dscan_r - 2 }}" y="175" fill="rgba(200,169,81,0.5)" font-size="7" font-family="monospace" text-anchor="end">{{ dscan_au }} AU</text>
+                    {% endif %}
+                    <!-- Planet orbits and dots -->
+                    {% for p in celestials['planets'] %}
+                    {% if p['distance_au'] %}
+                    {% set r = (p['distance_au'] / max_au * 155) %}
+                    {% set r = [r, 8] | max %}
+                    <!-- Orbit ring -->
+                    <circle cx="180" cy="180" r="{{ r }}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>
+                    <!-- Planet dot -->
+                    {% set angle = (p['planet_index'] or loop.index) * 137.5 %}
+                    {% set px = 180 + r * (angle * 0.0174533) | round(2) %}
+                    {% set planet_colors = {'Temperate': '#6db36d', 'Ice': '#a8d8ea', 'Gas': '#d4a06a', 'Oceanic': '#4a9eda', 'Lava': '#cc4433', 'Barren': '#8a7a6a', 'Storm': '#6a7a9a', 'Plasma': '#9a6acc', 'Shattered': '#aa8866'} %}
+                    {% set pcolor = planet_colors.get(p['type_name'], '#888') %}
+                    <circle cx="{{ 180 + r * 0.7071 * (1 if loop.index % 2 == 0 else -1) * (0.5 if loop.index % 3 == 0 else 1) }}" cy="{{ 180 - r * 0.7071 * (1 if loop.index % 3 == 0 else -0.3) }}" r="{{ 4 if p['moon_count'] < 5 else 5 }}" fill="{{ pcolor }}" stroke="rgba(255,255,255,0.2)" stroke-width="0.5">
+                        <title>{{ p['planet_name'] }} ({{ p['type_name'] }}) — {{ p['distance_au'] }} AU{% if p['moon_count'] > 0 %}, {{ p['moon_count'] }} moon{{ 's' if p['moon_count'] != 1 }}{% endif %}</title>
+                    </circle>
+                    {% endif %}
+                    {% endfor %}
+                    <!-- Star -->
+                    <circle cx="180" cy="180" r="6" fill="#f0d060" stroke="#f0d060" stroke-width="1" opacity="0.9">
+                        <title>{{ celestials['star']['type_name'] or 'Star' }}</title>
+                    </circle>
+                    <circle cx="180" cy="180" r="10" fill="none" stroke="rgba(240,208,96,0.2)" stroke-width="1"/>
+                </svg>
+                <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
+                    {% if dscan_r < 160 and dscan_r > 10 %}
+                    <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(200,169,81,0.5);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
+                    {% endif %}
+                    <span>{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }}</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Celestials List -->
         <div class="ws-section">
             <div class="ws-section-title">Celestials</div>
             <div class="b-panel" style="padding:0.5rem 0.75rem;">
                 {% if celestials['star'] %}
                 <div class="ws-celestial">
                     <span style="color:var(--accent);">{{ system['system_name'] }} - Star</span>
-                    <span style="color:var(--muted);text-align:right;">0.0 AU</span>
+                    <span style="color:var(--muted);text-align:right;font-size:10px;">0.0 AU</span>
                     <span>{{ celestials['star']['type_name'] or 'Star' }}</span>
                     <span></span>
                 </div>
@@ -124,7 +173,7 @@
                 {% for p in celestials['planets'] %}
                 <div class="ws-celestial">
                     <span>{{ p['planet_name'] }}</span>
-                    <span style="color:var(--muted);text-align:right;"></span>
+                    <span style="color:var(--muted);text-align:right;font-size:10px;">{% if p['distance_au'] %}{{ p['distance_au'] }} AU{% endif %}</span>
                     <span>Planet ({{ p['type_name'] }})</span>
                     <span style="color:{% if p['moon_count'] > 0 %}var(--text){% else %}var(--muted){% endif %};font-size:10px;">
                         {% if p['moon_count'] > 0 %}{{ p['moon_count'] }} moon{{ 's' if p['moon_count'] != 1 }}{% else %}no moons{% endif %}

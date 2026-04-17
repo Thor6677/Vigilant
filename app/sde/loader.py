@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import math
 import zipfile
 from datetime import datetime, timezone, timedelta
 
@@ -622,6 +623,11 @@ async def download_and_import(db: AsyncSession):
                 idx = int(item.get("celestialIndex") or 0)
                 sys_name = sys_name_map.get(system_id, f"System {system_id}")
                 planet_name = f"{sys_name} {_roman(idx)}".strip() if idx else sys_name
+                # Calculate orbital distance from star in AU
+                pos = item.get("position", {})
+                px, py, pz = pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)
+                dist_m = math.sqrt(px*px + py*py + pz*pz)
+                dist_au = round(dist_m / 149_597_870_700, 2) if dist_m > 0 else None
                 batch.append({
                     "planet_id": int(item["_key"]),
                     "system_id": system_id,
@@ -629,6 +635,7 @@ async def download_and_import(db: AsyncSession):
                     "planet_name": planet_name,
                     "planet_index": idx,
                     "radius": item.get("radius"),
+                    "distance_au": dist_au,
                 })
             except (KeyError, ValueError, TypeError):
                 continue
