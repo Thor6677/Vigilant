@@ -642,26 +642,66 @@ async def get_system_wh_class(db: AsyncSession, system_id: int) -> int | None:
     return None
 
 
+# Cached planet types per system {system_id: set(type_name)}
+_planet_types_cache: dict[int, set[str]] | None = None
+_planet_types_cache_ts: datetime | None = None
+
+# Planet type ID → name mapping
+PLANET_TYPE_NAMES = {
+    11: "Temperate", 12: "Ice", 13: "Gas",
+    2014: "Oceanic", 2015: "Lava", 2016: "Barren",
+    2017: "Storm", 2063: "Plasma", 30889: "Shattered",
+}
+
+# "Perfect PI" requires all 8 standard planet types
+PERFECT_PI_TYPES = {"Barren", "Gas", "Ice", "Lava", "Oceanic", "Plasma", "Storm", "Temperate"}
+
+# Wormhole type → destination class (for static destination filtering)
+_wh_type_dest_cache: dict[str, int] | None = None
+
+
+async def _ensure_planet_types_cache(db: AsyncSession):
+    """Load planet types per system into memory."""
+    global _planet_types_cache, _planet_types_cache_ts
+    now = datetime.now(timezone.utc)
+    if _planet_types_cache is not None and _planet_types_cache_ts and (now - _planet_types_cache_ts).total_seconds() < 3600:
+        return
+    result = await db.execute(select(SDEPlanet.system_id, SDEPlanet.planet_type_id))
+    cache: dict[int, set[str]] = {}
+    for r in result.fetchall():
+        tname = PLANET_TYPE_NAMES.get(r.planet_type_id)
+        if tname:
+            cache.setdefault(r.system_id, set()).add(tname)
+    _planet_types_cache = cache
+    _planet_types_cache_ts = now
+
+
 async def get_wormhole_systems(
     db: AsyncSession,
-    class_filter: int | None = None,
+    class_filter: list[int] | None = None,
     effect_filter: str | None = None,
-    static_filter: str | None = None,
+    static_dest_filter: list[int] | None = None,
+    planet_filter: list[str] | None = None,
+    perfect_pi: bool = False,
     search: str | None = None,
     limit: int = 50,
     offset: int = 0,
     wh_data: dict | None = None,
+    **kwargs,
 ) -> tuple[list[dict], int]:
     """Return filtered J-space systems with class, effect, and statics.
 
     Returns (list_of_systems, total_count).
-    wh_data should be the loaded wormholes.json dict.
     """
     await _ensure_wh_class_cache(db)
     if not _wh_class_cache:
         return [], 0
 
-    # Get all J-space systems (names starting with J and having 6-digit numbers)
+    # Load planet cache if planet filters are active
+    if planet_filter or perfect_pi:
+        await _ensure_planet_types_cache(db)
+
+    # Get all J-space systems
     query = (
         select(SDESystem.system_id, SDESystem.system_name,
                SDESystem.constellation_id, SDESystem.region_id)
@@ -677,6 +717,16 @@ async def get_wormhole_systems(
 
     system_effects = wh_data.get("system_effects", {}) if wh_data else {}
     system_statics = wh_data.get("system_statics", {}) if wh_data else {}
+    wh_meta = wh_data.get("wormhole_meta", {}) if wh_data else {}
+
+    # Build wormhole type → destination class lookup for static filtering
+    wh_type_dest: dict[str, int] = {}
+    if static_dest_filter:
+        all_wh_types = await db.execute(select(SDEWormholeType.type_name, SDEWormholeType.target_class))
+        for r in all_wh_types.fetchall():
+            short = r.type_name.replace("Wormhole ", "")
+            if r.target_class:
+                wh_type_dest[short] = int(r.target_class)
 
     filtered = []
     for sys in all_systems:
@@ -687,22 +737,45 @@ async def get_wormhole_systems(
         if wh_class is None and sys.region_id:
             wh_class = _wh_class_cache.get(sys.region_id)
         if wh_class is None:
-            continue  # Not a known WH system
+            continue
 
-        # Only include actual wormhole classes (1-6, 13)
         if wh_class not in (1, 2, 3, 4, 5, 6, 13):
             continue
 
         effect = system_effects.get(sys.system_name)
         statics = system_statics.get(sys.system_name, [])
 
-        # Apply filters
-        if class_filter is not None and wh_class != class_filter:
+        # Class filter (multi-select)
+        if class_filter and wh_class not in class_filter:
             continue
-        if effect_filter and effect != effect_filter:
+
+        # Effect filter
+        if effect_filter == "none" and effect is not None:
             continue
-        if static_filter and static_filter not in statics:
+        if effect_filter and effect_filter != "none" and effect != effect_filter:
             continue
+
+        # Static destination filter: system must have a static leading to one of the selected classes
+        if static_dest_filter:
+            static_dests = set()
+            for sc in statics:
+                dest = wh_type_dest.get(sc)
+                if dest:
+                    static_dests.add(dest)
+            if not any(d in static_dests for d in static_dest_filter):
+                continue
+
+        # Planet type filter
+        if planet_filter and _planet_types_cache is not None:
+            sys_planets = _planet_types_cache.get(sys.system_id, set())
+            if not all(pt in sys_planets for pt in planet_filter):
+                continue
+
+        # Perfect PI filter
+        if perfect_pi and _planet_types_cache is not None:
+            sys_planets = _planet_types_cache.get(sys.system_id, set())
+            if not PERFECT_PI_TYPES.issubset(sys_planets):
+                continue
 
         filtered.append({
             "system_id": sys.system_id,

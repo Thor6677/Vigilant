@@ -92,6 +92,16 @@ def _ship_size_hint(max_jump_mass: float | None) -> str:
 
 # ── System Database ─────────────────────────────────────────────────────────
 
+EFFECT_COLORS = {
+    "pulsar": "#5dffd2",
+    "black_hole": "#4a9eda",
+    "cataclysmic_variable": "#d4a06a",
+    "magnetar": "#cc4433",
+    "red_giant": "#e76363",
+    "wolf_rayet": "#a8cb70",
+}
+
+
 @router.get("/wormholes", response_class=HTMLResponse)
 async def wormhole_systems_page(request: Request):
     user_id = request.session.get("user_id")
@@ -102,6 +112,8 @@ async def wormhole_systems_page(request: Request):
         "request": request,
         "effects_list": list(_wh_data.get("effects", {}).keys()),
         "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
+        "effect_colors": EFFECT_COLORS,
+        "class_colors": _wh_data.get("class_colors", {}),
     })
 
 
@@ -111,28 +123,42 @@ async def wormhole_systems_search(
     q: str = Query(""),
     wh_class: str = Query(""),
     effect: str = Query(""),
-    static: str = Query(""),
+    static_dest: str = Query(""),
+    planets: str = Query(""),
+    perfect_pi: str = Query(""),
     page: int = Query(1),
     db: AsyncSession = Depends(get_db),
 ):
     per_page = 50
     offset = (page - 1) * per_page
     search_q = q.strip() if q else ""
-    class_int = int(wh_class) if wh_class.strip().isdigit() else None
     effect_val = effect.strip() if effect.strip() else None
 
-    # Require at least 4 chars in search OR a class/effect filter selected
-    has_filter = (class_int and class_int > 0) or effect_val
+    # Parse multi-select class filter (comma-separated)
+    class_list = [int(c) for c in wh_class.split(",") if c.strip().isdigit()] if wh_class.strip() else []
+
+    # Parse static destination filter (comma-separated class IDs)
+    static_dest_list = [int(c) for c in static_dest.split(",") if c.strip().isdigit()] if static_dest.strip() else []
+
+    # Parse planet type filter (comma-separated names)
+    planet_list = [p.strip() for p in planets.split(",") if p.strip()] if planets.strip() else []
+
+    perfect_pi_on = perfect_pi.strip() == "1"
+
+    # Require at least one filter or 4+ char search
+    has_filter = class_list or effect_val or static_dest_list or planet_list or perfect_pi_on
     if not has_filter and len(search_q) < 4:
         return HTMLResponse(
-            '<div class="b-empty">Type at least 4 characters (e.g. J114) to search, or select a class/effect filter.</div>'
+            '<div class="b-empty">Select filters above or type at least 4 characters to search.</div>'
         )
 
     systems, total = await sde.get_wormhole_systems(
         db,
-        class_filter=class_int if class_int and class_int > 0 else None,
+        class_filter=class_list or None,
         effect_filter=effect_val,
-        static_filter=static.strip() if static.strip() else None,
+        static_dest_filter=static_dest_list or None,
+        planet_filter=planet_list or None,
+        perfect_pi=perfect_pi_on,
         search=search_q if search_q else None,
         limit=per_page,
         offset=offset,

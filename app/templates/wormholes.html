@@ -10,27 +10,25 @@
 
 {% block head %}
 <style>
-    .wh-filters { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem; }
-    .wh-filter-group { display:flex; flex-direction:column; gap:0.2rem; }
-    .wh-filter-group label { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
-    .wh-filter-group input, .wh-filter-group select {
-        background:var(--bg); border:1px solid var(--border); color:var(--text);
-        font-family:inherit; font-size:11px; padding:0.4rem 0.5rem; min-width:120px;
-    }
-    .wh-filter-group input:focus, .wh-filter-group select:focus {
-        outline:none; border-color:var(--accent);
-    }
     .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
     .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
               color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
     .wh-tab:hover { color:var(--text); }
     .wh-tab.is-active { color:var(--accent); border-bottom-color:var(--accent); }
-    .wh-stats { display:flex; gap:1.5rem; margin-bottom:1rem; }
-    .wh-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
-    .wh-stat-label { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+    .wf-row { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; flex-wrap:wrap; }
+    .wf-label { font-size:10px; color:var(--muted); min-width:140px; text-align:right; flex-shrink:0; }
+    .wf-toggles { display:flex; gap:3px; flex-wrap:wrap; }
+    .wf-btn { font-size:10px; padding:3px 8px; border:1px solid var(--border); background:transparent;
+              color:var(--muted); cursor:pointer; font-family:inherit; border-radius:2px; transition:all 0.15s; }
+    .wf-btn:hover { border-color:var(--text); color:var(--text); }
+    .wf-btn.is-on { border-color:currentColor; opacity:1; }
+    .wf-search { background:var(--bg); border:1px solid var(--border); color:var(--text);
+                 font-family:inherit; font-size:11px; padding:0.35rem 0.5rem; width:140px; }
+    .wf-search:focus { outline:none; border-color:var(--accent); }
+    .wf-sep { border-top:1px solid var(--border); margin:0.4rem 0; }
     @media(max-width:640px) {
-        .wh-filters { flex-direction:column; }
-        .wh-filter-group input, .wh-filter-group select { width:100%; }
+        .wf-label { min-width:auto; text-align:left; width:100%; }
+        .wf-row { gap:0.3rem; }
     }
 </style>
 {% endblock %}
@@ -50,54 +48,124 @@
 <div class="b-banner is-danger" style="margin-bottom:1rem;">{{ error }}</div>
 {% endif %}
 
-<div class="wh-filters">
-    <div class="wh-filter-group">
-        <label>Search</label>
-        <input type="search" id="wh-search" name="q" placeholder="J114700..."
-               hx-get="/wormholes/search"
-               hx-trigger="input changed delay:400ms, search"
-               hx-target="#wh-results"
-               hx-include="#wh-class-filter, #wh-effect-filter"
-               hx-indicator="#wh-loading">
+<div class="b-panel" style="padding:0.75rem 1rem;margin-bottom:1rem;">
+    <div class="wf-row">
+        <span class="wf-label">Search:</span>
+        <input type="search" id="wh-search" name="q" class="wf-search" placeholder="J114700...">
     </div>
-    <div class="wh-filter-group">
-        <label>Class</label>
-        <select id="wh-class-filter" name="wh_class"
-                hx-get="/wormholes/search"
-                hx-trigger="change"
-                hx-target="#wh-results"
-                hx-include="#wh-search, #wh-effect-filter"
-                hx-indicator="#wh-loading">
-            <option value="">All Classes</option>
-            <option value="1">C1</option>
-            <option value="2">C2</option>
-            <option value="3">C3</option>
-            <option value="4">C4</option>
-            <option value="5">C5</option>
-            <option value="6">C6</option>
-            <option value="13">C13 (Shattered)</option>
-        </select>
-    </div>
-    <div class="wh-filter-group">
-        <label>Effect</label>
-        <select id="wh-effect-filter" name="effect"
-                hx-get="/wormholes/search"
-                hx-trigger="change"
-                hx-target="#wh-results"
-                hx-include="#wh-search, #wh-class-filter"
-                hx-indicator="#wh-loading">
-            <option value="">All Effects</option>
-            {% for key in effects_list %}
-            <option value="{{ key }}">{{ effects_labels[key] }}</option>
+
+    <div class="wf-row">
+        <span class="wf-label">Show systems of class:</span>
+        <div class="wf-toggles" id="filter-class">
+            {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
+            <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
             {% endfor %}
-            <option value="none">No Effect</option>
-        </select>
+        </div>
+    </div>
+
+    <div class="wf-row">
+        <span class="wf-label">Require statics to:</span>
+        <div class="wf-toggles" id="filter-static">
+            {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("7","HS"),("8","LS"),("9","NS")] %}
+            <button class="wf-btn" data-filter="static_dest" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="wf-row">
+        <span class="wf-label">Require planet types:</span>
+        <div class="wf-toggles" id="filter-planets">
+            {% for ptype in ["Barren","Gas","Ice","Lava","Oceanic","Plasma","Storm","Temperate"] %}
+            {% set pcolors = {"Barren":"#8a7a6a","Gas":"#d4a06a","Ice":"#a8d8ea","Lava":"#cc4433","Oceanic":"#4a9eda","Plasma":"#9a6acc","Storm":"#6a7a9a","Temperate":"#6db36d"} %}
+            <button class="wf-btn" data-filter="planet" data-val="{{ ptype }}" style="color:{{ pcolors[ptype] }};" onclick="toggleFilter(this)">{{ ptype }}</button>
+            {% endfor %}
+            <button class="wf-btn" data-filter="perfect_pi" data-val="1" style="color:var(--accent);border-style:dashed;" onclick="toggleFilter(this)" title="System has all planet types needed for all P4 PI materials">Perfect PI</button>
+        </div>
+    </div>
+
+    <div class="wf-row">
+        <span class="wf-label">Require effect:</span>
+        <div class="wf-toggles" id="filter-effect">
+            <button class="wf-btn is-on" data-filter="effect" data-val="" onclick="setExclusive(this,'effect')" style="color:var(--text);">Unfiltered</button>
+            <button class="wf-btn" data-filter="effect" data-val="none" onclick="setExclusive(this,'effect')">No Effect</button>
+            {% for key in effects_list %}
+            <button class="wf-btn" data-filter="effect" data-val="{{ key }}" onclick="setExclusive(this,'effect')" style="color:{{ effect_colors.get(key, 'var(--text)') }};">{{ effects_labels[key] }}</button>
+            {% endfor %}
+        </div>
     </div>
 </div>
 
 <span id="wh-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading...</span>
 
 <div id="wh-results">
-    <div class="b-empty">Type at least 4 characters (e.g. J114) to search, or select a class/effect filter.</div>
+    <div class="b-empty">Select filters above to find wormhole systems.</div>
 </div>
+
+<script>
+function getFilterValues(filterName) {
+    var vals = [];
+    document.querySelectorAll('.wf-btn.is-on[data-filter="' + filterName + '"]').forEach(function(b) {
+        if (b.dataset.val) vals.push(b.dataset.val);
+    });
+    return vals.join(',');
+}
+
+function toggleFilter(btn) {
+    btn.classList.toggle('is-on');
+    if (btn.classList.contains('is-on')) {
+        btn.style.borderColor = 'currentColor';
+        btn.style.textShadow = '0 0 6px currentColor';
+    } else {
+        btn.style.borderColor = '';
+        btn.style.textShadow = '';
+    }
+    doSearch();
+}
+
+function setExclusive(btn, group) {
+    document.querySelectorAll('.wf-btn[data-filter="' + group + '"]').forEach(function(b) {
+        b.classList.remove('is-on');
+        b.style.borderColor = '';
+        b.style.textShadow = '';
+    });
+    btn.classList.add('is-on');
+    btn.style.borderColor = 'currentColor';
+    btn.style.textShadow = '0 0 6px currentColor';
+    doSearch();
+}
+
+var searchTimer = null;
+document.getElementById('wh-search').addEventListener('input', function() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(doSearch, 400);
+});
+
+function doSearch() {
+    var q = document.getElementById('wh-search').value.trim();
+    var classes = getFilterValues('class');
+    var statics = getFilterValues('static_dest');
+    var planets = getFilterValues('planet');
+    var effect = getFilterValues('effect');
+    var perfectPi = getFilterValues('perfect_pi');
+
+    var hasFilter = classes || statics || planets || effect || perfectPi;
+    if (!hasFilter && q.length < 4) {
+        document.getElementById('wh-results').innerHTML = '<div class="b-empty">Select filters above or type at least 4 characters to search.</div>';
+        return;
+    }
+
+    var params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (classes) params.set('wh_class', classes);
+    if (statics) params.set('static_dest', statics);
+    if (planets) params.set('planets', planets);
+    if (effect) params.set('effect', effect);
+    if (perfectPi) params.set('perfect_pi', '1');
+
+    htmx.ajax('GET', '/wormholes/search?' + params.toString(), {
+        target: '#wh-results',
+        indicator: '#wh-loading'
+    });
+}
+</script>
 {% endblock %}
