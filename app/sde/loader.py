@@ -200,19 +200,29 @@ async def download_and_import(db: AsyncSession):
 
     # --- mapSolarSystems ---
     # Field name: securityStatus (official SDE) vs security (fuzzworks)
+    # Also extract wormholeClassID for the wormhole classes table.
     log.info("Importing solar systems...")
     await db.execute(text("DELETE FROM sde_systems"))
     await db.commit()
     count, batch = 0, []
+    wh_class_batch: list[dict] = []  # collected during system import
     for item in _iter_jsonl(zf, "mapSolarSystems.jsonl"):
         try:
+            sys_id = int(item["_key"])
             batch.append({
-                "system_id": int(item["_key"]),
+                "system_id": sys_id,
                 "system_name": item.get("name", {}).get("en"),
                 "security": item.get("securityStatus"),
                 "constellation_id": item.get("constellationID"),
                 "region_id": item.get("regionID"),
             })
+            # Collect wormhole class if present
+            wh_class = item.get("wormholeClassID")
+            if wh_class is not None:
+                wh_class_batch.append({
+                    "location_id": sys_id,
+                    "wormhole_class_id": int(wh_class),
+                })
         except (KeyError, ValueError):
             continue
         if len(batch) >= 500:
@@ -222,6 +232,17 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDESystem.__table__, batch)
     count += len(batch)
     log.info(f"Imported {count} systems")
+
+    # Insert wormhole class mappings collected during system import
+    if wh_class_batch:
+        await db.execute(text("DELETE FROM sde_wormhole_classes"))
+        await db.commit()
+        wh_cls_count = 0
+        for i in range(0, len(wh_class_batch), 500):
+            chunk = wh_class_batch[i:i+500]
+            await _bulk_insert(db, SDEWormholeClass.__table__, chunk)
+            wh_cls_count += len(chunk)
+        log.info(f"Imported {wh_cls_count} wormhole class mappings (from mapSolarSystems)")
 
     # --- mapStargates → jump graph (replaces mapSolarSystemJumps) ---
     # Each stargate has a paired counterpart at the destination, so both directions are present.
@@ -710,40 +731,17 @@ async def download_and_import(db: AsyncSession):
     except KeyError:
         log.warning("mapStars.jsonl not present in SDE zip — skipping star import")
 
-    # --- mapLocationWormholeClasses → wormhole class per location ---
-    log.info("Importing wormhole classes...")
-    await db.execute(text("DELETE FROM sde_wormhole_classes"))
-    await db.commit()
-    count, batch = 0, []
-    try:
-        for item in _iter_jsonl(zf, "mapLocationWormholeClasses.jsonl"):
-            try:
-                batch.append({
-                    "location_id": int(item["_key"]),
-                    "wormhole_class_id": int(item.get("wormholeClassID", 0)),
-                })
-            except (KeyError, ValueError, TypeError):
-                continue
-            if len(batch) >= 500:
-                await _bulk_insert(db, SDEWormholeClass.__table__, batch)
-                count += len(batch)
-                batch = []
-        await _bulk_insert(db, SDEWormholeClass.__table__, batch)
-        count += len(batch)
-        log.info(f"Imported {count} wormhole class mappings")
-    except KeyError:
-        log.warning("mapLocationWormholeClasses.jsonl not present — skipping")
-
     # --- Wormhole types from types.jsonl (group 988) + typeDogma attributes ---
     log.info("Importing wormhole types...")
     await db.execute(text("DELETE FROM sde_wormhole_types"))
     await db.commit()
 
     # First pass: collect wormhole type IDs from types.jsonl
+    # Note: wormhole types are all published=false in the SDE, so we skip that check
     wh_type_ids: set[int] = set()
     wh_type_names: dict[int, str] = {}
     for item in _iter_jsonl(zf, "types.jsonl"):
-        if item.get("groupID") == WH_GROUP_ID and item.get("published"):
+        if item.get("groupID") == WH_GROUP_ID:
             tid = int(item["_key"])
             wh_type_ids.add(tid)
             wh_type_names[tid] = item.get("name", {}).get("en", f"Wormhole {tid}")
