@@ -116,13 +116,23 @@ async def wormhole_systems_search(
 ):
     per_page = 50
     offset = (page - 1) * per_page
+    search_q = q.strip() if q else ""
     class_int = int(wh_class) if wh_class.strip().isdigit() else None
+    effect_val = effect.strip() if effect.strip() else None
+
+    # Require at least 4 chars in search OR a class/effect filter selected
+    has_filter = (class_int and class_int > 0) or effect_val
+    if not has_filter and len(search_q) < 4:
+        return HTMLResponse(
+            '<div class="b-empty">Type at least 4 characters (e.g. J114) to search, or select a class/effect filter.</div>'
+        )
+
     systems, total = await sde.get_wormhole_systems(
         db,
         class_filter=class_int if class_int and class_int > 0 else None,
-        effect_filter=effect.strip() if effect.strip() else None,
+        effect_filter=effect_val,
         static_filter=static.strip() if static.strip() else None,
-        search=q if q else None,
+        search=search_q if search_q else None,
         limit=per_page,
         offset=offset,
         wh_data=_wh_data,

@@ -53,7 +53,7 @@
 <div class="wh-filters">
     <div class="wh-filter-group">
         <label>Search</label>
-        <input type="search" id="wh-search" placeholder="J-number..."
+        <input type="search" id="wh-search" name="q" placeholder="J114700..."
                hx-get="/wormholes/search"
                hx-trigger="input changed delay:400ms, search"
                hx-target="#wh-results"
@@ -97,10 +97,7 @@
 
 <span id="wh-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading...</span>
 
-<div id="wh-results"
-     hx-get="/wormholes/search"
-     hx-trigger="load"
-     hx-indicator="#wh-loading">
-    <div class="b-empty">Loading systems...</div>
+<div id="wh-results">
+    <div class="b-empty">Type at least 4 characters (e.g. J114) to search, or select a class/effect filter.</div>
 </div>
 {% endblock %}
