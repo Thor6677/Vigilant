@@ -34,7 +34,7 @@
                     {% if val > 0 %}
                     {% set intensity = (val / max_kills) if max_kills > 0 else 0 %}
                     <td style="padding:0;">
-                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(200,169,81,{{ 0.25 + intensity * 0.75 }});border:1px solid rgba(200,169,81,{{ 0.3 + intensity * 0.5 }});display:flex;align-items:center;justify-content:center;font-size:7px;color:rgba(0,0,0,0.6);font-weight:700;">{{ val }}</div>
+                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(220,60,60,{{ 0.3 + intensity * 0.7 }});border:1px solid rgba(220,60,60,{{ 0.4 + intensity * 0.5 }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;">{{ val }}</div>
                     </td>
                     {% else %}
                     <td style="padding:0;">
@@ -50,9 +50,9 @@
     <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;font-size:9px;color:var(--muted);">
         <span>Less</span>
         <div style="width:12px;height:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(200,169,81,0.35);border:1px solid rgba(200,169,81,0.4);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(200,169,81,0.65);border:1px solid rgba(200,169,81,0.7);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(200,169,81,1.0);border:1px solid rgba(200,169,81,1.0);border-radius:2px;"></div>
+        <div style="width:12px;height:12px;background:rgba(220,60,60,0.4);border:1px solid rgba(220,60,60,0.5);border-radius:2px;"></div>
+        <div style="width:12px;height:12px;background:rgba(220,60,60,0.7);border:1px solid rgba(220,60,60,0.8);border-radius:2px;"></div>
+        <div style="width:12px;height:12px;background:rgba(220,60,60,1.0);border:1px solid rgba(220,60,60,1.0);border-radius:2px;"></div>
         <span>More</span>
     </div>
     {% endif %}

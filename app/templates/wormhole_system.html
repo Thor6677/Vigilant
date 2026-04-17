@@ -112,52 +112,74 @@
         <!-- System Diagram -->
         {% if celestials['planets'] %}
         <div class="ws-section">
-            <div class="ws-section-title">System Diagram</div>
+            <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+                System Diagram
+                <div style="display:flex;gap:2px;">
+                    <button id="zoom-full" onclick="drawDiagram('full')" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
+                    <button id="zoom-dscan" onclick="drawDiagram('dscan')" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
+                </div>
+            </div>
             <div class="ws-diagram-wrap">
                 <svg id="sys-diagram" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:400px;">
-                    <rect width="400" height="400" fill="var(--bg)" rx="4"/>
                 </svg>
                 <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
-                    <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(200,169,81,0.5);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
+                    <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(100,180,255,0.6);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
                     <span>{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }}</span>
                 </div>
             </div>
         </div>
         <script>
-        (function() {
-            var planets = {{ celestials['planets'] | tojson }};
+        var _diagramPlanets = {{ celestials['planets'] | tojson }};
+        function drawDiagram(mode) {
+            var planets = _diagramPlanets;
             var colors = {Temperate:'#6db36d',Ice:'#a8d8ea',Gas:'#d4a06a',Oceanic:'#4a9eda',Lava:'#cc4433',Barren:'#8a7a6a',Storm:'#6a7a9a',Plasma:'#9a6acc',Shattered:'#aa8866'};
             var svg = document.getElementById('sys-diagram');
-            var cx = 200, cy = 200, maxR = 170, minR = 24;
+            var ns = 'http://www.w3.org/2000/svg';
+            svg.innerHTML = '';
+            var cx = 200, cy = 200, maxR = 175;
             var dscanAU = 14.3;
+            var rom = ['','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV'];
 
-            // Get max AU for scaling
-            var maxAU = 0;
-            planets.forEach(function(p) { if (p.distance_au && p.distance_au > maxAU) maxAU = p.distance_au; });
-            if (maxAU < 1) maxAU = 10;
-
-            // Log scale: maps AU to pixel radius
-            function auToR(au) {
-                if (!au || au <= 0) return minR;
-                var logMin = Math.log(0.05);
-                var logMax = Math.log(maxAU * 1.15);
-                var t = (Math.log(au) - logMin) / (logMax - logMin);
-                return minR + t * (maxR - minR);
+            // Toggle button styles
+            var bf = document.getElementById('zoom-full'), bd = document.getElementById('zoom-dscan');
+            if (mode === 'dscan') {
+                bd.style.background='var(--accent)'; bd.style.color='var(--bg)'; bd.style.borderColor='var(--accent)';
+                bf.style.background='var(--surface)'; bf.style.color='var(--muted)'; bf.style.borderColor='var(--border)';
+            } else {
+                bf.style.background='var(--accent)'; bf.style.color='var(--bg)'; bf.style.borderColor='var(--accent)';
+                bd.style.background='var(--surface)'; bd.style.color='var(--muted)'; bd.style.borderColor='var(--border)';
             }
 
-            // D-scan circle
+            // Determine scale AU — linear
+            var scaleAU;
+            if (mode === 'dscan') {
+                scaleAU = dscanAU * 1.15;
+            } else {
+                scaleAU = 0;
+                planets.forEach(function(p) { if (p.distance_au > scaleAU) scaleAU = p.distance_au; });
+                scaleAU = scaleAU * 1.1 || 10;
+            }
+
+            function auToR(au) { return (au / scaleAU) * maxR; }
+
+            // Background
+            var bg = document.createElementNS(ns,'rect');
+            bg.setAttribute('width',400); bg.setAttribute('height',400); bg.setAttribute('fill','#080808'); bg.setAttribute('rx',4);
+            svg.appendChild(bg);
+
+            // D-scan circle (always shown)
             var dsR = auToR(dscanAU);
-            if (dsR > minR && dsR < maxR + 10) {
-                var c = document.createElementNS('http://www.w3.org/2000/svg','circle');
-                c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',dsR);
-                c.setAttribute('fill','none'); c.setAttribute('stroke','rgba(200,169,81,0.2)');
-                c.setAttribute('stroke-width','1'); c.setAttribute('stroke-dasharray','6,4');
-                svg.appendChild(c);
-                var t = document.createElementNS('http://www.w3.org/2000/svg','text');
-                t.setAttribute('x', cx + dsR + 3); t.setAttribute('y', cy - 3);
-                t.setAttribute('fill','rgba(200,169,81,0.45)'); t.setAttribute('font-size','8');
-                t.setAttribute('font-family','monospace');
-                t.textContent = '14.3 AU';
+            if (dsR > 5) {
+                var fill = document.createElementNS(ns,'circle');
+                fill.setAttribute('cx',cx); fill.setAttribute('cy',cy); fill.setAttribute('r',dsR);
+                fill.setAttribute('fill','rgba(100,180,255,0.03)'); fill.setAttribute('stroke','rgba(100,180,255,0.3)');
+                fill.setAttribute('stroke-width','1.5'); fill.setAttribute('stroke-dasharray','8,5');
+                svg.appendChild(fill);
+                var t = document.createElementNS(ns,'text');
+                t.setAttribute('x', cx); t.setAttribute('y', cy - dsR - 5);
+                t.setAttribute('fill','rgba(100,180,255,0.5)'); t.setAttribute('font-size','9');
+                t.setAttribute('font-family','monospace'); t.setAttribute('text-anchor','middle');
+                t.textContent = '14.3 AU D-scan';
                 svg.appendChild(t);
             }
 
@@ -165,52 +187,60 @@
             planets.forEach(function(p, i) {
                 if (!p.distance_au) return;
                 var r = auToR(p.distance_au);
+                if (r < 3) r = 3;
+                var outOfView = r > maxR + 15;
+
                 // Orbit ring
-                var orb = document.createElementNS('http://www.w3.org/2000/svg','circle');
-                orb.setAttribute('cx',cx); orb.setAttribute('cy',cy); orb.setAttribute('r',r);
-                orb.setAttribute('fill','none'); orb.setAttribute('stroke','rgba(255,255,255,0.07)');
-                orb.setAttribute('stroke-width','0.5');
-                svg.appendChild(orb);
-                // Planet position — spread evenly around the star using golden angle
-                var angle = (i + 1) * 2.399963 + 0.5; // golden angle in radians
-                var px = cx + r * Math.cos(angle);
-                var py = cy + r * Math.sin(angle);
+                if (!outOfView) {
+                    var orb = document.createElementNS(ns,'circle');
+                    orb.setAttribute('cx',cx); orb.setAttribute('cy',cy); orb.setAttribute('r',r);
+                    orb.setAttribute('fill','none'); orb.setAttribute('stroke','rgba(255,255,255,0.08)');
+                    orb.setAttribute('stroke-width','0.5');
+                    svg.appendChild(orb);
+                }
+
+                // Planet dot
+                var angle = (i + 1) * 2.399963 + 0.5;
+                var drawR = outOfView ? maxR + 8 : r;
+                var px = cx + drawR * Math.cos(angle);
+                var py = cy + drawR * Math.sin(angle);
                 var col = colors[p.type_name] || '#888';
-                var pr = p.moon_count >= 10 ? 6 : (p.moon_count >= 3 ? 5 : 4);
-                var dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+                var pr = outOfView ? 3 : (p.moon_count >= 10 ? 6 : (p.moon_count >= 3 ? 5 : 4));
+                var dot = document.createElementNS(ns,'circle');
                 dot.setAttribute('cx',px); dot.setAttribute('cy',py); dot.setAttribute('r',pr);
-                dot.setAttribute('fill',col); dot.setAttribute('stroke','rgba(255,255,255,0.25)');
-                dot.setAttribute('stroke-width','0.5');
-                var title = document.createElementNS('http://www.w3.org/2000/svg','title');
+                dot.setAttribute('fill', outOfView ? 'rgba(255,255,255,0.15)' : col);
+                dot.setAttribute('stroke','rgba(255,255,255,0.25)'); dot.setAttribute('stroke-width','0.5');
+                if (outOfView) dot.setAttribute('stroke-dasharray','2,2');
+                var title = document.createElementNS(ns,'title');
                 title.textContent = p.planet_name + ' (' + p.type_name + ') — ' + p.distance_au + ' AU' + (p.moon_count > 0 ? ', ' + p.moon_count + ' moon' + (p.moon_count !== 1 ? 's' : '') : '');
                 dot.appendChild(title);
                 svg.appendChild(dot);
-                // Label for outer planets
-                if (planets.length <= 10 || i % 2 === 0) {
-                    var lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
-                    var lx = px + (Math.cos(angle) > 0 ? pr + 3 : -pr - 3);
-                    var ly = py + 3;
-                    lbl.setAttribute('x', lx); lbl.setAttribute('y', ly);
-                    lbl.setAttribute('fill','rgba(255,255,255,0.35)'); lbl.setAttribute('font-size','7');
-                    lbl.setAttribute('font-family','monospace');
-                    lbl.setAttribute('text-anchor', Math.cos(angle) > 0 ? 'start' : 'end');
-                    var idx = p.planet_index || (i + 1);
-                    var rom = ['','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV'];
-                    lbl.textContent = rom[idx] || idx;
-                    svg.appendChild(lbl);
-                }
+
+                // Label
+                var idx = p.planet_index || (i + 1);
+                var label = rom[idx] || String(idx);
+                if (!outOfView) label += ' ' + p.distance_au;
+                var lbl = document.createElementNS(ns,'text');
+                var lx = px + (Math.cos(angle) > 0 ? pr + 3 : -pr - 3);
+                lbl.setAttribute('x', lx); lbl.setAttribute('y', py + 3);
+                lbl.setAttribute('fill', outOfView ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.45)');
+                lbl.setAttribute('font-size', outOfView ? '7' : '8'); lbl.setAttribute('font-family','monospace');
+                lbl.setAttribute('text-anchor', Math.cos(angle) > 0 ? 'start' : 'end');
+                lbl.textContent = label;
+                svg.appendChild(lbl);
             });
 
-            // Star (on top)
-            var sg = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            // Star
+            var sg = document.createElementNS(ns,'circle');
             sg.setAttribute('cx',cx); sg.setAttribute('cy',cy); sg.setAttribute('r','12');
             sg.setAttribute('fill','none'); sg.setAttribute('stroke','rgba(240,208,96,0.15)'); sg.setAttribute('stroke-width','1');
             svg.appendChild(sg);
-            var s = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            var s = document.createElementNS(ns,'circle');
             s.setAttribute('cx',cx); s.setAttribute('cy',cy); s.setAttribute('r','6');
             s.setAttribute('fill','#f0d060'); s.setAttribute('opacity','0.9');
             svg.appendChild(s);
-        })();
+        }
+        drawDiagram('full');
         </script>
         {% endif %}
 
