@@ -245,9 +245,10 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
 
     system_id = sys_detail["system_id"]
 
-    # Fetch kills from zKillboard (last 30 days = 2592000 seconds)
+    # Fetch all killmails from zKillboard (last 30 days = 2592000 seconds)
+    # Use /systemID/ (not /kills/systemID/) to include NPC and PvP kills
     try:
-        kills_data = await zkb_get(f"/kills/systemID/{system_id}/pastSeconds/2592000/")
+        kills_data = await zkb_get(f"/systemID/{system_id}/pastSeconds/2592000/")
     except Exception:
         kills_data = []
 
@@ -266,6 +267,13 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
     # Limit to 30 kills to avoid overloading ESI
     sem = asyncio.Semaphore(5)
 
+    # Build npc flag lookup from zkb data
+    npc_flags: dict[int, bool] = {}
+    for km in kills_data:
+        kid = km.get("killmail_id")
+        if kid:
+            npc_flags[kid] = km.get("zkb", {}).get("npc", False)
+
     async def _fetch_km(km_stub):
         async with sem:
             kid = km_stub.get("killmail_id")
@@ -282,6 +290,7 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
     # Build activity heatmap (day-of-week × hour) with kill IDs per cell
     heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
     heatmap_ids: dict[str, list[int]] = {}  # "d,h" -> [killmail_id, ...]
+    heatmap_npc: dict[str, bool] = {}  # "d,h" -> True if ALL kills in cell are NPC
     most_recent = None
 
     for km in full_kms:
@@ -294,8 +303,15 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
                 kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
                 d, h = kill_time.weekday(), kill_time.hour
                 heatmap[d][h] += 1
+                key = f"{d},{h}"
                 if kid:
-                    heatmap_ids.setdefault(f"{d},{h}", []).append(kid)
+                    heatmap_ids.setdefault(key, []).append(kid)
+                    is_npc = npc_flags.get(kid, False)
+                    # Cell is NPC-only if all kills in it are NPC
+                    if key not in heatmap_npc:
+                        heatmap_npc[key] = is_npc
+                    elif not is_npc:
+                        heatmap_npc[key] = False
                 if most_recent is None or kill_time > most_recent:
                     most_recent = kill_time
             except (ValueError, TypeError):
@@ -315,6 +331,7 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         "kill_count": len(kills_data),
         "heatmap": heatmap,
         "heatmap_ids": heatmap_ids,
+        "heatmap_npc": heatmap_npc,
         "day_names": day_names,
         "max_kills": max_kills,
         "most_recent": most_recent,

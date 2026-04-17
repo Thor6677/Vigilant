@@ -33,14 +33,20 @@
                     {% set val = heatmap[d][h] %}
                     {% if val > 0 %}
                     {% set intensity = (val / max_kills) if max_kills > 0 else 0 %}
-                    {% set cell_ids = heatmap_ids.get(d|string + ',' + h|string, []) %}
+                    {% set cell_key = d|string + ',' + h|string %}
+                    {% set cell_ids = heatmap_ids.get(cell_key, []) %}
+                    {% set is_npc = heatmap_npc.get(cell_key, false) %}
                     <td style="padding:0;">
                         {% if cell_ids|length == 1 %}
                         <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" style="display:block;text-decoration:none;">
                         {% elif cell_ids|length > 1 %}
                         <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" title="{{ cell_ids|length }} kills — click for first" style="display:block;text-decoration:none;">
                         {% endif %}
+                        {% if is_npc %}
+                        <div style="width:15px;height:15px;border-radius:2px;background:#b8960f;border:1px solid #d4ad20;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(200,169,81,0.6);{% if cell_ids %}cursor:pointer;{% endif %}" title="NPC kill">{{ val }}</div>
+                        {% else %}
                         <div style="width:15px;height:15px;border-radius:2px;background:#cc3333;border:1px solid #ee5555;display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,0.6);{% if cell_ids %}cursor:pointer;{% endif %}">{{ val }}</div>
+                        {% endif %}
                         {% if cell_ids %}</a>{% endif %}
                     </td>
                     {% else %}
@@ -55,12 +61,12 @@
         </table>
     </div>
     <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;font-size:9px;color:var(--muted);">
-        <span>Less</span>
         <div style="width:12px;height:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(220,60,60,0.4);border:1px solid rgba(220,60,60,0.5);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(220,60,60,0.7);border:1px solid rgba(220,60,60,0.8);border-radius:2px;"></div>
-        <div style="width:12px;height:12px;background:rgba(220,60,60,1.0);border:1px solid rgba(220,60,60,1.0);border-radius:2px;"></div>
-        <span>More</span>
+        <span>None</span>
+        <div style="width:12px;height:12px;background:#cc3333;border:1px solid #ee5555;border-radius:2px;"></div>
+        <span>PvP</span>
+        <div style="width:12px;height:12px;background:#b8960f;border:1px solid #d4ad20;border-radius:2px;"></div>
+        <span>NPC</span>
     </div>
     {% endif %}
 </div>
