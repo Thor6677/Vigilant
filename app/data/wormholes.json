@@ -1,0 +1,216 @@
+{
+  "connection_matrix": {
+    "c1": {"c1": ["H121"], "c2": ["C125"], "c3": ["O883"], "c4": ["M609"], "c5": ["L614"], "c6": ["S804"], "hs": ["N110"], "ls": ["J244"], "ns": ["Z060"], "thera": ["F353"]},
+    "c2": {"c1": ["Z647"], "c2": ["D382"], "c3": ["O477"], "c4": ["Y683"], "c5": ["N062"], "c6": ["R474"], "hs": ["B274"], "ls": ["A239"], "ns": ["E545"], "thera": ["F135"]},
+    "c3": {"c1": ["V301"], "c2": ["I182"], "c3": ["N968"], "c4": ["T405"], "c5": ["N770"], "c6": ["A982"], "hs": ["D845"], "ls": ["U210"], "ns": ["K346"], "thera": ["F135"]},
+    "c4": {"c1": ["P060"], "c2": ["N766"], "c3": ["C247"], "c4": ["X877"], "c5": ["H900"], "c6": ["U574"], "hs": ["S047"], "ls": ["N290"], "ns": ["K329"]},
+    "c5": {"c1": ["Y790"], "c2": ["D364"], "c3": ["M267"], "c4": ["E175"], "c5": ["H296"], "c6": ["V753"], "hs": ["D792"], "ls": ["C140"], "ns": ["Z142"]},
+    "c6": {"c1": ["Q317"], "c2": ["G024"], "c3": ["L477"], "c4": ["Z457"], "c5": ["V911", "W237"], "c6": ["B520", "D792"], "hs": ["C140", "C391"], "ls": ["C248", "Z142"], "ns": []},
+    "hs": {"c1": ["Z971"], "c2": ["R943"], "c3": ["X702"], "c4": ["O128"], "c5": ["M555"], "c6": ["B041"], "hs": ["A641"], "ls": ["R051"], "ns": ["V283"], "thera": ["T458"]},
+    "ls": {"c1": ["Z971"], "c2": ["R943"], "c3": ["X702"], "c4": ["O128"], "c5": ["N432"], "c6": ["U319"], "hs": ["B449"], "ls": ["N944"], "ns": ["S199"], "thera": ["M164"]},
+    "ns": {"c1": ["Z971"], "c2": ["R943"], "c3": ["X702"], "c4": ["O128"], "c5": ["N432"], "c6": ["U319"], "hs": ["B449"], "ls": ["N944"], "ns": ["S199"], "thera": ["L031"]},
+    "thera": {"c1": [], "c2": [], "c3": [], "c4": [], "c5": [], "c6": [], "hs": ["Q063"], "ls": ["V898"], "ns": ["E587"]},
+    "?": {"c1": ["E004"], "c2": ["L005"], "c3": ["Z006"], "c4": ["M001"], "c5": ["C008"], "c6": ["G008"], "hs": [], "ls": [], "ns": ["Q003"], "thera": [], "c13": ["A009", "S877", "B735", "V928", "C414", "R259"]}
+  },
+
+  "wormhole_meta": {
+    "H121": {"appears_in": ["c1"], "respawn": "static"},
+    "C125": {"appears_in": ["c2"], "respawn": "static"},
+    "O883": {"appears_in": ["c3"], "respawn": "static"},
+    "M609": {"appears_in": ["c4"], "respawn": "static"},
+    "L614": {"appears_in": ["c5"], "respawn": "static"},
+    "S804": {"appears_in": ["c6"], "respawn": "static"},
+    "N110": {"appears_in": ["c1"], "respawn": "static"},
+    "J244": {"appears_in": ["c1"], "respawn": "static"},
+    "Z060": {"appears_in": ["c1"], "respawn": "static"},
+    "F353": {"appears_in": ["c1"], "respawn": "static"},
+    "Z647": {"appears_in": ["c2"], "respawn": "static"},
+    "D382": {"appears_in": ["c2"], "respawn": "static"},
+    "O477": {"appears_in": ["c2"], "respawn": "static"},
+    "Y683": {"appears_in": ["c2"], "respawn": "static"},
+    "N062": {"appears_in": ["c2"], "respawn": "static"},
+    "R474": {"appears_in": ["c2"], "respawn": "static"},
+    "B274": {"appears_in": ["c2"], "respawn": "static"},
+    "A239": {"appears_in": ["c2"], "respawn": "static"},
+    "E545": {"appears_in": ["c2"], "respawn": "static"},
+    "F135": {"appears_in": ["c2", "c3"], "respawn": "static"},
+    "V301": {"appears_in": ["c3"], "respawn": "static"},
+    "I182": {"appears_in": ["c3"], "respawn": "static"},
+    "N968": {"appears_in": ["c3"], "respawn": "static"},
+    "T405": {"appears_in": ["c3"], "respawn": "static"},
+    "N770": {"appears_in": ["c3"], "respawn": "static"},
+    "A982": {"appears_in": ["c3"], "respawn": "static"},
+    "D845": {"appears_in": ["c3"], "respawn": "static"},
+    "U210": {"appears_in": ["c3"], "respawn": "static"},
+    "K346": {"appears_in": ["c3"], "respawn": "static"},
+    "P060": {"appears_in": ["c4"], "respawn": "static"},
+    "N766": {"appears_in": ["c4"], "respawn": "static"},
+    "C247": {"appears_in": ["c4"], "respawn": "static"},
+    "X877": {"appears_in": ["c4"], "respawn": "static"},
+    "H900": {"appears_in": ["c4"], "respawn": "static"},
+    "U574": {"appears_in": ["c4"], "respawn": "static"},
+    "S047": {"appears_in": ["c4"], "respawn": "static"},
+    "N290": {"appears_in": ["c4"], "respawn": "static"},
+    "K329": {"appears_in": ["c4"], "respawn": "static"},
+    "Y790": {"appears_in": ["c5"], "respawn": "static"},
+    "D364": {"appears_in": ["c5"], "respawn": "static"},
+    "M267": {"appears_in": ["c5"], "respawn": "static"},
+    "E175": {"appears_in": ["c5"], "respawn": "static"},
+    "H296": {"appears_in": ["c5"], "respawn": "static"},
+    "V753": {"appears_in": ["c5"], "respawn": "static"},
+    "D792": {"appears_in": ["c5", "c6"], "respawn": "static"},
+    "C140": {"appears_in": ["c5", "c6"], "respawn": "static"},
+    "Z142": {"appears_in": ["c5", "c6"], "respawn": "static"},
+    "Q317": {"appears_in": ["c6"], "respawn": "static"},
+    "G024": {"appears_in": ["c6"], "respawn": "static"},
+    "L477": {"appears_in": ["c6"], "respawn": "static"},
+    "Z457": {"appears_in": ["c6"], "respawn": "static"},
+    "V911": {"appears_in": ["c6"], "respawn": "static"},
+    "W237": {"appears_in": ["c6"], "respawn": "static"},
+    "B520": {"appears_in": ["c6"], "respawn": "static"},
+    "C391": {"appears_in": ["c6"], "respawn": "static"},
+    "C248": {"appears_in": ["c6"], "respawn": "static"},
+    "Z971": {"appears_in": ["hs", "ls", "ns"], "respawn": "wandering"},
+    "R943": {"appears_in": ["hs", "ls", "ns"], "respawn": "wandering"},
+    "X702": {"appears_in": ["hs", "ls", "ns"], "respawn": "wandering"},
+    "O128": {"appears_in": ["hs", "ls", "ns"], "respawn": "wandering"},
+    "M555": {"appears_in": ["hs"], "respawn": "wandering"},
+    "B041": {"appears_in": ["hs"], "respawn": "wandering"},
+    "A641": {"appears_in": ["hs"], "respawn": "wandering"},
+    "R051": {"appears_in": ["hs"], "respawn": "wandering"},
+    "V283": {"appears_in": ["hs"], "respawn": "wandering"},
+    "T458": {"appears_in": ["hs"], "respawn": "wandering"},
+    "N432": {"appears_in": ["ls", "ns"], "respawn": "wandering"},
+    "U319": {"appears_in": ["ls", "ns"], "respawn": "wandering"},
+    "B449": {"appears_in": ["ls", "ns"], "respawn": "wandering"},
+    "N944": {"appears_in": ["ls", "ns"], "respawn": "wandering"},
+    "S199": {"appears_in": ["ls", "ns"], "respawn": "wandering"},
+    "M164": {"appears_in": ["ls"], "respawn": "wandering"},
+    "L031": {"appears_in": ["ns"], "respawn": "wandering"},
+    "Q063": {"appears_in": ["thera"], "respawn": "static"},
+    "V898": {"appears_in": ["thera"], "respawn": "static"},
+    "E587": {"appears_in": ["thera"], "respawn": "static"},
+    "E004": {"appears_in": ["?"], "respawn": "wandering"},
+    "L005": {"appears_in": ["?"], "respawn": "wandering"},
+    "Z006": {"appears_in": ["?"], "respawn": "wandering"},
+    "M001": {"appears_in": ["?"], "respawn": "wandering"},
+    "C008": {"appears_in": ["?"], "respawn": "wandering"},
+    "G008": {"appears_in": ["?"], "respawn": "wandering"},
+    "Q003": {"appears_in": ["?"], "respawn": "wandering"},
+    "A009": {"appears_in": ["?"], "respawn": "wandering"},
+    "S877": {"appears_in": ["?"], "respawn": "wandering"},
+    "B735": {"appears_in": ["?"], "respawn": "wandering"},
+    "V928": {"appears_in": ["?"], "respawn": "wandering"},
+    "C414": {"appears_in": ["?"], "respawn": "wandering"},
+    "R259": {"appears_in": ["?"], "respawn": "wandering"},
+    "K162": {"appears_in": ["all"], "respawn": "exit"}
+  },
+
+  "ship_size_labels": {
+    "5000000": "frigate",
+    "20000000": "destroyer",
+    "62000000": "small (battlecruiser)",
+    "300000000": "medium (battleship)",
+    "375000000": "medium (battleship)",
+    "1000000000": "large (capital)",
+    "1350000000": "capital",
+    "1800000000": "capital (freighter)",
+    "2000000000": "very large"
+  },
+
+  "class_labels": {
+    "1": "C1", "2": "C2", "3": "C3", "4": "C4", "5": "C5", "6": "C6",
+    "7": "High-Sec", "8": "Low-Sec", "9": "Null-Sec",
+    "12": "Thera", "13": "C13",
+    "14": "Sentinel", "15": "Barbican", "16": "Vidette", "17": "Conflux", "18": "Redoubt",
+    "25": "Pochven"
+  },
+
+  "class_colors": {
+    "1": "#48b4e0", "2": "#48b4e0", "3": "#48b4e0",
+    "4": "#d4d400", "5": "#d4d400",
+    "6": "#cc3333",
+    "7": "#33aa55", "8": "#d4a017", "9": "#cc3333",
+    "12": "#b86bff", "13": "#48b4e0",
+    "14": "#7799bb", "15": "#7799bb", "16": "#7799bb", "17": "#7799bb", "18": "#7799bb",
+    "25": "#cc5533"
+  },
+
+  "effects": {
+    "pulsar": {
+      "name": "Pulsar",
+      "modifiers": [
+        {"name": "Shield Capacity", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Armor Resistances", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Capacitor Recharge", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Signature Radius", "values": [30, 44, 58, 72, 86, 100], "type": "penalty"},
+        {"name": "NOS/Neut Drain Amount", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"}
+      ]
+    },
+    "black_hole": {
+      "name": "Black Hole",
+      "modifiers": [
+        {"name": "Ship Velocity", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Stasis Webifier Strength", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Inertia Modifier", "values": [30, 44, 58, 72, 86, 100], "type": "penalty"},
+        {"name": "Targeting Range", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Missile Velocity", "values": [15, 22, 29, 36, 43, 50], "type": "bonus"},
+        {"name": "Missile Explosion Velocity", "values": [15, 22, 29, 36, 43, 50], "type": "bonus"}
+      ]
+    },
+    "cataclysmic_variable": {
+      "name": "Cataclysmic Variable",
+      "modifiers": [
+        {"name": "Local Armor Repair Amount", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Local Shield Boost Amount", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Shield Transfer Amount", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Remote Armor Repair Amount", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Capacitor Capacity", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Capacitor Recharge Time", "values": [15, 22, 29, 36, 43, 50], "type": "bonus"},
+        {"name": "Remote Capacitor Transmitter Amount", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"}
+      ]
+    },
+    "magnetar": {
+      "name": "Magnetar",
+      "modifiers": [
+        {"name": "Damage", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Missile Explosion Radius", "values": [15, 22, 29, 36, 43, 50], "type": "penalty"},
+        {"name": "Drone Tracking", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Targeting Range", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Tracking Speed", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Target Painter Strength", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"}
+      ]
+    },
+    "red_giant": {
+      "name": "Red Giant",
+      "modifiers": [
+        {"name": "Heat Damage", "values": [15, 22, 29, 36, 43, 50], "type": "penalty"},
+        {"name": "Overload Bonus", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Smart Bomb Range", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Smart Bomb Damage", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Bomb Damage", "values": [15, 22, 29, 36, 43, 50], "type": "bonus"}
+      ]
+    },
+    "wolf_rayet": {
+      "name": "Wolf Rayet",
+      "modifiers": [
+        {"name": "Armor HP", "values": [30, 44, 58, 72, 86, 100], "type": "bonus"},
+        {"name": "Shield Resistances", "values": [-15, -22, -29, -36, -43, -50], "type": "penalty"},
+        {"name": "Small Weapon Damage", "values": [60, 88, 116, 144, 172, 200], "type": "bonus"},
+        {"name": "Signature Radius", "values": [-15, -22, -29, -36, -43, -50], "type": "bonus"}
+      ]
+    }
+  },
+
+  "planet_type_names": {
+    "11": "Temperate",
+    "12": "Ice",
+    "13": "Gas",
+    "2014": "Oceanic",
+    "2015": "Lava",
+    "2016": "Barren",
+    "2017": "Storm",
+    "2063": "Plasma",
+    "30889": "Shattered"
+  }
+}

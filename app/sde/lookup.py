@@ -12,6 +12,7 @@ from app.db.sde_models import (
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
+    SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
 )
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h)
@@ -594,3 +595,254 @@ async def search_skills(db: AsyncSession, query: str, limit: int = 15) -> list[d
         .limit(limit)
     )
     return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.fetchall()]
+
+
+# ── Wormhole reference lookups ──────────────────────────────────────────────
+
+# Cached wormhole class mappings (loaded once per process)
+_wh_class_cache: dict[int, int] | None = None
+_wh_class_cache_ts: datetime | None = None
+
+
+async def _ensure_wh_class_cache(db: AsyncSession):
+    """Load wormhole class mappings into memory."""
+    global _wh_class_cache, _wh_class_cache_ts
+    now = datetime.now(timezone.utc)
+    if _wh_class_cache is not None and _wh_class_cache_ts and (now - _wh_class_cache_ts).total_seconds() < 3600:
+        return
+    result = await db.execute(select(SDEWormholeClass.location_id, SDEWormholeClass.wormhole_class_id))
+    _wh_class_cache = {r.location_id: r.wormhole_class_id for r in result.fetchall()}
+    _wh_class_cache_ts = now
+
+
+async def get_system_wh_class(db: AsyncSession, system_id: int) -> int | None:
+    """Determine wormhole class for a system.
+
+    Checks system_id first, then constellation_id, then region_id against
+    the mapLocationWormholeClasses table.
+    """
+    await _ensure_wh_class_cache(db)
+    if not _wh_class_cache:
+        return None
+    # Direct system match
+    if system_id in _wh_class_cache:
+        return _wh_class_cache[system_id]
+    # Constellation match
+    sys_result = await db.execute(
+        select(SDESystem.constellation_id, SDESystem.region_id)
+        .where(SDESystem.system_id == system_id)
+    )
+    row = sys_result.fetchone()
+    if not row:
+        return None
+    if row.constellation_id and row.constellation_id in _wh_class_cache:
+        return _wh_class_cache[row.constellation_id]
+    if row.region_id and row.region_id in _wh_class_cache:
+        return _wh_class_cache[row.region_id]
+    return None
+
+
+async def get_wormhole_systems(
+    db: AsyncSession,
+    class_filter: int | None = None,
+    effect_filter: str | None = None,
+    static_filter: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    wh_data: dict | None = None,
+) -> tuple[list[dict], int]:
+    """Return filtered J-space systems with class, effect, and statics.
+
+    Returns (list_of_systems, total_count).
+    wh_data should be the loaded wormholes.json dict.
+    """
+    await _ensure_wh_class_cache(db)
+    if not _wh_class_cache:
+        return [], 0
+
+    # Get all J-space systems (names starting with J and having 6-digit numbers)
+    query = (
+        select(SDESystem.system_id, SDESystem.system_name,
+               SDESystem.constellation_id, SDESystem.region_id)
+        .where(SDESystem.system_name.like("J%"))
+        .where(func.length(SDESystem.system_name) == 7)
+    )
+    if search:
+        query = query.where(func.lower(SDESystem.system_name).contains(search.lower()))
+    query = query.order_by(SDESystem.system_name)
+
+    result = await db.execute(query)
+    all_systems = result.fetchall()
+
+    system_effects = wh_data.get("system_effects", {}) if wh_data else {}
+    system_statics = wh_data.get("system_statics", {}) if wh_data else {}
+
+    filtered = []
+    for sys in all_systems:
+        # Determine class
+        wh_class = _wh_class_cache.get(sys.system_id)
+        if wh_class is None and sys.constellation_id:
+            wh_class = _wh_class_cache.get(sys.constellation_id)
+        if wh_class is None and sys.region_id:
+            wh_class = _wh_class_cache.get(sys.region_id)
+        if wh_class is None:
+            continue  # Not a known WH system
+
+        # Only include actual wormhole classes (1-6, 13)
+        if wh_class not in (1, 2, 3, 4, 5, 6, 13):
+            continue
+
+        effect = system_effects.get(sys.system_name)
+        statics = system_statics.get(sys.system_name, [])
+
+        # Apply filters
+        if class_filter is not None and wh_class != class_filter:
+            continue
+        if effect_filter and effect != effect_filter:
+            continue
+        if static_filter and static_filter not in statics:
+            continue
+
+        filtered.append({
+            "system_id": sys.system_id,
+            "system_name": sys.system_name,
+            "wh_class": wh_class,
+            "effect": effect,
+            "statics": statics,
+        })
+
+    total = len(filtered)
+    page = filtered[offset:offset + limit]
+    return page, total
+
+
+async def get_wormhole_system_detail(db: AsyncSession, system_name: str) -> dict | None:
+    """Full detail for a single wormhole system."""
+    result = await db.execute(
+        select(SDESystem).where(func.lower(SDESystem.system_name) == system_name.lower())
+    )
+    sys = result.scalar_one_or_none()
+    if not sys:
+        return None
+
+    wh_class = await get_system_wh_class(db, sys.system_id)
+
+    info = {
+        "system_id": sys.system_id,
+        "system_name": sys.system_name,
+        "wh_class": wh_class,
+        "security": round(sys.security, 2) if sys.security is not None else None,
+    }
+
+    if sys.constellation_id:
+        cr = await db.execute(
+            select(SDEConstellation).where(SDEConstellation.constellation_id == sys.constellation_id)
+        )
+        const = cr.scalar_one_or_none()
+        if const:
+            info["constellation_id"] = const.constellation_id
+            info["constellation"] = const.constellation_name
+
+    if sys.region_id:
+        rr = await db.execute(
+            select(SDERegion).where(SDERegion.region_id == sys.region_id)
+        )
+        region = rr.scalar_one_or_none()
+        if region:
+            info["region_id"] = region.region_id
+            info["region"] = region.region_name
+
+    return info
+
+
+async def get_system_celestials(db: AsyncSession, system_id: int) -> dict:
+    """Get star, planets, and moon counts for a system."""
+    # Star
+    star_result = await db.execute(
+        select(SDEStar).where(SDEStar.system_id == system_id)
+    )
+    star_row = star_result.scalar_one_or_none()
+    star = None
+    if star_row:
+        star_type_name = None
+        if star_row.type_id:
+            star_type_name = await type_id_to_name(db, star_row.type_id)
+        star = {
+            "type_id": star_row.type_id,
+            "type_name": star_type_name,
+        }
+
+    # Planets
+    planet_result = await db.execute(
+        select(SDEPlanet)
+        .where(SDEPlanet.system_id == system_id)
+        .order_by(SDEPlanet.planet_index)
+    )
+    planets_raw = planet_result.scalars().all()
+
+    # Resolve planet type names
+    planet_type_ids = list({p.planet_type_id for p in planets_raw if p.planet_type_id})
+    planet_type_names = await type_ids_to_names(db, planet_type_ids) if planet_type_ids else {}
+
+    # Moon counts per planet
+    moon_result = await db.execute(
+        select(SDEMoon.planet_id, func.count(SDEMoon.moon_id).label("moon_count"))
+        .where(SDEMoon.system_id == system_id)
+        .group_by(SDEMoon.planet_id)
+    )
+    moon_counts = {r.planet_id: r.moon_count for r in moon_result.fetchall()}
+
+    planets = []
+    for p in planets_raw:
+        type_name = planet_type_names.get(p.planet_type_id, "Unknown")
+        planets.append({
+            "planet_id": p.planet_id,
+            "planet_name": p.planet_name,
+            "planet_index": p.planet_index,
+            "type_id": p.planet_type_id,
+            "type_name": type_name,
+            "moon_count": moon_counts.get(p.planet_id, 0),
+        })
+
+    return {"star": star, "planets": planets}
+
+
+async def get_all_wormhole_types(db: AsyncSession) -> list[dict]:
+    """Return all wormhole types with their dogma attributes."""
+    result = await db.execute(
+        select(SDEWormholeType).order_by(SDEWormholeType.type_name)
+    )
+    return [
+        {
+            "type_id": r.type_id,
+            "type_name": r.type_name,
+            "target_class": int(r.target_class) if r.target_class else None,
+            "max_stable_mass": r.max_stable_mass,
+            "max_stable_time": r.max_stable_time,
+            "mass_regen": r.mass_regen,
+            "max_jump_mass": r.max_jump_mass,
+        }
+        for r in result.scalars().all()
+    ]
+
+
+async def get_wormhole_type_by_name(db: AsyncSession, name: str) -> dict | None:
+    """Lookup a single wormhole type by its short name (e.g., 'U574')."""
+    # Wormhole type names in SDE are like "Wormhole U574" — search by suffix
+    result = await db.execute(
+        select(SDEWormholeType)
+        .where(SDEWormholeType.type_name.like(f"%{name}%"))
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    return {
+        "type_id": row.type_id,
+        "type_name": row.type_name,
+        "target_class": int(row.target_class) if row.target_class else None,
+        "max_stable_mass": row.max_stable_mass,
+        "max_stable_time": row.max_stable_time,
+        "mass_regen": row.mass_regen,
+        "max_jump_mass": row.max_jump_mass,
+    }

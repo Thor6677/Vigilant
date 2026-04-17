@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Wormhole Systems — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Wormhole Systems</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .wh-filters { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem; }
+    .wh-filter-group { display:flex; flex-direction:column; gap:0.2rem; }
+    .wh-filter-group label { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+    .wh-filter-group input, .wh-filter-group select {
+        background:var(--bg); border:1px solid var(--border); color:var(--text);
+        font-family:inherit; font-size:11px; padding:0.4rem 0.5rem; min-width:120px;
+    }
+    .wh-filter-group input:focus, .wh-filter-group select:focus {
+        outline:none; border-color:var(--accent);
+    }
+    .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
+    .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
+              color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
+    .wh-tab:hover { color:var(--text); }
+    .wh-tab.is-active { color:var(--accent); border-bottom-color:var(--accent); }
+    .wh-stats { display:flex; gap:1.5rem; margin-bottom:1rem; }
+    .wh-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
+    .wh-stat-label { font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+    @media(max-width:640px) {
+        .wh-filters { flex-direction:column; }
+        .wh-filter-group input, .wh-filter-group select { width:100%; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Wormhole Systems</h1>
+</div>
+
+<div class="wh-tabs">
+    <a href="/wormholes" class="wh-tab is-active">Systems</a>
+    <a href="/wormholes/types" class="wh-tab">Wormhole Types</a>
+    <a href="/wormholes/effects" class="wh-tab">System Effects</a>
+</div>
+
+{% if error %}
+<div class="b-banner is-danger" style="margin-bottom:1rem;">{{ error }}</div>
+{% endif %}
+
+<div class="wh-filters">
+    <div class="wh-filter-group">
+        <label>Search</label>
+        <input type="search" id="wh-search" placeholder="J-number..."
+               hx-get="/wormholes/search"
+               hx-trigger="input changed delay:400ms, search"
+               hx-target="#wh-results"
+               hx-include="#wh-class-filter, #wh-effect-filter"
+               hx-indicator="#wh-loading">
+    </div>
+    <div class="wh-filter-group">
+        <label>Class</label>
+        <select id="wh-class-filter" name="wh_class"
+                hx-get="/wormholes/search"
+                hx-trigger="change"
+                hx-target="#wh-results"
+                hx-include="#wh-search, #wh-effect-filter"
+                hx-indicator="#wh-loading">
+            <option value="">All Classes</option>
+            <option value="1">C1</option>
+            <option value="2">C2</option>
+            <option value="3">C3</option>
+            <option value="4">C4</option>
+            <option value="5">C5</option>
+            <option value="6">C6</option>
+            <option value="13">C13 (Shattered)</option>
+        </select>
+    </div>
+    <div class="wh-filter-group">
+        <label>Effect</label>
+        <select id="wh-effect-filter" name="effect"
+                hx-get="/wormholes/search"
+                hx-trigger="change"
+                hx-target="#wh-results"
+                hx-include="#wh-search, #wh-class-filter"
+                hx-indicator="#wh-loading">
+            <option value="">All Effects</option>
+            {% for key in effects_list %}
+            <option value="{{ key }}">{{ effects_labels[key] }}</option>
+            {% endfor %}
+            <option value="none">No Effect</option>
+        </select>
+    </div>
+</div>
+
+<span id="wh-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading...</span>
+
+<div id="wh-results"
+     hx-get="/wormholes/search"
+     hx-trigger="load"
+     hx-indicator="#wh-loading">
+    <div class="b-empty">Loading systems...</div>
+</div>
+{% endblock %}

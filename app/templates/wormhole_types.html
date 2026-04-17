@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Wormhole Types — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span>
+    <a href="/wormholes">Wormhole Systems</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Wormhole Types</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
+    .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
+              color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
+    .wh-tab:hover { color:var(--text); }
+    .wh-tab.is-active { color:var(--accent); border-bottom-color:var(--accent); }
+    .wm-table { border-collapse:collapse; font-size:11px; width:auto; }
+    .wm-table th, .wm-table td { padding:0.3rem 0.4rem; text-align:center; border:1px solid var(--border); white-space:nowrap; }
+    .wm-table th { background:var(--surface); color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; }
+    .wm-table td a { text-decoration:none; font-weight:600; }
+    .wm-table td a:hover { text-decoration:underline; }
+    .wm-from { text-align:left !important; font-weight:600; }
+    .wm-detail { margin-top:1.5rem; }
+    .wm-detail-grid { display:grid; grid-template-columns:auto 1fr; gap:0.2rem 1rem; font-size:12px; }
+    .wm-detail-label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:0.1em; padding:0.3rem 0; }
+    .wm-detail-val { padding:0.3rem 0; font-weight:600; }
+    @media(max-width:768px) {
+        .wm-table { font-size:10px; }
+        .wm-table th, .wm-table td { padding:0.2rem 0.3rem; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Wormhole Types</h1>
+</div>
+
+<div class="wh-tabs">
+    <a href="/wormholes" class="wh-tab">Systems</a>
+    <a href="/wormholes/types" class="wh-tab is-active">Wormhole Types</a>
+    <a href="/wormholes/effects" class="wh-tab">System Effects</a>
+</div>
+
+<div class="ws-section-title" style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:var(--muted);margin-bottom:0.5rem;border-bottom:1px solid var(--border);padding-bottom:0.3rem;">Connection Matrix</div>
+
+<div style="overflow-x:auto;margin-bottom:1rem;">
+<table class="wm-table">
+    <thead>
+        <tr>
+            <th>From \ To</th>
+            {% set cols = ['c1','c2','c3','c4','c5','c6','hs','ls','ns','thera','c13'] %}
+            {% for col in cols %}
+            <th style="color:{{ class_color({'c1':1,'c2':2,'c3':3,'c4':4,'c5':5,'c6':6,'hs':7,'ls':8,'ns':9,'thera':12,'c13':13}[col]) }};">{{ col }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% set rows = ['c1','c2','c3','c4','c5','c6','hs','ls','ns','thera','?'] %}
+        {% set class_map = {'c1':1,'c2':2,'c3':3,'c4':4,'c5':5,'c6':6,'hs':7,'ls':8,'ns':9,'thera':12,'c13':13} %}
+        {% for row_key in rows %}
+        <tr>
+            <td class="wm-from" style="color:{{ class_color(class_map.get(row_key)) }};">{{ row_key }}</td>
+            {% for col_key in cols %}
+            <td>
+                {% set codes = matrix.get(row_key, {}).get(col_key, []) %}
+                {% for code in codes %}
+                <a href="/wormholes/types/{{ code }}"
+                   style="color:{{ class_color(class_map.get(col_key)) }};"
+                   title="{{ code }}"
+                   hx-get="/wormholes/types/{{ code }}"
+                   hx-target="#wh-type-detail"
+                   hx-swap="innerHTML">{{ code }}</a>{% if not loop.last %}<br>{% endif %}
+                {% endfor %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div id="wh-type-detail" class="wm-detail"></div>
+
+<script>
+// Highlight row/col on hover
+document.querySelectorAll('.wm-table td').forEach(function(td) {
+    td.addEventListener('mouseenter', function() {
+        td.style.background = 'var(--surface)';
+    });
+    td.addEventListener('mouseleave', function() {
+        td.style.background = '';
+    });
+});
+</script>
+{% endblock %}

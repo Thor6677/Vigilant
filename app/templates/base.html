@@ -776,11 +776,15 @@
             </div>
         </span>
         <span class="b-nav-dropdown">
-            <a href="/intel" class="b-nav-link {{ 'is-active' if _path.startswith('/intel') or _path.startswith('/dscan') }}">Intel ▾</a>
+            <a href="/intel" class="b-nav-link {{ 'is-active' if _path.startswith('/intel') or _path.startswith('/dscan') or _path.startswith('/wormholes') }}">Intel ▾</a>
             <div class="b-nav-dropdown-menu">
                 <a href="/intel" class="b-nav-dropdown-item {{ 'is-active' if _path == '/intel' }}">D-Scan / Local</a>
                 <a href="/intel/gatecheck" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
                 <a href="/map" class="b-nav-dropdown-item">Star Map</a>
+                <div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>
+                <a href="/wormholes" class="b-nav-dropdown-item {{ 'is-active' if _path == '/wormholes' or _path.startswith('/wormholes/system') }}">Wormhole Systems</a>
+                <a href="/wormholes/types" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/wormholes/types') }}">Wormhole Types</a>
+                <a href="/wormholes/effects" class="b-nav-dropdown-item {{ 'is-active' if _path == '/wormholes/effects' }}">System Effects</a>
             </div>
         </span>
         <span class="b-nav-dropdown">
@@ -878,6 +882,9 @@
     <a href="/intel" class="{{ 'is-active' if _path == '/intel' }}">D-Scan / Local</a>
     <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
     <a href="/map" class="{{ 'is-active' if _path == '/map' }}">Star Map</a>
+    <a href="/wormholes" class="{{ 'is-active' if _path == '/wormholes' or _path.startswith('/wormholes/system') }}">Wormhole Systems</a>
+    <a href="/wormholes/types" class="{{ 'is-active' if _path.startswith('/wormholes/types') }}">Wormhole Types</a>
+    <a href="/wormholes/effects" class="{{ 'is-active' if _path == '/wormholes/effects' }}">System Effects</a>
     <div class="b-mobile-sep"></div>
     <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
     <a href="/structure-timers" class="{{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>

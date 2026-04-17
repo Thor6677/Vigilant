@@ -1,0 +1,59 @@
+<div class="b-panel" style="padding:0.75rem;">
+    {% if kill_count == 0 %}
+    <div style="font-size:11px;color:var(--muted);">No kills recorded in the last 7 days.</div>
+    {% else %}
+    <div style="margin-bottom:0.75rem;">
+        <span style="font-size:13px;font-weight:600;color:var(--text);">{{ kill_count }}</span>
+        <span style="font-size:11px;color:var(--muted);">kill{{ 's' if kill_count != 1 }} in the last 7 days</span>
+        {% if most_recent and days_ago is not none %}
+        <div style="font-size:10px;color:var(--muted);margin-top:0.2rem;">
+            Most recent: {{ days_ago }} day{{ 's' if days_ago != 1.0 }} ago
+            <span style="font-size:9px;">({{ most_recent.strftime('%a, %d %b %Y %H:%M') }} UTC)</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Activity Heatmap -->
+    <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.3rem;">Activity Heatmap</div>
+    <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;font-size:9px;width:100%;">
+            <thead>
+                <tr>
+                    <th style="padding:1px 3px;color:var(--muted);text-align:left;"></th>
+                    {% for h in range(24) %}
+                    <th style="padding:1px 2px;color:var(--muted);text-align:center;min-width:14px;">{{ h }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in range(7) %}
+                <tr>
+                    <td style="padding:1px 3px;color:var(--muted);white-space:nowrap;">{{ day_names[d] }}</td>
+                    {% for h in range(24) %}
+                    {% set val = heatmap[d][h] %}
+                    {% if val > 0 %}
+                    {% set intensity = (val / max_kills) if max_kills > 0 else 0 %}
+                    <td style="padding:1px;text-align:center;">
+                        <div style="width:12px;height:12px;margin:auto;border-radius:1px;background:rgba(200,169,81,{{ 0.2 + intensity * 0.8 }});border:1px solid rgba(200,169,81,{{ 0.3 + intensity * 0.5 }});" title="{{ day_names[d] }} {{ h }}:00 — {{ val }} kill{{ 's' if val != 1 }}"></div>
+                    </td>
+                    {% else %}
+                    <td style="padding:1px;text-align:center;">
+                        <div style="width:12px;height:12px;margin:auto;border-radius:1px;background:var(--bg);border:1px solid var(--border);" title="{{ day_names[d] }} {{ h }}:00 — 0 kills"></div>
+                    </td>
+                    {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;font-size:9px;color:var(--muted);">
+        <span>Less</span>
+        <div style="width:10px;height:10px;background:var(--bg);border:1px solid var(--border);border-radius:1px;"></div>
+        <div style="width:10px;height:10px;background:rgba(200,169,81,0.3);border:1px solid rgba(200,169,81,0.4);border-radius:1px;"></div>
+        <div style="width:10px;height:10px;background:rgba(200,169,81,0.6);border:1px solid rgba(200,169,81,0.7);border-radius:1px;"></div>
+        <div style="width:10px;height:10px;background:rgba(200,169,81,1.0);border:1px solid rgba(200,169,81,1.0);border-radius:1px;"></div>
+        <span>More</span>
+    </div>
+    {% endif %}
+</div>

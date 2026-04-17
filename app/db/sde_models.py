@@ -210,3 +210,53 @@ class SDEPlanetSchematicMaterial(Base):
     type_id = Column(Integer, nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
     is_input = Column(Boolean, nullable=False, index=True)  # True = material, False = product
+
+
+# ── Wormhole reference SDE tables ──────────────────────────────────────────
+
+class SDEWormholeClass(Base):
+    """mapLocationWormholeClasses — maps location IDs to wormhole class.
+
+    location_id can be a system_id, constellation_id, or region_id.
+    Class mapping: 1-6=C1-C6, 7=HS, 8=LS, 9=NS, 12=Thera, 13=C13/shattered,
+    14-18=drifter, 25=Pochven.
+    """
+    __tablename__ = "sde_wormhole_classes"
+
+    location_id = Column(Integer, primary_key=True)
+    wormhole_class_id = Column(Integer, nullable=False, index=True)
+
+
+class SDEWormholeType(Base):
+    """Wormhole connection types with dogma attributes (group 988).
+
+    Stores mass, lifetime, destination, and other properties extracted from
+    typeDogma for each wormhole type item.
+    """
+    __tablename__ = "sde_wormhole_types"
+
+    type_id = Column(Integer, primary_key=True)
+    type_name = Column(String, nullable=False, index=True)
+    target_class = Column(Integer, nullable=True)         # destination WH class (dogma 1381)
+    max_stable_mass = Column(Float, nullable=True)        # total mass in kg (dogma 1382)
+    max_stable_time = Column(Float, nullable=True)        # lifetime in minutes (dogma 1383)
+    mass_regen = Column(Float, nullable=True)             # mass regen in kg (dogma 1384)
+    max_jump_mass = Column(Float, nullable=True)          # per-jump mass limit in kg (dogma 1385)
+
+
+class SDEMoon(Base):
+    """mapMoons — moon data for counting moons per planet."""
+    __tablename__ = "sde_moons"
+
+    moon_id = Column(Integer, primary_key=True)
+    planet_id = Column(Integer, nullable=False, index=True)
+    system_id = Column(Integer, nullable=False, index=True)
+
+
+class SDEStar(Base):
+    """mapStars — star data per solar system."""
+    __tablename__ = "sde_stars"
+
+    system_id = Column(Integer, primary_key=True)
+    type_id = Column(Integer, nullable=True)
+    star_name = Column(String, nullable=True)

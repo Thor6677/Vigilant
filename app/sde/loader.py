@@ -20,10 +20,19 @@ from app.db.sde_models import (
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
+    SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar,
 )
 
 # Planet type IDs that support PI (shattered / exotic types excluded).
 PI_PLANET_TYPE_IDS = {11, 12, 13, 2014, 2015, 2016, 2017, 2063}
+
+# Wormhole type dogma attribute IDs
+WH_ATTR_TARGET_CLASS = 1381
+WH_ATTR_MAX_STABLE_MASS = 1382
+WH_ATTR_MAX_STABLE_TIME = 1383
+WH_ATTR_MASS_REGEN = 1384
+WH_ATTR_MAX_JUMP_MASS = 1385
+WH_GROUP_ID = 988  # invGroups group for "Wormhole" items
 
 
 def _roman(n: int) -> str:
@@ -77,7 +86,7 @@ async def needs_update(db: AsyncSession) -> bool:
         types_result = await db.execute(text("SELECT COUNT(1) FROM sde_types"))
         types_count = types_result.scalar() or 0
         if types_count > 0:
-            for table in ("sde_planets", "sde_planet_schematics"):
+            for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars"):
                 try:
                     r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
                     if (r.scalar() or 0) == 0:
@@ -578,7 +587,7 @@ async def download_and_import(db: AsyncSession):
         for item in _iter_jsonl(zf, "mapPlanets.jsonl"):
             try:
                 type_id = int(item.get("typeID") or 0)
-                if type_id not in PI_PLANET_TYPE_IDS:
+                if type_id == 0:
                     continue
                 system_id = int(item["solarSystemID"])
                 idx = int(item.get("celestialIndex") or 0)
@@ -650,6 +659,123 @@ async def download_and_import(db: AsyncSession):
         log.info(f"Imported {sch_count} PI schematics with {mat_count} material rows")
     except KeyError:
         log.warning("planetSchematics.jsonl not present in SDE zip — skipping")
+
+    # --- mapMoons → moon data (for moon counts per planet) ---
+    log.info("Importing moons...")
+    await db.execute(text("DELETE FROM sde_moons"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "mapMoons.jsonl"):
+            try:
+                batch.append({
+                    "moon_id": int(item["_key"]),
+                    "planet_id": int(item.get("planetID") or 0),
+                    "system_id": int(item.get("solarSystemID") or 0),
+                })
+            except (KeyError, ValueError, TypeError):
+                continue
+            if len(batch) >= 1000:
+                await _bulk_insert(db, SDEMoon.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDEMoon.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} moons")
+    except KeyError:
+        log.warning("mapMoons.jsonl not present in SDE zip — skipping moon import")
+
+    # --- mapStars → star data per system ---
+    log.info("Importing stars...")
+    await db.execute(text("DELETE FROM sde_stars"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "mapStars.jsonl"):
+            try:
+                batch.append({
+                    "system_id": int(item.get("solarSystemID") or item.get("_key")),
+                    "type_id": int(item.get("typeID") or 0) or None,
+                    "star_name": None,  # resolved from type_id later
+                })
+            except (KeyError, ValueError, TypeError):
+                continue
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDEStar.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDEStar.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} stars")
+    except KeyError:
+        log.warning("mapStars.jsonl not present in SDE zip — skipping star import")
+
+    # --- mapLocationWormholeClasses → wormhole class per location ---
+    log.info("Importing wormhole classes...")
+    await db.execute(text("DELETE FROM sde_wormhole_classes"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "mapLocationWormholeClasses.jsonl"):
+            try:
+                batch.append({
+                    "location_id": int(item["_key"]),
+                    "wormhole_class_id": int(item.get("wormholeClassID", 0)),
+                })
+            except (KeyError, ValueError, TypeError):
+                continue
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDEWormholeClass.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDEWormholeClass.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} wormhole class mappings")
+    except KeyError:
+        log.warning("mapLocationWormholeClasses.jsonl not present — skipping")
+
+    # --- Wormhole types from types.jsonl (group 988) + typeDogma attributes ---
+    log.info("Importing wormhole types...")
+    await db.execute(text("DELETE FROM sde_wormhole_types"))
+    await db.commit()
+
+    # First pass: collect wormhole type IDs from types.jsonl
+    wh_type_ids: set[int] = set()
+    wh_type_names: dict[int, str] = {}
+    for item in _iter_jsonl(zf, "types.jsonl"):
+        if item.get("groupID") == WH_GROUP_ID and item.get("published"):
+            tid = int(item["_key"])
+            wh_type_ids.add(tid)
+            wh_type_names[tid] = item.get("name", {}).get("en", f"Wormhole {tid}")
+
+    # Second pass: extract dogma attributes for wormhole types
+    wh_attrs: dict[int, dict] = {}  # type_id -> {attr_id: value}
+    for item in _iter_jsonl(zf, "typeDogma.jsonl"):
+        tid = int(item["_key"])
+        if tid not in wh_type_ids:
+            continue
+        attrs = {a["attributeID"]: a["value"] for a in item.get("dogmaAttributes", [])}
+        wh_attrs[tid] = attrs
+
+    count, batch = 0, []
+    for tid in wh_type_ids:
+        attrs = wh_attrs.get(tid, {})
+        batch.append({
+            "type_id": tid,
+            "type_name": wh_type_names.get(tid, f"Wormhole {tid}"),
+            "target_class": attrs.get(WH_ATTR_TARGET_CLASS),
+            "max_stable_mass": attrs.get(WH_ATTR_MAX_STABLE_MASS),
+            "max_stable_time": attrs.get(WH_ATTR_MAX_STABLE_TIME),
+            "mass_regen": attrs.get(WH_ATTR_MASS_REGEN),
+            "max_jump_mass": attrs.get(WH_ATTR_MAX_JUMP_MASS),
+        })
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEWormholeType.__table__, batch)
+            count += len(batch)
+            batch = []
+    await _bulk_insert(db, SDEWormholeType.__table__, batch)
+    count += len(batch)
+    log.info(f"Imported {count} wormhole types with dogma attributes")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")

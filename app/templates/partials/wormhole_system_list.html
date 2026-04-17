@@ -1,0 +1,64 @@
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+    <span style="font-size:10px;color:var(--muted);">{{ total }} system{{ 's' if total != 1 }} found</span>
+    {% if total_pages > 1 %}
+    <span style="font-size:10px;color:var(--muted);">Page {{ page }} of {{ total_pages }}</span>
+    {% endif %}
+</div>
+
+{% if systems %}
+<div class="b-panel">
+    <div class="b-panel-head" style="display:grid;grid-template-columns:1fr 0.6fr 1fr 1.5fr;gap:0.5rem;padding:0.4rem 0.75rem;">
+        <span class="b-label">System</span>
+        <span class="b-label">Class</span>
+        <span class="b-label">Effect</span>
+        <span class="b-label">Statics</span>
+    </div>
+    {% for sys in systems %}
+    <a href="/wormholes/system/{{ sys['system_name'] }}"
+       style="display:grid;grid-template-columns:1fr 0.6fr 1fr 1.5fr;gap:0.5rem;padding:0.4rem 0.75rem;border-top:1px solid var(--border);text-decoration:none;color:var(--text);transition:background 0.15s;"
+       onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
+        <span style="color:var(--accent);">{{ sys['system_name'] }}</span>
+        <span style="color:{{ class_color(sys['wh_class']) }};">{{ class_label(sys['wh_class']) }}</span>
+        <span style="color:{% if sys['effect'] %}var(--text){% else %}var(--muted){% endif %};">{{ effect_label(sys['effect']) or '—' }}</span>
+        <span style="font-size:11px;">
+            {% for s in sys['statics'] %}
+            <span style="color:{{ class_color(wh_data.get('wormhole_meta', {}).get(s, {}).get('target_class')) }};">{{ s }}</span>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+            {% if not sys['statics'] %}<span style="color:var(--muted);">—</span>{% endif %}
+        </span>
+    </a>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div style="display:flex;justify-content:center;gap:0.25rem;margin-top:0.75rem;">
+    {% if page > 1 %}
+    <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
+            hx-get="/wormholes/search?page={{ page - 1 }}"
+            hx-target="#wh-results"
+            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">&lt; Prev</button>
+    {% endif %}
+    {% for p in range(1, total_pages + 1) %}
+    {% if p == page %}
+    <span style="background:var(--accent);color:var(--bg);padding:0.3rem 0.6rem;font-size:10px;">{{ p }}</span>
+    {% elif p <= 3 or p >= total_pages - 1 or (p >= page - 1 and p <= page + 1) %}
+    <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
+            hx-get="/wormholes/search?page={{ p }}"
+            hx-target="#wh-results"
+            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">{{ p }}</button>
+    {% elif p == 4 or p == total_pages - 2 %}
+    <span style="color:var(--muted);padding:0.3rem 0.2rem;font-size:10px;">...</span>
+    {% endif %}
+    {% endfor %}
+    {% if page < total_pages %}
+    <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
+            hx-get="/wormholes/search?page={{ page + 1 }}"
+            hx-target="#wh-results"
+            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">Next &gt;</button>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="b-empty">No systems match your filters.</div>
+{% endif %}

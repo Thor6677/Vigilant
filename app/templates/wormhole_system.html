@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ system['system_name'] }} — Wormhole Systems — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span>
+    <a href="/wormholes">Wormhole Systems</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ system['system_name'] }}</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .ws-header { display:flex; align-items:baseline; gap:0.75rem; margin-bottom:0.25rem; flex-wrap:wrap; }
+    .ws-name { font-size:28px; font-weight:700; color:var(--text); letter-spacing:-0.02em; }
+    .ws-class-badge { font-size:13px; font-weight:600; padding:0.15rem 0.5rem; border:1px solid; border-radius:2px; }
+    .ws-meta { font-size:10px; color:var(--muted); margin-bottom:1.5rem; }
+    .ws-meta a { color:var(--muted); text-decoration:none; }
+    .ws-meta a:hover { color:var(--text); }
+    .ws-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+    .ws-section { margin-bottom:1rem; }
+    .ws-section-title { font-size:9px; text-transform:uppercase; letter-spacing:0.12em; color:var(--muted); margin-bottom:0.5rem; border-bottom:1px solid var(--border); padding-bottom:0.3rem; }
+    .ws-conn { display:inline-flex; align-items:center; gap:0.2rem; margin-right:0.75rem; margin-bottom:0.3rem; }
+    .ws-conn a { text-decoration:none; font-weight:600; }
+    .ws-conn-dest { font-size:10px; vertical-align:super; }
+    .ws-celestial { display:grid; grid-template-columns:auto 60px 1fr auto; gap:0.5rem; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:11px; }
+    .ws-celestial:last-child { border-bottom:none; }
+    .ws-planet-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .ws-effect-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .ws-effect-table th { text-align:left; padding:0.3rem 0.5rem; color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid var(--border); }
+    .ws-effect-table td { padding:0.3rem 0.5rem; border-bottom:1px solid var(--border); }
+    .ws-links { display:flex; gap:0.75rem; flex-wrap:wrap; }
+    .ws-links a { font-size:11px; color:var(--accent); text-decoration:none; }
+    .ws-links a:hover { text-decoration:underline; }
+    @media(max-width:768px) { .ws-grid { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ws-header">
+    <span class="ws-name">{{ system['system_name'] }}</span>
+    <span class="ws-class-badge" style="color:{{ class_color(wh_class) }};border-color:{{ class_color(wh_class) }};">{{ class_label(wh_class) }} System</span>
+    {% if effect %}
+    <span style="font-size:12px;color:var(--text);">{{ effect['name'] }}</span>
+    {% endif %}
+</div>
+<div class="ws-meta">
+    {% if system.get('region') %}
+    <a href="#">{{ system['region'] }}</a> &raquo;
+    {% endif %}
+    {% if system.get('constellation') %}
+    <a href="#">{{ system['constellation'] }}</a> &raquo;
+    {% endif %}
+    {{ system['system_name'] }}
+</div>
+
+<!-- Connections -->
+<div class="ws-section">
+    <div class="ws-section-title">Connections</div>
+    <div style="margin-bottom:0.5rem;">
+        {% if statics %}
+        <div style="margin-bottom:0.4rem;">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Static{{ 's' if statics|length > 1 }}</span>
+            {% for s in statics %}
+            <span class="ws-conn">
+                <a href="/wormholes/types/{{ s['code'] }}" style="color:{{ class_color(s['target_class']) }};">{{ s['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(s['target_class']) }};">&rarr;{{ class_label(s['target_class']) }}</span>
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if wandering %}
+        <div>
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Possible Wandering</span>
+            {% for w in wandering %}
+            <span class="ws-conn">
+                <a href="/wormholes/types/{{ w['code'] }}" style="color:{{ class_color(w['target_class']) }};">{{ w['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(w['target_class']) }};">&rarr;{{ class_label(w['target_class']) }}</span>
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="ws-grid">
+    <div>
+        <!-- Effect -->
+        {% if effect %}
+        <div class="ws-section">
+            <div class="ws-section-title">{{ effect['name'] }} Effect ({{ class_label(wh_class) }})</div>
+            <div class="b-panel" style="padding:0;">
+                <table class="ws-effect-table">
+                    <thead>
+                        <tr><th>Modifier</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for mod in effect.get('modifiers', []) %}
+                    {% set idx = (wh_class - 1) if wh_class and wh_class <= 6 else 0 %}
+                    {% set val = mod['values'][idx] if idx < mod['values']|length else mod['values'][0] %}
+                    <tr>
+                        <td>{{ mod['name'] }}</td>
+                        <td style="color:{% if mod['type'] == 'bonus' and val > 0 %}var(--success){% elif mod['type'] == 'penalty' and val < 0 %}var(--danger){% elif mod['type'] == 'penalty' and val > 0 %}var(--danger){% else %}var(--success){% endif %};">
+                            {{ '+' if val > 0 }}{{ val }}%
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Celestials -->
+        <div class="ws-section">
+            <div class="ws-section-title">Celestials</div>
+            <div class="b-panel" style="padding:0.5rem 0.75rem;">
+                {% if celestials['star'] %}
+                <div class="ws-celestial">
+                    <span style="color:var(--accent);">{{ system['system_name'] }} - Star</span>
+                    <span style="color:var(--muted);text-align:right;">0.0 AU</span>
+                    <span>{{ celestials['star']['type_name'] or 'Star' }}</span>
+                    <span></span>
+                </div>
+                {% endif %}
+                {% for p in celestials['planets'] %}
+                <div class="ws-celestial">
+                    <span>{{ p['planet_name'] }}</span>
+                    <span style="color:var(--muted);text-align:right;"></span>
+                    <span>Planet ({{ p['type_name'] }})</span>
+                    <span style="color:{% if p['moon_count'] > 0 %}var(--text){% else %}var(--muted){% endif %};font-size:10px;">
+                        {% if p['moon_count'] > 0 %}{{ p['moon_count'] }} moon{{ 's' if p['moon_count'] != 1 }}{% else %}no moons{% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+                {% if not celestials['planets'] and not celestials['star'] %}
+                <div class="b-empty">No celestial data available.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <!-- Kill Activity (lazy loaded) -->
+        <div class="ws-section">
+            <div class="ws-section-title">Kill Activity (Last 7 Days)</div>
+            <div id="wh-kills"
+                 hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
+                 hx-trigger="load"
+                 hx-indicator="#kills-loading">
+                <div class="b-panel" style="padding:0.75rem;text-align:center;">
+                    <span id="kills-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading kill data...</span>
+                    <span style="font-size:10px;color:var(--muted);">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- External Links -->
+        <div class="ws-section">
+            <div class="ws-section-title">External Links</div>
+            <div class="ws-links">
+                <a href="https://zkillboard.com/system/{{ system['system_id'] }}/" target="_blank" rel="noopener">zKillboard</a>
+                <a href="https://evemaps.dotlan.net/system/{{ system['system_name'] }}" target="_blank" rel="noopener">DOTLAN</a>
+                <a href="https://anoik.is/systems/{{ system['system_name'] }}" target="_blank" rel="noopener">Anoik.is</a>
+                <a href="https://www.ellatha.com/eve/WormholeSystemview.asp?key={{ system['system_name'][1:] }}" target="_blank" rel="noopener">Ellatha</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

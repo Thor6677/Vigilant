@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}System Effects — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span>
+    <a href="/wormholes">Wormhole Systems</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">System Effects</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
+    .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
+              color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
+    .wh-tab:hover { color:var(--text); }
+    .wh-tab.is-active { color:var(--accent); border-bottom-color:var(--accent); }
+    .we-nav { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+    .we-nav a { font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:var(--accent);
+                text-decoration:none; padding:0.3rem 0.6rem; border:1px solid var(--border); }
+    .we-nav a:hover { background:var(--surface); }
+    .we-section { margin-bottom:2rem; scroll-margin-top:4rem; }
+    .we-section-title { font-size:18px; font-weight:700; color:var(--text); margin-bottom:0.75rem;
+                        padding-bottom:0.3rem; border-bottom:1px solid var(--border); }
+    .we-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .we-table th { text-align:center; padding:0.4rem 0.5rem; color:var(--muted); font-size:9px;
+                   text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid var(--border);
+                   background:var(--surface); }
+    .we-table th:first-child { text-align:left; }
+    .we-table td { padding:0.4rem 0.5rem; border-bottom:1px solid var(--border); text-align:center; }
+    .we-table td:first-child { text-align:left; color:var(--text); }
+    .we-bonus { color:var(--success); }
+    .we-penalty { color:var(--danger); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">System Effects</h1>
+</div>
+
+<div class="wh-tabs">
+    <a href="/wormholes" class="wh-tab">Systems</a>
+    <a href="/wormholes/types" class="wh-tab">Wormhole Types</a>
+    <a href="/wormholes/effects" class="wh-tab is-active">System Effects</a>
+</div>
+
+<p style="font-size:11px;color:var(--muted);margin-bottom:1rem;">
+    Some wormhole systems have a persistent environmental effect that modifies ship and module stats.
+    The strength of the effect scales with the system's wormhole class (C1 = weakest, C6 = strongest).
+</p>
+
+<div class="we-nav">
+    {% for key, info in effects.items() %}
+    <a href="#{{ key }}">{{ info['name'] }}</a>
+    {% endfor %}
+</div>
+
+{% for key, info in effects.items() %}
+<div id="{{ key }}" class="we-section">
+    <div class="we-section-title">{{ info['name'] }}</div>
+    <div class="b-panel" style="padding:0;overflow-x:auto;">
+        <table class="we-table">
+            <thead>
+                <tr>
+                    <th>Modifier</th>
+                    <th>C1</th>
+                    <th>C2</th>
+                    <th>C3</th>
+                    <th>C4</th>
+                    <th>C5</th>
+                    <th>C6</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for mod in info.get('modifiers', []) %}
+                <tr>
+                    <td>{{ mod['name'] }}</td>
+                    {% for i in range(6) %}
+                    {% set val = mod['values'][i] if i < mod['values']|length else 0 %}
+                    <td class="{{ 'we-bonus' if (mod['type'] == 'bonus' and val > 0) or (mod['type'] == 'bonus' and val < 0) else 'we-penalty' if (mod['type'] == 'penalty') else '' }}">
+                        {{ '+' if val > 0 }}{{ val }}%
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}
