@@ -867,7 +867,7 @@ async def planetary_calculator_page(
     target: int | None = Query(None),
     system: str | None = Query(None),
     cycles: int = Query(1, ge=1, le=10000),
-    max_chars: int | None = Query(None, ge=1, le=50),
+    max_chars: str = Query(""),
     ipc: int = Query(5, ge=0, le=5),  # Interplanetary Consolidation level
     ccu: int = Query(5, ge=0, le=5),  # Command Center Upgrades level
     db: AsyncSession = Depends(get_db),
@@ -887,6 +887,11 @@ async def planetary_calculator_page(
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
+
+    # Parse max_chars: empty string or non-numeric = auto (None)
+    max_chars_int: int | None = None
+    if max_chars.strip().isdigit():
+        max_chars_int = max(1, min(50, int(max_chars)))
 
     graph = await _load_schematic_graph(db)
 
@@ -969,7 +974,7 @@ async def planetary_calculator_page(
         planets_per_char = max(1, 1 + ipc)  # IPC V = 6, IPC 0 = 1
         character_plan = _plan_characters(
             bom, graph, system_planets, system_planet_types, system_p0_ids,
-            max_chars=max_chars,
+            max_chars=max_chars_int,
             planets_per_char=planets_per_char,
         )
 
@@ -978,7 +983,7 @@ async def planetary_calculator_page(
         "target": target,
         "system": system,
         "cycles": cycles,
-        "max_chars": max_chars,
+        "max_chars": max_chars_int,
         "ipc": ipc,
         "ccu": ccu,
         "planets_per_char": max(1, 1 + ipc),
