@@ -722,17 +722,27 @@ async def download_and_import(db: AsyncSession):
         log.warning("mapMoons.jsonl not present in SDE zip — skipping moon import")
 
     # --- mapStars → star data per system ---
+    # Pre-build star type name lookup (star types are unpublished in SDE)
     log.info("Importing stars...")
+    star_type_names: dict[int, str] = {}
+    for item in _iter_jsonl(zf, "types.jsonl"):
+        gid = item.get("groupID")
+        # Star groups: 6 (Sun), various star type groups
+        if gid in (6,) or (item.get("name", {}).get("en", "").startswith("Sun ")):
+            star_type_names[int(item["_key"])] = item.get("name", {}).get("en", "Star")
+    log.info(f"Found {len(star_type_names)} star type names")
+
     await db.execute(text("DELETE FROM sde_stars"))
     await db.commit()
     count, batch = 0, []
     try:
         for item in _iter_jsonl(zf, "mapStars.jsonl"):
             try:
+                tid = int(item.get("typeID") or 0) or None
                 batch.append({
                     "system_id": int(item.get("solarSystemID") or item.get("_key")),
-                    "type_id": int(item.get("typeID") or 0) or None,
-                    "star_name": None,  # resolved from type_id later
+                    "type_id": tid,
+                    "star_name": star_type_names.get(tid) if tid else None,
                 })
             except (KeyError, ValueError, TypeError):
                 continue

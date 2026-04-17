@@ -765,12 +765,9 @@ async def get_system_celestials(db: AsyncSession, system_id: int) -> dict:
     star_row = star_result.scalar_one_or_none()
     star = None
     if star_row:
-        star_type_name = None
-        if star_row.type_id:
-            star_type_name = await type_id_to_name(db, star_row.type_id)
         star = {
             "type_id": star_row.type_id,
-            "type_name": star_type_name,
+            "type_name": star_row.star_name or "Star",
         }
 
     # Planets
