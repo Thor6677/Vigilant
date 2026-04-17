@@ -67,7 +67,7 @@
             <td>
                 {% set codes = matrix.get(row_key, {}).get(col_key, []) %}
                 {% for code in codes %}
-                <a href="/wormholes/types/{{ code }}"
+                <a href="#{{ code }}"
                    style="color:{{ class_color(class_map.get(col_key)) }};"
                    title="{{ code }}"
                    hx-get="/wormholes/types/{{ code }}"

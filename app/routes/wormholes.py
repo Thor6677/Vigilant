@@ -355,11 +355,11 @@ async def wormhole_types_page(request: Request, db: AsyncSession = Depends(get_d
 
 @router.get("/wormholes/types/{code}", response_class=HTMLResponse)
 async def wormhole_type_detail(code: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Detail page/partial for a specific wormhole type."""
+    """Detail for a wormhole type. Returns partial for htmx, full page for direct nav."""
     wh_type = await sde.get_wormhole_type_by_name(db, code)
     meta = _wh_data.get("wormhole_meta", {}).get(code, {})
 
-    return templates.TemplateResponse("partials/wormhole_type_detail.html", {
+    ctx = {
         "request": request,
         "code": code,
         "wh_type": wh_type,
@@ -370,7 +370,12 @@ async def wormhole_type_detail(code: str, request: Request, db: AsyncSession = D
         "format_time": _format_time,
         "ship_size_hint": _ship_size_hint,
         "wh_data": _wh_data,
-    })
+    }
+
+    # htmx request → return partial; direct navigation → full page
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("partials/wormhole_type_detail.html", ctx)
+    return templates.TemplateResponse("wormhole_type_page.html", ctx)
 
 
 # ── System Effects Reference ────────────────────────────────────────────────

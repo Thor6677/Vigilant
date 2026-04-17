@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — Wormhole Types — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span>
+    <a href="/wormholes/types">Wormhole Types</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ code }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:520px;">
+    {% include "partials/wormhole_type_detail.html" %}
+</div>
+
+<div style="margin-top:1.5rem;">
+    <a href="/wormholes/types" style="font-size:11px;color:var(--accent);text-decoration:none;">&larr; Back to Connection Matrix</a>
+</div>
+{% endblock %}
