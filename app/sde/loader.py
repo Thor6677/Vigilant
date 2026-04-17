@@ -706,7 +706,7 @@ async def download_and_import(db: AsyncSession):
             try:
                 batch.append({
                     "moon_id": int(item["_key"]),
-                    "planet_id": int(item.get("planetID") or 0),
+                    "planet_id": int(item.get("orbitID") or item.get("planetID") or 0),
                     "system_id": int(item.get("solarSystemID") or 0),
                 })
             except (KeyError, ValueError, TypeError):
