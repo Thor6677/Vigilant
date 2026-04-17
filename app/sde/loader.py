@@ -29,8 +29,8 @@ PI_PLANET_TYPE_IDS = {11, 12, 13, 2014, 2015, 2016, 2017, 2063}
 
 # Wormhole type dogma attribute IDs
 WH_ATTR_TARGET_CLASS = 1381
-WH_ATTR_MAX_STABLE_MASS = 1382
-WH_ATTR_MAX_STABLE_TIME = 1383
+WH_ATTR_MAX_STABLE_TIME = 1382   # lifetime in minutes (despite the ID ordering)
+WH_ATTR_MAX_STABLE_MASS = 1383   # total mass in kg
 WH_ATTR_MASS_REGEN = 1384
 WH_ATTR_MAX_JUMP_MASS = 1385
 WH_GROUP_ID = 988  # invGroups group for "Wormhole" items
