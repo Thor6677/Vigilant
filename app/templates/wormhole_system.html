@@ -246,16 +246,12 @@
 
         <!-- Celestials List -->
         <div class="ws-section">
-            <div class="ws-section-title">Celestials</div>
+            {% set total_moons = celestials['planets'] | sum(attribute='moon_count') %}
+            <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+                Celestials
+                <span style="font-size:9px;letter-spacing:0.1em;color:var(--muted);text-transform:none;">{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }} &middot; {{ total_moons }} moon{{ 's' if total_moons != 1 }}{% if celestials['star'] %} &middot; {{ celestials['star']['type_name'] or 'Star' }}{% endif %}</span>
+            </div>
             <div class="b-panel" style="padding:0.5rem 0.75rem;">
-                {% if celestials['star'] %}
-                <div class="ws-celestial">
-                    <span style="color:var(--accent);">{{ system['system_name'] }} - Star</span>
-                    <span style="color:var(--muted);text-align:right;font-size:10px;">0.0 AU</span>
-                    <span>{{ celestials['star']['type_name'] or 'Star' }}</span>
-                    <span></span>
-                </div>
-                {% endif %}
                 {% for p in celestials['planets'] %}
                 <div class="ws-celestial">
                     <span>{{ p['planet_name'] }}</span>
