@@ -109,6 +109,8 @@ async def startup():
             "ALTER TABLE skill_plans ADD COLUMN owner_alliance_id INTEGER",
             "ALTER TABLE skill_plans ADD COLUMN last_edited_by_user_id INTEGER REFERENCES users(id)",
             "ALTER TABLE skill_plans ADD COLUMN last_edited_at DATETIME",
+            # Wormhole reference: planet orbital distance
+            "ALTER TABLE sde_planets ADD COLUMN distance_au REAL",
         ]:
             try:
                 await db.execute(text(stmt))
