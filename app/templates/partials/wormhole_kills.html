@@ -1,10 +1,10 @@
 <div class="b-panel" style="padding:0.75rem;">
     {% if kill_count == 0 %}
-    <div style="font-size:11px;color:var(--muted);">No kills recorded in the last 7 days.</div>
+    <div style="font-size:11px;color:var(--muted);">No kills recorded in the last 30 days.</div>
     {% else %}
     <div style="margin-bottom:0.75rem;">
         <span style="font-size:13px;font-weight:600;color:var(--text);">{{ kill_count }}</span>
-        <span style="font-size:11px;color:var(--muted);">kill{{ 's' if kill_count != 1 }} in the last 7 days</span>
+        <span style="font-size:11px;color:var(--muted);">kill{{ 's' if kill_count != 1 }} in the last 30 days</span>
         {% if most_recent and days_ago is not none %}
         <div style="font-size:10px;color:var(--muted);margin-top:0.2rem;">
             Most recent: {{ days_ago }} day{{ 's' if days_ago != 1.0 }} ago

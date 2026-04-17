@@ -245,9 +245,9 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
 
     system_id = sys_detail["system_id"]
 
-    # Fetch kills from zKillboard (last 7 days)
+    # Fetch kills from zKillboard (last 30 days = 2592000 seconds)
     try:
-        kills_data = await zkb_get(f"/kills/systemID/{system_id}/pastSeconds/604800/")
+        kills_data = await zkb_get(f"/kills/systemID/{system_id}/pastSeconds/2592000/")
     except Exception:
         kills_data = []
 
