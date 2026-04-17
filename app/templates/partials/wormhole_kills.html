@@ -1,10 +1,20 @@
 <div class="b-panel" style="padding:0.75rem;">
+    <!-- Time range selector -->
+    <div style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.75rem;">
+        {% for d in [30, 60, 90] %}
+        <button {% if d != days %}hx-get="/wormholes/system/{{ system_name }}/kills?days={{ d }}" hx-target="#wh-kills" hx-swap="innerHTML"{% endif %}
+                style="padding:4px 10px;font-size:9px;letter-spacing:0.1em;font-family:inherit;border:1px solid {% if d == days %}var(--accent){% else %}var(--border){% endif %};background:{% if d == days %}rgba(200,169,81,0.1){% else %}transparent{% endif %};color:{% if d == days %}var(--accent){% else %}var(--muted){% endif %};border-radius:3px;cursor:pointer;">
+            {{ d }}D
+        </button>
+        {% endfor %}
+    </div>
+
     {% if kill_count == 0 %}
-    <div style="font-size:11px;color:var(--muted);">No kills recorded in the last 30 days.</div>
+    <div style="font-size:11px;color:var(--muted);">No kills recorded in the last {{ days }} days.</div>
     {% else %}
     <div style="margin-bottom:0.75rem;">
         <span style="font-size:13px;font-weight:600;color:var(--text);">{{ kill_count }}</span>
-        <span style="font-size:11px;color:var(--muted);">kill{{ 's' if kill_count != 1 }} in the last 30 days</span>
+        <span style="font-size:11px;color:var(--muted);">kill{{ 's' if kill_count != 1 }} in the last {{ days }} days</span>
         {% if most_recent and days_ago is not none %}
         <div style="font-size:10px;color:var(--muted);margin-top:0.2rem;">
             Most recent: {{ days_ago }} day{{ 's' if days_ago != 1.0 }} ago
@@ -12,6 +22,33 @@
         </div>
         {% endif %}
     </div>
+
+    <!-- Most Active -->
+    {% if top_corps or top_alliances %}
+    <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Most Active</div>
+    <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
+        {% for corp in top_corps %}
+        <a href="https://zkillboard.com/corporation/{{ corp['id'] }}/" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;transition:background 0.15s;"
+           onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='var(--bg)'">
+            <img src="https://images.evetech.net/corporations/{{ corp['id'] }}/logo?size=32"
+                 alt="" width="16" height="16" style="border-radius:2px;flex-shrink:0;">
+            <span style="flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ corp['name'] }}</span>
+            <span style="font-size:9px;color:var(--muted);flex-shrink:0;">{{ corp['count'] }} kill{{ 's' if corp['count'] != 1 }}</span>
+        </a>
+        {% endfor %}
+        {% for ally in top_alliances %}
+        <a href="https://zkillboard.com/alliance/{{ ally['id'] }}/" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;transition:background 0.15s;"
+           onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='var(--bg)'">
+            <img src="https://images.evetech.net/alliances/{{ ally['id'] }}/logo?size=32"
+                 alt="" width="16" height="16" style="border-radius:2px;flex-shrink:0;">
+            <span style="flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6688aa;">{{ ally['name'] }}</span>
+            <span style="font-size:9px;color:var(--muted);flex-shrink:0;">{{ ally['count'] }} kill{{ 's' if ally['count'] != 1 }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <!-- Activity Heatmap -->
     <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Activity Heatmap</div>
@@ -45,9 +82,9 @@
                         <a href="https://zkillboard.com/kill/{{ cell_ids[0] }}/" target="_blank" rel="noopener" title="{{ cell_ids|length }} kills — click for first" style="display:block;text-decoration:none;">
                         {% endif %}
                         {% if is_npc %}
-                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(184,150,15,{{ opacity }});border:1px solid rgba(212,173,32,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(200,169,81,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="NPC kill{% if age == 1 %} (8-14d ago){% elif age == 2 %} (15-30d ago){% endif %}">{{ val }}</div>
+                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(184,150,15,{{ opacity }});border:1px solid rgba(212,173,32,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(200,169,81,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="NPC kill{% if age == 1 %} ({{ age_labels[1] }}){% elif age == 2 %} ({{ age_labels[2] }}){% endif %}">{{ val }}</div>
                         {% else %}
-                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(204,51,51,{{ opacity }});border:1px solid rgba(238,85,85,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="PvP kill{% if age == 1 %} (8-14d ago){% elif age == 2 %} (15-30d ago){% endif %}">{{ val }}</div>
+                        <div style="width:15px;height:15px;border-radius:2px;background:rgba(204,51,51,{{ opacity }});border:1px solid rgba(238,85,85,{{ opacity }});display:flex;align-items:center;justify-content:center;font-size:7px;color:#fff;font-weight:700;box-shadow:0 0 4px rgba(220,60,60,{{ opacity * 0.6 }});{% if cell_ids %}cursor:pointer;{% endif %}" title="PvP kill{% if age == 1 %} ({{ age_labels[1] }}){% elif age == 2 %} ({{ age_labels[2] }}){% endif %}">{{ val }}</div>
                         {% endif %}
                         {% if cell_ids %}</a>{% endif %}
                     </td>
@@ -71,11 +108,11 @@
         <span>NPC</span>
         <span style="margin-left:0.5rem;">|</span>
         <div style="width:12px;height:12px;background:rgba(204,51,51,1.0);border-radius:2px;"></div>
-        <span>&lt;7d</span>
+        <span>{{ age_labels[0] }}</span>
         <div style="width:12px;height:12px;background:rgba(204,51,51,0.65);border-radius:2px;"></div>
-        <span>8-14d</span>
+        <span>{{ age_labels[1] }}</span>
         <div style="width:12px;height:12px;background:rgba(204,51,51,0.4);border-radius:2px;"></div>
-        <span>15-30d</span>
+        <span>{{ age_labels[2] }}</span>
     </div>
 
     <!-- Recent Kills Feed -->
@@ -92,7 +129,18 @@
             {% else %}
             <div style="width:20px;height:20px;background:var(--border);border-radius:2px;flex-shrink:0;"></div>
             {% endif %}
-            <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ kill['ship_name'] or 'Unknown' }}</span>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ kill['ship_name'] or 'Unknown' }}</div>
+                <div style="font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {% if kill['character_name'] %}{{ kill['character_name'] }}{% endif %}
+                    {% if kill['corporation_name'] %}
+                    <span style="color:var(--border);">·</span> {{ kill['corporation_name'] }}
+                    {% endif %}
+                    {% if kill['alliance_name'] %}
+                    <span style="color:var(--border);">·</span> <span style="color:#6688aa;">{{ kill['alliance_name'] }}</span>
+                    {% endif %}
+                </div>
+            </div>
             <span style="font-size:9px;padding:1px 5px;border-radius:2px;flex-shrink:0;{% if kill['is_npc'] %}background:rgba(184,150,15,0.2);color:#d4ad20;{% else %}background:rgba(204,51,51,0.2);color:#ee5555;{% endif %}">{{ 'NPC' if kill['is_npc'] else 'PvP' }}</span>
             {% if kill['value'] %}
             <span style="font-size:10px;color:var(--accent);flex-shrink:0;min-width:55px;text-align:right;">{{ "%.1f"|format(kill['value'] / 1000000) }}M</span>

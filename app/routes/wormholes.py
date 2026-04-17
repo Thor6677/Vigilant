@@ -15,7 +15,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import get_db
+from app.db.models import get_db, AsyncSessionLocal
+from app.esi.client import ESIClient
 from app.sde import lookup as sde
 from app.intel.safety import zkb_get, fetch_killmail
 
@@ -263,17 +264,23 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
 
 
 @router.get("/wormholes/system/{name}/kills", response_class=HTMLResponse)
-async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def wormhole_system_kills(
+    name: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=30, le=90),
+):
     """Lazy-loaded kill activity for a wormhole system."""
     sys_detail = await sde.get_wormhole_system_detail(db, name)
     if not sys_detail:
         return HTMLResponse('<div class="b-empty">System not found.</div>')
 
     system_id = sys_detail["system_id"]
+    # Normalise to one of the supported ranges
+    if days not in (30, 60, 90):
+        days = 30
 
     # Fetch recent killmails from zKillboard (up to 200 most recent)
-    # Don't use pastSeconds — it's unreliable for low-activity systems.
-    # Fetch all recent and filter by date locally after ESI enrichment.
     try:
         kills_data = await zkb_get(f"/systemID/{system_id}/")
     except Exception:
@@ -288,10 +295,11 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
             "corps": [],
             "alliances": [],
             "most_recent": None,
+            "days": days,
+            "system_name": name,
         })
 
-    # Fetch full killmail details from ESI (for timestamps)
-    # Limit to 30 kills to avoid overloading ESI
+    # Fetch full killmail details from ESI (for timestamps + corp/alliance)
     sem = asyncio.Semaphore(5)
 
     # Build npc flag lookup from zkb data
@@ -312,25 +320,34 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
                     pass
         return None
 
-    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:50]])
+    fetch_limit = 100 if days > 30 else 50
+    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:fetch_limit]])
 
-    # Filter to last 30 days
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=30)
+    cutoff = now - timedelta(days=days)
+
+    # Age bucket boundaries (thirds of the range)
+    third = days // 3
+    cutoff_recent = now - timedelta(days=third)
+    cutoff_mid = now - timedelta(days=third * 2)
 
     # Build activity heatmap (day-of-week × hour) with kill IDs per cell
-    heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
-    heatmap_ids: dict[str, list[int]] = {}  # "d,h" -> [killmail_id, ...]
-    heatmap_npc: dict[str, bool] = {}  # "d,h" -> True if ALL kills in cell are NPC
-    heatmap_age: dict[str, int] = {}  # "d,h" -> min age bucket (0=<7d, 1=8-14d, 2=15-30d)
+    heatmap = [[0] * 24 for _ in range(7)]
+    heatmap_ids: dict[str, list[int]] = {}
+    heatmap_npc: dict[str, bool] = {}
+    heatmap_age: dict[str, int] = {}
     most_recent = None
-    recent_kills: list[dict] = []  # individual kill details for the feed
+    recent_kills: list[dict] = []
     victim_type_ids: set[int] = set()
+    kill_char_ids: set[int] = set()
+    kill_corp_ids: set[int] = set()
+    kill_alliance_ids: set[int] = set()
 
-    cutoff_7d = now - timedelta(days=7)
-    cutoff_14d = now - timedelta(days=14)
+    # Corp/alliance aggregation (player orgs only)
+    corp_kills: Counter = Counter()
+    alliance_kills: Counter = Counter()
 
-    for i, km in enumerate(full_kms):
+    for km in full_kms:
         if not km:
             continue
         kill_time_str = km.get("killmail_time", "")
@@ -348,14 +365,12 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         heatmap[d][h] += 1
         key = f"{d},{h}"
 
-        # Age bucket: 0 = last 7d (bright), 1 = 8-14d, 2 = 15-30d (faded)
-        if kill_time >= cutoff_7d:
+        if kill_time >= cutoff_recent:
             age = 0
-        elif kill_time >= cutoff_14d:
+        elif kill_time >= cutoff_mid:
             age = 1
         else:
             age = 2
-        # Keep the most recent (smallest) age bucket per cell
         if key not in heatmap_age or age < heatmap_age[key]:
             heatmap_age[key] = age
 
@@ -370,9 +385,24 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         if most_recent is None or kill_time > most_recent:
             most_recent = kill_time
 
+        # Aggregate corp/alliance involvement (player orgs only)
+        victim = km.get("victim", {})
+        v_corp = victim.get("corporation_id")
+        v_alliance = victim.get("alliance_id")
+        if v_corp and v_corp >= 98_000_000:
+            corp_kills[v_corp] += 1
+        if v_alliance and v_alliance >= 99_000_000:
+            alliance_kills[v_alliance] += 1
+        for att in km.get("attackers", []):
+            a_corp = att.get("corporation_id")
+            a_alliance = att.get("alliance_id")
+            if a_corp and a_corp >= 98_000_000:
+                corp_kills[a_corp] += 1
+            if a_alliance and a_alliance >= 99_000_000:
+                alliance_kills[a_alliance] += 1
+
         # Build recent kills list (up to 15)
         if len(recent_kills) < 15:
-            victim = km.get("victim", {})
             ship_tid = victim.get("ship_type_id")
             if ship_tid:
                 victim_type_ids.add(ship_tid)
@@ -387,12 +417,27 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
             else:
                 hrs = delta_kill.seconds // 3600
                 time_ago = f"{hrs}h ago" if hrs > 0 else "just now"
+            v_char_id = victim.get("character_id")
+            v_corp_id = victim.get("corporation_id")
+            v_ally_id = victim.get("alliance_id")
+            if v_char_id:
+                kill_char_ids.add(v_char_id)
+            if v_corp_id:
+                kill_corp_ids.add(v_corp_id)
+            if v_ally_id:
+                kill_alliance_ids.add(v_ally_id)
             recent_kills.append({
                 "killmail_id": kid,
                 "time": kill_time,
                 "time_ago": time_ago,
                 "ship_type_id": ship_tid,
-                "ship_name": None,  # resolved below
+                "ship_name": None,
+                "character_id": v_char_id,
+                "character_name": None,
+                "corporation_id": v_corp_id,
+                "corporation_name": None,
+                "alliance_id": v_ally_id,
+                "alliance_name": None,
                 "value": zkb_stub.get("totalValue", 0) if zkb_stub else 0,
                 "is_npc": npc_flags.get(kid, False),
             })
@@ -404,6 +449,78 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
             if kill["ship_type_id"]:
                 kill["ship_name"] = ship_names.get(kill["ship_type_id"], f"Type {kill['ship_type_id']}")
 
+    # Resolve names from ESI: top corps/alliances + kill list chars/corps/alliances
+    top_corps: list[dict] = []
+    top_alliances: list[dict] = []
+    top_corp_ids = [cid for cid, _ in corp_kills.most_common(5)]
+    top_alliance_ids = [aid for aid, _ in alliance_kills.most_common(5)]
+
+    # Merge IDs: top active + kill list victims
+    all_corp_ids = set(top_corp_ids) | kill_corp_ids
+    all_alliance_ids = set(top_alliance_ids) | kill_alliance_ids
+
+    name_sem = asyncio.Semaphore(5)
+    char_names: dict[int, str] = {}
+    corp_names: dict[int, str] = {}
+    alliance_names: dict[int, str] = {}
+
+    async def _resolve_char(cid: int):
+        async with name_sem:
+            async with AsyncSessionLocal() as sess:
+                c = ESIClient("", db=sess)
+                try:
+                    data = await c.get_public(f"/characters/{cid}/")
+                    if isinstance(data, dict):
+                        char_names[cid] = data.get("name", f"Char {cid}")
+                        return
+                except Exception:
+                    pass
+                char_names[cid] = f"Char {cid}"
+
+    async def _resolve_corp(cid: int):
+        async with name_sem:
+            async with AsyncSessionLocal() as sess:
+                c = ESIClient("", db=sess)
+                try:
+                    data = await c.get_public(f"/corporations/{cid}/")
+                    if isinstance(data, dict):
+                        corp_names[cid] = data.get("name", f"Corp {cid}")
+                        return
+                except Exception:
+                    pass
+                corp_names[cid] = f"Corp {cid}"
+
+    async def _resolve_alliance(aid: int):
+        async with name_sem:
+            async with AsyncSessionLocal() as sess:
+                c = ESIClient("", db=sess)
+                try:
+                    data = await c.get_public(f"/alliances/{aid}/")
+                    if isinstance(data, dict):
+                        alliance_names[aid] = data.get("name", f"Alliance {aid}")
+                        return
+                except Exception:
+                    pass
+                alliance_names[aid] = f"Alliance {aid}"
+
+    await asyncio.gather(
+        *[_resolve_char(cid) for cid in kill_char_ids],
+        *[_resolve_corp(cid) for cid in all_corp_ids],
+        *[_resolve_alliance(aid) for aid in all_alliance_ids],
+    )
+
+    top_corps = [{"id": cid, "name": corp_names.get(cid, f"Corp {cid}"), "count": corp_kills[cid]} for cid in top_corp_ids]
+    top_alliances = [{"id": aid, "name": alliance_names.get(aid, f"Alliance {aid}"), "count": alliance_kills[aid]} for aid in top_alliance_ids]
+
+    # Backfill resolved names into recent kills
+    for kill in recent_kills:
+        if kill["character_id"]:
+            kill["character_name"] = char_names.get(kill["character_id"])
+        if kill["corporation_id"]:
+            kill["corporation_name"] = corp_names.get(kill["corporation_id"])
+        if kill["alliance_id"]:
+            kill["alliance_name"] = alliance_names.get(kill["alliance_id"])
+
     filtered_count = sum(sum(row) for row in heatmap)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     max_kills = max(max(row) for row in heatmap) if filtered_count else 1
@@ -412,6 +529,9 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
     if most_recent:
         delta = now - most_recent
         days_ago = round(delta.total_seconds() / 86400, 1)
+
+    # Age bucket labels for the legend
+    age_labels = [f"<{third}d", f"{third}-{third*2}d", f"{third*2}-{days}d"]
 
     return templates.TemplateResponse("partials/wormhole_kills.html", {
         "request": request,
@@ -425,6 +545,11 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         "max_kills": max_kills,
         "most_recent": most_recent,
         "days_ago": days_ago,
+        "days": days,
+        "age_labels": age_labels,
+        "system_name": name,
+        "top_corps": top_corps,
+        "top_alliances": top_alliances,
     })
 
 
