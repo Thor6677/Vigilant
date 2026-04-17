@@ -3,6 +3,7 @@
 Provides searchable/filterable J-space system database, wormhole type lookup,
 system detail pages with celestials and zKillboard activity, and system effects.
 """
+import asyncio
 import json
 import logging
 from collections import Counter, defaultdict
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import get_db
 from app.sde import lookup as sde
-from app.intel.safety import zkb_get
+from app.intel.safety import zkb_get, fetch_killmail
 
 router = APIRouter(tags=["wormholes"])
 templates = Jinja2Templates(directory="app/templates")
@@ -261,14 +262,30 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
             "most_recent": None,
         })
 
+    # Fetch full killmail details from ESI (for timestamps)
+    # Limit to 30 kills to avoid overloading ESI
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch_km(km_stub):
+        async with sem:
+            kid = km_stub.get("killmail_id")
+            khash = km_stub.get("zkb", {}).get("hash")
+            if kid and khash:
+                try:
+                    return await fetch_killmail(kid, khash)
+                except Exception:
+                    pass
+        return None
+
+    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:30]])
+
     # Build activity heatmap (day-of-week × hour)
     heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
-    corp_counter: Counter = Counter()
-    alliance_counter: Counter = Counter()
     most_recent = None
 
-    for km in kills_data:
-        zkb = km.get("zkb", {})
+    for km in full_kms:
+        if not km:
+            continue
         kill_time_str = km.get("killmail_time", "")
         if kill_time_str:
             try:
@@ -278,19 +295,6 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
                     most_recent = kill_time
             except (ValueError, TypeError):
                 pass
-
-    # Find most_recent from zkb data if not from killmail_time
-    if most_recent is None and kills_data:
-        # Try to use killID ordering as a proxy
-        pass
-
-    # Resolve corp/alliance names from kill data (simplified — use zkb data)
-    # For a full implementation we'd fetch killmail details, but for now
-    # just report counts
-    for km in kills_data:
-        zkb = km.get("zkb", {})
-        # zKillboard basic data doesn't include corp names directly
-        # We'll show the count and timestamp info instead
 
     # Flatten heatmap for template
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
