@@ -7,7 +7,7 @@ import asyncio
 import json
 import logging
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -245,10 +245,11 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
 
     system_id = sys_detail["system_id"]
 
-    # Fetch all killmails from zKillboard (last 30 days = 2592000 seconds)
-    # Use /systemID/ (not /kills/systemID/) to include NPC and PvP kills
+    # Fetch recent killmails from zKillboard (up to 200 most recent)
+    # Don't use pastSeconds — it's unreliable for low-activity systems.
+    # Fetch all recent and filter by date locally after ESI enrichment.
     try:
-        kills_data = await zkb_get(f"/systemID/{system_id}/pastSeconds/2592000/")
+        kills_data = await zkb_get(f"/systemID/{system_id}/")
     except Exception:
         kills_data = []
 
@@ -285,7 +286,11 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
                     pass
         return None
 
-    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:30]])
+    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:50]])
+
+    # Filter to last 30 days
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=30)
 
     # Build activity heatmap (day-of-week × hour) with kill IDs per cell
     heatmap = [[0] * 24 for _ in range(7)]  # 7 days × 24 hours
@@ -301,6 +306,8 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
         if kill_time_str:
             try:
                 kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
+                if kill_time < cutoff:
+                    continue
                 d, h = kill_time.weekday(), kill_time.hour
                 heatmap[d][h] += 1
                 key = f"{d},{h}"
@@ -317,10 +324,10 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
             except (ValueError, TypeError):
                 pass
 
+    filtered_count = sum(sum(row) for row in heatmap)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    max_kills = max(max(row) for row in heatmap) if kills_data else 1
+    max_kills = max(max(row) for row in heatmap) if filtered_count else 1
 
-    now = datetime.now(timezone.utc)
     days_ago = None
     if most_recent:
         delta = now - most_recent
@@ -328,7 +335,7 @@ async def wormhole_system_kills(name: str, request: Request, db: AsyncSession = 
 
     return templates.TemplateResponse("partials/wormhole_kills.html", {
         "request": request,
-        "kill_count": len(kills_data),
+        "kill_count": filtered_count,
         "heatmap": heatmap,
         "heatmap_ids": heatmap_ids,
         "heatmap_npc": heatmap_npc,
