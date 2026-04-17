@@ -157,12 +157,17 @@ async def download_and_import(db: AsyncSession):
     await db.execute(text("DELETE FROM sde_regions"))
     await db.commit()
     count, batch = 0, []
+    wh_class_batch: list[dict] = []  # collect wormholeClassID from regions, constellations, systems
     for item in _iter_jsonl(zf, "mapRegions.jsonl"):
         name = item.get("name", {}).get("en")
         if not name:
             continue
         try:
-            batch.append({"region_id": int(item["_key"]), "region_name": name})
+            rid = int(item["_key"])
+            batch.append({"region_id": rid, "region_name": name})
+            wh_class = item.get("wormholeClassID")
+            if wh_class is not None:
+                wh_class_batch.append({"location_id": rid, "wormhole_class_id": int(wh_class)})
         except (KeyError, ValueError):
             continue
         if len(batch) >= 500:
@@ -183,11 +188,15 @@ async def download_and_import(db: AsyncSession):
         if not name:
             continue
         try:
+            cid = int(item["_key"])
             batch.append({
-                "constellation_id": int(item["_key"]),
+                "constellation_id": cid,
                 "constellation_name": name,
                 "region_id": item.get("regionID"),
             })
+            wh_class = item.get("wormholeClassID")
+            if wh_class is not None:
+                wh_class_batch.append({"location_id": cid, "wormhole_class_id": int(wh_class)})
         except (KeyError, ValueError):
             continue
         if len(batch) >= 500:
@@ -205,7 +214,6 @@ async def download_and_import(db: AsyncSession):
     await db.execute(text("DELETE FROM sde_systems"))
     await db.commit()
     count, batch = 0, []
-    wh_class_batch: list[dict] = []  # collected during system import
     for item in _iter_jsonl(zf, "mapSolarSystems.jsonl"):
         try:
             sys_id = int(item["_key"])
