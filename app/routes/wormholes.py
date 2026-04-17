@@ -108,19 +108,20 @@ async def wormhole_systems_page(request: Request):
 async def wormhole_systems_search(
     request: Request,
     q: str = Query(""),
-    wh_class: int | None = Query(None),
-    effect: str | None = Query(None),
-    static: str | None = Query(None),
+    wh_class: str = Query(""),
+    effect: str = Query(""),
+    static: str = Query(""),
     page: int = Query(1),
     db: AsyncSession = Depends(get_db),
 ):
     per_page = 50
     offset = (page - 1) * per_page
+    class_int = int(wh_class) if wh_class.strip().isdigit() else None
     systems, total = await sde.get_wormhole_systems(
         db,
-        class_filter=wh_class if wh_class and wh_class > 0 else None,
-        effect_filter=effect if effect else None,
-        static_filter=static if static else None,
+        class_filter=class_int if class_int and class_int > 0 else None,
+        effect_filter=effect.strip() if effect.strip() else None,
+        static_filter=static.strip() if static.strip() else None,
         search=q if q else None,
         limit=per_page,
         offset=offset,
