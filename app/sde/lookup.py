@@ -653,8 +653,13 @@ PLANET_TYPE_NAMES = {
     2017: "Storm", 2063: "Plasma", 30889: "Shattered",
 }
 
-# "Perfect PI" requires all 8 standard planet types
-PERFECT_PI_TYPES = {"Barren", "Gas", "Ice", "Lava", "Oceanic", "Plasma", "Storm", "Temperate"}
+# "Perfect PI" = system's planet types cover all 15 P0 raw materials,
+# enabling production of every P4 commodity without importing.
+# Minimum: Barren + Gas + Lava + Oceanic + Temperate (covers all 15 P0s).
+# Computed dynamically from the PI constants module.
+from app.pi.constants import P0_BY_PLANET_TYPE, P0_MATERIALS
+
+ALL_P0_SET = set(P0_MATERIALS)  # all 15 P0 raw material names
 
 # Wormhole type → destination class (for static destination filtering)
 _wh_type_dest_cache: dict[str, int] | None = None
@@ -771,10 +776,13 @@ async def get_wormhole_systems(
             if not all(pt in sys_planets for pt in planet_filter):
                 continue
 
-        # Perfect PI filter
+        # Perfect PI filter: check if system's planet types cover all 15 P0 materials
         if perfect_pi and _planet_types_cache is not None:
-            sys_planets = _planet_types_cache.get(sys.system_id, set())
-            if not PERFECT_PI_TYPES.issubset(sys_planets):
+            sys_planet_types = _planet_types_cache.get(sys.system_id, set())
+            available_p0s: set[str] = set()
+            for pt in sys_planet_types:
+                available_p0s.update(P0_BY_PLANET_TYPE.get(pt.lower(), []))
+            if not ALL_P0_SET.issubset(available_p0s):
                 continue
 
         filtered.append({
