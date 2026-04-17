@@ -99,13 +99,21 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [sovTimeRange, setSovTimeRange] = useState<SovTimeRange | null>(null);
   const sovChanges = useSovChanges(activeOverlay === 'sovereignty', sovTimeRange);
 
-  // Fetch alliance names for sovereignty data
+  // Fetch alliance names for sovereignty data + sov changes
   useEffect(() => {
-    if (!stats?.sovereignty) return;
     const ids = new Set<number>();
-    for (const sov of Object.values(stats.sovereignty)) {
-      if (sov.alliance_id) ids.add(sov.alliance_id);
+    if (stats?.sovereignty) {
+      for (const sov of Object.values(stats.sovereignty)) {
+        if (sov.alliance_id) ids.add(sov.alliance_id);
+      }
     }
+    if (sovChanges.data?.changes) {
+      for (const sc of Object.values(sovChanges.data.changes)) {
+        if (sc.old_alliance_id) ids.add(sc.old_alliance_id);
+        if (sc.new_alliance_id) ids.add(sc.new_alliance_id);
+      }
+    }
+    if (ids.size === 0) return;
     // Filter out already-resolved
     const missing = [...ids].filter(id => !allianceNames.has(String(id)));
     if (missing.length === 0) return;
@@ -122,7 +130,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         });
       })
       .catch(() => {});
-  }, [stats?.sovereignty]);
+  }, [stats?.sovereignty, sovChanges.data]);
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {
