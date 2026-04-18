@@ -1175,3 +1175,64 @@ async def get_market_group_path(
         })
         current_id = group.parent_group_id
     return path
+
+
+# ── Charge compatibility ─────────────────────────────────────────────
+
+
+async def get_compatible_charges(
+    db: AsyncSession, module_type_id: int
+) -> list[dict]:
+    """Find charges (ammo/scripts) compatible with a module.
+
+    Reads chargeGroup1-5 (attrs 604-610) and chargeSize (128) from the module,
+    then finds all published types in those groups with matching size.
+    """
+    from app.fitting.constants import CHARGE_GROUP_ATTRS, ATTR_CHARGE_SIZE
+
+    # Get module's charge group and size constraints
+    result = await db.execute(
+        select(SDETypeDogmaAttribute.attribute_id, SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id == module_type_id)
+        .where(SDETypeDogmaAttribute.attribute_id.in_(CHARGE_GROUP_ATTRS + [ATTR_CHARGE_SIZE]))
+    )
+    attrs = {row.attribute_id: row.value for row in result.fetchall()}
+
+    charge_groups = []
+    for attr_id in CHARGE_GROUP_ATTRS:
+        gid = attrs.get(attr_id)
+        if gid and int(gid) > 0:
+            charge_groups.append(int(gid))
+
+    if not charge_groups:
+        return []
+
+    module_charge_size = attrs.get(ATTR_CHARGE_SIZE)
+
+    # Find all published types in those groups
+    q = (
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEType.published == True)
+        .where(SDEType.group_id.in_(charge_groups))
+        .order_by(SDEType.type_name)
+    )
+    result = await db.execute(q)
+    candidates = result.fetchall()
+
+    # Filter by charge size if the module specifies one
+    if module_charge_size is not None:
+        module_size = int(module_charge_size)
+        # Get charge sizes for all candidates
+        candidate_ids = [c.type_id for c in candidates]
+        if candidate_ids:
+            size_result = await db.execute(
+                select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.value)
+                .where(SDETypeDogmaAttribute.type_id.in_(candidate_ids))
+                .where(SDETypeDogmaAttribute.attribute_id == ATTR_CHARGE_SIZE)
+            )
+            charge_sizes = {row.type_id: int(row.value) for row in size_result.fetchall()}
+            candidates = [c for c in candidates if charge_sizes.get(c.type_id) == module_size]
+
+    return [{"type_id": c.type_id, "type_name": c.type_name, "group_id": c.group_id}
+            for c in candidates]

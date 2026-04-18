@@ -35,6 +35,8 @@ from app.fitting.constants import (
     ATTR_HULL_KIN_RESONANCE, ATTR_HULL_EXPL_RESONANCE,
     ATTR_SHIELD_HP, ATTR_ARMOR_HP, ATTR_HP,
     ATTR_CAPACITOR, ATTR_CAP_RECHARGE,
+    ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
+    ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
 )
 
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
@@ -451,6 +453,65 @@ async def calculate_fitting_stats(
     shield_recharge_s = shield_recharge_ms / 1000 if shield_recharge_ms else 0
     peak_shield_recharge = _calc_peak_recharge(shield_hp, shield_recharge_s)
 
+    # ── Step 6: DPS calculation ──────────────────────────────────────────
+    # Collect charge attrs for modules that have charges loaded
+    charge_type_ids = list({
+        item["charge_type_id"] for item in items
+        if item.get("charge_type_id")
+    })
+    charge_attrs_map = await get_types_dogma_attrs(db, charge_type_ids) if charge_type_ids else {}
+
+    weapon_dps = 0.0
+    weapon_volley = 0.0
+    drone_dps = 0.0
+
+    for item in items:
+        tid = item["type_id"]
+        qty = item.get("quantity", 1)
+        mod_attrs = module_attrs_map.get(tid, {})
+        slot = item.get("slot", "")
+
+        if slot == "drone":
+            # Drone DPS: drone's own damage × damageMultiplier / cycleTime
+            em = mod_attrs.get(ATTR_EM_DAMAGE, 0)
+            therm = mod_attrs.get(ATTR_THERMAL_DAMAGE, 0)
+            kin = mod_attrs.get(ATTR_KINETIC_DAMAGE, 0)
+            expl = mod_attrs.get(ATTR_EXPLOSIVE_DAMAGE, 0)
+            dmg_mult = mod_attrs.get(ATTR_DAMAGE_MULTIPLIER, 1)
+            cycle = mod_attrs.get(ATTR_DURATION, 0) or mod_attrs.get(ATTR_RATE_OF_FIRE, 0)
+            if cycle > 0 and (em + therm + kin + expl) > 0:
+                volley = (em + therm + kin + expl) * dmg_mult
+                drone_dps += (volley / (cycle / 1000)) * qty
+            continue
+
+        if slot in ("cargo", "drone"):
+            continue
+
+        # Turret/Launcher DPS: charge damage × module damageMultiplier / cycleTime
+        charge_tid = item.get("charge_type_id")
+        if not charge_tid:
+            continue
+
+        charge_attrs = charge_attrs_map.get(charge_tid, {})
+        em = charge_attrs.get(ATTR_EM_DAMAGE, 0)
+        therm = charge_attrs.get(ATTR_THERMAL_DAMAGE, 0)
+        kin = charge_attrs.get(ATTR_KINETIC_DAMAGE, 0)
+        expl = charge_attrs.get(ATTR_EXPLOSIVE_DAMAGE, 0)
+        total_dmg = em + therm + kin + expl
+        if total_dmg <= 0:
+            continue
+
+        dmg_mult = mod_attrs.get(ATTR_DAMAGE_MULTIPLIER, 1)
+        cycle = mod_attrs.get(ATTR_RATE_OF_FIRE, 0) or mod_attrs.get(ATTR_DURATION, 0)
+        if cycle <= 0:
+            continue
+
+        volley = total_dmg * dmg_mult
+        weapon_volley += volley * qty
+        weapon_dps += (volley / (cycle / 1000)) * qty
+
+    total_dps = weapon_dps + drone_dps
+
     return {
         "cpu_used": round(cpu_used, 1),
         "cpu_total": round(mattr(SHIP_STAT_ATTRS["cpu_output"]), 1),
@@ -508,6 +569,11 @@ async def calculate_fitting_stats(
         "cap_lasts_s": round(cap_lasts_s),
         # Shield passive recharge
         "peak_shield_recharge": round(peak_shield_recharge, 1),
+        # DPS
+        "weapon_dps": round(weapon_dps, 1),
+        "drone_dps": round(drone_dps, 1),
+        "total_dps": round(total_dps, 1),
+        "weapon_volley": round(weapon_volley),
     }
 
 

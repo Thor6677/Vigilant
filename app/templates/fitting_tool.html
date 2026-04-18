@@ -374,9 +374,16 @@ function renderSlots() {
         container.innerHTML = '';
         items.forEach(function(item, idx) {
             var globalIdx = state.items.indexOf(item);
+            var chargeInfo = '';
+            if (item.charge_type_id) {
+                chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" onclick="openChargeSelector(' + globalIdx + ')" title="Change charge">' + (item.charge_name || 'loaded') + '</span>';
+            }
+            var chargeBtn = (slot === 'high' || slot === 'med') ?
+                '<button onclick="openChargeSelector(' + globalIdx + ')" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
-                '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + '</span>' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + chargeInfo + '</span>' +
+                chargeBtn +
                 '<button onclick="removeItem(' + globalIdx + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
                 '</div>';
         });
@@ -583,6 +590,77 @@ document.getElementById('ship-name').addEventListener('click', function() {
     searchInput.value = '';
     searchInput.focus();
 });
+
+/* ── Charge Selector ──────────────────────────────────────────────────────── */
+var chargeModal = null;
+
+function openChargeSelector(itemIndex) {
+    var item = state.items[itemIndex];
+    if (!item) return;
+    fetch('/tools/fitting/charges/' + item.type_id)
+        .then(function(r) { return r.json(); })
+        .then(function(charges) {
+            if (charges.length === 0) return;
+            showChargeDropdown(itemIndex, charges);
+        });
+}
+
+function showChargeDropdown(itemIndex, charges) {
+    closeChargeDropdown();
+    var item = state.items[itemIndex];
+    var overlay = document.createElement('div');
+    overlay.id = 'charge-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99;';
+    overlay.onclick = closeChargeDropdown;
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--surface);border:1px solid var(--border);max-height:400px;width:300px;display:flex;flex-direction:column;';
+
+    var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="font-size:11px;font-weight:600;color:var(--text);">Select Charge</span>' +
+        '<button onclick="clearCharge(' + itemIndex + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:9px;">Clear</button></div>';
+
+    var list = '<div style="overflow-y:auto;flex:1;">';
+    for (var i = 0; i < charges.length; i++) {
+        var c = charges[i];
+        var selected = item.charge_type_id === c.type_id ? 'background:rgba(200,169,81,0.1);' : '';
+        list += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);' + selected + '" ' +
+            'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'' + (selected ? 'rgba(200,169,81,0.1)' : '') + '\'" ' +
+            'onclick="selectCharge(' + itemIndex + ',' + c.type_id + ',\'' + c.type_name.replace(/'/g, "\\'") + '\')">' +
+            '<img src="https://images.evetech.net/types/' + c.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+            '<span style="font-size:11px;color:var(--text);">' + c.type_name + '</span></div>';
+    }
+    list += '</div>';
+
+    modal.innerHTML = header + list;
+    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
+    chargeModal = modal;
+}
+
+function closeChargeDropdown() {
+    var overlay = document.getElementById('charge-overlay');
+    if (overlay) overlay.remove();
+    if (chargeModal) { chargeModal.remove(); chargeModal = null; }
+}
+
+function selectCharge(itemIndex, chargeTypeId, chargeName) {
+    state.items[itemIndex].charge_type_id = chargeTypeId;
+    state.items[itemIndex].charge_name = chargeName;
+    saveState();
+    closeChargeDropdown();
+    renderSlots();
+    recalcStats();
+}
+
+function clearCharge(itemIndex) {
+    delete state.items[itemIndex].charge_type_id;
+    delete state.items[itemIndex].charge_name;
+    saveState();
+    closeChargeDropdown();
+    renderSlots();
+    recalcStats();
+}
 
 /* ── Module Browser (persistent left panel) ──────────────────────────────── */
 var browseHistory = [];

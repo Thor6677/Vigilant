@@ -515,3 +515,13 @@ async def check_module_fit(
     can_fit = await sde.can_module_fit_ship(db, module_type_id, ship_type_id)
     restrictions = await sde.get_module_fit_restrictions(db, module_type_id)
     return {"can_fit": can_fit, "restrictions": restrictions}
+
+
+@router.get("/tools/fitting/charges/{module_type_id}")
+async def get_charges(
+    request: Request,
+    module_type_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get compatible charges for a module."""
+    return await sde.get_compatible_charges(db, module_type_id)
