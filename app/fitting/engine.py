@@ -22,11 +22,14 @@ from app.db.sde_models import (
     SDETypeDogmaAttribute, SDEModuleSlot, SDEType,
     SDETypeEffect, SDEEffect, SDEModifier, SDEDogmaAttribute,
 )
+from app.db.sde_models import SDETypeSkillReq
+
 from app.fitting.constants import (
     ATTR_POWER, ATTR_CPU, ATTR_UPGRADE_COST, ATTR_VOLUME,
     ATTR_DRONE_BW_USED, SHIP_STAT_ATTRS,
     ATTR_MASS, ATTR_INERTIA,
     ATTR_CAPACITOR_NEED, ATTR_DURATION, ATTR_SHIELD_RECHARGE_RATE,
+    ATTR_CPU_OUTPUT, ATTR_POWER_OUTPUT,
     ATTR_SHIELD_EM_RESONANCE, ATTR_SHIELD_THERM_RESONANCE,
     ATTR_SHIELD_KIN_RESONANCE, ATTR_SHIELD_EXPL_RESONANCE,
     ATTR_ARMOR_EM_RESONANCE, ATTR_ARMOR_THERM_RESONANCE,
@@ -38,6 +41,9 @@ from app.fitting.constants import (
     ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
 )
+
+# Default skill level assumption
+DEFAULT_SKILL_LEVEL = 5
 
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
 OP_PRE_ASSIGN = -1   # Override base value
@@ -173,6 +179,113 @@ async def _get_module_modifiers(
     return out
 
 
+async def _apply_ship_hull_bonuses(
+    db: AsyncSession,
+    ship_type_id: int,
+    ship_attrs: dict[int, float],
+    module_attrs_map: dict[int, dict[int, float]],
+    items: list[dict],
+    skill_level: int = DEFAULT_SKILL_LEVEL,
+):
+    """Apply ship hull bonuses to module attributes (modifies module_attrs_map in-place).
+
+    Ship hull bonuses come in two flavors:
+    - LocationRequiredSkillModifier: per-level bonus targeting modules requiring a skill
+    - LocationGroupModifier: role bonus targeting modules in a group
+    """
+    # Get ship's passive effects
+    result = await db.execute(
+        select(SDETypeEffect.effect_id)
+        .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
+        .where(SDETypeEffect.type_id == ship_type_id)
+        .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+    )
+    ship_effect_ids = [row[0] for row in result.fetchall()]
+    if not ship_effect_ids:
+        return
+
+    # Get modifiers from ship effects
+    result = await db.execute(
+        select(SDEModifier)
+        .where(SDEModifier.effect_id.in_(ship_effect_ids))
+        .where(SDEModifier.domain == "shipID")
+    )
+    ship_modifiers = result.scalars().all()
+    if not ship_modifiers:
+        return
+
+    # Build lookup structures for matching modules to filters
+    # Skill requirements: which modules require which skills
+    all_type_ids = list(module_attrs_map.keys())
+    skill_reqs: dict[int, set[int]] = defaultdict(set)  # type_id -> set of skill_type_ids
+    if all_type_ids:
+        result = await db.execute(
+            select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+            .where(SDETypeSkillReq.type_id.in_(all_type_ids))
+        )
+        for row in result.fetchall():
+            skill_reqs[row.type_id].add(row.skill_type_id)
+
+    # Group IDs for modules
+    group_ids: dict[int, int] = {}  # type_id -> group_id
+    if all_type_ids:
+        result = await db.execute(
+            select(SDEType.type_id, SDEType.group_id)
+            .where(SDEType.type_id.in_(all_type_ids))
+        )
+        group_ids = {row.type_id: row.group_id for row in result.fetchall()}
+
+    # Apply each ship modifier to matching modules
+    for mod in ship_modifiers:
+        # Get source value from ship attributes
+        src_val = ship_attrs.get(mod.modifying_attribute_id)
+        if src_val is None:
+            continue
+
+        # Determine which module type_ids this modifier targets
+        matching_type_ids = set()
+        is_per_level = False
+
+        if mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
+            # Per-level bonus: targets modules requiring a specific skill
+            target_skill = mod.filter_value
+            is_per_level = True
+            for tid, skills in skill_reqs.items():
+                if target_skill in skills:
+                    matching_type_ids.add(tid)
+
+        elif mod.func == "LocationGroupModifier" and mod.filter_type == "group":
+            # Role bonus: targets modules in a specific group
+            target_group = mod.filter_value
+            for tid, gid in group_ids.items():
+                if gid == target_group:
+                    matching_type_ids.add(tid)
+
+        if not matching_type_ids:
+            continue
+
+        # Calculate effective value
+        if is_per_level:
+            effective_val = src_val * skill_level
+        else:
+            effective_val = src_val
+
+        # Apply to matching modules
+        target_attr = mod.modified_attribute_id
+        for tid in matching_type_ids:
+            if tid not in module_attrs_map:
+                continue
+            attrs = module_attrs_map[tid]
+            current = attrs.get(target_attr, 0)
+
+            if mod.operator == OP_MOD_ADD:
+                attrs[target_attr] = current + effective_val
+            elif mod.operator == OP_POST_PERCENT:
+                attrs[target_attr] = current * (1 + effective_val / 100)
+            elif mod.operator == OP_POST_MUL:
+                attrs[target_attr] = current * effective_val
+
+
 async def get_ship_stats(db: AsyncSession, ship_type_id: int) -> dict:
     """Fetch all displayable base stats for a ship from dogma attributes."""
     attrs = await get_type_dogma_attrs(db, ship_type_id)
@@ -228,6 +341,18 @@ async def calculate_fitting_stats(
     # Get module attributes and modifiers
     module_attrs_map = await get_types_dogma_attrs(db, all_type_ids) if all_type_ids else {}
     module_modifiers = await _get_module_modifiers(db, module_type_ids) if module_type_ids else {}
+
+    # ── Apply All-V fitting skills to ship attributes ─────────────────────
+    # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
+    ship_attrs[ATTR_CPU_OUTPUT] = ship_attrs.get(ATTR_CPU_OUTPUT, 0) * 1.25
+    ship_attrs[ATTR_POWER_OUTPUT] = ship_attrs.get(ATTR_POWER_OUTPUT, 0) * 1.25
+
+    # ── Apply ship hull bonuses to module attributes ──────────────────────
+    # Makes deep copies so we don't mutate cached SDE data
+    module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
+    await _apply_ship_hull_bonuses(
+        db, ship_type_id, ship_attrs, module_attrs_map, items
+    )
 
     # Fetch module slot info for turret/launcher counting
     slot_info = {}
