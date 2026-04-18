@@ -323,7 +323,12 @@ async def _apply_ship_hull_bonuses(
                 current = attrs.get(target_attr, 0)
                 if current == 0 and target_attr in (ATTR_DAMAGE_MULTIPLIER,):
                     current = 1.0
-                attrs[target_attr] = current * (1 + effective_val / 100)
+                # ROF bonuses are stated as positive ("+5% rate of fire") but
+                # mechanically REDUCE cycle time. Negate for ROF attributes.
+                if target_attr == ATTR_RATE_OF_FIRE:
+                    attrs[target_attr] = current * (1 - effective_val / 100)
+                else:
+                    attrs[target_attr] = current * (1 + effective_val / 100)
 
     # ── Source 2: modifierInfo-based ship modifiers ─────────────────────
     # Only apply LocationGroupModifier (role bonuses) from modifierInfo.
