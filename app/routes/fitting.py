@@ -180,6 +180,14 @@ async def import_eft(
     if not eft_text:
         return {"error": "No EFT text provided"}
 
+    # Normalize Unicode characters that break name matching
+    eft_text = eft_text.replace("\u2019", "'")   # right single quote → ASCII
+    eft_text = eft_text.replace("\u2018", "'")   # left single quote → ASCII
+    eft_text = eft_text.replace("\u201c", '"')    # left double quote
+    eft_text = eft_text.replace("\u201d", '"')    # right double quote
+    eft_text = eft_text.replace("\u2013", "-")    # en dash → hyphen
+    eft_text = eft_text.replace("\u2014", "-")    # em dash → hyphen
+
     lines = eft_text.split("\n")
     if not lines:
         return {"error": "Empty EFT text"}
@@ -216,6 +224,13 @@ async def import_eft(
             item_name = line
             quantity = 1
 
+        # Handle comma-separated charge: "Module Name, Charge Name"
+        charge_name_eft = None
+        if ", " in item_name and not item_name.startswith("["):
+            parts = item_name.rsplit(", ", 1)
+            item_name = parts[0].strip()
+            charge_name_eft = parts[1].strip()
+
         # Skip empty slot markers
         if item_name.startswith("[Empty ") or item_name.startswith("[empty "):
             continue
@@ -248,12 +263,40 @@ async def import_eft(
             else:
                 slot_type = "cargo"
 
-        items.append({
+        item_entry = {
             "type_id": type_id,
             "type_name": item_name,
             "slot": slot_type,
             "quantity": quantity,
-        })
+        }
+
+        # Resolve inline charge if present
+        if charge_name_eft and slot_type in ("high", "mid"):
+            charge_id = await sde.type_name_to_id(db, charge_name_eft)
+            if charge_id:
+                item_entry["charge_type_id"] = charge_id
+                item_entry["charge_name"] = charge_name_eft
+
+        items.append(item_entry)
+
+    # Auto-load charges from cargo onto compatible weapons
+    cargo_charges = [i for i in items if i["slot"] == "cargo"]
+    weapon_items = [i for i in items if i["slot"] in ("high", "mid") and not i.get("charge_type_id")]
+    if cargo_charges and weapon_items:
+        for weapon in weapon_items:
+            if weapon.get("charge_type_id"):
+                continue
+            compatible = await sde.get_compatible_charges(db, weapon["type_id"])
+            compat_ids = {c["type_id"] for c in compatible}
+            for cargo in cargo_charges:
+                if cargo["type_id"] in compat_ids:
+                    weapon["charge_type_id"] = cargo["type_id"]
+                    weapon["charge_name"] = cargo["type_name"]
+                    break
+
+    # Remove cargo items that are charges (already loaded onto weapons)
+    loaded_charge_ids = {i.get("charge_type_id") for i in items if i.get("charge_type_id")}
+    items = [i for i in items if not (i["slot"] == "cargo" and i["type_id"] in loaded_charge_ids)]
 
     return {
         "ship_type_id": ship_type_id,
