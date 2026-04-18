@@ -23,12 +23,40 @@ _GRAPH_CACHE_TTL = 3600  # seconds
 
 
 async def type_name_to_id(db: AsyncSession, name: str) -> int | None:
-    """Resolve item name to type_id. Case-insensitive."""
+    """Resolve item name to type_id. Case-insensitive.
+
+    Falls back to ASCII-normalized name if the initial lookup fails,
+    handling invisible Unicode chars from EVE client copy/paste.
+    """
     result = await db.execute(
         select(SDEType.type_id).where(func.lower(SDEType.type_name) == name.lower())
     )
     row = result.scalar_one_or_none()
-    return row
+    if row is not None:
+        return row
+
+    # Fallback: strip all non-ASCII, normalize quotes/dashes, and retry
+    import unicodedata
+    cleaned = []
+    for ch in name:
+        if ch == '\u2019' or ch == '\u2018':
+            cleaned.append("'")
+        elif ch == '\u2013' or ch == '\u2014':
+            cleaned.append('-')
+        elif ord(ch) < 128:
+            cleaned.append(ch)
+        elif unicodedata.category(ch).startswith('L'):
+            cleaned.append(ch)  # Keep letters (accented etc.)
+        elif ch == ' ' or ch == '\u00a0':
+            cleaned.append(' ')
+        # else: skip (invisible chars, format chars, etc.)
+    cleaned_name = ''.join(cleaned).strip()
+    if cleaned_name != name:
+        result = await db.execute(
+            select(SDEType.type_id).where(func.lower(SDEType.type_name) == cleaned_name.lower())
+        )
+        return result.scalar_one_or_none()
+    return None
 
 
 async def type_id_to_name(db: AsyncSession, type_id: int) -> str | None:
