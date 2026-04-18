@@ -32,7 +32,7 @@
 <div class="fit-grid">
 
 {# ── Left: Module Browser (persistent) ──────────────────────────────────── #}
-<div id="browser-panel" style="border:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-height:400px;max-height:calc(100vh - 160px);position:sticky;top:80px;">
+<div id="browser-panel" style="border:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-height:500px;max-height:calc(100vh - 120px);position:sticky;top:80px;">
     {# Browser header + breadcrumbs #}
     <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
         <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:0.35rem;">Module Browser</div>
@@ -40,8 +40,8 @@
     </div>
     {# Two-pane: tree + items #}
     <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-        <div id="browse-tree" style="overflow-y:auto;border-bottom:1px solid var(--border);min-height:120px;max-height:45%;"></div>
-        <div id="browse-items" style="flex:1;overflow-y:auto;">
+        <div id="browse-tree" style="overflow-y:auto;border-bottom:1px solid var(--border);min-height:120px;max-height:65%;"></div>
+        <div id="browse-items" style="flex:1;overflow-y:auto;min-height:80px;">
             <div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">Select a category above</div>
         </div>
     </div>
