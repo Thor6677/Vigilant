@@ -321,7 +321,7 @@ async def wormhole_system_kills(
                     pass
         return None
 
-    fetch_limit = 100 if days > 30 else 50
+    fetch_limit = {30: 50, 60: 150, 90: 200}.get(days, 50)
     full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data[:fetch_limit]])
     fetched_ok = sum(1 for km in full_kms if km)
     log.info("wh_kills: zkb=%d, esi_fetched=%d/%d ok=%d", len(kills_data), fetch_limit, len(kills_data), fetched_ok)
