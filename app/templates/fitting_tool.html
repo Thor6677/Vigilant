@@ -15,7 +15,21 @@
     </div>
 </div>
 
-<div style="display:grid;grid-template-columns:280px 1fr 1fr;gap:1rem;">
+<style>
+.fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
+.fit-stats-sticky { position:sticky; top:80px; }
+@media (max-width:1100px) {
+    .fit-grid { grid-template-columns:1fr 1fr; }
+    #browser-panel { display:none !important; }
+    #browser-toggle { display:inline-block !important; }
+}
+@media (max-width:768px) {
+    .fit-grid { grid-template-columns:1fr; }
+    .fit-stats-sticky { position:static; }
+}
+</style>
+<button id="browser-toggle" onclick="document.getElementById('browser-panel').style.display='';document.getElementById('browser-panel').style.position='fixed';document.getElementById('browser-panel').style.left='0';document.getElementById('browser-panel').style.top='0';document.getElementById('browser-panel').style.bottom='0';document.getElementById('browser-panel').style.zIndex='50';document.getElementById('browser-panel').style.width='300px';document.getElementById('browser-panel').style.maxHeight='100vh';" style="display:none;margin-bottom:0.5rem;padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);background:none;cursor:pointer;">Browse Modules</button>
+<div class="fit-grid">
 
 {# ── Left: Module Browser (persistent) ──────────────────────────────────── #}
 <div id="browser-panel" style="border:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-height:400px;max-height:calc(100vh - 160px);position:sticky;top:80px;">
@@ -115,7 +129,7 @@
 
 {# ── Right: Stats Panel ─────────────────────────────────────────────────── #}
 <div>
-    <div id="stats-panel">
+    <div id="stats-panel" class="fit-stats-sticky">
         <div class="b-empty">Select a ship to see stats</div>
     </div>
 
@@ -348,6 +362,15 @@ function removeItem(index) {
     recalcStats();
 }
 
+function toggleOnline(index) {
+    var item = state.items[index];
+    if (!item) return;
+    item.online = item.online === false ? true : false;
+    saveState();
+    renderSlots();
+    recalcStats();
+}
+
 function changeDroneQty(index, delta) {
     state.items[index].quantity += delta;
     if (state.items[index].quantity <= 0) {
@@ -374,13 +397,19 @@ function renderSlots() {
         container.innerHTML = '';
         items.forEach(function(item, idx) {
             var globalIdx = state.items.indexOf(item);
+            var isOnline = item.online !== false;
+            var opacity = isOnline ? '1' : '0.4';
             var chargeInfo = '';
             if (item.charge_type_id) {
                 chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" onclick="openChargeSelector(' + globalIdx + ')" title="Change charge">' + (item.charge_name || 'loaded') + '</span>';
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button onclick="openChargeSelector(' + globalIdx + ')" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
-            container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
+            // Online/offline toggle (green dot = online, grey = offline)
+            var onlineBtn = slot !== 'rig' ?
+                '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + (isOnline ? 'var(--success)' : 'var(--border)') + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + (isOnline ? 'Put offline' : 'Put online') + '">&#9679;</button>' : '';
+            container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
+                onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
                 '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + chargeInfo + '</span>' +
                 chargeBtn +

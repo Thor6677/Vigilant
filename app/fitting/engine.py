@@ -359,7 +359,10 @@ async def calculate_fitting_stats(
             ship_attrs[ATTR_MASS] = type_mass
 
     # Collect all module type IDs (excluding drones and cargo)
-    fitted_items = [i for i in items if i.get("slot") not in ("drone", "cargo")]
+    # Only online modules contribute to fitting (offline modules skip CPU/PG/effects)
+    fitted_items = [i for i in items
+                    if i.get("slot") not in ("drone", "cargo")
+                    and i.get("online", True)]
     module_type_ids = list({item["type_id"] for item in fitted_items})
     all_type_ids = list({item["type_id"] for item in items})
 
@@ -519,6 +522,10 @@ async def calculate_fitting_stats(
             continue
 
         if slot == "cargo":
+            continue
+
+        # Offline modules don't consume CPU/PG (rigs always count calibration)
+        if not item.get("online", True) and slot != "rig":
             continue
 
         cpu_used += mod_attrs.get(ATTR_CPU, 0) * qty

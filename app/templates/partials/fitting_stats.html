@@ -1,6 +1,21 @@
-{# ── Skills Assumption ─────────────────────────────────────────────────────── #}
-<div style="font-size:9px;color:var(--muted);margin-bottom:0.5rem;text-align:right;">
-    Skills: <span style="color:var(--accent);">All Level V</span>
+{# ── Summary Bar ──────────────────────────────────────────────────────────── #}
+<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
+    <div style="display:flex;gap:1rem;font-size:10px;">
+        {% if stats.total_dps > 0 %}
+        <span><span style="color:var(--muted);">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}</span></span>
+        {% endif %}
+        <span><span style="color:var(--muted);">EHP</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</span></span>
+        {% if stats.cap_drain_rate > 0 %}
+        <span><span style="color:var(--muted);">Cap</span>
+            {% if stats.cap_stable %}
+            <span style="color:var(--success);font-weight:600;">{{ stats.cap_stable_pct }}%</span>
+            {% else %}
+            <span style="color:var(--danger);font-weight:600;">{{ (stats.cap_lasts_s // 60)|int }}m{{ (stats.cap_lasts_s % 60)|int }}s</span>
+            {% endif %}
+        </span>
+        {% endif %}
+    </div>
+    <span style="font-size:9px;color:var(--muted);">All V</span>
 </div>
 
 {# ── Fitting Resources ─────────────────────────────────────────────────────── #}
