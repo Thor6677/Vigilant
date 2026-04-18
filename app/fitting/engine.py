@@ -534,6 +534,11 @@ async def calculate_fitting_stats(
 
         cross_mods = mod_cross_result.fetchall()
         if cross_mods:
+            # Count copies of each module type in the fit
+            module_copies: dict[int, int] = defaultdict(int)
+            for item in fitted_items:
+                module_copies[item["type_id"]] += item.get("quantity", 1)
+
             # Build skill/group lookups for all module types
             all_tid_list = list(module_attrs_map.keys())
             _skill_reqs: dict[int, set[int]] = defaultdict(set)
@@ -550,6 +555,13 @@ async def calculate_fitting_stats(
                 .where(SDEType.type_id.in_(all_tid_list))
             )
             _group_ids = {row.type_id: row.group_id for row in gr_result.fetchall()}
+
+            # Get stackable flags for stacking penalty check
+            cross_target_attrs = {cm[2] for cm in cross_mods}
+            _stackable = await _get_stackable_flags(db, cross_target_attrs)
+
+            # Collect all cross-module multipliers per target (for stacking penalties)
+            cross_collectors: dict[tuple[int, int], list[float]] = defaultdict(list)
 
             for cm in cross_mods:
                 src_type_id = cm[0]
@@ -574,22 +586,39 @@ async def calculate_fitting_stats(
 
                 target_attr = cm[2]
                 operator = cm[3]
+                copies = module_copies.get(src_type_id, 1)
+
                 for tid in matching:
                     if tid not in module_attrs_map:
                         continue
-                    attrs = module_attrs_map[tid]
-                    if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
-                        attrs[target_attr] = 1.0
-                    current = attrs.get(target_attr, 0)
-                    if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
-                        current = 1.0
 
-                    if operator == OP_MOD_ADD:
-                        attrs[target_attr] = current + src_val
+                    if operator == OP_POST_MUL:
+                        # Collect for stacking penalty application
+                        for _ in range(copies):
+                            cross_collectors[(tid, target_attr)].append(src_val)
                     elif operator == OP_POST_PERCENT:
-                        attrs[target_attr] = current * (1 + src_val / 100)
-                    elif operator == OP_POST_MUL:
-                        attrs[target_attr] = current * src_val
+                        for _ in range(copies):
+                            cross_collectors[(tid, target_attr)].append(1.0 + src_val / 100.0)
+                    elif operator == OP_MOD_ADD:
+                        attrs = module_attrs_map[tid]
+                        attrs[target_attr] = attrs.get(target_attr, 0) + src_val * copies
+
+            # Apply collected multipliers with stacking penalties
+            for (tid, target_attr), multipliers in cross_collectors.items():
+                attrs = module_attrs_map[tid]
+                if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+                    attrs[target_attr] = 1.0
+                current = attrs.get(target_attr, 0)
+                if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
+                    current = 1.0
+
+                is_stackable = _stackable.get(target_attr, True)
+                if is_stackable:
+                    for m in multipliers:
+                        current *= m
+                else:
+                    current *= apply_stacking_penalties(multipliers)
+                attrs[target_attr] = current
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
     # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
