@@ -99,22 +99,25 @@ async def needs_update(db: AsyncSession) -> bool:
     if datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS):
         return True
 
-    # Also force update if any NEW table (added after last import) is still empty
-    # while the base sde_types is populated. This catches additions like the PI
-    # tables without requiring manual `DELETE FROM sde_meta` steps.
+    # Force reimport if sde_types is empty (e.g. a previous import failed mid-way
+    # after DELETE FROM sde_types but before re-populating).
+    # Also force if any NEW table (added after last import) is still empty
+    # while the base sde_types is populated.
     try:
         types_result = await db.execute(text("SELECT COUNT(1) FROM sde_types"))
         types_count = types_result.scalar() or 0
-        if types_count > 0:
-            for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups"):
-                try:
-                    r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
-                    if (r.scalar() or 0) == 0:
-                        log.info(f"{table} is empty but sde_types is populated — forcing SDE reimport.")
-                        return True
-                except Exception:
-                    # Table doesn't exist yet — create_all will make it, next startup will populate
+        if types_count == 0:
+            log.info("sde_types is empty — forcing SDE reimport.")
+            return True
+        for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups"):
+            try:
+                r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
+                if (r.scalar() or 0) == 0:
+                    log.info(f"{table} is empty but sde_types is populated — forcing SDE reimport.")
                     return True
+            except Exception:
+                # Table doesn't exist yet — create_all will make it, next startup will populate
+                return True
     except Exception:
         pass
     return False
