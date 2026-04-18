@@ -233,6 +233,45 @@ async def _apply_ship_hull_bonuses(
     )
     group_ids = {row.type_id: row.group_id for row in result.fetchall()}
 
+    # Build charge-skill map: for each module, what skills do its compatible charges require?
+    # This bridges the gap where typeBonus targets ammo skills but bonuses apply to launchers.
+    from app.fitting.constants import CHARGE_GROUP_ATTRS, ATTR_CHARGE_SIZE
+    charge_skill_map: dict[int, set[int]] = defaultdict(set)  # module_type_id -> set of charge skill_type_ids
+
+    # Get chargeGroup attrs for fitted modules
+    if all_type_ids:
+        cg_result = await db.execute(
+            select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.attribute_id, SDETypeDogmaAttribute.value)
+            .where(SDETypeDogmaAttribute.type_id.in_(all_type_ids))
+            .where(SDETypeDogmaAttribute.attribute_id.in_(CHARGE_GROUP_ATTRS))
+        )
+        module_charge_groups: dict[int, set[int]] = defaultdict(set)
+        for row in cg_result.fetchall():
+            if row.value and int(row.value) > 0:
+                module_charge_groups[row.type_id].add(int(row.value))
+
+        # For modules with charge groups, find what skills charges in those groups require
+        all_charge_groups = set()
+        for groups in module_charge_groups.values():
+            all_charge_groups.update(groups)
+
+        if all_charge_groups:
+            # Get skill requirements for all types in those charge groups
+            charge_skill_result = await db.execute(
+                select(SDEType.group_id, SDETypeSkillReq.skill_type_id)
+                .join(SDETypeSkillReq, SDEType.type_id == SDETypeSkillReq.type_id)
+                .where(SDEType.group_id.in_(all_charge_groups))
+                .where(SDEType.published == True)
+            )
+            group_to_skills: dict[int, set[int]] = defaultdict(set)
+            for row in charge_skill_result.fetchall():
+                group_to_skills[row.group_id].add(row.skill_type_id)
+
+            # Map back to modules
+            for tid, groups in module_charge_groups.items():
+                for gid in groups:
+                    charge_skill_map[tid].update(group_to_skills.get(gid, set()))
+
     # ── Source 1: typeBonus.jsonl parsed bonuses ──────────────────────────
     result = await db.execute(
         select(SDETypeBonus)
@@ -251,10 +290,19 @@ async def _apply_ship_hull_bonuses(
             effective_val = tb.bonus_value * skill_level
 
         # Find matching modules — target_type_id is a skill type_id
+        # Direct match: module requires this skill
         matching_type_ids = set()
         for tid, skills in skill_reqs.items():
             if tb.target_type_id in skills:
                 matching_type_ids.add(tid)
+
+        # Indirect match: module loads charges that require this skill
+        # (e.g., Cruise Missile Launcher loads Cruise Missiles which require
+        # the Cruise Missiles skill — the bonus targets the launcher via ammo skill)
+        if not matching_type_ids and tb.target_type_id:
+            for tid in all_type_ids:
+                if tid in charge_skill_map and tb.target_type_id in charge_skill_map[tid]:
+                    matching_type_ids.add(tid)
 
         if not matching_type_ids:
             continue
