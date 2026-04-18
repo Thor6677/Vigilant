@@ -307,3 +307,41 @@ class SDEMarketGroup(Base):
     parent_group_id = Column(Integer, nullable=True, index=True)
     market_group_name = Column(String, nullable=False)
     icon_id = Column(Integer, nullable=True)
+
+
+# ── Dogma effect tables (fitting engine modifier pipeline) ───────────────
+
+class SDEEffect(Base):
+    """dogmaEffects — effect definitions with category and modifier info."""
+    __tablename__ = "sde_effects"
+
+    effect_id = Column(Integer, primary_key=True)
+    effect_name = Column(String, nullable=False)
+    effect_category = Column(Integer, nullable=False, default=0)
+    discharge_attribute_id = Column(Integer, nullable=True)
+    duration_attribute_id = Column(Integer, nullable=True)
+
+
+class SDETypeEffect(Base):
+    """Per-type effect assignments from typeDogma."""
+    __tablename__ = "sde_type_effects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    effect_id = Column(Integer, nullable=False, index=True)
+    is_default = Column(Boolean, default=False)
+
+
+class SDEModifier(Base):
+    """Parsed modifier info from dogma effects — what each effect actually does."""
+    __tablename__ = "sde_modifiers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    effect_id = Column(Integer, nullable=False, index=True)
+    func = Column(String, nullable=False)
+    domain = Column(String, nullable=False)
+    modified_attribute_id = Column(Integer, nullable=False, index=True)
+    modifying_attribute_id = Column(Integer, nullable=False)
+    operator = Column(Integer, nullable=False)
+    filter_type = Column(String, nullable=True)
+    filter_value = Column(Integer, nullable=True)

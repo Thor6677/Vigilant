@@ -23,7 +23,7 @@ from app.db.sde_models import (
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar,
     SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot,
-    SDEMarketGroup,
+    SDEMarketGroup, SDEEffect, SDETypeEffect, SDEModifier,
 )
 
 # Planet type IDs that support PI (shattered / exotic types excluded).
@@ -109,7 +109,7 @@ async def needs_update(db: AsyncSession) -> bool:
         if types_count == 0:
             log.info("sde_types is empty — forcing SDE reimport.")
             return True
-        for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups"):
+        for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups", "sde_effects"):
             try:
                 r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
                 if (r.scalar() or 0) == 0:
@@ -557,14 +557,15 @@ async def download_and_import(db: AsyncSession):
         (182, 277), (183, 278), (184, 279),
         (1285, 1286), (1289, 1287), (1290, 1288),
     ]
-    log.info("Importing typeDogma (skill requirements + skill info + all dogma attrs + module slots)...")
+    log.info("Importing typeDogma (skill requirements + skill info + all dogma attrs + module slots + type effects)...")
     await db.execute(text("DELETE FROM sde_type_skill_reqs"))
     await db.execute(text("DELETE FROM sde_skill_info"))
     await db.execute(text("DELETE FROM sde_type_dogma_attrs"))
     await db.execute(text("DELETE FROM sde_module_slots"))
+    await db.execute(text("DELETE FROM sde_type_effects"))
     await db.commit()
-    req_count, info_count, dogma_count, slot_count = 0, 0, 0, 0
-    req_batch, info_batch, dogma_batch, slot_batch = [], [], [], []
+    req_count, info_count, dogma_count, slot_count, te_count = 0, 0, 0, 0, 0
+    req_batch, info_batch, dogma_batch, slot_batch, te_batch = [], [], [], [], []
     for item in _iter_jsonl(zf, "typeDogma.jsonl"):
         type_id = int(item["_key"])
         attrs = {a["attributeID"]: a["value"] for a in item.get("dogmaAttributes", [])}
@@ -617,7 +618,8 @@ async def download_and_import(db: AsyncSession):
                 dogma_batch = []
 
             # Extract module slot type from dogma effects
-            effects = {e["effectID"] for e in item.get("dogmaEffects", [])}
+            effects_list = item.get("dogmaEffects", [])
+            effects = {e["effectID"] for e in effects_list}
             slot_type = None
             for eff_id, stype in SLOT_EFFECT_MAP.items():
                 if eff_id in effects:
@@ -635,6 +637,22 @@ async def download_and_import(db: AsyncSession):
                     slot_count += len(slot_batch)
                     slot_batch = []
 
+            # Store type-effect mappings for published types (fitting engine)
+            if type_id in published_type_ids:
+                for e in effects_list:
+                    try:
+                        te_batch.append({
+                            "type_id": type_id,
+                            "effect_id": int(e["effectID"]),
+                            "is_default": bool(e.get("isDefault", False)),
+                        })
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                if len(te_batch) >= 5000:
+                    await _bulk_insert(db, SDETypeEffect.__table__, te_batch)
+                    te_count += len(te_batch)
+                    te_batch = []
+
     await _bulk_insert(db, SDETypeSkillReq.__table__, req_batch)
     req_count += len(req_batch)
     await _bulk_insert(db, SDESkillInfo.__table__, info_batch)
@@ -643,8 +661,10 @@ async def download_and_import(db: AsyncSession):
     dogma_count += len(dogma_batch)
     await _bulk_insert(db, SDEModuleSlot.__table__, slot_batch)
     slot_count += len(slot_batch)
+    await _bulk_insert(db, SDETypeEffect.__table__, te_batch)
+    te_count += len(te_batch)
     log.info(f"Imported {req_count} skill requirements, {info_count} skill info entries")
-    log.info(f"Imported {dogma_count} type dogma attributes, {slot_count} module slot entries")
+    log.info(f"Imported {dogma_count} type dogma attributes, {slot_count} module slot entries, {te_count} type-effect mappings")
 
     # --- certificates ---
     log.info("Importing certificates...")
@@ -944,6 +964,73 @@ async def download_and_import(db: AsyncSession):
         log.info(f"Imported {count} dogma attribute definitions")
     except KeyError:
         log.warning("dogmaAttributes.jsonl not present in SDE zip — skipping")
+
+    # --- dogmaEffects (effect definitions + modifier info for fitting engine) ---
+    log.info("Importing dogma effects and modifiers...")
+    await db.execute(text("DELETE FROM sde_effects"))
+    await db.execute(text("DELETE FROM sde_modifiers"))
+    await db.commit()
+    eff_count, mod_count = 0, 0
+    eff_batch, mod_batch = [], []
+    try:
+        for item in _iter_jsonl(zf, "dogmaEffects.jsonl"):
+            try:
+                eff_id = int(item["_key"])
+                eff_batch.append({
+                    "effect_id": eff_id,
+                    "effect_name": item.get("effectName", ""),
+                    "effect_category": int(item.get("effectCategory", 0)),
+                    "discharge_attribute_id": item.get("dischargeAttributeID"),
+                    "duration_attribute_id": item.get("durationAttributeID"),
+                })
+            except (KeyError, ValueError, TypeError):
+                continue
+            if len(eff_batch) >= 500:
+                await _bulk_insert(db, SDEEffect.__table__, eff_batch)
+                eff_count += len(eff_batch)
+                eff_batch = []
+
+            # Parse modifierInfo (list of modifier dicts)
+            for mi in item.get("modifierInfo", []):
+                try:
+                    modified = mi.get("modifiedAttributeID")
+                    modifying = mi.get("modifyingAttributeID")
+                    if modified is None or modifying is None:
+                        continue
+                    func = mi.get("func", "")
+                    # Extract filter info from func-specific fields
+                    filter_type = None
+                    filter_value = None
+                    if "skillTypeID" in mi:
+                        filter_type = "skill"
+                        filter_value = int(mi["skillTypeID"])
+                    elif "groupID" in mi:
+                        filter_type = "group"
+                        filter_value = int(mi["groupID"])
+                    mod_batch.append({
+                        "effect_id": eff_id,
+                        "func": func,
+                        "domain": mi.get("domain", ""),
+                        "modified_attribute_id": int(modified),
+                        "modifying_attribute_id": int(modifying),
+                        "operator": int(mi.get("operator", 0)),
+                        "filter_type": filter_type,
+                        "filter_value": filter_value,
+                    })
+                except (KeyError, ValueError, TypeError):
+                    continue
+                if len(mod_batch) >= 2000:
+                    await _bulk_insert(db, SDEModifier.__table__, mod_batch)
+                    mod_count += len(mod_batch)
+                    mod_batch = []
+
+        await _bulk_insert(db, SDEEffect.__table__, eff_batch)
+        eff_count += len(eff_batch)
+        await _bulk_insert(db, SDEModifier.__table__, mod_batch)
+        mod_count += len(mod_batch)
+        log.info(f"Imported {eff_count} dogma effects, {mod_count} modifiers")
+    except KeyError:
+        log.warning("dogmaEffects.jsonl not present in SDE zip — skipping effect import")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")
