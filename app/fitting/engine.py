@@ -396,6 +396,84 @@ async def calculate_fitting_stats(
                         continue
                 attrs[target_attr] = current * (1 + ol_val / 100)
 
+    # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
+    # Some modules (Bastion, Siege) have effects that modify OTHER modules
+    # via LocationRequiredSkillModifier / LocationGroupModifier.
+    # These are different from ship hull bonuses — the source attrs are on
+    # the fitted module, not the ship.
+    if module_type_ids:
+        # Get all cross-module modifiers from fitted module effects
+        mod_cross_result = await db.execute(
+            select(SDETypeEffect.type_id, SDEModifier.modifying_attribute_id,
+                   SDEModifier.modified_attribute_id, SDEModifier.operator,
+                   SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value)
+            .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
+            .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
+            .where(SDETypeEffect.type_id.in_(module_type_ids))
+            .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+            .where(SDEModifier.domain == "shipID")
+            .where(SDEModifier.func.in_(["LocationRequiredSkillModifier", "LocationGroupModifier"]))
+        )
+
+        cross_mods = mod_cross_result.fetchall()
+        if cross_mods:
+            # Build skill/group lookups for all module types
+            all_tid_list = list(module_attrs_map.keys())
+            _skill_reqs: dict[int, set[int]] = defaultdict(set)
+            sr_result = await db.execute(
+                select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+                .where(SDETypeSkillReq.type_id.in_(all_tid_list))
+            )
+            for row in sr_result.fetchall():
+                _skill_reqs[row.type_id].add(row.skill_type_id)
+
+            _group_ids: dict[int, int] = {}
+            gr_result = await db.execute(
+                select(SDEType.type_id, SDEType.group_id)
+                .where(SDEType.type_id.in_(all_tid_list))
+            )
+            _group_ids = {row.type_id: row.group_id for row in gr_result.fetchall()}
+
+            for cm in cross_mods:
+                src_type_id = cm[0]
+                src_attrs = module_attrs_map.get(src_type_id, {})
+                src_val = src_attrs.get(cm[1])
+                if src_val is None:
+                    continue
+
+                # Find target modules
+                matching = set()
+                if cm[4] == "LocationRequiredSkillModifier" and cm[5] == "skill":
+                    for tid, skills in _skill_reqs.items():
+                        if tid != src_type_id and cm[6] in skills:
+                            matching.add(tid)
+                elif cm[4] == "LocationGroupModifier" and cm[5] == "group":
+                    for tid, gid in _group_ids.items():
+                        if tid != src_type_id and gid == cm[6]:
+                            matching.add(tid)
+
+                if not matching:
+                    continue
+
+                target_attr = cm[2]
+                operator = cm[3]
+                for tid in matching:
+                    if tid not in module_attrs_map:
+                        continue
+                    attrs = module_attrs_map[tid]
+                    if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+                        attrs[target_attr] = 1.0
+                    current = attrs.get(target_attr, 0)
+                    if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
+                        current = 1.0
+
+                    if operator == OP_MOD_ADD:
+                        attrs[target_attr] = current + src_val
+                    elif operator == OP_POST_PERCENT:
+                        attrs[target_attr] = current * (1 + src_val / 100)
+                    elif operator == OP_POST_MUL:
+                        attrs[target_attr] = current * src_val
+
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
     # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
     ship_attrs[ATTR_CPU_OUTPUT] = ship_attrs.get(ATTR_CPU_OUTPUT, 0) * 1.25
