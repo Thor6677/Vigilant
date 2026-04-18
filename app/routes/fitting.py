@@ -15,7 +15,7 @@ from app.db.models import get_db, UserFitting
 from app.sde import lookup as sde
 from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
-from app.db.sde_models import SDEModuleSlot
+from app.db.sde_models import SDEModuleSlot, SDEType, SDEGroup
 
 logger = logging.getLogger(__name__)
 
@@ -413,3 +413,83 @@ async def delete_fitting(
     await db.delete(fitting)
     await db.commit()
     return {"status": "deleted"}
+
+
+# ── Module browser endpoints ─────────────────────────────────────────────
+
+
+# Root market group IDs relevant to ship fitting
+FITTING_ROOT_GROUPS = {
+    "modules": 9,      # Ship Equipment
+    "rigs": 955,        # Ship Modifications
+    "drones": 157,      # Drones
+    "charges": 11,      # Ammunition & Charges
+}
+
+
+@router.get("/tools/fitting/browse/groups")
+async def browse_groups(
+    request: Request,
+    parent: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get child market groups for the browser tree."""
+    if parent is None:
+        # Return the top-level fitting categories
+        groups = []
+        for label, gid in FITTING_ROOT_GROUPS.items():
+            children = await sde.get_market_group_children(db, gid)
+            groups.append({
+                "market_group_id": gid,
+                "market_group_name": label.replace("_", " ").title(),
+                "has_children": len(children) > 0,
+            })
+        return groups
+    children = await sde.get_market_group_children(db, parent)
+    return children
+
+
+@router.get("/tools/fitting/browse/items/{market_group_id}")
+async def browse_items(
+    request: Request,
+    market_group_id: int,
+    ship_type_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get items in a market group with fit restriction info."""
+    items = await sde.get_market_group_items(db, market_group_id)
+
+    # Check fit restrictions if a ship is selected
+    if ship_type_id:
+        for item in items:
+            item["can_fit"] = await sde.can_module_fit_ship(
+                db, item["type_id"], ship_type_id
+            )
+    else:
+        for item in items:
+            item["can_fit"] = True
+
+    return items
+
+
+@router.get("/tools/fitting/browse/path/{market_group_id}")
+async def browse_path(
+    request: Request,
+    market_group_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get breadcrumb path for a market group."""
+    return await sde.get_market_group_path(db, market_group_id)
+
+
+@router.get("/tools/fitting/check-fit")
+async def check_module_fit(
+    request: Request,
+    module_type_id: int = Query(...),
+    ship_type_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if a module can fit a specific ship."""
+    can_fit = await sde.can_module_fit_ship(db, module_type_id, ship_type_id)
+    restrictions = await sde.get_module_fit_restrictions(db, module_type_id)
+    return {"can_fit": can_fit, "restrictions": restrictions}

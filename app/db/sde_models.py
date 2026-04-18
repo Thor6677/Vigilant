@@ -10,6 +10,7 @@ class SDEType(Base):
     type_name = Column(String, nullable=False, index=True)
     group_id = Column(Integer, nullable=True)
     category_id = Column(Integer, nullable=True)
+    market_group_id = Column(Integer, nullable=True, index=True)
     published = Column(Boolean, default=True)
     volume = Column(Float, nullable=True)
     portion_size = Column(Integer, nullable=True)
@@ -296,3 +297,13 @@ class SDEModuleSlot(Base):
     slot_type = Column(String, nullable=False)
     is_turret = Column(Boolean, default=False)
     is_launcher = Column(Boolean, default=False)
+
+
+class SDEMarketGroup(Base):
+    """marketGroups — hierarchical market categories for browsing modules."""
+    __tablename__ = "sde_market_groups"
+
+    market_group_id = Column(Integer, primary_key=True)
+    parent_group_id = Column(Integer, nullable=True, index=True)
+    market_group_name = Column(String, nullable=False)
+    icon_id = Column(Integer, nullable=True)

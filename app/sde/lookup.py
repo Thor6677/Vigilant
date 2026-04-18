@@ -13,7 +13,7 @@ from app.db.sde_models import (
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
-    SDEModuleSlot,
+    SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute,
 )
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h)
@@ -1026,3 +1026,147 @@ async def get_group_name(db: AsyncSession, group_id: int) -> str | None:
         select(SDEGroup.group_name).where(SDEGroup.group_id == group_id)
     )
     return result.scalar_one_or_none()
+
+
+# ── Market group browsing ────────────────────────────────────────────────
+
+
+async def get_market_group_children(
+    db: AsyncSession, parent_id: int | None
+) -> list[dict]:
+    """Get child market groups for a parent (None = roots)."""
+    if parent_id is None:
+        q = select(SDEMarketGroup).where(SDEMarketGroup.parent_group_id.is_(None))
+    else:
+        q = select(SDEMarketGroup).where(SDEMarketGroup.parent_group_id == parent_id)
+    q = q.order_by(SDEMarketGroup.market_group_name)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    out = []
+    for r in rows:
+        # Check if this group has children (is a folder)
+        child_check = await db.execute(
+            select(func.count()).where(SDEMarketGroup.parent_group_id == r.market_group_id)
+        )
+        has_children = child_check.scalar() > 0
+        out.append({
+            "market_group_id": r.market_group_id,
+            "market_group_name": r.market_group_name,
+            "parent_group_id": r.parent_group_id,
+            "has_children": has_children,
+            "icon_id": r.icon_id,
+        })
+    return out
+
+
+async def get_market_group_items(
+    db: AsyncSession, market_group_id: int
+) -> list[dict]:
+    """Get all published items in a market group with slot type info."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .where(SDEType.market_group_id == market_group_id)
+        .where(SDEType.published == True)
+        .order_by(SDEType.type_name)
+    )
+    items = []
+    for r in result.fetchall():
+        # Get slot type if it's a module
+        slot_result = await db.execute(
+            select(SDEModuleSlot.slot_type)
+            .where(SDEModuleSlot.type_id == r.type_id)
+        )
+        slot_type = slot_result.scalar_one_or_none()
+        items.append({
+            "type_id": r.type_id,
+            "type_name": r.type_name,
+            "group_id": r.group_id,
+            "slot_type": slot_type,
+        })
+    return items
+
+
+# ── Module fit restriction checking ──────────────────────────────────────
+
+# canFitShipType attribute IDs
+CAN_FIT_SHIP_TYPE_ATTRS = [1302, 1303, 1304, 1305, 1944, 2335, 2336, 2337, 2338, 2339]
+# canFitShipGroup attribute IDs
+CAN_FIT_SHIP_GROUP_ATTRS = [1298, 1299, 1300, 1301, 2340, 2341, 2342, 2343]
+ALL_FIT_RESTRICT_ATTRS = CAN_FIT_SHIP_TYPE_ATTRS + CAN_FIT_SHIP_GROUP_ATTRS
+
+
+async def get_module_fit_restrictions(
+    db: AsyncSession, module_type_id: int
+) -> dict:
+    """Check if a module has ship type/group restrictions.
+
+    Returns {"restricted": False} if the module can fit any ship,
+    or {"restricted": True, "ship_type_ids": [...], "ship_group_ids": [...]}
+    """
+    result = await db.execute(
+        select(SDETypeDogmaAttribute.attribute_id, SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id == module_type_id)
+        .where(SDETypeDogmaAttribute.attribute_id.in_(ALL_FIT_RESTRICT_ATTRS))
+    )
+    rows = result.fetchall()
+    if not rows:
+        return {"restricted": False}
+    ship_type_ids = []
+    ship_group_ids = []
+    for attr_id, value in rows:
+        v = int(value)
+        if v <= 0:
+            continue
+        if attr_id in CAN_FIT_SHIP_TYPE_ATTRS:
+            ship_type_ids.append(v)
+        else:
+            ship_group_ids.append(v)
+    if not ship_type_ids and not ship_group_ids:
+        return {"restricted": False}
+    return {
+        "restricted": True,
+        "ship_type_ids": ship_type_ids,
+        "ship_group_ids": ship_group_ids,
+    }
+
+
+async def can_module_fit_ship(
+    db: AsyncSession, module_type_id: int, ship_type_id: int
+) -> bool:
+    """Check if a module can be fitted to a specific ship."""
+    restrictions = await get_module_fit_restrictions(db, module_type_id)
+    if not restrictions["restricted"]:
+        return True
+    # Check ship type match
+    if ship_type_id in restrictions.get("ship_type_ids", []):
+        return True
+    # Check ship group match
+    if restrictions.get("ship_group_ids"):
+        ship_group = await db.execute(
+            select(SDEType.group_id).where(SDEType.type_id == ship_type_id)
+        )
+        group_id = ship_group.scalar_one_or_none()
+        if group_id and group_id in restrictions["ship_group_ids"]:
+            return True
+    return False
+
+
+async def get_market_group_path(
+    db: AsyncSession, market_group_id: int
+) -> list[dict]:
+    """Get the full path from root to this market group (breadcrumbs)."""
+    path = []
+    current_id = market_group_id
+    while current_id is not None:
+        result = await db.execute(
+            select(SDEMarketGroup).where(SDEMarketGroup.market_group_id == current_id)
+        )
+        group = result.scalar_one_or_none()
+        if not group:
+            break
+        path.insert(0, {
+            "market_group_id": group.market_group_id,
+            "market_group_name": group.market_group_name,
+        })
+        current_id = group.parent_group_id
+    return path

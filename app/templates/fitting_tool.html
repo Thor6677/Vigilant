@@ -94,6 +94,13 @@
     </div>
 </div>
 
+{# Browse modules button #}
+<div class="b-section" id="browse-section" style="display:none;">
+    <button onclick="openBrowser()" class="b-btn" style="width:100%;padding:6px 10px;font-size:11px;border:1px solid var(--accent);color:var(--accent);text-align:center;">
+        Browse Modules
+    </button>
+</div>
+
 </div>
 </div>
 
@@ -124,6 +131,31 @@
     {% endif %}
 </div>
 
+</div>
+
+{# ── Module Browser Modal ────────────────────────────────────────────────── #}
+<div id="browse-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
+    <div style="background:var(--surface);border:1px solid var(--border);width:90%;max-width:800px;height:75vh;margin:5vh auto;display:flex;flex-direction:column;">
+        {# Header #}
+        <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:1rem;">
+                <span style="font-size:12px;font-weight:600;color:var(--text);">Module Browser</span>
+                <div id="browse-breadcrumbs" style="font-size:10px;color:var(--muted);display:flex;gap:0.25rem;flex-wrap:wrap;"></div>
+            </div>
+            <button onclick="closeBrowser()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 0.25rem;">&times;</button>
+        </div>
+
+        {# Content: two-pane layout #}
+        <div style="flex:1;display:flex;overflow:hidden;">
+            {# Left: tree nav #}
+            <div id="browse-tree" style="width:260px;min-width:200px;border-right:1px solid var(--border);overflow-y:auto;padding:0.5rem 0;"></div>
+
+            {# Right: items list #}
+            <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+                <div id="browse-items" style="flex:1;overflow-y:auto;padding:0.25rem 0;"></div>
+            </div>
+        </div>
+    </div>
 </div>
 
 {# ── EFT Import Modal ────────────────────────────────────────────────────── #}
@@ -185,6 +217,7 @@ function applyState() {
     document.getElementById('fitting-name-section').style.display = '';
     document.getElementById('fitting-name').value = state.fittingName || 'Unnamed';
     document.getElementById('slot-layout').style.display = '';
+    document.getElementById('browse-section').style.display = '';
 
     renderSlots();
     recalcStats();
@@ -520,6 +553,188 @@ document.getElementById('ship-name').addEventListener('click', function() {
     searchInput.value = '';
     searchInput.focus();
 });
+
+/* ── Module Browser ──────────────────────────────────────────────────────── */
+var browseHistory = [];
+var currentBrowseGroup = null;
+
+function openBrowser() {
+    document.getElementById('browse-modal').style.display = '';
+    browseHistory = [];
+    currentBrowseGroup = null;
+    loadBrowseGroups(null);
+}
+
+function closeBrowser() {
+    document.getElementById('browse-modal').style.display = 'none';
+}
+
+function loadBrowseGroups(parentId) {
+    currentBrowseGroup = parentId;
+    var url = '/tools/fitting/browse/groups';
+    if (parentId !== null) url += '?parent=' + parentId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            renderBrowseTree(groups, parentId);
+        });
+    document.getElementById('browse-items').innerHTML =
+        '<div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">Select a category to see items</div>';
+    updateBreadcrumbs();
+}
+
+function browseIntoGroup(groupId, groupName) {
+    browseHistory.push({groupId: currentBrowseGroup, groupName: ''});
+    currentBrowseGroup = groupId;
+    var url = '/tools/fitting/browse/groups?parent=' + groupId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            if (groups.length === 0) {
+                loadBrowseItems(groupId);
+                renderBrowseTree([], groupId);
+            } else {
+                renderBrowseTree(groups, groupId);
+                loadBrowseItems(groupId);
+            }
+        });
+    updateBreadcrumbsAsync(groupId);
+}
+
+function browseBack() {
+    if (browseHistory.length === 0) return;
+    var prev = browseHistory.pop();
+    currentBrowseGroup = prev.groupId;
+    if (prev.groupId === null) {
+        loadBrowseGroups(null);
+    } else {
+        var url = '/tools/fitting/browse/groups?parent=' + prev.groupId;
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(groups) {
+                renderBrowseTree(groups, prev.groupId);
+                loadBrowseItems(prev.groupId);
+            });
+        updateBreadcrumbsAsync(prev.groupId);
+    }
+}
+
+function renderBrowseTree(groups, parentId) {
+    var tree = document.getElementById('browse-tree');
+    var html = '';
+    if (parentId !== null) {
+        html += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+                'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
+                'onclick="browseBack()">' +
+                '<span style="font-size:11px;color:var(--accent);">\u2190 Back</span></div>';
+    }
+    for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        var arrow = g.has_children ? '<span style="color:var(--muted);font-size:9px;">&#9656;</span>' : '';
+        html += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+                'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
+                'onclick="browseIntoGroup(' + g.market_group_id + ', \'' + g.market_group_name.replace(/'/g, "\\'") + '\')">' +
+                '<span style="font-size:11px;color:var(--text);">' + g.market_group_name + '</span>' +
+                arrow + '</div>';
+    }
+    if (groups.length === 0 && parentId !== null) {
+        html += '<div style="padding:0.75rem;font-size:10px;color:var(--muted);text-align:center;">No subcategories</div>';
+    }
+    tree.innerHTML = html;
+}
+
+function loadBrowseItems(groupId) {
+    var url = '/tools/fitting/browse/items/' + groupId;
+    if (state.shipTypeId) url += '?ship_type_id=' + state.shipTypeId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(items) { renderBrowseItems(items); });
+}
+
+function renderBrowseItems(items) {
+    var container = document.getElementById('browse-items');
+    if (items.length === 0) {
+        container.innerHTML = '<div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">No items in this category</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var canFit = item.can_fit !== false;
+        var opacity = canFit ? '1' : '0.35';
+        var cursor = canFit ? 'pointer' : 'not-allowed';
+        var slotBadge = item.slot_type
+            ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + item.slot_type + '</span>'
+            : '';
+        var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span>' : '';
+        var clickFn = canFit
+            ? 'addModuleFromBrowser(' + item.type_id + ',\'' + item.type_name.replace(/'/g, "\\'") + '\',\'' + (item.slot_type || 'cargo') + '\')'
+            : '';
+        html += '<div style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';" ' +
+                'onmouseover="if(' + canFit + ')this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
+                (clickFn ? 'onclick="' + clickFn + '"' : '') + '>' +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + restrictLabel + '</span>' +
+                slotBadge + '</div>';
+    }
+    container.innerHTML = html;
+}
+
+function addModuleFromBrowser(typeId, typeName, slotType) {
+    // Browser already checked fit restrictions, skip the wrapper
+    if (slotType === 'drone') {
+        addDrone(typeId, typeName);
+    } else {
+        _origAddModule(typeId, typeName, slotType);
+    }
+}
+
+function updateBreadcrumbs() {
+    document.getElementById('browse-breadcrumbs').innerHTML = '';
+}
+
+function updateBreadcrumbsAsync(groupId) {
+    fetch('/tools/fitting/browse/path/' + groupId)
+        .then(function(r) { return r.json(); })
+        .then(function(path) {
+            var html = '';
+            for (var i = 0; i < path.length; i++) {
+                if (i > 0) html += '<span style="color:var(--border);margin:0 2px;">/</span>';
+                if (i < path.length - 1) {
+                    html += '<span style="cursor:pointer;color:var(--accent);" onclick="browseToPathIndex(' + i + ',' + path[i].market_group_id + ')">' + path[i].market_group_name + '</span>';
+                } else {
+                    html += '<span style="color:var(--text);">' + path[i].market_group_name + '</span>';
+                }
+            }
+            document.getElementById('browse-breadcrumbs').innerHTML = html;
+        });
+}
+
+function browseToPathIndex(idx, groupId) {
+    browseHistory = browseHistory.slice(0, idx + 1);
+    currentBrowseGroup = groupId;
+    fetch('/tools/fitting/browse/groups?parent=' + groupId)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            renderBrowseTree(groups, groupId);
+            loadBrowseItems(groupId);
+        });
+    updateBreadcrumbsAsync(groupId);
+}
+
+/* ── Fit restriction check on search-based module add ────────────────────── */
+var _origAddModule = addModule;
+addModule = function(typeId, typeName, slot) {
+    if (!state.shipTypeId) { _origAddModule(typeId, typeName, slot); return; }
+    fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.can_fit) {
+                if (!confirm(typeName + ' may not be compatible with this ship. Add anyway?')) return;
+            }
+            _origAddModule(typeId, typeName, slot);
+        });
+};
 
 /* ── Initialize ───────────────────────────────────────────────────────────── */
 restoreState();

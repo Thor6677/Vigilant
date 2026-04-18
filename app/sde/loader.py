@@ -23,6 +23,7 @@ from app.db.sde_models import (
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar,
     SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot,
+    SDEMarketGroup,
 )
 
 # Planet type IDs that support PI (shattered / exotic types excluded).
@@ -105,7 +106,7 @@ async def needs_update(db: AsyncSession) -> bool:
         types_result = await db.execute(text("SELECT COUNT(1) FROM sde_types"))
         types_count = types_result.scalar() or 0
         if types_count > 0:
-            for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots"):
+            for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups"):
                 try:
                     r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
                     if (r.scalar() or 0) == 0:
@@ -157,6 +158,7 @@ async def download_and_import(db: AsyncSession):
                 "type_name": item["name"]["en"],
                 "group_id": item.get("groupID"),
                 "category_id": None,
+                "market_group_id": item.get("marketGroupID"),
                 "published": True,
                 "volume": item.get("volume"),
                 "portion_size": item.get("portionSize"),
@@ -507,6 +509,37 @@ async def download_and_import(db: AsyncSession):
     ))
     await db.commit()
     log.info("Backfilled category_id on types")
+
+    # --- marketGroups (hierarchical market categories for module browsing) ---
+    log.info("Importing market groups...")
+    await db.execute(text("DELETE FROM sde_market_groups"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "marketGroups.jsonl"):
+            name = item.get("name", {})
+            if isinstance(name, dict):
+                name = name.get("en", "")
+            if not name:
+                continue
+            try:
+                batch.append({
+                    "market_group_id": int(item["_key"]),
+                    "parent_group_id": item.get("parentGroupID"),
+                    "market_group_name": name,
+                    "icon_id": item.get("iconID"),
+                })
+            except (KeyError, ValueError):
+                continue
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDEMarketGroup.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDEMarketGroup.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} market groups")
+    except KeyError:
+        log.warning("marketGroups.jsonl not present in SDE zip — skipping")
 
     # --- typeDogma (skill requirements + skill metadata) ---
     # Attribute mapping for skill requirements:
