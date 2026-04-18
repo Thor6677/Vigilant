@@ -1,0 +1,48 @@
+{% if not results %}
+<div style="padding:0.4rem 0.5rem;font-size:10px;color:var(--muted);">No results found</div>
+{% else %}
+{% for r in results %}
+{% if search_type == 'ship' %}
+<div style="padding:0.3rem 0.5rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
+     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
+     onmouseout="this.style.background=''"
+     onclick="selectShip({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">
+    <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
+         style="width:20px;height:20px;border:1px solid var(--border);"
+         onerror="this.style.display='none'">
+    <span style="font-size:11px;color:var(--text);">{{ r.type_name }}</span>
+</div>
+{% elif search_type == 'module' %}
+<div style="padding:0.3rem 0.5rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
+     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
+     onmouseout="this.style.background=''"
+     onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', '{{ r.slot_type }}')">
+    <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
+         style="width:20px;height:20px;border:1px solid var(--border);"
+         onerror="this.style.display='none'">
+    <span style="font-size:11px;color:var(--text);flex:1;">{{ r.type_name }}</span>
+    <span style="font-size:9px;color:var(--muted);text-transform:uppercase;">{{ r.slot_type }}</span>
+</div>
+{% elif search_type == 'drone' %}
+<div style="padding:0.3rem 0.5rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
+     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
+     onmouseout="this.style.background=''"
+     onclick="addDrone({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">
+    <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
+         style="width:20px;height:20px;border:1px solid var(--border);"
+         onerror="this.style.display='none'">
+    <span style="font-size:11px;color:var(--text);">{{ r.type_name }}</span>
+</div>
+{% elif search_type == 'charge' %}
+<div style="padding:0.3rem 0.5rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
+     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
+     onmouseout="this.style.background=''"
+     onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', 'cargo')">
+    <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
+         style="width:20px;height:20px;border:1px solid var(--border);"
+         onerror="this.style.display='none'">
+    <span style="font-size:11px;color:var(--text);">{{ r.type_name }}</span>
+</div>
+{% endif %}
+{% endfor %}
+{% endif %}

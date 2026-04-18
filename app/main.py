@@ -5,7 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
 from app.db.cache import ESICache  # registers table with Base
-from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo, SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial, SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar  # registers SDE tables
+from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo, SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial, SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
@@ -31,6 +31,7 @@ from app.routes.starmap import router as starmap_router, start_map_poller
 from app.routes.images import router as images_router
 from app.routes.discordtime import router as discordtime_router
 from app.routes.wormholes import router as wormholes_router
+from app.routes.fitting import router as fitting_router
 
 settings = get_settings()
 
@@ -79,6 +80,7 @@ app.include_router(starmap_router)
 app.include_router(images_router)
 app.include_router(discordtime_router)
 app.include_router(wormholes_router)
+app.include_router(fitting_router)
 
 
 @app.on_event("startup")

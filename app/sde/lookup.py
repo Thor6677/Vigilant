@@ -13,6 +13,7 @@ from app.db.sde_models import (
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
+    SDEModuleSlot,
 )
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h)
@@ -934,3 +935,94 @@ async def get_wormhole_type_by_name(db: AsyncSession, name: str) -> dict | None:
         "mass_regen": row.mass_regen,
         "max_jump_mass": row.max_jump_mass,
     }
+
+
+# ── Fitting tool lookups ──────────────────────────────────────────────────
+
+# EVE SDE category IDs
+CATEGORY_SHIP = 6
+CATEGORY_MODULE = 7
+CATEGORY_CHARGE = 8
+CATEGORY_DRONE = 18
+CATEGORY_FIGHTER = 87
+CATEGORY_SUBSYSTEM = 32
+
+
+async def search_ships(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
+    """Search published ship types by partial name."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEGroup.category_id == CATEGORY_SHIP)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(query.lower()))
+        .order_by(func.length(SDEType.type_name), SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+            for r in result.fetchall()]
+
+
+async def search_modules(db: AsyncSession, query: str, slot_type: str | None = None,
+                         limit: int = 20) -> list[dict]:
+    """Search published modules by partial name, optionally filtered by slot type."""
+    q = (
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEGroup.category_id == CATEGORY_MODULE)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(query.lower()))
+    )
+    if slot_type:
+        q = q.join(SDEModuleSlot, SDEType.type_id == SDEModuleSlot.type_id)
+        q = q.where(SDEModuleSlot.slot_type == slot_type)
+    q = q.order_by(func.length(SDEType.type_name), SDEType.type_name).limit(limit)
+    result = await db.execute(q)
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+            for r in result.fetchall()]
+
+
+async def search_drones(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
+    """Search published drone types by partial name."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEGroup.category_id == CATEGORY_DRONE)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(query.lower()))
+        .order_by(func.length(SDEType.type_name), SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+            for r in result.fetchall()]
+
+
+async def search_charges(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
+    """Search published charge types by partial name."""
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
+        .where(SDEGroup.category_id == CATEGORY_CHARGE)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(query.lower()))
+        .order_by(func.length(SDEType.type_name), SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+            for r in result.fetchall()]
+
+
+async def get_module_slot_type(db: AsyncSession, type_id: int) -> str | None:
+    """Get the slot type for a module (high/mid/low/rig/subsystem)."""
+    result = await db.execute(
+        select(SDEModuleSlot.slot_type).where(SDEModuleSlot.type_id == type_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_group_name(db: AsyncSession, group_id: int) -> str | None:
+    """Get group name by group_id."""
+    result = await db.execute(
+        select(SDEGroup.group_name).where(SDEGroup.group_id == group_id)
+    )
+    return result.scalar_one_or_none()

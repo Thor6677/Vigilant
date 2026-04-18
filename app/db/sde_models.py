@@ -261,3 +261,38 @@ class SDEStar(Base):
     system_id = Column(Integer, primary_key=True)
     type_id = Column(Integer, nullable=True)
     star_name = Column(String, nullable=True)
+
+
+# ── Dogma attribute tables (fitting tool) ─────────────────────────────────
+
+class SDEDogmaAttribute(Base):
+    """dogmaAttributes — attribute definitions (id, name, unit, etc.)."""
+    __tablename__ = "sde_dogma_attributes"
+
+    attribute_id = Column(Integer, primary_key=True)
+    attribute_name = Column(String, nullable=False, index=True)
+    display_name = Column(String, nullable=True)
+    default_value = Column(Float, nullable=True)
+    stackable = Column(Boolean, default=True)
+    high_is_good = Column(Boolean, default=True)
+    unit_id = Column(Integer, nullable=True)
+
+
+class SDETypeDogmaAttribute(Base):
+    """Per-type dogma attribute values from typeDogma."""
+    __tablename__ = "sde_type_dogma_attrs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    attribute_id = Column(Integer, nullable=False)
+    value = Column(Float, nullable=False)
+
+
+class SDEModuleSlot(Base):
+    """Pre-computed module slot type derived from dogma effects."""
+    __tablename__ = "sde_module_slots"
+
+    type_id = Column(Integer, primary_key=True)
+    slot_type = Column(String, nullable=False)
+    is_turret = Column(Boolean, default=False)
+    is_launcher = Column(Boolean, default=False)

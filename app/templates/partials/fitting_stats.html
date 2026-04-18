@@ -1,0 +1,190 @@
+{# ── Fitting Resources ─────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Fitting Resources</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+
+        {# CPU #}
+        {% set cpu_pct = (stats.cpu_used / stats.cpu_total * 100) if stats.cpu_total > 0 else 0 %}
+        {% set cpu_over = stats.cpu_used > stats.cpu_total %}
+        <div style="margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;">
+                <span style="color:var(--muted);">CPU</span>
+                <span style="color:{{ 'var(--danger)' if cpu_over else 'var(--text)' }};">{{ stats.cpu_used }} / {{ stats.cpu_total }} tf</span>
+            </div>
+            <div style="height:4px;background:var(--bg);border:1px solid var(--border);">
+                <div style="height:100%;width:{{ [cpu_pct, 100] | min }}%;background:{{ 'var(--danger)' if cpu_over else 'var(--accent)' }};"></div>
+            </div>
+        </div>
+
+        {# Powergrid #}
+        {% set pg_pct = (stats.pg_used / stats.pg_total * 100) if stats.pg_total > 0 else 0 %}
+        {% set pg_over = stats.pg_used > stats.pg_total %}
+        <div style="margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;">
+                <span style="color:var(--muted);">Powergrid</span>
+                <span style="color:{{ 'var(--danger)' if pg_over else 'var(--text)' }};">{{ stats.pg_used }} / {{ stats.pg_total }} MW</span>
+            </div>
+            <div style="height:4px;background:var(--bg);border:1px solid var(--border);">
+                <div style="height:100%;width:{{ [pg_pct, 100] | min }}%;background:{{ 'var(--danger)' if pg_over else 'var(--accent)' }};"></div>
+            </div>
+        </div>
+
+        {# Calibration #}
+        {% set cal_pct = (stats.calibration_used / stats.calibration_total * 100) if stats.calibration_total > 0 else 0 %}
+        {% set cal_over = stats.calibration_used > stats.calibration_total %}
+        <div style="margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;">
+                <span style="color:var(--muted);">Calibration</span>
+                <span style="color:{{ 'var(--danger)' if cal_over else 'var(--text)' }};">{{ stats.calibration_used }} / {{ stats.calibration_total }}</span>
+            </div>
+            <div style="height:4px;background:var(--bg);border:1px solid var(--border);">
+                <div style="height:100%;width:{{ [cal_pct, 100] | min }}%;background:{{ 'var(--danger)' if cal_over else 'var(--accent)' }};"></div>
+            </div>
+        </div>
+
+        {# Hardpoints #}
+        <div style="display:flex;gap:1.5rem;font-size:10px;color:var(--text);">
+            <span><span style="color:var(--muted);">Turrets:</span> {{ stats.turrets_used }}/{{ stats.turrets_total }}</span>
+            <span><span style="color:var(--muted);">Launchers:</span> {{ stats.launchers_used }}/{{ stats.launchers_total }}</span>
+        </div>
+    </div>
+</div>
+
+{# ── Defense ──────────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Defense</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Shield HP</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.shield_hp) }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Armor HP</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.armor_hp) }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Hull HP</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.hull_hp) }}</td>
+            </tr>
+        </table>
+
+        {# Resist table #}
+        <div style="margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.35rem;">
+            <table style="width:100%;font-size:9px;border-collapse:collapse;text-align:center;">
+                <tr style="color:var(--muted);">
+                    <td></td>
+                    <td style="color:#00bfff;">EM</td>
+                    <td style="color:#ff6347;">Therm</td>
+                    <td style="color:#999;">Kin</td>
+                    <td style="color:#ff8c00;">Expl</td>
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);">Shield</td>
+                    <td style="color:var(--text);">{{ stats.shield_em_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.shield_therm_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.shield_kin_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.shield_expl_resist }}%</td>
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);">Armor</td>
+                    <td style="color:var(--text);">{{ stats.armor_em_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.armor_therm_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.armor_kin_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.armor_expl_resist }}%</td>
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);">Hull</td>
+                    <td style="color:var(--text);">{{ stats.hull_em_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.hull_therm_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.hull_kin_resist }}%</td>
+                    <td style="color:var(--text);">{{ stats.hull_expl_resist }}%</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</div>
+
+{# ── Navigation ───────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Navigation</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Velocity</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.max_velocity) }} m/s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Align Time</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.align_time }}s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Mass</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.mass) }} kg</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Signature</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.sig_radius }} m</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+{# ── Capacitor ────────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Capacitor</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Capacity</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.capacitor) }} GJ</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Recharge</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.cap_recharge }}s</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+{# ── Targeting ────────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Targeting</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Range</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.max_target_range }} km</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Locked</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.max_locked_targets }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Scan Resolution</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.scan_resolution }} mm</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+{# ── Drones & Cargo ──────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Drones & Cargo</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Drone Bay</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.drone_bay_used }} / {{ stats.drone_bay_total }} m&sup3;</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Bandwidth</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.drone_bw_used }} / {{ stats.drone_bw_total }} Mbit/s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Cargo</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.cargo_capacity) }} m&sup3;</td>
+            </tr>
+        </table>
+    </div>
+</div>
