@@ -205,8 +205,15 @@ async def calculate_fitting_stats(
     3. Apply modifiers with stacking penalties
     4. Compute derived stats (align time, resists)
     """
-    # Get raw ship attributes
+    # Get raw ship attributes — mass/capacity from invTypes if not in dogma
     ship_attrs = await get_type_dogma_attrs(db, ship_type_id)
+    if ATTR_MASS not in ship_attrs or ship_attrs[ATTR_MASS] == 0:
+        type_result = await db.execute(
+            select(SDEType.mass).where(SDEType.type_id == ship_type_id)
+        )
+        type_mass = type_result.scalar_one_or_none()
+        if type_mass:
+            ship_attrs[ATTR_MASS] = type_mass
 
     # Collect all module type IDs (excluding drones and cargo)
     fitted_items = [i for i in items if i.get("slot") not in ("drone", "cargo")]

@@ -163,7 +163,9 @@ async def download_and_import(db: AsyncSession):
                 "category_id": None,
                 "market_group_id": item.get("marketGroupID"),
                 "published": True,
+                "mass": item.get("mass"),
                 "volume": item.get("volume"),
+                "capacity": item.get("capacity"),
                 "portion_size": item.get("portionSize"),
             })
         except (KeyError, ValueError, TypeError):

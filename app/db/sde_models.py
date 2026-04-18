@@ -12,7 +12,9 @@ class SDEType(Base):
     category_id = Column(Integer, nullable=True)
     market_group_id = Column(Integer, nullable=True, index=True)
     published = Column(Boolean, default=True)
+    mass = Column(Float, nullable=True)
     volume = Column(Float, nullable=True)
+    capacity = Column(Float, nullable=True)
     portion_size = Column(Integer, nullable=True)
 
 

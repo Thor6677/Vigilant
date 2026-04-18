@@ -115,6 +115,9 @@ async def startup():
             "ALTER TABLE sde_planets ADD COLUMN distance_au REAL",
             # Fitting tool: market group on types for module browsing
             "ALTER TABLE sde_types ADD COLUMN market_group_id INTEGER",
+            # Fitting engine: mass and capacity from invTypes
+            "ALTER TABLE sde_types ADD COLUMN mass REAL",
+            "ALTER TABLE sde_types ADD COLUMN capacity REAL",
         ]:
             try:
                 await db.execute(text(stmt))
