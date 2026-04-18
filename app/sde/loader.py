@@ -49,7 +49,7 @@ EFFECT_LAUNCHER_FITTED = 40
 
 SLOT_EFFECT_MAP = {
     EFFECT_HI_POWER: "high",
-    EFFECT_MED_POWER: "mid",
+    EFFECT_MED_POWER: "med",  # "med" not "mid" — matches HTML/JS slot keys
     EFFECT_LO_POWER: "low",
     EFFECT_RIG_SLOT: "rig",
     EFFECT_SUBSYSTEM_SLOT: "subsystem",
