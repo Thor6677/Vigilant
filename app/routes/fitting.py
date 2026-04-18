@@ -180,13 +180,26 @@ async def import_eft(
     if not eft_text:
         return {"error": "No EFT text provided"}
 
-    # Normalize Unicode characters that break name matching
-    eft_text = eft_text.replace("\u2019", "'")   # right single quote → ASCII
-    eft_text = eft_text.replace("\u2018", "'")   # left single quote → ASCII
-    eft_text = eft_text.replace("\u201c", '"')    # left double quote
-    eft_text = eft_text.replace("\u201d", '"')    # right double quote
-    eft_text = eft_text.replace("\u2013", "-")    # en dash → hyphen
-    eft_text = eft_text.replace("\u2014", "-")    # em dash → hyphen
+    # Aggressively normalize Unicode that breaks name matching.
+    # EVE client, Discord, and browsers inject invisible chars on copy/paste.
+    import unicodedata
+    cleaned = []
+    for ch in eft_text:
+        if ch in ('\n', '\r', '\t'):
+            cleaned.append(ch)
+        elif ch == '\u2019' or ch == '\u2018':
+            cleaned.append("'")
+        elif ch == '\u201c' or ch == '\u201d':
+            cleaned.append('"')
+        elif ch == '\u2013' or ch == '\u2014':
+            cleaned.append('-')
+        elif ch == '\u00a0':
+            cleaned.append(' ')  # non-breaking space → space
+        elif unicodedata.category(ch).startswith('C') and ch not in ('\n', '\r', '\t'):
+            continue  # strip all control/format chars (ZWSP, BOM, etc.)
+        else:
+            cleaned.append(ch)
+    eft_text = ''.join(cleaned)
 
     lines = eft_text.split("\n")
     if not lines:

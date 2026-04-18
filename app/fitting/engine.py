@@ -41,6 +41,7 @@ from app.fitting.constants import (
     ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
     OVERLOAD_ATTR_MAP,
+    ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
 )
 
 # Default skill level assumption
@@ -723,8 +724,10 @@ async def calculate_fitting_stats(
     charge_attrs_map = await get_types_dogma_attrs(db, charge_type_ids) if charge_type_ids else {}
 
     weapon_dps = 0.0
+    weapon_dps_max_spool = 0.0  # DPS at max spool (Triglavian)
     weapon_volley = 0.0
     drone_dps = 0.0
+    spool_time_s = 0  # Time to reach max spool
 
     for item in items:
         tid = item["type_id"]
@@ -771,7 +774,20 @@ async def calculate_fitting_stats(
         weapon_volley += volley * qty
         weapon_dps += (volley / (cycle / 1000)) * qty
 
+        # Spool-up: Triglavian entropic disintegrators ramp damage per cycle
+        spool_per_cycle = mod_attrs.get(ATTR_DMG_MULT_BONUS_PER_CYCLE, 0)
+        spool_max = mod_attrs.get(ATTR_DMG_MULT_BONUS_MAX, 0)
+        if spool_per_cycle > 0 and spool_max > 0:
+            max_spool_mult = dmg_mult + spool_max
+            spool_volley = total_dmg * max_spool_mult
+            weapon_dps_max_spool += (spool_volley / (cycle / 1000)) * qty
+            cycles_to_max = int(spool_max / spool_per_cycle)
+            spool_time_s = max(spool_time_s, int(cycles_to_max * cycle / 1000))
+        else:
+            weapon_dps_max_spool += (volley / (cycle / 1000)) * qty
+
     total_dps = weapon_dps + drone_dps
+    total_dps_max_spool = weapon_dps_max_spool + drone_dps
 
     return {
         "cpu_used": round(cpu_used, 1),
@@ -835,6 +851,9 @@ async def calculate_fitting_stats(
         "drone_dps": round(drone_dps, 1),
         "total_dps": round(total_dps, 1),
         "weapon_volley": round(weapon_volley),
+        "weapon_dps_max_spool": round(weapon_dps_max_spool, 1),
+        "total_dps_max_spool": round(total_dps_max_spool, 1),
+        "spool_time_s": spool_time_s,
     }
 
 

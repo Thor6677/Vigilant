@@ -62,6 +62,10 @@ OVERLOAD_ATTR_MAP = {
     1206: (ATTR_DURATION, True),              # overloadSelfDurationBonus → reduce cycle
     1222: (54, False),                        # overloadRangeBonus → +% optimal range
 }
+
+# Spool-up (Triglavian entropic disintegrators)
+ATTR_DMG_MULT_BONUS_PER_CYCLE = 2733
+ATTR_DMG_MULT_BONUS_MAX = 2734
 ATTR_OPTIMAL_RANGE = 54        # maxRange
 ATTR_FALLOFF = 158
 ATTR_TRACKING_SPEED = 160

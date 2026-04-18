@@ -2,7 +2,7 @@
 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
     <div style="display:flex;gap:1rem;font-size:10px;">
         {% if stats.total_dps > 0 %}
-        <span><span style="color:var(--muted);">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}</span></span>
+        <span><span style="color:var(--muted);">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %}<span style="color:var(--muted);font-weight:400;"> / </span>{{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}</span></span>
         {% endif %}
         <span><span style="color:var(--muted);">EHP</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</span></span>
         {% if stats.cap_drain_rate > 0 %}
@@ -92,6 +92,16 @@
                 <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total DPS</td>
                 <td style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.1f}".format(stats.total_dps) }}</td>
             </tr>
+            {% if stats.spool_time_s > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Spool DPS</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.1f}".format(stats.total_dps_max_spool) }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Spool Time</td>
+                <td style="text-align:right;color:var(--text);">{{ (stats.spool_time_s // 60) }}m {{ (stats.spool_time_s % 60) }}s</td>
+            </tr>
+            {% endif %}
             {% if stats.weapon_volley > 0 %}
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Alpha Strike</td>
