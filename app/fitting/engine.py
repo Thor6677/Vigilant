@@ -22,7 +22,7 @@ from app.db.sde_models import (
     SDETypeDogmaAttribute, SDEModuleSlot, SDEType,
     SDETypeEffect, SDEEffect, SDEModifier, SDEDogmaAttribute,
 )
-from app.db.sde_models import SDETypeSkillReq
+from app.db.sde_models import SDETypeSkillReq, SDETypeBonus
 
 from app.fitting.constants import (
     ATTR_POWER, ATTR_CPU, ATTR_UPGRADE_COST, ATTR_VOLUME,
@@ -44,6 +44,24 @@ from app.fitting.constants import (
 
 # Default skill level assumption
 DEFAULT_SKILL_LEVEL = 5
+
+# Keyword-to-attribute mapping for typeBonus.jsonl bonusText parsing.
+# Maps keywords found in English bonus text to (attribute_id, is_multiplicative).
+# Multiplicative bonuses use postPercent (val * (1 + bonus/100)).
+# Source: docs/fitting-mechanics.md, verified against Pyfa behavior.
+BONUS_KEYWORD_ATTRS = {
+    "damage": [ATTR_DAMAGE_MULTIPLIER],
+    "rate of fire": [ATTR_RATE_OF_FIRE],
+    "optimal range": [54],           # maxRange
+    "falloff": [158],                # falloff
+    "tracking speed": [160],         # trackingSpeed
+    "hitpoints": [9, 265, 263],      # hull, armor, shield — context-dependent
+    "max velocity": [37],            # maxVelocity
+    "amount": [84],                  # armorDamageAmount (repair)
+    "shield boost amount": [68],     # shieldBonus
+    "mining yield": [194],           # miningAmount
+    "drone operation range": [458],  # droneControlRange
+}
 
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
 OP_PRE_ASSIGN = -1   # Override base value
@@ -189,11 +207,77 @@ async def _apply_ship_hull_bonuses(
 ):
     """Apply ship hull bonuses to module attributes (modifies module_attrs_map in-place).
 
-    Ship hull bonuses come in two flavors:
-    - LocationRequiredSkillModifier: per-level bonus targeting modules requiring a skill
-    - LocationGroupModifier: role bonus targeting modules in a group
+    Uses two data sources:
+    1. SDETypeBonus (from typeBonus.jsonl) — parsed ship traits with keyword matching
+    2. SDEModifier (from modifierInfo) — fallback for effects with structured modifiers
+
+    The typeBonus approach covers per-level and role bonuses that modifierInfo misses.
     """
-    # Get ship's passive effects
+    all_type_ids = list(module_attrs_map.keys())
+    if not all_type_ids:
+        return
+
+    # Build skill requirement and group lookups for modules
+    skill_reqs: dict[int, set[int]] = defaultdict(set)
+    result = await db.execute(
+        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+        .where(SDETypeSkillReq.type_id.in_(all_type_ids))
+    )
+    for row in result.fetchall():
+        skill_reqs[row.type_id].add(row.skill_type_id)
+
+    group_ids: dict[int, int] = {}
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.group_id)
+        .where(SDEType.type_id.in_(all_type_ids))
+    )
+    group_ids = {row.type_id: row.group_id for row in result.fetchall()}
+
+    # ── Source 1: typeBonus.jsonl parsed bonuses ──────────────────────────
+    result = await db.execute(
+        select(SDETypeBonus)
+        .where(SDETypeBonus.type_id == ship_type_id)
+    )
+    type_bonuses = result.scalars().all()
+
+    for tb in type_bonuses:
+        if not tb.bonus_keyword or not tb.target_type_id:
+            continue
+
+        # Determine effective bonus value
+        if tb.is_role_bonus:
+            effective_val = tb.bonus_value
+        else:
+            effective_val = tb.bonus_value * skill_level
+
+        # Find matching modules — target_type_id is a skill type_id
+        matching_type_ids = set()
+        for tid, skills in skill_reqs.items():
+            if tb.target_type_id in skills:
+                matching_type_ids.add(tid)
+
+        if not matching_type_ids:
+            continue
+
+        # Map keyword to target attributes
+        target_attrs = _resolve_bonus_keyword(tb.bonus_keyword)
+        if not target_attrs:
+            continue
+
+        # Apply bonus as postPercent to each matching module
+        for tid in matching_type_ids:
+            if tid not in module_attrs_map:
+                continue
+            attrs = module_attrs_map[tid]
+            for target_attr in target_attrs:
+                if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+                    attrs[target_attr] = 1.0
+                current = attrs.get(target_attr, 0)
+                if current == 0 and target_attr in (ATTR_DAMAGE_MULTIPLIER,):
+                    current = 1.0
+                attrs[target_attr] = current * (1 + effective_val / 100)
+
+    # ── Source 2: modifierInfo-based ship modifiers (role bonuses etc.) ───
     result = await db.execute(
         select(SDETypeEffect.effect_id)
         .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
@@ -204,80 +288,40 @@ async def _apply_ship_hull_bonuses(
     if not ship_effect_ids:
         return
 
-    # Get modifiers from ship effects
     result = await db.execute(
         select(SDEModifier)
         .where(SDEModifier.effect_id.in_(ship_effect_ids))
         .where(SDEModifier.domain == "shipID")
     )
-    ship_modifiers = result.scalars().all()
-    if not ship_modifiers:
-        return
 
-    # Build lookup structures for matching modules to filters
-    # Skill requirements: which modules require which skills
-    all_type_ids = list(module_attrs_map.keys())
-    skill_reqs: dict[int, set[int]] = defaultdict(set)  # type_id -> set of skill_type_ids
-    if all_type_ids:
-        result = await db.execute(
-            select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
-            .where(SDETypeSkillReq.type_id.in_(all_type_ids))
-        )
-        for row in result.fetchall():
-            skill_reqs[row.type_id].add(row.skill_type_id)
-
-    # Group IDs for modules
-    group_ids: dict[int, int] = {}  # type_id -> group_id
-    if all_type_ids:
-        result = await db.execute(
-            select(SDEType.type_id, SDEType.group_id)
-            .where(SDEType.type_id.in_(all_type_ids))
-        )
-        group_ids = {row.type_id: row.group_id for row in result.fetchall()}
-
-    # Apply each ship modifier to matching modules
-    for mod in ship_modifiers:
-        # Get source value from ship attributes
+    for mod in result.scalars().all():
         src_val = ship_attrs.get(mod.modifying_attribute_id)
         if src_val is None:
             continue
 
-        # Determine which module type_ids this modifier targets
         matching_type_ids = set()
         is_per_level = False
 
         if mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
-            # Per-level bonus: targets modules requiring a specific skill
-            target_skill = mod.filter_value
             is_per_level = True
             for tid, skills in skill_reqs.items():
-                if target_skill in skills:
+                if mod.filter_value in skills:
                     matching_type_ids.add(tid)
-
         elif mod.func == "LocationGroupModifier" and mod.filter_type == "group":
-            # Role bonus: targets modules in a specific group
-            target_group = mod.filter_value
             for tid, gid in group_ids.items():
-                if gid == target_group:
+                if gid == mod.filter_value:
                     matching_type_ids.add(tid)
 
         if not matching_type_ids:
             continue
 
-        # Calculate effective value
-        if is_per_level:
-            effective_val = src_val * skill_level
-        else:
-            effective_val = src_val
-
-        # Apply to matching modules
+        effective_val = src_val * skill_level if is_per_level else src_val
         target_attr = mod.modified_attribute_id
+
         for tid in matching_type_ids:
             if tid not in module_attrs_map:
                 continue
             attrs = module_attrs_map[tid]
-            # Default to 1.0 for multiplicative attributes like damageMultiplier
-            # that may not be explicitly set on the module
             if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
                 attrs[target_attr] = 1.0
             current = attrs.get(target_attr, 0)
@@ -288,6 +332,16 @@ async def _apply_ship_hull_bonuses(
                 attrs[target_attr] = current * (1 + effective_val / 100)
             elif mod.operator == OP_POST_MUL:
                 attrs[target_attr] = current * effective_val
+
+
+def _resolve_bonus_keyword(keyword: str) -> list[int]:
+    """Map a typeBonus keyword string to target attribute IDs."""
+    kw = keyword.lower()
+    # Check each known pattern — longest match first
+    for pattern, attr_ids in sorted(BONUS_KEYWORD_ATTRS.items(), key=lambda x: -len(x[0])):
+        if pattern in kw:
+            return attr_ids
+    return []
 
 
 async def get_ship_stats(db: AsyncSession, ship_type_id: int) -> dict:

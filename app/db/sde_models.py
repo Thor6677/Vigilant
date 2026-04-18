@@ -311,6 +311,19 @@ class SDEMarketGroup(Base):
     icon_id = Column(Integer, nullable=True)
 
 
+class SDETypeBonus(Base):
+    """typeBonus — ship hull bonuses parsed from CCP traits data."""
+    __tablename__ = "sde_type_bonuses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(Integer, nullable=False, index=True)
+    bonus_value = Column(Float, nullable=False)
+    is_role_bonus = Column(Boolean, default=False)
+    scaling_skill_id = Column(Integer, nullable=True)
+    target_type_id = Column(Integer, nullable=True)
+    bonus_keyword = Column(String, nullable=True)
+
+
 # ── Dogma effect tables (fitting engine modifier pipeline) ───────────────
 
 class SDEEffect(Base):

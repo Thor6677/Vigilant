@@ -24,6 +24,7 @@ from app.db.sde_models import (
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar,
     SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot,
     SDEMarketGroup, SDEEffect, SDETypeEffect, SDEModifier,
+    SDETypeBonus,
 )
 
 # Planet type IDs that support PI (shattered / exotic types excluded).
@@ -109,7 +110,7 @@ async def needs_update(db: AsyncSession) -> bool:
         if types_count == 0:
             log.info("sde_types is empty — forcing SDE reimport.")
             return True
-        for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups", "sde_effects"):
+        for table in ("sde_planets", "sde_planet_schematics", "sde_wormhole_classes", "sde_wormhole_types", "sde_moons", "sde_stars", "sde_dogma_attributes", "sde_type_dogma_attrs", "sde_module_slots", "sde_market_groups", "sde_effects", "sde_type_bonuses"):
             try:
                 r = await db.execute(text(f"SELECT COUNT(1) FROM {table}"))
                 if (r.scalar() or 0) == 0:
@@ -1033,6 +1034,68 @@ async def download_and_import(db: AsyncSession):
         log.info(f"Imported {eff_count} dogma effects, {mod_count} modifiers")
     except KeyError:
         log.warning("dogmaEffects.jsonl not present in SDE zip — skipping effect import")
+
+    # --- typeBonus (ship hull bonuses / traits for fitting engine) ---
+    import re as _re
+    log.info("Importing ship type bonuses...")
+    await db.execute(text("DELETE FROM sde_type_bonuses"))
+    await db.commit()
+    bonus_count, bonus_batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "typeBonus.jsonl"):
+            type_id = int(item["_key"])
+
+            # Per-level bonuses (types array, keyed by scaling skill)
+            for skill_entry in item.get("types", []):
+                scaling_skill = int(skill_entry["_key"])
+                for b in skill_entry.get("_value", []):
+                    en = b.get("bonusText", {}).get("en", "")
+                    si = _re.search(r'showinfo:(\d+)', en)
+                    target_id = int(si.group(1)) if si else None
+                    keyword = _re.sub(r'<[^>]+>', '', en).strip().lower()
+                    try:
+                        bonus_batch.append({
+                            "type_id": type_id,
+                            "bonus_value": float(b["bonus"]),
+                            "is_role_bonus": False,
+                            "scaling_skill_id": scaling_skill,
+                            "target_type_id": target_id,
+                            "bonus_keyword": keyword,
+                        })
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    if len(bonus_batch) >= 500:
+                        await _bulk_insert(db, SDETypeBonus.__table__, bonus_batch)
+                        bonus_count += len(bonus_batch)
+                        bonus_batch = []
+
+            # Role bonuses (flat, no skill scaling)
+            for b in item.get("roleBonuses", []):
+                en = b.get("bonusText", {}).get("en", "")
+                si = _re.search(r'showinfo:(\d+)', en)
+                target_id = int(si.group(1)) if si else None
+                keyword = _re.sub(r'<[^>]+>', '', en).strip().lower()
+                try:
+                    bonus_batch.append({
+                        "type_id": type_id,
+                        "bonus_value": float(b["bonus"]),
+                        "is_role_bonus": True,
+                        "scaling_skill_id": None,
+                        "target_type_id": target_id,
+                        "bonus_keyword": keyword,
+                    })
+                except (KeyError, ValueError, TypeError):
+                    continue
+                if len(bonus_batch) >= 500:
+                    await _bulk_insert(db, SDETypeBonus.__table__, bonus_batch)
+                    bonus_count += len(bonus_batch)
+                    bonus_batch = []
+
+        await _bulk_insert(db, SDETypeBonus.__table__, bonus_batch)
+        bonus_count += len(bonus_batch)
+        log.info(f"Imported {bonus_count} ship type bonuses")
+    except KeyError:
+        log.warning("typeBonus.jsonl not present in SDE zip — skipping")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     log.info("SDE import complete.")
