@@ -1088,10 +1088,15 @@ async def get_market_group_items(
 
 # ── Module fit restriction checking ──────────────────────────────────────
 
-# canFitShipType attribute IDs
-CAN_FIT_SHIP_TYPE_ATTRS = [1302, 1303, 1304, 1305, 1944, 2335, 2336, 2337, 2338, 2339]
-# canFitShipGroup attribute IDs
-CAN_FIT_SHIP_GROUP_ATTRS = [1298, 1299, 1300, 1301, 2340, 2341, 2342, 2343]
+# canFitShipType attribute IDs (all 12 slots)
+CAN_FIT_SHIP_TYPE_ATTRS = [
+    1302, 1303, 1304, 1305, 1944, 2103, 2463, 2486, 2487, 2488, 2758, 5948,
+]
+# canFitShipGroup attribute IDs (all 20 slots)
+CAN_FIT_SHIP_GROUP_ATTRS = [
+    1298, 1299, 1300, 1301, 1872, 1879, 1880, 1881,
+    2065, 2396, 2476, 2477, 2478, 2479, 2480, 2481, 2482, 2483, 2484, 2485,
+]
 ALL_FIT_RESTRICT_ATTRS = CAN_FIT_SHIP_TYPE_ATTRS + CAN_FIT_SHIP_GROUP_ATTRS
 
 
