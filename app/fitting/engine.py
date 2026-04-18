@@ -277,7 +277,10 @@ async def _apply_ship_hull_bonuses(
                     current = 1.0
                 attrs[target_attr] = current * (1 + effective_val / 100)
 
-    # ── Source 2: modifierInfo-based ship modifiers (role bonuses etc.) ───
+    # ── Source 2: modifierInfo-based ship modifiers ─────────────────────
+    # Only apply LocationGroupModifier (role bonuses) from modifierInfo.
+    # LocationRequiredSkillModifier (per-level) bonuses are already handled
+    # by typeBonus above — applying both would double-count.
     result = await db.execute(
         select(SDETypeEffect.effect_id)
         .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
@@ -292,6 +295,7 @@ async def _apply_ship_hull_bonuses(
         select(SDEModifier)
         .where(SDEModifier.effect_id.in_(ship_effect_ids))
         .where(SDEModifier.domain == "shipID")
+        .where(SDEModifier.func == "LocationGroupModifier")
     )
 
     for mod in result.scalars().all():
@@ -300,14 +304,7 @@ async def _apply_ship_hull_bonuses(
             continue
 
         matching_type_ids = set()
-        is_per_level = False
-
-        if mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
-            is_per_level = True
-            for tid, skills in skill_reqs.items():
-                if mod.filter_value in skills:
-                    matching_type_ids.add(tid)
-        elif mod.func == "LocationGroupModifier" and mod.filter_type == "group":
+        if mod.filter_type == "group":
             for tid, gid in group_ids.items():
                 if gid == mod.filter_value:
                     matching_type_ids.add(tid)
@@ -315,9 +312,7 @@ async def _apply_ship_hull_bonuses(
         if not matching_type_ids:
             continue
 
-        effective_val = src_val * skill_level if is_per_level else src_val
         target_attr = mod.modified_attribute_id
-
         for tid in matching_type_ids:
             if tid not in module_attrs_map:
                 continue
@@ -329,9 +324,9 @@ async def _apply_ship_hull_bonuses(
             if mod.operator == OP_MOD_ADD:
                 attrs[target_attr] = current + effective_val
             elif mod.operator == OP_POST_PERCENT:
-                attrs[target_attr] = current * (1 + effective_val / 100)
+                attrs[target_attr] = current * (1 + src_val / 100)
             elif mod.operator == OP_POST_MUL:
-                attrs[target_attr] = current * effective_val
+                attrs[target_attr] = current * src_val
 
 
 def _resolve_bonus_keyword(keyword: str) -> list[int]:
