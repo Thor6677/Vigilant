@@ -113,6 +113,8 @@ async def startup():
             "ALTER TABLE skill_plans ADD COLUMN last_edited_at DATETIME",
             # Wormhole reference: planet orbital distance
             "ALTER TABLE sde_planets ADD COLUMN distance_au REAL",
+            # Fitting tool: market group on types for module browsing
+            "ALTER TABLE sde_types ADD COLUMN market_group_id INTEGER",
         ]:
             try:
                 await db.execute(text(stmt))
