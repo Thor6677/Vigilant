@@ -45,32 +45,23 @@ ATTR_VOLUME = 161
 # Shield recharge
 ATTR_SHIELD_RECHARGE_RATE = 479  # shield recharge time (ms)
 
-# Overload bonus attributes (on modules, applied when overheated)
-ATTR_OL_DAMAGE = 1210           # overloadDamageModifier — +% damage
-ATTR_OL_ROF = 1205              # overloadRofBonus — -% cycle time (faster)
-ATTR_OL_SPEED = 1223            # overloadSpeedFactorBonus — +% velocity bonus
-ATTR_OL_HARDENING = 1208        # overloadHardeningBonus — +% resist
-ATTR_OL_ARMOR_REP = 1230        # overloadArmorDamageAmount — +% armor rep
-ATTR_OL_SHIELD_BOOST = 1231     # overloadShieldBonus — +% shield boost
-ATTR_OL_DURATION = 1206         # overloadSelfDurationBonus — -% cycle time
-ATTR_OL_RANGE = 1222            # overloadRangeBonus — +% optimal range
-
-# Mapping: overload attr → (target attr to modify, is_reduction)
-# is_reduction=True means the bonus reduces the target (ROF, duration)
-OVERLOAD_ATTR_MAP = {
-    1210: (ATTR_DAMAGE_MULTIPLIER, False),   # +% damage → damageMultiplier
-    1205: (ATTR_RATE_OF_FIRE, True),          # +% ROF → reduce cycle time
-    1223: (20, False),                        # +% speed → speedFactor (attr 20)
-    1208: (None, False),                      # +% resist → all resonances (special)
-    1230: (84, False),                        # +% armor rep → armorDamageAmount
-    1231: (68, False),                        # +% shield boost → shieldBonus
-    1206: (ATTR_DURATION, True),              # -% duration → reduce cycle time
-    1222: (54, False),                        # +% range → maxRange (optimal)
-}
-
 # Weapon / damage attributes
 ATTR_DAMAGE_MULTIPLIER = 64    # turret/drone damage multiplier
 ATTR_RATE_OF_FIRE = 51         # turret/launcher ROF (ms) — "speed" attribute
+
+# Overload bonus attributes (on modules, applied when overheated)
+# Mapping: overload attr ID → (target attr to modify, is_reduction)
+# is_reduction=True means the bonus mechanically reduces the target (ROF/duration)
+OVERLOAD_ATTR_MAP = {
+    1210: (ATTR_DAMAGE_MULTIPLIER, False),   # overloadDamageModifier → +% damage
+    1205: (ATTR_RATE_OF_FIRE, True),          # overloadRofBonus → reduce cycle time
+    1223: (20, False),                        # overloadSpeedFactorBonus → +% speed
+    1208: (None, False),                      # overloadHardeningBonus → resist (special)
+    1230: (84, False),                        # overloadArmorDamageAmount → +% armor rep
+    1231: (68, False),                        # overloadShieldBonus → +% shield boost
+    1206: (ATTR_DURATION, True),              # overloadSelfDurationBonus → reduce cycle
+    1222: (54, False),                        # overloadRangeBonus → +% optimal range
+}
 ATTR_OPTIMAL_RANGE = 54        # maxRange
 ATTR_FALLOFF = 158
 ATTR_TRACKING_SPEED = 160
