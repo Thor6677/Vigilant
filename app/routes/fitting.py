@@ -251,6 +251,8 @@ async def import_eft(
         # Resolve type
         type_id = await sde.type_name_to_id(db, item_name)
         if not type_id:
+            logger.warning("EFT import: unresolved name '%s' (hex: %s)",
+                           item_name, item_name.encode('unicode_escape').decode())
             continue
 
         # Determine slot from module slot table
