@@ -143,6 +143,28 @@ async def fitting_stats(
     })
 
 
+@router.get("/tools/fitting/ship-slots/{ship_type_id}")
+async def ship_slots(
+    request: Request,
+    ship_type_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return slot counts for a ship type."""
+    attrs = await get_type_dogma_attrs(db, ship_type_id)
+    from app.fitting.constants import (
+        ATTR_HI_SLOTS, ATTR_MED_SLOTS, ATTR_LOW_SLOTS,
+        ATTR_RIG_SLOTS, ATTR_TURRET_SLOTS, ATTR_LAUNCHER_SLOTS,
+    )
+    return {
+        "high": int(attrs.get(ATTR_HI_SLOTS, 0)),
+        "med": int(attrs.get(ATTR_MED_SLOTS, 0)),
+        "low": int(attrs.get(ATTR_LOW_SLOTS, 0)),
+        "rig": int(attrs.get(ATTR_RIG_SLOTS, 0)),
+        "turret": int(attrs.get(ATTR_TURRET_SLOTS, 0)),
+        "launcher": int(attrs.get(ATTR_LAUNCHER_SLOTS, 0)),
+    }
+
+
 @router.post("/tools/fitting/import-eft")
 async def import_eft(
     request: Request,

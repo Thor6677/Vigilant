@@ -171,6 +171,22 @@ var state = {
     items: []
 };
 
+/* Ship slot limits — populated from stats response */
+var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0};
+
+function getSlotCount(slot) {
+    return state.items.filter(function(i) { return i.slot === slot; }).length;
+}
+
+function getSlotLimit(slot) {
+    return shipSlots[slot] || 0;
+}
+
+function isSlotFull(slot) {
+    if (slot === 'drone' || slot === 'cargo') return false;
+    return getSlotCount(slot) >= getSlotLimit(slot);
+}
+
 function saveState() {
     localStorage.setItem(FIT_KEY, JSON.stringify(state));
 }
@@ -202,6 +218,7 @@ function applyState() {
     document.getElementById('fitting-name').value = state.fittingName || 'Unnamed';
     document.getElementById('slot-layout').style.display = '';
 
+    fetchShipSlots(state.shipTypeId);
     renderSlots();
     recalcStats();
 }
@@ -229,10 +246,25 @@ function selectShip(typeId, typeName) {
     state.fittingId = null;
     state.fittingName = 'Unnamed';
     saveState();
+    fetchShipSlots(typeId);
     applyState();
     document.getElementById('ship-results').style.display = 'none';
-    // Refresh browser items to update fit restrictions for new ship
     if (currentBrowseGroup !== null) loadBrowseItems(currentBrowseGroup);
+}
+
+function fetchShipSlots(typeId) {
+    fetch('/tools/fitting/ship-slots/' + typeId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            shipSlots.high = data.high || 0;
+            shipSlots.med = data.med || 0;
+            shipSlots.low = data.low || 0;
+            shipSlots.rig = data.rig || 0;
+            shipSlots.subsystem = 0; // T3C subsystems handled separately
+            shipSlots.turret = data.turret || 0;
+            shipSlots.launcher = data.launcher || 0;
+            renderSlots();
+        });
 }
 
 /* ── Module Search ────────────────────────────────────────────────────────── */
@@ -266,6 +298,7 @@ function searchDrone(q, inputEl) {
 }
 
 function addModule(typeId, typeName, slot) {
+    if (isSlotFull(slot)) return;
     state.items.push({
         type_id: typeId,
         type_name: typeName,
@@ -331,7 +364,12 @@ function renderSlots() {
     slotTypes.forEach(function(slot) {
         var container = document.getElementById('slots-' + slot);
         var section = document.getElementById('section-' + slot);
+        var countEl = document.getElementById('count-' + slot);
         var items = state.items.filter(function(i) { return i.slot === slot; });
+        var limit = getSlotLimit(slot);
+
+        // Show slot count
+        if (countEl) countEl.textContent = items.length + ' / ' + limit;
 
         container.innerHTML = '';
         items.forEach(function(item, idx) {
@@ -343,7 +381,14 @@ function renderSlots() {
                 '</div>';
         });
 
-        section.style.display = '';
+        // Hide section if ship has 0 of this slot type, show otherwise
+        section.style.display = (limit > 0 || slot === 'subsystem') ? '' : 'none';
+
+        // Hide search input when slots are full
+        var searchDiv = section.querySelector('.module-search');
+        if (searchDiv) {
+            searchDiv.parentElement.parentElement.style.display = items.length >= limit ? 'none' : '';
+        }
     });
 
     // Drones
@@ -661,6 +706,7 @@ function renderBrowseItems(items) {
 }
 
 function addModuleFromBrowser(typeId, typeName, slotType) {
+    if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) return;
     // Browser already checked fit restrictions, skip the wrapper
     if (slotType === 'drone') {
         addDrone(typeId, typeName);
