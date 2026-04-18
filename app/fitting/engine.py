@@ -313,6 +313,122 @@ async def _apply_ship_hull_bonuses(
 
 
 
+async def _apply_all_v_skill_bonuses(
+    db: AsyncSession,
+    module_attrs_map: dict[int, dict[int, float]],
+    items: list[dict],
+):
+    """Apply All Level V skill bonuses to module attributes.
+
+    Skills are items with effects that modify modules on the ship via
+    LocationGroupModifier or LocationRequiredSkillModifier. Each skill
+    has a bonus attribute (e.g., damageMultiplierBonus=3.0 per level).
+    At All V, effective bonus = base * 5.
+
+    Category 16 = Skills in the SDE.
+    """
+    all_type_ids = list(module_attrs_map.keys())
+    if not all_type_ids:
+        return
+
+    # Get module groups and skill requirements
+    group_ids: dict[int, int] = {}
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.group_id)
+        .where(SDEType.type_id.in_(all_type_ids))
+    )
+    group_ids = {row.type_id: row.group_id for row in result.fetchall()}
+
+    module_groups = set(group_ids.values())
+    if not module_groups:
+        return
+
+    skill_reqs: dict[int, set[int]] = defaultdict(set)
+    result = await db.execute(
+        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+        .where(SDETypeSkillReq.type_id.in_(all_type_ids))
+    )
+    for row in result.fetchall():
+        skill_reqs[row.type_id].add(row.skill_type_id)
+
+    required_skills = set()
+    for skills in skill_reqs.values():
+        required_skills.update(skills)
+
+    # Find all skill modifiers that target module groups or required skills
+    # Skills are category 16 items
+    from app.db.sde_models import SDEGroup as SDEGroupModel
+    result = await db.execute(
+        select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
+               SDEModifier.modified_attribute_id, SDEModifier.operator,
+               SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value,
+               SDETypeEffect.type_id)
+        .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
+        .join(SDEType, SDETypeEffect.type_id == SDEType.type_id)
+        .where(SDEType.category_id == 16)  # Skills
+        .where(SDEModifier.domain == "shipID")
+        .where(SDEModifier.func.in_(["LocationGroupModifier", "LocationRequiredSkillModifier"]))
+    )
+
+    skill_modifiers = result.fetchall()
+    if not skill_modifiers:
+        return
+
+    # Get skill bonus attributes for all relevant skills
+    skill_type_ids = list({row.type_id for row in skill_modifiers})
+    skill_attrs_map = await get_types_dogma_attrs(db, skill_type_ids)
+
+    for row in skill_modifiers:
+        skill_tid = row.type_id
+        src_attr_id = row.modifying_attribute_id
+        target_attr_id = row.modified_attribute_id
+        operator = row.operator
+        func = row.func
+        filter_type = row.filter_type
+        filter_value = row.filter_value
+
+        # Get the skill's bonus attribute base value
+        skill_attrs = skill_attrs_map.get(skill_tid, {})
+        src_val = skill_attrs.get(src_attr_id)
+        if src_val is None or src_val == 0:
+            continue
+
+        # At All V: effective bonus = base * 5
+        effective_val = src_val * DEFAULT_SKILL_LEVEL
+
+        # Find matching modules
+        matching = set()
+        if func == "LocationGroupModifier" and filter_type == "group" and filter_value:
+            for tid, gid in group_ids.items():
+                if gid == filter_value:
+                    matching.add(tid)
+        elif func == "LocationRequiredSkillModifier" and filter_type == "skill" and filter_value:
+            for tid, skills in skill_reqs.items():
+                if filter_value in skills:
+                    matching.add(tid)
+
+        if not matching:
+            continue
+
+        # Apply to matching modules
+        for tid in matching:
+            if tid not in module_attrs_map:
+                continue
+            attrs = module_attrs_map[tid]
+            if target_attr_id == ATTR_DAMAGE_MULTIPLIER and target_attr_id not in attrs:
+                attrs[target_attr_id] = 1.0
+            current = attrs.get(target_attr_id, 0)
+            if current == 0 and target_attr_id == ATTR_DAMAGE_MULTIPLIER:
+                current = 1.0
+
+            if operator == OP_POST_PERCENT:
+                attrs[target_attr_id] = current * (1 + effective_val / 100)
+            elif operator == OP_MOD_ADD:
+                attrs[target_attr_id] = current + effective_val
+            elif operator == OP_POST_MUL:
+                attrs[target_attr_id] = current * effective_val
+
+
 async def get_ship_stats(db: AsyncSession, ship_type_id: int) -> dict:
     """Fetch all displayable base stats for a ship from dogma attributes."""
     attrs = await get_type_dogma_attrs(db, ship_type_id)
@@ -479,6 +595,12 @@ async def calculate_fitting_stats(
     # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
     ship_attrs[ATTR_CPU_OUTPUT] = ship_attrs.get(ATTR_CPU_OUTPUT, 0) * 1.25
     ship_attrs[ATTR_POWER_OUTPUT] = ship_attrs.get(ATTR_POWER_OUTPUT, 0) * 1.25
+
+    # ── Apply All-V weapon/support skill bonuses to module attributes ─────
+    # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
+    # target modules by group or required skill. At All V, the bonus is
+    # skill_base_attr * 5, applied as postPercent.
+    await _apply_all_v_skill_bonuses(db, module_attrs_map, items)
 
     # ── Apply ship hull bonuses to module attributes ──────────────────────
     # Makes deep copies so we don't mutate cached SDE data
