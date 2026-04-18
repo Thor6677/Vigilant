@@ -15,7 +15,7 @@ from app.db.models import get_db, UserFitting
 from app.sde import lookup as sde
 from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
-from app.db.sde_models import SDEModuleSlot, SDEType, SDEGroup
+from app.db.sde_models import SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +515,31 @@ async def check_module_fit(
     can_fit = await sde.can_module_fit_ship(db, module_type_id, ship_type_id)
     restrictions = await sde.get_module_fit_restrictions(db, module_type_id)
     return {"can_fit": can_fit, "restrictions": restrictions}
+
+
+OVERLOAD_ATTR_IDS = [1210, 1205, 1223, 1208, 1230, 1231, 1206, 1222]
+
+
+@router.get("/tools/fitting/can-overheat")
+async def can_overheat(
+    request: Request,
+    type_ids: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check which module types can be overheated."""
+    if not type_ids:
+        return {}
+    ids = [int(x) for x in type_ids.split(",") if x.strip()]
+    if not ids:
+        return {}
+    result = await db.execute(
+        select(SDETypeDogmaAttribute.type_id)
+        .where(SDETypeDogmaAttribute.type_id.in_(ids))
+        .where(SDETypeDogmaAttribute.attribute_id.in_(OVERLOAD_ATTR_IDS))
+        .distinct()
+    )
+    overheatable = {row[0] for row in result.fetchall()}
+    return {str(tid): tid in overheatable for tid in ids}
 
 
 @router.get("/tools/fitting/charges/{module_type_id}")

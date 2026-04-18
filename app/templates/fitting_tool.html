@@ -187,6 +187,7 @@ var state = {
 
 /* Ship slot limits — populated from stats response */
 var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0};
+var overheatCache = {};  // type_id -> bool
 
 function getSlotCount(slot) {
     return state.items.filter(function(i) { return i.slot === slot; }).length;
@@ -322,6 +323,7 @@ function addModule(typeId, typeName, slot) {
     saveState();
     renderSlots();
     recalcStats();
+    refreshOverheatCache();
     // Clear search
     var inputs = document.querySelectorAll('.module-search[data-slot="' + slot + '"]');
     inputs.forEach(function(el) { el.value = ''; });
@@ -365,15 +367,18 @@ function removeItem(index) {
 function toggleOnline(index) {
     var item = state.items[index];
     if (!item) return;
-    // Cycle: online → overheated → offline → online
+    var canOH = overheatCache[item.type_id] === true;
+    // Cycle: online → overheated (if capable) → offline → online
     if (item.overheated) {
         item.overheated = false;
         item.online = false;
     } else if (item.online === false) {
         item.online = true;
         item.overheated = false;
-    } else {
+    } else if (canOH) {
         item.overheated = true;
+    } else {
+        item.online = false;
     }
     saveState();
     renderSlots();
@@ -416,8 +421,10 @@ function renderSlots() {
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button onclick="openChargeSelector(' + globalIdx + ')" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
             // State toggle: green=online, red=overheated, grey=offline
+            var canOH = overheatCache[item.type_id] === true;
             var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
-            var stateTitle = isOverheated ? 'Overheated (click: offline)' : (isOnline ? 'Online (click: overheat)' : 'Offline (click: online)');
+            var stateTitle = isOverheated ? 'Overheated (click: offline)' :
+                (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
             var onlineBtn = slot !== 'rig' ?
                 '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
@@ -881,9 +888,27 @@ addModule = function(typeId, typeName, slot) {
         });
 };
 
+/* ── Overheat capability cache ────────────────────────────────────────────── */
+function refreshOverheatCache() {
+    var typeIds = [];
+    state.items.forEach(function(item) {
+        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig') {
+            if (overheatCache[item.type_id] === undefined) typeIds.push(item.type_id);
+        }
+    });
+    if (typeIds.length === 0) return;
+    fetch('/tools/fitting/can-overheat?type_ids=' + typeIds.join(','))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            for (var k in data) overheatCache[parseInt(k)] = data[k];
+            renderSlots();
+        });
+}
+
 /* ── Initialize ───────────────────────────────────────────────────────────── */
 restoreState();
 initBrowser();
+refreshOverheatCache();
 </script>
 
 {% endblock %}
