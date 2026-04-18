@@ -40,6 +40,7 @@ from app.fitting.constants import (
     ATTR_CAPACITOR, ATTR_CAP_RECHARGE,
     ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
+    OVERLOAD_ATTR_MAP,
 )
 
 # Default skill level assumption
@@ -369,6 +370,32 @@ async def calculate_fitting_stats(
     # Get module attributes and modifiers
     module_attrs_map = await get_types_dogma_attrs(db, all_type_ids) if all_type_ids else {}
     module_modifiers = await _get_module_modifiers(db, module_type_ids) if module_type_ids else {}
+
+    # ── Apply overload bonuses to overheated module attrs ───────────────────
+    for item in items:
+        if item.get("overheated") and item.get("online", True):
+            tid = item["type_id"]
+            if tid not in module_attrs_map:
+                continue
+            attrs = module_attrs_map[tid] = dict(module_attrs_map.get(tid, {}))
+            raw_attrs = await get_type_dogma_attrs(db, tid)
+            for ol_attr_id, (target_attr, is_reduction) in OVERLOAD_ATTR_MAP.items():
+                ol_val = raw_attrs.get(ol_attr_id)
+                if ol_val is None or ol_val == 0:
+                    continue
+                if target_attr is None:
+                    # Resist hardening bonus — not implemented yet
+                    continue
+                current = attrs.get(target_attr)
+                if current is None:
+                    if target_attr == ATTR_DAMAGE_MULTIPLIER:
+                        current = 1.0
+                    else:
+                        continue
+                if is_reduction:
+                    attrs[target_attr] = current * (1 + ol_val / 100)  # ol_val is negative
+                else:
+                    attrs[target_attr] = current * (1 + ol_val / 100)
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
     # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput

@@ -365,7 +365,16 @@ function removeItem(index) {
 function toggleOnline(index) {
     var item = state.items[index];
     if (!item) return;
-    item.online = item.online === false ? true : false;
+    // Cycle: online → overheated → offline → online
+    if (item.overheated) {
+        item.overheated = false;
+        item.online = false;
+    } else if (item.online === false) {
+        item.online = true;
+        item.overheated = false;
+    } else {
+        item.overheated = true;
+    }
     saveState();
     renderSlots();
     recalcStats();
@@ -398,6 +407,7 @@ function renderSlots() {
         items.forEach(function(item, idx) {
             var globalIdx = state.items.indexOf(item);
             var isOnline = item.online !== false;
+            var isOverheated = item.overheated === true;
             var opacity = isOnline ? '1' : '0.4';
             var chargeInfo = '';
             if (item.charge_type_id) {
@@ -405,9 +415,11 @@ function renderSlots() {
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button onclick="openChargeSelector(' + globalIdx + ')" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
-            // Online/offline toggle (green dot = online, grey = offline)
+            // State toggle: green=online, red=overheated, grey=offline
+            var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
+            var stateTitle = isOverheated ? 'Overheated (click: offline)' : (isOnline ? 'Online (click: overheat)' : 'Offline (click: online)');
             var onlineBtn = slot !== 'rig' ?
-                '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + (isOnline ? 'var(--success)' : 'var(--border)') + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + (isOnline ? 'Put offline' : 'Put online') + '">&#9679;</button>' : '';
+                '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
