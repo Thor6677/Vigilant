@@ -276,6 +276,10 @@ async def _apply_ship_hull_bonuses(
             if tid not in module_attrs_map:
                 continue
             attrs = module_attrs_map[tid]
+            # Default to 1.0 for multiplicative attributes like damageMultiplier
+            # that may not be explicitly set on the module
+            if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+                attrs[target_attr] = 1.0
             current = attrs.get(target_attr, 0)
 
             if mod.operator == OP_MOD_ADD:
