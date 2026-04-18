@@ -1013,7 +1013,7 @@ async def download_and_import(db: AsyncSession):
                         "domain": mi.get("domain", ""),
                         "modified_attribute_id": int(modified),
                         "modifying_attribute_id": int(modifying),
-                        "operator": int(mi.get("operator", 0)),
+                        "operator": int(mi.get("operation", mi.get("operator", 0))),
                         "filter_type": filter_type,
                         "filter_value": filter_value,
                     })
