@@ -218,34 +218,10 @@ async def _apply_ship_hull_bonuses(
         skill_reqs[row.type_id].add(row.skill_type_id)
 
     # Determine which source attributes are per-level vs role bonuses.
-    # Per-level bonus source attrs (e.g., shipBonus2CB) appear in typeBonus
-    # as is_role_bonus=False. Role bonus attrs appear as is_role_bonus=True.
-    result = await db.execute(
-        select(SDETypeBonus.is_role_bonus)
-        .where(SDETypeBonus.type_id == ship_type_id)
-        .where(SDETypeBonus.is_role_bonus == False)
-    )
-    has_per_level = result.first() is not None
-
-    # Build set of role-bonus source attribute IDs from typeBonus
-    # Any ship attribute used by a role bonus should NOT be skill-scaled
-    role_bonus_src_attrs: set[int] = set()
-    per_level_src_attrs: set[int] = set()
-    # Get all typeBonus entries to identify role vs per-level source attrs
-    result = await db.execute(
-        select(SDETypeBonus.is_role_bonus, SDETypeBonus.bonus_value)
-        .where(SDETypeBonus.type_id == ship_type_id)
-    )
-    # We can't directly map typeBonus to modifying_attribute_id, so use
-    # a heuristic: if the source attr value in ship_attrs matches a role
-    # bonus value exactly, it's a role bonus.
-    role_bonus_values = set()
-    per_level_values = set()
-    for row in result.fetchall():
-        if row[0]:  # is_role_bonus
-            role_bonus_values.add(abs(row[1]))
-        else:
-            per_level_values.add(abs(row[1]))
+    # Per-level attrs follow naming: shipBonus*, eliteBonus* (per Pyfa convention).
+    # Role bonus attrs use other names: *roleBonus*, battleship*Bonus, etc.
+    # Query attribute names for all source attrs used by this ship's modifiers.
+    per_level_attr_ids: set[int] = set()
 
     # Get ship's passive effects and their modifiers
     result = await db.execute(
@@ -257,6 +233,24 @@ async def _apply_ship_hull_bonuses(
     ship_effect_ids = [row[0] for row in result.fetchall()]
     if not ship_effect_ids:
         return
+
+    # Get source attribute names to identify per-level attrs
+    result = await db.execute(
+        select(SDEModifier.modifying_attribute_id)
+        .where(SDEModifier.effect_id.in_(ship_effect_ids))
+        .where(SDEModifier.domain.in_(["shipID", "charID"]))
+    )
+    src_attr_ids = list({row[0] for row in result.fetchall()})
+    if src_attr_ids:
+        name_result = await db.execute(
+            select(SDEDogmaAttribute.attribute_id, SDEDogmaAttribute.attribute_name)
+            .where(SDEDogmaAttribute.attribute_id.in_(src_attr_ids))
+        )
+        for row in name_result.fetchall():
+            name = row.attribute_name or ""
+            # shipBonus*, eliteBonus* = per-level; everything else = role/flat
+            if name.startswith("shipBonus") or name.startswith("eliteBonus"):
+                per_level_attr_ids.add(row.attribute_id)
 
     result = await db.execute(
         select(SDEModifier)
@@ -283,15 +277,14 @@ async def _apply_ship_hull_bonuses(
                     matching_type_ids.add(tid)
 
         elif mod.func == "OwnerRequiredSkillModifier" and mod.filter_type == "skill":
-            # Targets charges requiring a skill — skip for now (affects ammo, not launcher)
+            # Targets charges requiring a skill — skip for now
             continue
 
         if not matching_type_ids:
             continue
 
-        # Determine if this is per-level: check if the source attr value
-        # matches a known per-level bonus magnitude from typeBonus
-        is_per_level = abs(src_val) in per_level_values and abs(src_val) not in role_bonus_values
+        # Per-level if source attribute is named shipBonus* or eliteBonus*
+        is_per_level = mod.modifying_attribute_id in per_level_attr_ids
         if is_per_level:
             effective_val = src_val * skill_level
         else:
