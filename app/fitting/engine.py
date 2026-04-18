@@ -34,12 +34,16 @@ from app.fitting.constants import (
     ATTR_HULL_KIN_RESONANCE, ATTR_HULL_EXPL_RESONANCE,
 )
 
-# Pyfa-style operator IDs (what the CCP JSONL SDE actually uses in "operation" field)
-OP_PREASSIGN = 0    # Override base value
-OP_PREINCREASE = 1  # Add before multiply
-OP_MULTIPLY = 2     # Multiplicative (stacking-penalized if applicable)
-OP_POSTINCREASE = 3 # Add after multiply
-OP_FORCE = 4        # Lock value, no further modification
+# CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
+OP_PRE_ASSIGN = -1   # Override base value
+OP_PRE_MUL = 0       # Multiply before additions
+OP_PRE_DIV = 1       # Divide before additions
+OP_MOD_ADD = 2       # Flat add
+OP_MOD_SUB = 3       # Flat subtract
+OP_POST_MUL = 4      # Multiply after additions (stacking penalized if applicable)
+OP_POST_DIV = 5      # Divide after additions
+OP_POST_PERCENT = 6  # val = val * (1 + modifier/100) — most common
+OP_POST_ASSIGN = 7   # Force/lock value
 
 # Effect categories — determines when effects fire
 EFFECT_CAT_PASSIVE = 0
@@ -272,40 +276,63 @@ async def calculate_fitting_stats(
     for attr_id, modifiers in mod_collectors.items():
         base = modified_attrs.get(attr_id, 0)
 
-        # Group by Pyfa-style operator
-        pre_assigns = [v for op, v in modifiers if op == OP_PREASSIGN]
-        pre_increases = [v for op, v in modifiers if op == OP_PREINCREASE]
-        multipliers = [v for op, v in modifiers if op == OP_MULTIPLY]
-        post_increases = [v for op, v in modifiers if op == OP_POSTINCREASE]
-        forces = [v for op, v in modifiers if op == OP_FORCE]
+        # Group by CCP operator
+        pre_assigns = [v for op, v in modifiers if op == OP_PRE_ASSIGN]
+        pre_muls = [v for op, v in modifiers if op == OP_PRE_MUL]
+        pre_divs = [v for op, v in modifiers if op == OP_PRE_DIV]
+        mod_adds = [v for op, v in modifiers if op == OP_MOD_ADD]
+        mod_subs = [v for op, v in modifiers if op == OP_MOD_SUB]
+        post_muls = [v for op, v in modifiers if op == OP_POST_MUL]
+        post_divs = [v for op, v in modifiers if op == OP_POST_DIV]
+        post_pcts = [v for op, v in modifiers if op == OP_POST_PERCENT]
+        post_assigns = [v for op, v in modifiers if op == OP_POST_ASSIGN]
 
-        # FORCE: locks the value, skip all other modifiers
-        if forces:
-            modified_attrs[attr_id] = forces[-1]
+        # POST_ASSIGN: force/lock — skip all other modifiers
+        if post_assigns:
+            modified_attrs[attr_id] = post_assigns[-1]
             continue
 
         val = base
 
-        # PREASSIGN: override base value
+        # PRE_ASSIGN: override base
         if pre_assigns:
             val = pre_assigns[-1]
 
-        # PREINCREASE: flat adds before multiplication
-        for a in pre_increases:
-            val += a
+        # PRE_MUL / PRE_DIV
+        for m in pre_muls:
+            val *= m
+        for d in pre_divs:
+            if d != 0:
+                val /= d
 
-        # MULTIPLY: multiplicative — stacking penalized if attribute not stackable
+        # MOD_ADD / MOD_SUB: flat changes
+        for a in mod_adds:
+            val += a
+        for s in mod_subs:
+            val -= s
+
+        # POST_MUL: multiplicative — stacking penalized if attribute not stackable
         is_stackable = stackable_flags.get(attr_id, True)
-        if multipliers:
+        if post_muls:
             if is_stackable:
-                for m in multipliers:
+                for m in post_muls:
                     val *= m
             else:
-                val *= apply_stacking_penalties(multipliers)
+                val *= apply_stacking_penalties(post_muls)
 
-        # POSTINCREASE: flat adds after multiplication
-        for a in post_increases:
-            val += a
+        # POST_DIV
+        for d in post_divs:
+            if d != 0:
+                val /= d
+
+        # POST_PERCENT: val = val * (1 + modifier/100) — stacking penalized if needed
+        if post_pcts:
+            pct_muls = [1.0 + p / 100.0 for p in post_pcts]
+            if is_stackable:
+                for m in pct_muls:
+                    val *= m
+            else:
+                val *= apply_stacking_penalties(pct_muls)
 
         modified_attrs[attr_id] = val
 
