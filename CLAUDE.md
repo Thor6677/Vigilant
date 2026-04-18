@@ -127,3 +127,18 @@ Always commit and push code at the end of a session. Before finishing, ask: "Sho
 **Commits**: 27 commits, ~20 deploys, multiple SDE reimports
 **State**: All features deployed and live at vigilant.thunderborn.dev. SDE data current.
 **Next**: The `wormholes.json` system_statics data covers ~2,568 of ~2,600 systems — a few edge cases (shattered, drifter) may be missing. The wormhole type detail page could show which systems have that type as a static. The system diagram planet placement uses golden angle (cosmetic, not actual orbital positions).
+
+### 2026-04-17 (evening) — Starmap Sov Fix + Wormhole Kill Enhancements
+**Fixed**: Starmap sov overlay showing "Alliance #####" instead of names — alliance name resolution now includes IDs from sov change history, not just current holders
+**Built**:
+- Starmap: "Now" button on sovereignty timeframe selector (shows current sov without change highlights, separated from Changes sub-bar)
+- Wormhole kills: 30D/60D/90D time range selector (htmx-powered)
+- Wormhole kills: "Most Active" section — top 5 corps and alliances by kill involvement with logos, names, kill counts (NPC orgs filtered out)
+- Wormhole kills: Recent kills now show victim character name, corporation, and alliance
+- Wormhole kills: Removed arbitrary ESI fetch cap — fetches all 200 zKB kills for accurate counts across all ranges
+- Heatmap age bucket labels adjust dynamically to selected time range
+
+**Files**: `app/routes/wormholes.py`, `app/templates/partials/wormhole_kills.html`, `app/templates/wormhole_system.html`, `frontend/src/components/StarMap/StarMap.tsx`, `frontend/src/components/StarMap/ui/OverlayControls.tsx`
+**Commits**: 6 commits, 6 deploys
+**State**: All deployed and live. Debug logging still present in `wormholes.py` (wh_kills lines) — can be removed next session.
+**Next**: Starmap alliance name resolution for sov changes was reported as possibly broken ("No alliances are showing now") but worked in logs — may have been a cache issue; verify next session. The wormhole kills endpoint now resolves char/corp/alliance names from ESI on every request — consider caching these.
