@@ -34,9 +34,16 @@ ATTR_POWER = 30
 ATTR_CPU = 50
 ATTR_UPGRADE_COST = 1153
 
+# Module activation
+ATTR_CAPACITOR_NEED = 6    # cap per activation (GJ)
+ATTR_DURATION = 73         # cycle time (ms)
+
 # Drone attributes
 ATTR_DRONE_BW_USED = 1272
 ATTR_VOLUME = 161
+
+# Shield recharge
+ATTR_SHIELD_RECHARGE_RATE = 479  # shield recharge time (ms)
 
 # Sensor strength
 ATTR_SCAN_GRAVIMETRIC = 211

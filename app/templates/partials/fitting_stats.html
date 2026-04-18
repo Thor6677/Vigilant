@@ -55,17 +55,30 @@
     <div class="b-section-head"><span class="b-label">Defense</span></div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
         <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr style="color:var(--muted);">
+                <td style="padding:2px 0;"></td>
+                <td style="text-align:right;padding:2px 0;">HP</td>
+                <td style="text-align:right;padding:2px 0;">EHP</td>
+            </tr>
             <tr>
-                <td style="color:var(--muted);padding:2px 0;">Shield HP</td>
+                <td style="color:var(--muted);padding:2px 0;">Shield</td>
                 <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.shield_hp) }}</td>
+                <td style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.shield_ehp) }}</td>
             </tr>
             <tr>
-                <td style="color:var(--muted);padding:2px 0;">Armor HP</td>
+                <td style="color:var(--muted);padding:2px 0;">Armor</td>
                 <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.armor_hp) }}</td>
+                <td style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.armor_ehp) }}</td>
             </tr>
             <tr>
-                <td style="color:var(--muted);padding:2px 0;">Hull HP</td>
+                <td style="color:var(--muted);padding:2px 0;">Hull</td>
                 <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.hull_hp) }}</td>
+                <td style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.hull_ehp) }}</td>
+            </tr>
+            <tr style="border-top:1px solid var(--border);">
+                <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total</td>
+                <td style="text-align:right;color:var(--text);font-weight:600;">{{ "{:,.0f}".format(stats.shield_hp + stats.armor_hp + stats.hull_hp) }}</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</td>
             </tr>
         </table>
 
@@ -102,6 +115,17 @@
                 </tr>
             </table>
         </div>
+
+        {% if stats.peak_shield_recharge > 0 %}
+        <div style="margin-top:0.35rem;border-top:1px solid var(--border);padding-top:0.35rem;">
+            <table style="width:100%;font-size:10px;border-collapse:collapse;">
+                <tr>
+                    <td style="color:var(--muted);padding:2px 0;">Shield Recharge</td>
+                    <td style="text-align:right;color:var(--text);">{{ stats.peak_shield_recharge }} HP/s</td>
+                </tr>
+            </table>
+        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -142,6 +166,32 @@
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Recharge</td>
                 <td style="text-align:right;color:var(--text);">{{ stats.cap_recharge }}s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Peak Recharge</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.peak_cap_recharge }} GJ/s</td>
+            </tr>
+            {% if stats.cap_drain_rate > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Drain Rate</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.cap_drain_rate }} GJ/s</td>
+            </tr>
+            {% endif %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Stability</td>
+                {% if stats.cap_stable %}
+                <td style="text-align:right;color:var(--success);font-weight:600;">Stable at {{ stats.cap_stable_pct }}%</td>
+                {% elif stats.cap_drain_rate > 0 %}
+                <td style="text-align:right;color:var(--danger);font-weight:600;">
+                    {% if stats.cap_lasts_s >= 60 %}
+                        Lasts {{ (stats.cap_lasts_s // 60)|int }}m {{ (stats.cap_lasts_s % 60)|int }}s
+                    {% else %}
+                        Lasts {{ stats.cap_lasts_s }}s
+                    {% endif %}
+                </td>
+                {% else %}
+                <td style="text-align:right;color:var(--success);font-weight:600;">Stable at 100%</td>
+                {% endif %}
             </tr>
         </table>
     </div>

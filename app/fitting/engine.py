@@ -26,12 +26,15 @@ from app.fitting.constants import (
     ATTR_POWER, ATTR_CPU, ATTR_UPGRADE_COST, ATTR_VOLUME,
     ATTR_DRONE_BW_USED, SHIP_STAT_ATTRS,
     ATTR_MASS, ATTR_INERTIA,
+    ATTR_CAPACITOR_NEED, ATTR_DURATION, ATTR_SHIELD_RECHARGE_RATE,
     ATTR_SHIELD_EM_RESONANCE, ATTR_SHIELD_THERM_RESONANCE,
     ATTR_SHIELD_KIN_RESONANCE, ATTR_SHIELD_EXPL_RESONANCE,
     ATTR_ARMOR_EM_RESONANCE, ATTR_ARMOR_THERM_RESONANCE,
     ATTR_ARMOR_KIN_RESONANCE, ATTR_ARMOR_EXPL_RESONANCE,
     ATTR_HULL_EM_RESONANCE, ATTR_HULL_THERM_RESONANCE,
     ATTR_HULL_KIN_RESONANCE, ATTR_HULL_EXPL_RESONANCE,
+    ATTR_SHIELD_HP, ATTR_ARMOR_HP, ATTR_HP,
+    ATTR_CAPACITOR, ATTR_CAP_RECHARGE,
 )
 
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
@@ -386,18 +389,67 @@ async def calculate_fitting_stats(
     align_time = _calc_align_time(mattr(ATTR_INERTIA), mattr(ATTR_MASS))
 
     # Recalculate resists from modified resonances
-    shield_em_resist = _resonance_to_resist(mattr(ATTR_SHIELD_EM_RESONANCE, 1.0))
-    shield_therm_resist = _resonance_to_resist(mattr(ATTR_SHIELD_THERM_RESONANCE, 1.0))
-    shield_kin_resist = _resonance_to_resist(mattr(ATTR_SHIELD_KIN_RESONANCE, 1.0))
-    shield_expl_resist = _resonance_to_resist(mattr(ATTR_SHIELD_EXPL_RESONANCE, 1.0))
-    armor_em_resist = _resonance_to_resist(mattr(ATTR_ARMOR_EM_RESONANCE, 1.0))
-    armor_therm_resist = _resonance_to_resist(mattr(ATTR_ARMOR_THERM_RESONANCE, 1.0))
-    armor_kin_resist = _resonance_to_resist(mattr(ATTR_ARMOR_KIN_RESONANCE, 1.0))
-    armor_expl_resist = _resonance_to_resist(mattr(ATTR_ARMOR_EXPL_RESONANCE, 1.0))
-    hull_em_resist = _resonance_to_resist(mattr(ATTR_HULL_EM_RESONANCE, 1.0))
-    hull_therm_resist = _resonance_to_resist(mattr(ATTR_HULL_THERM_RESONANCE, 1.0))
-    hull_kin_resist = _resonance_to_resist(mattr(ATTR_HULL_KIN_RESONANCE, 1.0))
-    hull_expl_resist = _resonance_to_resist(mattr(ATTR_HULL_EXPL_RESONANCE, 1.0))
+    shield_em_res = mattr(ATTR_SHIELD_EM_RESONANCE, 1.0)
+    shield_therm_res = mattr(ATTR_SHIELD_THERM_RESONANCE, 1.0)
+    shield_kin_res = mattr(ATTR_SHIELD_KIN_RESONANCE, 1.0)
+    shield_expl_res = mattr(ATTR_SHIELD_EXPL_RESONANCE, 1.0)
+    armor_em_res = mattr(ATTR_ARMOR_EM_RESONANCE, 1.0)
+    armor_therm_res = mattr(ATTR_ARMOR_THERM_RESONANCE, 1.0)
+    armor_kin_res = mattr(ATTR_ARMOR_KIN_RESONANCE, 1.0)
+    armor_expl_res = mattr(ATTR_ARMOR_EXPL_RESONANCE, 1.0)
+    hull_em_res = mattr(ATTR_HULL_EM_RESONANCE, 1.0)
+    hull_therm_res = mattr(ATTR_HULL_THERM_RESONANCE, 1.0)
+    hull_kin_res = mattr(ATTR_HULL_KIN_RESONANCE, 1.0)
+    hull_expl_res = mattr(ATTR_HULL_EXPL_RESONANCE, 1.0)
+
+    # EHP — uniform damage profile (25/25/25/25)
+    shield_hp = mattr(ATTR_SHIELD_HP)
+    armor_hp = mattr(ATTR_ARMOR_HP)
+    hull_hp = mattr(ATTR_HP)
+    shield_ehp = _calc_ehp(shield_hp, shield_em_res, shield_therm_res, shield_kin_res, shield_expl_res)
+    armor_ehp = _calc_ehp(armor_hp, armor_em_res, armor_therm_res, armor_kin_res, armor_expl_res)
+    hull_ehp = _calc_ehp(hull_hp, hull_em_res, hull_therm_res, hull_kin_res, hull_expl_res)
+    total_ehp = shield_ehp + armor_ehp + hull_ehp
+
+    # Cap stability — peak recharge vs total module drain
+    cap_capacity = mattr(ATTR_CAPACITOR)
+    cap_recharge_ms = mattr(ATTR_CAP_RECHARGE)  # in ms
+    cap_recharge_s = cap_recharge_ms / 1000 if cap_recharge_ms else 0
+    peak_cap_recharge = _calc_peak_recharge(cap_capacity, cap_recharge_s)
+
+    # Sum cap drain from all active (non-drone, non-cargo) modules
+    total_cap_drain = 0.0
+    for item in fitted_items:
+        tid = item["type_id"]
+        qty = item.get("quantity", 1)
+        mod_attrs = module_attrs_map.get(tid, {})
+        cap_need = mod_attrs.get(ATTR_CAPACITOR_NEED, 0)
+        duration = mod_attrs.get(ATTR_DURATION, 0)
+        if cap_need > 0 and duration > 0:
+            total_cap_drain += (cap_need / (duration / 1000)) * qty
+
+    cap_stable = peak_cap_recharge >= total_cap_drain
+    if cap_stable and total_cap_drain > 0:
+        # Find equilibrium percentage where recharge = drain
+        cap_stable_pct = _find_cap_stable_pct(cap_capacity, cap_recharge_s, total_cap_drain)
+    elif total_cap_drain == 0:
+        cap_stable_pct = 100.0
+    else:
+        cap_stable_pct = 0.0
+
+    # Estimate time until cap empty when unstable
+    cap_lasts_s = 0.0
+    if not cap_stable and total_cap_drain > 0:
+        # Simple estimate: cap / (drain - avg_recharge)
+        avg_recharge = cap_capacity / cap_recharge_s if cap_recharge_s else 0
+        net_drain = total_cap_drain - avg_recharge
+        if net_drain > 0:
+            cap_lasts_s = cap_capacity / net_drain
+
+    # Shield recharge (passive tank)
+    shield_recharge_ms = mattr(ATTR_SHIELD_RECHARGE_RATE, 0)
+    shield_recharge_s = shield_recharge_ms / 1000 if shield_recharge_ms else 0
+    peak_shield_recharge = _calc_peak_recharge(shield_hp, shield_recharge_s)
 
     return {
         "cpu_used": round(cpu_used, 1),
@@ -414,9 +466,13 @@ async def calculate_fitting_stats(
         "drone_bw_total": round(mattr(SHIP_STAT_ATTRS["drone_bandwidth"]), 1),
         "drone_bay_used": round(drone_bay_used, 1),
         "drone_bay_total": round(mattr(SHIP_STAT_ATTRS["drone_capacity"]), 1),
-        "hull_hp": round(mattr(SHIP_STAT_ATTRS["hull_hp"])),
-        "armor_hp": round(mattr(SHIP_STAT_ATTRS["armor_hp"])),
-        "shield_hp": round(mattr(SHIP_STAT_ATTRS["shield_hp"])),
+        "hull_hp": round(hull_hp),
+        "armor_hp": round(armor_hp),
+        "shield_hp": round(shield_hp),
+        "shield_ehp": round(shield_ehp),
+        "armor_ehp": round(armor_ehp),
+        "hull_ehp": round(hull_ehp),
+        "total_ehp": round(total_ehp),
         "max_velocity": round(mattr(SHIP_STAT_ATTRS["max_velocity"]), 1),
         "mass": round(mattr(SHIP_STAT_ATTRS["mass"])),
         "inertia": round(mattr(SHIP_STAT_ATTRS["inertia"]), 4),
@@ -432,18 +488,26 @@ async def calculate_fitting_stats(
         "med_slots": int(mattr(SHIP_STAT_ATTRS["med_slots"])),
         "low_slots": int(mattr(SHIP_STAT_ATTRS["low_slots"])),
         "rig_slots": int(mattr(SHIP_STAT_ATTRS["rig_slots"])),
-        "shield_em_resist": shield_em_resist,
-        "shield_therm_resist": shield_therm_resist,
-        "shield_kin_resist": shield_kin_resist,
-        "shield_expl_resist": shield_expl_resist,
-        "armor_em_resist": armor_em_resist,
-        "armor_therm_resist": armor_therm_resist,
-        "armor_kin_resist": armor_kin_resist,
-        "armor_expl_resist": armor_expl_resist,
-        "hull_em_resist": hull_em_resist,
-        "hull_therm_resist": hull_therm_resist,
-        "hull_kin_resist": hull_kin_resist,
-        "hull_expl_resist": hull_expl_resist,
+        "shield_em_resist": _resonance_to_resist(shield_em_res),
+        "shield_therm_resist": _resonance_to_resist(shield_therm_res),
+        "shield_kin_resist": _resonance_to_resist(shield_kin_res),
+        "shield_expl_resist": _resonance_to_resist(shield_expl_res),
+        "armor_em_resist": _resonance_to_resist(armor_em_res),
+        "armor_therm_resist": _resonance_to_resist(armor_therm_res),
+        "armor_kin_resist": _resonance_to_resist(armor_kin_res),
+        "armor_expl_resist": _resonance_to_resist(armor_expl_res),
+        "hull_em_resist": _resonance_to_resist(hull_em_res),
+        "hull_therm_resist": _resonance_to_resist(hull_therm_res),
+        "hull_kin_resist": _resonance_to_resist(hull_kin_res),
+        "hull_expl_resist": _resonance_to_resist(hull_expl_res),
+        # Cap stability
+        "cap_stable": cap_stable,
+        "cap_stable_pct": round(cap_stable_pct, 1),
+        "cap_drain_rate": round(total_cap_drain, 1),
+        "peak_cap_recharge": round(peak_cap_recharge, 1),
+        "cap_lasts_s": round(cap_lasts_s),
+        # Shield passive recharge
+        "peak_shield_recharge": round(peak_shield_recharge, 1),
     }
 
 
@@ -456,3 +520,62 @@ def _calc_align_time(inertia: float, mass: float) -> float:
 def _resonance_to_resist(resonance: float) -> float:
     """Convert damage resonance (0-1) to resist percentage (0-100)."""
     return round((1.0 - resonance) * 100, 1)
+
+
+def _calc_ehp(hp: float, em_res: float, therm_res: float, kin_res: float, expl_res: float) -> float:
+    """Calculate EHP for one layer assuming uniform damage (25/25/25/25).
+
+    Resonance is 0-1 where 0 = 100% resist, 1 = 0% resist.
+    EHP = HP / avg(resonances)
+    """
+    if hp <= 0:
+        return 0
+    avg_res = (em_res + therm_res + kin_res + expl_res) / 4
+    if avg_res <= 0:
+        return hp * 1000  # near-infinite EHP at 100% resist
+    return hp / avg_res
+
+
+def _calc_peak_recharge(capacity: float, recharge_time_s: float) -> float:
+    """Peak recharge rate at 25% capacity.
+
+    Formula: 2.5 * capacity / recharge_time
+    Source: Pyfa eos/saveddata/fit.py, docs/fitting-mechanics.md
+    """
+    if capacity <= 0 or recharge_time_s <= 0:
+        return 0
+    return 2.5 * capacity / recharge_time_s
+
+
+def _find_cap_stable_pct(capacity: float, recharge_s: float, drain_rate: float) -> float:
+    """Find the equilibrium cap percentage where recharge = drain.
+
+    Cap recharge: dC/dt = (10 * C_max / tau) * (sqrt(C/C_max) - C/C_max)
+    At equilibrium: recharge_rate = drain_rate
+    Solve: (10 * C_max / tau) * (sqrt(p) - p) = drain_rate
+    where p = C/C_max (fraction)
+
+    Rearranging: sqrt(p) - p = drain_rate * tau / (10 * C_max)
+    Let k = drain_rate * tau / (10 * C_max)
+    sqrt(p) - p = k  →  sqrt(p) = k + p  →  p = (k + p)^2
+
+    Binary search for p in [0, 0.25] where peak is at p=0.25.
+    """
+    if capacity <= 0 or recharge_s <= 0:
+        return 100.0
+    k = drain_rate * recharge_s / (10 * capacity)
+    # Max possible k is 0.25 (at peak recharge). If k > 0.25, not stable.
+    if k > 0.25:
+        return 0.0
+
+    # Binary search
+    lo, hi = 0.0, 1.0
+    for _ in range(50):
+        mid = (lo + hi) / 2
+        p_sqrt = math.sqrt(mid)
+        recharge_at_mid = p_sqrt - mid  # normalized recharge
+        if recharge_at_mid > k:
+            lo = mid  # can sustain at higher cap
+        else:
+            hi = mid
+    return round(lo * 100, 1)
