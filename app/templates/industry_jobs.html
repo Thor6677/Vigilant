@@ -108,7 +108,12 @@
         <h1 class="b-page-title">Industry Jobs</h1>
         <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
             Active jobs across {{ char_count_with_scope }} character{{ '' if char_count_with_scope == 1 else 's' }}
-            and {{ corp_count_with_scope }} corporation{{ '' if corp_count_with_scope == 1 else 's' }}
+            and {{ corp_count_with_scope }} player corporation{{ '' if corp_count_with_scope == 1 else 's' }}
+            {% if npc_corps_skipped %}
+            <span title="{{ npc_corps_skipped | join(', ') }}" style="color:var(--muted);">
+                &middot; {{ npc_corps_skipped | length }} NPC corp{{ '' if npc_corps_skipped|length == 1 else 's' }} skipped
+            </span>
+            {% endif %}
         </div>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">

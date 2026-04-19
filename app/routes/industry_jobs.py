@@ -23,6 +23,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 CHAR_JOBS_SCOPE = "esi-industry.read_character_jobs.v1"
 CORP_JOBS_SCOPE = "esi-industry.read_corporation_jobs.v1"
+CORP_STRUCTURES_SCOPE = "esi-corporations.read_structures.v1"
 
 ACTIVITY_NAMES = {
     1: "Manufacturing",
@@ -73,6 +74,33 @@ async def _fetch_character_jobs(char: Character, include_completed: bool) -> tup
     except Exception as e:
         logger.warning("Character industry jobs fetch failed for %s: %s", char.character_id, e)
         return char, [], f"esi_error: {type(e).__name__}"
+
+
+async def _cache_corp_structures(corp_id: int, scope_chars: list[Character]) -> int:
+    """Proactively populate StructureNameCache from /corporations/{id}/structures/.
+
+    Cycles through scope_chars (director fallback) until one returns 200.
+    Returns the number of structures cached, or 0 on failure.
+    """
+    from app.esi import corporation as esi_corp
+    for ch in scope_chars:
+        try:
+            async with AsyncSessionLocal() as s_db:
+                client = await get_client_safe(ch)
+                client.db = s_db
+                raw = await esi_corp.get_corporation_structures(client, corp_id)
+                if not raw:
+                    return 0
+                await esi_universe.cache_corp_structures(s_db, raw)
+                return len(raw)
+        except Exception as e:
+            err = str(e)
+            if "403" in err or "401" in err:
+                continue
+            logger.info("corp-structures fetch failed for %s via %s: %s",
+                        corp_id, ch.character_name, err)
+            return 0
+    return 0
 
 
 async def _fetch_corp_jobs(
@@ -202,22 +230,26 @@ async def _resolve_location_names(
     sem = asyncio.Semaphore(_STRUCTURE_LOOKUP_CONCURRENCY)
 
     async def _lookup(struct_id: int) -> tuple[int, str | None]:
-        candidates = structure_candidates.get(struct_id, [])
+        # /universe/structures/{id}/ requires the esi-universe.read_structures.v1
+        # scope, so skip chars that don't have it (would get 401 and pollute the
+        # in-memory 401 cache — poisoning future lookups for 24h).
+        candidates = [
+            ch for ch in structure_candidates.get(struct_id, [])
+            if "esi-universe.read_structures.v1" in (ch.scopes or "")
+        ]
+        if not candidates:
+            return struct_id, None
         async with sem:
             for ch in candidates:
                 try:
                     async with AsyncSessionLocal() as s_db:
                         client = await get_client_safe(ch)
                         client.db = s_db
-                        # get_structure checks the 401 cache, writes to
-                        # StructureNameCache on success, and returns
-                        # {"name": ..., "solar_system_id": ...}.
                         data = await esi_universe.get_structure(client, struct_id, db=s_db)
                         name = (data or {}).get("name")
                         if name and name != "Unknown Structure":
                             return struct_id, name
                 except Exception as e:
-                    # 401/403 from a char that doesn't have access — try the next one
                     logger.debug("Structure %s via %s failed: %s", struct_id, ch.character_name, e)
                     continue
         return struct_id, None
@@ -263,24 +295,50 @@ async def industry_jobs_page(
 
     corp_scope_by_corp: dict[int, list[Character]] = {}
     corp_names: dict[int, str] = {}
+    npc_corps_skipped: dict[int, str] = {}   # corp_id -> name, for transparency
     for c in chars:
-        # Skip NPC corps entirely — their corp-jobs endpoint always 403s
-        # because no player holds the Director role in an NPC corp.
-        if not c.corporation_id or c.corporation_id < NPC_CORP_CEILING:
+        if not c.corporation_id:
+            continue
+        if c.corporation_id < NPC_CORP_CEILING:
+            # NPC corp — their corp-jobs endpoint always 403s (no player
+            # holds Director in an NPC corp).  Record it so we can still
+            # surface its name in the page subtitle rather than silently
+            # disappearing it from the count.
+            if c.corporation_name:
+                npc_corps_skipped[c.corporation_id] = c.corporation_name
             continue
         if CORP_JOBS_SCOPE in (c.scopes or ""):
             corp_scope_by_corp.setdefault(c.corporation_id, []).append(c)
             if c.corporation_name:
                 corp_names[c.corporation_id] = c.corporation_name
 
+    # Pick a character with read_structures scope per corp to prime the
+    # StructureNameCache from /corporations/{id}/structures/.  Runs in
+    # parallel with job fetches; nothing blocks on it — if it finishes
+    # before the structure-name resolver runs, those structures get pulled
+    # from cache and we skip per-structure ESI hops entirely.
+    struct_fetch_targets: dict[int, list[Character]] = {}
+    for c in chars:
+        if (
+            c.corporation_id
+            and c.corporation_id >= NPC_CORP_CEILING
+            and CORP_STRUCTURES_SCOPE in (c.scopes or "")
+        ):
+            struct_fetch_targets.setdefault(c.corporation_id, []).append(c)
+
     char_tasks = [_fetch_character_jobs(c, inc_completed) for c in char_fetch_targets]
     corp_tasks = [
         _fetch_corp_jobs(cid, corp_names.get(cid), sc, inc_completed)
         for cid, sc in corp_scope_by_corp.items()
     ]
-    char_results, corp_results = await asyncio.gather(
+    struct_cache_tasks = [
+        _cache_corp_structures(cid, sc)
+        for cid, sc in struct_fetch_targets.items()
+    ]
+    char_results, corp_results, _struct_counts = await asyncio.gather(
         asyncio.gather(*char_tasks, return_exceptions=True),
         asyncio.gather(*corp_tasks, return_exceptions=True),
+        asyncio.gather(*struct_cache_tasks, return_exceptions=True),
     )
 
     # --- Flatten + tag ------------------------------------------------------
@@ -489,6 +547,8 @@ async def industry_jobs_page(
         key=lambda x: x["name"].lower(),
     )
 
+    npc_corps_list = sorted(npc_corps_skipped.values(), key=str.lower)
+
     return templates.TemplateResponse("industry_jobs.html", {
         "request": request,
         "rows": rows,
@@ -501,4 +561,5 @@ async def industry_jobs_page(
         "include_completed": inc_completed,
         "char_count_with_scope": len(char_fetch_targets),
         "corp_count_with_scope": len(corp_scope_by_corp),
+        "npc_corps_skipped": npc_corps_list,
     })
