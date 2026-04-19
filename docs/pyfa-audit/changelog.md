@@ -1,5 +1,28 @@
 # Pyfa Audit Changelog
 
+## Round 2 (2026-04-19)
+
+### ISSUE-002 — Subsystem modifier operator ordering
+- **Fixed:** Subsystem ItemModifier bonuses to ship attributes are now accumulated by operator type and applied in dogma order (MOD_ADD → POST_MUL → POST_PERCENT), regardless of subsystem iteration order.
+- **References:** pyfa `eos/modifiedAttributeDict.py:308-416`; theorycrafter `FittingEngine.kt:3490-3582`
+- **Result:** Tengu PG total: 867.5 → 915.0 (correct: `(420+190)*1.2*1.25 = 915`). No regressions on non-T3C fits.
+
+### ISSUE-007 — Charge compatibility for legacy type IDs
+- **Fixed:** `ATTR_CHARGE_GROUP_4` was defined as 607 (nonexistent attribute). Correct SDE attribute ID is 609 (`chargeGroup4`). This caused `get_compatible_charges()` to miss Advanced Heavy/Assault/Light Missiles (Fury, Precision, Javelin variants), breaking EFT import auto-loading for T2 ammo.
+- **References:** pyfa only — theorycrafter uses compiled game database directly.
+- **Result:** "Scourge Fury Heavy Missile" (type 2629) now appears in HML II's compatible charges list. EFT imports with T2 missile ammo auto-load correctly.
+
+### ISSUE-003 — Drone bandwidth enforcement in DPS
+- **Fixed:** Drone DPS now only counts drones within the ship's available bandwidth. Drones sorted by per-drone DPS (descending) so highest-DPS drones fill bandwidth first.
+- **References:** pyfa `eos/saveddata/drone.py:163-168`; theorycrafter `Mechanics.kt:1204-1236`
+- **Result:** Rattlesnake drone DPS: 588.8 → 490.6 (2x Ogre II fill 50 BW; 3x Hammerhead excluded).
+
+### ISSUE-005 — Leshak max spool DPS (closed, not a bug)
+- **Finding:** Previous value 2,505.7 was wrong — no modifier targets `damageMultiplierBonusMax` (2734) on the Leshak fit. Current 2,436.7 = `779.7 × (1+2.125)` is mathematically correct per pyfa `eos/saveddata/module.py:515-523`.
+
+### ISSUE-001 — Sacrilege DPS gap (closed, test fit error)
+- **Finding:** SDE confirms Sacrilege has Medium Energy Turret bonuses (skill 3306), not missile bonuses. The HAM test fit was exercising an unbonused weapon system. Test fit needs replacement.
+
 ## Phase 3.1-3.6 (2026-04-18)
 
 ### 3.1 — Hull resonance attribute IDs
