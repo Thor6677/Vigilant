@@ -114,38 +114,36 @@
 {% endif %}
 
 {# ── Defense ──────────────────────────────────────────────────────────────── #}
+{% set raw_total_hp = stats.shield_hp + stats.armor_hp + stats.hull_hp %}
 <div class="b-section">
     <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="b-label">Defense</span>
+        <span class="b-label">Defense
+            <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
+        </span>
         <button id="def-toggle" onclick="toggleDefMode()"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
     </div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
         <table style="width:100%;font-size:10px;border-collapse:collapse;">
-            <tr style="color:var(--muted);">
-                <td style="padding:2px 0;"></td>
-                <td style="text-align:right;padding:2px 0;">HP</td>
-                <td class="def-ehp-col" style="text-align:right;padding:2px 0;">EHP</td>
-            </tr>
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Shield</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.shield_hp) }}</td>
-                <td class="def-ehp-col" style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.shield_ehp) }}</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.shield_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.shield_ehp) }}">{{ "{:,.0f}".format(stats.shield_ehp) }}</td>
             </tr>
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Armor</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.armor_hp) }}</td>
-                <td class="def-ehp-col" style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.armor_ehp) }}</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.armor_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.armor_ehp) }}">{{ "{:,.0f}".format(stats.armor_ehp) }}</td>
             </tr>
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Hull</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.hull_hp) }}</td>
-                <td class="def-ehp-col" style="text-align:right;color:var(--accent);">{{ "{:,.0f}".format(stats.hull_ehp) }}</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.hull_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.hull_ehp) }}">{{ "{:,.0f}".format(stats.hull_ehp) }}</td>
             </tr>
             <tr style="border-top:1px solid var(--border);">
                 <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total</td>
-                <td style="text-align:right;color:var(--text);font-weight:600;">{{ "{:,.0f}".format(stats.shield_hp + stats.armor_hp + stats.hull_hp) }}</td>
-                <td class="def-ehp-col" style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);font-weight:600;"
+                    data-hp="{{ "{:,.0f}".format(raw_total_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.total_ehp) }}">{{ "{:,.0f}".format(stats.total_ehp) }}</td>
             </tr>
         </table>
 
@@ -190,21 +188,21 @@
                 <tr>
                     <td style="color:var(--muted);padding:2px 0;">Shield Boost</td>
                     <td class="def-rep-val" style="text-align:right;color:var(--text);"
-                        data-hp="{{ stats.shield_rep_rate }}" data-ehp="{{ (stats.shield_rep_rate * stats.shield_ehp_mult)|round(1) }}">{{ stats.shield_rep_rate }} HP/s</td>
+                        data-hp="{{ stats.shield_rep_rate }}" data-ehp="{{ (stats.shield_rep_rate * stats.shield_ehp_mult)|round(1) }}">{{ (stats.shield_rep_rate * stats.shield_ehp_mult)|round(1) }} EHP/s</td>
                 </tr>
                 {% endif %}
                 {% if stats.armor_rep_rate > 0 %}
                 <tr>
                     <td style="color:var(--muted);padding:2px 0;">Armor Repair</td>
                     <td class="def-rep-val" style="text-align:right;color:var(--text);"
-                        data-hp="{{ stats.armor_rep_rate }}" data-ehp="{{ (stats.armor_rep_rate * stats.armor_ehp_mult)|round(1) }}">{{ stats.armor_rep_rate }} HP/s</td>
+                        data-hp="{{ stats.armor_rep_rate }}" data-ehp="{{ (stats.armor_rep_rate * stats.armor_ehp_mult)|round(1) }}">{{ (stats.armor_rep_rate * stats.armor_ehp_mult)|round(1) }} EHP/s</td>
                 </tr>
                 {% endif %}
                 {% if stats.peak_shield_recharge > 0 %}
                 <tr>
                     <td style="color:var(--muted);padding:2px 0;">Shield Recharge</td>
                     <td class="def-rep-val" style="text-align:right;color:var(--text);"
-                        data-hp="{{ stats.peak_shield_recharge }}" data-ehp="{{ (stats.peak_shield_recharge * stats.shield_ehp_mult)|round(1) }}">{{ stats.peak_shield_recharge }} HP/s</td>
+                        data-hp="{{ stats.peak_shield_recharge }}" data-ehp="{{ (stats.peak_shield_recharge * stats.shield_ehp_mult)|round(1) }}">{{ (stats.peak_shield_recharge * stats.shield_ehp_mult)|round(1) }} EHP/s</td>
                 </tr>
                 {% endif %}
             </table>
@@ -215,13 +213,22 @@
 <script>
 function toggleDefMode(){
     var btn=document.getElementById('def-toggle');
-    var showEhp=btn.textContent.trim()==='HP';
-    btn.textContent=showEhp?'EHP':'HP';
-    document.querySelectorAll('.def-ehp-col').forEach(function(el){el.style.display=showEhp?'':'none';});
+    var isEhp=btn.textContent.trim()==='EHP';
+    var mode=isEhp?'hp':'ehp';
+    btn.textContent=isEhp?'HP':'EHP';
+    var lbl=document.getElementById('def-header-label');
+    document.querySelectorAll('.def-hp-val').forEach(function(el){
+        el.textContent=el.dataset[mode];
+    });
+    var totalEl=document.querySelector('.def-hp-val[data-ehp]');
+    if(lbl){
+        var totals=document.querySelectorAll('.def-hp-val');
+        var last=totals[totals.length-1];
+        lbl.textContent=isEhp?'(Raw HP: '+last.dataset.hp+')':'(Effective HP: '+last.dataset.ehp+')';
+    }
     document.querySelectorAll('.def-rep-val').forEach(function(el){
-        var v=showEhp?el.dataset.ehp:el.dataset.hp;
-        var u=showEhp?'EHP/s':'HP/s';
-        el.textContent=v+' '+u;
+        var v=isEhp?el.dataset.hp:el.dataset.ehp;
+        el.textContent=v+(isEhp?' HP/s':' EHP/s');
     });
 }
 </script>
