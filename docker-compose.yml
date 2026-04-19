@@ -76,5 +76,10 @@ volumes:
   app_data:
 
 networks:
+  # Shared with the Wanderer mapper stack (mapper.thunderborn.dev).
+  # Declared external so we attach to the pre-existing `web` bridge
+  # created by /opt/wanderer/docker-compose.yml, rather than compose
+  # creating its own `vigilant_web`.
   web:
-    driver: bridge
+    external: true
+    name: web
