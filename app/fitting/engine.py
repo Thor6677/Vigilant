@@ -1140,6 +1140,39 @@ async def calculate_fitting_stats(
     drone_dps = 0.0
     spool_time_s = 0  # Time to reach max spool
 
+    # Determine how many drones of each type are active (within bandwidth).
+    # Sort by bandwidth cost ascending to maximize active drone count,
+    # matching Pyfa's approach of capping by bandwidth.
+    # Algorithm reference: pyfa eos/saveddata/drone.py:163-168 (amountActive
+    # gates DPS); theorycrafter Mechanics.kt:1204-1236 (maxDroneGroupSize
+    # caps at bandwidth/bwPerDrone).
+    drone_bw_total_ship = mattr(SHIP_STAT_ATTRS["drone_bandwidth"])
+    drone_active_counts: dict[int, int] = {}  # type_id → active count
+    drone_entries = [(i["type_id"], i.get("quantity", 1)) for i in items if i.get("slot") == "drone"]
+    # Sort by per-drone DPS descending so highest-DPS drones fill first
+    # (matches typical player behavior — activate strongest drones).
+    drone_bw_per = {}
+    drone_dps_per: dict[int, float] = {}
+    for tid, qty in drone_entries:
+        if tid not in drone_bw_per:
+            d_attrs = module_attrs_map.get(tid, {})
+            drone_bw_per[tid] = d_attrs.get(ATTR_DRONE_BW_USED, 0)
+            d_dmg = sum(d_attrs.get(a, 0) for a in (ATTR_EM_DAMAGE, ATTR_THERMAL_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_EXPLOSIVE_DAMAGE))
+            d_mult = d_attrs.get(ATTR_DAMAGE_MULTIPLIER, 1)
+            d_cycle = d_attrs.get(ATTR_DURATION, 0) or d_attrs.get(ATTR_RATE_OF_FIRE, 0)
+            drone_dps_per[tid] = (d_dmg * d_mult / (d_cycle / 1000)) if d_cycle > 0 and d_dmg > 0 else 0
+    drone_entries.sort(key=lambda x: -drone_dps_per.get(x[0], 0))
+    bw_remaining = drone_bw_total_ship
+    for tid, qty in drone_entries:
+        bw_each = drone_bw_per.get(tid, 0)
+        if bw_each <= 0:
+            drone_active_counts[tid] = drone_active_counts.get(tid, 0) + qty
+            continue
+        can_fit = int(bw_remaining / bw_each) if bw_each > 0 else qty
+        active = min(qty, can_fit)
+        drone_active_counts[tid] = drone_active_counts.get(tid, 0) + active
+        bw_remaining -= active * bw_each
+
     for item in items:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
@@ -1147,7 +1180,12 @@ async def calculate_fitting_stats(
         slot = item.get("slot", "")
 
         if slot == "drone":
-            # Drone DPS: drone's own damage × damageMultiplier / cycleTime
+            # Drone DPS: only count drones within bandwidth
+            active_qty = min(qty, drone_active_counts.get(tid, 0))
+            if active_qty <= 0:
+                continue
+            # Decrement so subsequent entries of same type don't double-count
+            drone_active_counts[tid] = drone_active_counts.get(tid, 0) - active_qty
             em = mod_attrs.get(ATTR_EM_DAMAGE, 0)
             therm = mod_attrs.get(ATTR_THERMAL_DAMAGE, 0)
             kin = mod_attrs.get(ATTR_KINETIC_DAMAGE, 0)
@@ -1156,7 +1194,7 @@ async def calculate_fitting_stats(
             cycle = mod_attrs.get(ATTR_DURATION, 0) or mod_attrs.get(ATTR_RATE_OF_FIRE, 0)
             if cycle > 0 and (em + therm + kin + expl) > 0:
                 volley = (em + therm + kin + expl) * dmg_mult
-                drone_dps += (volley / (cycle / 1000)) * qty
+                drone_dps += (volley / (cycle / 1000)) * active_qty
             continue
 
         if slot in ("cargo", "drone"):
