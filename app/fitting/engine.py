@@ -1151,6 +1151,10 @@ async def calculate_fitting_stats(
         "cap_lasts_s": round(cap_lasts_s),
         # Shield passive recharge
         "peak_shield_recharge": round(peak_shield_recharge, 1),
+        # EHP multiplier per layer (1 / avg_resonance) for HP→EHP conversion
+        "shield_ehp_mult": round(shield_ehp / shield_hp, 2) if shield_hp > 0 else 1.0,
+        "armor_ehp_mult": round(armor_ehp / armor_hp, 2) if armor_hp > 0 else 1.0,
+        "hull_ehp_mult": round(hull_ehp / hull_hp, 2) if hull_hp > 0 else 1.0,
         # Active tank
         "armor_rep_rate": round(armor_rep_rate, 1),
         "shield_rep_rate": round(shield_rep_rate, 1),
