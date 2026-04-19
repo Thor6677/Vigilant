@@ -268,14 +268,21 @@ function selectShip(typeId, typeName) {
 }
 
 function fetchShipSlots(typeId) {
-    fetch('/tools/fitting/ship-slots/' + typeId)
+    // Include subsystem type IDs so the server can apply slot modifiers
+    var subIds = state.items
+        .filter(function(i) { return i.slot === 'subsystem'; })
+        .map(function(i) { return i.type_id; })
+        .join(',');
+    var url = '/tools/fitting/ship-slots/' + typeId;
+    if (subIds) url += '?subsystems=' + subIds;
+    fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             shipSlots.high = data.high || 0;
             shipSlots.med = data.med || 0;
             shipSlots.low = data.low || 0;
             shipSlots.rig = data.rig || 0;
-            shipSlots.subsystem = 0; // T3C subsystems handled separately
+            shipSlots.subsystem = data.subsystem || 0;
             shipSlots.turret = data.turret || 0;
             shipSlots.launcher = data.launcher || 0;
             renderSlots();
@@ -321,6 +328,10 @@ function addModule(typeId, typeName, slot) {
         quantity: 1
     });
     saveState();
+    // Subsystem changes affect slot counts — re-fetch from server
+    if (slot === 'subsystem' && state.shipTypeId) {
+        fetchShipSlots(state.shipTypeId);
+    }
     renderSlots();
     recalcStats();
     refreshOverheatCache();
@@ -358,8 +369,13 @@ function addDrone(typeId, typeName) {
 }
 
 function removeItem(index) {
+    var removed = state.items[index];
     state.items.splice(index, 1);
     saveState();
+    // Subsystem removal affects slot counts — re-fetch from server
+    if (removed && removed.slot === 'subsystem' && state.shipTypeId) {
+        fetchShipSlots(state.shipTypeId);
+    }
     renderSlots();
     recalcStats();
 }

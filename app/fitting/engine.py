@@ -46,6 +46,10 @@ from app.fitting.constants import (
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
     ATTR_MISSILE_DAMAGE_MULTIPLIER, ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS,
     ATTR_ARMOR_DAMAGE_AMOUNT, ATTR_SHIELD_BONUS,
+    ATTR_HI_SLOTS, ATTR_MED_SLOTS, ATTR_LOW_SLOTS,
+    ATTR_TURRET_SLOTS, ATTR_LAUNCHER_SLOTS,
+    ATTR_HI_SLOT_MODIFIER, ATTR_MED_SLOT_MODIFIER, ATTR_LOW_SLOT_MODIFIER,
+    ATTR_TURRET_HARDPOINT_MODIFIER, ATTR_LAUNCHER_HARDPOINT_MODIFIER,
 )
 
 # Default skill level assumption
@@ -278,10 +282,12 @@ async def _apply_ship_hull_bonuses(
         )
         for row in name_result.fetchall():
             name = row.attribute_name or ""
-            # Per-level attrs: shipBonusCBC1, eliteBonusGunship2, etc.
+            # Per-level attrs: shipBonusCBC1, eliteBonusGunship2,
+            # subsystemBonusCaldariOffensive, etc.
             # Role attrs contain "Role": shipBonusRole7, eliteBonusViolatorsRole1
             is_per_level_name = (
-                (name.startswith("shipBonus") or name.startswith("eliteBonus"))
+                (name.startswith("shipBonus") or name.startswith("eliteBonus")
+                 or name.startswith("subsystemBonus"))
                 and "Role" not in name
             )
             if is_per_level_name:
@@ -533,9 +539,17 @@ async def calculate_fitting_stats(
     module_type_ids = list({item["type_id"] for item in fitted_items})
     all_type_ids = list({item["type_id"] for item in items})
 
-    # Get module attributes and modifiers
+    # Separate subsystem items — they need special handling (slot modifiers,
+    # per-level scaling) and must be excluded from the normal modifier pipeline.
+    subsystem_type_ids = set(
+        i["type_id"] for i in fitted_items if i.get("slot") == "subsystem"
+    )
+    non_sub_module_type_ids = [t for t in module_type_ids if t not in subsystem_type_ids]
+
+    # Get module attributes and modifiers (subsystems excluded from modifiers
+    # — they're processed separately below)
     module_attrs_map = await get_types_dogma_attrs(db, all_type_ids) if all_type_ids else {}
-    module_modifiers = await _get_module_modifiers(db, module_type_ids) if module_type_ids else {}
+    module_modifiers = await _get_module_modifiers(db, non_sub_module_type_ids) if non_sub_module_type_ids else {}
 
     # Build charge attrs map early so bonuses (ship hull, skills) can modify it.
     # Deep-copied so we can mutate charge damage values.
@@ -573,12 +587,70 @@ async def calculate_fitting_stats(
                         continue
                 attrs[target_attr] = current * (1 + ol_val / 100)
 
+    # ── Apply T3C subsystem bonuses ─────────────────────────────────────────
+    # Subsystems provide:
+    # 1. Slot/hardpoint modifiers (special attrs not in the dogma effect pipeline)
+    # 2. ItemModifier bonuses to ship attributes (CPU, PG, cap, velocity, etc.)
+    # 3. LocationGroupModifier/LocationRequiredSkillModifier bonuses to modules
+    # 4. OwnerRequiredSkillModifier bonuses to charges (missile damage, etc.)
+    #
+    # Per-level attributes (subsystemBonus*) are scaled by skill level.
+    # This section must run BEFORE skill bonuses so that MOD_ADD contributions
+    # (CPU, PG, HP) are included in the skill percentage calculation.
+    if subsystem_type_ids:
+        # 1. Apply slot/hardpoint modifiers (attributes not in effect pipeline)
+        for item in fitted_items:
+            if item.get("slot") != "subsystem":
+                continue
+            sub_attrs = module_attrs_map.get(item["type_id"], {})
+            ship_attrs[ATTR_HI_SLOTS] = ship_attrs.get(ATTR_HI_SLOTS, 0) + sub_attrs.get(ATTR_HI_SLOT_MODIFIER, 0)
+            ship_attrs[ATTR_MED_SLOTS] = ship_attrs.get(ATTR_MED_SLOTS, 0) + sub_attrs.get(ATTR_MED_SLOT_MODIFIER, 0)
+            ship_attrs[ATTR_LOW_SLOTS] = ship_attrs.get(ATTR_LOW_SLOTS, 0) + sub_attrs.get(ATTR_LOW_SLOT_MODIFIER, 0)
+            ship_attrs[ATTR_TURRET_SLOTS] = ship_attrs.get(ATTR_TURRET_SLOTS, 0) + sub_attrs.get(ATTR_TURRET_HARDPOINT_MODIFIER, 0)
+            ship_attrs[ATTR_LAUNCHER_SLOTS] = ship_attrs.get(ATTR_LAUNCHER_SLOTS, 0) + sub_attrs.get(ATTR_LAUNCHER_HARDPOINT_MODIFIER, 0)
+
+        # 2. Get subsystem modifiers and detect per-level source attributes
+        sub_modifiers = await _get_module_modifiers(db, list(subsystem_type_ids))
+
+        sub_src_attr_ids = set()
+        for tid in subsystem_type_ids:
+            for mod in sub_modifiers.get(tid, []):
+                sub_src_attr_ids.add(mod["modifying_attribute_id"])
+
+        sub_per_level_ids: set[int] = set()
+        if sub_src_attr_ids:
+            name_result = await db.execute(
+                select(SDEDogmaAttribute.attribute_id, SDEDogmaAttribute.attribute_name)
+                .where(SDEDogmaAttribute.attribute_id.in_(sub_src_attr_ids))
+            )
+            for row in name_result.fetchall():
+                name = row.attribute_name or ""
+                if name.startswith("subsystemBonus") and "Role" not in name:
+                    sub_per_level_ids.add(row.attribute_id)
+
+        # 3. Apply ItemModifier bonuses directly to ship_attrs
+        #    (CPU, PG, drone BW, cap, velocity, agility, etc.)
+        for item in fitted_items:
+            if item.get("slot") != "subsystem":
+                continue
+            tid = item["type_id"]
+            sub_attrs = module_attrs_map.get(tid, {})
+            for mod in sub_modifiers.get(tid, []):
+                if mod["func"] != "ItemModifier" or mod["domain"] != "shipID":
+                    continue
+                src_val = sub_attrs.get(mod["modifying_attribute_id"])
+                if src_val is None:
+                    continue
+                if mod["modifying_attribute_id"] in sub_per_level_ids:
+                    src_val *= DEFAULT_SKILL_LEVEL
+                _apply_modifier(ship_attrs, mod["modified_attribute_id"], mod["operator"], src_val)
+
     # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
     # Some modules (Bastion, Siege) have effects that modify OTHER modules
     # via LocationRequiredSkillModifier / LocationGroupModifier.
     # These are different from ship hull bonuses — the source attrs are on
     # the fitted module, not the ship.
-    if module_type_ids:
+    if non_sub_module_type_ids:
         # Get all cross-module modifiers from fitted module effects.
         # Includes OwnerRequiredSkillModifier (domain=charID) for damage mods
         # like DDA that target drones by skill requirement.
@@ -588,7 +660,7 @@ async def calculate_fitting_stats(
                    SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value)
             .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
-            .where(SDETypeEffect.type_id.in_(module_type_ids))
+            .where(SDETypeEffect.type_id.in_(non_sub_module_type_ids))
             .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
             .where(SDEModifier.domain.in_(["shipID", "charID"]))
             .where(SDEModifier.func.in_([
@@ -723,6 +795,22 @@ async def calculate_fitting_stats(
     await _apply_ship_hull_bonuses(
         db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items
     )
+
+    # ── Apply subsystem bonuses to module/charge attributes ──────────────
+    # Subsystem LocationGroupModifier/LocationRequiredSkillModifier/
+    # OwnerRequiredSkillModifier bonuses work like ship hull bonuses but
+    # originate from the fitted subsystem. Re-use _apply_ship_hull_bonuses
+    # with each subsystem as the source (per-level detection extended to
+    # cover subsystemBonus* attributes).
+    if subsystem_type_ids:
+        for item in fitted_items:
+            if item.get("slot") != "subsystem":
+                continue
+            sub_attrs = module_attrs_map.get(item["type_id"], {})
+            await _apply_ship_hull_bonuses(
+                db, item["type_id"], sub_attrs,
+                module_attrs_map, charge_attrs_map, items,
+            )
 
     # ── Collect character-level missile damage multiplier (BCU mechanism) ──
     # BCU sets character attr 212 (missileDamageMultiplier) via ItemModifier

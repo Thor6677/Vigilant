@@ -148,21 +148,50 @@ async def fitting_stats(
 async def ship_slots(
     request: Request,
     ship_type_id: int,
+    subsystems: str = Query(""),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return slot counts for a ship type."""
+    """Return slot counts for a ship type, including subsystem modifiers."""
     attrs = await get_type_dogma_attrs(db, ship_type_id)
     from app.fitting.constants import (
         ATTR_HI_SLOTS, ATTR_MED_SLOTS, ATTR_LOW_SLOTS,
         ATTR_RIG_SLOTS, ATTR_TURRET_SLOTS, ATTR_LAUNCHER_SLOTS,
+        ATTR_HI_SLOT_MODIFIER, ATTR_MED_SLOT_MODIFIER, ATTR_LOW_SLOT_MODIFIER,
+        ATTR_TURRET_HARDPOINT_MODIFIER, ATTR_LAUNCHER_HARDPOINT_MODIFIER,
     )
+    hi = attrs.get(ATTR_HI_SLOTS, 0)
+    med = attrs.get(ATTR_MED_SLOTS, 0)
+    low = attrs.get(ATTR_LOW_SLOTS, 0)
+    rig = attrs.get(ATTR_RIG_SLOTS, 0)
+    turret = attrs.get(ATTR_TURRET_SLOTS, 0)
+    launcher = attrs.get(ATTR_LAUNCHER_SLOTS, 0)
+
+    # Apply subsystem slot modifiers if provided
+    sub_ids = [int(x) for x in subsystems.split(",") if x.strip()] if subsystems else []
+    for sub_id in sub_ids:
+        sub_attrs = await get_type_dogma_attrs(db, sub_id)
+        hi += sub_attrs.get(ATTR_HI_SLOT_MODIFIER, 0)
+        med += sub_attrs.get(ATTR_MED_SLOT_MODIFIER, 0)
+        low += sub_attrs.get(ATTR_LOW_SLOT_MODIFIER, 0)
+        turret += sub_attrs.get(ATTR_TURRET_HARDPOINT_MODIFIER, 0)
+        launcher += sub_attrs.get(ATTR_LAUNCHER_HARDPOINT_MODIFIER, 0)
+
+    # Detect T3C (Strategic Cruiser, group 963) for subsystem slot count
+    GROUP_STRATEGIC_CRUISER = 963
+    ship_result = await db.execute(
+        select(SDEType.group_id).where(SDEType.type_id == ship_type_id)
+    )
+    group_id = ship_result.scalar_one_or_none()
+    subsystem_slots = 4 if group_id == GROUP_STRATEGIC_CRUISER else 0
+
     return {
-        "high": int(attrs.get(ATTR_HI_SLOTS, 0)),
-        "med": int(attrs.get(ATTR_MED_SLOTS, 0)),
-        "low": int(attrs.get(ATTR_LOW_SLOTS, 0)),
-        "rig": int(attrs.get(ATTR_RIG_SLOTS, 0)),
-        "turret": int(attrs.get(ATTR_TURRET_SLOTS, 0)),
-        "launcher": int(attrs.get(ATTR_LAUNCHER_SLOTS, 0)),
+        "high": int(hi),
+        "med": int(med),
+        "low": int(low),
+        "rig": int(rig),
+        "turret": int(turret),
+        "launcher": int(launcher),
+        "subsystem": subsystem_slots,
     }
 
 
