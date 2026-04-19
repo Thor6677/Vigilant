@@ -45,6 +45,10 @@ ATTR_VOLUME = 161
 # Shield recharge
 ATTR_SHIELD_RECHARGE_RATE = 479  # shield recharge time (ms)
 
+# Repair module output attributes
+ATTR_ARMOR_DAMAGE_AMOUNT = 84    # armor HP per cycle
+ATTR_SHIELD_BONUS = 68           # shield HP per cycle (shield boosters)
+
 # Weapon / damage attributes
 ATTR_DAMAGE_MULTIPLIER = 64    # turret/drone damage multiplier
 ATTR_RATE_OF_FIRE = 51         # turret/launcher ROF (ms) — "speed" attribute

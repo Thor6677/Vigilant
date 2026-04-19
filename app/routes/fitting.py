@@ -130,7 +130,8 @@ async def fitting_stats(
         return HTMLResponse("<div class='b-empty'>Select a ship to see stats</div>")
 
     items = body.get("items", [])
-    stats = await calculate_fitting_stats(db, int(ship_type_id), items)
+    damage_profile = body.get("damage_profile", "uniform")
+    stats = await calculate_fitting_stats(db, int(ship_type_id), items, damage_profile)
 
     # Get ship name
     ship_name = await sde.type_id_to_name(db, int(ship_type_id))

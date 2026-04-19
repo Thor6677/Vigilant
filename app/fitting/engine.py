@@ -16,6 +16,8 @@ import math
 from collections import defaultdict
 
 from sqlalchemy import select, text
+
+from app.fitting.cap_sim import simulate_cap
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.sde_models import (
@@ -43,6 +45,7 @@ from app.fitting.constants import (
     OVERLOAD_ATTR_MAP,
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
     ATTR_MISSILE_DAMAGE_MULTIPLIER, ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS,
+    ATTR_ARMOR_DAMAGE_AMOUNT, ATTR_SHIELD_BONUS,
 )
 
 # Default skill level assumption
@@ -482,8 +485,27 @@ async def get_ship_stats(db: AsyncSession, ship_type_id: int) -> dict:
     return stats
 
 
+# Built-in damage profiles: (em, thermal, kinetic, explosive) fractions
+DAMAGE_PROFILES = {
+    "uniform": (0.25, 0.25, 0.25, 0.25),
+    "em": (1.0, 0.0, 0.0, 0.0),
+    "thermal": (0.0, 1.0, 0.0, 0.0),
+    "kinetic": (0.0, 0.0, 1.0, 0.0),
+    "explosive": (0.0, 0.0, 0.0, 1.0),
+    "guristas": (0.0, 0.18, 0.82, 0.0),
+    "serpentis": (0.0, 0.55, 0.45, 0.0),
+    "angel": (0.0, 0.0, 0.08, 0.92),
+    "blood": (0.50, 0.48, 0.0, 0.02),
+    "sansha": (0.53, 0.47, 0.0, 0.0),
+    "sleeper": (0.22, 0.36, 0.28, 0.14),
+    "triglavian": (0.0, 0.65, 0.0, 0.35),
+    "drifter": (0.0, 0.0, 0.0, 1.0),
+}
+
+
 async def calculate_fitting_stats(
-    db: AsyncSession, ship_type_id: int, items: list[dict]
+    db: AsyncSession, ship_type_id: int, items: list[dict],
+    damage_profile: str = "uniform",
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
 
@@ -936,50 +958,64 @@ async def calculate_fitting_stats(
     shield_hp = mattr(ATTR_SHIELD_HP)
     armor_hp = mattr(ATTR_ARMOR_HP)
     hull_hp = mattr(ATTR_HP)
-    shield_ehp = _calc_ehp(shield_hp, shield_em_res, shield_therm_res, shield_kin_res, shield_expl_res)
-    armor_ehp = _calc_ehp(armor_hp, armor_em_res, armor_therm_res, armor_kin_res, armor_expl_res)
-    hull_ehp = _calc_ehp(hull_hp, hull_em_res, hull_therm_res, hull_kin_res, hull_expl_res)
+    dmg_prof = DAMAGE_PROFILES.get(damage_profile, DAMAGE_PROFILES["uniform"])
+    shield_ehp = _calc_ehp(shield_hp, shield_em_res, shield_therm_res, shield_kin_res, shield_expl_res, dmg_prof)
+    armor_ehp = _calc_ehp(armor_hp, armor_em_res, armor_therm_res, armor_kin_res, armor_expl_res, dmg_prof)
+    hull_ehp = _calc_ehp(hull_hp, hull_em_res, hull_therm_res, hull_kin_res, hull_expl_res, dmg_prof)
     total_ehp = shield_ehp + armor_ehp + hull_ehp
 
-    # Cap stability — peak recharge vs total module drain
+    # ── Capacitor simulation (discrete-event) ──────────────────────────
     cap_capacity = mattr(ATTR_CAPACITOR)
     cap_recharge_ms = mattr(ATTR_CAP_RECHARGE)  # in ms
-    cap_recharge_s = cap_recharge_ms / 1000 if cap_recharge_ms else 0
-    peak_cap_recharge = _calc_peak_recharge(cap_capacity, cap_recharge_s)
 
-    # Sum cap drain from all active (non-drone, non-cargo) modules
-    total_cap_drain = 0.0
+    # Build module drain list for the simulator
+    cap_sim_modules: list[dict] = []
     for item in fitted_items:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
         mod_attrs = module_attrs_map.get(tid, {})
         cap_need = mod_attrs.get(ATTR_CAPACITOR_NEED, 0)
-        duration = mod_attrs.get(ATTR_DURATION, 0)
-        if cap_need > 0 and duration > 0:
-            total_cap_drain += (cap_need / (duration / 1000)) * qty
+        duration = mod_attrs.get(ATTR_DURATION, 0) or mod_attrs.get(ATTR_RATE_OF_FIRE, 0)
+        if cap_need != 0 and duration > 0:
+            si = slot_info.get(tid, {})
+            cap_sim_modules.append({
+                "cap_need": cap_need,
+                "duration_ms": duration,
+                "count": qty,
+                "stagger": not si.get("is_turret", False),  # turrets fire together
+            })
 
-    cap_stable = peak_cap_recharge >= total_cap_drain
-    if cap_stable and total_cap_drain > 0:
-        # Find equilibrium percentage where recharge = drain
-        cap_stable_pct = _find_cap_stable_pct(cap_capacity, cap_recharge_s, total_cap_drain)
-    elif total_cap_drain == 0:
-        cap_stable_pct = 100.0
-    else:
-        cap_stable_pct = 0.0
-
-    # Estimate time until cap empty when unstable
-    cap_lasts_s = 0.0
-    if not cap_stable and total_cap_drain > 0:
-        # Simple estimate: cap / (drain - avg_recharge)
-        avg_recharge = cap_capacity / cap_recharge_s if cap_recharge_s else 0
-        net_drain = total_cap_drain - avg_recharge
-        if net_drain > 0:
-            cap_lasts_s = cap_capacity / net_drain
+    cap_result = simulate_cap(cap_capacity, cap_recharge_ms, cap_sim_modules)
+    cap_stable = cap_result["stable"]
+    cap_stable_pct = cap_result["stable_pct"]
+    cap_lasts_s = cap_result["time_to_empty_s"]
+    peak_cap_recharge = cap_result["peak_recharge"]
+    total_cap_drain = cap_result["total_drain"]
 
     # Shield recharge (passive tank)
     shield_recharge_ms = mattr(ATTR_SHIELD_RECHARGE_RATE, 0)
     shield_recharge_s = shield_recharge_ms / 1000 if shield_recharge_ms else 0
     peak_shield_recharge = _calc_peak_recharge(shield_hp, shield_recharge_s)
+
+    # ── Active tank (rep/s) ──────────────────────────────────────────────
+    armor_rep_rate = 0.0
+    shield_rep_rate = 0.0
+    for item in fitted_items:
+        tid = item["type_id"]
+        qty = item.get("quantity", 1)
+        mod_attrs = module_attrs_map.get(tid, {})
+        duration = mod_attrs.get(ATTR_DURATION, 0)
+        if duration <= 0:
+            continue
+        cycle_s = duration / 1000.0
+        # Armor repair modules have armorDamageAmount (attr 84)
+        armor_rep = mod_attrs.get(ATTR_ARMOR_DAMAGE_AMOUNT, 0)
+        if armor_rep > 0:
+            armor_rep_rate += (armor_rep / cycle_s) * qty
+        # Shield boost modules have shieldBonus (attr 68)
+        shield_rep = mod_attrs.get(ATTR_SHIELD_BONUS, 0)
+        if shield_rep > 0:
+            shield_rep_rate += (shield_rep / cycle_s) * qty
 
     # ── Step 6: DPS calculation ──────────────────────────────────────────
     # charge_attrs_map was built early and modified by skill/hull bonus steps.
@@ -1101,6 +1137,10 @@ async def calculate_fitting_stats(
         "max_locked_targets": int(mattr(SHIP_STAT_ATTRS["max_locked_targets"])),
         "scan_resolution": round(mattr(SHIP_STAT_ATTRS["scan_resolution"]), 1),
         "sig_radius": round(mattr(SHIP_STAT_ATTRS["sig_radius"]), 1),
+        "lock_time": round(_calc_lock_time(
+            mattr(SHIP_STAT_ATTRS["scan_resolution"]),
+            mattr(SHIP_STAT_ATTRS["sig_radius"]),
+        ), 1),
         "cargo_capacity": round(mattr(SHIP_STAT_ATTRS["cargo_capacity"]), 1),
         "hi_slots": int(mattr(SHIP_STAT_ATTRS["hi_slots"])),
         "med_slots": int(mattr(SHIP_STAT_ATTRS["med_slots"])),
@@ -1126,6 +1166,9 @@ async def calculate_fitting_stats(
         "cap_lasts_s": round(cap_lasts_s),
         # Shield passive recharge
         "peak_shield_recharge": round(peak_shield_recharge, 1),
+        # Active tank
+        "armor_rep_rate": round(armor_rep_rate, 1),
+        "shield_rep_rate": round(shield_rep_rate, 1),
         # DPS
         "weapon_dps": round(weapon_dps, 1),
         "drone_dps": round(drone_dps, 1),
@@ -1143,23 +1186,44 @@ def _calc_align_time(inertia: float, mass: float) -> float:
     return -math.log(0.25) * inertia * mass / 1_000_000
 
 
+def _calc_lock_time(scan_resolution: float, target_sig_radius: float) -> float:
+    """Time to lock a target with the given sig radius.
+
+    Formula: 40000 / (scanResolution * asinh(sigRadius)^2), capped at 30 min.
+    Uses own sig radius as default target (self-lock estimate).
+    """
+    if scan_resolution <= 0 or target_sig_radius <= 0:
+        return 0
+    asinh_sig = math.asinh(target_sig_radius)
+    if asinh_sig <= 0:
+        return 0
+    lock_time = 40000.0 / (scan_resolution * asinh_sig ** 2)
+    return min(lock_time, 1800.0)  # cap at 30 minutes
+
+
 def _resonance_to_resist(resonance: float) -> float:
     """Convert damage resonance (0-1) to resist percentage (0-100)."""
     return round((1.0 - resonance) * 100, 1)
 
 
-def _calc_ehp(hp: float, em_res: float, therm_res: float, kin_res: float, expl_res: float) -> float:
-    """Calculate EHP for one layer assuming uniform damage (25/25/25/25).
+def _calc_ehp(
+    hp: float, em_res: float, therm_res: float, kin_res: float, expl_res: float,
+    damage_profile: tuple[float, float, float, float] = (0.25, 0.25, 0.25, 0.25),
+) -> float:
+    """Calculate EHP for one layer against a damage profile.
 
     Resonance is 0-1 where 0 = 100% resist, 1 = 0% resist.
-    EHP = HP / avg(resonances)
+    EHP = HP / weighted_avg(resonances, damage_profile)
+
+    damage_profile is (em, therm, kin, expl) fractions summing to 1.0.
     """
     if hp <= 0:
         return 0
-    avg_res = (em_res + therm_res + kin_res + expl_res) / 4
-    if avg_res <= 0:
+    em_w, th_w, ki_w, ex_w = damage_profile
+    weighted_res = em_res * em_w + therm_res * th_w + kin_res * ki_w + expl_res * ex_w
+    if weighted_res <= 0:
         return hp * 1000  # near-infinite EHP at 100% resist
-    return hp / avg_res
+    return hp / weighted_res
 
 
 def _calc_peak_recharge(capacity: float, recharge_time_s: float) -> float:
