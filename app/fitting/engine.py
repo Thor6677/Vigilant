@@ -275,7 +275,13 @@ async def _apply_ship_hull_bonuses(
         )
         for row in name_result.fetchall():
             name = row.attribute_name or ""
-            if name.startswith("shipBonus") or name.startswith("eliteBonus"):
+            # Per-level attrs: shipBonusCBC1, eliteBonusGunship2, etc.
+            # Role attrs contain "Role": shipBonusRole7, eliteBonusViolatorsRole1
+            is_per_level_name = (
+                (name.startswith("shipBonus") or name.startswith("eliteBonus"))
+                and "Role" not in name
+            )
+            if is_per_level_name:
                 per_level_attr_ids.add(row.attribute_id)
 
     result = await db.execute(
