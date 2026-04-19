@@ -15,6 +15,7 @@ from app.routes.character_detail import router as character_detail_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
+from app.routes.industry_jobs import router as industry_jobs_router
 from app.routes.pi import router as pi_router
 from app.routes.journal import router as journal_router
 from app.routes.skills import router as skills_router
@@ -64,6 +65,7 @@ app.include_router(character_detail_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
+app.include_router(industry_jobs_router)
 app.include_router(pi_router)
 app.include_router(journal_router)
 app.include_router(skills_router)

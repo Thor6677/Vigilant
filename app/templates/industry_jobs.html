@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}INDUSTRY JOBS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Jobs</span></div>
+{% endblock %}
+
+{% block head %}
+<style>
+.ij-summary {
+    display:flex; flex-wrap:wrap; gap:0.5rem 1.25rem;
+    padding:0.6rem 0.9rem;
+    border:1px solid var(--border);
+    background:var(--surface);
+    margin-bottom:0.75rem;
+    font-size:11px;
+}
+.ij-stat { display:flex; align-items:baseline; gap:0.4rem; }
+.ij-stat-label { color:var(--muted); font-size:9px; letter-spacing:0.12em; text-transform:uppercase; }
+.ij-stat-value { color:var(--accent); font-weight:600; }
+
+.ij-filters { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem; font-size:10px; }
+.ij-chip {
+    padding:3px 10px; border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; background:var(--surface); font-family:inherit; font-size:10px;
+}
+.ij-chip:hover { color:var(--text); border-color:var(--muted); }
+.ij-chip.is-active { color:var(--accent); border-color:var(--accent); background:rgba(200,169,81,0.07); }
+
+.ij-table { width:100%; border-collapse:collapse; font-size:11px; }
+.ij-table thead th {
+    text-align:left; padding:0.4rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+    position:sticky; top:52px; z-index:2;
+}
+.ij-table tbody td {
+    padding:0.4rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text);
+    vertical-align:middle;
+}
+.ij-table tbody tr:hover { background:rgba(200,169,81,0.04); }
+.ij-row-product { display:flex; align-items:center; gap:0.5rem; min-width:0; }
+.ij-row-product img { width:24px; height:24px; border:1px solid var(--border); flex-shrink:0; }
+.ij-product-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ij-sub { font-size:9px; color:var(--muted); }
+
+.ij-time-ready { color:var(--success); font-weight:600; }
+.ij-time-soon  { color:var(--warning, #e5c07b); font-weight:600; }
+.ij-time-normal { color:var(--text); }
+
+.ij-status {
+    display:inline-block; padding:1px 6px; border:1px solid var(--border);
+    font-size:9px; letter-spacing:0.08em; text-transform:uppercase;
+}
+.ij-status.is-ready   { color:var(--success); border-color:var(--success); }
+.ij-status.is-active  { color:var(--accent);  border-color:var(--accent); }
+.ij-status.is-paused  { color:var(--muted);   border-color:var(--border); }
+.ij-status.is-cancelled, .ij-status.is-reverted, .ij-status.is-delivered { color:var(--muted); border-color:var(--border); }
+
+.ij-source-kind { font-size:9px; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; }
+.ij-source-name { font-size:11px; color:var(--text); }
+
+.ij-warnings {
+    margin-bottom:0.75rem; padding:0.5rem 0.75rem;
+    border:1px solid var(--border); background:var(--surface);
+    font-size:10px; color:var(--muted);
+}
+.ij-warnings b { color:var(--warning, #e5c07b); font-weight:600; }
+
+@media (max-width:900px) {
+    .ij-table thead th:nth-child(5), .ij-table tbody td:nth-child(5),  /* installer */
+    .ij-table thead th:nth-child(6), .ij-table tbody td:nth-child(6) { /* location */
+        display:none;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Industry Jobs</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            Active jobs across {{ char_count_with_scope }} character{{ '' if char_count_with_scope == 1 else 's' }}
+            and {{ corp_count_with_scope }} corporation{{ '' if corp_count_with_scope == 1 else 's' }}
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+        {% if include_completed %}
+        <a href="?" class="ij-chip is-active" style="text-decoration:none;">Including completed &times;</a>
+        {% else %}
+        <a href="?include_completed=1" class="ij-chip" style="text-decoration:none;">+ Include completed</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if warnings %}
+<div class="ij-warnings">
+    <b>Warnings:</b>
+    {% for w in warnings %}<span>{{ w }}{% if not loop.last %} &middot; {% endif %}</span>{% endfor %}
+</div>
+{% endif %}
+
+<div class="ij-summary">
+    <div class="ij-stat"><span class="ij-stat-label">Total</span><span class="ij-stat-value">{{ total }}</span></div>
+    {% if counts_by_source.character %}
+    <div class="ij-stat"><span class="ij-stat-label">Characters</span><span class="ij-stat-value">{{ counts_by_source.character }}</span></div>
+    {% endif %}
+    {% if counts_by_source.corporation %}
+    <div class="ij-stat"><span class="ij-stat-label">Corporations</span><span class="ij-stat-value">{{ counts_by_source.corporation }}</span></div>
+    {% endif %}
+    {% for status_name, n in counts_by_status.items() %}
+    <div class="ij-stat"><span class="ij-stat-label">{{ status_name }}</span><span class="ij-stat-value">{{ n }}</span></div>
+    {% endfor %}
+</div>
+
+{% if counts_by_activity %}
+<div class="ij-filters">
+    <button class="ij-chip is-active" data-filter-activity="all">All activities ({{ total }})</button>
+    {% for label, n in counts_by_activity %}
+    <button class="ij-chip" data-filter-activity="{{ label }}">{{ label }} ({{ n }})</button>
+    {% endfor %}
+    <span style="flex:1;"></span>
+    <button class="ij-chip is-active" data-filter-source="all">All sources</button>
+    {% if counts_by_source.character %}<button class="ij-chip" data-filter-source="character">Character only</button>{% endif %}
+    {% if counts_by_source.corporation %}<button class="ij-chip" data-filter-source="corporation">Corp only</button>{% endif %}
+</div>
+{% endif %}
+
+{% if rows %}
+<div class="b-panel" style="overflow-x:auto;">
+    <table class="ij-table">
+        <thead>
+            <tr>
+                <th style="width:28%;">Product</th>
+                <th>Activity</th>
+                <th style="text-align:right;">Runs</th>
+                <th>Source</th>
+                <th>Installer</th>
+                <th>Location</th>
+                <th>Remaining</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr data-activity="{{ r.activity_label }}" data-source="{{ r.source_kind }}">
+                <td>
+                    <div class="ij-row-product">
+                        {% if r.product_id %}
+                        <img src="https://images.evetech.net/types/{{ r.product_id }}/icon?size=32"
+                             onerror="this.style.display='none'" alt="">
+                        {% endif %}
+                        <div style="min-width:0;">
+                            <div class="ij-product-name">{{ r.product_name }}</div>
+                            {% if r.blueprint_name and r.blueprint_name != r.product_name %}
+                            <div class="ij-sub">from {{ r.blueprint_name }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </td>
+                <td>{{ r.activity_short }}</td>
+                <td style="text-align:right;">{{ r.runs }}</td>
+                <td>
+                    <div class="ij-source-kind">{{ r.source_kind|capitalize }}</div>
+                    <div class="ij-source-name">{{ r.source_name }}</div>
+                </td>
+                <td>{{ r.installer_name or '—' }}</td>
+                <td title="{{ r.location_id or '' }}">{{ r.location_name or '—' }}</td>
+                <td class="ij-time-{{ r.urgency }}" title="{{ r.end_iso or '' }}">{{ r.time_remaining }}</td>
+                <td><span class="ij-status is-{{ r.status }}">{{ r.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="b-empty" style="padding:2rem;text-align:center;font-size:11px;color:var(--muted);">
+    {% if char_count_with_scope == 0 and corp_count_with_scope == 0 %}
+    No characters have the industry-jobs scope granted.
+    Authorize a character with <code>esi-industry.read_character_jobs.v1</code>
+    (and <code>esi-industry.read_corporation_jobs.v1</code> for corp jobs) to populate this page.
+    {% else %}
+    No {{ 'jobs' if include_completed else 'active jobs' }} found.
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+/* Client-side filter chips (activity + source). */
+(function() {
+    var activity = 'all';
+    var source = 'all';
+    var chips = document.querySelectorAll('.ij-chip[data-filter-activity], .ij-chip[data-filter-source]');
+    var rows = document.querySelectorAll('.ij-table tbody tr');
+
+    function apply() {
+        rows.forEach(function(tr) {
+            var okA = activity === 'all' || tr.dataset.activity === activity;
+            var okS = source === 'all' || tr.dataset.source === source;
+            tr.style.display = (okA && okS) ? '' : 'none';
+        });
+    }
+    chips.forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            var key = chip.dataset.filterActivity !== undefined ? 'activity' : 'source';
+            var val = chip.dataset.filterActivity !== undefined ? chip.dataset.filterActivity : chip.dataset.filterSource;
+            var group = chip.dataset.filterActivity !== undefined ? 'data-filter-activity' : 'data-filter-source';
+            document.querySelectorAll('.ij-chip[' + group + ']').forEach(function(c) {
+                c.classList.remove('is-active');
+            });
+            chip.classList.add('is-active');
+            if (key === 'activity') activity = val; else source = val;
+            apply();
+        });
+    });
+})();
+</script>
+{% endblock %}
