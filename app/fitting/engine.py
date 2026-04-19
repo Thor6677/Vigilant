@@ -630,6 +630,16 @@ async def calculate_fitting_stats(
 
         # 3. Apply ItemModifier bonuses directly to ship_attrs
         #    (CPU, PG, drone BW, cap, velocity, agility, etc.)
+        #
+        #    Modifiers are accumulated by (target_attr, operator) first, then
+        #    applied in dogma operator order: MOD_ADD before POST_MUL before
+        #    POST_PERCENT.  This ensures correct results regardless of
+        #    subsystem iteration order.
+        #    Algorithm reference: pyfa eos/modifiedAttributeDict.py:308-416
+        #    (__calculateValue — accumulates into operator-type buckets, applies
+        #    in fixed order); theorycrafter FittingEngine.kt:3490-3582
+        #    (iterates Operation.entries in enum declaration order).
+        sub_ship_mods: dict[int, list[tuple[int, float]]] = defaultdict(list)
         for item in fitted_items:
             if item.get("slot") != "subsystem":
                 continue
@@ -643,7 +653,26 @@ async def calculate_fitting_stats(
                     continue
                 if mod["modifying_attribute_id"] in sub_per_level_ids:
                     src_val *= DEFAULT_SKILL_LEVEL
-                _apply_modifier(ship_attrs, mod["modified_attribute_id"], mod["operator"], src_val)
+                sub_ship_mods[mod["modified_attribute_id"]].append(
+                    (mod["operator"], src_val)
+                )
+
+        # Apply accumulated modifiers in operator order per attribute
+        for attr_id, mods in sub_ship_mods.items():
+            current = ship_attrs.get(attr_id, 0)
+            adds = [v for op, v in mods if op == OP_MOD_ADD]
+            post_muls = [v for op, v in mods if op == OP_POST_MUL]
+            post_pcts = [v for op, v in mods if op == OP_POST_PERCENT]
+            pre_assigns = [v for op, v in mods if op == OP_PRE_ASSIGN]
+            if pre_assigns:
+                current = pre_assigns[-1]
+            for a in adds:
+                current += a
+            for m in post_muls:
+                current *= m
+            for p in post_pcts:
+                current *= (1 + p / 100)
+            ship_attrs[attr_id] = current
 
     # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
     # Some modules (Bastion, Siege) have effects that modify OTHER modules
