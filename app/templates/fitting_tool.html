@@ -9,6 +9,7 @@
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <button onclick="showImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Import EFT</button>
+        <button onclick="showCharImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Import from Character</button>
         <button onclick="exportEFT()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);" id="btn-export">Export EFT</button>
         <button onclick="saveFitting()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);" id="btn-save">Save</button>
         <button onclick="clearFitting()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--danger);color:var(--danger);">Clear</button>
@@ -133,27 +134,85 @@
         <div class="b-empty">Select a ship to see stats</div>
     </div>
 
-    {# Saved fittings #}
-    {% if saved_fittings %}
-    <div class="b-section" style="margin-top:1.5rem;">
-        <div class="b-section-head"><span class="b-label">Saved Fittings</span></div>
-        {% for fit in saved_fittings %}
-        <div class="b-panel" style="margin-bottom:0.25rem;padding:0.35rem 0.75rem;display:flex;justify-content:space-between;align-items:center;">
-            <div style="cursor:pointer;flex:1;" onclick="loadFitting({{ fit.id }})">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                    <img src="https://images.evetech.net/types/{{ fit.ship_type_id }}/icon?size=32"
-                         style="width:20px;height:20px;border:1px solid var(--border);"
-                         onerror="this.style.display='none'">
-                    <span style="font-size:11px;color:var(--text);">{{ fit.name }}</span>
-                </div>
-            </div>
-            <button onclick="deleteFitting({{ fit.id }}, this)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.25rem;" title="Delete">&times;</button>
-        </div>
+    {# Saved fittings (with nested folders) #}
+    {% if saved_fittings or folders %}
+    {# Reusable move-to-folder dropdown — rendered once, moved into place on click #}
+    <datalist id="fit-folder-options">
+        {% for fp in folder_paths %}
+        <option value="{{ fp.id }}">{{ fp.path }}</option>
         {% endfor %}
+    </datalist>
+
+    {% macro fit_row(fit) %}
+    <div class="b-panel" style="margin-bottom:0.2rem;padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.3rem;">
+        <div style="cursor:pointer;flex:1;display:flex;align-items:center;gap:0.5rem;min-width:0;" onclick="loadFitting({{ fit.id }})">
+            <img src="https://images.evetech.net/types/{{ fit.ship_type_id }}/icon?size=32"
+                 style="width:18px;height:18px;border:1px solid var(--border);flex-shrink:0;"
+                 onerror="this.style.display='none'">
+            <span style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ fit.name }}</span>
+        </div>
+        <button onclick="moveFit({{ fit.id }}, this)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.2rem;" title="Move to folder">&#8644;</button>
+        <button onclick="deleteFitting({{ fit.id }}, this)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.15rem;" title="Delete">&times;</button>
+    </div>
+    {% endmacro %}
+
+    {% macro folder_tree(parent_id, depth) %}
+    {% for f in folder_children.get(parent_id, [])|sort(attribute='name') %}
+    <div data-folder-id="{{ f.id }}" data-folder-parent="{{ f.parent_id or '' }}" style="margin-left:{{ depth * 10 }}px;">
+        <div class="fit-folder-row" data-folder-name="{{ f.name }}" style="display:flex;align-items:center;gap:0.3rem;padding:0.25rem 0.35rem;cursor:pointer;border-bottom:1px dashed rgba(255,255,255,0.04);"
+             onclick="toggleFolder({{ f.id }}, this)">
+            <span class="fit-folder-caret" style="font-size:9px;color:var(--muted);width:10px;display:inline-block;">&#9656;</span>
+            <span style="flex:1;font-size:10px;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ f.name }}</span>
+            <button onclick="event.stopPropagation();createFolder({{ f.id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.15rem;" title="New subfolder">+</button>
+            <button onclick="event.stopPropagation();renameFolder({{ f.id }}, '{{ f.name | replace("'", "\\'") }}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.15rem;" title="Rename">&#9998;</button>
+            <button onclick="event.stopPropagation();deleteFolder({{ f.id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;" title="Delete folder">&times;</button>
+        </div>
+        <div class="fit-folder-contents" id="folder-contents-{{ f.id }}" style="display:none;">
+            {{ folder_tree(f.id, depth + 1) }}
+            {% for fit in fits_by_folder.get(f.id, []) %}
+            {{ fit_row(fit) }}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+    {% endmacro %}
+
+    <div class="b-section" style="margin-top:1.5rem;">
+        <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Saved Fittings</span>
+            <button onclick="createFolder(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.25rem;" title="New folder">+ Folder</button>
+        </div>
+        <div id="fit-tree" style="padding:0.25rem 0;">
+            {{ folder_tree(None, 0) }}
+            {% for fit in fits_by_folder.get(None, []) %}
+                {{ fit_row(fit) }}
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 </div>
 
+</div>
+
+{# ── Module Info Modal ───────────────────────────────────────────────────── #}
+<div id="info-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;" onclick="if(event.target===this)hideInfoModal()">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:520px;width:90%;margin:auto;position:relative;top:12%;max-height:80vh;overflow-y:auto;">
+        <button onclick="hideInfoModal()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <div id="info-modal-body">
+            <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
+        </div>
+    </div>
+</div>
+
+{# ── Character Fittings Import Modal ─────────────────────────────────────── #}
+<div id="charimport-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;" onclick="if(event.target===this)hideCharImportModal()">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:560px;width:92%;margin:auto;position:relative;top:10%;max-height:82vh;overflow-y:auto;">
+        <button onclick="hideCharImportModal()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import from Character</div>
+        <div id="charimport-body">
+            <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
+        </div>
+    </div>
 </div>
 
 {# ── EFT Import Modal ────────────────────────────────────────────────────── #}
@@ -445,8 +504,9 @@ function renderSlots() {
                 '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
-                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
                 '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + chargeInfo + '</span>' +
+                '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
                 chargeBtn +
                 '<button onclick="removeItem(' + globalIdx + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
                 '</div>';
@@ -469,8 +529,9 @@ function renderSlots() {
     droneItems.forEach(function(item) {
         var globalIdx = state.items.indexOf(item);
         droneContainer.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
-            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
             '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + '</span>' +
+            '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
             '<div style="display:flex;align-items:center;gap:0.25rem;">' +
             '<button onclick="changeDroneQty(' + globalIdx + ', -1)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
             '<span style="font-size:10px;color:var(--accent);min-width:16px;text-align:center;">' + item.quantity + '</span>' +
@@ -495,6 +556,270 @@ function recalcStats() {
     .then(function(r) { return r.text(); })
     .then(function(html) {
         document.getElementById('stats-panel').innerHTML = html;
+    });
+}
+
+/* ── Folder tree ──────────────────────────────────────────────────────── */
+var FOLDER_OPEN_KEY = 'vigilant_fit_folder_open';
+function getOpenFolders() {
+    try { return JSON.parse(localStorage.getItem(FOLDER_OPEN_KEY) || '{}'); }
+    catch(e) { return {}; }
+}
+function setFolderOpen(id, open) {
+    var m = getOpenFolders();
+    if (open) m[id] = 1; else delete m[id];
+    localStorage.setItem(FOLDER_OPEN_KEY, JSON.stringify(m));
+}
+function toggleFolder(id, headerEl) {
+    var contents = document.getElementById('folder-contents-' + id);
+    if (!contents) return;
+    var isOpen = contents.style.display !== 'none';
+    contents.style.display = isOpen ? 'none' : '';
+    setFolderOpen(id, !isOpen);
+    var caret = headerEl.querySelector('.fit-folder-caret');
+    if (caret) caret.innerHTML = isOpen ? '&#9656;' : '&#9662;';
+}
+/* Apply saved open state on page load */
+(function applyFolderOpenState() {
+    document.addEventListener('DOMContentLoaded', function() {
+        var open = getOpenFolders();
+        Object.keys(open).forEach(function(id) {
+            var contents = document.getElementById('folder-contents-' + id);
+            if (!contents) return;
+            contents.style.display = '';
+            var row = contents.previousElementSibling;
+            if (row) {
+                var caret = row.querySelector('.fit-folder-caret');
+                if (caret) caret.innerHTML = '&#9662;';
+            }
+        });
+    });
+})();
+
+function createFolder(parentId) {
+    var name = prompt(parentId ? 'New subfolder name:' : 'New folder name:');
+    if (!name || !name.trim()) return;
+    fetch('/tools/fitting/folders', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name.trim(), parent_id: parentId})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        if (parentId) setFolderOpen(parentId, true);
+        window.location.reload();
+    });
+}
+
+function renameFolder(folderId, currentName) {
+    var name = prompt('Rename folder:', currentName);
+    if (!name || !name.trim() || name === currentName) return;
+    fetch('/tools/fitting/folders/' + folderId, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name.trim()})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        window.location.reload();
+    });
+}
+
+function deleteFolder(folderId) {
+    if (!confirm('Delete this folder?')) return;
+    fetch('/tools/fitting/folders/' + folderId, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { alert(data.error); return; }
+            window.location.reload();
+        });
+}
+
+function moveFit(fitId, btnEl) {
+    /* Build a list from the datalist */
+    var dl = document.getElementById('fit-folder-options');
+    var options = [{id: '', label: '(Root)'}];
+    if (dl) {
+        Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+            options.push({id: opt.value, label: opt.textContent});
+        });
+    }
+    var msg = 'Move to folder:\n0. (Root)';
+    for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+    msg += '\n\nEnter number:';
+    var choice = prompt(msg, '0');
+    if (choice === null) return;
+    var idx = parseInt(choice, 10);
+    if (isNaN(idx) || idx < 0 || idx >= options.length) { alert('Invalid choice'); return; }
+    var target = options[idx];
+    fetch('/tools/fitting/' + fitId + '/folder', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({folder_id: target.id ? parseInt(target.id, 10) : null})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        window.location.reload();
+    });
+}
+
+/* ── Module Info Modal ─────────────────────────────────────────────────── */
+function showModuleInfo(typeId) {
+    if (!typeId) return;
+    var modal = document.getElementById('info-modal');
+    var body = document.getElementById('info-modal-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>';
+    modal.style.display = 'block';
+    fetch('/tools/fitting/info/' + typeId)
+        .then(function(r) { return r.text(); })
+        .then(function(html) { body.innerHTML = html; })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--danger);">Failed to load info.</div>';
+        });
+}
+
+function hideInfoModal() {
+    document.getElementById('info-modal').style.display = 'none';
+}
+
+/* ── Character Fitting Import ─────────────────────────────────────────── */
+function showCharImportModal() {
+    var modal = document.getElementById('charimport-modal');
+    var body = document.getElementById('charimport-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading characters...</div>';
+    modal.style.display = 'block';
+    fetch('/tools/fitting/import-character/characters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--danger);">' + data.error + '</div>';
+                return;
+            }
+            if (!data.characters || !data.characters.length) {
+                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);">No characters with the <code>esi-fittings.read_fittings.v1</code> scope. Re-authorize a character from the <a href="/dashboard" style="color:var(--accent);">dashboard</a>.</div>';
+                return;
+            }
+            var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">Pick a character:</div>';
+            data.characters.forEach(function(c) {
+                html += '<button onclick="loadCharFittings(' + c.id + ', this)" class="b-btn" style="display:block;width:100%;padding:6px 12px;margin-bottom:4px;font-size:11px;text-align:left;background:var(--bg);border:1px solid var(--border);color:var(--text);cursor:pointer;">' +
+                    '<img src="https://images.evetech.net/characters/' + c.id + '/portrait?size=32" style="width:20px;height:20px;vertical-align:middle;margin-right:0.5rem;border:1px solid var(--border);">' +
+                    c.name.replace(/</g, '&lt;') +
+                    '</button>';
+            });
+            body.innerHTML = html;
+        })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">Failed to load characters.</div>';
+        });
+}
+
+function hideCharImportModal() {
+    document.getElementById('charimport-modal').style.display = 'none';
+}
+
+function loadCharFittings(charId, btnEl) {
+    var body = document.getElementById('charimport-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading fittings...</div>';
+    fetch('/tools/fitting/import-character/' + charId + '/fittings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">' + data.error + '</div>';
+                return;
+            }
+            if (!data.fittings || !data.fittings.length) {
+                body.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">No in-game fittings found for this character.</div>';
+                return;
+            }
+            var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">' + data.fittings.length + ' fitting(s). <b>Load</b> opens in builder; <b>Import</b> saves a copy.</div>';
+            /* Stash EFT text on window for per-row access to avoid monster inline JSON */
+            window._charFittings = {};
+            data.fittings.forEach(function(f, i) {
+                window._charFittings[i] = f;
+                var safeName = (f.name || 'Unnamed').replace(/</g, '&lt;');
+                var safeShip = (f.ship_name || '').replace(/</g, '&lt;');
+                html += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);">' +
+                    '<img src="https://images.evetech.net/types/' + f.ship_type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+                    '<div style="flex:1;min-width:0;">' +
+                      '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + safeName + '</div>' +
+                      '<div style="font-size:9px;color:var(--muted);">' + safeShip + '</div>' +
+                    '</div>' +
+                    '<button onclick="charImportLoad(' + i + ')" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Load</button>' +
+                    '<button onclick="charImportSave(' + i + ')" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);">Import</button>' +
+                '</div>';
+            });
+            body.innerHTML = html;
+        })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">Failed to load fittings.</div>';
+        });
+}
+
+function _parseEftForCharImport(idx, cb) {
+    var f = window._charFittings && window._charFittings[idx];
+    if (!f) return;
+    fetch('/tools/fitting/import-eft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({eft: f.eft})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        cb(f, data);
+    });
+}
+
+function charImportLoad(idx) {
+    _parseEftForCharImport(idx, function(f, data) {
+        state.shipTypeId = data.ship_type_id;
+        state.shipName = data.ship_name;
+        state.fittingName = f.name || data.fitting_name || 'Unnamed';
+        state.fittingId = null;
+        state.items = data.items;
+        saveState();
+        applyState();
+        hideCharImportModal();
+    });
+}
+
+function charImportSave(idx) {
+    var dl = document.getElementById('fit-folder-options');
+    var folderId = null;
+    if (dl && dl.querySelectorAll('option').length > 0) {
+        var options = [{id: '', label: '(Root)'}];
+        Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+            options.push({id: opt.value, label: opt.textContent});
+        });
+        var msg = 'Save to folder:\n0. (Root)';
+        for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+        msg += '\n\nEnter number:';
+        var choice = prompt(msg, '0');
+        if (choice === null) return;
+        var ix = parseInt(choice, 10);
+        if (isNaN(ix) || ix < 0 || ix >= options.length) { alert('Invalid choice'); return; }
+        if (options[ix].id) folderId = parseInt(options[ix].id, 10);
+    }
+    _parseEftForCharImport(idx, function(f, data) {
+        fetch('/tools/fitting/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                ship_type_id: data.ship_type_id,
+                name: f.name || data.fitting_name || 'Unnamed',
+                items: data.items,
+                folder_id: folderId
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(resp) {
+            if (resp.error) { alert(resp.error); return; }
+            hideCharImportModal();
+            window.location.reload();
+        });
     });
 }
 
@@ -569,15 +894,36 @@ function saveFitting() {
     var name = document.getElementById('fitting-name').value.trim() || 'Unnamed';
     state.fittingName = name;
 
+    var body = {
+        ship_type_id: state.shipTypeId,
+        name: name,
+        items: state.items,
+        fitting_id: state.fittingId
+    };
+
+    /* For new fits only, let user pick a folder */
+    if (!state.fittingId) {
+        var dl = document.getElementById('fit-folder-options');
+        if (dl && dl.querySelectorAll('option').length > 0) {
+            var options = [{id: '', label: '(Root)'}];
+            Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+                options.push({id: opt.value, label: opt.textContent});
+            });
+            var msg = 'Save in folder:\n0. (Root)';
+            for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+            msg += '\n\nEnter number:';
+            var choice = prompt(msg, '0');
+            if (choice === null) return;
+            var idx = parseInt(choice, 10);
+            if (isNaN(idx) || idx < 0 || idx >= options.length) { alert('Invalid choice'); return; }
+            if (options[idx].id) body.folder_id = parseInt(options[idx].id, 10);
+        }
+    }
+
     fetch('/tools/fitting/save', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            ship_type_id: state.shipTypeId,
-            name: name,
-            items: state.items,
-            fitting_id: state.fittingId
-        })
+        body: JSON.stringify(body)
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {

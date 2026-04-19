@@ -118,6 +118,8 @@ async def startup():
             # Fitting engine: mass and capacity from invTypes
             "ALTER TABLE sde_types ADD COLUMN mass REAL",
             "ALTER TABLE sde_types ADD COLUMN capacity REAL",
+            # Fitting tool: nested folders for saved fits
+            "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
         ]:
             try:
                 await db.execute(text(stmt))

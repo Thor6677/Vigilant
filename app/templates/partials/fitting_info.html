@@ -1,0 +1,34 @@
+{# Module info modal body — populated via /tools/fitting/info/{type_id} #}
+<div style="display:flex;gap:1rem;margin-bottom:1rem;">
+    <img src="https://images.evetech.net/types/{{ type_id }}/render?size=128"
+         style="width:96px;height:96px;border:1px solid var(--border);flex-shrink:0;"
+         onerror="this.onerror=null;this.src='https://images.evetech.net/types/{{ type_id }}/icon?size=128'">
+    <div style="flex:1;min-width:0;">
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:0.25rem;">{{ type_name }}</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:0.25rem;">
+            {% if group_name %}{{ group_name }}{% endif %}
+            {% if meta_level is not none %} &middot; Meta {{ meta_level|int }}{% endif %}
+        </div>
+        {% if volume %}
+        <div style="font-size:10px;color:var(--muted);">Volume: {{ "{:,.1f}".format(volume) }} m&sup3;</div>
+        {% endif %}
+    </div>
+</div>
+
+{% if description %}
+<div style="font-size:11px;color:var(--text);line-height:1.4;margin-bottom:1rem;max-height:160px;overflow-y:auto;border-left:2px solid var(--accent);padding:0.25rem 0.5rem;background:var(--bg);white-space:pre-line;">{{ description }}</div>
+{% endif %}
+
+{% if attrs %}
+<div style="font-size:10px;color:var(--muted);margin-bottom:0.25rem;text-transform:uppercase;letter-spacing:0.05em;">Attributes</div>
+<table style="width:100%;font-size:10px;border-collapse:collapse;">
+    {% for a in attrs %}
+    <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:3px 0.5rem 3px 0;color:var(--muted);">{{ a.label }}</td>
+        <td style="text-align:right;color:var(--text);padding:3px 0;">{{ a.value_display }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% elif not description %}
+<div style="font-size:11px;color:var(--muted);text-align:center;padding:1rem;">No attribute information available.</div>
+{% endif %}

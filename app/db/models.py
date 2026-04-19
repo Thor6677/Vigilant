@@ -418,12 +418,25 @@ class SavedGateRoute(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class UserFittingFolder(Base):
+    """Nested folder for organizing user fittings. Root = parent_id NULL."""
+    __tablename__ = "user_fitting_folders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("user_fitting_folders.id", ondelete="CASCADE"), nullable=True, index=True)
+    name = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class UserFitting(Base):
     """User-created ship fittings (local to Vigilant, not ESI)."""
     __tablename__ = "user_fittings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    folder_id = Column(Integer, ForeignKey("user_fitting_folders.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     ship_type_id = Column(Integer, nullable=False)

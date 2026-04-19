@@ -1279,6 +1279,11 @@ async def calculate_fitting_stats(
         "mass": round(mattr(SHIP_STAT_ATTRS["mass"])),
         "inertia": round(mattr(SHIP_STAT_ATTRS["inertia"]), 4),
         "align_time": round(align_time, 1),
+        "warp_speed_au_s": round(
+            mattr(SHIP_STAT_ATTRS["base_warp_speed"])
+            * mattr(SHIP_STAT_ATTRS["warp_speed_multiplier"]),
+            2,
+        ),
         "capacitor": round(mattr(SHIP_STAT_ATTRS["capacitor"]), 1),
         "cap_recharge": round(mattr(SHIP_STAT_ATTRS["cap_recharge"]) / 1000, 1) if mattr(SHIP_STAT_ATTRS["cap_recharge"]) else 0,
         "max_target_range": round(mattr(SHIP_STAT_ATTRS["max_target_range"]) / 1000, 1),

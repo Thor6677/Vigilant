@@ -21,6 +21,11 @@ ATTR_SCAN_RESOLUTION = 564
 ATTR_CALIBRATION_OUTPUT = 1132
 ATTR_RIG_SIZE = 1547
 
+# Warp
+ATTR_WARP_SPEED_MULTIPLIER = 600   # hull-class multiplier; modules apply post_percent here
+ATTR_BASE_WARP_SPEED = 1281        # base warp speed (typically 1.0 AU/s on ships)
+ATTR_WARP_CAP_NEED = 153           # capacitor cost per warp (GJ)
+
 # Ship slot counts (NOTE: 12=low, 14=high — counterintuitive SDE naming)
 ATTR_LOW_SLOTS = 12
 ATTR_MED_SLOTS = 13
@@ -150,4 +155,6 @@ SHIP_STAT_ATTRS = {
     "rig_slots": ATTR_RIG_SLOTS,
     "turret_slots": ATTR_TURRET_SLOTS,
     "launcher_slots": ATTR_LAUNCHER_SLOTS,
+    "warp_speed_multiplier": ATTR_WARP_SPEED_MULTIPLIER,
+    "base_warp_speed": ATTR_BASE_WARP_SPEED,
 }
