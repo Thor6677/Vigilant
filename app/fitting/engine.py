@@ -699,9 +699,17 @@ async def calculate_fitting_stats(
                 attrs[target_attr] = current * product
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
-    # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
+    # These skills use ItemModifier with domain=shipID to modify the ship
+    # directly.  At All V the bonus is base_attr * 5 applied as postPercent.
+    # CPU Management V / Power Grid Management V: +25% CPU/PG output
     ship_attrs[ATTR_CPU_OUTPUT] = ship_attrs.get(ATTR_CPU_OUTPUT, 0) * 1.25
     ship_attrs[ATTR_POWER_OUTPUT] = ship_attrs.get(ATTR_POWER_OUTPUT, 0) * 1.25
+    # Shield Management V: +25% shield HP (attr 337 base=5, *5=25%)
+    ship_attrs[ATTR_SHIELD_HP] = ship_attrs.get(ATTR_SHIELD_HP, 0) * 1.25
+    # Hull Upgrades V: +25% armor HP (attr 335 base=5, *5=25%)
+    ship_attrs[ATTR_ARMOR_HP] = ship_attrs.get(ATTR_ARMOR_HP, 0) * 1.25
+    # Mechanics V: +25% hull HP (attr 327 base=5, *5=25%)
+    ship_attrs[ATTR_HP] = ship_attrs.get(ATTR_HP, 0) * 1.25
 
     # ── Apply All-V weapon/support skill bonuses to module attributes ─────
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
