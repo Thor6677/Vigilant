@@ -147,36 +147,44 @@
             </tr>
         </table>
 
-        {# Resist table #}
+        {# Resist table with filled bars #}
+        {% macro resist_cell(value, color) %}
+        <td style="padding:2px 1px;">
+            <div style="position:relative;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:2px;height:18px;overflow:hidden;">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:{{ value }}%;background:{{ color }};opacity:0.35;"></div>
+                <span style="position:relative;display:block;text-align:center;line-height:18px;font-size:9px;color:var(--text);font-weight:500;">{{ value }}%</span>
+            </div>
+        </td>
+        {% endmacro %}
         <div style="margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.35rem;">
-            <table style="width:100%;font-size:9px;border-collapse:collapse;text-align:center;">
-                <tr style="color:var(--muted);">
-                    <td></td>
+            <table style="width:100%;border-collapse:separate;border-spacing:0 2px;text-align:center;">
+                <tr style="color:var(--muted);font-size:8px;">
+                    <td style="width:40px;"></td>
                     <td style="color:#00bfff;">EM</td>
                     <td style="color:#ff6347;">Therm</td>
                     <td style="color:#999;">Kin</td>
                     <td style="color:#ff8c00;">Expl</td>
                 </tr>
                 <tr>
-                    <td style="text-align:left;color:var(--muted);">Shield</td>
-                    <td style="color:var(--text);">{{ stats.shield_em_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.shield_therm_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.shield_kin_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.shield_expl_resist }}%</td>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Shield</td>
+                    {{ resist_cell(stats.shield_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.shield_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.shield_kin_resist, '#999') }}
+                    {{ resist_cell(stats.shield_expl_resist, '#ff8c00') }}
                 </tr>
                 <tr>
-                    <td style="text-align:left;color:var(--muted);">Armor</td>
-                    <td style="color:var(--text);">{{ stats.armor_em_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.armor_therm_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.armor_kin_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.armor_expl_resist }}%</td>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Armor</td>
+                    {{ resist_cell(stats.armor_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.armor_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.armor_kin_resist, '#999') }}
+                    {{ resist_cell(stats.armor_expl_resist, '#ff8c00') }}
                 </tr>
                 <tr>
-                    <td style="text-align:left;color:var(--muted);">Hull</td>
-                    <td style="color:var(--text);">{{ stats.hull_em_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.hull_therm_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.hull_kin_resist }}%</td>
-                    <td style="color:var(--text);">{{ stats.hull_expl_resist }}%</td>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Hull</td>
+                    {{ resist_cell(stats.hull_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.hull_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.hull_kin_resist, '#999') }}
+                    {{ resist_cell(stats.hull_expl_resist, '#ff8c00') }}
                 </tr>
             </table>
         </div>
