@@ -603,7 +603,11 @@ async def calculate_fitting_stats(
                         attrs = module_attrs_map[tid]
                         attrs[target_attr] = attrs.get(target_attr, 0) + src_val * copies
 
-            # Apply collected multipliers with stacking penalties
+            # Apply collected multipliers
+            # Cross-module modifiers (Bastion, damage mods) apply without
+            # inter-type stacking — Bastion doesn't penalize against sinks.
+            # Stacking between copies of the same mod type is handled by
+            # the multiplier count already being accurate.
             for (tid, target_attr), multipliers in cross_collectors.items():
                 attrs = module_attrs_map[tid]
                 if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
@@ -612,12 +616,8 @@ async def calculate_fitting_stats(
                 if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
                     current = 1.0
 
-                is_stackable = _stackable.get(target_attr, True)
-                if is_stackable:
-                    for m in multipliers:
-                        current *= m
-                else:
-                    current *= apply_stacking_penalties(multipliers)
+                for m in multipliers:
+                    current *= m
                 attrs[target_attr] = current
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
