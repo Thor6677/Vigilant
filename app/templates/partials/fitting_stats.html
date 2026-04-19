@@ -120,7 +120,8 @@
         <span class="b-label">Defense
             <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
         </span>
-        <button id="def-toggle" onclick="toggleDefMode()"
+        <button id="def-toggle"
+                onclick="var b=this,e=b.textContent.trim()==='EHP',m=e?'hp':'ehp';b.textContent=e?'HP':'EHP';document.querySelectorAll('.def-hp-val').forEach(function(el){el.textContent=el.dataset[m]});var l=document.getElementById('def-header-label');if(l){var t=document.querySelectorAll('.def-hp-val'),v=t[t.length-1];l.textContent=e?'(Raw HP: '+v.dataset.hp+')':'(Effective HP: '+v.dataset.ehp+')'}document.querySelectorAll('.def-rep-val').forEach(function(el){el.textContent=(e?el.dataset.hp:el.dataset.ehp)+(e?' HP/s':' EHP/s')})"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
     </div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
@@ -218,28 +219,6 @@
         {% endif %}
     </div>
 </div>
-<script>
-function toggleDefMode(){
-    var btn=document.getElementById('def-toggle');
-    var isEhp=btn.textContent.trim()==='EHP';
-    var mode=isEhp?'hp':'ehp';
-    btn.textContent=isEhp?'HP':'EHP';
-    var lbl=document.getElementById('def-header-label');
-    document.querySelectorAll('.def-hp-val').forEach(function(el){
-        el.textContent=el.dataset[mode];
-    });
-    var totalEl=document.querySelector('.def-hp-val[data-ehp]');
-    if(lbl){
-        var totals=document.querySelectorAll('.def-hp-val');
-        var last=totals[totals.length-1];
-        lbl.textContent=isEhp?'(Raw HP: '+last.dataset.hp+')':'(Effective HP: '+last.dataset.ehp+')';
-    }
-    document.querySelectorAll('.def-rep-val').forEach(function(el){
-        var v=isEhp?el.dataset.hp:el.dataset.ehp;
-        el.textContent=v+(isEhp?' HP/s':' EHP/s');
-    });
-}
-</script>
 
 {# ── Navigation ───────────────────────────────────────────────────────────── #}
 <div class="b-section">
