@@ -513,6 +513,16 @@ async def calculate_fitting_stats(
                         continue
                 attrs[target_attr] = current * (1 + ol_val / 100)
 
+    # ── Save base damageMultiplier for spool-up weapons ────────────────────
+    # Must snapshot BEFORE cross-module/skill/ship modifiers change it.
+    # At max spool the bonus is added to the base, THEN all modifiers apply:
+    #   final = (base_dmg + spool_max) × modifier_chain
+    # Not: final = (base_dmg × modifier_chain) + spool_max  (wrong!)
+    base_dmg_mults: dict[int, float] = {}
+    for tid, attrs in module_attrs_map.items():
+        if attrs.get(ATTR_DMG_MULT_BONUS_MAX, 0) > 0:
+            base_dmg_mults[tid] = attrs.get(ATTR_DAMAGE_MULTIPLIER, 0)
+
     # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
     # Some modules (Bastion, Siege) have effects that modify OTHER modules
     # via LocationRequiredSkillModifier / LocationGroupModifier.
@@ -603,11 +613,10 @@ async def calculate_fitting_stats(
                         attrs = module_attrs_map[tid]
                         attrs[target_attr] = attrs.get(target_attr, 0) + src_val * copies
 
-            # Apply collected multipliers
-            # Cross-module modifiers (Bastion, damage mods) apply without
-            # inter-type stacking — Bastion doesn't penalize against sinks.
-            # Stacking between copies of the same mod type is handled by
-            # the multiplier count already being accurate.
+            # Apply collected multipliers with stacking penalties.
+            # Damage mods (Heat Sinks, Gyros, etc.) are stacking-penalized
+            # per the EVE dogma system.  The stackable flag from the target
+            # attribute determines whether penalties apply.
             for (tid, target_attr), multipliers in cross_collectors.items():
                 attrs = module_attrs_map[tid]
                 if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
@@ -616,8 +625,12 @@ async def calculate_fitting_stats(
                 if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
                     current = 1.0
 
-                for m in multipliers:
-                    current *= m
+                is_stackable = _stackable.get(target_attr, True)
+                if is_stackable or len(multipliers) <= 1:
+                    for m in multipliers:
+                        current *= m
+                else:
+                    current *= apply_stacking_penalties(multipliers)
                 attrs[target_attr] = current
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
@@ -902,6 +915,10 @@ async def calculate_fitting_stats(
         if slot in ("cargo", "drone"):
             continue
 
+        # Offline weapons don't fire
+        if not item.get("online", True):
+            continue
+
         # Turret/Launcher DPS: charge damage × module damageMultiplier / cycleTime
         charge_tid = item.get("charge_type_id")
         if not charge_tid:
@@ -925,11 +942,20 @@ async def calculate_fitting_stats(
         weapon_volley += volley * qty
         weapon_dps += (volley / (cycle / 1000)) * qty
 
-        # Spool-up: Triglavian entropic disintegrators ramp damage per cycle
+        # Spool-up: Triglavian entropic disintegrators ramp damage per cycle.
+        # The spool bonus is added to the BASE damageMultiplier, then ALL
+        # modifiers (skills, ship, mods) apply on top.  So at max spool:
+        #   effective = (base + spool_max) × modifier_chain
+        # We recover the modifier chain ratio from the already-modified value.
         spool_per_cycle = mod_attrs.get(ATTR_DMG_MULT_BONUS_PER_CYCLE, 0)
         spool_max = mod_attrs.get(ATTR_DMG_MULT_BONUS_MAX, 0)
         if spool_per_cycle > 0 and spool_max > 0:
-            max_spool_mult = dmg_mult + spool_max
+            base_dmg = base_dmg_mults.get(tid, dmg_mult)
+            if base_dmg > 0:
+                modifier_ratio = dmg_mult / base_dmg
+                max_spool_mult = (base_dmg + spool_max) * modifier_ratio
+            else:
+                max_spool_mult = dmg_mult + spool_max
             spool_volley = total_dmg * max_spool_mult
             weapon_dps_max_spool += (spool_volley / (cycle / 1000)) * qty
             cycles_to_max = int(spool_max / spool_per_cycle)
