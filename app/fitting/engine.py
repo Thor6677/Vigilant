@@ -573,16 +573,6 @@ async def calculate_fitting_stats(
                         continue
                 attrs[target_attr] = current * (1 + ol_val / 100)
 
-    # ── Save base damageMultiplier for spool-up weapons ────────────────────
-    # Must snapshot BEFORE cross-module/skill/ship modifiers change it.
-    # At max spool the bonus is added to the base, THEN all modifiers apply:
-    #   final = (base_dmg + spool_max) × modifier_chain
-    # Not: final = (base_dmg × modifier_chain) + spool_max  (wrong!)
-    base_dmg_mults: dict[int, float] = {}
-    for tid, attrs in module_attrs_map.items():
-        if attrs.get(ATTR_DMG_MULT_BONUS_MAX, 0) > 0:
-            base_dmg_mults[tid] = attrs.get(ATTR_DAMAGE_MULTIPLIER, 0)
-
     # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
     # Some modules (Bastion, Siege) have effects that modify OTHER modules
     # via LocationRequiredSkillModifier / LocationGroupModifier.
@@ -1082,20 +1072,15 @@ async def calculate_fitting_stats(
         weapon_dps += (volley / (cycle / 1000)) * qty
 
         # Spool-up: Triglavian entropic disintegrators ramp damage per cycle.
-        # The spool bonus is added to the BASE damageMultiplier, then ALL
-        # modifiers (skills, ship, mods) apply on top.  So at max spool:
-        #   effective = (base + spool_max) × modifier_chain
-        # We recover the modifier chain ratio from the already-modified value.
+        # Spool is a separate multiplier on the volley (matching Pyfa/in-game):
+        #   spool_volley = base_volley × (1 + spoolBoost)
+        # where spoolBoost = damageMultiplierBonusMax (already modified by ship
+        # hull bonuses like Babaroga's +100%).  The base volley already includes
+        # all skill/ship/mod multipliers on damageMultiplier.
         spool_per_cycle = mod_attrs.get(ATTR_DMG_MULT_BONUS_PER_CYCLE, 0)
         spool_max = mod_attrs.get(ATTR_DMG_MULT_BONUS_MAX, 0)
         if spool_per_cycle > 0 and spool_max > 0:
-            base_dmg = base_dmg_mults.get(tid, dmg_mult)
-            if base_dmg > 0:
-                modifier_ratio = dmg_mult / base_dmg
-                max_spool_mult = (base_dmg + spool_max) * modifier_ratio
-            else:
-                max_spool_mult = dmg_mult + spool_max
-            spool_volley = total_dmg * max_spool_mult
+            spool_volley = volley * (1 + spool_max)
             weapon_dps_max_spool += (spool_volley / (cycle / 1000)) * qty
             cycles_to_max = int(spool_max / spool_per_cycle)
             spool_time_s = max(spool_time_s, int(cycles_to_max * cycle / 1000))
