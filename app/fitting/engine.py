@@ -42,6 +42,7 @@ from app.fitting.constants import (
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
     OVERLOAD_ATTR_MAP,
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
+    ATTR_MISSILE_DAMAGE_MULTIPLIER, ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS,
 )
 
 # Default skill level assumption
@@ -182,47 +183,71 @@ async def _get_module_modifiers(
     return out
 
 
+def _apply_modifier(attrs: dict[int, float], target_attr: int, operator: int, value: float):
+    """Apply a single modifier to an attribute dict. Handles damageMultiplier default."""
+    if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+        attrs[target_attr] = 1.0
+    current = attrs.get(target_attr, 0)
+    if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
+        current = 1.0
+
+    if operator == OP_MOD_ADD:
+        attrs[target_attr] = current + value
+    elif operator == OP_POST_PERCENT:
+        attrs[target_attr] = current * (1 + value / 100)
+    elif operator == OP_POST_MUL:
+        attrs[target_attr] = current * value
+    elif operator == OP_PRE_MUL:
+        attrs[target_attr] = current * value
+
+
 async def _apply_ship_hull_bonuses(
     db: AsyncSession,
     ship_type_id: int,
     ship_attrs: dict[int, float],
     module_attrs_map: dict[int, dict[int, float]],
+    charge_attrs_map: dict[int, dict[int, float]],
     items: list[dict],
     skill_level: int = DEFAULT_SKILL_LEVEL,
 ):
-    """Apply ship hull bonuses to module attributes (modifies module_attrs_map in-place).
+    """Apply ship hull bonuses to module and charge attributes.
 
-    Uses modifierInfo as the authoritative source for targeting (correct group/skill
-    filters), and typeBonus to determine per-level vs role scaling.
+    Handles three modifier function types:
+    - LocationGroupModifier: matches modules by group ID → module_attrs_map
+    - LocationRequiredSkillModifier: matches modules by skill req → module_attrs_map
+    - OwnerRequiredSkillModifier: matches ALL items (modules, drones, charges)
+      by skill req → module_attrs_map for modules/drones, charge_attrs_map for charges
 
-    Per Pyfa architecture: modifierInfo has the real targeting data (group IDs,
-    skill IDs). typeBonus.jsonl showinfo is display-only and unreliable for matching.
+    Uses modifierInfo as the authoritative source for targeting.  typeBonus.jsonl
+    showinfo is display-only and unreliable for matching.  Per-level vs role
+    detection uses attribute name patterns (shipBonus*/eliteBonus* = per-level).
     """
+    # Combine module + charge type IDs for skill-req lookup
     all_type_ids = list(module_attrs_map.keys())
-    if not all_type_ids:
+    charge_type_ids = list(charge_attrs_map.keys())
+    combined_type_ids = list(set(all_type_ids + charge_type_ids))
+    if not combined_type_ids:
         return
 
-    # Build group lookup for modules
-    group_ids: dict[int, int] = {}
+    # Build group lookup for modules/drones
     result = await db.execute(
         select(SDEType.type_id, SDEType.group_id)
-        .where(SDEType.type_id.in_(all_type_ids))
+        .where(SDEType.type_id.in_(combined_type_ids))
     )
-    group_ids = {row.type_id: row.group_id for row in result.fetchall()}
+    group_ids: dict[int, int] = {row.type_id: row.group_id for row in result.fetchall()}
 
-    # Build skill requirement lookup for modules
+    # Build skill requirement lookup for modules, drones, AND charges
     skill_reqs: dict[int, set[int]] = defaultdict(set)
     result = await db.execute(
         select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
-        .where(SDETypeSkillReq.type_id.in_(all_type_ids))
+        .where(SDETypeSkillReq.type_id.in_(combined_type_ids))
     )
     for row in result.fetchall():
         skill_reqs[row.type_id].add(row.skill_type_id)
 
+    charge_tid_set = set(charge_type_ids)
+
     # Determine which source attributes are per-level vs role bonuses.
-    # Per-level attrs follow naming: shipBonus*, eliteBonus* (per Pyfa convention).
-    # Role bonus attrs use other names: *roleBonus*, battleship*Bonus, etc.
-    # Query attribute names for all source attrs used by this ship's modifiers.
     per_level_attr_ids: set[int] = set()
 
     # Get ship's passive effects and their modifiers
@@ -250,7 +275,6 @@ async def _apply_ship_hull_bonuses(
         )
         for row in name_result.fetchall():
             name = row.attribute_name or ""
-            # shipBonus*, eliteBonus* = per-level; everything else = role/flat
             if name.startswith("shipBonus") or name.startswith("eliteBonus"):
                 per_level_attr_ids.add(row.attribute_id)
 
@@ -265,99 +289,92 @@ async def _apply_ship_hull_bonuses(
         if src_val is None:
             continue
 
-        # Determine matching modules based on func type
+        # Determine matching type IDs based on func type
         matching_type_ids = set()
+        matching_charge_ids = set()
 
         if mod.func == "LocationGroupModifier" and mod.filter_type == "group":
             for tid, gid in group_ids.items():
-                if gid == mod.filter_value:
+                if gid == mod.filter_value and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
 
         elif mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
             for tid, skills in skill_reqs.items():
-                if mod.filter_value in skills:
+                if mod.filter_value in skills and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
 
         elif mod.func == "OwnerRequiredSkillModifier" and mod.filter_type == "skill":
-            # Targets charges requiring a skill — skip for now
-            continue
+            # Matches ALL items (modules, drones, charges) requiring the skill
+            for tid, skills in skill_reqs.items():
+                if mod.filter_value in skills:
+                    if tid in charge_tid_set:
+                        matching_charge_ids.add(tid)
+                    else:
+                        matching_type_ids.add(tid)
 
-        if not matching_type_ids:
+        if not matching_type_ids and not matching_charge_ids:
             continue
 
         # Per-level if source attribute is named shipBonus* or eliteBonus*
         is_per_level = mod.modifying_attribute_id in per_level_attr_ids
-        if is_per_level:
-            effective_val = src_val * skill_level
-        else:
-            effective_val = src_val
-
-        # Apply to matching modules
+        effective_val = src_val * skill_level if is_per_level else src_val
         target_attr = mod.modified_attribute_id
+
+        # Apply to matching modules/drones
         for tid in matching_type_ids:
             if tid not in module_attrs_map:
                 continue
-            attrs = module_attrs_map[tid]
-            if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
-                attrs[target_attr] = 1.0
-            current = attrs.get(target_attr, 0)
-            if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
-                current = 1.0
+            _apply_modifier(module_attrs_map[tid], target_attr, mod.operator, effective_val)
 
-            if mod.operator == OP_MOD_ADD:
-                attrs[target_attr] = current + effective_val
-            elif mod.operator == OP_POST_PERCENT:
-                attrs[target_attr] = current * (1 + effective_val / 100)
-            elif mod.operator == OP_POST_MUL:
-                attrs[target_attr] = current * effective_val
+        # Apply to matching charges
+        for tid in matching_charge_ids:
+            if tid not in charge_attrs_map:
+                continue
+            _apply_modifier(charge_attrs_map[tid], target_attr, mod.operator, effective_val)
 
 
 
 async def _apply_all_v_skill_bonuses(
     db: AsyncSession,
     module_attrs_map: dict[int, dict[int, float]],
+    charge_attrs_map: dict[int, dict[int, float]],
     items: list[dict],
 ):
-    """Apply All Level V skill bonuses to module attributes.
+    """Apply All Level V skill bonuses to module, drone, and charge attributes.
 
-    Skills are items with effects that modify modules on the ship via
-    LocationGroupModifier or LocationRequiredSkillModifier. Each skill
-    has a bonus attribute (e.g., damageMultiplierBonus=3.0 per level).
-    At All V, effective bonus = base * 5.
+    Skills (category 16) have effects that modify items on the ship via:
+    - LocationGroupModifier / LocationRequiredSkillModifier (domain=shipID)
+      → targets modules/drones in module_attrs_map
+    - OwnerRequiredSkillModifier (domain=charID)
+      → targets drones in module_attrs_map AND charges in charge_attrs_map
 
-    Category 16 = Skills in the SDE.
+    At All V, effective bonus = base_attr_value * 5.
+    Skills are never stacking-penalized.
     """
     all_type_ids = list(module_attrs_map.keys())
-    if not all_type_ids:
+    charge_type_ids = list(charge_attrs_map.keys())
+    combined = list(set(all_type_ids + charge_type_ids))
+    if not combined:
         return
 
-    # Get module groups and skill requirements
-    group_ids: dict[int, int] = {}
+    # Build group and skill-requirement lookups for all item types
     result = await db.execute(
         select(SDEType.type_id, SDEType.group_id)
-        .where(SDEType.type_id.in_(all_type_ids))
+        .where(SDEType.type_id.in_(combined))
     )
-    group_ids = {row.type_id: row.group_id for row in result.fetchall()}
-
-    module_groups = set(group_ids.values())
-    if not module_groups:
-        return
+    group_ids: dict[int, int] = {row.type_id: row.group_id for row in result.fetchall()}
 
     skill_reqs: dict[int, set[int]] = defaultdict(set)
     result = await db.execute(
         select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
-        .where(SDETypeSkillReq.type_id.in_(all_type_ids))
+        .where(SDETypeSkillReq.type_id.in_(combined))
     )
     for row in result.fetchall():
         skill_reqs[row.type_id].add(row.skill_type_id)
 
-    required_skills = set()
-    for skills in skill_reqs.values():
-        required_skills.update(skills)
+    charge_tid_set = set(charge_type_ids)
 
-    # Find all skill modifiers that target module groups or required skills
-    # Skills are category 16 items
-    from app.db.sde_models import SDEGroup as SDEGroupModel
+    # Find all skill modifiers that target items on the ship or owned by character
     result = await db.execute(
         select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
                SDEModifier.modified_attribute_id, SDEModifier.operator,
@@ -366,8 +383,12 @@ async def _apply_all_v_skill_bonuses(
         .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
         .join(SDEType, SDETypeEffect.type_id == SDEType.type_id)
         .where(SDEType.category_id == 16)  # Skills
-        .where(SDEModifier.domain == "shipID")
-        .where(SDEModifier.func.in_(["LocationGroupModifier", "LocationRequiredSkillModifier"]))
+        .where(SDEModifier.domain.in_(["shipID", "charID"]))
+        .where(SDEModifier.func.in_([
+            "LocationGroupModifier",
+            "LocationRequiredSkillModifier",
+            "OwnerRequiredSkillModifier",
+        ]))
     )
 
     skill_modifiers = result.fetchall()
@@ -396,37 +417,37 @@ async def _apply_all_v_skill_bonuses(
         # At All V: effective bonus = base * 5
         effective_val = src_val * DEFAULT_SKILL_LEVEL
 
-        # Find matching modules
-        matching = set()
+        # Find matching items
+        matching_modules = set()
+        matching_charges = set()
+
         if func == "LocationGroupModifier" and filter_type == "group" and filter_value:
             for tid, gid in group_ids.items():
-                if gid == filter_value:
-                    matching.add(tid)
+                if gid == filter_value and tid not in charge_tid_set:
+                    matching_modules.add(tid)
+
         elif func == "LocationRequiredSkillModifier" and filter_type == "skill" and filter_value:
             for tid, skills in skill_reqs.items():
+                if filter_value in skills and tid not in charge_tid_set:
+                    matching_modules.add(tid)
+
+        elif func == "OwnerRequiredSkillModifier" and filter_type == "skill" and filter_value:
+            for tid, skills in skill_reqs.items():
                 if filter_value in skills:
-                    matching.add(tid)
+                    if tid in charge_tid_set:
+                        matching_charges.add(tid)
+                    else:
+                        matching_modules.add(tid)
 
-        if not matching:
-            continue
+        # Apply to matching modules/drones
+        for tid in matching_modules:
+            if tid in module_attrs_map:
+                _apply_modifier(module_attrs_map[tid], target_attr_id, operator, effective_val)
 
-        # Apply to matching modules
-        for tid in matching:
-            if tid not in module_attrs_map:
-                continue
-            attrs = module_attrs_map[tid]
-            if target_attr_id == ATTR_DAMAGE_MULTIPLIER and target_attr_id not in attrs:
-                attrs[target_attr_id] = 1.0
-            current = attrs.get(target_attr_id, 0)
-            if current == 0 and target_attr_id == ATTR_DAMAGE_MULTIPLIER:
-                current = 1.0
-
-            if operator == OP_POST_PERCENT:
-                attrs[target_attr_id] = current * (1 + effective_val / 100)
-            elif operator == OP_MOD_ADD:
-                attrs[target_attr_id] = current + effective_val
-            elif operator == OP_POST_MUL:
-                attrs[target_attr_id] = current * effective_val
+        # Apply to matching charges
+        for tid in matching_charges:
+            if tid in charge_attrs_map:
+                _apply_modifier(charge_attrs_map[tid], target_attr_id, operator, effective_val)
 
 
 async def get_ship_stats(db: AsyncSession, ship_type_id: int) -> dict:
@@ -488,6 +509,17 @@ async def calculate_fitting_stats(
     module_attrs_map = await get_types_dogma_attrs(db, all_type_ids) if all_type_ids else {}
     module_modifiers = await _get_module_modifiers(db, module_type_ids) if module_type_ids else {}
 
+    # Build charge attrs map early so bonuses (ship hull, skills) can modify it.
+    # Deep-copied so we can mutate charge damage values.
+    charge_type_ids = list({
+        item["charge_type_id"] for item in items
+        if item.get("charge_type_id")
+    })
+    charge_attrs_map: dict[int, dict[int, float]] = {}
+    if charge_type_ids:
+        raw_charge = await get_types_dogma_attrs(db, charge_type_ids)
+        charge_attrs_map = {tid: dict(attrs) for tid, attrs in raw_charge.items()}
+
     # ── Apply overload bonuses to overheated module attrs ───────────────────
     # Only apply once per type_id (all copies share the same attrs dict)
     overloaded_types = set()
@@ -529,7 +561,9 @@ async def calculate_fitting_stats(
     # These are different from ship hull bonuses — the source attrs are on
     # the fitted module, not the ship.
     if module_type_ids:
-        # Get all cross-module modifiers from fitted module effects
+        # Get all cross-module modifiers from fitted module effects.
+        # Includes OwnerRequiredSkillModifier (domain=charID) for damage mods
+        # like DDA that target drones by skill requirement.
         mod_cross_result = await db.execute(
             select(SDETypeEffect.type_id, SDEModifier.modifying_attribute_id,
                    SDEModifier.modified_attribute_id, SDEModifier.operator,
@@ -538,8 +572,12 @@ async def calculate_fitting_stats(
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
             .where(SDETypeEffect.type_id.in_(module_type_ids))
             .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
-            .where(SDEModifier.domain == "shipID")
-            .where(SDEModifier.func.in_(["LocationRequiredSkillModifier", "LocationGroupModifier"]))
+            .where(SDEModifier.domain.in_(["shipID", "charID"]))
+            .where(SDEModifier.func.in_([
+                "LocationRequiredSkillModifier",
+                "LocationGroupModifier",
+                "OwnerRequiredSkillModifier",
+            ]))
         )
 
         cross_mods = mod_cross_result.fetchall()
@@ -570,8 +608,12 @@ async def calculate_fitting_stats(
             cross_target_attrs = {cm[2] for cm in cross_mods}
             _stackable = await _get_stackable_flags(db, cross_target_attrs)
 
-            # Collect all cross-module multipliers per target (for stacking penalties)
-            cross_collectors: dict[tuple[int, int], list[float]] = defaultdict(list)
+            # Collect cross-module multipliers grouped by (target_tid, target_attr, source_type).
+            # Grouping by source type means copies of the same damage mod stack-penalize
+            # each other, but different module types (e.g. Bastion vs Heat Sinks)
+            # are independent groups whose products are multiplied together.
+            # Key: (target_tid, target_attr, source_type_id) → list of multipliers
+            cross_collectors: dict[tuple[int, int, int], list[float]] = defaultdict(list)
 
             for cm in cross_mods:
                 src_type_id = cm[0]
@@ -580,7 +622,7 @@ async def calculate_fitting_stats(
                 if src_val is None:
                     continue
 
-                # Find target modules
+                # Find target modules/drones
                 matching = set()
                 if cm[4] == "LocationRequiredSkillModifier" and cm[5] == "skill":
                     for tid, skills in _skill_reqs.items():
@@ -589,6 +631,10 @@ async def calculate_fitting_stats(
                 elif cm[4] == "LocationGroupModifier" and cm[5] == "group":
                     for tid, gid in _group_ids.items():
                         if tid != src_type_id and gid == cm[6]:
+                            matching.add(tid)
+                elif cm[4] == "OwnerRequiredSkillModifier" and cm[5] == "skill":
+                    for tid, skills in _skill_reqs.items():
+                        if tid != src_type_id and cm[6] in skills:
                             matching.add(tid)
 
                 if not matching:
@@ -603,35 +649,36 @@ async def calculate_fitting_stats(
                         continue
 
                     if operator == OP_POST_MUL:
-                        # Collect for stacking penalty application
                         for _ in range(copies):
-                            cross_collectors[(tid, target_attr)].append(src_val)
+                            cross_collectors[(tid, target_attr, src_type_id)].append(src_val)
                     elif operator == OP_POST_PERCENT:
                         for _ in range(copies):
-                            cross_collectors[(tid, target_attr)].append(1.0 + src_val / 100.0)
+                            cross_collectors[(tid, target_attr, src_type_id)].append(1.0 + src_val / 100.0)
                     elif operator == OP_MOD_ADD:
                         attrs = module_attrs_map[tid]
                         attrs[target_attr] = attrs.get(target_attr, 0) + src_val * copies
 
-            # Apply collected multipliers with stacking penalties.
-            # Damage mods (Heat Sinks, Gyros, etc.) are stacking-penalized
-            # per the EVE dogma system.  The stackable flag from the target
-            # attribute determines whether penalties apply.
-            for (tid, target_attr), multipliers in cross_collectors.items():
+            # Apply multipliers per group with stacking penalties, then combine.
+            # Reorganize: (target_tid, target_attr) → list of per-group products.
+            combined: dict[tuple[int, int], float] = defaultdict(lambda: 1.0)
+            for (tid, target_attr, src_tid), multipliers in cross_collectors.items():
+                is_stackable = _stackable.get(target_attr, True)
+                if is_stackable or len(multipliers) <= 1:
+                    group_product = 1.0
+                    for m in multipliers:
+                        group_product *= m
+                else:
+                    group_product = apply_stacking_penalties(multipliers)
+                combined[(tid, target_attr)] *= group_product
+
+            for (tid, target_attr), product in combined.items():
                 attrs = module_attrs_map[tid]
                 if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
                     attrs[target_attr] = 1.0
                 current = attrs.get(target_attr, 0)
                 if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
                     current = 1.0
-
-                is_stackable = _stackable.get(target_attr, True)
-                if is_stackable or len(multipliers) <= 1:
-                    for m in multipliers:
-                        current *= m
-                else:
-                    current *= apply_stacking_penalties(multipliers)
-                attrs[target_attr] = current
+                attrs[target_attr] = current * product
 
     # ── Apply All-V fitting skills to ship attributes ─────────────────────
     # CPU Management V: +25% cpuOutput, PG Management V: +25% powerOutput
@@ -642,14 +689,63 @@ async def calculate_fitting_stats(
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
     # target modules by group or required skill. At All V, the bonus is
     # skill_base_attr * 5, applied as postPercent.
-    await _apply_all_v_skill_bonuses(db, module_attrs_map, items)
+    await _apply_all_v_skill_bonuses(db, module_attrs_map, charge_attrs_map, items)
 
-    # ── Apply ship hull bonuses to module attributes ──────────────────────
+    # ── Apply ship hull bonuses to module/charge attributes ──────────────
     # Makes deep copies so we don't mutate cached SDE data
     module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
     await _apply_ship_hull_bonuses(
-        db, ship_type_id, ship_attrs, module_attrs_map, items
+        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items
     )
+
+    # ── Collect character-level missile damage multiplier (BCU mechanism) ──
+    # BCU sets character attr 212 (missileDamageMultiplier) via ItemModifier
+    # with domain=charID.  Accumulate from all online fitted modules that have
+    # this modifier, then apply as a global scale on missile charge damage.
+    char_missile_dmg_mult = 1.0
+    if module_type_ids:
+        bcu_result = await db.execute(
+            select(SDETypeEffect.type_id, SDEModifier.modifying_attribute_id,
+                   SDEModifier.operator)
+            .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
+            .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
+            .where(SDETypeEffect.type_id.in_(module_type_ids))
+            .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+            .where(SDEModifier.domain == "charID")
+            .where(SDEModifier.func == "ItemModifier")
+            .where(SDEModifier.modified_attribute_id == ATTR_MISSILE_DAMAGE_MULTIPLIER)
+        )
+        bcu_mods = bcu_result.fetchall()
+        if bcu_mods:
+            # Count copies and collect multipliers
+            module_copies: dict[int, int] = defaultdict(int)
+            for item in fitted_items:
+                module_copies[item["type_id"]] += item.get("quantity", 1)
+            bcu_multipliers: list[float] = []
+            for row in bcu_mods:
+                src_tid = row.type_id
+                src_attr_id = row.modifying_attribute_id
+                operator = row.operator
+                src_val = module_attrs_map.get(src_tid, {}).get(src_attr_id)
+                if src_val is None or src_val == 0:
+                    continue
+                copies = module_copies.get(src_tid, 0)
+                for _ in range(copies):
+                    if operator == OP_PRE_MUL:
+                        bcu_multipliers.append(src_val)
+                    elif operator == OP_POST_PERCENT:
+                        bcu_multipliers.append(1.0 + src_val / 100.0)
+            if bcu_multipliers:
+                # BCU multipliers are stacking-penalized
+                stackable_result = await _get_stackable_flags(
+                    db, {ATTR_MISSILE_DAMAGE_MULTIPLIER}
+                )
+                is_stackable = stackable_result.get(ATTR_MISSILE_DAMAGE_MULTIPLIER, True)
+                if is_stackable or len(bcu_multipliers) <= 1:
+                    for m in bcu_multipliers:
+                        char_missile_dmg_mult *= m
+                else:
+                    char_missile_dmg_mult *= apply_stacking_penalties(bcu_multipliers)
 
     # Fetch module slot info for turret/launcher counting
     slot_info = {}
@@ -880,13 +976,7 @@ async def calculate_fitting_stats(
     peak_shield_recharge = _calc_peak_recharge(shield_hp, shield_recharge_s)
 
     # ── Step 6: DPS calculation ──────────────────────────────────────────
-    # Collect charge attrs for modules that have charges loaded
-    charge_type_ids = list({
-        item["charge_type_id"] for item in items
-        if item.get("charge_type_id")
-    })
-    charge_attrs_map = await get_types_dogma_attrs(db, charge_type_ids) if charge_type_ids else {}
-
+    # charge_attrs_map was built early and modified by skill/hull bonus steps.
     weapon_dps = 0.0
     weapon_dps_max_spool = 0.0  # DPS at max spool (Triglavian)
     weapon_volley = 0.0
@@ -937,6 +1027,13 @@ async def calculate_fitting_stats(
         cycle = mod_attrs.get(ATTR_RATE_OF_FIRE, 0) or mod_attrs.get(ATTR_DURATION, 0)
         if cycle <= 0:
             continue
+
+        # Apply character-level missile damage multiplier (from BCU) to launchers.
+        # Launchers don't have their own damageMultiplier — all damage comes from
+        # the charge.  BCU scales charge damage via the character's attr 212.
+        si = slot_info.get(tid, {})
+        if si.get("is_launcher") and char_missile_dmg_mult != 1.0:
+            total_dmg *= char_missile_dmg_mult
 
         volley = total_dmg * dmg_mult
         weapon_volley += volley * qty

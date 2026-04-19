@@ -49,6 +49,11 @@ ATTR_SHIELD_RECHARGE_RATE = 479  # shield recharge time (ms)
 ATTR_DAMAGE_MULTIPLIER = 64    # turret/drone damage multiplier
 ATTR_RATE_OF_FIRE = 51         # turret/launcher ROF (ms) — "speed" attribute
 
+# Character-level damage multiplier — BCU sets this via ItemModifier(charID).
+# The DPS formula for missiles is: charge_damage * char_missileDmgMult / cycle_time.
+ATTR_MISSILE_DAMAGE_MULTIPLIER = 212        # on character entity
+ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS = 213  # on BCU (source attr)
+
 # Overload bonus attributes (on modules, applied when overheated)
 # Mapping: overload attr ID → (target attr to modify, is_reduction)
 # is_reduction=True means the bonus mechanically reduces the target (ROF/duration)
@@ -101,11 +106,13 @@ ATTR_ARMOR_THERM_RESONANCE = 270
 ATTR_ARMOR_KIN_RESONANCE = 269
 ATTR_ARMOR_EXPL_RESONANCE = 268
 
-# Hull resists
-ATTR_HULL_EM_RESONANCE = 974
-ATTR_HULL_THERM_RESONANCE = 977
-ATTR_HULL_KIN_RESONANCE = 976
-ATTR_HULL_EXPL_RESONANCE = 975
+# Hull resists — ships store hull/structure resonance in the generic
+# damageResonance attrs (109-113), NOT the hull-specific 974-977.
+# 974-977 are source attrs on hull-tanking modules (e.g. Damage Control).
+ATTR_HULL_EM_RESONANCE = 113       # emDamageResonance
+ATTR_HULL_THERM_RESONANCE = 110    # thermalDamageResonance
+ATTR_HULL_KIN_RESONANCE = 109      # kineticDamageResonance
+ATTR_HULL_EXPL_RESONANCE = 111     # explosiveDamageResonance
 
 SHIP_STAT_ATTRS = {
     "hull_hp": ATTR_HP,
