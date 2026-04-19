@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.db.models import get_db, AsyncSessionLocal, Character, StructureNameCache
 from app.esi.client import ESIClient, refresh_token, get_client_safe
 from app.esi import industry as esi_industry
+from app.esi import universe as esi_universe
 from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,14 @@ ACTIVITY_SHORT = {
 
 # Station ID ranges — anything >= 1e12 is a player-built structure.
 STATION_ID_CEILING = 10 ** 12
+
+# NPC-corp id ceiling. Corp ids below this are always NPC corps (starter corps,
+# factions, academies, etc.) — the corp-jobs endpoint will always 403 for those
+# because no player holds the Director role in an NPC corp. Skip them entirely.
+NPC_CORP_CEILING = 2_000_000
+
+# Concurrency cap for per-page structure lookups.
+_STRUCTURE_LOOKUP_CONCURRENCY = 5
 
 
 async def _fetch_character_jobs(char: Character, include_completed: bool) -> tuple[Character, list, str | None]:
@@ -133,8 +142,23 @@ async def _resolve_installer_names(
     return resolved
 
 
-async def _resolve_location_names(db: AsyncSession, location_ids: set[int]) -> dict[int, str]:
-    """Resolve structure + station IDs to names. Best-effort, never fails the page."""
+async def _resolve_location_names(
+    db: AsyncSession,
+    location_ids: set[int],
+    structure_candidates: dict[int, list[Character]],
+) -> dict[int, str]:
+    """Resolve structure + station IDs to names.
+
+    Order:
+      1. NPC stations (id < 1e12): batch via public /universe/names.
+      2. Player structures (id >= 1e12):
+         - Check StructureNameCache first (shared with assets page).
+         - For structures still unknown, cycle through each candidate
+           character that had a job at this structure — their ESI token
+           almost certainly has docking rights. get_structure() writes
+           successful results back to StructureNameCache so subsequent
+           page loads (and the assets page) skip the ESI hop.
+    """
     if not location_ids:
         return {}
     resolved: dict[int, str] = {}
@@ -147,16 +171,7 @@ async def _resolve_location_names(db: AsyncSession, location_ids: set[int]) -> d
         else:
             station_ids.append(lid)
 
-    # Structures: check DB cache
-    if structure_ids:
-        rows = await db.execute(
-            select(StructureNameCache.structure_id, StructureNameCache.name)
-            .where(StructureNameCache.structure_id.in_(structure_ids))
-        )
-        for sid, name in rows.fetchall():
-            resolved[sid] = name
-
-    # NPC stations: batch /universe/names (public)
+    # NPC stations: batch /universe/names (public, supports 1000 IDs/batch)
     if station_ids:
         try:
             pub = ESIClient("", db=db)
@@ -167,6 +182,55 @@ async def _resolve_location_names(db: AsyncSession, location_ids: set[int]) -> d
                     resolved[int(entry["id"])] = entry.get("name") or f"Station {entry['id']}"
         except Exception as e:
             logger.info("universe/names station resolution failed: %s", e)
+
+    if not structure_ids:
+        return resolved
+
+    # Player structures: DB cache first
+    rows = await db.execute(
+        select(StructureNameCache.structure_id, StructureNameCache.name)
+        .where(StructureNameCache.structure_id.in_(structure_ids))
+    )
+    for sid, name in rows.fetchall():
+        resolved[sid] = name
+
+    # Unknown structures: try each candidate installer's ESI client
+    unknown = [sid for sid in structure_ids if sid not in resolved]
+    if not unknown:
+        return resolved
+
+    sem = asyncio.Semaphore(_STRUCTURE_LOOKUP_CONCURRENCY)
+
+    async def _lookup(struct_id: int) -> tuple[int, str | None]:
+        candidates = structure_candidates.get(struct_id, [])
+        async with sem:
+            for ch in candidates:
+                try:
+                    async with AsyncSessionLocal() as s_db:
+                        client = await get_client_safe(ch)
+                        client.db = s_db
+                        # get_structure checks the 401 cache, writes to
+                        # StructureNameCache on success, and returns
+                        # {"name": ..., "solar_system_id": ...}.
+                        data = await esi_universe.get_structure(client, struct_id, db=s_db)
+                        name = (data or {}).get("name")
+                        if name and name != "Unknown Structure":
+                            return struct_id, name
+                except Exception as e:
+                    # 401/403 from a char that doesn't have access — try the next one
+                    logger.debug("Structure %s via %s failed: %s", struct_id, ch.character_name, e)
+                    continue
+        return struct_id, None
+
+    results = await asyncio.gather(
+        *[_lookup(sid) for sid in unknown], return_exceptions=True,
+    )
+    for r in results:
+        if isinstance(r, Exception):
+            continue
+        sid, name = r
+        if name:
+            resolved[sid] = name
 
     return resolved
 
@@ -200,7 +264,11 @@ async def industry_jobs_page(
     corp_scope_by_corp: dict[int, list[Character]] = {}
     corp_names: dict[int, str] = {}
     for c in chars:
-        if c.corporation_id and CORP_JOBS_SCOPE in (c.scopes or ""):
+        # Skip NPC corps entirely — their corp-jobs endpoint always 403s
+        # because no player holds the Director role in an NPC corp.
+        if not c.corporation_id or c.corporation_id < NPC_CORP_CEILING:
+            continue
+        if CORP_JOBS_SCOPE in (c.scopes or ""):
             corp_scope_by_corp.setdefault(c.corporation_id, []).append(c)
             if c.corporation_name:
                 corp_names[c.corporation_id] = c.corporation_name
@@ -219,15 +287,34 @@ async def industry_jobs_page(
     raw_rows: list[dict] = []
     warnings: list[str] = []
 
+    # Track which owned characters "touch" each structure, so the structure
+    # resolver can cycle through their ESI clients to get the name.
+    char_by_id = {c.character_id: c for c in chars}
+    structure_candidates: dict[int, list[Character]] = {}
+
+    def _mark_structure_candidate(job: dict, owning_char: Character | None):
+        """Remember which char could authenticate against the structure."""
+        if owning_char is None:
+            return
+        for key in ("output_location_id", "station_id", "facility_id", "blueprint_location_id"):
+            v = job.get(key)
+            if v and int(v) >= STATION_ID_CEILING:
+                lst = structure_candidates.setdefault(int(v), [])
+                if owning_char not in lst:
+                    lst.append(owning_char)
+
     for res in char_results:
         if isinstance(res, Exception):
-            warnings.append(f"Character fetch: {type(res).__name__}")
+            logger.warning("Character fetch exception: %s", res)
             continue
         char, jobs, err = res
         if err == "missing_scope":
             continue  # silent — user hasn't granted; shows in dashboard scope UI
         if err:
-            warnings.append(f"{char.character_name}: {err}")
+            if "403" in (err or "") or "401" in (err or ""):
+                logger.info("Char %s: %s", char.character_name, err)
+            else:
+                warnings.append(f"{char.character_name}: {err}")
             continue
         for j in jobs:
             raw_rows.append({
@@ -236,15 +323,21 @@ async def industry_jobs_page(
                 "source_id": char.character_id,
                 "source_name": char.character_name,
             })
+            _mark_structure_candidate(j, char)
 
     for res in corp_results:
         if isinstance(res, Exception):
-            warnings.append(f"Corp fetch: {type(res).__name__}")
+            logger.warning("Corp fetch exception: %s", res)
             continue
         corp_id, corp_name, jobs, err = res
         if err:
-            warnings.append(f"{corp_name or f'Corp {corp_id}'}: {err}")
+            # 403s are routine — only surface non-auth errors in the UI
+            if "403" in (err or "") or "401" in (err or ""):
+                logger.info("Corp %s: %s", corp_name or corp_id, err)
+            else:
+                warnings.append(f"{corp_name or f'Corp {corp_id}'}: {err}")
             continue
+        corp_director_candidates = corp_scope_by_corp.get(corp_id, [])
         for j in jobs:
             raw_rows.append({
                 "job": j,
@@ -252,6 +345,15 @@ async def industry_jobs_page(
                 "source_id": corp_id,
                 "source_name": corp_name or f"Corporation {corp_id}",
             })
+            # Installer might be a user-owned char; if so prefer them for
+            # structure-name resolution.  Otherwise fall back to any
+            # director with the corp scope — they likely have docking.
+            installer = char_by_id.get(j.get("installer_id") or 0)
+            if installer is not None:
+                _mark_structure_candidate(j, installer)
+            else:
+                for ch in corp_director_candidates:
+                    _mark_structure_candidate(j, ch)
 
     # --- Deduplicate character-job that's also visible in a corp job feed ---
     # A job is the same if it has the same job_id across character and corp feeds.
@@ -284,7 +386,7 @@ async def industry_jobs_page(
 
     type_names = await sde.type_ids_to_names(db, list(product_ids | blueprint_ids)) if (product_ids | blueprint_ids) else {}
     installer_names = await _resolve_installer_names(db, installer_ids, owned_char_names)
-    location_names = await _resolve_location_names(db, location_ids)
+    location_names = await _resolve_location_names(db, location_ids, structure_candidates)
 
     # --- Build rendered rows ------------------------------------------------
     now = datetime.now(timezone.utc)
@@ -364,14 +466,38 @@ async def industry_jobs_page(
 
     rows.sort(key=lambda r: r["end_sort"])
 
+    # Build distinct installer lists for the dropdown filters.  Each entry
+    # includes how many jobs it owns so the UI can show "(n)" next to it.
+    char_counts: dict[int, int] = {}
+    char_labels: dict[int, str] = {}
+    corp_counts: dict[int, int] = {}
+    corp_labels: dict[int, str] = {}
+    for r in rows:
+        if r["source_kind"] == "character":
+            char_counts[r["source_id"]] = char_counts.get(r["source_id"], 0) + 1
+            char_labels[r["source_id"]] = r["source_name"]
+        else:
+            corp_counts[r["source_id"]] = corp_counts.get(r["source_id"], 0) + 1
+            corp_labels[r["source_id"]] = r["source_name"]
+
+    character_filters = sorted(
+        [{"id": cid, "name": char_labels[cid], "count": char_counts[cid]} for cid in char_counts],
+        key=lambda x: x["name"].lower(),
+    )
+    corp_filters = sorted(
+        [{"id": cid, "name": corp_labels[cid], "count": corp_counts[cid]} for cid in corp_counts],
+        key=lambda x: x["name"].lower(),
+    )
+
     return templates.TemplateResponse("industry_jobs.html", {
         "request": request,
         "rows": rows,
         "counts_by_activity": sorted(counts_by_activity.items(), key=lambda kv: -kv[1]),
         "counts_by_source": counts_by_source,
         "counts_by_status": counts_by_status,
+        "character_filters": character_filters,
+        "corp_filters": corp_filters,
         "total": len(rows),
-        "warnings": warnings,
         "include_completed": inc_completed,
         "char_count_with_scope": len(char_fetch_targets),
         "corp_count_with_scope": len(corp_scope_by_corp),

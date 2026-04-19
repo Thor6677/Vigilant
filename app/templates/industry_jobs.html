@@ -32,7 +32,6 @@
     background:var(--surface); color:var(--muted);
     font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
     border-bottom:1px solid var(--border);
-    position:sticky; top:52px; z-index:2;
 }
 .ij-table tbody td {
     padding:0.4rem 0.6rem;
@@ -62,12 +61,37 @@
 .ij-source-kind { font-size:9px; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; }
 .ij-source-name { font-size:11px; color:var(--text); }
 
-.ij-warnings {
-    margin-bottom:0.75rem; padding:0.5rem 0.75rem;
-    border:1px solid var(--border); background:var(--surface);
-    font-size:10px; color:var(--muted);
+/* Dropdown-picker filter (for characters / corps). */
+.ij-picker { position:relative; display:inline-block; }
+.ij-picker > button {
+    padding:3px 10px; border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; background:var(--surface); font-family:inherit; font-size:10px;
 }
-.ij-warnings b { color:var(--warning, #e5c07b); font-weight:600; }
+.ij-picker > button:hover { color:var(--text); border-color:var(--muted); }
+.ij-picker.has-selection > button { color:var(--accent); border-color:var(--accent); }
+.ij-picker-panel {
+    display:none; position:absolute; top:calc(100% + 3px); left:0; z-index:10;
+    min-width:220px; max-height:320px; overflow-y:auto;
+    background:var(--surface); border:1px solid var(--accent);
+    padding:0.4rem; font-size:11px;
+}
+.ij-picker.is-open .ij-picker-panel { display:block; }
+.ij-picker-head {
+    display:flex; gap:0.25rem; padding-bottom:0.25rem;
+    border-bottom:1px solid var(--border); margin-bottom:0.25rem;
+}
+.ij-picker-head button {
+    flex:1; padding:2px 6px; font-size:9px; font-family:inherit;
+    background:var(--bg); border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; letter-spacing:0.08em; text-transform:uppercase;
+}
+.ij-picker-head button:hover { color:var(--text); border-color:var(--muted); }
+.ij-picker-row {
+    display:flex; align-items:center; gap:0.4rem; padding:3px 4px; cursor:pointer;
+}
+.ij-picker-row:hover { background:rgba(200,169,81,0.07); }
+.ij-picker-row input { accent-color:var(--accent); cursor:pointer; }
+.ij-picker-row .pcount { color:var(--muted); font-size:9px; margin-left:auto; }
 
 @media (max-width:900px) {
     .ij-table thead th:nth-child(5), .ij-table tbody td:nth-child(5),  /* installer */
@@ -96,13 +120,6 @@
     </div>
 </div>
 
-{% if warnings %}
-<div class="ij-warnings">
-    <b>Warnings:</b>
-    {% for w in warnings %}<span>{{ w }}{% if not loop.last %} &middot; {% endif %}</span>{% endfor %}
-</div>
-{% endif %}
-
 <div class="ij-summary">
     <div class="ij-stat"><span class="ij-stat-label">Total</span><span class="ij-stat-value">{{ total }}</span></div>
     {% if counts_by_source.character %}
@@ -122,15 +139,61 @@
     {% for label, n in counts_by_activity %}
     <button class="ij-chip" data-filter-activity="{{ label }}">{{ label }} ({{ n }})</button>
     {% endfor %}
-    <span style="flex:1;"></span>
+</div>
+
+<div class="ij-filters">
     <button class="ij-chip is-active" data-filter-source="all">All sources</button>
-    {% if counts_by_source.character %}<button class="ij-chip" data-filter-source="character">Character only</button>{% endif %}
-    {% if counts_by_source.corporation %}<button class="ij-chip" data-filter-source="corporation">Corp only</button>{% endif %}
+    {% if counts_by_source.character %}<button class="ij-chip" data-filter-source="character">Characters only</button>{% endif %}
+    {% if counts_by_source.corporation %}<button class="ij-chip" data-filter-source="corporation">Corps only</button>{% endif %}
+
+    {% if character_filters %}
+    <div class="ij-picker" id="picker-character">
+        <button type="button" data-picker-toggle="character">
+            Characters <span class="picker-count">(all {{ character_filters|length }})</span> ▾
+        </button>
+        <div class="ij-picker-panel">
+            <div class="ij-picker-head">
+                <button type="button" data-picker-all="character">All</button>
+                <button type="button" data-picker-none="character">None</button>
+            </div>
+            {% for f in character_filters %}
+            <label class="ij-picker-row">
+                <input type="checkbox" data-filter-source-id="character:{{ f.id }}" checked>
+                <span>{{ f.name }}</span>
+                <span class="pcount">{{ f.count }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if corp_filters %}
+    <div class="ij-picker" id="picker-corporation">
+        <button type="button" data-picker-toggle="corporation">
+            Corps <span class="picker-count">(all {{ corp_filters|length }})</span> ▾
+        </button>
+        <div class="ij-picker-panel">
+            <div class="ij-picker-head">
+                <button type="button" data-picker-all="corporation">All</button>
+                <button type="button" data-picker-none="corporation">None</button>
+            </div>
+            {% for f in corp_filters %}
+            <label class="ij-picker-row">
+                <input type="checkbox" data-filter-source-id="corporation:{{ f.id }}" checked>
+                <span>{{ f.name }}</span>
+                <span class="pcount">{{ f.count }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <button class="ij-chip" id="ij-clear-filters">Reset</button>
 </div>
 {% endif %}
 
 {% if rows %}
-<div class="b-panel" style="overflow-x:auto;">
+<div class="b-panel">
     <table class="ij-table">
         <thead>
             <tr>
@@ -146,7 +209,9 @@
         </thead>
         <tbody>
             {% for r in rows %}
-            <tr data-activity="{{ r.activity_label }}" data-source="{{ r.source_kind }}">
+            <tr data-activity="{{ r.activity_label }}"
+                data-source="{{ r.source_kind }}"
+                data-source-id="{{ r.source_kind }}:{{ r.source_id }}">
                 <td>
                     <div class="ij-row-product">
                         {% if r.product_id %}
@@ -189,33 +254,145 @@
 {% endif %}
 
 <script>
-/* Client-side filter chips (activity + source). */
 (function() {
-    var activity = 'all';
-    var source = 'all';
-    var chips = document.querySelectorAll('.ij-chip[data-filter-activity], .ij-chip[data-filter-source]');
+    var activity = 'all';      // activity label string, or 'all'
+    var sourceKind = 'all';    // 'all' | 'character' | 'corporation'
+    var selectedIds = null;    // Set of "kind:id" strings; null means "no per-id filtering"
     var rows = document.querySelectorAll('.ij-table tbody tr');
 
-    function apply() {
+    function applyFilters() {
         rows.forEach(function(tr) {
             var okA = activity === 'all' || tr.dataset.activity === activity;
-            var okS = source === 'all' || tr.dataset.source === source;
-            tr.style.display = (okA && okS) ? '' : 'none';
+            var okS = sourceKind === 'all' || tr.dataset.source === sourceKind;
+            var okId = selectedIds === null || selectedIds.has(tr.dataset.sourceId);
+            tr.style.display = (okA && okS && okId) ? '' : 'none';
         });
     }
-    chips.forEach(function(chip) {
+
+    /* Activity + source-kind chips */
+    document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(chip) {
         chip.addEventListener('click', function() {
-            var key = chip.dataset.filterActivity !== undefined ? 'activity' : 'source';
-            var val = chip.dataset.filterActivity !== undefined ? chip.dataset.filterActivity : chip.dataset.filterSource;
-            var group = chip.dataset.filterActivity !== undefined ? 'data-filter-activity' : 'data-filter-source';
-            document.querySelectorAll('.ij-chip[' + group + ']').forEach(function(c) {
+            document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(c) {
                 c.classList.remove('is-active');
             });
             chip.classList.add('is-active');
-            if (key === 'activity') activity = val; else source = val;
-            apply();
+            activity = chip.dataset.filterActivity;
+            applyFilters();
         });
     });
+    document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
+                c.classList.remove('is-active');
+            });
+            chip.classList.add('is-active');
+            sourceKind = chip.dataset.filterSource;
+            applyFilters();
+        });
+    });
+
+    /* Picker dropdowns */
+    function pickerEl(kind) { return document.getElementById('picker-' + kind); }
+
+    function refreshPickerLabel(kind) {
+        var el = pickerEl(kind);
+        if (!el) return;
+        var boxes = el.querySelectorAll('input[data-filter-source-id]');
+        var checked = 0;
+        boxes.forEach(function(b) { if (b.checked) checked++; });
+        var total = boxes.length;
+        var label = el.querySelector('.picker-count');
+        if (!label) return;
+        if (checked === total) {
+            label.textContent = '(all ' + total + ')';
+            el.classList.remove('has-selection');
+        } else if (checked === 0) {
+            label.textContent = '(none)';
+            el.classList.add('has-selection');
+        } else {
+            label.textContent = '(' + checked + ' of ' + total + ')';
+            el.classList.add('has-selection');
+        }
+    }
+
+    function rebuildSelectedIds() {
+        /* If every checkbox (across both pickers) is checked, disable per-id filtering entirely. */
+        var all = document.querySelectorAll('input[data-filter-source-id]');
+        var allChecked = true;
+        var setIds = new Set();
+        all.forEach(function(b) {
+            if (b.checked) setIds.add(b.dataset.filterSourceId);
+            else allChecked = false;
+        });
+        selectedIds = allChecked ? null : setIds;
+    }
+
+    document.querySelectorAll('[data-picker-toggle]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            var kind = btn.dataset.pickerToggle;
+            var el = pickerEl(kind);
+            var wasOpen = el.classList.contains('is-open');
+            /* Close any other picker */
+            document.querySelectorAll('.ij-picker').forEach(function(p) { p.classList.remove('is-open'); });
+            if (!wasOpen) el.classList.add('is-open');
+            e.stopPropagation();
+        });
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.ij-picker')) {
+            document.querySelectorAll('.ij-picker').forEach(function(p) { p.classList.remove('is-open'); });
+        }
+    });
+
+    document.querySelectorAll('[data-picker-all]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var kind = btn.dataset.pickerAll;
+            pickerEl(kind).querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
+                b.checked = true;
+            });
+            refreshPickerLabel(kind);
+            rebuildSelectedIds();
+            applyFilters();
+        });
+    });
+    document.querySelectorAll('[data-picker-none]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var kind = btn.dataset.pickerNone;
+            pickerEl(kind).querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
+                b.checked = false;
+            });
+            refreshPickerLabel(kind);
+            rebuildSelectedIds();
+            applyFilters();
+        });
+    });
+    document.querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
+        b.addEventListener('change', function() {
+            var kind = b.dataset.filterSourceId.split(':')[0];
+            refreshPickerLabel(kind);
+            rebuildSelectedIds();
+            applyFilters();
+        });
+    });
+
+    /* Reset button */
+    var reset = document.getElementById('ij-clear-filters');
+    if (reset) {
+        reset.addEventListener('click', function() {
+            activity = 'all';
+            sourceKind = 'all';
+            document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(c) {
+                c.classList.toggle('is-active', c.dataset.filterActivity === 'all');
+            });
+            document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
+                c.classList.toggle('is-active', c.dataset.filterSource === 'all');
+            });
+            document.querySelectorAll('input[data-filter-source-id]').forEach(function(b) { b.checked = true; });
+            ['character', 'corporation'].forEach(refreshPickerLabel);
+            rebuildSelectedIds();
+            applyFilters();
+        });
+    }
 })();
 </script>
 {% endblock %}
