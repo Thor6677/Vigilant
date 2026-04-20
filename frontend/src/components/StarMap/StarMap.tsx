@@ -12,12 +12,12 @@ import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
 
-import type { SystemData, MapData, OverlayType, GroupMode, IndustryIndexKind } from './types';
+import type { SystemData, MapData, OverlayType, GroupMode, IndustryIndexKind, PlanetTypeId } from './types';
 import { LODTier } from './types';
 import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
 import {
   heatmapColor, allianceColor, FACTION_COLORS,
-  industryColor, admColor, dominantPlanetColor,
+  industryColor, admColor, dominantPlanetColor, PLANET_TYPE_COLORS,
 } from './utils/colors';
 import { SystemRenderer } from './renderer/SystemRenderer';
 import { EdgeRenderer } from './renderer/EdgeRenderer';
@@ -86,6 +86,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   } | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
   const [industryKind, setIndustryKind] = useState<IndustryIndexKind>('manufacturing');
+  const [planetKind, setPlanetKind] = useState<PlanetTypeId | null>(null);
   const [radarPivotId, setRadarPivotId] = useState<number | null>(null);
   const [radarJumps, setRadarJumps] = useState<number>(3);
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
@@ -291,11 +292,31 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       }
     } else if (activeOverlay === 'planetType') {
-      // Dim systems we don't have planet data for so the painted systems pop.
+      // When a specific planet type is picked, paint ONLY systems that host
+      // that type and dim the rest — very useful for PI-site selection. When
+      // "All" is selected we fall back to the dominant-type color so the
+      // whole galaxy gets painted.
       if (planetData?.systems) {
+        const selectedId = planetKind !== null ? String(planetKind) : null;
+        const selectedColor = planetKind !== null
+          ? PLANET_TYPE_COLORS[planetKind as number] ?? 0x141414
+          : 0;
         for (const sys of data.systems) {
           const counts = planetData.systems[String(sys.id)];
-          tints.set(sys.id, counts ? dominantPlanetColor(counts) : 0x141414);
+          if (selectedId !== null) {
+            const n = counts?.[selectedId] ?? 0;
+            // Dim systems without this planet type; brighten those that host
+            // many (up to 5). Count rarely exceeds 5, so divide by 5 for a
+            // reasonable 0..1 intensity ramp.
+            if (n > 0) {
+              const intensity = Math.min(1, n / 5);
+              tints.set(sys.id, brighten(selectedColor, 0.6 + intensity * 0.6));
+            } else {
+              tints.set(sys.id, 0x0e0e0e);
+            }
+          } else {
+            tints.set(sys.id, counts ? dominantPlanetColor(counts) : 0x141414);
+          }
         }
       } else {
         for (const sys of data.systems) tints.set(sys.id, 0x141414);
@@ -318,7 +339,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
 
     return tints;
-  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, radarReach]);
+  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach]);
 
   // Apply overlay tints to renderer
   useEffect(() => {
@@ -1560,6 +1581,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           isMobile={isMobile}
           industryKind={industryKind}
           onIndustryKindChange={setIndustryKind}
+          planetKind={planetKind}
+          onPlanetKindChange={setPlanetKind}
           radarPivotName={radarPivotId ? data.systemMap.get(radarPivotId)?.name ?? null : null}
           radarJumps={radarJumps}
           onRadarJumpsChange={setRadarJumps}

@@ -1,4 +1,4 @@
-import type { OverlayType, IndustryIndexKind } from '../types';
+import type { OverlayType, IndustryIndexKind, PlanetTypeId } from '../types';
 import type { SovTimeRange } from '../useSovChanges';
 
 const OVERLAYS: { key: OverlayType; label: string }[] = [
@@ -25,6 +25,19 @@ const INDUSTRY_KINDS: { key: IndustryIndexKind; label: string }[] = [
   { key: 'reaction',      label: 'RXN' },
 ];
 
+const PLANET_KINDS: { key: PlanetTypeId | null; label: string; color: string }[] = [
+  { key: null,   label: 'ALL',  color: '#c8a951' },
+  { key: 11,     label: 'TEMP', color: '#33aa66' },
+  { key: 12,     label: 'ICE',  color: '#88ccee' },
+  { key: 13,     label: 'GAS',  color: '#66aa99' },
+  { key: 2014,   label: 'OCN',  color: '#3366cc' },
+  { key: 2015,   label: 'LAVA', color: '#ee3300' },
+  { key: 2016,   label: 'BARR', color: '#a08060' },
+  { key: 2017,   label: 'STRM', color: '#bb66cc' },
+  { key: 2063,   label: 'PLSM', color: '#ee8844' },
+  { key: 30889,  label: 'SHAT', color: '#888888' },
+];
+
 const SOV_RANGES: { key: SovTimeRange; label: string }[] = [
   { key: '24h', label: '24H' },
   { key: '7d',  label: '7D' },
@@ -44,6 +57,8 @@ interface Props {
   isMobile?: boolean;
   industryKind?: IndustryIndexKind;
   onIndustryKindChange?: (k: IndustryIndexKind) => void;
+  planetKind?: PlanetTypeId | null;
+  onPlanetKindChange?: (k: PlanetTypeId | null) => void;
   radarPivotName?: string | null;
   radarJumps?: number;
   onRadarJumpsChange?: (n: number) => void;
@@ -58,13 +73,213 @@ export function OverlayControls({
   isMobile,
   industryKind = 'manufacturing',
   onIndustryKindChange,
+  planetKind = null,
+  onPlanetKindChange,
   radarPivotName,
   radarJumps = 3,
   onRadarJumpsChange,
   onRadarClear,
 }: Props) {
+  // ── Sub-bar renderers ──────────────────────────────────────────────────
+  // Each sub-bar now renders ABOVE the main overlay row so popups grow toward
+  // the map instead of into the screen edge. Visual separators live on the
+  // BOTTOM of each sub-bar (plus the main row's borderTop) so the boundary
+  // between sub-bar and main row stays crisp.
+
+  const subBarStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 0,
+    background: '#060606',
+    borderTop: '1px solid #191919',
+    borderBottom: '1px solid #131313',
+    padding: '0 4px',
+  };
+
+  const industrySubBar = activeOverlay === 'industry' ? (
+    <div style={subBarStyle}>
+      <span style={{
+        padding: '6px 8px', fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333',
+      }}>
+        Activity
+      </span>
+      {INDUSTRY_KINDS.map(({ key, label }) => {
+        const isActive = industryKind === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onIndustryKindChange?.(key)}
+            style={{
+              padding: '6px 10px', fontSize: 8, letterSpacing: '0.12em',
+              textTransform: 'uppercase', fontFamily: FONT,
+              background: isActive ? '#0e0e0e' : 'transparent',
+              color: isActive ? '#c8a951' : '#474747',
+              border: 'none',
+              borderBottom: isActive ? '1px solid #c8a951' : '1px solid transparent',
+              cursor: 'pointer', transition: 'color 0.15s',
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  const planetSubBar = activeOverlay === 'planetType' ? (
+    <div style={{ ...subBarStyle, gap: 0, overflowX: 'auto' }}>
+      <span style={{
+        padding: '6px 8px', fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333', whiteSpace: 'nowrap',
+      }}>
+        Planet
+      </span>
+      {PLANET_KINDS.map(({ key, label, color }) => {
+        const isActive = planetKind === key;
+        return (
+          <button
+            key={String(key)}
+            onClick={() => onPlanetKindChange?.(key)}
+            style={{
+              padding: '6px 10px', fontSize: 8, letterSpacing: '0.12em',
+              textTransform: 'uppercase', fontFamily: FONT,
+              background: isActive ? '#0e0e0e' : 'transparent',
+              color: isActive ? color : '#474747',
+              border: 'none',
+              borderBottom: isActive ? `1px solid ${color}` : '1px solid transparent',
+              cursor: 'pointer', transition: 'color 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  const radarSubBar = activeOverlay === 'radar' ? (
+    <div style={{ ...subBarStyle, gap: 6, padding: '4px 8px' }}>
+      <span style={{
+        fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333',
+      }}>
+        Pivot
+      </span>
+      <span style={{
+        fontSize: 10, color: radarPivotName ? '#c8a951' : '#474747',
+        letterSpacing: '0.05em', marginRight: 8,
+      }}>
+        {radarPivotName || 'right-click a system · "Radar Pivot"'}
+      </span>
+      <span style={{
+        fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333',
+      }}>
+        Reach
+      </span>
+      {[1, 2, 3, 4, 5].map(n => {
+        const isActive = radarJumps === n;
+        return (
+          <button
+            key={n}
+            onClick={() => onRadarJumpsChange?.(n)}
+            style={{
+              padding: '4px 10px', fontSize: 9, fontFamily: FONT,
+              background: isActive ? '#0e0e0e' : 'transparent',
+              color: isActive ? '#c8a951' : '#474747',
+              border: '1px solid ' + (isActive ? '#c8a951' : '#191919'),
+              cursor: 'pointer', transition: 'color 0.15s',
+            }}
+          >
+            {n}
+          </button>
+        );
+      })}
+      {radarPivotName && (
+        <button
+          onClick={onRadarClear}
+          style={{
+            marginLeft: 'auto', padding: '4px 8px', fontSize: 8,
+            letterSpacing: '0.12em', fontFamily: FONT,
+            background: 'transparent', color: '#888',
+            border: '1px solid #191919', cursor: 'pointer',
+          }}
+        >
+          CLEAR
+        </button>
+      )}
+    </div>
+  ) : null;
+
+  const sovSubBar = activeOverlay === 'sovereignty' ? (
+    <div style={subBarStyle}>
+      <button
+        onClick={() => onSovTimeRangeChange?.(null)}
+        style={{
+          padding: '6px 10px', fontSize: 8, letterSpacing: '0.12em',
+          textTransform: 'uppercase', fontFamily: FONT,
+          background: !sovTimeRange ? '#0e0e0e' : 'transparent',
+          color: !sovTimeRange ? '#c8a951' : '#474747',
+          border: 'none',
+          borderBottom: !sovTimeRange ? '1px solid #c8a951' : '1px solid transparent',
+          cursor: 'pointer', transition: 'color 0.15s',
+        }}
+      >
+        Now
+      </button>
+      <span style={{ padding: '6px 4px', fontSize: 8, color: '#222' }}>|</span>
+      <span style={{
+        padding: '6px 10px', fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333',
+      }}>
+        Changes
+      </span>
+      {SOV_RANGES.map(({ key, label }) => {
+        const isActive = sovTimeRange === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onSovTimeRangeChange?.(key)}
+            style={{
+              padding: '6px 10px', fontSize: 8, letterSpacing: '0.12em',
+              textTransform: 'uppercase', fontFamily: FONT,
+              background: isActive ? '#0e0e0e' : 'transparent',
+              color: isActive ? '#c8a951' : '#474747',
+              border: 'none',
+              borderBottom: isActive ? '1px solid #c8a951' : '1px solid transparent',
+              cursor: 'pointer', transition: 'color 0.15s',
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+      {sovChangesLoading && (
+        <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>loading...</span>
+      )}
+      {!sovChangesLoading && sovTimeRange && sovChangesCount > 0 && (
+        <span style={{ fontSize: 8, color: '#c8a951', marginLeft: 8 }}>
+          {sovChangesCount} system{sovChangesCount !== 1 ? 's' : ''}
+        </span>
+      )}
+      {!sovChangesLoading && sovTimeRange && sovChangesCount === 0 && (
+        <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>no changes</span>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div style={{ fontFamily: FONT }}>
+      {/* Sub-bars render ABOVE the main overlay row. Only one is ever active
+          at a time based on activeOverlay. */}
+      {industrySubBar}
+      {planetSubBar}
+      {radarSubBar}
+      {sovSubBar}
+
+      {/* Main overlay row — the persistent tab strip along the bottom. */}
       <div style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -133,210 +348,6 @@ export function OverlayControls({
           {activeOverlay === 'radar' && <RadarLegend />}
         </div>
       </div>
-
-      {/* Industry index-kind sub-bar */}
-      {activeOverlay === 'industry' && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0,
-          background: '#060606',
-          borderTop: '1px solid #131313',
-          padding: '0 4px',
-        }}>
-          <span style={{
-            padding: '6px 8px',
-            fontSize: 8,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#333',
-          }}>
-            Activity
-          </span>
-          {INDUSTRY_KINDS.map(({ key, label }) => {
-            const isActive = industryKind === key;
-            return (
-              <button
-                key={key}
-                onClick={() => onIndustryKindChange?.(key)}
-                style={{
-                  padding: '6px 10px',
-                  fontSize: 8,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  fontFamily: FONT,
-                  background: isActive ? '#0e0e0e' : 'transparent',
-                  color: isActive ? '#c8a951' : '#474747',
-                  border: 'none',
-                  borderTop: isActive ? '1px solid #c8a951' : '1px solid transparent',
-                  cursor: 'pointer',
-                  transition: 'color 0.15s',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Radar mode sub-bar */}
-      {activeOverlay === 'radar' && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          background: '#060606',
-          borderTop: '1px solid #131313',
-          padding: '4px 8px',
-        }}>
-          <span style={{
-            fontSize: 8,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#333',
-          }}>
-            Pivot
-          </span>
-          <span style={{
-            fontSize: 10,
-            color: radarPivotName ? '#c8a951' : '#474747',
-            letterSpacing: '0.05em',
-            marginRight: 8,
-          }}>
-            {radarPivotName || 'right-click a system · "Radar Pivot"'}
-          </span>
-          <span style={{
-            fontSize: 8,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#333',
-          }}>
-            Reach
-          </span>
-          {[1, 2, 3, 4, 5].map(n => {
-            const isActive = radarJumps === n;
-            return (
-              <button
-                key={n}
-                onClick={() => onRadarJumpsChange?.(n)}
-                style={{
-                  padding: '4px 10px',
-                  fontSize: 9,
-                  fontFamily: FONT,
-                  background: isActive ? '#0e0e0e' : 'transparent',
-                  color: isActive ? '#c8a951' : '#474747',
-                  border: '1px solid ' + (isActive ? '#c8a951' : '#191919'),
-                  cursor: 'pointer',
-                  transition: 'color 0.15s',
-                }}
-              >
-                {n}
-              </button>
-            );
-          })}
-          {radarPivotName && (
-            <button
-              onClick={onRadarClear}
-              style={{
-                marginLeft: 'auto',
-                padding: '4px 8px',
-                fontSize: 8,
-                letterSpacing: '0.12em',
-                fontFamily: FONT,
-                background: 'transparent',
-                color: '#888',
-                border: '1px solid #191919',
-                cursor: 'pointer',
-              }}
-            >
-              CLEAR
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Sovereignty time range sub-bar */}
-      {activeOverlay === 'sovereignty' && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0,
-          background: '#060606',
-          borderTop: '1px solid #131313',
-          padding: '0 4px',
-        }}>
-          <button
-            onClick={() => onSovTimeRangeChange?.(null)}
-            style={{
-              padding: '6px 10px',
-              fontSize: 8,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              fontFamily: FONT,
-              background: !sovTimeRange ? '#0e0e0e' : 'transparent',
-              color: !sovTimeRange ? '#c8a951' : '#474747',
-              border: 'none',
-              borderTop: !sovTimeRange ? '1px solid #c8a951' : '1px solid transparent',
-              cursor: 'pointer',
-              transition: 'color 0.15s',
-            }}
-          >
-            Now
-          </button>
-          <span style={{
-            padding: '6px 4px',
-            fontSize: 8,
-            color: '#222',
-          }}>
-            |
-          </span>
-          <span style={{
-            padding: '6px 10px',
-            fontSize: 8,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#333',
-          }}>
-            Changes
-          </span>
-          {SOV_RANGES.map(({ key, label }) => {
-            const isActive = sovTimeRange === key;
-            return (
-              <button
-                key={key}
-                onClick={() => onSovTimeRangeChange?.(key)}
-                style={{
-                  padding: '6px 10px',
-                  fontSize: 8,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  fontFamily: FONT,
-                  background: isActive ? '#0e0e0e' : 'transparent',
-                  color: isActive ? '#c8a951' : '#474747',
-                  border: 'none',
-                  borderTop: isActive ? '1px solid #c8a951' : '1px solid transparent',
-                  cursor: 'pointer',
-                  transition: 'color 0.15s',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-          {sovChangesLoading && (
-            <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>loading...</span>
-          )}
-          {!sovChangesLoading && sovTimeRange && sovChangesCount > 0 && (
-            <span style={{ fontSize: 8, color: '#c8a951', marginLeft: 8 }}>
-              {sovChangesCount} system{sovChangesCount !== 1 ? 's' : ''}
-            </span>
-          )}
-          {!sovChangesLoading && sovTimeRange && sovChangesCount === 0 && (
-            <span style={{ fontSize: 8, color: '#333', marginLeft: 8 }}>no changes</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
