@@ -68,6 +68,23 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 - **Assets** — background-synced asset browser grouped by location
 - **Corp history** — full employment timeline
 
+### Ship Fitting Tool (`/tools/fitting`)
+- **Full fitting builder** — three-column layout with module browser (market-group tree), slot layout (high/mid/low/rig/subsystem/drone), and live stats
+- **Dogma-accurate engine** — DPS, EHP, capacitor simulation, offense/defense/navigation/targeting/drones, stacking penalties, module-to-module bonuses (Bastion/Siege), Triglavian spool-up, T3C subsystems with per-level scaling
+- **Character-accurate stats** — dropdown picks any of your characters; DPS/EHP/CPU/PG recompute against that character's actual trained skills (falls back to All V when no character selected)
+- **Skill-requirement warnings** — ⚠ pip + red row highlight on any ship/module/drone the selected character can't use; hover tooltip lists missing skills with need/have levels
+- **Module overheating** — toggle per module with correct per-type overload bonuses
+- **Module info popup** — click any fitted module, drone, or search result for icon, description, and formatted dogma attributes
+- **Warp speed** — AU/s in the Navigation panel, Hyperspatial rigs apply correctly
+- **HP ↔ EHP and VAL ↔ % toggles** — flip Defense between raw HP and EHP-adjusted; flip Fitting Resources between absolute and percent used
+- **EFT import/export** — paste from EVE or Pyfa with aggressive Unicode normalization; one-click export to clipboard
+- **Import from character** — pulls your in-game saved fittings; Load to builder or Import to a saved folder
+
+### Saved Fittings (`/tools/fitting/saved`)
+- **Searchable, sortable table** — ship, fitting name, folder, DPS, estimated cost (live from `/markets/prices/`)
+- **Nested folders** — create, rename, move, delete; folder membership persists per fit
+- **Click to load** — any row opens the builder with that fit restored, ready to edit or compare
+
 ### Fitting Viewer (`/character/{id}/fittings`)
 - **Slot-organized display** — High/Mid/Low/Rig/Subsystem/Drone/Cargo with ship slot counts
 - **Ship render images** — grouped by ship type
@@ -98,6 +115,13 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 - **Stacked ore chart** — visual breakdown by ore type over time
 - **Date range filters** — 7d, 30d, 90d, 6m, 1y
 - **Per-character/corp views** also available at `/character/{id}/mining` and `/corporations/{id}/mining`
+
+### Industry Jobs (`/industry/jobs`)
+- **Combined active-jobs view** across every owned character and every corp where at least one character has the corp-jobs scope (Director fallback cycles through characters on 403)
+- **Dropdown filters** — per-character, per-corp, per-activity chips, and source-kind toggle (all / characters only / corps only)
+- **Structure name resolution** — shared `StructureNameCache` with proactive corp-structures prefetch so player citadels show up by name
+- **Include-completed toggle** — widen the view to finished jobs when doing post-mortems
+- **NPC corps surfaced honestly** — skipped automatically (their endpoint always 403s) but counted in the subtitle so the number stays explainable
 
 ### Structure Timers (`/structure-timers`)
 - **Shared timer board** — manual entry with countdown or absolute UTC time
@@ -455,6 +479,9 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 | `/industry` | Manufacturing calculator with nested build/buy |
 | `/industry/compression` | Compression calculator with LP solver |
 | `/industry/mining-ledger` | Unified cross-character/corp mining ledger |
+| `/industry/jobs` | Combined active industry jobs across characters and corps |
+| `/tools/fitting` | Ship fitting builder with Dogma engine and per-character skill scaling |
+| `/tools/fitting/saved` | Saved fittings list with DPS/cost and folder tree |
 | `/character/{id}` | Character detail — wallet, skills, mail, notifications, assets |
 | `/character/{id}/journal` | Full wallet journal with category filtering |
 | `/character/{id}/skills` | Skill remap optimizer and what-if simulator |
