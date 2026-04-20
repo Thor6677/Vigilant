@@ -139,7 +139,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const sovChanges = useSovChanges(activeOverlay === 'sovereignty', sovTimeRange);
   const bookmarks = useBookmarks();
 
-  // Fetch alliance names for sovereignty data + sov changes
+  // Fetch alliance names for sovereignty data + sov changes.
+  //
+  // Ref-based dedupe rather than state dep: we track in-flight IDs so we
+  // don't re-fetch while a request is open, and we don't put allianceNames
+  // in the deps (which would cause a render loop — the effect's own
+  // setAllianceNames would re-trigger it).
+  const allianceFetchInFlightRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     const ids = new Set<number>();
     if (stats?.sovereignty) {
@@ -154,13 +160,21 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       }
     }
     if (ids.size === 0) return;
-    // Filter out already-resolved
-    const missing = [...ids].filter(id => !allianceNames.has(String(id)));
+    // Skip already-resolved AND already-in-flight
+    const missing = [...ids].filter(id =>
+      !allianceNames.has(String(id)) && !allianceFetchInFlightRef.current.has(id)
+    );
     if (missing.length === 0) return;
 
-    // Batch fetch in groups of 50
-    const batch = missing.slice(0, 50);
-    fetch(`/api/map/alliances?ids=${batch.join(',')}`)
+    // The backend /api/map/alliances route uses ESI's bulk /universe/names/
+    // (up to 1,000 IDs per call), so sending all missing IDs in one request
+    // is fine. Earlier code sliced to 50, and because `allianceNames` isn't
+    // in the deps array the effect never re-fired to fetch the remaining
+    // IDs until the next 5-minute sov poll — leaving some systems showing
+    // "Alliance 99xxxxxx" until then.
+    for (const id of missing) allianceFetchInFlightRef.current.add(id);
+
+    fetch(`/api/map/alliances?ids=${missing.join(',')}`)
       .then(r => r.ok ? r.json() : {})
       .then((names: Record<string, string>) => {
         setAllianceNames(prev => {
@@ -169,8 +183,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           return next;
         });
       })
-      .catch(() => {});
-  }, [stats?.sovereignty, sovChanges.data]);
+      .catch(() => {})
+      .finally(() => {
+        for (const id of missing) allianceFetchInFlightRef.current.delete(id);
+      });
+  }, [stats?.sovereignty, sovChanges.data, allianceNames]);
 
   // Compute overlay tints when overlay or stats change
   const overlayTints = useMemo(() => {
