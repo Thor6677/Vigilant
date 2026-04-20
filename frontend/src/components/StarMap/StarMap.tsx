@@ -696,6 +696,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         // otherwise a single right-click both opens the menu and selects the
         // system beneath it.
         if (e.event?.button === 2) return;
+        // Any left-click closes a previously-open context menu. PixiJS's
+        // federated event pipeline swallows the native DOM click, so the
+        // context menu's document-level outside-click handler never fires
+        // on clicks over the canvas. Close it explicitly here.
+        setContextMenu(null);
         const worldPos = e.world;
         const hitRadius = 30 / vp.scaled;
 
