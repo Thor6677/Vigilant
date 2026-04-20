@@ -690,6 +690,12 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       });
 
       vp.on('clicked', (e: any) => {
+        // pixi-viewport fires `clicked` for every mouse button, including
+        // right-click. We handle right-click via the DOM `contextmenu`
+        // listener below (which opens the context menu), so ignore it here —
+        // otherwise a single right-click both opens the menu and selects the
+        // system beneath it.
+        if (e.event?.button === 2) return;
         const worldPos = e.world;
         const hitRadius = 30 / vp.scaled;
 
