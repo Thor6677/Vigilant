@@ -18,7 +18,20 @@
 
 <style>
 .fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
-.fit-stats-sticky { position:sticky; top:80px; }
+/* The right column stacks stats (sticky) + saved fittings. Cap the sticky
+   stats panel's height so it can't overflow the viewport — otherwise on
+   short screens the sticky element would extend below viewport-bottom and
+   the saved-fittings section flowing below it scrolls UP into the sticky
+   area and visually overlaps. Internal overflow-y lets long stats scroll
+   on their own. */
+.fit-stats-sticky {
+    position:sticky; top:80px;
+    max-height:calc(100vh - 100px);
+    overflow-y:auto;
+    overflow-x:hidden;
+}
+/* Scoped under fit-saved-wrap so the stats column can keep overflow clipped */
+.fit-saved-wrap { position:relative; z-index:1; }
 @media (max-width:1100px) {
     .fit-grid { grid-template-columns:1fr 1fr; }
     #browser-panel { display:none !important; }
@@ -26,7 +39,7 @@
 }
 @media (max-width:768px) {
     .fit-grid { grid-template-columns:1fr; }
-    .fit-stats-sticky { position:static; }
+    .fit-stats-sticky { position:static; max-height:none; overflow:visible; }
 }
 </style>
 <button id="browser-toggle" onclick="document.getElementById('browser-panel').style.display='';document.getElementById('browser-panel').style.position='fixed';document.getElementById('browser-panel').style.left='0';document.getElementById('browser-panel').style.top='0';document.getElementById('browser-panel').style.bottom='0';document.getElementById('browser-panel').style.zIndex='50';document.getElementById('browser-panel').style.width='300px';document.getElementById('browser-panel').style.maxHeight='100vh';" style="display:none;margin-bottom:0.5rem;padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);background:none;cursor:pointer;">Browse Modules</button>
@@ -177,7 +190,7 @@
     {% endfor %}
     {% endmacro %}
 
-    <div class="b-section" style="margin-top:1.5rem;">
+    <div class="b-section fit-saved-wrap" style="margin-top:1.5rem;background:var(--bg);">
         <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Saved Fittings</span>
             <button onclick="createFolder(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 0.25rem;" title="New folder">+ Folder</button>
