@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type Graph from 'graphology';
 import type { RoutePreference } from './types';
 import { findRoute } from './graph/pathfinding';
+import type { TheraConnection } from './useOverlayData';
 
 export interface AvoidEntry {
   id: number;
@@ -120,6 +121,11 @@ export interface GateRoutePlannerState {
   errorMessage: string | null;
   clearError: () => void;
 
+  /** Whether Thera/Turnur wormhole connections should be treated as edges
+   *  in the routing graph. Default false — wormhole chains are ephemeral. */
+  useThera: boolean;
+  setUseThera: (v: boolean) => void;
+
   reset: () => void;
 }
 
@@ -129,7 +135,10 @@ export interface GateRoutePlannerState {
  * can read the latest graph reference at compute time without forcing the
  * parent to convert its graph ref to state.
  */
-export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlannerState {
+export function useGateRoutePlanner(
+  getGraph: () => Graph | null,
+  getTheraConnections?: () => TheraConnection[] | null,
+): GateRoutePlannerState {
   const [active, setActive] = useState(false);
   const [origin, setOrigin] = useState<number | null>(null);
   const [dest, setDest] = useState<number | null>(null);
@@ -143,6 +152,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
   const [activeCharacterId, setActiveCharacterId] = useState<number | null>(null);
   const [followCharacter, setFollowCharacter] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [useThera, setUseThera] = useState(false);
 
   // Derived: only system-kind entries contribute to routing avoidance for now.
   // Constellation/region expansion will come later (needs SDE lookup).
@@ -396,14 +406,36 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       return;
     }
 
+    // Optionally splice Thera/Turnur wormhole edges into the graph for this
+    // compute only. Restored in `finally` so the gate-edge graph stays clean.
+    const theraEdgeKeys: string[] = [];
+    const theraConns = useThera && getTheraConnections ? getTheraConnections() : null;
+    if (theraConns && theraConns.length) {
+      for (const c of theraConns) {
+        // Only add edges where both endpoints are in the K-space graph
+        const a = String(c.src);
+        const b = String(c.dst);
+        if (!graph.hasNode(a) || !graph.hasNode(b)) continue;
+        if (graph.hasEdge(a, b)) continue;
+        const key = graph.addEdge(a, b, { weight: 1 });
+        theraEdgeKeys.push(key);
+      }
+    }
+
     // Chain pathfinding through any intermediate waypoints.
     const stops = [origin, ...waypoints, dest];
     const fullPath: number[] = [];
+    const cleanup = () => {
+      for (const k of theraEdgeKeys) {
+        if (graph.hasEdge(k)) graph.dropEdge(k);
+      }
+    };
     for (let i = 0; i < stops.length - 1; i++) {
       const seg = findRoute(
         graph, stops[i], stops[i + 1], preference, avoidSystems, stableKillWeights,
       );
       if (!seg) {
+        cleanup();
         setActiveRoute(null);
         setErrorMessage(`No path between system ${stops[i]} and ${stops[i + 1]}`);
         return;
@@ -416,6 +448,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
         fullPath.push(...seg.slice(1));
       }
     }
+    cleanup();
     // Bail out of state updates if the new path is identical to the previous
     // one (same systems in the same order). This prevents the infinite loop:
     // compute → setActiveRoute(newArr) → intel re-fetch → killWeights changes
@@ -431,7 +464,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
       return fullPath;
     });
     setErrorMessage(null);
-  }, [origin, dest, waypoints, preference, avoidSystems, stableKillWeights, getGraph]);
+  }, [origin, dest, waypoints, preference, avoidSystems, stableKillWeights, getGraph, useThera, getTheraConnections]);
 
   // ── Waypoint helpers ─────────────────────────────────────────────────────
 
@@ -602,6 +635,7 @@ export function useGateRoutePlanner(getGraph: () => Graph | null): GateRoutePlan
     followCharacter, setFollowCharacter,
     pushRouteToAutopilot, pushWaypointToAutopilot,
     errorMessage, clearError,
+    useThera, setUseThera,
     reset,
   };
 }

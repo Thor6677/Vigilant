@@ -445,6 +445,37 @@ class UserFitting(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class UserMapBookmark(Base):
+    """User-pinned system/constellation/region on the star map."""
+    __tablename__ = "user_map_bookmarks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "entity_id", name="uq_user_map_bookmark"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)          # 'system' | 'constellation' | 'region'
+    entity_id = Column(Integer, nullable=False)
+    label = Column(String(64), nullable=True)           # optional user-chosen label
+    color = Column(String(8), nullable=True)            # hex like "#c8a951"
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class SystemActivitySnapshot(Base):
+    """Hourly kill/jump snapshot per system. Drives the 48h sparkline in the
+    map's system info panel and the 'most violent (3h)' trending list."""
+    __tablename__ = "system_activity_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    captured_at = Column(DateTime, nullable=False, index=True)
+    ship_kills = Column(Integer, nullable=False, default=0)
+    pod_kills = Column(Integer, nullable=False, default=0)
+    npc_kills = Column(Integer, nullable=False, default=0)
+    jumps = Column(Integer, nullable=False, default=0)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

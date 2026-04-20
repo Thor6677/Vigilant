@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}TRENDING — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Trending</h1>
+    <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+        sovereignty movements (7d) &middot; most violent systems (3h)
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;" id="trending-grid">
+
+    {# ── Sov gained (7d) ──────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span class="b-label">Systems Gained · 7d</span>
+            <span id="sov-total-gained" style="font-size:10px;color:var(--muted);"></span>
+        </div>
+        <div id="sov-gained" style="padding:0.5rem 0.75rem;font-size:11px;">
+            <div style="color:var(--muted);">Loading…</div>
+        </div>
+    </div>
+
+    {# ── Sov lost (7d) ────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Systems Lost · 7d</span>
+        </div>
+        <div id="sov-lost" style="padding:0.5rem 0.75rem;font-size:11px;">
+            <div style="color:var(--muted);">Loading…</div>
+        </div>
+    </div>
+
+    {# ── Most violent (3h) ────────────────────────────────────────── #}
+    <div class="b-panel" style="grid-column:1 / -1;">
+        <div class="b-panel-head">
+            <span class="b-label">Most Violent Systems · 3h</span>
+        </div>
+        <div id="violent-list" style="padding:0.5rem 0.75rem;font-size:11px;">
+            <div style="color:var(--muted);">Loading…</div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+    .b-trending-row {
+        display:grid;
+        grid-template-columns:auto 1fr auto;
+        gap:0.75rem;
+        padding:0.25rem 0;
+        border-bottom:1px solid var(--border);
+        align-items:center;
+    }
+    .b-trending-row:last-child { border-bottom:none; }
+    .b-trending-rank {
+        color:var(--muted);
+        font-size:9px;
+        width:22px;
+        text-align:right;
+    }
+    .b-trending-name {
+        color:var(--text);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+    }
+    .b-trending-name a { color:var(--accent); text-decoration:none; }
+    .b-trending-name a:hover { text-decoration:underline; }
+    .b-trending-count { color:var(--accent); font-weight:500; }
+    .b-trending-count.neg { color:var(--danger); }
+    @media (max-width: 768px) {
+        #trending-grid { grid-template-columns: 1fr !important; }
+    }
+</style>
+
+<script>
+(async function () {
+    const [sovResp, violentResp] = await Promise.all([
+        fetch('/api/map/trending/sov').then(r => r.ok ? r.json() : null),
+        fetch('/api/map/trending/violent').then(r => r.ok ? r.json() : null),
+    ]);
+
+    // Resolve alliance names in one batch
+    const allianceIds = new Set();
+    if (sovResp) {
+        for (const [id] of sovResp.top_gained || []) allianceIds.add(id);
+        for (const [id] of sovResp.top_lost || []) allianceIds.add(id);
+    }
+    let names = {};
+    if (allianceIds.size) {
+        names = await fetch('/api/map/alliances?ids=' + [...allianceIds].join(','))
+            .then(r => r.ok ? r.json() : {});
+    }
+
+    const $ = (id) => document.getElementById(id);
+
+    function renderAlliance(container, rows, neg) {
+        if (!rows || !rows.length) {
+            container.innerHTML = '<div style="color:var(--muted);">No activity in the last 7 days.</div>';
+            return;
+        }
+        container.innerHTML = rows.slice(0, 15).map(([aid, count], i) => `
+            <div class="b-trending-row">
+                <span class="b-trending-rank">${i + 1}</span>
+                <span class="b-trending-name"><a href="/alliance/${aid}">${names[aid] || ('Alliance ' + aid)}</a></span>
+                <span class="b-trending-count${neg ? ' neg' : ''}">${neg ? '-' : '+'}${count}</span>
+            </div>
+        `).join('');
+    }
+
+    if (sovResp) {
+        $('sov-total-gained').textContent = `${sovResp.total_changes} systems flipped`;
+        renderAlliance($('sov-gained'), sovResp.top_gained, false);
+        renderAlliance($('sov-lost'),   sovResp.top_lost,   true);
+    }
+
+    // Resolve system names via the shared map data JSON
+    let systemMap = new Map();
+    try {
+        const systems = await fetch('/map/data/systems.json').then(r => r.ok ? r.json() : []);
+        for (const s of systems) systemMap.set(s.id, s);
+    } catch {}
+
+    if (violentResp) {
+        const vc = $('violent-list');
+        if (!violentResp.systems || !violentResp.systems.length) {
+            vc.innerHTML = '<div style="color:var(--muted);">No ship destruction reported in the last 3 hours.</div>';
+        } else {
+            vc.innerHTML = violentResp.systems.map((s, i) => {
+                const sys = systemMap.get(s.system_id);
+                const sysName = sys?.name || ('System ' + s.system_id);
+                const regName = sys?.regName || '';
+                return `
+                    <div class="b-trending-row">
+                        <span class="b-trending-rank">${i + 1}</span>
+                        <span class="b-trending-name">
+                            <a href="/map#${s.system_id}">${sysName}</a>
+                            <span style="color:var(--muted);margin-left:0.5rem;font-size:9px;">${regName}</span>
+                        </span>
+                        <span>
+                            <span class="b-trending-count neg">${s.ship_kills.toLocaleString()}</span>
+                            <span style="color:var(--muted);font-size:9px;margin-left:4px;">ships</span>
+                            ${s.pod_kills ? `<span class="b-trending-count neg" style="margin-left:6px;">${s.pod_kills.toLocaleString()}</span><span style="color:var(--muted);font-size:9px;margin-left:4px;">pods</span>` : ''}
+                        </span>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+})();
+</script>
+
+{% endblock %}

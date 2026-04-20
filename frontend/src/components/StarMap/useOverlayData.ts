@@ -18,6 +18,7 @@ export interface FWData {
   contested: string;
   vp: number;
   vp_threshold: number;
+  vp_pct: number;
 }
 
 export interface IncursionData {
@@ -25,7 +26,30 @@ export interface IncursionData {
   staging_system_id: number;
   type: string;
   state: string;
+  influence?: number;
+  has_boss?: boolean;
   systems: number[];
+}
+
+export interface IndustryIndices {
+  manufacturing: number;
+  me: number;
+  te: number;
+  copying: number;
+  invention: number;
+  reaction: number;
+}
+
+export interface TheraConnection {
+  src: number;
+  dst: number;
+  src_name: string;
+  dst_name: string;
+  type: string;
+  mass_status: string;
+  life_hours: number | null;
+  sig: string;
+  created_at?: string | null;
 }
 
 export interface MapStats {
@@ -34,6 +58,9 @@ export interface MapStats {
   sovereignty: Record<string, SovData>;
   fw: Record<string, FWData>;
   incursions: IncursionData[];
+  indices: Record<string, IndustryIndices>;
+  adm: Record<string, number>;
+  thera: TheraConnection[];
   _freshness: Record<string, string | null>;
 }
 
@@ -64,10 +91,55 @@ export function useOverlayData() {
 
   useEffect(() => {
     fetchStats();
-    // Refresh every 5 minutes
-    const interval = setInterval(fetchStats, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    // Refresh every 5 minutes, but only while the tab is visible — saves
+    // battery on mobile and cuts useless ESI load when the user is away.
+    let interval: number | null = null;
+    const start = () => {
+      if (interval != null) return;
+      interval = window.setInterval(fetchStats, 5 * 60 * 1000);
+    };
+    const stop = () => {
+      if (interval != null) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        fetchStats();  // immediate refresh on focus
+        start();
+      } else {
+        stop();
+      }
+    };
+    start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [fetchStats]);
 
   return { stats, loading, error, refetch: fetchStats };
+}
+
+// ── Planet-type counts per system (static SDE data) ────────────────────
+
+export interface PlanetTypesData {
+  types: Record<string, string>;     // "11": "Temperate", etc.
+  systems: Record<string, Record<string, number>>; // system_id → {type_id → count}
+}
+
+export function usePlanetTypes(enabled: boolean) {
+  const [data, setData] = useState<PlanetTypesData | null>(null);
+
+  useEffect(() => {
+    if (!enabled || data) return;
+    fetch('/api/map/planet-types')
+      .then(r => r.ok ? r.json() : null)
+      .then(setData)
+      .catch(() => {});
+  }, [enabled, data]);
+
+  return data;
 }

@@ -12,22 +12,28 @@ import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
 
-import type { SystemData, MapData, OverlayType, GroupMode } from './types';
+import type { SystemData, MapData, OverlayType, GroupMode, IndustryIndexKind } from './types';
 import { LODTier } from './types';
 import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
-import { heatmapColor, allianceColor, FACTION_COLORS } from './utils/colors';
+import {
+  heatmapColor, allianceColor, FACTION_COLORS,
+  industryColor, admColor, dominantPlanetColor,
+} from './utils/colors';
 import { SystemRenderer } from './renderer/SystemRenderer';
 import { EdgeRenderer } from './renderer/EdgeRenderer';
 import { LabelRenderer } from './renderer/LabelRenderer';
 import { RouteRenderer } from './renderer/RouteRenderer';
 import { JumpRangeRenderer } from './renderer/JumpRangeRenderer';
 import { AllianceTerritoryRenderer } from './renderer/AllianceTerritoryRenderer';
+import { TheraRenderer } from './renderer/TheraRenderer';
 import { buildGraph } from './graph/buildGraph';
-import { useOverlayData } from './useOverlayData';
+import { useOverlayData, usePlanetTypes } from './useOverlayData';
+import type { TheraConnection } from './useOverlayData';
 import { useSovChanges, type SovTimeRange } from './useSovChanges';
 import { useCharacterLocations } from './useCharacterLocations';
 import { useJumpPlanner } from './useJumpPlanner';
 import { useGateRoutePlanner } from './useGateRoutePlanner';
+import { useBookmarks } from './useBookmarks';
 
 import { SystemInfoPanel } from './ui/SystemInfoPanel';
 import { SystemSearch } from './ui/SystemSearch';
@@ -37,6 +43,7 @@ import { GroupModeControls } from './ui/GroupModeControls';
 import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
 import { GateRoutePlannerPanel } from './ui/GateRoutePlannerPanel';
 import { SystemContextMenu } from './ui/SystemContextMenu';
+import { BottomSheet } from './ui/BottomSheet';
 import { useIsMobile } from './useIsMobile';
 import type { GroupData } from './renderer/LabelRenderer';
 
@@ -67,6 +74,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const routeRendererRef = useRef<RouteRenderer | null>(null);
   const jumpRangeRendererRef = useRef<JumpRangeRenderer | null>(null);
   const territoryRendererRef = useRef<AllianceTerritoryRenderer | null>(null);
+  const theraRendererRef = useRef<TheraRenderer | null>(null);
 
   const [selectedSystem, setSelectedSystem] = useState<SystemData | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
@@ -77,6 +85,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     position: { x: number; y: number };
   } | null>(null);
   const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
+  const [industryKind, setIndustryKind] = useState<IndustryIndexKind>('manufacturing');
+  const [radarPivotId, setRadarPivotId] = useState<number | null>(null);
+  const [radarJumps, setRadarJumps] = useState<number>(3);
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
   const overlayBarRef = useRef<HTMLDivElement>(null);
@@ -92,12 +103,41 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   // Fetch ESI overlay stats
   const { stats, loading: statsLoading } = useOverlayData();
   const { characters } = useCharacterLocations();
+  // Planet types — lazy-loaded when the planetType overlay is activated
+  const planetData = usePlanetTypes(activeOverlay === 'planetType');
+
+  // Radar reach: BFS from pivot up to radarJumps on the stargate graph.
+  const radarReach = useMemo(() => {
+    if (activeOverlay !== 'radar' || radarPivotId == null) return null;
+    const adj = adjacencyRef.current;
+    if (!adj) return null;
+    const depth = new Map<number, number>();
+    depth.set(radarPivotId, 0);
+    const queue: number[] = [radarPivotId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      const d = depth.get(cur)!;
+      if (d >= radarJumps) continue;
+      const nbrs = adj.get(cur);
+      if (!nbrs) continue;
+      for (const n of nbrs) {
+        if (!depth.has(n)) {
+          depth.set(n, d + 1);
+          queue.push(n);
+        }
+      }
+    }
+    return depth;
+  }, [activeOverlay, radarPivotId, radarJumps, adjacencyRef.current]);
   const jumpPlanner = useJumpPlanner(data.systemMap, data.systems, adjacencyRef.current ?? undefined);
   const getGraph = useCallback(() => graphRef.current, []);
-  const gateRoutePlanner = useGateRoutePlanner(getGraph);
+  const theraConnectionsRef = useRef<TheraConnection[] | null>(null);
+  const getThera = useCallback(() => theraConnectionsRef.current, []);
+  const gateRoutePlanner = useGateRoutePlanner(getGraph, getThera);
   const [allianceNames, setAllianceNames] = useState<Map<string, string>>(new Map());
   const [sovTimeRange, setSovTimeRange] = useState<SovTimeRange | null>(null);
   const sovChanges = useSovChanges(activeOverlay === 'sovereignty', sovTimeRange);
+  const bookmarks = useBookmarks();
 
   // Fetch alliance names for sovereignty data + sov changes
   useEffect(() => {
@@ -205,20 +245,78 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         const fw = stats.fw[String(sys.id)];
         if (fw?.occupier) {
           const base = FACTION_COLORS[fw.occupier] ?? 0x555577;
-          tints.set(sys.id, fw.contested !== 'uncontested' ? brighten(base, 1.4) : base);
+          // Brighten contested systems in proportion to VP%
+          const factor = fw.contested !== 'uncontested'
+            ? 1.2 + (fw.vp_pct ?? 0) / 100 * 0.8
+            : 1.0;
+          tints.set(sys.id, factor > 1.01 ? brighten(base, factor) : base);
         } else {
           tints.set(sys.id, 0x1a1a2a);
         }
       }
+    } else if (activeOverlay === 'industry') {
+      // Normalize against the P95 of seen values so Jita doesn't compress the scale.
+      const values = Object.values(stats.indices || {}).map(x => x[industryKind] ?? 0);
+      const sorted = [...values].sort((a, b) => a - b);
+      const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0.2;
+      for (const sys of data.systems) {
+        const row = stats.indices?.[String(sys.id)];
+        const v = row?.[industryKind] ?? 0;
+        tints.set(sys.id, industryColor(v, p95 || 0.2));
+      }
+    } else if (activeOverlay === 'adm') {
+      for (const sys of data.systems) {
+        const v = stats.adm?.[String(sys.id)];
+        if (typeof v === 'number') {
+          tints.set(sys.id, admColor(v));
+        } else {
+          tints.set(sys.id, 0x141414);
+        }
+      }
+    } else if (activeOverlay === 'planetType') {
+      // Dim systems we don't have planet data for so the painted systems pop.
+      if (planetData?.systems) {
+        for (const sys of data.systems) {
+          const counts = planetData.systems[String(sys.id)];
+          tints.set(sys.id, counts ? dominantPlanetColor(counts) : 0x141414);
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
+    } else if (activeOverlay === 'radar') {
+      // Pivot = gold. 1 jump = bright green. 2 = yellow. 3+ = orange.
+      // Outside the reach radius: deep dim.
+      if (radarReach) {
+        for (const sys of data.systems) {
+          const d = radarReach.get(sys.id);
+          if (d == null) { tints.set(sys.id, 0x0f0f0f); continue; }
+          if (d === 0) { tints.set(sys.id, 0xc8a951); continue; }
+          if (d === 1) { tints.set(sys.id, 0x48f148); continue; }
+          if (d === 2) { tints.set(sys.id, 0xccaa33); continue; }
+          tints.set(sys.id, 0xef6f00);
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
     }
 
     return tints;
-  }, [activeOverlay, stats, data.systems, sovChanges.data]);
+  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, radarReach]);
 
   // Apply overlay tints to renderer
   useEffect(() => {
     systemRendererRef.current?.setOverlayTint(overlayTints);
   }, [overlayTints]);
+
+  // Keep Thera connections up to date — used both for rendering (rings on the
+  // map) and as a feed for the gate route planner when 'Include Thera' is on.
+  useEffect(() => {
+    theraConnectionsRef.current = stats?.thera ?? null;
+    const tr = theraRendererRef.current;
+    if (tr && stats?.thera) {
+      tr.update(stats.thera, data.systemMap);
+    }
+  }, [stats?.thera, data.systemMap]);
 
   // Update alliance territory shading when sovereignty overlay is active
   useEffect(() => {
@@ -475,6 +573,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       const routeRenderer = new RouteRenderer();
       const jumpRangeRenderer = new JumpRangeRenderer();
       const territoryRenderer = new AllianceTerritoryRenderer();
+      const theraRenderer = new TheraRenderer();
 
       systemRendererRef.current = systemRenderer;
       edgeRendererRef.current = edgeRenderer;
@@ -482,6 +581,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       routeRendererRef.current = routeRenderer;
       jumpRangeRendererRef.current = jumpRangeRenderer;
       territoryRendererRef.current = territoryRenderer;
+      theraRendererRef.current = theraRenderer;
 
       // Init renderers
       edgeRenderer.init(data.systemMap, data.edges);
@@ -490,6 +590,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       labelRenderer.init(data.systems, data.regions);
       routeRenderer.init(data.systemMap);
       jumpRangeRenderer.init();
+      theraRenderer.init();
 
       // Add to viewport in draw order: territory → edges → region labels → group labels → systems → system labels → route
       vp.addChild(territoryRenderer.container);
@@ -497,6 +598,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       vp.addChild(labelRenderer.regionLabels);
       vp.addChild(labelRenderer.groupLabels);
       vp.addChild(systemRenderer.container);
+      vp.addChild(theraRenderer.container);   // rings sit above system sprites
       vp.addChild(labelRenderer.systemLabels);
       vp.addChild(jumpRangeRenderer.rangeGraphics);
       vp.addChild(jumpRangeRenderer.routeGraphics);
@@ -638,25 +740,70 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
-      // Right-click context menu on systems
-      const handleContextMenu = (e: MouseEvent) => {
-        e.preventDefault();
+      // Right-click context menu on systems (also triggered by touch long-press below)
+      const openContextMenuAt = (clientX: number, clientY: number) => {
         const rect = el.getBoundingClientRect();
-        const localX = e.clientX - rect.left;
-        const localY = e.clientY - rect.top;
+        const localX = clientX - rect.left;
+        const localY = clientY - rect.top;
         const worldPos = vp.toWorld(localX, localY);
         const hitRadius = 30 / vp.scaled;
         const found = qt.find(worldPos.x, worldPos.y, hitRadius);
         if (found) {
           setContextMenu({
             system: found,
-            position: { x: e.clientX, y: e.clientY },
+            position: { x: clientX, y: clientY },
           });
+          // Subtle haptic tap on mobile
+          try { (navigator as any).vibrate?.(10); } catch {}
         } else {
           setContextMenu(null);
         }
       };
+      const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        openContextMenuAt(e.clientX, e.clientY);
+      };
       el.addEventListener('contextmenu', handleContextMenu);
+
+      // Touch long-press → context menu. Fires after 500ms if the pointer
+      // hasn't moved more than 10px and hasn't been released. Cancelled by
+      // any drag > 10px (so the viewport can still pan).
+      let longPressTimer: number | null = null;
+      let longPressStart: { x: number; y: number } | null = null;
+      const CANCEL_DISTANCE = 10;
+      const LONG_PRESS_MS = 500;
+      const onTouchStart = (e: TouchEvent) => {
+        if (e.touches.length !== 1) { cancelLongPress(); return; }
+        const t = e.touches[0];
+        longPressStart = { x: t.clientX, y: t.clientY };
+        longPressTimer = window.setTimeout(() => {
+          if (longPressStart) {
+            openContextMenuAt(longPressStart.x, longPressStart.y);
+          }
+          longPressTimer = null;
+        }, LONG_PRESS_MS);
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        if (!longPressStart || !e.touches[0]) return;
+        const dx = e.touches[0].clientX - longPressStart.x;
+        const dy = e.touches[0].clientY - longPressStart.y;
+        if (Math.hypot(dx, dy) > CANCEL_DISTANCE) cancelLongPress();
+      };
+      const cancelLongPress = () => {
+        if (longPressTimer != null) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        longPressStart = null;
+      };
+      el.addEventListener('touchstart', onTouchStart, { passive: true });
+      el.addEventListener('touchmove', onTouchMove, { passive: true });
+      el.addEventListener('touchend', cancelLongPress);
+      el.addEventListener('touchcancel', cancelLongPress);
+
+      // Make the map canvas "own" pan/zoom gestures so Safari doesn't hijack
+      // them for page scroll. See MDN touch-action.
+      el.style.touchAction = 'none';
 
       // Animation loop
       app.ticker.add((ticker) => {
@@ -664,6 +811,32 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         systemRenderer.tick(ticker.deltaTime);
         jumpRangeRenderer.tick(ticker.deltaTime);
       });
+
+      // Respect prefers-reduced-motion: halt the idle animation loop when
+      // the user has asked for less motion. Selection pulse + transitions
+      // freeze to their resting state; pan/zoom still work.
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+      const applyMotionPref = () => {
+        if (reducedMotion?.matches) {
+          app.ticker.stop();
+        } else if (!app.ticker.started) {
+          app.ticker.start();
+        }
+      };
+      applyMotionPref();
+      reducedMotion?.addEventListener?.('change', applyMotionPref);
+
+      // Pause Pixi rendering when the browser tab is hidden — saves battery
+      // and GPU on mobile. Re-render one frame on resume so nothing looks
+      // stale.
+      const onVis = () => {
+        if (document.visibilityState === 'hidden') {
+          app.ticker.stop();
+        } else if (!reducedMotion?.matches) {
+          app.ticker.start();
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
 
       // ResizeObserver
       const resizeObserver = new ResizeObserver(() => {
@@ -677,6 +850,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       (el as any).__mapCleanup = () => {
         resizeObserver.disconnect();
         el.removeEventListener('contextmenu', handleContextMenu);
+        el.removeEventListener('touchstart', onTouchStart);
+        el.removeEventListener('touchmove', onTouchMove);
+        el.removeEventListener('touchend', cancelLongPress);
+        el.removeEventListener('touchcancel', cancelLongPress);
+        document.removeEventListener('visibilitychange', onVis);
+        reducedMotion?.removeEventListener?.('change', applyMotionPref);
+        cancelLongPress();
         if (hoverThrottleId !== null) clearTimeout(hoverThrottleId);
         if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
       };
@@ -693,6 +873,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       labelRendererRef.current?.destroy();
       routeRendererRef.current?.destroy();
       jumpRangeRendererRef.current?.destroy();
+      theraRendererRef.current?.destroy();
       if (viewportRef.current) {
         viewportRef.current.destroy();
         viewportRef.current = null;
@@ -919,6 +1100,16 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
+
+  const handleRadarPivot = useCallback((id: number) => {
+    setActiveOverlay('radar');
+    setRadarPivotId(id);
+    if (sovTimeRange !== null) setSovTimeRange(null);
+  }, [sovTimeRange]);
+
+  const handleToggleBookmark = useCallback((id: number) => {
+    bookmarks.toggleBookmark('system', id);
+  }, [bookmarks]);
 
   const handleSetOrigin = useCallback((id: number) => {
     gateRoutePlanner.setActive(true);
@@ -1204,6 +1395,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           onSetDestination={handleSetDest}
           onAddWaypoint={handleAddWaypoint}
           onAvoidSystem={handleAvoidSystem}
+          onSetRadarPivot={handleRadarPivot}
+          onToggleBookmark={handleToggleBookmark}
+          isBookmarked={bookmarks.isBookmarked('system', contextMenu.system.id)}
         />
       )}
 
@@ -1252,8 +1446,9 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         </div>
       )}
 
-      {/* System info panel */}
-      {selectedSystem && panelPos && (
+      {/* System info panel — desktop renders floating next to the system;
+          mobile wraps it in a bottom sheet with a drag handle. */}
+      {selectedSystem && panelPos && !isMobile && (
         <SystemInfoPanel
           system={selectedSystem}
           position={panelPos}
@@ -1273,8 +1468,51 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }}
           onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
           onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
+          onSetRadarPivot={handleRadarPivot}
+          onToggleBookmark={handleToggleBookmark}
+          isBookmarked={bookmarks.isBookmarked('system', selectedSystem.id)}
           sovChange={sovChanges.data?.changes[String(selectedSystem.id)] ?? null}
         />
+      )}
+      {isMobile && (
+        <BottomSheet
+          open={!!selectedSystem}
+          initialSnap="half"
+          title={selectedSystem?.name}
+          onClose={() => {
+            setSelectedSystem(null);
+            setPanelPos(null);
+            systemRendererRef.current?.setSelected(null);
+          }}
+        >
+          {selectedSystem && (
+            <SystemInfoPanel
+              inSheet
+              system={selectedSystem}
+              position={{ x: 0, y: 0 }}  // unused inside sheet
+              stats={stats}
+              allianceNames={allianceNames}
+              routeOrigin={gateRoutePlanner.origin}
+              routeDest={gateRoutePlanner.dest}
+              activeRoute={gateRoutePlanner.activeRoute}
+              routePreference={gateRoutePlanner.preference}
+              onSetOrigin={handleSetOrigin}
+              onSetDestination={handleSetDest}
+              onSetRoutePreference={gateRoutePlanner.setPreference}
+              onClose={() => {
+                setSelectedSystem(null);
+                setPanelPos(null);
+                systemRendererRef.current?.setSelected(null);
+              }}
+              onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
+              onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
+              onSetRadarPivot={handleRadarPivot}
+              onToggleBookmark={handleToggleBookmark}
+              isBookmarked={bookmarks.isBookmarked('system', selectedSystem.id)}
+              sovChange={sovChanges.data?.changes[String(selectedSystem.id)] ?? null}
+            />
+          )}
+        </BottomSheet>
       )}
 
       {/* Bottom overlay controls */}
@@ -1291,6 +1529,12 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           sovChangesCount={sovChanges.data ? Object.keys(sovChanges.data.changes).length : 0}
           sovChangesLoading={sovChanges.loading}
           isMobile={isMobile}
+          industryKind={industryKind}
+          onIndustryKindChange={setIndustryKind}
+          radarPivotName={radarPivotId ? data.systemMap.get(radarPivotId)?.name ?? null : null}
+          radarJumps={radarJumps}
+          onRadarJumpsChange={setRadarJumps}
+          onRadarClear={() => setRadarPivotId(null)}
         />
       </div>
     </div>

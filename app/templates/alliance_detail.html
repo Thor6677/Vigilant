@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}ALLIANCE — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title" id="alliance-title">Alliance</h1>
+    <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;" id="alliance-subtitle">Loading…</div>
+</div>
+
+<div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;margin-top:1rem;align-items:start;" id="alliance-grid">
+
+    <div class="b-panel" style="padding:0.75rem;display:flex;flex-direction:column;align-items:center;gap:0.5rem;">
+        <img id="alliance-logo" src="" width="128" height="128" style="background:#0a0a0a;" alt="">
+        <div id="alliance-ticker" style="font-size:10px;color:var(--muted);letter-spacing:0.15em;"></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0.5rem;">
+        <div class="b-panel" style="padding:0.5rem 0.75rem;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;">SOV SYSTEMS</div>
+            <div id="stat-sov-count" style="font-size:24px;color:var(--accent);font-weight:500;">—</div>
+        </div>
+        <div class="b-panel" style="padding:0.5rem 0.75rem;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;">GAINED · 7D</div>
+            <div id="stat-gained" style="font-size:24px;color:var(--success);font-weight:500;">—</div>
+        </div>
+        <div class="b-panel" style="padding:0.5rem 0.75rem;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;">LOST · 7D</div>
+            <div id="stat-lost" style="font-size:24px;color:var(--danger);font-weight:500;">—</div>
+        </div>
+        <div class="b-panel" style="padding:0.5rem 0.75rem;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;">FOUNDED</div>
+            <div id="stat-founded" style="font-size:12px;color:var(--text);font-weight:400;margin-top:6px;">—</div>
+        </div>
+    </div>
+</div>
+
+<div class="b-panel" style="margin-top:1rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Recent Changes · 7d</span>
+    </div>
+    <div id="changes-list" style="padding:0.5rem 0.75rem;font-size:11px;max-height:500px;overflow-y:auto;">
+        <div style="color:var(--muted);">Loading…</div>
+    </div>
+</div>
+
+<style>
+    .b-change-row {
+        display:grid;
+        grid-template-columns:auto 1fr auto auto;
+        gap:0.75rem;
+        padding:0.25rem 0;
+        border-bottom:1px solid var(--border);
+        align-items:center;
+    }
+    .b-change-row:last-child { border-bottom:none; }
+    .b-change-dir.gain { color:var(--success); }
+    .b-change-dir.loss { color:var(--danger); }
+    @media (max-width: 768px) {
+        #alliance-grid { grid-template-columns: 1fr !important; }
+        #alliance-grid > div:last-child { grid-template-columns: repeat(2, 1fr) !important; }
+    }
+</style>
+
+<script>
+(async function () {
+    const allianceId = {{ alliance_id }};
+
+    const detail = await fetch('/api/map/alliance/' + allianceId).then(r => r.ok ? r.json() : null);
+    if (!detail) {
+        document.getElementById('alliance-subtitle').textContent = 'Alliance not found.';
+        return;
+    }
+
+    document.getElementById('alliance-title').textContent = detail.name || ('Alliance ' + allianceId);
+    document.getElementById('alliance-ticker').textContent = detail.ticker || '';
+    document.getElementById('alliance-logo').src = `https://images.evetech.net/alliances/${allianceId}/logo?size=128`;
+
+    document.getElementById('alliance-subtitle').textContent =
+        (detail.ticker ? `[${detail.ticker}] ` : '') + `ID ${allianceId}`;
+
+    document.getElementById('stat-sov-count').textContent = detail.sov_system_count ?? 0;
+    document.getElementById('stat-gained').textContent = (detail.sov_gained_7d > 0 ? '+' : '') + (detail.sov_gained_7d ?? 0);
+    document.getElementById('stat-lost').textContent = '-' + (detail.sov_lost_7d ?? 0);
+    document.getElementById('stat-founded').textContent = detail.date_founded
+        ? new Date(detail.date_founded).toISOString().slice(0, 10)
+        : '—';
+
+    // Resolve system names
+    let systemMap = new Map();
+    try {
+        const systems = await fetch('/map/data/systems.json').then(r => r.ok ? r.json() : []);
+        for (const s of systems) systemMap.set(s.id, s);
+    } catch {}
+
+    // Resolve alliance names for counter-parties
+    const counterparties = new Set();
+    for (const c of detail.recent_changes || []) {
+        if (c.direction === 'gain' && c.old_alliance_id) counterparties.add(c.old_alliance_id);
+        if (c.direction === 'loss' && c.new_alliance_id) counterparties.add(c.new_alliance_id);
+    }
+    let names = {};
+    if (counterparties.size) {
+        names = await fetch('/api/map/alliances?ids=' + [...counterparties].join(','))
+            .then(r => r.ok ? r.json() : {});
+    }
+
+    const cl = document.getElementById('changes-list');
+    if (!detail.recent_changes || !detail.recent_changes.length) {
+        cl.innerHTML = '<div style="color:var(--muted);">No sovereignty changes in the last 7 days.</div>';
+    } else {
+        cl.innerHTML = detail.recent_changes.map(c => {
+            const sys = systemMap.get(c.system_id);
+            const sysName = sys?.name || ('System ' + c.system_id);
+            const regName = sys?.regName || '';
+            const other = c.direction === 'gain' ? c.old_alliance_id : c.new_alliance_id;
+            const otherName = other ? (names[other] || ('Alliance ' + other)) : 'Unclaimed';
+            const when = new Date(c.changed_at).toISOString().slice(0, 16).replace('T', ' ');
+            return `
+                <div class="b-change-row">
+                    <span class="b-change-dir ${c.direction}">${c.direction === 'gain' ? '▲' : '▼'}</span>
+                    <span>
+                        <span style="color:var(--accent);">${sysName}</span>
+                        <span style="color:var(--muted);font-size:9px;margin-left:0.5rem;">${regName}</span>
+                    </span>
+                    <span style="color:var(--muted);font-size:10px;">
+                        ${c.direction === 'gain' ? 'from' : 'to'}
+                        ${other ? `<a style="color:var(--text);" href="/alliance/${other}">${otherName}</a>` : otherName}
+                    </span>
+                    <span style="color:var(--muted);font-size:9px;">${when}</span>
+                </div>
+            `;
+        }).join('');
+    }
+})();
+</script>
+
+{% endblock %}

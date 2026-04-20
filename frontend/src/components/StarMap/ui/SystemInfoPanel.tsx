@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { SystemData, RoutePreference } from '../types';
 import type { MapStats } from '../useOverlayData';
 import { securityColorCSS } from '../utils/colors';
@@ -35,7 +36,21 @@ interface Props {
   onClose: () => void;
   onSetJumpOrigin?: (id: number) => void;
   onSetJumpDest?: (id: number) => void;
+  onSetRadarPivot?: (id: number) => void;
+  onToggleBookmark?: (id: number) => void;
+  isBookmarked?: boolean;
   sovChange?: { old_alliance_id: number | null; new_alliance_id: number | null; change_count: number; last_change: string } | null;
+  /** When true, drop the absolute positioning / shadow / border — caller
+   *  (BottomSheet) owns the chrome. */
+  inSheet?: boolean;
+}
+
+interface HistoryRow {
+  t: string;
+  ship: number;
+  pod: number;
+  npc: number;
+  jumps: number;
 }
 
 export function SystemInfoPanel({
@@ -53,10 +68,14 @@ export function SystemInfoPanel({
   onClose,
   onSetJumpOrigin,
   onSetJumpDest,
+  onSetRadarPivot,
+  onToggleBookmark,
+  isBookmarked,
   sovChange,
+  inSheet,
 }: Props) {
-  const left = Math.min(position.x + 20, window.innerWidth - 280);
-  const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 400);
+  const left = Math.min(position.x + 20, window.innerWidth - 290);
+  const top = Math.min(Math.max(position.y - 60, 10), window.innerHeight - 500);
 
   const isOrigin = routeOrigin === system.id;
   const isDest = routeDest === system.id;
@@ -67,15 +86,40 @@ export function SystemInfoPanel({
   const kills = stats?.kills[sid];
   const jumps = stats?.jumps[sid];
   const sov = stats?.sovereignty[sid];
+  const fw = stats?.fw[sid];
+  const indices = stats?.indices[sid];
+  const adm = stats?.adm?.[sid];
   const hasStats = kills || jumps;
+
+  // Lazy-fetch 48h history when the panel first opens for a system
+  const [history, setHistory] = useState<HistoryRow[] | null>(null);
+  useEffect(() => {
+    setHistory(null);
+    let cancelled = false;
+    fetch(`/api/map/history/${system.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!cancelled && d?.hours) setHistory(d.hours);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [system.id]);
 
   return (
     <div
-      style={{
+      style={inSheet ? {
+        width: '100%',
+        padding: '8px 14px 20px',
+        fontFamily: FONT,
+        fontSize: 11,
+        color: TEXT,
+      } : {
         position: 'absolute',
         left,
         top,
-        width: 260,
+        width: 270,
+        maxHeight: 'calc(100vh - 120px)',
+        overflowY: 'auto',
         background: BG,
         border: `1px solid ${BORDER}`,
         padding: '12px 14px',
@@ -91,16 +135,32 @@ export function SystemInfoPanel({
         <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: TEXT }}>
           {system.name}
         </span>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'none', border: 'none', color: MUTED,
-            cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px',
-            fontFamily: FONT,
-          }}
-        >
-          ×
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {onToggleBookmark && (
+            <button
+              onClick={() => onToggleBookmark(system.id)}
+              title={isBookmarked ? 'Remove bookmark' : 'Bookmark system'}
+              style={{
+                background: 'none', border: 'none',
+                color: isBookmarked ? ACCENT : MUTED,
+                cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px',
+                fontFamily: FONT,
+              }}
+            >
+              {isBookmarked ? '★' : '☆'}
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', color: MUTED,
+              cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px',
+              fontFamily: FONT,
+            }}
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       {/* Details */}
@@ -141,9 +201,22 @@ export function SystemInfoPanel({
               style={{ width: 16, height: 16 }}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
-            <span style={{ color: '#6688aa', fontSize: 10 }}>
+            <a
+              href={`/alliance/${sov.alliance_id}`}
+              style={{ color: '#6688aa', fontSize: 10, textDecoration: 'none' }}
+            >
               {allianceNames.get(String(sov.alliance_id)) ?? `Alliance ${sov.alliance_id}`}
-            </span>
+            </a>
+            {typeof adm === 'number' && (
+              <span style={{
+                marginLeft: 'auto',
+                fontSize: 9, letterSpacing: '0.08em', padding: '1px 5px',
+                background: 'rgba(200,169,81,0.1)', color: ACCENT,
+                border: '1px solid rgba(200,169,81,0.25)',
+              }}>
+                ADM {adm.toFixed(1)}
+              </span>
+            )}
           </div>
         )}
         {sovChange && (
@@ -171,6 +244,49 @@ export function SystemInfoPanel({
           </div>
         )}
       </div>
+
+      {/* FW contested readout */}
+      {fw?.occupier && (
+        <div style={{
+          marginTop: 8, padding: '6px 8px', background: '#0a0a0a',
+          border: `1px solid ${BORDER}`, fontSize: 9, letterSpacing: '0.08em',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: MUTED }}>
+            <span>FW CONTEST</span>
+            <span style={{ color: fw.contested !== 'uncontested' ? '#ef6f00' : '#33aa55' }}>
+              {fw.vp_pct.toFixed(1)}%
+            </span>
+          </div>
+          <div style={{
+            height: 3, marginTop: 3, background: '#161616', overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${Math.min(100, fw.vp_pct)}%`, height: '100%',
+              background: fw.contested !== 'uncontested' ? '#ef6f00' : '#33aa55',
+              transition: 'width 300ms ease',
+            }} />
+          </div>
+          <div style={{ color: MUTED, fontSize: 8, marginTop: 2 }}>
+            {fw.vp.toLocaleString()} / {fw.vp_threshold.toLocaleString()} VP · {fw.contested}
+          </div>
+        </div>
+      )}
+
+      {/* Industry cost indices */}
+      {indices && (indices.manufacturing + indices.me + indices.te + indices.copying + indices.invention + indices.reaction) > 0 && (
+        <div style={{
+          marginTop: 8, padding: '6px 8px', background: '#0a0a0a',
+          border: `1px solid ${BORDER}`, fontSize: 9, letterSpacing: '0.1em',
+          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '2px 10px',
+        }}>
+          <IdxCell k="MFG"  v={indices.manufacturing} />
+          <IdxCell k="ME"   v={indices.me} />
+          <IdxCell k="TE"   v={indices.te} />
+          <IdxCell k="COPY" v={indices.copying} />
+          <IdxCell k="INV"  v={indices.invention} />
+          <IdxCell k="RXN"  v={indices.reaction} />
+        </div>
+      )}
 
       {/* Activity stats */}
       {hasStats && (
@@ -204,6 +320,11 @@ export function SystemInfoPanel({
             </>
           )}
         </div>
+      )}
+
+      {/* 48h history sparkline */}
+      {history && history.length > 1 && (
+        <Sparkline data={history} />
       )}
 
       {/* Route info */}
@@ -252,6 +373,13 @@ export function SystemInfoPanel({
           active={isDest}
           onClick={() => onSetDestination(system.id)}
         />
+        {onSetRadarPivot && (
+          <ActionButton
+            label="RADAR"
+            active={false}
+            onClick={() => onSetRadarPivot(system.id)}
+          />
+        )}
       </div>
 
       {/* Jump planner buttons — always visible */}
@@ -320,5 +448,59 @@ function ActionButton({ label, active, onClick }: { label: string; active: boole
     >
       {label}
     </button>
+  );
+}
+
+function IdxCell({ k, v }: { k: string; v: number }) {
+  // Pct displayed as x.xx — the raw ESI value is a fractional multiplier
+  const pct = (v * 100).toFixed(2);
+  // Color by magnitude: low = grey, moderate = yellow, saturated = red
+  const color = v >= 0.4 ? '#cc3333' : v >= 0.15 ? '#c8a951' : v >= 0.03 ? '#888' : MUTED;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <span style={{ color: MUTED }}>{k}</span>
+      <span style={{ color, textAlign: 'right' }}>{pct}%</span>
+    </div>
+  );
+}
+
+function Sparkline({ data }: { data: HistoryRow[] }) {
+  const W = 240, H = 40;
+  const maxShip = Math.max(1, ...data.map(d => d.ship));
+  const maxJumps = Math.max(1, ...data.map(d => d.jumps));
+  const pathShip = data.map((d, i) => {
+    const x = (i / Math.max(1, data.length - 1)) * W;
+    const y = H - (d.ship / maxShip) * (H - 2);
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const pathJumps = data.map((d, i) => {
+    const x = (i / Math.max(1, data.length - 1)) * W;
+    const y = H - (d.jumps / maxJumps) * (H - 2);
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const totalShip = data.reduce((a, b) => a + b.ship, 0);
+  const totalJumps = data.reduce((a, b) => a + b.jumps, 0);
+
+  return (
+    <div style={{
+      marginTop: 8, padding: '6px 8px', background: '#0a0a0a',
+      border: `1px solid ${BORDER}`,
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', fontSize: 8,
+        letterSpacing: '0.1em', color: MUTED, marginBottom: 3,
+      }}>
+        <span>48H ACTIVITY</span>
+        <span>
+          <span style={{ color: '#cc3333' }}>{totalShip.toLocaleString()} K</span>
+          <span style={{ margin: '0 5px', color: '#222' }}>·</span>
+          <span>{totalJumps.toLocaleString()} J</span>
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+        <path d={pathJumps} fill="none" stroke="#888" strokeWidth="1" />
+        <path d={pathShip}  fill="none" stroke="#cc3333" strokeWidth="1.2" />
+      </svg>
+    </div>
   );
 }

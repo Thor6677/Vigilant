@@ -85,3 +85,61 @@ export const FACTION_COLORS: Record<number, number> = {
   500003: 0xccaa33, // Amarr — gold
   500004: 0x33aa66, // Gallente — green
 };
+
+/** Industry cost-index color ramp. 0 = dim blue (cheap), 1 = bright red (busy).
+ *  ESI reports indices as decimals ≥ 0, usually 0.0 – 0.2 for quiet systems,
+ *  0.3 – 0.8 for industrial hubs, and 1.0+ for saturated markets (Jita/Amarr).
+ *  We normalize on a reference max so one Jita doesn't wash out the scale. */
+export function industryColor(value: number, maxSeen: number): number {
+  if (!isFinite(value) || value <= 0) return 0x1a1a1a;
+  const cap = Math.max(0.1, maxSeen);
+  // Use sqrt so the low end has more visible differentiation
+  const t = Math.sqrt(Math.min(value / cap, 1));
+  return heatmapColor(t);
+}
+
+/** ADM (Activity Defense Multiplier) color — inverted from industry since
+ *  HIGH ADM = strongly defended = friendly for the sov holder.
+ *  1.0 ≈ undefended (red), 6.0 ≈ maxed (green). */
+export function admColor(value: number): number {
+  if (!isFinite(value) || value <= 0) return 0x1a1a1a;
+  // Clamp to 1.0 – 6.0, normalize to 0..1
+  const t = Math.max(0, Math.min(1, (value - 1) / 5));
+  // Red (low ADM) → yellow → green (high ADM)
+  if (t < 0.5) {
+    const s = t * 2;
+    const r = 0xcc;
+    const g = Math.round(s * 0xaa);
+    const b = Math.round(0x33 - s * 0x33);
+    return (r << 16) | (g << 8) | b;
+  }
+  const s = (t - 0.5) * 2;
+  const r = Math.round((1 - s) * 0xcc + s * 0x33);
+  const g = 0xaa;
+  const b = Math.round(s * 0x66);
+  return (r << 16) | (g << 8) | b;
+}
+
+/** Per-planet-type color palette (matches typical EVE community references). */
+export const PLANET_TYPE_COLORS: Record<number, number> = {
+  11:    0x33aa66, // Temperate — green
+  12:    0x88ccee, // Ice — pale blue
+  13:    0x66aa99, // Gas — teal
+  2014:  0x3366cc, // Oceanic — deep blue
+  2015:  0xee3300, // Lava — red/orange
+  2016:  0xa08060, // Barren — tan
+  2017:  0xbb66cc, // Storm — purple
+  2063:  0xee8844, // Plasma — orange
+  30889: 0x888888, // Shattered — grey
+};
+
+/** Pick the dominant planet-type color for a system, based on count. */
+export function dominantPlanetColor(counts: Record<string, number> | undefined): number {
+  if (!counts) return 0x1a1a1a;
+  let bestId = 0;
+  let bestN = 0;
+  for (const [tid, n] of Object.entries(counts)) {
+    if (n > bestN) { bestN = n; bestId = Number(tid); }
+  }
+  return PLANET_TYPE_COLORS[bestId] ?? 0x1a1a1a;
+}

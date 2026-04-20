@@ -11,6 +11,9 @@ interface Props {
   onSetDestination: (id: number) => void;
   onAddWaypoint: (id: number) => void;
   onAvoidSystem: (id: number) => void;
+  onSetRadarPivot?: (id: number) => void;
+  onToggleBookmark?: (id: number) => void;
+  isBookmarked?: boolean;
 }
 
 /**
@@ -25,6 +28,9 @@ export function SystemContextMenu({
   onSetDestination,
   onAddWaypoint,
   onAvoidSystem,
+  onSetRadarPivot,
+  onToggleBookmark,
+  isBookmarked,
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -107,6 +113,13 @@ export function SystemContextMenu({
       {item('Set as Destination', () => onSetDestination(system.id), '#cc5533')}
       {item('Add as Waypoint', () => onAddWaypoint(system.id), '#00d4ff')}
       {item('Avoid this System', () => onAvoidSystem(system.id), '#cc3333')}
+
+      {onSetRadarPivot && item('Set as Radar Pivot', () => onSetRadarPivot(system.id), '#c8a951', true)}
+      {onToggleBookmark && item(
+        isBookmarked ? 'Remove Bookmark' : 'Bookmark System',
+        () => onToggleBookmark(system.id),
+        isBookmarked ? '#888' : '#c8a951',
+      )}
 
       {item(
         'View on zKillboard ↗',

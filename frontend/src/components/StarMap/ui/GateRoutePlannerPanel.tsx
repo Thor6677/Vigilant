@@ -174,6 +174,22 @@ export function GateRoutePlannerPanel({
         </select>
       </div>
 
+      {/* Thera/Turnur shortcut toggle */}
+      <label style={{
+        marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+        fontSize: 10, fontFamily: FONT,
+      }}>
+        <input
+          type="checkbox"
+          checked={planner.useThera}
+          onChange={e => planner.setUseThera(e.target.checked)}
+          style={{ cursor: 'pointer' }}
+        />
+        <span style={{ color: planner.useThera ? '#c8a951' : '#777', letterSpacing: '0.05em' }}>
+          INCLUDE THERA / TURNUR (EVE-SCOUT)
+        </span>
+      </label>
+
       {/* Error message */}
       {planner.errorMessage && (
         <div style={{

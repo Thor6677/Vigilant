@@ -30,12 +30,18 @@ ESI_BASE = "https://esi.evetech.net/latest"
 
 # (ESI path, cache key, poll interval seconds)
 ESI_STATS = [
-    ("/universe/system_kills/",  "kills",       3600),
-    ("/universe/system_jumps/",  "jumps",       3600),
-    ("/sovereignty/map/",        "sovereignty",  3600),
-    ("/fw/systems/",             "fw",           1800),
-    ("/incursions/",             "incursions",   300),
+    ("/universe/system_kills/",       "kills",        3600),
+    ("/universe/system_jumps/",       "jumps",        3600),
+    ("/sovereignty/map/",             "sovereignty",  3600),
+    ("/sovereignty/structures/",      "sov_structs",  3600),   # ADM per IHUB
+    ("/fw/systems/",                  "fw",           1800),
+    ("/incursions/",                  "incursions",    300),
+    ("/industry/systems/",            "indices",      3600),   # industry cost indices
 ]
+
+# External (non-ESI) data sources. Polled with their own cadence.
+EVE_SCOUT_URL = "https://api.eve-scout.com/v2/public/signatures"
+EVE_SCOUT_POLL_SECONDS = 600   # 10 minutes — Eve-Scout updates infrequently
 
 # EVE faction IDs
 FACTION_NAMES = {
@@ -115,6 +121,83 @@ async def _diff_and_store_sov_changes(new_data: list[dict]):
             log.warning("Sov cleanup failed: %s", e)
 
 
+async def _snapshot_activity(kills_data: list[dict], jumps_data: list[dict]):
+    """Persist hourly kill/jump snapshots so the map can render a 48h sparkline.
+    Called once per poll cycle after the kills + jumps caches update."""
+    from app.db.models import AsyncSessionLocal, SystemActivitySnapshot
+    from sqlalchemy import delete as sa_delete
+
+    by_sys: dict[int, dict] = {}
+    for entry in kills_data:
+        sid = entry.get("system_id")
+        if not sid:
+            continue
+        by_sys.setdefault(sid, {})
+        by_sys[sid]["ship"] = entry.get("ship_kills", 0)
+        by_sys[sid]["pod"] = entry.get("pod_kills", 0)
+        by_sys[sid]["npc"] = entry.get("npc_kills", 0)
+    for entry in jumps_data:
+        sid = entry.get("system_id")
+        if not sid:
+            continue
+        by_sys.setdefault(sid, {})
+        by_sys[sid]["jumps"] = entry.get("ship_jumps", 0)
+
+    now = datetime.now(timezone.utc)
+    # Only snapshot systems that had some activity — avoids writing 5,200 rows
+    # every hour for systems that were empty anyway.
+    rows = [
+        SystemActivitySnapshot(
+            system_id=sid,
+            captured_at=now,
+            ship_kills=v.get("ship", 0),
+            pod_kills=v.get("pod", 0),
+            npc_kills=v.get("npc", 0),
+            jumps=v.get("jumps", 0),
+        )
+        for sid, v in by_sys.items()
+        if any((v.get("ship", 0), v.get("pod", 0), v.get("npc", 0), v.get("jumps", 0)))
+    ]
+    if not rows:
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            db.add_all(rows)
+            await db.commit()
+            # Trim snapshots older than 72 hours (sparkline only needs 48h;
+            # the extra 24h gives us a buffer for late-arriving queries)
+            cutoff = now - timedelta(hours=72)
+            await db.execute(
+                sa_delete(SystemActivitySnapshot).where(
+                    SystemActivitySnapshot.captured_at < cutoff
+                )
+            )
+            await db.commit()
+    except Exception as e:
+        log.warning("Activity snapshot persistence error: %s", e)
+
+
+async def _poll_eve_scout(client: httpx.AsyncClient):
+    """Fetch current Thera/Turnur wormhole connections from Eve-Scout.
+    Cached under the 'thera' stats key; no auth required."""
+    cached = _stats_cache.get("thera", {})
+    last = cached.get("updated_at")
+    if last and (datetime.now(timezone.utc) - last).total_seconds() < EVE_SCOUT_POLL_SECONDS:
+        return
+    try:
+        resp = await client.get(EVE_SCOUT_URL, timeout=20)
+        if resp.status_code != 200:
+            log.warning("Eve-Scout returned %d", resp.status_code)
+            return
+        _stats_cache["thera"] = {
+            "data": resp.json(),
+            "updated_at": datetime.now(timezone.utc),
+        }
+    except Exception as e:
+        log.warning("Eve-Scout fetch error: %s", e)
+
+
 async def _poll_esi_stats():
     """Background loop: fetch public ESI endpoints and cache results."""
     global _poller_started
@@ -130,51 +213,76 @@ async def _poll_esi_stats():
         timeout=30,
         headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
     ) as client:
-        while True:
-            for path, key, interval in ESI_STATS:
+        async with httpx.AsyncClient(timeout=20,
+            headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"}) as ext_client:
+            while True:
+                kills_updated = False
+                jumps_updated = False
+                for path, key, interval in ESI_STATS:
+                    try:
+                        cached = _stats_cache.get(key, {})
+                        last = cached.get("updated_at")
+                        if last and (datetime.now(timezone.utc) - last).total_seconds() < interval:
+                            continue
+
+                        headers = {}
+                        if cached.get("etag"):
+                            headers["If-None-Match"] = cached["etag"]
+
+                        resp = await client.get(path, headers=headers)
+
+                        remain = resp.headers.get("X-ESI-Error-Limit-Remain")
+                        if remain and int(remain) < 20:
+                            log.warning("ESI error limit low (%s), pausing map poller 60s", remain)
+                            await asyncio.sleep(60)
+                            continue
+
+                        if resp.status_code == 304:
+                            _stats_cache[key]["updated_at"] = datetime.now(timezone.utc)
+                            continue
+
+                        if resp.status_code == 200:
+                            new_data = resp.json()
+                            _stats_cache[key] = {
+                                "data": new_data,
+                                "etag": resp.headers.get("ETag"),
+                                "updated_at": datetime.now(timezone.utc),
+                            }
+                            log.debug("Map stats updated: %s (%d items)", key, len(new_data))
+                            # Diff sovereignty changes
+                            if key == "sovereignty":
+                                try:
+                                    await _diff_and_store_sov_changes(new_data)
+                                except Exception as sov_err:
+                                    log.warning("Sov diff error: %s", sov_err)
+                            if key == "kills":
+                                kills_updated = True
+                            elif key == "jumps":
+                                jumps_updated = True
+                        else:
+                            log.warning("ESI %s returned %d", path, resp.status_code)
+
+                    except Exception as e:
+                        log.warning("Map stats poll error for %s: %s", key, e)
+
+                # After a poll cycle where either kills or jumps just refreshed,
+                # persist an activity snapshot so the 48h graph has data.
+                if kills_updated or jumps_updated:
+                    try:
+                        await _snapshot_activity(
+                            _stats_cache.get("kills", {}).get("data", []),
+                            _stats_cache.get("jumps", {}).get("data", []),
+                        )
+                    except Exception as snap_err:
+                        log.warning("Snapshot error: %s", snap_err)
+
+                # External sources
                 try:
-                    cached = _stats_cache.get(key, {})
-                    last = cached.get("updated_at")
-                    if last and (datetime.now(timezone.utc) - last).total_seconds() < interval:
-                        continue
+                    await _poll_eve_scout(ext_client)
+                except Exception as ext_err:
+                    log.warning("Eve-Scout poll error: %s", ext_err)
 
-                    headers = {}
-                    if cached.get("etag"):
-                        headers["If-None-Match"] = cached["etag"]
-
-                    resp = await client.get(path, headers=headers)
-
-                    remain = resp.headers.get("X-ESI-Error-Limit-Remain")
-                    if remain and int(remain) < 20:
-                        log.warning("ESI error limit low (%s), pausing map poller 60s", remain)
-                        await asyncio.sleep(60)
-                        continue
-
-                    if resp.status_code == 304:
-                        _stats_cache[key]["updated_at"] = datetime.now(timezone.utc)
-                        continue
-
-                    if resp.status_code == 200:
-                        new_data = resp.json()
-                        _stats_cache[key] = {
-                            "data": new_data,
-                            "etag": resp.headers.get("ETag"),
-                            "updated_at": datetime.now(timezone.utc),
-                        }
-                        log.debug("Map stats updated: %s (%d items)", key, len(new_data))
-                        # Diff sovereignty changes
-                        if key == "sovereignty":
-                            try:
-                                await _diff_and_store_sov_changes(new_data)
-                            except Exception as sov_err:
-                                log.warning("Sov diff error: %s", sov_err)
-                    else:
-                        log.warning("ESI %s returned %d", path, resp.status_code)
-
-                except Exception as e:
-                    log.warning("Map stats poll error for %s: %s", key, e)
-
-            await asyncio.sleep(60)
+                await asyncio.sleep(60)
 
 
 def start_map_poller():
@@ -436,21 +544,24 @@ async def map_stats(request: Request):
             }
     result["sovereignty"] = sov
 
-    # Faction warfare: {system_id: {owner, occupier, contested, vp, vp_threshold}}
+    # Faction warfare: {system_id: {owner, occupier, contested, vp, vp_threshold, vp_pct}}
     fw = {}
     for entry in _stats_cache.get("fw", {}).get("data", []):
         sid = entry.get("solar_system_id")
         if sid:
+            vp = entry.get("victory_points", 0) or 0
+            vpt = entry.get("victory_points_threshold", 0) or 0
             fw[str(sid)] = {
                 "owner": entry.get("owner_faction_id"),
                 "occupier": entry.get("occupier_faction_id"),
                 "contested": entry.get("contested", "uncontested"),
-                "vp": entry.get("victory_points", 0),
-                "vp_threshold": entry.get("victory_points_threshold", 0),
+                "vp": vp,
+                "vp_threshold": vpt,
+                "vp_pct": round(100 * vp / vpt, 1) if vpt > 0 else 0.0,
             }
     result["fw"] = fw
 
-    # Incursions: [{constellation_id, staging_system_id, type, state, systems}]
+    # Incursions: [{constellation_id, staging_system_id, type, state, systems, influence, has_boss}]
     incursions = []
     for entry in _stats_cache.get("incursions", {}).get("data", []):
         incursions.append({
@@ -458,13 +569,70 @@ async def map_stats(request: Request):
             "staging_system_id": entry.get("staging_solar_system_id"),
             "type": entry.get("type"),
             "state": entry.get("state"),
+            "influence": entry.get("influence"),
+            "has_boss": entry.get("has_boss", False),
             "systems": entry.get("infested_solar_systems", []),
         })
     result["incursions"] = incursions
 
+    # Industry cost indices: {system_id: {manufacturing, me, te, copying, invention, reaction}}
+    indices = {}
+    for entry in _stats_cache.get("indices", {}).get("data", []):
+        sid = entry.get("solar_system_id")
+        if not sid:
+            continue
+        by_act = {a.get("activity"): a.get("cost_index", 0) for a in entry.get("cost_indices", [])}
+        indices[str(sid)] = {
+            "manufacturing": by_act.get("manufacturing", 0),
+            "me":            by_act.get("researching_material_efficiency", 0),
+            "te":            by_act.get("researching_time_efficiency", 0),
+            "copying":       by_act.get("copying", 0),
+            "invention":     by_act.get("invention", 0),
+            "reaction":      by_act.get("reaction", 0),
+        }
+    result["indices"] = indices
+
+    # ADM (Activity Defense Multiplier) per sov system, from the sov structures feed.
+    # IHUB rows carry `vulnerability_occupancy_level`; TCU rows don't. We take the
+    # max across structures in a system so a system with both still shows the IHUB ADM.
+    adm: dict[str, float] = {}
+    for entry in _stats_cache.get("sov_structs", {}).get("data", []):
+        sid = entry.get("solar_system_id")
+        level = entry.get("vulnerability_occupancy_level")
+        if sid and level is not None:
+            try:
+                v = float(level)
+            except (TypeError, ValueError):
+                continue
+            if adm.get(str(sid), 0) < v:
+                adm[str(sid)] = v
+    result["adm"] = adm
+
+    # Thera/Turnur public wormhole connections from Eve-Scout.
+    # Each entry: {in_signature, in_system_id, out_system_id, wh_type, ...}
+    # We expose an array of {src, dst, src_system, dst_system, type, mass_status, life_status}.
+    thera = []
+    for sig in _stats_cache.get("thera", {}).get("data", []) or []:
+        src = sig.get("out_system_id")
+        dst = sig.get("in_system_id")
+        if not src or not dst:
+            continue
+        thera.append({
+            "src": src,
+            "dst": dst,
+            "src_name": (sig.get("out_system_name") or ""),
+            "dst_name": (sig.get("in_system_name") or ""),
+            "type": sig.get("wh_type") or "",
+            "mass_status": sig.get("remaining_hours") and "ok" or (sig.get("wh_mass") or ""),
+            "life_hours": sig.get("remaining_hours"),
+            "sig": sig.get("out_signature") or "",
+            "created_at": sig.get("created_at"),
+        })
+    result["thera"] = thera
+
     # Cache freshness
     freshness = {}
-    for key in ["kills", "jumps", "sovereignty", "fw", "incursions"]:
+    for key in ["kills", "jumps", "sovereignty", "sov_structs", "fw", "incursions", "indices", "thera"]:
         updated = _stats_cache.get(key, {}).get("updated_at")
         freshness[key] = updated.isoformat() if updated else None
     result["_freshness"] = freshness
@@ -897,4 +1065,455 @@ async def route_safety(request: Request):
             "top_kills": r["kills"][:5],
         }
         for r in results
+    })
+
+
+# ── Planet types per system (for PI site-selection overlay) ───────────────
+
+# SDE invType IDs for the 9 planet types
+PLANET_TYPE_NAMES: dict[int, str] = {
+    11:    "Temperate",
+    12:    "Ice",
+    13:    "Gas",
+    2014:  "Oceanic",
+    2015:  "Lava",
+    2016:  "Barren",
+    2017:  "Storm",
+    2063:  "Plasma",
+    30889: "Shattered",
+}
+
+_planet_types_cache: dict | None = None
+
+
+@router.get("/api/map/planet-types")
+async def map_planet_types(request: Request):
+    """Return per-system planet-type counts from the SDE.
+
+    Shape: {"types": {"11": "Temperate", ...},
+            "systems": {"30000142": {"11": 2, "2016": 3}, ...}}
+
+    Cached in-memory for the process lifetime — the SDE only reloads on startup.
+    """
+    global _planet_types_cache
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    if _planet_types_cache is not None:
+        return JSONResponse(_planet_types_cache)
+
+    from sqlalchemy import select, func
+    from app.db.models import AsyncSessionLocal
+    from app.db.sde_models import SDEPlanet
+
+    systems: dict[str, dict[str, int]] = {}
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(SDEPlanet.system_id, SDEPlanet.planet_type_id, func.count().label("n"))
+                .group_by(SDEPlanet.system_id, SDEPlanet.planet_type_id)
+            )).all()
+            for sid, ptid, n in rows:
+                if ptid not in PLANET_TYPE_NAMES:
+                    continue
+                systems.setdefault(str(sid), {})[str(ptid)] = int(n)
+    except Exception as e:
+        log.warning("planet-types query failed: %s", e)
+        return JSONResponse({"types": PLANET_TYPE_NAMES, "systems": {}})
+
+    _planet_types_cache = {
+        "types": {str(k): v for k, v in PLANET_TYPE_NAMES.items()},
+        "systems": systems,
+    }
+    return JSONResponse(_planet_types_cache)
+
+
+# ── 48h activity history (sparkline in system info panel) ─────────────────
+
+@router.get("/api/map/history/{system_id}")
+async def map_system_history(system_id: int, request: Request):
+    """Return hourly kill/jump snapshots for a system over the last 48 hours.
+    Caller: SystemInfoPanel renders this as a sparkline."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SystemActivitySnapshot
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(SystemActivitySnapshot)
+            .where(
+                SystemActivitySnapshot.system_id == system_id,
+                SystemActivitySnapshot.captured_at >= cutoff,
+            )
+            .order_by(SystemActivitySnapshot.captured_at.asc())
+        )).scalars().all()
+
+    return JSONResponse({
+        "system_id": system_id,
+        "hours": [
+            {
+                "t": r.captured_at.isoformat(),
+                "ship": r.ship_kills,
+                "pod": r.pod_kills,
+                "npc": r.npc_kills,
+                "jumps": r.jumps,
+            }
+            for r in rows
+        ],
+    })
+
+
+# ── User bookmarks on the star map ────────────────────────────────────────
+
+_VALID_BOOKMARK_KINDS = {"system", "constellation", "region"}
+
+
+def _serialize_bookmark(b) -> dict:
+    return {
+        "id": b.id,
+        "kind": b.kind,
+        "entity_id": b.entity_id,
+        "label": b.label,
+        "color": b.color,
+        "notes": b.notes,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+    }
+
+
+@router.get("/api/map/bookmarks")
+async def list_bookmarks(request: Request):
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, UserMapBookmark
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(UserMapBookmark)
+            .where(UserMapBookmark.user_id == user_id)
+            .order_by(UserMapBookmark.created_at.desc())
+        )).scalars().all()
+
+    return JSONResponse([_serialize_bookmark(b) for b in rows])
+
+
+@router.post("/api/map/bookmarks")
+async def create_bookmark(request: Request):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, UserMapBookmark
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    kind = body.get("kind")
+    entity_id = body.get("entity_id")
+    label = body.get("label")
+    color = body.get("color")
+    notes = body.get("notes")
+
+    if kind not in _VALID_BOOKMARK_KINDS or not isinstance(entity_id, int):
+        return JSONResponse({"error": "Invalid kind or entity_id"}, status_code=400)
+    if label is not None and (not isinstance(label, str) or len(label) > 64):
+        return JSONResponse({"error": "Invalid label"}, status_code=400)
+    if color is not None and (not isinstance(color, str) or len(color) > 8):
+        return JSONResponse({"error": "Invalid color"}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        bm = UserMapBookmark(
+            user_id=user_id, kind=kind, entity_id=entity_id,
+            label=label, color=color, notes=notes,
+        )
+        db.add(bm)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            existing = (await db.execute(
+                select(UserMapBookmark).where(
+                    UserMapBookmark.user_id == user_id,
+                    UserMapBookmark.kind == kind,
+                    UserMapBookmark.entity_id == entity_id,
+                )
+            )).scalar_one()
+            return JSONResponse(_serialize_bookmark(existing))
+        await db.refresh(bm)
+        return JSONResponse(_serialize_bookmark(bm), status_code=201)
+
+
+@router.patch("/api/map/bookmarks/{bookmark_id}")
+async def update_bookmark(bookmark_id: int, request: Request):
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, UserMapBookmark
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    async with AsyncSessionLocal() as db:
+        bm = (await db.execute(
+            select(UserMapBookmark).where(
+                UserMapBookmark.id == bookmark_id,
+                UserMapBookmark.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not bm:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+
+        if "label" in body:
+            v = body["label"]
+            if v is not None and (not isinstance(v, str) or len(v) > 64):
+                return JSONResponse({"error": "Invalid label"}, status_code=400)
+            bm.label = v
+        if "color" in body:
+            v = body["color"]
+            if v is not None and (not isinstance(v, str) or len(v) > 8):
+                return JSONResponse({"error": "Invalid color"}, status_code=400)
+            bm.color = v
+        if "notes" in body:
+            v = body["notes"]
+            if v is not None and not isinstance(v, str):
+                return JSONResponse({"error": "Invalid notes"}, status_code=400)
+            bm.notes = v
+        await db.commit()
+        await db.refresh(bm)
+        return JSONResponse(_serialize_bookmark(bm))
+
+
+@router.delete("/api/map/bookmarks/{bookmark_id}")
+async def delete_bookmark(bookmark_id: int, request: Request):
+    from sqlalchemy import select, delete
+    from app.db.models import AsyncSessionLocal, UserMapBookmark
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    async with AsyncSessionLocal() as db:
+        existing = (await db.execute(
+            select(UserMapBookmark).where(
+                UserMapBookmark.id == bookmark_id,
+                UserMapBookmark.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        await db.execute(
+            delete(UserMapBookmark).where(UserMapBookmark.id == bookmark_id)
+        )
+        await db.commit()
+
+    return JSONResponse({"deleted": bookmark_id})
+
+
+# ── Trending: sov changes + most violent (serves the trending page) ───────
+
+@router.get("/api/map/trending/sov")
+async def trending_sov(request: Request):
+    """Aggregate sov changes over the last 7 days, grouped by new_alliance_id
+    (systems gained) and old_alliance_id (systems lost). Returns a leaderboard."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, SovereigntyChangeEvent
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(SovereigntyChangeEvent)
+            .where(SovereigntyChangeEvent.changed_at >= cutoff)
+            .order_by(SovereigntyChangeEvent.changed_at.asc())
+        )).scalars().all()
+
+    # Use final state for each system in the window (last event wins)
+    latest: dict[int, SovereigntyChangeEvent] = {}
+    for row in rows:
+        latest[row.system_id] = row
+
+    gained: dict[int, int] = {}   # alliance_id → systems gained (net)
+    lost: dict[int, int] = {}     # alliance_id → systems lost
+    for sid, row in latest.items():
+        old_a = row.old_alliance_id
+        new_a = row.new_alliance_id
+        if old_a == new_a:
+            continue
+        if new_a:
+            gained[new_a] = gained.get(new_a, 0) + 1
+        if old_a:
+            lost[old_a] = lost.get(old_a, 0) + 1
+
+    return JSONResponse({
+        "since": cutoff.isoformat(),
+        "total_changes": len(latest),
+        "top_gained": sorted(gained.items(), key=lambda kv: -kv[1])[:20],
+        "top_lost": sorted(lost.items(), key=lambda kv: -kv[1])[:20],
+    })
+
+
+@router.get("/api/map/trending/violent")
+async def trending_violent(request: Request):
+    """Most violent systems in the last 3 hours, sourced from the stored
+    hourly snapshots. Returns top N by combined ship + pod kills."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    from sqlalchemy import select, func
+    from app.db.models import AsyncSessionLocal, SystemActivitySnapshot
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=3)
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(
+                SystemActivitySnapshot.system_id,
+                func.sum(SystemActivitySnapshot.ship_kills).label("ship"),
+                func.sum(SystemActivitySnapshot.pod_kills).label("pod"),
+                func.sum(SystemActivitySnapshot.npc_kills).label("npc"),
+                func.sum(SystemActivitySnapshot.jumps).label("jumps"),
+            )
+            .where(SystemActivitySnapshot.captured_at >= cutoff)
+            .group_by(SystemActivitySnapshot.system_id)
+            .order_by((
+                func.sum(SystemActivitySnapshot.ship_kills) +
+                func.sum(SystemActivitySnapshot.pod_kills)
+            ).desc())
+            .limit(50)
+        )).all()
+
+    return JSONResponse({
+        "since": cutoff.isoformat(),
+        "systems": [
+            {
+                "system_id": sid,
+                "ship_kills": int(ship or 0),
+                "pod_kills": int(pod or 0),
+                "npc_kills": int(npc or 0),
+                "jumps": int(jumps or 0),
+            }
+            for sid, ship, pod, npc, jumps in rows
+            if (ship or 0) + (pod or 0) > 0
+        ],
+    })
+
+
+@router.get("/trending", response_class=HTMLResponse)
+async def trending_page(request: Request):
+    """HTML page — sov leaderboards + most violent systems."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+    return templates.TemplateResponse("trending.html", {"request": request})
+
+
+# ── Alliance detail page (sov summary, 7d changes) ────────────────────────
+
+@router.get("/api/map/alliance/{alliance_id}")
+async def alliance_detail(alliance_id: int, request: Request):
+    """Aggregated alliance snapshot derived from the sov map cache + 7d change log.
+
+    Returns current sov count, 7d gained/lost, and a recent-changes timeline.
+    ESI's /alliances/{id}/ gives us the alliance header (name/ticker)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    # 1. Current sov systems for this alliance
+    current_sys: list[int] = []
+    for entry in _stats_cache.get("sovereignty", {}).get("data", []):
+        if entry.get("alliance_id") == alliance_id:
+            current_sys.append(entry.get("system_id"))
+
+    # 2. 7d change activity
+    from sqlalchemy import select, or_
+    from app.db.models import AsyncSessionLocal, SovereigntyChangeEvent
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(SovereigntyChangeEvent)
+            .where(
+                SovereigntyChangeEvent.changed_at >= cutoff,
+                or_(
+                    SovereigntyChangeEvent.new_alliance_id == alliance_id,
+                    SovereigntyChangeEvent.old_alliance_id == alliance_id,
+                ),
+            )
+            .order_by(SovereigntyChangeEvent.changed_at.desc())
+        )).scalars().all()
+
+    gained_7d = sum(1 for r in rows if r.new_alliance_id == alliance_id and r.old_alliance_id != alliance_id)
+    lost_7d = sum(1 for r in rows if r.old_alliance_id == alliance_id and r.new_alliance_id != alliance_id)
+
+    # 3. Fetch alliance header from ESI (cached globally)
+    header = {}
+    async with httpx.AsyncClient(
+        base_url=ESI_BASE, timeout=10,
+        headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
+    ) as client:
+        try:
+            resp = await client.get(f"/alliances/{alliance_id}/")
+            if resp.status_code == 200:
+                h = resp.json()
+                header = {
+                    "name": h.get("name"),
+                    "ticker": h.get("ticker"),
+                    "creator_id": h.get("creator_id"),
+                    "executor_corporation_id": h.get("executor_corporation_id"),
+                    "date_founded": h.get("date_founded"),
+                    "faction_id": h.get("faction_id"),
+                }
+                _alliance_cache[alliance_id] = h.get("name", f"Alliance {alliance_id}")
+        except Exception:
+            pass
+
+    return JSONResponse({
+        "alliance_id": alliance_id,
+        **header,
+        "sov_system_count": len(current_sys),
+        "sov_system_ids": current_sys[:500],  # cap payload size
+        "sov_gained_7d": gained_7d,
+        "sov_lost_7d": lost_7d,
+        "recent_changes": [
+            {
+                "system_id": r.system_id,
+                "changed_at": r.changed_at.isoformat(),
+                "old_alliance_id": r.old_alliance_id,
+                "new_alliance_id": r.new_alliance_id,
+                "direction": "gain" if r.new_alliance_id == alliance_id else "loss",
+            }
+            for r in rows[:100]
+        ],
+    })
+
+
+@router.get("/alliance/{alliance_id}", response_class=HTMLResponse)
+async def alliance_page(alliance_id: int, request: Request):
+    """HTML page — alliance profile with sov history."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+    return templates.TemplateResponse("alliance_detail.html", {
+        "request": request,
+        "alliance_id": alliance_id,
     })

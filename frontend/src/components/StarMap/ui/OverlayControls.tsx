@@ -1,4 +1,4 @@
-import type { OverlayType } from '../types';
+import type { OverlayType, IndustryIndexKind } from '../types';
 import type { SovTimeRange } from '../useSovChanges';
 
 const OVERLAYS: { key: OverlayType; label: string }[] = [
@@ -8,8 +8,21 @@ const OVERLAYS: { key: OverlayType; label: string }[] = [
   { key: 'podKills',        label: 'Pod Kills' },
   { key: 'npcKills',        label: 'NPC Kills' },
   { key: 'sovereignty',     label: 'Sovereignty' },
+  { key: 'adm',             label: 'ADM' },
   { key: 'factionWarfare',  label: 'FW' },
   { key: 'incursions',      label: 'Incursions' },
+  { key: 'industry',        label: 'Industry' },
+  { key: 'planetType',      label: 'Planets' },
+  { key: 'radar',           label: 'Radar' },
+];
+
+const INDUSTRY_KINDS: { key: IndustryIndexKind; label: string }[] = [
+  { key: 'manufacturing', label: 'MFG' },
+  { key: 'me',            label: 'ME' },
+  { key: 'te',            label: 'TE' },
+  { key: 'copying',       label: 'COPY' },
+  { key: 'invention',     label: 'INV' },
+  { key: 'reaction',      label: 'RXN' },
 ];
 
 const SOV_RANGES: { key: SovTimeRange; label: string }[] = [
@@ -29,6 +42,12 @@ interface Props {
   sovChangesCount?: number;
   sovChangesLoading?: boolean;
   isMobile?: boolean;
+  industryKind?: IndustryIndexKind;
+  onIndustryKindChange?: (k: IndustryIndexKind) => void;
+  radarPivotName?: string | null;
+  radarJumps?: number;
+  onRadarJumpsChange?: (n: number) => void;
+  onRadarClear?: () => void;
 }
 
 const FONT = "'JetBrains Mono', monospace";
@@ -37,6 +56,12 @@ export function OverlayControls({
   activeOverlay, onOverlayChange, statsLoaded,
   sovTimeRange, onSovTimeRangeChange, sovChangesCount = 0, sovChangesLoading = false,
   isMobile,
+  industryKind = 'manufacturing',
+  onIndustryKindChange,
+  radarPivotName,
+  radarJumps = 3,
+  onRadarJumpsChange,
+  onRadarClear,
 }: Props) {
   return (
     <div style={{ fontFamily: FONT }}>
@@ -99,12 +124,137 @@ export function OverlayControls({
           flexShrink: 0,
         }}>
           {activeOverlay === 'security' && <SecurityLegend />}
-          {['jumps', 'shipKills', 'podKills', 'npcKills'].includes(activeOverlay) && <HeatmapLegend />}
+          {['jumps', 'shipKills', 'podKills', 'npcKills', 'industry'].includes(activeOverlay) && <HeatmapLegend />}
           {activeOverlay === 'sovereignty' && <SovLegend hasChanges={sovTimeRange != null && sovChangesCount > 0} />}
+          {activeOverlay === 'adm' && <ADMLegend />}
           {activeOverlay === 'factionWarfare' && <FWLegend />}
           {activeOverlay === 'incursions' && <IncursionLegend />}
+          {activeOverlay === 'planetType' && <PlanetLegend />}
+          {activeOverlay === 'radar' && <RadarLegend />}
         </div>
       </div>
+
+      {/* Industry index-kind sub-bar */}
+      {activeOverlay === 'industry' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          background: '#060606',
+          borderTop: '1px solid #131313',
+          padding: '0 4px',
+        }}>
+          <span style={{
+            padding: '6px 8px',
+            fontSize: 8,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#333',
+          }}>
+            Activity
+          </span>
+          {INDUSTRY_KINDS.map(({ key, label }) => {
+            const isActive = industryKind === key;
+            return (
+              <button
+                key={key}
+                onClick={() => onIndustryKindChange?.(key)}
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 8,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  fontFamily: FONT,
+                  background: isActive ? '#0e0e0e' : 'transparent',
+                  color: isActive ? '#c8a951' : '#474747',
+                  border: 'none',
+                  borderTop: isActive ? '1px solid #c8a951' : '1px solid transparent',
+                  cursor: 'pointer',
+                  transition: 'color 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Radar mode sub-bar */}
+      {activeOverlay === 'radar' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: '#060606',
+          borderTop: '1px solid #131313',
+          padding: '4px 8px',
+        }}>
+          <span style={{
+            fontSize: 8,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#333',
+          }}>
+            Pivot
+          </span>
+          <span style={{
+            fontSize: 10,
+            color: radarPivotName ? '#c8a951' : '#474747',
+            letterSpacing: '0.05em',
+            marginRight: 8,
+          }}>
+            {radarPivotName || 'right-click a system · "Radar Pivot"'}
+          </span>
+          <span style={{
+            fontSize: 8,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#333',
+          }}>
+            Reach
+          </span>
+          {[1, 2, 3, 4, 5].map(n => {
+            const isActive = radarJumps === n;
+            return (
+              <button
+                key={n}
+                onClick={() => onRadarJumpsChange?.(n)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 9,
+                  fontFamily: FONT,
+                  background: isActive ? '#0e0e0e' : 'transparent',
+                  color: isActive ? '#c8a951' : '#474747',
+                  border: '1px solid ' + (isActive ? '#c8a951' : '#191919'),
+                  cursor: 'pointer',
+                  transition: 'color 0.15s',
+                }}
+              >
+                {n}
+              </button>
+            );
+          })}
+          {radarPivotName && (
+            <button
+              onClick={onRadarClear}
+              style={{
+                marginLeft: 'auto',
+                padding: '4px 8px',
+                fontSize: 8,
+                letterSpacing: '0.12em',
+                fontFamily: FONT,
+                background: 'transparent',
+                color: '#888',
+                border: '1px solid #191919',
+                cursor: 'pointer',
+              }}
+            >
+              CLEAR
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Sovereignty time range sub-bar */}
       {activeOverlay === 'sovereignty' && (
@@ -249,6 +399,45 @@ function IncursionLegend() {
     <>
       <Dot color="#ff4444" label="INFESTED" />
       <Dot color="#ff8800" label="STAGING" />
+    </>
+  );
+}
+
+function ADMLegend() {
+  return (
+    <>
+      <span>WEAK</span>
+      <span style={{
+        width: 50, height: 6, display: 'inline-block',
+        background: 'linear-gradient(to right, #cc3333, #ccaa33, #33aa66)',
+      }} />
+      <span>STRONG</span>
+    </>
+  );
+}
+
+function PlanetLegend() {
+  return (
+    <>
+      <Dot color="#33aa66" label="TEMP" />
+      <Dot color="#88ccee" label="ICE" />
+      <Dot color="#66aa99" label="GAS" />
+      <Dot color="#3366cc" label="OCN" />
+      <Dot color="#ee3300" label="LAVA" />
+      <Dot color="#a08060" label="BARR" />
+      <Dot color="#bb66cc" label="STRM" />
+      <Dot color="#ee8844" label="PLSM" />
+    </>
+  );
+}
+
+function RadarLegend() {
+  return (
+    <>
+      <Dot color="#c8a951" label="PIVOT" />
+      <Dot color="#48f148" label="1J" />
+      <Dot color="#ccaa33" label="2J" />
+      <Dot color="#ef6f00" label="3J+" />
     </>
   );
 }
