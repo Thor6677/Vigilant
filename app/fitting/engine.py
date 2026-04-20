@@ -883,18 +883,24 @@ async def calculate_fitting_stats(
                     current = 1.0
                 attrs[target_attr] = current * product
 
-    # ── Apply All-V fitting skills to ship attributes ─────────────────────
-    # These skills use ItemModifier with domain=shipID to modify the ship
-    # directly.  At All V the bonus is base_attr * 5 applied as postPercent.
-    # CPU Management V / Power Grid Management V: +25% CPU/PG output
-    ship_attrs[ATTR_CPU_OUTPUT] = ship_attrs.get(ATTR_CPU_OUTPUT, 0) * 1.25
-    ship_attrs[ATTR_POWER_OUTPUT] = ship_attrs.get(ATTR_POWER_OUTPUT, 0) * 1.25
-    # Shield Management V: +25% shield HP (attr 337 base=5, *5=25%)
-    ship_attrs[ATTR_SHIELD_HP] = ship_attrs.get(ATTR_SHIELD_HP, 0) * 1.25
-    # Hull Upgrades V: +25% armor HP (attr 335 base=5, *5=25%)
-    ship_attrs[ATTR_ARMOR_HP] = ship_attrs.get(ATTR_ARMOR_HP, 0) * 1.25
-    # Mechanics V: +25% hull HP (attr 327 base=5, *5=25%)
-    ship_attrs[ATTR_HP] = ship_attrs.get(ATTR_HP, 0) * 1.25
+    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
+    # These core skills use ItemModifier with domain=shipID to add +5% per
+    # level to the ship's own CPU/PG/HP attributes. They're applied outside
+    # the dogma modifier graph because the graph doesn't target the ship's
+    # own attrs (only modules/drones/charges).  When `skill_levels` is
+    # supplied, each bonus scales by the character's actual level in that
+    # specific skill; otherwise All V (× 1.25) is assumed.
+    _FITTING_SKILLS_FIVE_PCT = [
+        (3426, ATTR_CPU_OUTPUT),       # CPU Management
+        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
+        (3419, ATTR_SHIELD_HP),        # Shield Management
+        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
+        (3392, ATTR_HP),               # Mechanics
+    ]
+    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
+        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
+        if lvl:
+            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
 
     # ── Apply All-V weapon/support skill bonuses to module attributes ─────
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
