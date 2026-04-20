@@ -524,24 +524,42 @@ async def industry_jobs_page(
 
     rows.sort(key=lambda r: r["end_sort"])
 
-    # Build distinct installer lists for the dropdown filters.  Each entry
-    # includes how many jobs it owns so the UI can show "(n)" next to it.
-    char_counts: dict[int, int] = {}
-    char_labels: dict[int, str] = {}
+    # Build filter lists keyed on useful dimensions:
+    # - Characters: the INSTALLER of a job, not the ESI-feed source. Users
+    #   think "show me Thor776's jobs", not "show me rows that came from the
+    #   character-jobs endpoint". Covers both char-source and corp-source
+    #   rows via installer_id.
+    # - Corps: the corp whose corp-jobs endpoint returned the row (source_id
+    #   for corp-source rows). A job has exactly one source corp or none.
+    installer_counts: dict[int, int] = {}
+    installer_labels: dict[int, str] = {}
+    for r in rows:
+        iid = r.get("installer_id")
+        if not iid:
+            continue
+        installer_counts[iid] = installer_counts.get(iid, 0) + 1
+        installer_labels[iid] = r.get("installer_name") or f"Pilot {iid}"
+
+    # Seed with every owned character that COULD have jobs (has the char-jobs
+    # scope) even if they currently have 0 rows — otherwise a user whose only
+    # alt got deduped into corp rows would see nothing to select.
+    for c in chars:
+        if CHAR_JOBS_SCOPE in (c.scopes or ""):
+            installer_counts.setdefault(c.character_id, 0)
+            installer_labels.setdefault(c.character_id, c.character_name)
+
+    character_filters = sorted(
+        [{"id": cid, "name": installer_labels[cid], "count": installer_counts[cid]}
+         for cid in installer_counts],
+        key=lambda x: x["name"].lower(),
+    )
+
     corp_counts: dict[int, int] = {}
     corp_labels: dict[int, str] = {}
     for r in rows:
-        if r["source_kind"] == "character":
-            char_counts[r["source_id"]] = char_counts.get(r["source_id"], 0) + 1
-            char_labels[r["source_id"]] = r["source_name"]
-        else:
+        if r["source_kind"] == "corporation":
             corp_counts[r["source_id"]] = corp_counts.get(r["source_id"], 0) + 1
             corp_labels[r["source_id"]] = r["source_name"]
-
-    character_filters = sorted(
-        [{"id": cid, "name": char_labels[cid], "count": char_counts[cid]} for cid in char_counts],
-        key=lambda x: x["name"].lower(),
-    )
     corp_filters = sorted(
         [{"id": cid, "name": corp_labels[cid], "count": corp_counts[cid]} for cid in corp_counts],
         key=lambda x: x["name"].lower(),

@@ -148,22 +148,22 @@
 
 <div class="ij-filters">
     <button class="ij-chip is-active" data-filter-source="all">All sources</button>
-    {% if counts_by_source.character %}<button class="ij-chip" data-filter-source="character">Characters only</button>{% endif %}
-    {% if counts_by_source.corporation %}<button class="ij-chip" data-filter-source="corporation">Corps only</button>{% endif %}
+    <button class="ij-chip" data-filter-source="character">Characters only</button>
+    <button class="ij-chip" data-filter-source="corporation">Corps only</button>
 
     {% if character_filters %}
-    <div class="ij-picker" id="picker-character">
-        <button type="button" data-picker-toggle="character">
-            Characters <span class="picker-count">(all {{ character_filters|length }})</span> ▾
+    <div class="ij-picker" id="picker-installer">
+        <button type="button" data-picker-toggle="installer">
+            Character <span class="picker-count">(all {{ character_filters|length }})</span> ▾
         </button>
         <div class="ij-picker-panel">
             <div class="ij-picker-head">
-                <button type="button" data-picker-all="character">All</button>
-                <button type="button" data-picker-none="character">None</button>
+                <button type="button" data-picker-all="installer">All</button>
+                <button type="button" data-picker-none="installer">None</button>
             </div>
             {% for f in character_filters %}
             <label class="ij-picker-row">
-                <input type="checkbox" data-filter-source-id="character:{{ f.id }}" checked>
+                <input type="checkbox" data-filter-installer-id="{{ f.id }}" checked>
                 <span>{{ f.name }}</span>
                 <span class="pcount">{{ f.count }}</span>
             </label>
@@ -173,18 +173,18 @@
     {% endif %}
 
     {% if corp_filters %}
-    <div class="ij-picker" id="picker-corporation">
-        <button type="button" data-picker-toggle="corporation">
-            Corps <span class="picker-count">(all {{ corp_filters|length }})</span> ▾
+    <div class="ij-picker" id="picker-corp">
+        <button type="button" data-picker-toggle="corp">
+            Corp <span class="picker-count">(all {{ corp_filters|length }})</span> ▾
         </button>
         <div class="ij-picker-panel">
             <div class="ij-picker-head">
-                <button type="button" data-picker-all="corporation">All</button>
-                <button type="button" data-picker-none="corporation">None</button>
+                <button type="button" data-picker-all="corp">All</button>
+                <button type="button" data-picker-none="corp">None</button>
             </div>
             {% for f in corp_filters %}
             <label class="ij-picker-row">
-                <input type="checkbox" data-filter-source-id="corporation:{{ f.id }}" checked>
+                <input type="checkbox" data-filter-corp-id="{{ f.id }}" checked>
                 <span>{{ f.name }}</span>
                 <span class="pcount">{{ f.count }}</span>
             </label>
@@ -216,7 +216,8 @@
             {% for r in rows %}
             <tr data-activity="{{ r.activity_label }}"
                 data-source="{{ r.source_kind }}"
-                data-source-id="{{ r.source_kind }}:{{ r.source_id }}">
+                data-installer-id="{{ r.installer_id or '' }}"
+                data-corp-id="{{ r.source_id if r.source_kind == 'corporation' else '' }}">
                 <td>
                     <div class="ij-row-product">
                         {% if r.product_id %}
@@ -260,21 +261,30 @@
 
 <script>
 (function() {
-    var activity = 'all';      // activity label string, or 'all'
-    var sourceKind = 'all';    // 'all' | 'character' | 'corporation'
-    var selectedIds = null;    // Set of "kind:id" strings; null means "no per-id filtering"
+    /* Each picker has two state knobs:
+       - `all`: every box checked → filter disabled (treat as no-op)
+       - `Set` of ID strings: only rows whose matching attr is IN the set pass
+    */
+    var activity = 'all';
+    var sourceKind = 'all';
+    var installerSet = null;   // null = "all installers" (no filter)
+    var corpSet = null;        // null = "all corps" (no filter)
     var rows = document.querySelectorAll('.ij-table tbody tr');
 
     function applyFilters() {
         rows.forEach(function(tr) {
             var okA = activity === 'all' || tr.dataset.activity === activity;
             var okS = sourceKind === 'all' || tr.dataset.source === sourceKind;
-            var okId = selectedIds === null || selectedIds.has(tr.dataset.sourceId);
-            tr.style.display = (okA && okS && okId) ? '' : 'none';
+            var okI = installerSet === null || installerSet.has(tr.dataset.installerId);
+            var okC = corpSet === null || (tr.dataset.corpId && corpSet.has(tr.dataset.corpId));
+            /* Corp-filter special case: if corpSet filters any corps, char-source rows
+               (no corpId) fall through — user probably wants them hidden too. */
+            if (corpSet !== null && !tr.dataset.corpId) okC = false;
+            tr.style.display = (okA && okS && okI && okC) ? '' : 'none';
         });
     }
 
-    /* Activity + source-kind chips */
+    /* --- Activity chips --- */
     document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(chip) {
         chip.addEventListener('click', function() {
             document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(c) {
@@ -285,6 +295,8 @@
             applyFilters();
         });
     });
+
+    /* --- Source-kind chips (All / Characters / Corps) --- */
     document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(chip) {
         chip.addEventListener('click', function() {
             document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
@@ -296,13 +308,19 @@
         });
     });
 
-    /* Picker dropdowns */
+    /* --- Picker dropdowns (installer + corp) --- */
     function pickerEl(kind) { return document.getElementById('picker-' + kind); }
+    function pickerBoxes(kind) {
+        var el = pickerEl(kind);
+        if (!el) return [];
+        var attr = kind === 'installer' ? 'data-filter-installer-id' : 'data-filter-corp-id';
+        return el.querySelectorAll('input[' + attr + ']');
+    }
 
     function refreshPickerLabel(kind) {
         var el = pickerEl(kind);
         if (!el) return;
-        var boxes = el.querySelectorAll('input[data-filter-source-id]');
+        var boxes = pickerBoxes(kind);
         var checked = 0;
         boxes.forEach(function(b) { if (b.checked) checked++; });
         var total = boxes.length;
@@ -320,16 +338,26 @@
         }
     }
 
-    function rebuildSelectedIds() {
-        /* If every checkbox (across both pickers) is checked, disable per-id filtering entirely. */
-        var all = document.querySelectorAll('input[data-filter-source-id]');
-        var allChecked = true;
-        var setIds = new Set();
-        all.forEach(function(b) {
-            if (b.checked) setIds.add(b.dataset.filterSourceId);
-            else allChecked = false;
+    function rebuildSets() {
+        /* Installer set */
+        var iBoxes = pickerBoxes('installer');
+        var iAll = iBoxes.length > 0;
+        var iSet = new Set();
+        iBoxes.forEach(function(b) {
+            if (b.checked) iSet.add(b.dataset.filterInstallerId);
+            else iAll = false;
         });
-        selectedIds = allChecked ? null : setIds;
+        installerSet = iAll ? null : iSet;
+
+        /* Corp set */
+        var cBoxes = pickerBoxes('corp');
+        var cAll = cBoxes.length > 0;
+        var cSet = new Set();
+        cBoxes.forEach(function(b) {
+            if (b.checked) cSet.add(b.dataset.filterCorpId);
+            else cAll = false;
+        });
+        corpSet = cAll ? null : cSet;
     }
 
     document.querySelectorAll('[data-picker-toggle]').forEach(function(btn) {
@@ -337,7 +365,6 @@
             var kind = btn.dataset.pickerToggle;
             var el = pickerEl(kind);
             var wasOpen = el.classList.contains('is-open');
-            /* Close any other picker */
             document.querySelectorAll('.ij-picker').forEach(function(p) { p.classList.remove('is-open'); });
             if (!wasOpen) el.classList.add('is-open');
             e.stopPropagation();
@@ -352,35 +379,31 @@
     document.querySelectorAll('[data-picker-all]').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var kind = btn.dataset.pickerAll;
-            pickerEl(kind).querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
-                b.checked = true;
-            });
+            pickerBoxes(kind).forEach(function(b) { b.checked = true; });
             refreshPickerLabel(kind);
-            rebuildSelectedIds();
+            rebuildSets();
             applyFilters();
         });
     });
     document.querySelectorAll('[data-picker-none]').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var kind = btn.dataset.pickerNone;
-            pickerEl(kind).querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
-                b.checked = false;
-            });
+            pickerBoxes(kind).forEach(function(b) { b.checked = false; });
             refreshPickerLabel(kind);
-            rebuildSelectedIds();
+            rebuildSets();
             applyFilters();
         });
     });
-    document.querySelectorAll('input[data-filter-source-id]').forEach(function(b) {
+    document.querySelectorAll('input[data-filter-installer-id], input[data-filter-corp-id]').forEach(function(b) {
         b.addEventListener('change', function() {
-            var kind = b.dataset.filterSourceId.split(':')[0];
+            var kind = b.hasAttribute('data-filter-installer-id') ? 'installer' : 'corp';
             refreshPickerLabel(kind);
-            rebuildSelectedIds();
+            rebuildSets();
             applyFilters();
         });
     });
 
-    /* Reset button */
+    /* --- Reset --- */
     var reset = document.getElementById('ij-clear-filters');
     if (reset) {
         reset.addEventListener('click', function() {
@@ -392,9 +415,11 @@
             document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
                 c.classList.toggle('is-active', c.dataset.filterSource === 'all');
             });
-            document.querySelectorAll('input[data-filter-source-id]').forEach(function(b) { b.checked = true; });
-            ['character', 'corporation'].forEach(refreshPickerLabel);
-            rebuildSelectedIds();
+            pickerBoxes('installer').forEach(function(b) { b.checked = true; });
+            pickerBoxes('corp').forEach(function(b) { b.checked = true; });
+            refreshPickerLabel('installer');
+            refreshPickerLabel('corp');
+            rebuildSets();
             applyFilters();
         });
     }
