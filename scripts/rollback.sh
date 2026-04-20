@@ -27,9 +27,12 @@ docker tag vigilant-app:latest vigilant-app:broken
 echo "[2/4] Swap :prev -> :latest"
 docker tag vigilant-app:prev vigilant-app:latest
 
-echo "[3/4] Restart with the restored image (no rebuild)"
-docker compose down
-docker compose up -d
+echo "[3/4] Recreate app with the restored image (nginx left running)"
+# Same reason deploy.sh uses --no-deps: keep the Wanderer mapper's
+# reverse proxy up. Only the app container cycles.
+docker compose up -d --no-deps --force-recreate app
+docker compose up -d --no-deps nginx  # idempotent; brings nginx back if missing
+docker exec vigilant-nginx-1 nginx -s reload
 
 echo "[4/4] Post-rollback checks"
 sleep 3
