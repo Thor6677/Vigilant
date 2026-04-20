@@ -52,8 +52,62 @@ from app.fitting.constants import (
     ATTR_TURRET_HARDPOINT_MODIFIER, ATTR_LAUNCHER_HARDPOINT_MODIFIER,
 )
 
-# Default skill level assumption
+# Default skill level assumption (used as fallback when no character is
+# selected — models the EVE-standard "All V" fitting target).
 DEFAULT_SKILL_LEVEL = 5
+
+
+async def _ship_scaling_skill_ids(db: AsyncSession, ship_type_id: int) -> list[int]:
+    """Return unique skill IDs that scale this ship's per-level hull bonuses.
+
+    Sourced from the SDE's typeBonus (traits) data, which CCP ships with each
+    bonus explicitly tagged. Role bonuses (scaling_skill_id IS NULL) are
+    skipped — they don't scale with any skill. Most ships have exactly one
+    scaling skill (their racial class skill), but T3C hulls have several
+    (one per subsystem slot).
+    """
+    result = await db.execute(
+        select(SDETypeBonus.scaling_skill_id)
+        .where(SDETypeBonus.type_id == ship_type_id)
+        .where(SDETypeBonus.is_role_bonus == False)  # noqa: E712
+        .where(SDETypeBonus.scaling_skill_id.isnot(None))
+    )
+    return list({row[0] for row in result.fetchall() if row[0]})
+
+
+async def _subsystem_scaling_skill_ids(db: AsyncSession, sub_type_id: int) -> list[int]:
+    """Return the skill IDs that scale a subsystem's per-level bonuses.
+
+    For subsystems the scaling skill is the subsystem's own required skill
+    (e.g. "Caldari Offensive Systems" for the Tengu's offensive subsystem).
+    We use SDETypeSkillReq for this rather than SDETypeBonus — subsystems
+    don't have their own traits rows, the bonuses are attached to dogma
+    effects gated by the required skill.
+    """
+    result = await db.execute(
+        select(SDETypeSkillReq.skill_type_id).where(SDETypeSkillReq.type_id == sub_type_id)
+    )
+    return [row[0] for row in result.fetchall()]
+
+
+def _effective_skill_level(
+    scaling_skill_ids: list[int],
+    skill_levels: dict[int, int] | None,
+) -> int:
+    """Pick an effective level for a per-level bonus.
+
+    - No character selected (skill_levels is None): assume All V.
+    - No scaling skill IDs (shouldn't normally happen): assume All V too, so
+      we don't silently zero-out a bonus we can't identify.
+    - Otherwise: take the MIN of the character's levels across the scaling
+      skills. Missing = 0, so an untrained class skill drops the bonus to
+      zero (matches the in-game reality that you can't fly the ship at all).
+    """
+    if skill_levels is None:
+        return DEFAULT_SKILL_LEVEL
+    if not scaling_skill_ids:
+        return DEFAULT_SKILL_LEVEL
+    return min(skill_levels.get(sid, 0) for sid in scaling_skill_ids)
 
 
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
@@ -215,7 +269,8 @@ async def _apply_ship_hull_bonuses(
     module_attrs_map: dict[int, dict[int, float]],
     charge_attrs_map: dict[int, dict[int, float]],
     items: list[dict],
-    skill_level: int = DEFAULT_SKILL_LEVEL,
+    skill_levels: dict[int, int] | None = None,
+    scaling_skill_override: list[int] | None = None,
 ):
     """Apply ship hull bonuses to module and charge attributes.
 
@@ -228,6 +283,13 @@ async def _apply_ship_hull_bonuses(
     Uses modifierInfo as the authoritative source for targeting.  typeBonus.jsonl
     showinfo is display-only and unreliable for matching.  Per-level vs role
     detection uses attribute name patterns (shipBonus*/eliteBonus* = per-level).
+
+    `skill_levels` is an optional {skill_id: active_level} dict for the
+    selected character; if None the function falls back to All V.
+    `scaling_skill_override` lets callers supply the per-level-scaling
+    skills directly (used when re-entering this function for a subsystem,
+    where the scaling skill is the subsystem's required skill rather than
+    a ship traits row).
     """
     # Combine module + charge type IDs for skill-req lookup
     all_type_ids = list(module_attrs_map.keys())
@@ -299,6 +361,15 @@ async def _apply_ship_hull_bonuses(
         .where(SDEModifier.domain.in_(["shipID", "charID"]))
     )
 
+    # Resolve the per-level scaling skill(s) once. For a ship this comes
+    # from SDETypeBonus (traits). For a subsystem the caller overrides it
+    # with the subsystem's required skill ID(s).
+    if scaling_skill_override is not None:
+        scaling_skills = scaling_skill_override
+    else:
+        scaling_skills = await _ship_scaling_skill_ids(db, ship_type_id)
+    effective_skill_level = _effective_skill_level(scaling_skills, skill_levels)
+
     for mod in result.scalars().all():
         src_val = ship_attrs.get(mod.modifying_attribute_id)
         if src_val is None:
@@ -332,7 +403,7 @@ async def _apply_ship_hull_bonuses(
 
         # Per-level if source attribute is named shipBonus* or eliteBonus*
         is_per_level = mod.modifying_attribute_id in per_level_attr_ids
-        effective_val = src_val * skill_level if is_per_level else src_val
+        effective_val = src_val * effective_skill_level if is_per_level else src_val
         target_attr = mod.modified_attribute_id
 
         # Apply to matching modules/drones
@@ -354,8 +425,9 @@ async def _apply_all_v_skill_bonuses(
     module_attrs_map: dict[int, dict[int, float]],
     charge_attrs_map: dict[int, dict[int, float]],
     items: list[dict],
+    skill_levels: dict[int, int] | None = None,
 ):
-    """Apply All Level V skill bonuses to module, drone, and charge attributes.
+    """Apply skill bonuses to module, drone, and charge attributes.
 
     Skills (category 16) have effects that modify items on the ship via:
     - LocationGroupModifier / LocationRequiredSkillModifier (domain=shipID)
@@ -363,8 +435,10 @@ async def _apply_all_v_skill_bonuses(
     - OwnerRequiredSkillModifier (domain=charID)
       → targets drones in module_attrs_map AND charges in charge_attrs_map
 
-    At All V, effective bonus = base_attr_value * 5.
-    Skills are never stacking-penalized.
+    When `skill_levels` is None, applies the All-V assumption (× 5 for every
+    skill). When a character's skill map is passed, each skill's bonus
+    scales by that character's actual active level — an untrained skill
+    contributes zero.  Skills are never stacking-penalized.
     """
     all_type_ids = list(module_attrs_map.keys())
     charge_type_ids = list(charge_attrs_map.keys())
@@ -429,8 +503,12 @@ async def _apply_all_v_skill_bonuses(
         if src_val is None or src_val == 0:
             continue
 
-        # At All V: effective bonus = base * 5
-        effective_val = src_val * DEFAULT_SKILL_LEVEL
+        # Skill bonus scales by character's level in the skill providing
+        # the bonus (row.type_id IS the skill's type_id via the join).
+        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_tid, 0)
+        if lvl == 0:
+            continue
+        effective_val = src_val * lvl
 
         # Find matching items
         matching_modules = set()
@@ -512,6 +590,7 @@ DAMAGE_PROFILES = {
 async def calculate_fitting_stats(
     db: AsyncSession, ship_type_id: int, items: list[dict],
     damage_profile: str = "uniform",
+    skill_levels: dict[int, int] | None = None,
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
 
@@ -645,6 +724,11 @@ async def calculate_fitting_stats(
                 continue
             tid = item["type_id"]
             sub_attrs = module_attrs_map.get(tid, {})
+            # Per-subsystem scaling skill lookup (e.g. Caldari Offensive
+            # Systems for the Tengu's offensive subsystem). Cached for the
+            # duration of this subsystem's pass.
+            sub_scaling_skills = await _subsystem_scaling_skill_ids(db, tid)
+            sub_effective_level = _effective_skill_level(sub_scaling_skills, skill_levels)
             for mod in sub_modifiers.get(tid, []):
                 if mod["func"] != "ItemModifier" or mod["domain"] != "shipID":
                     continue
@@ -652,7 +736,7 @@ async def calculate_fitting_stats(
                 if src_val is None:
                     continue
                 if mod["modifying_attribute_id"] in sub_per_level_ids:
-                    src_val *= DEFAULT_SKILL_LEVEL
+                    src_val *= sub_effective_level
                 sub_ship_mods[mod["modified_attribute_id"]].append(
                     (mod["operator"], src_val)
                 )
@@ -816,13 +900,16 @@ async def calculate_fitting_stats(
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
     # target modules by group or required skill. At All V, the bonus is
     # skill_base_attr * 5, applied as postPercent.
-    await _apply_all_v_skill_bonuses(db, module_attrs_map, charge_attrs_map, items)
+    await _apply_all_v_skill_bonuses(
+        db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
+    )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
     # Makes deep copies so we don't mutate cached SDE data
     module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
     await _apply_ship_hull_bonuses(
-        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items
+        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
+        skill_levels=skill_levels,
     )
 
     # ── Apply subsystem bonuses to module/charge attributes ──────────────
@@ -836,9 +923,12 @@ async def calculate_fitting_stats(
             if item.get("slot") != "subsystem":
                 continue
             sub_attrs = module_attrs_map.get(item["type_id"], {})
+            sub_scaling = await _subsystem_scaling_skill_ids(db, item["type_id"])
             await _apply_ship_hull_bonuses(
                 db, item["type_id"], sub_attrs,
                 module_attrs_map, charge_attrs_map, items,
+                skill_levels=skill_levels,
+                scaling_skill_override=sub_scaling,
             )
 
     # ── Collect character-level missile damage multiplier (BCU mechanism) ──

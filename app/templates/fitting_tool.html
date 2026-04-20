@@ -520,12 +520,14 @@ function renderSlots() {
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
 function recalcStats() {
     if (!state.shipTypeId) return;
+    var charId = getSelectedSkillCharId();
     fetch('/tools/fitting/stats', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
             ship_type_id: state.shipTypeId,
-            items: state.items
+            items: state.items,
+            character_id: charId,
         })
     })
     .then(function(r) { return r.text(); })
@@ -572,9 +574,12 @@ function onSkillCharChange(silent) {
     } else {
         localStorage.removeItem(SKILL_CHAR_KEY);
     }
-    /* Re-apply warnings from the new character. */
-    if (!silent) refreshSkillWarnings();
-    else refreshSkillWarnings();
+    /* Stats must re-run under the new skill set; warnings too. */
+    if (state.shipTypeId) {
+        recalcStats();  /* recalcStats also calls refreshSkillWarnings */
+    } else {
+        refreshSkillWarnings();
+    }
 }
 
 function _clearSkillWarnings() {

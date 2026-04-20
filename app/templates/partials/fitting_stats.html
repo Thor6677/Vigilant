@@ -15,7 +15,9 @@
         </span>
         {% endif %}
     </div>
-    <span style="font-size:9px;color:var(--muted);">All V</span>
+    <span style="font-size:9px;color:{{ 'var(--accent)' if character_name else 'var(--muted)' }};">
+        {% if character_name %}as {{ character_name }}{% else %}All V{% endif %}
+    </span>
 </div>
 
 {# ── Fitting Resources ─────────────────────────────────────────────────────── #}

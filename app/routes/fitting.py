@@ -297,7 +297,30 @@ async def fitting_stats(
 
     items = body.get("items", [])
     damage_profile = body.get("damage_profile", "uniform")
-    stats = await calculate_fitting_stats(db, int(ship_type_id), items, damage_profile)
+
+    # Optional: scale by a specific character's trained skills instead of All V.
+    user_id = request.session.get("user_id")
+    character_id = body.get("character_id")
+    skill_levels: dict[int, int] | None = None
+    character_name: str | None = None
+    if character_id and user_id:
+        r = await db.execute(
+            select(Character)
+            .where(Character.character_id == int(character_id))
+            .where(Character.user_id == user_id)
+        )
+        char = r.scalar_one_or_none()
+        if char and _SKILLS_SCOPE in (char.scopes or ""):
+            try:
+                skill_levels = await _character_skills_map(db, char)
+                character_name = char.character_name
+            except Exception as e:
+                logger.info("fitting_stats: skills fetch failed for %s: %s", character_id, e)
+
+    stats = await calculate_fitting_stats(
+        db, int(ship_type_id), items, damage_profile,
+        skill_levels=skill_levels,
+    )
 
     # Get ship name
     ship_name = await sde.type_id_to_name(db, int(ship_type_id))
@@ -307,6 +330,7 @@ async def fitting_stats(
         "stats": stats,
         "ship_name": ship_name or f"Ship {ship_type_id}",
         "ship_type_id": ship_type_id,
+        "character_name": character_name,
     })
 
 
