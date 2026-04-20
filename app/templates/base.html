@@ -794,7 +794,8 @@
                 <a href="/assets" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
                 <a href="/structure-timers" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>
                 <a href="/tools/images" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/images') or _path.startswith('/i/') }}">Image Host</a>
-                <a href="/tools/fitting" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/fitting') }}">Ship Fitting</a>
+                <a href="/tools/fitting" class="b-nav-dropdown-item {{ 'is-active' if _path == '/tools/fitting' }}">Ship Fitting</a>
+                <a href="/tools/fitting/saved" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/fitting/saved') }}">Saved Fits</a>
                 <a href="/tools/discordtime" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/discordtime') }}">Discord Time</a>
                 <a href="https://mapper.thunderborn.dev" class="b-nav-dropdown-item" target="_blank">Wormhole Mapper</a>
             </div>

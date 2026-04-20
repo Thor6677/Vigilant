@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}SAVED FITTINGS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/tools/fitting">Fitting</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Saved</span></div>
+{% endblock %}
+
+{% block head %}
+<style>
+.sf-toolbar {
+    display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;
+    margin-bottom:0.75rem; font-size:10px;
+}
+.sf-chip {
+    padding:3px 10px; border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; background:var(--surface); font-family:inherit; font-size:10px;
+    text-decoration:none; display:inline-block;
+}
+.sf-chip:hover { color:var(--text); border-color:var(--muted); }
+.sf-chip.is-active { color:var(--accent); border-color:var(--accent); background:rgba(200,169,81,0.07); }
+.sf-chip.is-primary { color:var(--accent); border-color:var(--accent); }
+
+#sf-search {
+    padding:4px 8px; font-size:11px; font-family:inherit;
+    background:var(--bg); border:1px solid var(--border); color:var(--text);
+    min-width:220px;
+}
+
+.sf-table { width:100%; border-collapse:collapse; font-size:11px; }
+.sf-table thead th {
+    text-align:left; padding:0.4rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+}
+.sf-table tbody td {
+    padding:0.45rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text);
+    vertical-align:middle;
+}
+.sf-table tbody tr { cursor:pointer; }
+.sf-table tbody tr:hover { background:rgba(200,169,81,0.06); }
+.sf-ship { display:flex; align-items:center; gap:0.5rem; min-width:0; }
+.sf-ship img { width:24px; height:24px; border:1px solid var(--border); flex-shrink:0; }
+.sf-ship-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sf-folder {
+    font-size:9px; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase;
+}
+.sf-dps { color:var(--accent); font-weight:600; text-align:right; }
+.sf-cost { color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+.sf-actions { text-align:right; white-space:nowrap; }
+.sf-actions button {
+    background:none; border:none; color:var(--muted); cursor:pointer;
+    font-size:11px; padding:0 0.3rem;
+}
+.sf-actions button:hover { color:var(--danger); }
+
+.sf-empty {
+    padding:3rem 1rem; text-align:center; color:var(--muted); font-size:11px;
+    border:1px dashed var(--border); background:var(--surface);
+}
+.sf-empty a { color:var(--accent); text-decoration:none; }
+.sf-empty a:hover { text-decoration:underline; }
+
+@media (max-width:720px) {
+    .sf-table thead th:nth-child(3), .sf-table tbody td:nth-child(3),   /* folder */
+    .sf-table thead th:nth-child(5), .sf-table tbody td:nth-child(5) {  /* cost */
+        display:none;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Saved Fittings</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            {{ total }} saved fit{{ '' if total == 1 else 's' }}{% if folders %} &middot; {{ folders|length }} folder{{ '' if folders|length == 1 else 's' }}{% endif %}
+        </div>
+    </div>
+    <div>
+        <a href="/tools/fitting" class="sf-chip is-primary" style="padding:6px 14px;">+ New Fit</a>
+    </div>
+</div>
+
+{% if rows %}
+<div class="sf-toolbar">
+    <input id="sf-search" type="text" placeholder="Filter by name, ship, folder..." autocomplete="off">
+    <span style="flex:1;"></span>
+    <button class="sf-chip is-active" data-sort="name">Name</button>
+    <button class="sf-chip" data-sort="ship">Ship</button>
+    <button class="sf-chip" data-sort="dps">DPS</button>
+    <button class="sf-chip" data-sort="cost">Cost</button>
+    <button class="sf-chip" data-sort="folder">Folder</button>
+    <button class="sf-chip" id="sf-new-folder" title="Create a folder">+ Folder</button>
+</div>
+
+<div class="b-panel">
+    <table class="sf-table">
+        <thead>
+            <tr>
+                <th>Ship</th>
+                <th>Fitting Name</th>
+                <th>Folder</th>
+                <th style="text-align:right;">DPS</th>
+                <th style="text-align:right;">Est. Cost (ISK)</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="sf-tbody">
+            {% for r in rows %}
+            <tr data-fit-id="{{ r.id }}"
+                data-name="{{ r.name | lower }}"
+                data-ship="{{ r.ship_name | lower }}"
+                data-folder="{{ r.folder_path | lower }}"
+                data-dps="{{ r.dps }}"
+                data-cost="{{ r.cost }}"
+                onclick="if(!event.target.closest('button,.sf-actions'))window.location='/tools/fitting?load={{ r.id }}'">
+                <td>
+                    <div class="sf-ship">
+                        <img src="https://images.evetech.net/types/{{ r.ship_type_id }}/icon?size=32"
+                             onerror="this.style.display='none'" alt="">
+                        <span class="sf-ship-name">{{ r.ship_name }}</span>
+                    </div>
+                </td>
+                <td><span style="color:var(--text);">{{ r.name }}</span></td>
+                <td><span class="sf-folder">{{ r.folder_path or '—' }}</span></td>
+                <td class="sf-dps">{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}</td>
+                <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>
+                <td class="sf-actions">
+                    <button onclick="event.stopPropagation();moveFit({{ r.id }})" title="Move to folder">&#8644;</button>
+                    <button onclick="event.stopPropagation();deleteFit({{ r.id }}, this)" title="Delete">&times;</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="sf-empty">
+    No saved fittings yet. <a href="/tools/fitting">Open the builder</a> and save a fit to see it here.
+</div>
+{% endif %}
+
+<datalist id="sf-folder-options">
+    {% for fp in folder_paths %}
+    <option value="{{ fp.id }}">{{ fp.path }}</option>
+    {% endfor %}
+</datalist>
+
+<script>
+(function() {
+    var tbody = document.getElementById('sf-tbody');
+    if (!tbody) return;
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+
+    /* --- Filter --- */
+    var searchInput = document.getElementById('sf-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            var q = this.value.trim().toLowerCase();
+            rows.forEach(function(tr) {
+                var hay = tr.dataset.name + ' ' + tr.dataset.ship + ' ' + tr.dataset.folder;
+                tr.style.display = (!q || hay.indexOf(q) >= 0) ? '' : 'none';
+            });
+        });
+    }
+
+    /* --- Sort --- */
+    var currentSort = 'name';
+    var sortDir = 1;
+    document.querySelectorAll('.sf-chip[data-sort]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var key = btn.dataset.sort;
+            if (currentSort === key) { sortDir = -sortDir; }
+            else { currentSort = key; sortDir = 1; }
+            document.querySelectorAll('.sf-chip[data-sort]').forEach(function(b) { b.classList.remove('is-active'); });
+            btn.classList.add('is-active');
+            rows.sort(function(a, b) {
+                var va = a.dataset[key] || '';
+                var vb = b.dataset[key] || '';
+                if (key === 'dps' || key === 'cost') { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+                if (va < vb) return -1 * sortDir;
+                if (va > vb) return  1 * sortDir;
+                return 0;
+            });
+            rows.forEach(function(r) { tbody.appendChild(r); });
+        });
+    });
+})();
+
+function _folderPickPrompt(message) {
+    var dl = document.getElementById('sf-folder-options');
+    var options = [{id: '', label: '(Root)'}];
+    if (dl) {
+        Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+            options.push({id: opt.value, label: opt.textContent});
+        });
+    }
+    var msg = message + '\n0. (Root)';
+    for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+    msg += '\n\nEnter number:';
+    var choice = prompt(msg, '0');
+    if (choice === null) return undefined;
+    var idx = parseInt(choice, 10);
+    if (isNaN(idx) || idx < 0 || idx >= options.length) { alert('Invalid choice'); return undefined; }
+    return options[idx].id ? parseInt(options[idx].id, 10) : null;
+}
+
+function moveFit(fitId) {
+    var folderId = _folderPickPrompt('Move to folder:');
+    if (folderId === undefined) return;
+    fetch('/tools/fitting/' + fitId + '/folder', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({folder_id: folderId})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        window.location.reload();
+    });
+}
+
+function deleteFit(fitId, btn) {
+    if (!confirm('Delete this fitting?')) return;
+    fetch('/tools/fitting/' + fitId, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { alert(data.error); return; }
+            var row = btn.closest('tr');
+            if (row) row.remove();
+        });
+}
+
+document.getElementById('sf-new-folder').addEventListener('click', function() {
+    var name = prompt('New folder name:');
+    if (!name || !name.trim()) return;
+    fetch('/tools/fitting/folders', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name.trim()})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        window.location.reload();
+    });
+});
+</script>
+{% endblock %}

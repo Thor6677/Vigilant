@@ -1,5 +1,6 @@
 """Ship fitting tool — build and analyze ship fittings locally."""
 
+import asyncio
 import json
 import logging
 import re
@@ -21,6 +22,8 @@ from app.db.sde_models import (
 from app.esi.client import ESIClient, refresh_token
 from app.esi import universe as esi_universe
 from app.esi import character as esi_char
+from app.esi import market as esi_market
+from app.db.models import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +31,28 @@ router = APIRouter(tags=["fitting"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _folder_path_map(folders: list[dict]) -> dict[int, str]:
+    """Flatten folders into id→'A / B / C' path labels for pickers."""
+    by_id = {f["id"]: f for f in folders}
+    out: dict[int, str] = {}
+    for f in folders:
+        parts = []
+        cur = f
+        while cur is not None:
+            parts.append(cur["name"])
+            cur = by_id.get(cur["parent_id"]) if cur["parent_id"] else None
+        out[f["id"]] = " / ".join(reversed(parts))
+    return out
+
+
 @router.get("/tools/fitting", response_class=HTMLResponse)
 async def fitting_tool(request: Request, db: AsyncSession = Depends(get_db)):
+    """Fitting builder. The saved-fits list moved to /tools/fitting/saved;
+    the builder now only needs the flat folder list for its 'Save to folder'
+    picker."""
     user_id = request.session.get("user_id")
-    saved_fittings = []
-    folders = []
+    folders: list[dict] = []
     if user_id:
-        result = await db.execute(
-            select(UserFitting)
-            .where(UserFitting.user_id == user_id)
-            .order_by(UserFitting.updated_at.desc())
-        )
-        saved_fittings = [
-            {"id": f.id, "name": f.name, "ship_type_id": f.ship_type_id,
-             "description": f.description, "updated_at": f.updated_at,
-             "folder_id": f.folder_id}
-            for f in result.scalars().all()
-        ]
         folder_rows = await db.execute(
             select(UserFittingFolder)
             .where(UserFittingFolder.user_id == user_id)
@@ -54,35 +62,150 @@ async def fitting_tool(request: Request, db: AsyncSession = Depends(get_db)):
             {"id": f.id, "parent_id": f.parent_id, "name": f.name}
             for f in folder_rows.scalars().all()
         ]
-    # Pre-compute tree structure for sidebar: children per folder + fits per folder
-    folder_children: dict[int | None, list] = {}
-    for f in folders:
-        folder_children.setdefault(f["parent_id"], []).append(f)
-    fits_by_folder: dict[int | None, list] = {}
-    for f in saved_fittings:
-        fits_by_folder.setdefault(f["folder_id"], []).append(f)
-
-    # Flat path list for the "Move to folder" dropdown
-    folder_paths: list[dict] = []
-    by_id = {f["id"]: f for f in folders}
-    def _path(fid: int) -> str:
-        parts = []
-        cur = by_id.get(fid)
-        while cur is not None:
-            parts.append(cur["name"])
-            cur = by_id.get(cur["parent_id"]) if cur["parent_id"] else None
-        return " / ".join(reversed(parts))
-    for f in folders:
-        folder_paths.append({"id": f["id"], "path": _path(f["id"])})
-    folder_paths.sort(key=lambda x: x["path"].lower())
-
+    path_map = _folder_path_map(folders)
+    folder_paths = sorted(
+        [{"id": fid, "path": p} for fid, p in path_map.items()],
+        key=lambda x: x["path"].lower(),
+    )
     return templates.TemplateResponse("fitting_tool.html", {
         "request": request,
-        "saved_fittings": saved_fittings,
-        "folders": folders,
-        "folder_children": folder_children,
-        "fits_by_folder": fits_by_folder,
         "folder_paths": folder_paths,
+    })
+
+
+@router.get("/tools/fitting/saved", response_class=HTMLResponse)
+async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Dedicated list view for saved fittings.
+
+    Computes DPS and cost per fit at request time, in parallel.  Prices
+    are pulled from the global /markets/prices/ endpoint (a single ESI
+    call batched across all type_ids in the table).  Clicking a row
+    navigates to /tools/fitting?load=<id> which the builder reads on
+    init.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
+    # --- Folders + fits -----------------------------------------------------
+    folder_rows = await db.execute(
+        select(UserFittingFolder)
+        .where(UserFittingFolder.user_id == user_id)
+        .order_by(UserFittingFolder.name)
+    )
+    folders = [
+        {"id": f.id, "parent_id": f.parent_id, "name": f.name}
+        for f in folder_rows.scalars().all()
+    ]
+    path_map = _folder_path_map(folders)
+
+    fit_rows = await db.execute(
+        select(UserFitting)
+        .where(UserFitting.user_id == user_id)
+        .order_by(UserFitting.updated_at.desc())
+    )
+    fits = list(fit_rows.scalars().all())
+
+    # --- Gather all type_ids for name + price resolution -------------------
+    items_by_fit: dict[int, list[dict]] = {}
+    all_type_ids: set[int] = set()
+    for f in fits:
+        try:
+            items = json.loads(f.items_json) if f.items_json else []
+        except Exception:
+            items = []
+        items_by_fit[f.id] = items
+        if f.ship_type_id:
+            all_type_ids.add(f.ship_type_id)
+        for item in items:
+            tid = item.get("type_id")
+            if tid:
+                all_type_ids.add(int(tid))
+            cid = item.get("charge_type_id")
+            if cid:
+                all_type_ids.add(int(cid))
+
+    ship_names = await sde.type_ids_to_names(db, [f.ship_type_id for f in fits if f.ship_type_id]) if fits else {}
+
+    # --- Prices + DPS (parallel) -------------------------------------------
+    async def _dps_for(f: UserFitting) -> tuple[int, float]:
+        items = items_by_fit.get(f.id, [])
+        if not items:
+            return f.id, 0.0
+        try:
+            async with AsyncSessionLocal() as fdb:
+                stats = await calculate_fitting_stats(fdb, f.ship_type_id, items)
+            return f.id, float(stats.get("total_dps") or 0.0)
+        except Exception as e:
+            logger.info("DPS calc failed for fit %s: %s", f.id, e)
+            return f.id, 0.0
+
+    async def _price_map() -> dict[int, float]:
+        if not all_type_ids:
+            return {}
+        try:
+            client = ESIClient("", db=db)
+            prices = await esi_market.get_market_prices(client)
+            m: dict[int, float] = {}
+            for p in prices or []:
+                tid = p.get("type_id")
+                if tid in all_type_ids:
+                    m[tid] = float(p.get("average_price") or p.get("adjusted_price") or 0)
+            return m
+        except Exception as e:
+            logger.info("market price fetch failed: %s", e)
+            return {}
+
+    dps_task = asyncio.gather(*[_dps_for(f) for f in fits], return_exceptions=True)
+    price_task = _price_map()
+    dps_results, price_map = await asyncio.gather(dps_task, price_task)
+
+    dps_by_fit: dict[int, float] = {}
+    for r in dps_results:
+        if isinstance(r, Exception):
+            continue
+        fid, dps = r
+        dps_by_fit[fid] = dps
+
+    # --- Compose rows ------------------------------------------------------
+    rows = []
+    for f in fits:
+        items = items_by_fit.get(f.id, [])
+        cost = price_map.get(f.ship_type_id, 0.0)
+        for item in items:
+            qty = item.get("quantity", 1) or 1
+            tid = item.get("type_id")
+            if tid:
+                cost += price_map.get(int(tid), 0.0) * qty
+            cid = item.get("charge_type_id")
+            if cid:
+                cost += price_map.get(int(cid), 0.0)
+        rows.append({
+            "id": f.id,
+            "name": f.name,
+            "ship_type_id": f.ship_type_id,
+            "ship_name": ship_names.get(f.ship_type_id, f"Type {f.ship_type_id}"),
+            "folder_id": f.folder_id,
+            "folder_path": path_map.get(f.folder_id) if f.folder_id else "",
+            "dps": round(dps_by_fit.get(f.id, 0.0), 1),
+            "cost": round(cost, 2),
+            "updated_at": f.updated_at,
+        })
+
+    # Sort by folder path then name for predictability
+    rows.sort(key=lambda r: (r["folder_path"].lower(), r["name"].lower()))
+
+    folder_paths = sorted(
+        [{"id": fid, "path": p} for fid, p in path_map.items()],
+        key=lambda x: x["path"].lower(),
+    )
+
+    return templates.TemplateResponse("fitting_saved.html", {
+        "request": request,
+        "rows": rows,
+        "folders": folders,
+        "folder_paths": folder_paths,
+        "total": len(rows),
     })
 
 
