@@ -633,12 +633,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       });
 
-      // Close panel on drag
-      vp.on('drag-start', () => {
-        setSelectedSystem(null);
-        setPanelPos(null);
-        systemRenderer.setSelected(null);
-      });
+      // Note: no drag-start handler here — pixi-viewport fires drag-start on
+      // every mousedown (even for clean clicks), so closing the panel here
+      // caused a visible flash when the subsequent `clicked` event reopened
+      // it, and left the panel stuck closed when the release registered as
+      // a tiny drag instead of a click. The `moved` handler below keeps the
+      // panel anchored to the selected system during pans, so leaving it
+      // open is fine.
 
       // Pointer events
       let hoverThrottleId: number | null = null;
