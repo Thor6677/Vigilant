@@ -8,6 +8,12 @@
         <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">Build and analyze ship fittings</div>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <select id="skill-char-select" onchange="onSkillCharChange()"
+                title="Check fit against a character's trained skills"
+                style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
+            <option value="">All V (default)</option>
+            {# populated via JS on init #}
+        </select>
         <a href="/tools/fitting/saved" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;">Saved Fits</a>
         <button onclick="showImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import EFT</button>
         <button onclick="showCharImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import from Character</button>
@@ -16,10 +22,26 @@
         <button onclick="clearFitting()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--danger);color:var(--danger);white-space:nowrap;">Clear</button>
     </div>
 </div>
+<div id="ship-skill-banner" style="display:none;margin-bottom:0.5rem;padding:6px 12px;border:1px solid var(--danger);color:var(--danger);background:rgba(255,80,80,0.06);font-size:11px;">
+    <span class="ssb-icon">&#9888;</span>
+    <span class="ssb-text"></span>
+</div>
 
 <style>
 .fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
 .fit-stats-sticky { position:sticky; top:80px; }
+.skill-warn {
+    display:none;  /* shown only when the row is missing skills */
+    color:var(--danger);
+    font-size:12px;
+    cursor:help;
+    padding:0 0.2rem;
+    font-weight:700;
+}
+.fit-row-warn {
+    box-shadow:inset 3px 0 0 var(--danger);
+    background:rgba(255,80,80,0.04);
+}
 @media (max-width:1100px) {
     .fit-grid { grid-template-columns:1fr 1fr; }
     #browser-panel { display:none !important; }
@@ -453,10 +475,11 @@ function renderSlots() {
                 (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
             var onlineBtn = slot !== 'rig' ?
                 '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
-            container.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
+            container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
                 '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + chargeInfo + '</span>' +
+                '<span class="skill-warn" title="">&#9888;</span>' +
                 '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
                 chargeBtn +
                 '<button onclick="removeItem(' + globalIdx + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
@@ -479,9 +502,10 @@ function renderSlots() {
     droneContainer.innerHTML = '';
     droneItems.forEach(function(item) {
         var globalIdx = state.items.indexOf(item);
-        droneContainer.innerHTML += '<div class="b-table-row" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
+        droneContainer.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
             '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
             '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + '</span>' +
+            '<span class="skill-warn" title="">&#9888;</span>' +
             '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
             '<div style="display:flex;align-items:center;gap:0.25rem;">' +
             '<button onclick="changeDroneQty(' + globalIdx + ', -1)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
@@ -507,6 +531,119 @@ function recalcStats() {
     .then(function(r) { return r.text(); })
     .then(function(html) {
         document.getElementById('stats-panel').innerHTML = html;
+    });
+    /* Skill check runs in parallel with the stats fetch — warnings don't
+       block stats from appearing. */
+    refreshSkillWarnings();
+}
+
+/* ── Character skill check (warnings) ────────────────────────────────── */
+var SKILL_CHAR_KEY = 'vigilant_fit_skill_char';
+
+function getSelectedSkillCharId() {
+    var sel = document.getElementById('skill-char-select');
+    if (!sel) return null;
+    var v = sel.value;
+    return v ? parseInt(v, 10) : null;
+}
+
+function loadSkillCharList() {
+    var sel = document.getElementById('skill-char-select');
+    if (!sel) return;
+    fetch('/tools/fitting/characters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
+            (data.characters || []).forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = String(c.id);
+                opt.textContent = c.name;
+                if (String(c.id) === saved) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            if (saved) onSkillCharChange(/*silent*/true);
+        });
+}
+
+function onSkillCharChange(silent) {
+    var id = getSelectedSkillCharId();
+    if (id) {
+        localStorage.setItem(SKILL_CHAR_KEY, String(id));
+    } else {
+        localStorage.removeItem(SKILL_CHAR_KEY);
+    }
+    /* Re-apply warnings from the new character. */
+    if (!silent) refreshSkillWarnings();
+    else refreshSkillWarnings();
+}
+
+function _clearSkillWarnings() {
+    document.querySelectorAll('.b-table-row.fit-row-warn').forEach(function(r) {
+        r.classList.remove('fit-row-warn');
+    });
+    document.querySelectorAll('.skill-warn').forEach(function(w) {
+        w.style.display = 'none';
+        w.title = '';
+    });
+    var banner = document.getElementById('ship-skill-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function _formatMissing(entries) {
+    if (!entries || !entries.length) return '';
+    var lines = entries.map(function(m) {
+        return m.skill_name + ' ' + m.need + ' (you have ' + m.have + ')';
+    });
+    return 'Missing skill' + (lines.length === 1 ? '' : 's') + ':\n  • ' + lines.join('\n  • ');
+}
+
+function refreshSkillWarnings() {
+    _clearSkillWarnings();
+    var charId = getSelectedSkillCharId();
+    if (!charId || !state.shipTypeId) return;
+
+    fetch('/tools/fitting/skill-check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            character_id: charId,
+            ship_type_id: state.shipTypeId,
+            items: state.items,
+        }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { console.warn('skill-check:', data.error); return; }
+        var missing = data.missing || {};
+
+        /* Ship: show banner at top instead of a row highlight. */
+        var banner = document.getElementById('ship-skill-banner');
+        var shipMissing = missing[String(state.shipTypeId)];
+        if (banner && shipMissing && shipMissing.length) {
+            banner.querySelector('.ssb-text').textContent =
+                '  ' + state.shipName + ' — ' + _formatMissing(shipMissing).replace(/\n\s*•/g, ';').replace('Missing skills:', 'missing skills:').replace('Missing skill:', 'missing skill:');
+            banner.title = _formatMissing(shipMissing);
+            banner.style.display = '';
+        }
+
+        /* Module / drone rows. */
+        document.querySelectorAll('.b-table-row[data-type-id]').forEach(function(row) {
+            var tid = row.dataset.typeId;
+            var warn = row.querySelector('.skill-warn');
+            if (!tid || !warn) return;
+            var entries = missing[tid];
+            if (entries && entries.length) {
+                warn.style.display = 'inline';
+                warn.title = _formatMissing(entries);
+                row.classList.add('fit-row-warn');
+            } else {
+                warn.style.display = 'none';
+                row.classList.remove('fit-row-warn');
+            }
+        });
+    })
+    .catch(function(e) {
+        console.warn('skill-check failed:', e);
     });
 }
 
@@ -1126,6 +1263,7 @@ function refreshOverheatCache() {
     }
     initBrowser();
     refreshOverheatCache();
+    loadSkillCharList();
 })();
 </script>
 

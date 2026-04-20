@@ -18,6 +18,7 @@ from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.db.sde_models import (
     SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute, SDEDogmaAttribute,
+    SDETypeSkillReq,
 )
 from app.esi.client import ESIClient, refresh_token
 from app.esi import universe as esi_universe
@@ -1035,6 +1036,141 @@ async def can_overheat(
     )
     overheatable = {row[0] for row in result.fetchall()}
     return {str(tid): tid in overheatable for tid in ids}
+
+
+# ── Character skills + fit skill-check ──────────────────────────────────
+
+_SKILLS_SCOPE = "esi-skills.read_skills.v1"
+
+
+async def _character_skills_map(db: AsyncSession, char: Character) -> dict[int, int]:
+    """Return {skill_type_id: active_skill_level} for this character."""
+    token = await refresh_token(char, db)
+    client = ESIClient(token, db=db)
+    data = await esi_char.get_skills(client, char.character_id)
+    return {
+        int(s["skill_id"]): int(s.get("active_skill_level", 0))
+        for s in (data or {}).get("skills", [])
+    }
+
+
+@router.get("/tools/fitting/characters")
+async def list_fitting_characters(request: Request, db: AsyncSession = Depends(get_db)):
+    """Dropdown source — characters the user owns that have the skills scope."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"characters": []}
+    r = await db.execute(
+        select(Character)
+        .where(Character.user_id == user_id)
+        .order_by(Character.character_name)
+    )
+    return {
+        "characters": [
+            {"id": c.character_id, "name": c.character_name}
+            for c in r.scalars().all()
+            if _SKILLS_SCOPE in (c.scopes or "")
+        ],
+    }
+
+
+@router.post("/tools/fitting/skill-check")
+async def fit_skill_check(request: Request, db: AsyncSession = Depends(get_db)):
+    """For a ship + list of items + character, return missing skills per type_id.
+
+    Response shape:
+        {
+          "missing": {
+            "<type_id>": [{"skill_id", "skill_name", "need", "have"}, ...],
+            ...
+          },
+          "skills": {<skill_id>: level, ...}
+        }
+
+    A type_id only appears in `missing` if the character is short on at
+    least one of its required skills.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"error": "Not logged in", "missing": {}}
+    try:
+        body = await request.json()
+    except Exception:
+        return {"error": "Invalid request", "missing": {}}
+
+    character_id = body.get("character_id")
+    ship_type_id = body.get("ship_type_id")
+    items = body.get("items", []) or []
+    if not character_id:
+        return {"missing": {}, "skills": {}}
+
+    r = await db.execute(
+        select(Character)
+        .where(Character.character_id == int(character_id))
+        .where(Character.user_id == user_id)
+    )
+    char = r.scalar_one_or_none()
+    if not char:
+        return {"error": "Character not found", "missing": {}}
+    if _SKILLS_SCOPE not in (char.scopes or ""):
+        return {
+            "error": "Character is missing esi-skills.read_skills.v1 — re-authorize it.",
+            "missing": {},
+        }
+
+    try:
+        skills = await _character_skills_map(db, char)
+    except Exception as e:
+        logger.warning("skills fetch failed for char %s: %s", character_id, e)
+        return {"error": f"Could not load skills: {type(e).__name__}", "missing": {}}
+
+    # Collect every type_id whose requirements we need to check
+    type_ids: set[int] = set()
+    if ship_type_id:
+        type_ids.add(int(ship_type_id))
+    for item in items:
+        tid = item.get("type_id")
+        if tid:
+            type_ids.add(int(tid))
+        # Drones and charges are also items the char needs skills to use;
+        # skip cargo since it doesn't affect "can I fly this" materially.
+        if item.get("charge_type_id"):
+            type_ids.add(int(item["charge_type_id"]))
+
+    if not type_ids:
+        return {"missing": {}, "skills": skills}
+
+    req_rows = await db.execute(
+        select(
+            SDETypeSkillReq.type_id,
+            SDETypeSkillReq.skill_type_id,
+            SDETypeSkillReq.required_level,
+        ).where(SDETypeSkillReq.type_id.in_(type_ids))
+    )
+
+    missing_by_type: dict[int, list[dict]] = {}
+    missing_skill_ids: set[int] = set()
+    for row in req_rows.fetchall():
+        have = int(skills.get(row.skill_type_id, 0))
+        if have < int(row.required_level):
+            missing_by_type.setdefault(row.type_id, []).append({
+                "skill_id": int(row.skill_type_id),
+                "need": int(row.required_level),
+                "have": have,
+            })
+            missing_skill_ids.add(row.skill_type_id)
+
+    skill_names = await sde.type_ids_to_names(db, list(missing_skill_ids)) if missing_skill_ids else {}
+    for tid, missing in missing_by_type.items():
+        missing.sort(key=lambda m: (-m["need"], m["skill_id"]))
+        for m in missing:
+            m["skill_name"] = skill_names.get(m["skill_id"], f"Skill {m['skill_id']}")
+
+    # Serialize keys as strings for JSON friendliness (JS uses type_id as key)
+    return {
+        "missing": {str(k): v for k, v in missing_by_type.items()},
+        "skills_trained": len(skills),
+    }
 
 
 @router.get("/tools/fitting/charges/{module_type_id}")
