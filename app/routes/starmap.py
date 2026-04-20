@@ -255,6 +255,13 @@ async def _poll_esi_stats():
                                     await _diff_and_store_sov_changes(new_data)
                                 except Exception as sov_err:
                                     log.warning("Sov diff error: %s", sov_err)
+                                # Fire-and-forget warm of the alliance name
+                                # cache so clicks on system panels never
+                                # block on per-alliance ESI lookups.
+                                try:
+                                    asyncio.create_task(_warm_alliance_cache_from_sov())
+                                except Exception as warm_err:
+                                    log.warning("Alliance warm schedule error: %s", warm_err)
                             if key == "kills":
                                 kills_updated = True
                             elif key == "jumps":
@@ -394,13 +401,118 @@ async def map_characters(request: Request):
     return JSONResponse(result)
 
 
-# ── Alliance name cache ───────────────────────────────────────────────────
+# ── Alliance name cache (in-memory hot layer over the DB) ─────────────────
+#
+# The DB is the source of truth; this dict is a per-process hot cache so we
+# don't round-trip SQLite for every panel click. Populated from the DB on
+# first read and refreshed whenever we resolve new IDs via bulk ESI.
 _alliance_cache: dict[int, str] = {}
+_alliance_cache_ttl_days = 30
+
+
+async def _load_alliance_cache_from_db():
+    """Warm the in-memory alliance name cache from the persistent DB table.
+    Called once on first access and re-called when the process starts."""
+    from sqlalchemy import select
+    from app.db.models import AsyncSessionLocal, AllianceNameCache
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(AllianceNameCache.alliance_id, AllianceNameCache.name)
+            )).all()
+            for aid, name in rows:
+                _alliance_cache[aid] = name
+    except Exception as e:
+        log.warning("Alliance cache warm failed: %s", e)
+
+
+async def _resolve_alliance_names_bulk(ids: list[int]) -> dict[int, str]:
+    """Resolve a list of alliance IDs to names using the bulk
+    POST /universe/names/ endpoint (≤ 1,000 IDs per call).
+
+    Writes results to both the in-memory cache and the DB. Returns a dict
+    of {alliance_id: name} for every ID that resolved successfully."""
+    from app.db.models import AsyncSessionLocal, AllianceNameCache
+
+    out: dict[int, str] = {}
+    if not ids:
+        return out
+
+    async with httpx.AsyncClient(
+        base_url=ESI_BASE, timeout=15,
+        headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
+    ) as client:
+        # Chunk into groups of 1,000 (ESI's max)
+        for chunk_start in range(0, len(ids), 1000):
+            chunk = ids[chunk_start:chunk_start + 1000]
+            try:
+                resp = await client.post("/universe/names/", json=chunk)
+                if resp.status_code != 200:
+                    log.warning("Bulk /universe/names returned %d", resp.status_code)
+                    continue
+                for entry in resp.json():
+                    if entry.get("category") != "alliance":
+                        continue
+                    aid = entry.get("id")
+                    name = entry.get("name")
+                    if isinstance(aid, int) and isinstance(name, str):
+                        out[aid] = name
+                        _alliance_cache[aid] = name
+            except Exception as e:
+                log.warning("Bulk /universe/names error: %s", e)
+
+    # Persist to DB in one commit
+    if out:
+        try:
+            now = datetime.now(timezone.utc)
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                existing = (await db.execute(
+                    select(AllianceNameCache).where(
+                        AllianceNameCache.alliance_id.in_(list(out.keys()))
+                    )
+                )).scalars().all()
+                by_id = {r.alliance_id: r for r in existing}
+                for aid, name in out.items():
+                    if aid in by_id:
+                        by_id[aid].name = name
+                        by_id[aid].cached_at = now
+                    else:
+                        db.add(AllianceNameCache(alliance_id=aid, name=name, cached_at=now))
+                await db.commit()
+        except Exception as e:
+            log.warning("Alliance cache DB write failed: %s", e)
+
+    return out
+
+
+async def _warm_alliance_cache_from_sov():
+    """Prime the alliance name cache from all alliances currently holding sov.
+    Runs after each sovereignty poll so repeat map loads never block on
+    per-alliance ESI lookups."""
+    if not _alliance_cache:
+        await _load_alliance_cache_from_db()
+
+    sov_ids: set[int] = set()
+    for entry in _stats_cache.get("sovereignty", {}).get("data", []):
+        aid = entry.get("alliance_id")
+        if aid and aid not in _alliance_cache:
+            sov_ids.add(aid)
+
+    if sov_ids:
+        log.info("Alliance cache: resolving %d new sov alliance names in bulk", len(sov_ids))
+        await _resolve_alliance_names_bulk(list(sov_ids))
 
 
 @router.get("/api/map/alliances")
 async def map_alliances(request: Request):
-    """Resolve alliance IDs to names. Accepts ?ids=123,456,789."""
+    """Resolve alliance IDs to names. Accepts ?ids=123,456,789.
+
+    Caching layers (fastest → slowest):
+      1. In-memory `_alliance_cache` dict (warm from DB on first access)
+      2. `alliance_name_cache` DB table (30-day TTL)
+      3. Bulk POST /universe/names/ ESI lookup (≤ 1,000 IDs per call)
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
@@ -414,30 +526,28 @@ async def map_alliances(request: Request):
     except ValueError:
         return JSONResponse({"error": "Invalid IDs"}, status_code=400)
 
-    # Check cache first
-    result = {}
-    missing = []
+    # Lazy-warm the in-memory cache from DB on first request of the process
+    if not _alliance_cache:
+        await _load_alliance_cache_from_db()
+
+    result: dict[str, str] = {}
+    missing: list[int] = []
     for aid in ids:
         if aid in _alliance_cache:
             result[str(aid)] = _alliance_cache[aid]
         else:
             missing.append(aid)
 
-    # Fetch missing from ESI
+    # One bulk ESI call resolves up to 1,000 missing IDs
     if missing:
-        async with httpx.AsyncClient(
-            base_url=ESI_BASE, timeout=10,
-            headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
-        ) as client:
-            for aid in missing[:50]:  # Limit batch size
-                try:
-                    resp = await client.get(f"/alliances/{aid}/")
-                    if resp.status_code == 200:
-                        name = resp.json().get("name", f"Alliance {aid}")
-                        _alliance_cache[aid] = name
-                        result[str(aid)] = name
-                except Exception:
-                    result[str(aid)] = f"Alliance {aid}"
+        resolved = await _resolve_alliance_names_bulk(missing)
+        for aid, name in resolved.items():
+            result[str(aid)] = name
+        # Fill in any still-unresolved with the placeholder so callers don't
+        # retry endlessly on bad IDs
+        for aid in missing:
+            if str(aid) not in result:
+                result[str(aid)] = f"Alliance {aid}"
 
     return JSONResponse(result)
 
@@ -1465,7 +1575,10 @@ async def alliance_detail(alliance_id: int, request: Request):
     gained_7d = sum(1 for r in rows if r.new_alliance_id == alliance_id and r.old_alliance_id != alliance_id)
     lost_7d = sum(1 for r in rows if r.old_alliance_id == alliance_id and r.new_alliance_id != alliance_id)
 
-    # 3. Fetch alliance header from ESI (cached globally)
+    # 3. Fetch alliance header from ESI. The alliance detail endpoint returns
+    # more metadata (ticker, creator, founded date) than the bulk /universe/names/
+    # call, so this page specifically needs the full response — we still
+    # update the name cache as a side effect.
     header = {}
     async with httpx.AsyncClient(
         base_url=ESI_BASE, timeout=10,
@@ -1483,7 +1596,32 @@ async def alliance_detail(alliance_id: int, request: Request):
                     "date_founded": h.get("date_founded"),
                     "faction_id": h.get("faction_id"),
                 }
-                _alliance_cache[alliance_id] = h.get("name", f"Alliance {alliance_id}")
+                name = h.get("name", f"Alliance {alliance_id}")
+                ticker = h.get("ticker")
+                _alliance_cache[alliance_id] = name
+                # Persist to the DB-backed name cache so subsequent panel
+                # clicks skip the ESI round-trip entirely.
+                try:
+                    from sqlalchemy import select
+                    from app.db.models import AsyncSessionLocal, AllianceNameCache
+                    async with AsyncSessionLocal() as db:
+                        existing = (await db.execute(
+                            select(AllianceNameCache).where(
+                                AllianceNameCache.alliance_id == alliance_id
+                            )
+                        )).scalar_one_or_none()
+                        if existing:
+                            existing.name = name
+                            existing.ticker = ticker
+                            existing.cached_at = datetime.now(timezone.utc)
+                        else:
+                            db.add(AllianceNameCache(
+                                alliance_id=alliance_id, name=name, ticker=ticker,
+                                cached_at=datetime.now(timezone.utc),
+                            ))
+                        await db.commit()
+                except Exception:
+                    pass
         except Exception:
             pass
 

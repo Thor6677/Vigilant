@@ -476,6 +476,22 @@ class SystemActivitySnapshot(Base):
     jumps = Column(Integer, nullable=False, default=0)
 
 
+class AllianceNameCache(Base):
+    """Persistent cache of ESI alliance ID → name (and ticker when available).
+
+    Alliance names effectively never change — they shift only when alliances
+    dissolve/reform, so we refresh entries on a 30-day TTL rather than per
+    request. Populated by the bulk POST /universe/names/ endpoint which
+    resolves up to 1,000 IDs per call.
+    """
+    __tablename__ = "alliance_name_cache"
+
+    alliance_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    ticker = Column(String(8), nullable=True)
+    cached_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
