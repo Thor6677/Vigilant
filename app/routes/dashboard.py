@@ -1139,199 +1139,264 @@ _FIELD_FETCHERS = {
 
 # ── Background sync task ──────────────────────────────────────────────────────
 
+_SYNC_TIMEOUT = 300  # 5 minutes — if the entire sync for a character takes
+                     # longer than this, it's killed and the status is reset.
+
+
 async def _sync_task(character_id: int):
-    """Sync one character. Acquires semaphore slot + per-character lock."""
+    """Sync one character. Acquires semaphore slot + per-character lock.
+
+    Safety mechanisms:
+      - asyncio.wait_for wraps the core work with a hard timeout
+      - try/finally guarantees sync_status resets to idle/error regardless
+        of how the function exits (including CancelledError, TimeoutError)
+      - per-character lock prevents concurrent syncs of the same character
+    """
     if _get_char_sync_lock(character_id).locked():
         return  # Already syncing this character
     async with _get_sync_semaphore():
-        async with AsyncSessionLocal() as db:
-            try:
-                char_result = await db.execute(select(Character).where(Character.character_id == character_id))
-                char = char_result.scalar_one_or_none()
-                if not char:
-                    return
+        async with _get_char_sync_lock(character_id):
+            await _sync_task_inner(character_id)
 
-                # Load or create cache rows
+
+async def _sync_task_inner(character_id: int):
+    """Inner sync body — always resets DB sync_status on exit."""
+    async with AsyncSessionLocal() as db:
+        cache = None
+        try:
+            char_result = await db.execute(select(Character).where(Character.character_id == character_id))
+            char = char_result.scalar_one_or_none()
+            if not char:
+                return
+
+            # Load or create cache rows
+            cache_result = await db.execute(
+                select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
+            )
+            cache = cache_result.scalar_one_or_none()
+            if cache is None:
+                cache = CharacterDashboardCache(character_id=character_id)
+                db.add(cache)
+
+            asset_cache_result = await db.execute(
+                select(CharacterAssetCache).where(CharacterAssetCache.character_id == character_id)
+            )
+            asset_cache = asset_cache_result.scalar_one_or_none()
+            if asset_cache is None:
+                asset_cache = CharacterAssetCache(character_id=character_id)
+                db.add(asset_cache)
+
+            cache.sync_status = "syncing"
+            await db.commit()
+
+            # Run the actual field-fetch work under a hard timeout so hung
+            # ESI calls don't block the character permanently.
+            await asyncio.wait_for(
+                _sync_fields(character_id, char, cache, asset_cache, db),
+                timeout=_SYNC_TIMEOUT,
+            )
+
+            logger.info("Sync complete for char %s", character_id)
+
+        except asyncio.TimeoutError:
+            logger.warning("Sync for char %s timed out after %ds", character_id, _SYNC_TIMEOUT)
+            try:
+                if cache:
+                    cache.sync_status = "error"
+                    cache.sync_error = f"timeout after {_SYNC_TIMEOUT}s"
+                    await db.commit()
+            except Exception:
+                pass
+        except (asyncio.CancelledError, BaseException) as e:
+            # CancelledError (Python 3.9+) inherits BaseException, not
+            # Exception — the old `except Exception` missed it, leaving
+            # sync_status permanently stuck at "syncing".
+            logger.warning("Sync for char %s cancelled/crashed: %s", character_id, type(e).__name__)
+            try:
+                if cache:
+                    cache.sync_status = "error"
+                    cache.sync_error = f"{type(e).__name__}: {str(e)[:300]}"
+                    await db.commit()
+            except Exception:
+                pass
+            if isinstance(e, asyncio.CancelledError):
+                raise  # re-raise so asyncio cancellation propagates
+        except Exception as e:
+            try:
                 cache_result = await db.execute(
                     select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
                 )
                 cache = cache_result.scalar_one_or_none()
-                if cache is None:
-                    cache = CharacterDashboardCache(character_id=character_id)
-                    db.add(cache)
-
-                asset_cache_result = await db.execute(
-                    select(CharacterAssetCache).where(CharacterAssetCache.character_id == character_id)
+                if cache:
+                    cache.sync_status = "error"
+                    cache.sync_error = str(e)[:500]
+                    await db.commit()
+            except Exception:
+                pass
+        finally:
+            # Last-resort guard: if we exited by any path that didn't
+            # explicitly set a terminal status, force it to idle so the
+            # character never stays stuck at "syncing" in the DB.
+            try:
+                cache_check = await db.execute(
+                    select(CharacterDashboardCache).where(
+                        CharacterDashboardCache.character_id == character_id
+                    )
                 )
-                asset_cache = asset_cache_result.scalar_one_or_none()
-                if asset_cache is None:
-                    asset_cache = CharacterAssetCache(character_id=character_id)
-                    db.add(asset_cache)
+                c = cache_check.scalar_one_or_none()
+                if c and c.sync_status == "syncing":
+                    c.sync_status = "idle"
+                    await db.commit()
+            except Exception:
+                pass
 
-                # Mark syncing now that the lock is held (idempotent if already set)
-                cache.sync_status = "syncing"
-                await db.commit()
 
-                field_synced: dict = json.loads(cache.field_synced_json) if cache.field_synced_json else {}
-                warnings: dict = json.loads(cache.sync_warnings_json) if cache.sync_warnings_json else {}
-                now = datetime.now(timezone.utc)
-                scopes = char.scopes or ""
+async def _sync_fields(character_id: int, char, cache, asset_cache, db):
+    """Core field-fetch logic, extracted so _sync_task_inner can wrap it
+    with asyncio.wait_for for a hard timeout."""
+    field_synced: dict = json.loads(cache.field_synced_json) if cache.field_synced_json else {}
+    warnings: dict = json.loads(cache.sync_warnings_json) if cache.sync_warnings_json else {}
+    now = datetime.now(timezone.utc)
+    scopes = char.scopes or ""
 
-                # Determine which fields need refreshing
-                stale_fields = []
-                for field, cache_secs in FIELD_CACHE_SECONDS.items():
-                    scope = FIELD_SCOPES[field]
-                    if scope and scope not in scopes:
-                        continue
-                    last_str = field_synced.get(field)
-                    if last_str and (now - datetime.fromisoformat(last_str)).total_seconds() < cache_secs:
-                        continue  # Still within cache window
-                    stale_fields.append(field)
+    # Determine which fields need refreshing
+    stale_fields = []
+    for field, cache_secs in FIELD_CACHE_SECONDS.items():
+        scope = FIELD_SCOPES[field]
+        if scope and scope not in scopes:
+            continue
+        last_str = field_synced.get(field)
+        if last_str and (now - datetime.fromisoformat(last_str)).total_seconds() < cache_secs:
+            continue
+        stale_fields.append(field)
 
-                logger.info("Syncing char %s — stale fields: %s", character_id, stale_fields or "none")
+    logger.info("Syncing char %s — stale fields: %s", character_id, stale_fields or "none")
 
-                # Snapshot old data for notification detection
-                _old_cache = {}
-                if stale_fields:
-                    for sf in stale_fields:
-                        col = _FIELD_DB_COLUMN.get(sf)
-                        json_attr = f"{sf}_json" if sf != "wallet" else None
-                        if json_attr and sf in ("skillqueue", "industry", "pi", "mail", "notifications"):
-                            raw = getattr(cache, json_attr, None)
-                            if raw:
-                                try:
-                                    _old_cache[sf] = json.loads(raw)
-                                except (json.JSONDecodeError, TypeError) as e:
-                                    logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
+    # Snapshot old data for notification detection
+    _old_cache = {}
+    if stale_fields:
+        for sf in stale_fields:
+            col = _FIELD_DB_COLUMN.get(sf)
+            json_attr = f"{sf}_json" if sf != "wallet" else None
+            if json_attr and sf in ("skillqueue", "industry", "pi", "mail", "notifications"):
+                raw = getattr(cache, json_attr, None)
+                if raw:
+                    try:
+                        _old_cache[sf] = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
 
-                if stale_fields:
-                    results = await asyncio.gather(
-                        *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields],
-                        return_exceptions=True,
+    if stale_fields:
+        results = await asyncio.gather(
+            *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields],
+            return_exceptions=True,
+        )
+        for field, result in zip(stale_fields, results):
+            if isinstance(result, Exception):
+                logger.warning("Field %s raised for char %s: %s", field, character_id, result)
+                warnings[field] = f"exception: {type(result).__name__}"
+                field_synced[field] = now.isoformat()
+                continue
+            val, warn = result.get(character_id, (None, None))
+            col = _FIELD_DB_COLUMN[field]
+            if field == "assets":
+                if val is not None:
+                    asset_cache.assets_json = json.dumps(val)
+                    asset_cache.last_fetched = now
+                    warnings.pop(field, None)
+                elif warn and warn != "missing_scope":
+                    warnings[field] = warn
+                field_synced[field] = now.isoformat()
+                continue
+            if field == "roles":
+                if val is not None:
+                    roles_list = val.get("roles", []) if isinstance(val, dict) else []
+                    roles_res = await db.execute(
+                        select(CharacterCorpRoles).where(
+                            CharacterCorpRoles.character_id == character_id
+                        )
                     )
-                    for field, result in zip(stale_fields, results):
-                        if isinstance(result, Exception):
-                            logger.warning("Field %s raised for char %s: %s", field, character_id, result)
-                            warnings[field] = f"exception: {type(result).__name__}"
-                            field_synced[field] = now.isoformat()
-                            continue
-                        val, warn = result.get(character_id, (None, None))
-                        col = _FIELD_DB_COLUMN[field]
-                        if field == "assets":
-                            if val is not None:
-                                asset_cache.assets_json = json.dumps(val)
-                                asset_cache.last_fetched = now
-                                warnings.pop(field, None)
-                            elif warn and warn != "missing_scope":
-                                warnings[field] = warn
-                            field_synced[field] = now.isoformat()
-                            continue
-                        if field == "roles":
-                            # Upsert into the CharacterCorpRoles cache table used
-                            # by skill-plan permission checks.
-                            if val is not None:
-                                roles_list = val.get("roles", []) if isinstance(val, dict) else []
-                                roles_res = await db.execute(
-                                    select(CharacterCorpRoles).where(
-                                        CharacterCorpRoles.character_id == character_id
-                                    )
-                                )
-                                roles_row = roles_res.scalar_one_or_none()
-                                if roles_row is None:
-                                    db.add(CharacterCorpRoles(
-                                        character_id=character_id,
-                                        roles_json=json.dumps(roles_list),
-                                        fetched_at=now,
-                                    ))
-                                else:
-                                    roles_row.roles_json = json.dumps(roles_list)
-                                    roles_row.fetched_at = now
-                                warnings.pop(field, None)
-                            elif warn and warn != "missing_scope":
-                                warnings[field] = warn
-                            field_synced[field] = now.isoformat()
-                            continue
-                        if val is not None:
-                            if col is None:  # wallet is a Float column
-                                cache.wallet = val
-                                if field == "wallet":
-                                    db.add(WalletSnapshot(
-                                        character_id=character_id,
-                                        balance=val,
-                                        recorded_at=now,
-                                    ))
-                            else:
-                                setattr(cache, col, json.dumps(val))
-                            warnings.pop(field, None)
-                        elif warn and warn != "missing_scope":
-                            warnings[field] = warn
-                        field_synced[field] = now.isoformat()
+                    roles_row = roles_res.scalar_one_or_none()
+                    if roles_row is None:
+                        db.add(CharacterCorpRoles(
+                            character_id=character_id,
+                            roles_json=json.dumps(roles_list),
+                            fetched_at=now,
+                        ))
+                    else:
+                        roles_row.roles_json = json.dumps(roles_list)
+                        roles_row.fetched_at = now
+                    warnings.pop(field, None)
+                elif warn and warn != "missing_scope":
+                    warnings[field] = warn
+                field_synced[field] = now.isoformat()
+                continue
+            if val is not None:
+                if col is None:  # wallet is a Float column
+                    cache.wallet = val
+                    if field == "wallet":
+                        db.add(WalletSnapshot(
+                            character_id=character_id,
+                            balance=val,
+                            recorded_at=now,
+                        ))
+                else:
+                    setattr(cache, col, json.dumps(val))
+                warnings.pop(field, None)
+            elif warn and warn != "missing_scope":
+                warnings[field] = warn
+            field_synced[field] = now.isoformat()
 
-                # Refresh corp/alliance info from public endpoint (no scope needed)
-                if "location" in stale_fields:
-                    try:
-                        pub_client = ESIClient("")
-                        pub_info = await esi_char.get_public_info(pub_client, character_id)
-                        new_corp_id = pub_info.get("corporation_id")
-                        new_alliance_id = pub_info.get("alliance_id")
-                        if new_corp_id and new_corp_id != char.corporation_id:
-                            try:
-                                corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
-                                char.corporation_id = new_corp_id
-                                char.corporation_name = corp_info.get("name")
-                            except Exception:
-                                char.corporation_id = new_corp_id
-                                char.corporation_name = None
-                            logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, new_corp_id)
-                        if new_alliance_id != char.alliance_id:
-                            char.alliance_id = new_alliance_id
-                            if new_alliance_id:
-                                try:
-                                    ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
-                                    char.alliance_name = ally_info.get("name")
-                                except Exception:
-                                    char.alliance_name = None
-                            else:
-                                char.alliance_name = None
-                    except Exception as pub_err:
-                        logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
-
-                cache.field_synced_json = json.dumps(field_synced)
-                cache.sync_warnings_json = json.dumps(warnings) if warnings else None
-                cache.last_synced = now
-                cache.sync_status = "idle"
-                cache.sync_error = None
-                await db.commit()
-
-                # Detect notification events by comparing old vs new data
-                if _old_cache and char.user_id:
-                    _new_cache = {}
-                    for field in ("skillqueue", "industry", "pi", "mail", "notifications"):
-                        raw = getattr(cache, f"{field}_json", None)
-                        if raw:
-                            try:
-                                _new_cache[field] = json.loads(raw)
-                            except (json.JSONDecodeError, TypeError) as e:
-                                logger.warning("Corrupt %s cache for char %s: %s", field, character_id, e)
-                    try:
-                        await _detect_notifications(char, _old_cache, _new_cache, db)
-                    except Exception as notif_err:
-                        logger.debug("Notification detection error for char %s: %s", character_id, notif_err)
-
-                logger.info("Sync complete for char %s", character_id)
-
-            except Exception as e:
+    # Refresh corp/alliance info from public endpoint (no scope needed)
+    if "location" in stale_fields:
+        try:
+            pub_client = ESIClient("")
+            pub_info = await esi_char.get_public_info(pub_client, character_id)
+            new_corp_id = pub_info.get("corporation_id")
+            new_alliance_id = pub_info.get("alliance_id")
+            if new_corp_id and new_corp_id != char.corporation_id:
                 try:
-                    cache_result = await db.execute(
-                        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
-                    )
-                    cache = cache_result.scalar_one_or_none()
-                    if cache:
-                        cache.sync_status = "error"
-                        cache.sync_error = str(e)[:500]
-                        await db.commit()
+                    corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
+                    char.corporation_id = new_corp_id
+                    char.corporation_name = corp_info.get("name")
                 except Exception:
-                    pass
+                    char.corporation_id = new_corp_id
+                    char.corporation_name = None
+                logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, new_corp_id)
+            if new_alliance_id != char.alliance_id:
+                char.alliance_id = new_alliance_id
+                if new_alliance_id:
+                    try:
+                        ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
+                        char.alliance_name = ally_info.get("name")
+                    except Exception:
+                        char.alliance_name = None
+                else:
+                    char.alliance_name = None
+        except Exception as pub_err:
+            logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+
+    cache.field_synced_json = json.dumps(field_synced)
+    cache.sync_warnings_json = json.dumps(warnings) if warnings else None
+    cache.last_synced = now
+    cache.sync_status = "idle"
+    cache.sync_error = None
+    await db.commit()
+
+    # Detect notification events by comparing old vs new data
+    if _old_cache and char.user_id:
+        _new_cache = {}
+        for field in ("skillqueue", "industry", "pi", "mail", "notifications"):
+            raw = getattr(cache, f"{field}_json", None)
+            if raw:
+                try:
+                    _new_cache[field] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning("Corrupt %s cache for char %s: %s", field, character_id, e)
+        try:
+            await _detect_notifications(char, _old_cache, _new_cache, db)
+        except Exception as notif_err:
+            logger.debug("Notification detection error for char %s: %s", character_id, notif_err)
 
 
 async def _cleanup_old_snapshots():
@@ -1403,25 +1468,58 @@ async def _sync_all_task(character_ids: list[int]):
         for cid in character_ids:
             _queued_sync.pop(cid, None)
 
-def _clean_stuck_characters():
-    """Remove characters that have been queued for sync for >5 minutes (stuck detection).
+async def _clean_stuck_characters():
+    """Remove characters stuck in sync for >5 minutes.
 
-    This safety mechanism prevents characters from getting permanently stuck in the
-    _queued_sync queue if a sync task crashes or is cancelled without proper cleanup.
+    Cleans BOTH the in-memory _queued_sync dict AND the DB sync_status column.
+    The old version only cleaned the in-memory dict, so a character whose sync
+    task crashed would have sync_status="syncing" in the DB forever —
+    _collect_stale() skipped it, and only a full restart would unstick it.
     """
     now = datetime.now(timezone.utc)
     stuck_threshold = timedelta(minutes=5)
     stuck_cids = []
 
+    # 1. Clean the in-memory queue (same as before)
     for cid, queued_at in list(_queued_sync.items()):
-        # Make queued_at timezone-aware if needed
         qa = queued_at if queued_at.tzinfo else queued_at.replace(tzinfo=timezone.utc)
         if (now - qa) > stuck_threshold:
             stuck_cids.append(cid)
             _queued_sync.pop(cid, None)
 
+    # 2. Also scan the DB for characters stuck at sync_status="syncing" whose
+    #    last_synced is stale and who are NOT in the in-memory queue (i.e. their
+    #    asyncio task has finished/crashed but the DB was never reset).
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import or_
+            stale_cutoff = now - stuck_threshold
+            stale_cutoff_naive = stale_cutoff.replace(tzinfo=None)
+            stuck_rows = (await db.execute(
+                select(CharacterDashboardCache).where(
+                    CharacterDashboardCache.sync_status == "syncing",
+                    or_(
+                        CharacterDashboardCache.last_synced < stale_cutoff_naive,
+                        CharacterDashboardCache.last_synced.is_(None),
+                    ),
+                )
+            )).scalars().all()
+            db_stuck = []
+            for row in stuck_rows:
+                if row.character_id not in _queued_sync:
+                    row.sync_status = "idle"
+                    row.sync_error = "auto-unstuck: was syncing for >5m with no active task"
+                    db_stuck.append(row.character_id)
+                    if row.character_id not in stuck_cids:
+                        stuck_cids.append(row.character_id)
+            if db_stuck:
+                await db.commit()
+                logger.warning("Reset %d DB-stuck character(s) from syncing→idle: %s", len(db_stuck), db_stuck)
+    except Exception as e:
+        logger.warning("DB stuck-character cleanup failed: %s", e)
+
     if stuck_cids:
-        logger.warning("Detected %d character(s) stuck in sync queue (>5m): %s — force cleaned",
+        logger.warning("Detected %d character(s) stuck in sync (>5m): %s — force cleaned",
                       len(stuck_cids), stuck_cids)
 
     return stuck_cids
@@ -1451,7 +1549,7 @@ async def _background_scheduler():
                         char_caches = {c.character_id: c for c in cache_result.scalars().all()}
 
                         # Check for and clean up characters stuck in queue (>5 minutes)
-                        stuck_cids = _clean_stuck_characters()
+                        stuck_cids = await _clean_stuck_characters()
 
                         stale_ids = _collect_stale(list(characters), char_caches)
 
