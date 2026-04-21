@@ -43,6 +43,9 @@ EVE_SCOPES = " ".join([
     "esi-contracts.read_character_contracts.v1",
     "esi-planets.manage_planets.v1",
     "esi-search.search_structures.v1",
+    # Structure name resolution — needed by industry jobs, assets, and the
+    # star map to turn structure IDs into human-readable names + system info.
+    "esi-universe.read_structures.v1",
     # Star map gate route planner — push routes to in-game autopilot
     "esi-ui.write_waypoint.v1",
     # Corp-level scopes — only granted by EVE SSO if the character holds the
