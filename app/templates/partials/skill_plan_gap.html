@@ -24,24 +24,59 @@
     </div>
     {% endif %}
 
-    {# Skill injector estimate #}
+    {# Skill injector estimate with Jita pricing #}
     {% if injectors %}
-    <div style="padding:0.25rem 0.75rem 0.5rem;display:flex;flex-wrap:wrap;gap:0.5rem 1.5rem;font-size:10px;border-bottom:1px solid var(--border);">
-        <span style="color:var(--muted);letter-spacing:0.08em;">INJECTORS NEEDED</span>
-        <span style="display:flex;align-items:center;gap:0.3rem;">
-            <span style="color:var(--accent);font-weight:500;">{{ injectors['large'] }}</span>
-            <span style="color:var(--text);">Large</span>
-            <span style="color:var(--muted);font-size:9px;">(500k–150k SP each)</span>
-        </span>
-        <span style="color:var(--muted);">or</span>
-        <span style="display:flex;align-items:center;gap:0.3rem;">
-            <span style="color:var(--accent);font-weight:500;">{{ injectors['small'] }}</span>
-            <span style="color:var(--text);">Small</span>
-            <span style="color:var(--muted);font-size:9px;">(100k SP each)</span>
-        </span>
-        <span style="color:var(--muted);font-size:9px;margin-left:auto;">
-            {{ "{:,.0f}".format(char_total_sp) }} SP current
-        </span>
+    {% set opt = injectors['optimal'] %}
+    {% set lo = injectors['large_only'] %}
+    {% set so = injectors['small_only'] %}
+    <div style="padding:0.4rem 0.75rem 0.5rem;border-bottom:1px solid var(--border);font-size:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+            <span style="color:var(--muted);letter-spacing:0.1em;font-size:9px;">SKILL INJECTORS · JITA</span>
+            <span style="color:var(--muted);font-size:9px;">
+                {{ "{:,.0f}".format(char_total_sp) }} SP current
+            </span>
+        </div>
+
+        {# Optimal mix (highlighted) #}
+        {% if opt['cost'] > 0 %}
+        <div style="padding:0.35rem 0.5rem;background:rgba(200,169,81,0.06);border:1px solid rgba(200,169,81,0.15);margin-bottom:0.35rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.3rem;">
+            <span style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="color:var(--accent);font-size:9px;letter-spacing:0.1em;">BEST VALUE</span>
+                {% if opt['large'] > 0 %}
+                <span><span style="color:var(--accent);font-weight:500;">{{ opt['large'] }}</span> Large</span>
+                {% endif %}
+                {% if opt['large'] > 0 and opt['small'] > 0 %}
+                <span style="color:var(--muted);">+</span>
+                {% endif %}
+                {% if opt['small'] > 0 %}
+                <span><span style="color:var(--accent);font-weight:500;">{{ opt['small'] }}</span> Small</span>
+                {% endif %}
+            </span>
+            <span style="color:var(--accent);font-weight:500;">{{ "{:,.0f}".format(opt['cost']) }} ISK</span>
+        </div>
+        {% endif %}
+
+        {# Large-only and Small-only as secondary options #}
+        <div style="display:flex;gap:1rem;color:var(--muted);font-size:9px;">
+            {% if lo['cost'] > 0 %}
+            <span>
+                <span style="color:var(--text);">{{ lo['large'] }}</span> Large only:
+                <span style="color:var(--text);">{{ "{:,.0f}".format(lo['cost']) }} ISK</span>
+                {% if injectors['large_price'] > 0 %}
+                <span style="font-size:8px;">@ {{ "{:,.0f}".format(injectors['large_price']) }}/ea</span>
+                {% endif %}
+            </span>
+            {% endif %}
+            {% if so['cost'] > 0 %}
+            <span>
+                <span style="color:var(--text);">{{ so['small'] }}</span> Small only:
+                <span style="color:var(--text);">{{ "{:,.0f}".format(so['cost']) }} ISK</span>
+                {% if injectors['small_price'] > 0 %}
+                <span style="font-size:8px;">@ {{ "{:,.0f}".format(injectors['small_price']) }}/ea</span>
+                {% endif %}
+            </span>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
 

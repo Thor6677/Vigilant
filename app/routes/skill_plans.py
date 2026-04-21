@@ -92,10 +92,11 @@ def _format_duration(minutes: float) -> str:
     return f"{mins}m"
 
 
+# ── Skill injector calculator ─────────────────────────────────────────────────
+
+import math
+
 # Large Skill Injector SP yield depends on the character's CURRENT total SP.
-# As the character injects, their total SP rises and they may cross into a
-# lower-yield bracket mid-plan. This function simulates injecting one at a
-# time to get an accurate count.
 _LSI_BRACKETS = [
     (5_000_000,  500_000),   # <5M SP   → 500k per injector
     (50_000_000, 400_000),   # 5–50M SP → 400k per injector
@@ -103,6 +104,44 @@ _LSI_BRACKETS = [
     (None,       150_000),   # >80M SP  → 150k per injector
 ]
 _SSI_SP = 100_000  # Small Skill Injector — always 100k SP
+
+_LSI_TYPE_ID = 40520
+_SSI_TYPE_ID = 45635
+_FORGE_REGION = 10000002  # Jita is in The Forge
+
+# Cached Jita sell prices (refreshed every 30 minutes)
+_injector_price_cache: dict = {}
+_injector_price_ts: datetime | None = None
+
+
+async def _get_injector_prices() -> tuple[float, float]:
+    """Return (large_price, small_price) from Jita lowest sell orders.
+    Cached for 30 minutes to avoid hammering ESI on repeated gap checks."""
+    global _injector_price_cache, _injector_price_ts
+    import httpx
+
+    now = datetime.now(timezone.utc)
+    if _injector_price_ts and (now - _injector_price_ts).total_seconds() < 1800:
+        return _injector_price_cache.get("large", 0), _injector_price_cache.get("small", 0)
+
+    prices = {"large": 0.0, "small": 0.0}
+    async with httpx.AsyncClient(timeout=15) as client:
+        for key, type_id in [("large", _LSI_TYPE_ID), ("small", _SSI_TYPE_ID)]:
+            try:
+                resp = await client.get(
+                    f"https://esi.evetech.net/latest/markets/{_FORGE_REGION}/orders/",
+                    params={"type_id": type_id, "order_type": "sell"},
+                )
+                if resp.status_code == 200:
+                    orders = resp.json()
+                    if orders:
+                        prices[key] = min(o["price"] for o in orders)
+            except Exception:
+                pass
+
+    _injector_price_cache = prices
+    _injector_price_ts = now
+    return prices["large"], prices["small"]
 
 
 def _lsi_yield(current_sp: int) -> int:
@@ -112,33 +151,86 @@ def _lsi_yield(current_sp: int) -> int:
     return 150_000
 
 
-def _calc_injectors(sp_needed: int, char_total_sp: int) -> dict:
-    """Calculate how many Large and Small Skill Injectors a character needs
-    to cover `sp_needed`, accounting for bracket transitions as total SP rises."""
-    if sp_needed <= 0:
-        return {"large": 0, "small": 0, "large_sp_breakdown": [], "char_sp": char_total_sp}
+def _calc_injectors(sp_needed: int, char_total_sp: int,
+                    large_price: float = 0, small_price: float = 0) -> dict:
+    """Calculate injector options for covering `sp_needed`.
 
-    # Simulate injecting Large Skill Injectors one at a time
+    Returns three options:
+      - large_only: all Large Skill Injectors
+      - small_only: all Small Skill Injectors
+      - optimal: cheapest mix of large + small (greedy per-injection decision)
+    """
+    if sp_needed <= 0:
+        return {
+            "large_only": {"large": 0, "cost": 0},
+            "small_only": {"small": 0, "cost": 0},
+            "optimal": {"large": 0, "small": 0, "cost": 0},
+            "char_sp": char_total_sp,
+        }
+
+    # ── Large-only option ────────────────────────────────────────────────
     remaining = sp_needed
     current_sp = char_total_sp
     large_count = 0
-    breakdown = []  # (bracket_label, count) for display
-
+    while remaining > 0:
+        remaining -= _lsi_yield(current_sp)
+        current_sp += _lsi_yield(char_total_sp + (sp_needed - remaining - _lsi_yield(current_sp)))
+        large_count += 1
+    # Recompute cleanly
+    remaining = sp_needed
+    current_sp = char_total_sp
+    large_count = 0
     while remaining > 0:
         yld = _lsi_yield(current_sp)
         large_count += 1
         current_sp += yld
         remaining -= yld
+    large_only_cost = large_count * large_price
 
-    # Also compute how many Small Skill Injectors would be needed (flat rate)
-    import math
+    # ── Small-only option ────────────────────────────────────────────────
     small_count = math.ceil(sp_needed / _SSI_SP)
+    small_only_cost = small_count * small_price
+
+    # ── Optimal mix (greedy) ─────────────────────────────────────────────
+    # At each step: compare ISK/SP of one large vs one small. Pick the
+    # cheaper option. This accounts for bracket transitions correctly
+    # because we track current_sp as we go.
+    remaining = sp_needed
+    current_sp = char_total_sp
+    opt_large = 0
+    opt_small = 0
+    if large_price > 0 and small_price > 0:
+        while remaining > 0:
+            lsi_yld = _lsi_yield(current_sp)
+            # How much SP we'd actually USE (don't overshoot for cost comparison)
+            lsi_effective = min(lsi_yld, remaining)
+            ssi_effective = min(_SSI_SP, remaining)
+
+            lsi_cost_per_sp = large_price / lsi_effective if lsi_effective > 0 else float("inf")
+            ssi_cost_per_sp = small_price / ssi_effective if ssi_effective > 0 else float("inf")
+
+            if lsi_cost_per_sp <= ssi_cost_per_sp:
+                opt_large += 1
+                current_sp += lsi_yld
+                remaining -= lsi_yld
+            else:
+                opt_small += 1
+                current_sp += _SSI_SP
+                remaining -= _SSI_SP
+    elif large_price > 0:
+        opt_large = large_count
+    elif small_price > 0:
+        opt_small = small_count
+
+    opt_cost = opt_large * large_price + opt_small * small_price
 
     return {
-        "large": large_count,
-        "small": small_count,
-        "char_sp": char_total_sp,
-        "large_sp_total": sp_needed,
+        "large_only":  {"large": large_count, "cost": large_only_cost},
+        "small_only":  {"small": small_count, "cost": small_only_cost},
+        "optimal":     {"large": opt_large, "small": opt_small, "cost": opt_cost},
+        "char_sp":     char_total_sp,
+        "large_price": large_price,
+        "small_price": small_price,
     }
 
 
@@ -1201,7 +1293,10 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
             "time_str": _format_duration(time_mins),
         })
 
-    injectors = _calc_injectors(total_sp_needed, char_total_sp) if total_sp_needed > 0 else None
+    injectors = None
+    if total_sp_needed > 0:
+        large_price, small_price = await _get_injector_prices()
+        injectors = _calc_injectors(total_sp_needed, char_total_sp, large_price, small_price)
 
     return templates.TemplateResponse("partials/skill_plan_gap.html", {
         "request": request,
