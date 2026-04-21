@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Maps structure_id -> timestamp of the first 401.
 # Cached entries are skipped for 24 hours to avoid wasting ESI calls.
 _structure_401_cache: dict[int, datetime] = {}
-_STRUCTURE_401_TTL = timedelta(hours=24)
+_STRUCTURE_401_TTL = timedelta(hours=2)
 
 
 async def get_station(client: ESIClient, station_id: int) -> dict:

@@ -230,13 +230,15 @@ async def _resolve_location_names(
     sem = asyncio.Semaphore(_STRUCTURE_LOOKUP_CONCURRENCY)
 
     async def _lookup(struct_id: int) -> tuple[int, str | None]:
-        # /universe/structures/{id}/ requires the esi-universe.read_structures.v1
-        # scope, so skip chars that don't have it (would get 401 and pollute the
-        # in-memory 401 cache — poisoning future lookups for 24h).
-        candidates = [
-            ch for ch in structure_candidates.get(struct_id, [])
-            if "esi-universe.read_structures.v1" in (ch.scopes or "")
-        ]
+        # Try all candidate characters (those whose jobs reference this
+        # structure). The old code filtered to characters with the
+        # esi-universe.read_structures.v1 scope, but if NO characters have
+        # that scope the resolver would silently give up without even trying.
+        # Now we attempt all candidates — a 401/403 is gracefully handled and
+        # cached (2h TTL) in get_structure() so it won't spam ESI.
+        # Characters WITH the scope + docking rights will resolve immediately;
+        # characters without it fail once and get cached — acceptable tradeoff.
+        candidates = structure_candidates.get(struct_id, [])
         if not candidates:
             return struct_id, None
         async with sem:
@@ -446,6 +448,34 @@ async def industry_jobs_page(
     installer_names = await _resolve_installer_names(db, installer_ids, owned_char_names)
     location_names = await _resolve_location_names(db, location_ids, structure_candidates)
 
+    # For unresolved locations, try to show the system name as a fallback.
+    # Source: StructureNameCache may have solar_system_id from a prior fetch.
+    location_system_names: dict[int, str] = {}
+    unresolved_structure_ids = [
+        lid for lid in location_ids
+        if lid >= STATION_ID_CEILING and lid not in location_names
+    ]
+    if unresolved_structure_ids:
+        from app.db.models import StructureNameCache
+        from app.db.sde_models import SDESystem as SDESolarSystem
+        cache_rows = (await db.execute(
+            select(StructureNameCache.structure_id, StructureNameCache.solar_system_id)
+            .where(
+                StructureNameCache.structure_id.in_(unresolved_structure_ids),
+                StructureNameCache.solar_system_id.isnot(None),
+            )
+        )).all()
+        sys_ids = {ssid for _, ssid in cache_rows if ssid}
+        if sys_ids:
+            sys_rows = (await db.execute(
+                select(SDESolarSystem.system_id, SDESolarSystem.system_name)
+                .where(SDESolarSystem.system_id.in_(list(sys_ids)))
+            )).all()
+            sys_name_map = {sid: name for sid, name in sys_rows}
+            for struct_id, solar_sys_id in cache_rows:
+                if solar_sys_id and solar_sys_id in sys_name_map:
+                    location_system_names[struct_id] = sys_name_map[solar_sys_id]
+
     # --- Build rendered rows ------------------------------------------------
     now = datetime.now(timezone.utc)
     rows: list[dict] = []
@@ -476,8 +506,14 @@ async def industry_jobs_page(
         )
         location_name = location_names.get(int(location_id)) if location_id else None
         if location_name is None and location_id:
-            kind = "Structure" if location_id >= STATION_ID_CEILING else "Station"
-            location_name = f"{kind} {location_id}"
+            # Try to at least show the solar system name when the structure
+            # name can't be resolved (e.g. no character has the scope, or the
+            # structure is access-restricted).
+            system_name = location_system_names.get(int(location_id))
+            if system_name:
+                location_name = f"Unknown Structure · {system_name}"
+            else:
+                location_name = "Unknown Structure"
 
         end_str = j.get("end_date")
         time_remaining = "—"
