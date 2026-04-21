@@ -356,7 +356,7 @@ async def industry_jobs_page(
         """Remember which char could authenticate against the structure."""
         if owning_char is None:
             return
-        for key in ("output_location_id", "station_id", "facility_id", "blueprint_location_id"):
+        for key in ("facility_id", "station_id", "output_location_id", "blueprint_location_id"):
             v = job.get(key)
             if v and int(v) >= STATION_ID_CEILING:
                 lst = structure_candidates.setdefault(int(v), [])
@@ -440,7 +440,7 @@ async def industry_jobs_page(
             blueprint_ids.add(int(j["blueprint_type_id"]))
         if j.get("installer_id"):
             installer_ids.add(int(j["installer_id"]))
-        for key in ("output_location_id", "station_id", "facility_id", "blueprint_location_id"):
+        for key in ("facility_id", "station_id", "output_location_id", "blueprint_location_id"):
             if j.get(key):
                 location_ids.add(int(j[key]))
 
@@ -500,9 +500,14 @@ async def industry_jobs_page(
         installer_id = j.get("installer_id")
         installer_name = installer_names.get(int(installer_id)) if installer_id else None
 
+        # facility_id is the station/structure where the job runs — always
+        # a resolvable entity. output_location_id and blueprint_location_id
+        # can be internal container IDs (corp offices/hangars) that look
+        # like structure IDs (int64) but aren't resolvable by any ESI
+        # endpoint. Prefer facility_id / station_id over container fields.
         location_id = (
-            j.get("output_location_id") or j.get("station_id")
-            or j.get("facility_id") or j.get("blueprint_location_id")
+            j.get("facility_id") or j.get("station_id")
+            or j.get("output_location_id") or j.get("blueprint_location_id")
         )
         location_name = location_names.get(int(location_id)) if location_id else None
         if location_name is None and location_id:
