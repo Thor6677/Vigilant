@@ -92,6 +92,56 @@ def _format_duration(minutes: float) -> str:
     return f"{mins}m"
 
 
+# Large Skill Injector SP yield depends on the character's CURRENT total SP.
+# As the character injects, their total SP rises and they may cross into a
+# lower-yield bracket mid-plan. This function simulates injecting one at a
+# time to get an accurate count.
+_LSI_BRACKETS = [
+    (5_000_000,  500_000),   # <5M SP   → 500k per injector
+    (50_000_000, 400_000),   # 5–50M SP → 400k per injector
+    (80_000_000, 300_000),   # 50–80M SP → 300k per injector
+    (None,       150_000),   # >80M SP  → 150k per injector
+]
+_SSI_SP = 100_000  # Small Skill Injector — always 100k SP
+
+
+def _lsi_yield(current_sp: int) -> int:
+    for ceiling, sp in _LSI_BRACKETS:
+        if ceiling is None or current_sp < ceiling:
+            return sp
+    return 150_000
+
+
+def _calc_injectors(sp_needed: int, char_total_sp: int) -> dict:
+    """Calculate how many Large and Small Skill Injectors a character needs
+    to cover `sp_needed`, accounting for bracket transitions as total SP rises."""
+    if sp_needed <= 0:
+        return {"large": 0, "small": 0, "large_sp_breakdown": [], "char_sp": char_total_sp}
+
+    # Simulate injecting Large Skill Injectors one at a time
+    remaining = sp_needed
+    current_sp = char_total_sp
+    large_count = 0
+    breakdown = []  # (bracket_label, count) for display
+
+    while remaining > 0:
+        yld = _lsi_yield(current_sp)
+        large_count += 1
+        current_sp += yld
+        remaining -= yld
+
+    # Also compute how many Small Skill Injectors would be needed (flat rate)
+    import math
+    small_count = math.ceil(sp_needed / _SSI_SP)
+
+    return {
+        "large": large_count,
+        "small": small_count,
+        "char_sp": char_total_sp,
+        "large_sp_total": sp_needed,
+    }
+
+
 # ── List all plans ───────────────────────────────────────────────────────────
 
 @router.get("", response_class=HTMLResponse)
@@ -1079,6 +1129,7 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
         token = await refresh_token(char, db)
         client = ESIClient(token, db=db)
         skills_data = await esi_char.get_skills(client, character_id)
+        char_total_sp = skills_data.get("total_sp", 0) if isinstance(skills_data, dict) else 0
         trained = {s["skill_id"]: s.get("active_skill_level", 0) for s in skills_data.get("skills", [])}
 
         # Fetch attributes for training time calculation
@@ -1150,6 +1201,8 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
             "time_str": _format_duration(time_mins),
         })
 
+    injectors = _calc_injectors(total_sp_needed, char_total_sp) if total_sp_needed > 0 else None
+
     return templates.TemplateResponse("partials/skill_plan_gap.html", {
         "request": request,
         "rows": rows,
@@ -1158,6 +1211,8 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
         "completed": completed,
         "total": len(plan.entries),
         "char": char,
+        "char_total_sp": char_total_sp,
+        "injectors": injectors,
     })
 
 

@@ -24,6 +24,27 @@
     </div>
     {% endif %}
 
+    {# Skill injector estimate #}
+    {% if injectors %}
+    <div style="padding:0.25rem 0.75rem 0.5rem;display:flex;flex-wrap:wrap;gap:0.5rem 1.5rem;font-size:10px;border-bottom:1px solid var(--border);">
+        <span style="color:var(--muted);letter-spacing:0.08em;">INJECTORS NEEDED</span>
+        <span style="display:flex;align-items:center;gap:0.3rem;">
+            <span style="color:var(--accent);font-weight:500;">{{ injectors['large'] }}</span>
+            <span style="color:var(--text);">Large</span>
+            <span style="color:var(--muted);font-size:9px;">(500k–150k SP each)</span>
+        </span>
+        <span style="color:var(--muted);">or</span>
+        <span style="display:flex;align-items:center;gap:0.3rem;">
+            <span style="color:var(--accent);font-weight:500;">{{ injectors['small'] }}</span>
+            <span style="color:var(--text);">Small</span>
+            <span style="color:var(--muted);font-size:9px;">(100k SP each)</span>
+        </span>
+        <span style="color:var(--muted);font-size:9px;margin-left:auto;">
+            {{ "{:,.0f}".format(char_total_sp) }} SP current
+        </span>
+    </div>
+    {% endif %}
+
     {# Skill rows #}
     {% for row in rows %}
     <div class="b-table-row" style="{% if row.completed %}opacity:0.5;{% endif %}">
