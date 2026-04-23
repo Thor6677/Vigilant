@@ -17,6 +17,7 @@ from app.esi import character as esi_char
 from app.esi.client import refresh_token
 from app.esi.character import get_wallet_journal
 from app.sde import lookup as sde
+from app.utils.perf import perf_log, perf_enabled, now, ms_since
 from dateutil import parser as iso_parser
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,7 @@ async def character_detail(
     range: str = "1w",
     db: AsyncSession = Depends(get_db),
 ):
+    _t0 = now() if perf_enabled() else 0.0
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/dashboard")
@@ -523,6 +525,8 @@ async def character_detail(
     from app.config import get_settings as _get_settings_km
     _km_cfg = _get_settings_km()
 
+    if perf_enabled():
+        perf_log("character_detail", total_ms=ms_since(_t0))
     return templates.TemplateResponse("character_detail.html", {
         "request": request,
         "char": char,
