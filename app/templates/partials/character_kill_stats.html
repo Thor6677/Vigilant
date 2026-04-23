@@ -1,7 +1,5 @@
-{# Combat Profile partial — lazy-loaded via htmx from /character/{id}/kill-stats.
-   Ported from the v1 killmails-wip layout (streaks, gang split bar, thumbnail
-   rows with progress bars, security-status dots) while keeping the v2
-   memory-safe backend. #}
+{# Combat Profile partial — v1 layout ported onto the v2 backend.
+   Expects Chart.js to be loaded by character_detail.html (<head>). #}
 
 {% macro fmt_isk(amount) -%}
 {%- if amount >= 1_000_000_000 -%}{{ "%.2f"|format(amount / 1_000_000_000) }}B
@@ -17,7 +15,7 @@
 {%- else -%}#ee5555{%- endif -%}
 {% endmacro %}
 
-{% set total_kl = (summary['kills'] or 0) + (summary['losses'] or 0) %}
+{% set has_data = ships or weapons or systems or gang_total > 0 or (streak['current_win'] or 0) > 0 or untouchable %}
 
 <div class="b-section">
     <div class="b-section-head">
@@ -25,229 +23,452 @@
         <span class="b-label" style="color:var(--muted)">{{ summary['kills'] }} kills · {{ summary['losses'] }} losses</span>
     </div>
 
-    {% if total_kl == 0 %}
+    <div style="padding:0.75rem;">
+
+    {% if not has_data %}
     <div style="padding:1.5rem;text-align:center;color:var(--muted);font-size:11px;">
-        No killmail history stored yet. Data populates over the next few minutes.
+        {% if backfill_complete %}
+        No killmail history found for this character in zKillboard.
+        {% else %}
+        Backfilling killmail history… stats will populate over the next few minutes.
+        {% endif %}
     </div>
     {% else %}
 
-    <div style="padding:0.75rem;">
+    {# ── ISK summary row ─────────────────────────────────────────── #}
+    <div style="display:flex;flex-wrap:wrap;text-align:center;border:1px solid var(--border);margin-bottom:0.75rem;">
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(summary['isk_destroyed']) }}</div>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Destroyed</div>
+        </div>
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--danger);">{{ fmt_isk(summary['isk_lost']) }}</div>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Lost</div>
+        </div>
+        <div style="flex:1;min-width:120px;padding:0.75rem;">
+            {% set tot_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
+            {% if tot_isk > 0 %}
+            <div style="font-size:18px;font-weight:300;color:var(--text);">{{ (summary['isk_destroyed'] / tot_isk * 100) | round(0) | int }}%</div>
+            {% else %}
+            <div style="font-size:18px;font-weight:300;color:var(--muted);">—</div>
+            {% endif %}
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Efficiency</div>
+        </div>
+    </div>
 
-        {# ── ISK summary row ─────────────────────────────────────────── #}
-        <div style="display:flex;flex-wrap:wrap;text-align:center;border:1px solid var(--border);">
-            <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
-                <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(summary['isk_destroyed']) }}</div>
-                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Destroyed</div>
-            </div>
-            <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
-                <div style="font-size:18px;font-weight:300;color:var(--danger);">{{ fmt_isk(summary['isk_lost']) }}</div>
-                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Lost</div>
-            </div>
-            <div style="flex:1;min-width:120px;padding:0.75rem;">
-                {% set tot_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
-                {% if tot_isk > 0 %}
-                <div style="font-size:18px;font-weight:300;color:var(--text);">{{ (summary['isk_destroyed'] / tot_isk * 100) | round(0) | int }}%</div>
-                {% else %}
-                <div style="font-size:18px;font-weight:300;color:var(--muted);">—</div>
-                {% endif %}
-                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Efficiency</div>
+    {# ── Streaks + Gang Split row ───────────────────────────────── #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0.75rem;margin-bottom:0.75rem;">
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Streaks</span></div>
+            <div style="display:flex;text-align:center;">
+                <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
+                    <div style="font-size:18px;font-weight:300;color:var(--success);">{{ streak['current_win'] }}</div>
+                    <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Current Win</div>
+                </div>
+                <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
+                    <div style="font-size:18px;font-weight:300;color:var(--accent);">{{ streak['longest_win'] }}</div>
+                    <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Longest</div>
+                </div>
+                <div style="flex:1;padding:0.25rem;">
+                    <div style="font-size:18px;font-weight:300;color:var(--text);">
+                        {% if streak['days_since_loss'] is not none %}{{ streak['days_since_loss'] }}{% else %}∞{% endif %}
+                    </div>
+                    <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Days Since Loss</div>
+                </div>
             </div>
         </div>
 
-        {# ── Streaks + Gang Split row ───────────────────────────────── #}
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0.75rem;margin-top:0.75rem;">
-
-            <div class="b-panel" style="padding:0.75rem;">
-                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Streaks</span></div>
-                <div style="display:flex;text-align:center;">
-                    <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
-                        <div style="font-size:18px;font-weight:300;color:var(--success);">{{ streak['current_win'] }}</div>
-                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Current Win</div>
-                    </div>
-                    <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
-                        <div style="font-size:18px;font-weight:300;color:var(--accent);">{{ streak['longest_win'] }}</div>
-                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Longest</div>
-                    </div>
-                    <div style="flex:1;padding:0.25rem;">
-                        <div style="font-size:18px;font-weight:300;color:var(--text);">
-                            {% if streak['days_since_loss'] is not none %}{{ streak['days_since_loss'] }}{% else %}∞{% endif %}
-                        </div>
-                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Days Since Loss</div>
-                    </div>
-                </div>
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Solo / Gang / Fleet</span></div>
+            {% if gang_total > 0 %}
+            <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);">
+                {% set solo_pct = (gang_split['solo'] / gang_total * 100) %}
+                {% set small_pct = (gang_split['small'] / gang_total * 100) %}
+                {% set medium_pct = (gang_split['medium'] / gang_total * 100) %}
+                {% set fleet_pct = (gang_split['fleet'] / gang_total * 100) %}
+                {% if solo_pct > 0 %}<div style="width:{{ solo_pct }}%;background:#5eb1ff;" title="Solo: {{ gang_split['solo'] }}"></div>{% endif %}
+                {% if small_pct > 0 %}<div style="width:{{ small_pct }}%;background:#4ade80;" title="Small (2-5): {{ gang_split['small'] }}"></div>{% endif %}
+                {% if medium_pct > 0 %}<div style="width:{{ medium_pct }}%;background:#d4ad20;" title="Medium (6-20): {{ gang_split['medium'] }}"></div>{% endif %}
+                {% if fleet_pct > 0 %}<div style="width:{{ fleet_pct }}%;background:#ee5555;" title="Fleet (21+): {{ gang_split['fleet'] }}"></div>{% endif %}
             </div>
-
-            <div class="b-panel" style="padding:0.75rem;">
-                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Solo / Gang / Fleet</span></div>
-                {% if gang_total > 0 %}
-                <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);">
-                    {% set solo_pct = (gang_split['solo'] / gang_total * 100) %}
-                    {% set small_pct = (gang_split['small'] / gang_total * 100) %}
-                    {% set medium_pct = (gang_split['medium'] / gang_total * 100) %}
-                    {% set fleet_pct = (gang_split['fleet'] / gang_total * 100) %}
-                    {% if solo_pct > 0 %}<div style="width:{{ solo_pct }}%;background:#5eb1ff;" title="Solo: {{ gang_split['solo'] }}"></div>{% endif %}
-                    {% if small_pct > 0 %}<div style="width:{{ small_pct }}%;background:#4ade80;" title="Small (2-5): {{ gang_split['small'] }}"></div>{% endif %}
-                    {% if medium_pct > 0 %}<div style="width:{{ medium_pct }}%;background:#d4ad20;" title="Medium (6-20): {{ gang_split['medium'] }}"></div>{% endif %}
-                    {% if fleet_pct > 0 %}<div style="width:{{ fleet_pct }}%;background:#ee5555;" title="Fleet (21+): {{ gang_split['fleet'] }}"></div>{% endif %}
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:0.4rem;flex-wrap:wrap;gap:0.4rem;">
-                    <span><span style="display:inline-block;width:8px;height:8px;background:#5eb1ff;border-radius:1px;vertical-align:middle;"></span> Solo {{ gang_split['solo'] }}</span>
-                    <span><span style="display:inline-block;width:8px;height:8px;background:#4ade80;border-radius:1px;vertical-align:middle;"></span> Small {{ gang_split['small'] }}</span>
-                    <span><span style="display:inline-block;width:8px;height:8px;background:#d4ad20;border-radius:1px;vertical-align:middle;"></span> Medium {{ gang_split['medium'] }}</span>
-                    <span><span style="display:inline-block;width:8px;height:8px;background:#ee5555;border-radius:1px;vertical-align:middle;"></span> Fleet {{ gang_split['fleet'] }}</span>
-                </div>
-                {% else %}
-                <div style="font-size:11px;color:var(--muted);">No win data in window.</div>
-                {% endif %}
-            </div>
-
-        </div>
-
-        {# ── Top Ships / Weapons / Systems ───────────────────────────── #}
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0.75rem;margin-top:0.75rem;">
-
-            <div class="b-panel" style="padding:0.75rem;">
-                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Ships Used</span></div>
-                {% if ships %}
-                {% set ship_max = ships[0]['count'] %}
-                <div style="display:flex;flex-direction:column;gap:3px;">
-                    {% for s in ships %}
-                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
-                        <img src="https://images.evetech.net/types/{{ s['ship_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
-                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(s['ship_type_id'], s['ship_type_id']) }}</div>
-                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
-                                <div style="height:100%;width:{{ (s['count'] / ship_max * 100) }}%;background:var(--accent);"></div>
-                            </div>
-                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="font-size:11px;color:var(--muted);">No data.</div>
-                {% endif %}
-            </div>
-
-            <div class="b-panel" style="padding:0.75rem;">
-                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Weapons</span></div>
-                {% if weapons %}
-                {% set wpn_max = weapons[0]['count'] %}
-                <div style="display:flex;flex-direction:column;gap:3px;">
-                    {% for w in weapons %}
-                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
-                        <img src="https://images.evetech.net/types/{{ w['weapon_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
-                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(w['weapon_type_id'], w['weapon_type_id']) }}</div>
-                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
-                                <div style="height:100%;width:{{ (w['count'] / wpn_max * 100) }}%;background:var(--accent);"></div>
-                            </div>
-                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ w['count'] }}</span>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="font-size:11px;color:var(--muted);">No data.</div>
-                {% endif %}
-            </div>
-
-            <div class="b-panel" style="padding:0.75rem;">
-                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Systems</span></div>
-                {% if systems %}
-                {% set sys_max = systems[0]['count'] %}
-                <div style="display:flex;flex-direction:column;gap:3px;">
-                    {% for s in systems %}
-                    {% set sec = system_security.get(s['system_id']) %}
-                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
-                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ sec_color(sec) }};flex-shrink:0;"
-                              title="sec {% if sec is not none %}{{ '%.1f'|format(sec) }}{% else %}?{% endif %}"></span>
-                        <a href="https://zkillboard.com/system/{{ s['system_id'] }}/" target="_blank" rel="noopener"
-                           style="flex:1;color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                            {{ system_names.get(s['system_id'], s['system_id']) }}
-                        </a>
-                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
-                                <div style="height:100%;width:{{ (s['count'] / sys_max * 100) }}%;background:var(--accent);"></div>
-                            </div>
-                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div style="font-size:11px;color:var(--muted);">No data.</div>
-                {% endif %}
-            </div>
-
-        </div>
-
-        {# ── Weekly Activity Heatmap (7×24) ──────────────────────────── #}
-        <div class="b-panel" style="padding:0.75rem;margin-top:0.75rem;">
-            <div class="b-panel-head" style="margin-bottom:0.5rem;">
-                <span class="b-label">Activity · 7×24</span>
-                <span class="b-label" style="color:var(--muted);font-size:9px;">last 90 days</span>
-            </div>
-            {% set maxc = (heat | map(attribute='count') | max | default(0)) or 1 %}
-            {% set heat_map = {} %}
-            {% for row in heat %}{% set _ = heat_map.update({ (row['dow'], row['hour']): row['count'] }) %}{% endfor %}
-            <div style="display:grid;grid-template-columns:28px repeat(24, 1fr);gap:1px;">
-                <div></div>
-                {% for h in range(24) %}<div style="font-size:8px;color:var(--muted);text-align:center;">{{ '%02d' % h }}</div>{% endfor %}
-                {% set dow_labels = ['Mo','Tu','We','Th','Fr','Sa','Su'] %}
-                {% for d in range(7) %}
-                    <div style="font-size:9px;color:var(--muted);text-align:right;padding-right:4px;line-height:14px;">{{ dow_labels[d] }}</div>
-                    {% for h in range(24) %}
-                        {% set c = heat_map.get((d, h), 0) %}
-                        {% set lvl = 0 %}
-                        {% if maxc and c %}
-                            {% set r = c / maxc %}
-                            {% if r >= 0.75 %}{% set lvl = 4 %}
-                            {% elif r >= 0.5 %}{% set lvl = 3 %}
-                            {% elif r >= 0.25 %}{% set lvl = 2 %}
-                            {% elif r > 0 %}{% set lvl = 1 %}
-                            {% endif %}
-                        {% endif %}
-                        {% set bg = 'rgba(255,255,255,0.03)' %}
-                        {% if lvl == 1 %}{% set bg = 'rgba(80,200,120,0.18)' %}{% endif %}
-                        {% if lvl == 2 %}{% set bg = 'rgba(80,200,120,0.35)' %}{% endif %}
-                        {% if lvl == 3 %}{% set bg = 'rgba(80,200,120,0.55)' %}{% endif %}
-                        {% if lvl == 4 %}{% set bg = 'rgba(80,200,120,0.80)' %}{% endif %}
-                        <div style="aspect-ratio:1;background:{{ bg }};" title="{{ dow_labels[d] }} {{ '%02d:00' % h }} — {{ c }}"></div>
-                    {% endfor %}
-                {% endfor %}
-            </div>
-        </div>
-
-        {# ── Loss Autopsy ─────────────────────────────────────────── #}
-        {% set total_loss = (autopsy.values() | sum) %}
-        <div class="b-panel" style="padding:0.75rem;margin-top:0.75rem;">
-            <div class="b-panel-head" style="margin-bottom:0.5rem;">
-                <span class="b-label">Loss Autopsy</span>
-                <span class="b-label" style="color:var(--muted);font-size:9px;">{{ total_loss }} losses · 90d</span>
-            </div>
-            {% if total_loss > 0 %}
-            <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);margin-bottom:0.5rem;">
-                {% for label, color in [('solo','#5eb1ff'), ('small_gang','#d69e2e'), ('fleet','#ee5555'), ('smartbomb','#805ad5'), ('npc','#4a5568')] %}
-                    {% set c = autopsy.get(label, 0) %}
-                    {% if c > 0 %}
-                    <div style="flex:{{ c }};display:flex;align-items:center;justify-content:center;background:{{ color }};color:#fff;font-size:9px;text-shadow:0 0 2px #000;"
-                         title="{{ label }}: {{ c }}">{{ c }}</div>
-                    {% endif %}
-                {% endfor %}
-            </div>
-            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;font-size:10px;color:var(--muted);">
-                <span><span style="display:inline-block;width:8px;height:8px;background:#5eb1ff;border-radius:1px;vertical-align:middle;"></span> Solo {{ autopsy['solo'] }}</span>
-                <span><span style="display:inline-block;width:8px;height:8px;background:#d69e2e;border-radius:1px;vertical-align:middle;"></span> Small gang {{ autopsy['small_gang'] }}</span>
-                <span><span style="display:inline-block;width:8px;height:8px;background:#ee5555;border-radius:1px;vertical-align:middle;"></span> Fleet {{ autopsy['fleet'] }}</span>
-                <span><span style="display:inline-block;width:8px;height:8px;background:#805ad5;border-radius:1px;vertical-align:middle;"></span> Smartbomb {{ autopsy['smartbomb'] }}</span>
-                <span><span style="display:inline-block;width:8px;height:8px;background:#4a5568;border-radius:1px;vertical-align:middle;"></span> NPC {{ autopsy['npc'] }}</span>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:0.4rem;flex-wrap:wrap;gap:0.4rem;">
+                <span><span style="display:inline-block;width:8px;height:8px;background:#5eb1ff;border-radius:1px;vertical-align:middle;"></span> Solo {{ gang_split['solo'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#4ade80;border-radius:1px;vertical-align:middle;"></span> Small {{ gang_split['small'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#d4ad20;border-radius:1px;vertical-align:middle;"></span> Medium {{ gang_split['medium'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#ee5555;border-radius:1px;vertical-align:middle;"></span> Fleet {{ gang_split['fleet'] }}</span>
             </div>
             {% else %}
-            <div style="font-size:11px;color:var(--muted);">No losses recorded — well done.</div>
+            <div style="font-size:11px;color:var(--muted);">No win data in window.</div>
             {% endif %}
         </div>
 
     </div>
+
+    {# ── Top Ships / Weapons / Systems ───────────────────────────── #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0.75rem;margin-bottom:0.75rem;">
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Ships Used</span></div>
+            {% if ships %}
+            {% set ship_max = ships[0]['count'] %}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                {% for s in ships %}
+                <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                    <img src="https://images.evetech.net/types/{{ s['ship_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
+                    <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(s['ship_type_id'], s['ship_type_id']) }}</div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                        <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                            <div style="height:100%;width:{{ (s['count'] / ship_max * 100) }}%;background:var(--accent);"></div>
+                        </div>
+                        <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No data.</div>
+            {% endif %}
+        </div>
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Weapons</span></div>
+            {% if weapons %}
+            {% set wpn_max = weapons[0]['count'] %}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                {% for w in weapons %}
+                <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                    <img src="https://images.evetech.net/types/{{ w['weapon_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
+                    <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(w['weapon_type_id'], w['weapon_type_id']) }}</div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                        <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                            <div style="height:100%;width:{{ (w['count'] / wpn_max * 100) }}%;background:var(--accent);"></div>
+                        </div>
+                        <span style="color:var(--muted);min-width:24px;text-align:right;">{{ w['count'] }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No data.</div>
+            {% endif %}
+        </div>
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Systems</span></div>
+            {% if systems %}
+            {% set sys_max = systems[0]['count'] %}
+            <div style="display:flex;flex-direction:column;gap:3px;">
+                {% for s in systems %}
+                {% set sec = system_security.get(s['system_id']) %}
+                <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ sec_color(sec) }};flex-shrink:0;"
+                          title="sec {% if sec is not none %}{{ '%.1f'|format(sec) }}{% else %}?{% endif %}"></span>
+                    <a href="https://zkillboard.com/system/{{ s['system_id'] }}/" target="_blank" rel="noopener"
+                       style="flex:1;color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        {{ system_names.get(s['system_id'], s['system_id']) }}
+                    </a>
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                        <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                            <div style="height:100%;width:{{ (s['count'] / sys_max * 100) }}%;background:var(--accent);"></div>
+                        </div>
+                        <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No data.</div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    {# ── Untouchable Ships ──────────────────────────────────────── #}
+    {% if untouchable %}
+    <div class="b-panel" style="padding:0.75rem;margin-bottom:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;">
+            <span class="b-label">Untouchable Ships</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">flown 5+ times, never lost</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+            {% for u in untouchable %}
+            <div style="display:flex;align-items:center;gap:0.4rem;padding:4px 8px;background:var(--bg);border:1px solid rgba(46,160,67,0.3);border-radius:3px;font-size:10px;">
+                <img src="https://images.evetech.net/types/{{ u['ship_type_id'] }}/icon?size=32" alt="" width="16" height="16" style="border-radius:2px;">
+                <span>{{ type_names.get(u['ship_type_id'], u['ship_type_id']) }}</span>
+                <span style="color:var(--success);font-weight:600;">×{{ u['uses'] }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
     {% endif %}
+
+    {# ── Activity Calendar (53×7 GitHub-style) ──────────────────── #}
+    <div class="b-panel" style="padding:0.75rem;margin-bottom:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Activity Calendar · {{ year }}</span>
+            <div style="display:flex;gap:4px;">
+                {% for y in [year - 2, year - 1, year, year + 1] if y <= year %}
+                <button
+                    {% if y != year %}hx-get="/character/{{ character_id }}/kill-stats?year={{ y }}" hx-target="#kill-stats-panel" hx-swap="innerHTML"{% endif %}
+                    style="padding:2px 8px;font-size:9px;font-family:inherit;border:1px solid {% if y == year %}var(--accent){% else %}var(--border){% endif %};background:{% if y == year %}rgba(200,169,81,0.1){% else %}transparent{% endif %};color:{% if y == year %}var(--accent){% else %}var(--muted){% endif %};border-radius:2px;cursor:pointer;">
+                    {{ y }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+        {% if cal_max > 0 %}
+        <div style="overflow-x:auto;">
+            <div style="display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:2px;">
+                {% for cell in cal_cells %}
+                    {% if cell.empty %}
+                    <div style="background:transparent;"></div>
+                    {% else %}
+                        {% set intensity = (cell.total / cal_max) if cal_max > 0 else 0 %}
+                        {% if cell.total == 0 %}
+                        <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:1px;" title="{{ cell.date_str }} · 0"></div>
+                        {% elif cell.kills >= cell.losses %}
+                        <div style="background:rgba(46,160,67,{{ 0.3 + intensity * 0.7 }});border-radius:1px;" title="{{ cell.date_str }} · {{ cell.kills }}K / {{ cell.losses }}L"></div>
+                        {% else %}
+                        <div style="background:rgba(204,51,51,{{ 0.3 + intensity * 0.7 }});border-radius:1px;" title="{{ cell.date_str }} · {{ cell.kills }}K / {{ cell.losses }}L"></div>
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:9px;color:var(--muted);">
+            <div style="width:10px;height:10px;background:rgb(46,160,67);border-radius:1px;"></div><span>Kill day</span>
+            <div style="width:10px;height:10px;background:#cc3333;border-radius:1px;"></div><span>Loss day</span>
+            <span style="margin-left:0.5rem;">Opacity = activity intensity (peak {{ cal_max }} engagements)</span>
+        </div>
+        {% else %}
+        <div style="font-size:11px;color:var(--muted);">No engagements in {{ year }}.</div>
+        {% endif %}
+    </div>
+
+    {# ── Radar + Loss Autopsy + Profitability (Chart.js) ────────── #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.75rem;margin-bottom:0.75rem;">
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Combat Profile</span></div>
+            <div style="position:relative;height:240px;">
+                <canvas id="radar-{{ character_id }}"></canvas>
+            </div>
+        </div>
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;">
+                <span class="b-label">Loss Autopsies</span>
+                <span class="b-label" style="color:var(--muted);font-size:9px;">{{ autopsy_total }} losses · 90d</span>
+            </div>
+            {% if autopsy_total > 0 %}
+            <div style="position:relative;height:240px;">
+                <canvas id="autopsy-{{ character_id }}"></canvas>
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No losses in window — well done.</div>
+            {% endif %}
+        </div>
+
+        <div class="b-panel" style="padding:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;">
+                <span class="b-label">Profitability by Ship</span>
+                <span class="b-label" style="color:var(--muted);font-size:9px;">ISK destroyed vs lost when flown</span>
+            </div>
+            {% if profitability %}
+            <div style="position:relative;height:240px;">
+                <canvas id="profit-{{ character_id }}"></canvas>
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No data.</div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    {# ── Ship Usage Stream (180d) ────────────────────────────────── #}
+    {% if ts_datasets %}
+    <div class="b-panel" style="padding:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;">
+            <span class="b-label">Ship Usage Stream · 180d</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships</span>
+        </div>
+        <div style="position:relative;height:200px;">
+            <canvas id="stream-{{ character_id }}"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not backfill_complete %}
+    <div style="font-size:9px;color:var(--muted);margin-top:0.5rem;text-align:center;">⏳ Killmail backfill still in progress — numbers will grow as history imports.</div>
+    {% endif %}
+
+    {% endif %}
+
+    </div>
 </div>
+
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const ck = "{{ character_id }}";
+
+    {% if has_data %}
+    // Radar
+    const radarEl = document.getElementById('radar-' + ck);
+    if (radarEl) {
+        const radarRaw = {{ radar_raw|tojson }};
+        const radarLabels = {{ radar_labels|tojson }};
+        new Chart(radarEl, {
+            type: 'radar',
+            data: {
+                labels: radarLabels,
+                datasets: [{
+                    label: 'Profile',
+                    data: {{ radar_values|tojson }},
+                    backgroundColor: 'rgba(200,169,81,0.18)',
+                    borderColor: 'rgba(200,169,81,0.85)',
+                    pointBackgroundColor: '#c8a951',
+                    pointRadius: 3,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    r: {
+                        suggestedMin: 0,
+                        suggestedMax: 100,
+                        ticks: { display: false },
+                        grid: { color: 'rgba(255,255,255,0.08)' },
+                        angleLines: { color: 'rgba(255,255,255,0.10)' },
+                        pointLabels: { color: '#bfbfbf', font: { size: 10 } }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const raw = radarRaw[ctx.dataIndex];
+                                const suffix = [' kills', '%', ' solo', ' gang', ' ISK', ' systems'];
+                                let v = raw;
+                                if (ctx.dataIndex === 4) v = (raw / 1_000_000).toFixed(1) + 'M';
+                                else if (typeof raw === 'number') v = (raw % 1 === 0 ? raw : raw.toFixed(1));
+                                return radarLabels[ctx.dataIndex] + ': ' + v + suffix[ctx.dataIndex];
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Loss Autopsies doughnut
+    {% if autopsy_total > 0 %}
+    const autopsyEl = document.getElementById('autopsy-' + ck);
+    if (autopsyEl) {
+        const buckets = {{ autopsy|tojson }};
+        const labels = ['Solo PvP', 'Small Gang', 'Fleet', 'Smartbomb', 'NPC'];
+        const data = [buckets.solo, buckets.small_gang, buckets.fleet, buckets.smartbomb, buckets.npc];
+        const colors = ['#5eb1ff', '#4ade80', '#ee5555', '#a855f7', '#fb923c'];
+        new Chart(autopsyEl, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{ data: data, backgroundColor: colors, borderColor: '#1a1a1a', borderWidth: 2 }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '50%',
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const total = data.reduce((a, b) => a + b, 0);
+                                const pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
+                                return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {% endif %}
+
+    // Profitability bar
+    {% if profitability %}
+    const profitEl = document.getElementById('profit-' + ck);
+    if (profitEl) {
+        const rows = {{ profitability|tojson }};
+        const typeNames = {{ type_names|tojson }};
+        const labels = rows.map(r => typeNames[r.ship_type_id] || ('Type ' + r.ship_type_id));
+        const destroyed = rows.map(r => r.isk_destroyed);
+        const lost = rows.map(r => r.isk_lost);
+        new Chart(profitEl, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: 'Destroyed', data: destroyed.map(v => v / 1_000_000), backgroundColor: 'rgba(46,160,67,0.7)' },
+                    { label: 'Lost', data: lost.map(v => -v / 1_000_000), backgroundColor: 'rgba(204,51,51,0.7)' }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { stacked: true, ticks: { color: '#888', font: { size: 10 }, callback: (v) => v + 'M' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { stacked: true, ticks: { color: '#bfbfbf', font: { size: 10 } }, grid: { display: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.dataset.label + ': ' + Math.abs(ctx.raw).toFixed(1) + 'M ISK'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {% endif %}
+
+    // Ship Usage Stream
+    {% if ts_datasets %}
+    const streamEl = document.getElementById('stream-' + ck);
+    if (streamEl) {
+        const datasets = {{ ts_datasets|tojson }};
+        const palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7','#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
+        datasets.forEach((d, i) => {
+            d.backgroundColor = palette[i % palette.length] + 'cc';
+            d.borderColor = palette[i % palette.length];
+            d.pointRadius = 0;
+        });
+        const weeks = {{ ts_weeks }};
+        const labels = Array.from({length: weeks}, (_, i) => 'W' + (i - weeks + 1));
+        new Chart(streamEl, {
+            type: 'line',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
+                    y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' }
+                }
+            }
+        });
+    }
+    {% endif %}
+    {% endif %}
+})();
+</script>

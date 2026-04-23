@@ -10,6 +10,7 @@ Design rules:
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, distinct, func, or_, select
@@ -408,3 +409,135 @@ async def streaks(character_id: int) -> dict:
         "longest_win": longest_win,
         "days_since_loss": days_since_loss,
     }
+
+
+async def calendar_buckets(character_id: int, year: int) -> dict[str, dict]:
+    """Daily kill/loss counts for a given year. Keys are YYYY-MM-DD.
+    Powers the 53x7 calendar heatmap. Ported from the v1 killmails-wip branch."""
+    start = datetime(year, 1, 1)
+    end = datetime(year + 1, 1, 1)
+    async with AsyncSessionLocal() as db:
+        attacker_ids_q = select(KillmailAttacker.killmail_id).where(
+            KillmailAttacker.character_id == character_id
+        )
+        q = (
+            select(Killmail.killmail_time, Killmail.victim_character_id)
+            .where(Killmail.killmail_time >= start)
+            .where(Killmail.killmail_time < end)
+            .where(or_(
+                Killmail.victim_character_id == character_id,
+                Killmail.killmail_id.in_(attacker_ids_q),
+            ))
+        )
+        rows = (await db.execute(q)).all()
+
+    buckets: dict[str, dict] = {}
+    for kt, vid in rows:
+        key = kt.strftime("%Y-%m-%d")
+        b = buckets.setdefault(key, {"kills": 0, "losses": 0, "total": 0})
+        if vid == character_id:
+            b["losses"] += 1
+        else:
+            b["kills"] += 1
+        b["total"] += 1
+    return buckets
+
+
+async def untouchable_ships(character_id: int, min_uses: int = 5) -> list[dict]:
+    """Ships the character has flown at least `min_uses` times in wins,
+    never lost. Ported from v1."""
+    async with AsyncSessionLocal() as db:
+        win_q = (
+            select(KillmailAttacker.ship_type_id, func.count().label("n"))
+            .where(KillmailAttacker.character_id == character_id)
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+            .group_by(KillmailAttacker.ship_type_id)
+        )
+        wins = {tid: n for tid, n in (await db.execute(win_q)).all()}
+
+        loss_q = (
+            select(distinct(Killmail.victim_ship_type_id))
+            .where(Killmail.victim_character_id == character_id)
+        )
+        lost_set = {tid for (tid,) in (await db.execute(loss_q)).all()}
+
+    return sorted(
+        ({"ship_type_id": tid, "uses": n} for tid, n in wins.items()
+         if n >= min_uses and tid not in lost_set),
+        key=lambda x: x["uses"],
+        reverse=True,
+    )
+
+
+async def profitability_by_ship(character_id: int, days: int = 90) -> list[dict]:
+    """Per ship type: ISK destroyed as attacker, ISK lost as victim, net.
+    Ported from v1."""
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        win_q = (
+            select(KillmailAttacker.ship_type_id, func.sum(Killmail.total_value).label("isk"))
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id == character_id)
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+        )
+        if cutoff is not None:
+            win_q = win_q.where(Killmail.killmail_time >= cutoff)
+        win_q = win_q.group_by(KillmailAttacker.ship_type_id)
+        wins = {tid: float(isk or 0) for tid, isk in (await db.execute(win_q)).all()}
+
+        loss_q = (
+            select(Killmail.victim_ship_type_id, func.sum(Killmail.total_value).label("isk"))
+            .where(Killmail.victim_character_id == character_id)
+        )
+        if cutoff is not None:
+            loss_q = loss_q.where(Killmail.killmail_time >= cutoff)
+        loss_q = loss_q.group_by(Killmail.victim_ship_type_id)
+        losses = {tid: float(isk or 0) for tid, isk in (await db.execute(loss_q)).all()}
+
+    all_ships = set(wins) | set(losses)
+    return sorted(
+        ({
+            "ship_type_id": tid,
+            "isk_destroyed": wins.get(tid, 0),
+            "isk_lost": losses.get(tid, 0),
+            "net": wins.get(tid, 0) - losses.get(tid, 0),
+        } for tid in all_ships if tid is not None),
+        key=lambda x: x["net"],
+        reverse=True,
+    )
+
+
+async def ship_usage_timeseries(character_id: int, days: int = 180) -> dict[int, list[int]]:
+    """Per-week kill counts per ship (top 10 by total). Keys are
+    ship_type_id, values are length-N week lists where index 0 is the
+    oldest week and index N-1 is the current week. Ported from v1."""
+    cutoff = _cutoff(days)
+    weeks = (days + 6) // 7
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(KillmailAttacker.ship_type_id, Killmail.killmail_time)
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id == character_id)
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        rows = (await db.execute(q)).all()
+
+    if not rows:
+        return {}
+
+    ship_totals: Counter = Counter()
+    series: dict[int, list[int]] = {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for tid, kt in rows:
+        ship_totals[tid] += 1
+        week_idx = max(0, weeks - 1 - ((now - kt).days // 7))
+        if week_idx >= weeks:
+            continue
+        if tid not in series:
+            series[tid] = [0] * weeks
+        series[tid][week_idx] += 1
+
+    top_ships = {tid for tid, _ in ship_totals.most_common(10)}
+    return {tid: counts for tid, counts in series.items() if tid in top_ships}
