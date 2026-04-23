@@ -138,7 +138,7 @@ async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
 
 
 _CACHE_STATS_MEMO: dict = {"at": None, "val": None}
-_CACHE_STATS_TTL = timedelta(seconds=30)
+_CACHE_STATS_TTL = timedelta(minutes=10)
 
 
 async def cache_stats(db: AsyncSession) -> dict:

@@ -1,6 +1,11 @@
+import time
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+
+from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
@@ -45,6 +50,19 @@ app = FastAPI(
     docs_url="/api/docs" if settings.debug else None,
     redoc_url=None,
 )
+
+class _RequestTimingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if not perf_enabled():
+            return await call_next(request)
+        start = time.perf_counter()
+        response = await call_next(request)
+        total_ms = (time.perf_counter() - start) * 1000.0
+        perf_log(f"http {request.method} {request.url.path}", total_ms=total_ms)
+        return response
+
+
+app.add_middleware(_RequestTimingMiddleware)
 
 app.add_middleware(
     SessionMiddleware,

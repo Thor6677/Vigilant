@@ -420,12 +420,15 @@ async def character_detail(
                 for s in st_r.scalars().all():
                     loc_names[s.station_id] = s.station_name
 
+            _t_sn = _perf_now() if perf_enabled() else 0.0
             for sid in structure_ids:
                 try:
                     sd = await ic_client.get("/universe/structures/" + str(sid) + "/")
                     loc_names[sid] = sd.get("name", "Structure " + str(sid))
                 except Exception:
                     loc_names[sid] = "Structure " + str(sid)
+            if perf_enabled():
+                _section_ms["structure_names_serial"] = ms_since(_t_sn)
 
             for jc in jc_list:
                 loc_id = jc["location_id"]
