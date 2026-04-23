@@ -238,6 +238,15 @@ async def character_detail(
     db: AsyncSession = Depends(get_db),
 ):
     _t0 = _perf_now() if perf_enabled() else 0.0
+    _t_mark = _t0
+    _section_ms: dict[str, float] = {}
+
+    def _mark(label: str) -> None:
+        nonlocal _t_mark
+        if perf_enabled():
+            _section_ms[label] = ms_since(_t_mark)
+            _t_mark = _perf_now()
+
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/dashboard")
@@ -253,6 +262,7 @@ async def character_detail(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
     )
     cache = cache_result.scalar_one_or_none()
+    _mark("preamble")
 
     # Fetch total trained SP from ESI
     total_trained_sp = 0
@@ -272,6 +282,7 @@ async def character_detail(
                     total_trained_sp += s.get("skillpoints_in_skill", 0)
     except Exception as e:
         logger.warning("Failed to fetch total SP for char %s: %s", character_id, e)
+    _mark("trained_sp")
 
     queue_remaining = 0
     completed_skills = []
@@ -346,6 +357,7 @@ async def character_detail(
             zkill = json.loads(cache.zkill_json)
         except Exception as e:
             logger.warning("Failed to parse zkill for char %s: %s", character_id, e)
+    _mark("skillqueue_parse")
 
     # Fetch active clone implants + jump clones (share one ESI session and SDE batch lookup)
     implants = []
@@ -425,6 +437,7 @@ async def character_detail(
 
         except Exception as e:
             logger.warning("Failed to fetch implants/clones for char %s: %s", character_id, e)
+    _mark("implants_clones")
 
     # Assets are loaded lazily via /character/{id}/assets.json when the user clicks "View Assets"
     has_assets_scope = "esi-assets.read_assets.v1" in (char.scopes or "")
@@ -459,6 +472,7 @@ async def character_detail(
             journal_error = "fetch_failed"
     else:
         journal_error = "missing_scope"
+    _mark("wallet_journal")
 
     # Fetch corporation history + backfill birthday (public, no auth needed)
     corp_history = []
@@ -517,9 +531,11 @@ async def character_detail(
                 await db.commit()
         except Exception:
             pass
+    _mark("corp_history_and_birthday")
 
     # Initial chart data (default range)
     chart_data = await _get_chart_data(character_id, range, db)
+    _mark("chart_data")
 
     current_wallet = cache.wallet if cache else None
 
@@ -527,7 +543,7 @@ async def character_detail(
     _km_cfg = _get_settings_km()
 
     if perf_enabled():
-        perf_log("character_detail", total_ms=ms_since(_t0))
+        perf_log("character_detail", total_ms=ms_since(_t0), **_section_ms)
     return templates.TemplateResponse("character_detail.html", {
         "request": request,
         "char": char,

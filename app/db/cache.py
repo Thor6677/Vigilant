@@ -1,7 +1,7 @@
 import json
 import hashlib
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, String, Text, DateTime, select, delete
+from sqlalchemy import Column, String, Text, DateTime, select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Base
 
@@ -137,13 +137,21 @@ async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
         pass  # cache writes must never break the caller
 
 
+_CACHE_STATS_MEMO: dict = {"at": None, "val": None}
+_CACHE_STATS_TTL = timedelta(seconds=30)
+
+
 async def cache_stats(db: AsyncSession) -> dict:
-    """Return cache statistics."""
-    result = await db.execute(select(ESICache))
-    rows = result.scalars().all()
     now = datetime.now(timezone.utc)
-    active = sum(
-        1 for r in rows
-        if (r.expires_at if r.expires_at.tzinfo else r.expires_at.replace(tzinfo=timezone.utc)) > now
-    )
-    return {"total_entries": len(rows), "active_entries": active, "expired_entries": len(rows) - active}
+    memoed_at = _CACHE_STATS_MEMO["at"]
+    if memoed_at and (now - memoed_at) < _CACHE_STATS_TTL:
+        return _CACHE_STATS_MEMO["val"]
+
+    total = (await db.execute(select(func.count(ESICache.key)))).scalar() or 0
+    active = (await db.execute(
+        select(func.count(ESICache.key)).where(ESICache.expires_at > now.replace(tzinfo=None))
+    )).scalar() or 0
+    val = {"total_entries": total, "active_entries": active, "expired_entries": total - active}
+    _CACHE_STATS_MEMO["at"] = now
+    _CACHE_STATS_MEMO["val"] = val
+    return val

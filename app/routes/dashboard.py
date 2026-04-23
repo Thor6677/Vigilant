@@ -1783,11 +1783,25 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     sync_warnings = data["sync_warnings"]
 
     # Live fetches (cache stats and skillqueue processing; server status loaded via AJAX)
+    _cache_stats_ms = 0.0
+    _skillqueue_ms = 0.0
+
+    async def _timed_cache_stats():
+        nonlocal _cache_stats_ms
+        t = _perf_now()
+        r = await cache_stats(db)
+        _cache_stats_ms = ms_since(t)
+        return r
+
+    async def _timed_skillqueue():
+        nonlocal _skillqueue_ms
+        t = _perf_now()
+        r = await _process_skillqueue(list(characters), data["skillqueue_raw"], db)
+        _skillqueue_ms = ms_since(t)
+        return r
+
     _t_live = _perf_now() if perf_enabled() else 0.0
-    stats, skill_data = await asyncio.gather(
-        cache_stats(db),
-        _process_skillqueue(list(characters), data["skillqueue_raw"], db),
-    )
+    stats, skill_data = await asyncio.gather(_timed_cache_stats(), _timed_skillqueue())
     _live_ms = ms_since(_t_live) if perf_enabled() else 0.0
     skill_groups = group_skill_data(skill_data)
     # Build skill_map for per-character lookup in template
@@ -1891,7 +1905,13 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     char_rows.sort(key=lambda x: x["wallet"] or 0, reverse=True)
 
     if perf_enabled():
-        perf_log("dashboard", total_ms=ms_since(_t0), live_gather=_live_ms)
+        perf_log(
+            "dashboard",
+            total_ms=ms_since(_t0),
+            live_gather=_live_ms,
+            cache_stats=_cache_stats_ms,
+            skillqueue=_skillqueue_ms,
+        )
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "characters": characters,
