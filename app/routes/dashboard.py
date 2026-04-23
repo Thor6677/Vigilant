@@ -15,7 +15,8 @@ from sqlalchemy import select
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
-from app.utils.perf import perf_log, perf_enabled, now, ms_since
+from app.utils.perf import perf_log, perf_enabled, ms_since
+from time import perf_counter as _perf_now
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import market as esi_market
@@ -1736,7 +1737,7 @@ async def index(request: Request):
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = Depends(get_db)):
-    _t0 = now() if perf_enabled() else 0.0
+    _t0 = _perf_now() if perf_enabled() else 0.0
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
@@ -1782,7 +1783,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     sync_warnings = data["sync_warnings"]
 
     # Live fetches (cache stats and skillqueue processing; server status loaded via AJAX)
-    _t_live = now() if perf_enabled() else 0.0
+    _t_live = _perf_now() if perf_enabled() else 0.0
     stats, skill_data = await asyncio.gather(
         cache_stats(db),
         _process_skillqueue(list(characters), data["skillqueue_raw"], db),

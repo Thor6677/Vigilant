@@ -11,10 +11,6 @@ def perf_enabled() -> bool:
     return _ENABLED
 
 
-def now() -> float:
-    return time.perf_counter()
-
-
 def ms_since(start: float) -> float:
     return (time.perf_counter() - start) * 1000.0
 
