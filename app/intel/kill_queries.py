@@ -337,3 +337,74 @@ async def your_hunters(character_ids: list[int], days: int = 90, limit: int = 10
             {"type": "corp", "id": corp_id, "alliance_id": ally_id, "count": n}
             for corp_id, ally_id, n in rows.all()
         ]
+
+
+async def solo_gang_split(character_id: int, days: int = 90) -> dict:
+    """Bucket the character's wins by gang size: solo / small (2-5) /
+    medium (6-20) / fleet (21+). Ported from the v1 killmails-wip branch."""
+    buckets = {"solo": 0, "small": 0, "medium": 0, "fleet": 0}
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(Killmail.killmail_id, Killmail.attacker_count)
+            .join(KillmailAttacker, KillmailAttacker.killmail_id == Killmail.killmail_id)
+            .where(KillmailAttacker.character_id == character_id)
+            .distinct()
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        result = await db.execute(q)
+        for _kid, count in result.all():
+            c = count or 0
+            if c <= 1:
+                buckets["solo"] += 1
+            elif c <= 5:
+                buckets["small"] += 1
+            elif c <= 20:
+                buckets["medium"] += 1
+            else:
+                buckets["fleet"] += 1
+    return buckets
+
+
+async def streaks(character_id: int) -> dict:
+    """Current win streak, longest win streak, days since last loss.
+    Ported from the v1 killmails-wip branch."""
+    async with AsyncSessionLocal() as db:
+        attacker_ids_q = select(KillmailAttacker.killmail_id).where(
+            KillmailAttacker.character_id == character_id
+        )
+        q = (
+            select(Killmail.killmail_time, Killmail.victim_character_id)
+            .where(or_(
+                Killmail.victim_character_id == character_id,
+                Killmail.killmail_id.in_(attacker_ids_q),
+            ))
+            .order_by(Killmail.killmail_time.asc())
+        )
+        rows = (await db.execute(q)).all()
+
+    current_win = 0
+    longest_win = 0
+    last_loss_time: datetime | None = None
+    for kt, vid in rows:
+        is_loss = vid == character_id
+        if is_loss:
+            longest_win = max(longest_win, current_win)
+            current_win = 0
+            last_loss_time = kt
+        else:
+            current_win += 1
+    longest_win = max(longest_win, current_win)
+
+    days_since_loss: int | None = None
+    if last_loss_time:
+        days_since_loss = max(
+            0, (datetime.now(timezone.utc).replace(tzinfo=None) - last_loss_time).days
+        )
+
+    return {
+        "current_win": current_win,
+        "longest_win": longest_win,
+        "days_since_loss": days_since_loss,
+    }

@@ -1,149 +1,253 @@
-{# Combat profile partial — lazy-loaded via htmx from /character/{id}/kill-stats #}
-{% set total_kl = (summary['kills'] or 0) + (summary['losses'] or 0) %}
-{% if total_kl == 0 %}
-<div class="b-section">
-    <div class="b-section-head"><span class="b-label">Combat Profile</span></div>
-    <div style="padding:0.75rem;color:var(--muted);font-size:11px;">
-        No killmails stored yet. Data populates within a few minutes of the first backfill.
-    </div>
-</div>
-{% else %}
+{# Combat Profile partial — lazy-loaded via htmx from /character/{id}/kill-stats.
+   Ported from the v1 killmails-wip layout (streaks, gang split bar, thumbnail
+   rows with progress bars, security-status dots) while keeping the v2
+   memory-safe backend. #}
 
-<style>
-    .km-grid { display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem; }
-    @media (max-width: 900px) { .km-grid { grid-template-columns: 1fr; } }
-    .km-panel { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.75rem; }
-    .km-panel-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.5rem; text-transform:uppercase; }
-    .km-stat-row { display:flex; justify-content:space-between; align-items:baseline; font-size:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
-    .km-stat-row:last-child { border-bottom:none; }
-    .km-stat-name { color:var(--fg); }
-    .km-stat-count { color:var(--accent); font-family:monospace; }
-    .km-heatmap { display:grid; grid-template-columns: 28px repeat(24, 1fr); gap:1px; margin-top:0.25rem; }
-    .km-heatmap-h { font-size:8px; color:var(--muted); text-align:center; }
-    .km-heatmap-d { font-size:9px; color:var(--muted); text-align:right; padding-right:4px; line-height:14px; }
-    .km-heatmap-cell { aspect-ratio: 1; background:rgba(255,255,255,0.03); }
-    .km-heatmap-cell[data-c="1"] { background: rgba(80,200,120,0.18); }
-    .km-heatmap-cell[data-c="2"] { background: rgba(80,200,120,0.35); }
-    .km-heatmap-cell[data-c="3"] { background: rgba(80,200,120,0.55); }
-    .km-heatmap-cell[data-c="4"] { background: rgba(80,200,120,0.80); }
-    .km-summary { display:flex; gap:1rem; flex-wrap:wrap; align-items:baseline; font-size:11px; color:var(--muted); }
-    .km-summary b { color:var(--accent); font-family:monospace; font-weight:400; }
-    .km-autopsy-bars { display:flex; gap:2px; height:18px; margin:0.25rem 0 0.5rem; border:1px solid var(--border); }
-    .km-autopsy-bar { display:flex; align-items:center; justify-content:center; font-size:9px; color:#fff; text-shadow:0 0 2px #000; }
-</style>
+{% macro fmt_isk(amount) -%}
+{%- if amount >= 1_000_000_000 -%}{{ "%.2f"|format(amount / 1_000_000_000) }}B
+{%- elif amount >= 1_000_000 -%}{{ "%.1f"|format(amount / 1_000_000) }}M
+{%- elif amount >= 1_000 -%}{{ "%.1f"|format(amount / 1_000) }}K
+{%- else -%}{{ "%.0f"|format(amount) }}{%- endif -%}
+{% endmacro %}
+
+{% macro sec_color(sec) -%}
+{%- if sec is none -%}#888
+{%- elif sec >= 0.5 -%}#5eb1ff
+{%- elif sec >= 0.0 -%}#d4ad20
+{%- else -%}#ee5555{%- endif -%}
+{% endmacro %}
+
+{% set total_kl = (summary['kills'] or 0) + (summary['losses'] or 0) %}
 
 <div class="b-section">
     <div class="b-section-head">
-        <span class="b-label">Combat Profile (90d)</span>
+        <span class="b-label">Combat Profile · 90d</span>
         <span class="b-label" style="color:var(--muted)">{{ summary['kills'] }} kills · {{ summary['losses'] }} losses</span>
     </div>
-    <div style="padding:0.75rem;">
-        <div class="km-summary">
-            <div>ISK destroyed <b>{{ (summary['isk_destroyed'] / 1e6) | round(0) | int }}M</b></div>
-            <div>ISK lost <b>{{ (summary['isk_lost'] / 1e6) | round(0) | int }}M</b></div>
-            {% set total_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
-            {% if total_isk > 0 %}
-            <div>Efficiency <b>{{ (summary['isk_destroyed'] / total_isk * 100) | round(0) | int }}%</b></div>
-            {% endif %}
-        </div>
 
-        <div class="km-grid" style="margin-top:0.75rem;">
-            <div class="km-panel">
-                <div class="km-panel-title">Activity — 7×24</div>
-                {% set maxc = heat | map(attribute='count') | max | default(1) %}
-                {% set heat_map = {} %}
-                {% for row in heat %}{% set _ = heat_map.update({ (row['dow'], row['hour']): row['count'] }) %}{% endfor %}
-                <div class="km-heatmap">
-                    <div></div>
-                    {% for h in range(24) %}<div class="km-heatmap-h">{{ '%02d' % h }}</div>{% endfor %}
-                    {% set dow_labels = ['Mo','Tu','We','Th','Fr','Sa','Su'] %}
-                    {% for d in range(7) %}
-                        <div class="km-heatmap-d">{{ dow_labels[d] }}</div>
-                        {% for h in range(24) %}
-                            {% set c = heat_map.get((d, h), 0) %}
-                            {% set lvl = 0 %}
-                            {% if maxc and c %}
-                                {% set r = c / maxc %}
-                                {% if r >= 0.75 %}{% set lvl = 4 %}
-                                {% elif r >= 0.5 %}{% set lvl = 3 %}
-                                {% elif r >= 0.25 %}{% set lvl = 2 %}
-                                {% elif r > 0 %}{% set lvl = 1 %}
-                                {% endif %}
-                            {% endif %}
-                            <div class="km-heatmap-cell" data-c="{{ lvl }}" title="{{ dow_labels[d] }} {{ '%02d:00' % h }} — {{ c }}"></div>
-                        {% endfor %}
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div class="km-panel">
-                <div class="km-panel-title">Loss Autopsy</div>
-                {% set total_loss = autopsy.values() | sum %}
-                {% if total_loss > 0 %}
-                    <div class="km-autopsy-bars">
-                        {% for label, color in [('solo','#e07b91'), ('small_gang','#d69e2e'), ('fleet','#dd6b20'), ('smartbomb','#805ad5'), ('npc','#4a5568')] %}
-                            {% set c = autopsy[label] or 0 %}
-                            {% if c > 0 %}
-                                <div class="km-autopsy-bar" style="background:{{ color }};flex:{{ c }};" title="{{ label }}: {{ c }}">{{ c }}</div>
-                            {% endif %}
-                        {% endfor %}
-                    </div>
-                    <div style="font-size:10px;color:var(--muted);display:flex;gap:0.75rem;flex-wrap:wrap;">
-                        <span>Solo <b style="color:var(--fg);">{{ autopsy['solo'] }}</b></span>
-                        <span>Small gang <b style="color:var(--fg);">{{ autopsy['small_gang'] }}</b></span>
-                        <span>Fleet <b style="color:var(--fg);">{{ autopsy['fleet'] }}</b></span>
-                        <span>NPC <b style="color:var(--fg);">{{ autopsy['npc'] }}</b></span>
-                        <span>Smartbomb <b style="color:var(--fg);">{{ autopsy['smartbomb'] }}</b></span>
-                    </div>
-                {% else %}
-                    <div style="font-size:11px;color:var(--muted);">No losses recorded.</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="km-grid">
-            <div class="km-panel">
-                <div class="km-panel-title">Top Ships Flown</div>
-                {% if ships %}
-                    {% for s in ships %}
-                    <div class="km-stat-row">
-                        <span class="km-stat-name">{{ type_names.get(s['ship_type_id'], s['ship_type_id']) }}</span>
-                        <span class="km-stat-count">{{ s['count'] }}</span>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div style="font-size:11px;color:var(--muted);">No ship data.</div>
-                {% endif %}
-            </div>
-            <div class="km-panel">
-                <div class="km-panel-title">Top Weapons</div>
-                {% if weapons %}
-                    {% for w in weapons %}
-                    <div class="km-stat-row">
-                        <span class="km-stat-name">{{ type_names.get(w['weapon_type_id'], w['weapon_type_id']) }}</span>
-                        <span class="km-stat-count">{{ w['count'] }}</span>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div style="font-size:11px;color:var(--muted);">No weapon data.</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="km-panel" style="margin-top:0.75rem;">
-            <div class="km-panel-title">Top Systems</div>
-            {% if systems %}
-                {% for s in systems %}
-                <div class="km-stat-row">
-                    <span class="km-stat-name">{{ system_names.get(s['system_id'], s['system_id']) }}</span>
-                    <span class="km-stat-count">{{ s['count'] }}</span>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div style="font-size:11px;color:var(--muted);">No system data.</div>
-            {% endif %}
-        </div>
+    {% if total_kl == 0 %}
+    <div style="padding:1.5rem;text-align:center;color:var(--muted);font-size:11px;">
+        No killmail history stored yet. Data populates over the next few minutes.
     </div>
-</div>
+    {% else %}
 
-{% endif %}
+    <div style="padding:0.75rem;">
+
+        {# ── ISK summary row ─────────────────────────────────────────── #}
+        <div style="display:flex;flex-wrap:wrap;text-align:center;border:1px solid var(--border);">
+            <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+                <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(summary['isk_destroyed']) }}</div>
+                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Destroyed</div>
+            </div>
+            <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+                <div style="font-size:18px;font-weight:300;color:var(--danger);">{{ fmt_isk(summary['isk_lost']) }}</div>
+                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Lost</div>
+            </div>
+            <div style="flex:1;min-width:120px;padding:0.75rem;">
+                {% set tot_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
+                {% if tot_isk > 0 %}
+                <div style="font-size:18px;font-weight:300;color:var(--text);">{{ (summary['isk_destroyed'] / tot_isk * 100) | round(0) | int }}%</div>
+                {% else %}
+                <div style="font-size:18px;font-weight:300;color:var(--muted);">—</div>
+                {% endif %}
+                <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Efficiency</div>
+            </div>
+        </div>
+
+        {# ── Streaks + Gang Split row ───────────────────────────────── #}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0.75rem;margin-top:0.75rem;">
+
+            <div class="b-panel" style="padding:0.75rem;">
+                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Streaks</span></div>
+                <div style="display:flex;text-align:center;">
+                    <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
+                        <div style="font-size:18px;font-weight:300;color:var(--success);">{{ streak['current_win'] }}</div>
+                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Current Win</div>
+                    </div>
+                    <div style="flex:1;border-right:1px solid var(--border);padding:0.25rem;">
+                        <div style="font-size:18px;font-weight:300;color:var(--accent);">{{ streak['longest_win'] }}</div>
+                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Longest</div>
+                    </div>
+                    <div style="flex:1;padding:0.25rem;">
+                        <div style="font-size:18px;font-weight:300;color:var(--text);">
+                            {% if streak['days_since_loss'] is not none %}{{ streak['days_since_loss'] }}{% else %}∞{% endif %}
+                        </div>
+                        <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Days Since Loss</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="b-panel" style="padding:0.75rem;">
+                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Solo / Gang / Fleet</span></div>
+                {% if gang_total > 0 %}
+                <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);">
+                    {% set solo_pct = (gang_split['solo'] / gang_total * 100) %}
+                    {% set small_pct = (gang_split['small'] / gang_total * 100) %}
+                    {% set medium_pct = (gang_split['medium'] / gang_total * 100) %}
+                    {% set fleet_pct = (gang_split['fleet'] / gang_total * 100) %}
+                    {% if solo_pct > 0 %}<div style="width:{{ solo_pct }}%;background:#5eb1ff;" title="Solo: {{ gang_split['solo'] }}"></div>{% endif %}
+                    {% if small_pct > 0 %}<div style="width:{{ small_pct }}%;background:#4ade80;" title="Small (2-5): {{ gang_split['small'] }}"></div>{% endif %}
+                    {% if medium_pct > 0 %}<div style="width:{{ medium_pct }}%;background:#d4ad20;" title="Medium (6-20): {{ gang_split['medium'] }}"></div>{% endif %}
+                    {% if fleet_pct > 0 %}<div style="width:{{ fleet_pct }}%;background:#ee5555;" title="Fleet (21+): {{ gang_split['fleet'] }}"></div>{% endif %}
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:0.4rem;flex-wrap:wrap;gap:0.4rem;">
+                    <span><span style="display:inline-block;width:8px;height:8px;background:#5eb1ff;border-radius:1px;vertical-align:middle;"></span> Solo {{ gang_split['solo'] }}</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;background:#4ade80;border-radius:1px;vertical-align:middle;"></span> Small {{ gang_split['small'] }}</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;background:#d4ad20;border-radius:1px;vertical-align:middle;"></span> Medium {{ gang_split['medium'] }}</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;background:#ee5555;border-radius:1px;vertical-align:middle;"></span> Fleet {{ gang_split['fleet'] }}</span>
+                </div>
+                {% else %}
+                <div style="font-size:11px;color:var(--muted);">No win data in window.</div>
+                {% endif %}
+            </div>
+
+        </div>
+
+        {# ── Top Ships / Weapons / Systems ───────────────────────────── #}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0.75rem;margin-top:0.75rem;">
+
+            <div class="b-panel" style="padding:0.75rem;">
+                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Ships Used</span></div>
+                {% if ships %}
+                {% set ship_max = ships[0]['count'] %}
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    {% for s in ships %}
+                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                        <img src="https://images.evetech.net/types/{{ s['ship_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
+                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(s['ship_type_id'], s['ship_type_id']) }}</div>
+                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                                <div style="height:100%;width:{{ (s['count'] / ship_max * 100) }}%;background:var(--accent);"></div>
+                            </div>
+                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size:11px;color:var(--muted);">No data.</div>
+                {% endif %}
+            </div>
+
+            <div class="b-panel" style="padding:0.75rem;">
+                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Weapons</span></div>
+                {% if weapons %}
+                {% set wpn_max = weapons[0]['count'] %}
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    {% for w in weapons %}
+                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                        <img src="https://images.evetech.net/types/{{ w['weapon_type_id'] }}/icon?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
+                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(w['weapon_type_id'], w['weapon_type_id']) }}</div>
+                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                                <div style="height:100%;width:{{ (w['count'] / wpn_max * 100) }}%;background:var(--accent);"></div>
+                            </div>
+                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ w['count'] }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size:11px;color:var(--muted);">No data.</div>
+                {% endif %}
+            </div>
+
+            <div class="b-panel" style="padding:0.75rem;">
+                <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Top Systems</span></div>
+                {% if systems %}
+                {% set sys_max = systems[0]['count'] %}
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                    {% for s in systems %}
+                    {% set sec = system_security.get(s['system_id']) %}
+                    <div style="display:flex;align-items:center;gap:0.4rem;font-size:10px;">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ sec_color(sec) }};flex-shrink:0;"
+                              title="sec {% if sec is not none %}{{ '%.1f'|format(sec) }}{% else %}?{% endif %}"></span>
+                        <a href="https://zkillboard.com/system/{{ s['system_id'] }}/" target="_blank" rel="noopener"
+                           style="flex:1;color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            {{ system_names.get(s['system_id'], s['system_id']) }}
+                        </a>
+                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                            <div style="width:60px;height:6px;background:var(--bg);border-radius:1px;overflow:hidden;">
+                                <div style="height:100%;width:{{ (s['count'] / sys_max * 100) }}%;background:var(--accent);"></div>
+                            </div>
+                            <span style="color:var(--muted);min-width:24px;text-align:right;">{{ s['count'] }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size:11px;color:var(--muted);">No data.</div>
+                {% endif %}
+            </div>
+
+        </div>
+
+        {# ── Weekly Activity Heatmap (7×24) ──────────────────────────── #}
+        <div class="b-panel" style="padding:0.75rem;margin-top:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;">
+                <span class="b-label">Activity · 7×24</span>
+                <span class="b-label" style="color:var(--muted);font-size:9px;">last 90 days</span>
+            </div>
+            {% set maxc = (heat | map(attribute='count') | max | default(0)) or 1 %}
+            {% set heat_map = {} %}
+            {% for row in heat %}{% set _ = heat_map.update({ (row['dow'], row['hour']): row['count'] }) %}{% endfor %}
+            <div style="display:grid;grid-template-columns:28px repeat(24, 1fr);gap:1px;">
+                <div></div>
+                {% for h in range(24) %}<div style="font-size:8px;color:var(--muted);text-align:center;">{{ '%02d' % h }}</div>{% endfor %}
+                {% set dow_labels = ['Mo','Tu','We','Th','Fr','Sa','Su'] %}
+                {% for d in range(7) %}
+                    <div style="font-size:9px;color:var(--muted);text-align:right;padding-right:4px;line-height:14px;">{{ dow_labels[d] }}</div>
+                    {% for h in range(24) %}
+                        {% set c = heat_map.get((d, h), 0) %}
+                        {% set lvl = 0 %}
+                        {% if maxc and c %}
+                            {% set r = c / maxc %}
+                            {% if r >= 0.75 %}{% set lvl = 4 %}
+                            {% elif r >= 0.5 %}{% set lvl = 3 %}
+                            {% elif r >= 0.25 %}{% set lvl = 2 %}
+                            {% elif r > 0 %}{% set lvl = 1 %}
+                            {% endif %}
+                        {% endif %}
+                        {% set bg = 'rgba(255,255,255,0.03)' %}
+                        {% if lvl == 1 %}{% set bg = 'rgba(80,200,120,0.18)' %}{% endif %}
+                        {% if lvl == 2 %}{% set bg = 'rgba(80,200,120,0.35)' %}{% endif %}
+                        {% if lvl == 3 %}{% set bg = 'rgba(80,200,120,0.55)' %}{% endif %}
+                        {% if lvl == 4 %}{% set bg = 'rgba(80,200,120,0.80)' %}{% endif %}
+                        <div style="aspect-ratio:1;background:{{ bg }};" title="{{ dow_labels[d] }} {{ '%02d:00' % h }} — {{ c }}"></div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+
+        {# ── Loss Autopsy ─────────────────────────────────────────── #}
+        {% set total_loss = (autopsy.values() | sum) %}
+        <div class="b-panel" style="padding:0.75rem;margin-top:0.75rem;">
+            <div class="b-panel-head" style="margin-bottom:0.5rem;">
+                <span class="b-label">Loss Autopsy</span>
+                <span class="b-label" style="color:var(--muted);font-size:9px;">{{ total_loss }} losses · 90d</span>
+            </div>
+            {% if total_loss > 0 %}
+            <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);margin-bottom:0.5rem;">
+                {% for label, color in [('solo','#5eb1ff'), ('small_gang','#d69e2e'), ('fleet','#ee5555'), ('smartbomb','#805ad5'), ('npc','#4a5568')] %}
+                    {% set c = autopsy.get(label, 0) %}
+                    {% if c > 0 %}
+                    <div style="flex:{{ c }};display:flex;align-items:center;justify-content:center;background:{{ color }};color:#fff;font-size:9px;text-shadow:0 0 2px #000;"
+                         title="{{ label }}: {{ c }}">{{ c }}</div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;font-size:10px;color:var(--muted);">
+                <span><span style="display:inline-block;width:8px;height:8px;background:#5eb1ff;border-radius:1px;vertical-align:middle;"></span> Solo {{ autopsy['solo'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#d69e2e;border-radius:1px;vertical-align:middle;"></span> Small gang {{ autopsy['small_gang'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#ee5555;border-radius:1px;vertical-align:middle;"></span> Fleet {{ autopsy['fleet'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#805ad5;border-radius:1px;vertical-align:middle;"></span> Smartbomb {{ autopsy['smartbomb'] }}</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:#4a5568;border-radius:1px;vertical-align:middle;"></span> NPC {{ autopsy['npc'] }}</span>
+            </div>
+            {% else %}
+            <div style="font-size:11px;color:var(--muted);">No losses recorded — well done.</div>
+            {% endif %}
+        </div>
+
+    </div>
+    {% endif %}
+</div>

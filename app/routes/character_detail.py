@@ -1226,13 +1226,15 @@ async def character_kill_stats(
     import asyncio as _asyncio
     from app.intel import kill_queries as kq
 
-    summary, heat, ships, weapons, systems, autopsy = await _asyncio.gather(
+    summary, heat, ships, weapons, systems, autopsy, streaks_d, gang = await _asyncio.gather(
         kq.character_summary(character_id, days=90),
         kq.weekly_heatmap(character_id, days=90),
         kq.top_ships_used(character_id, days=90, limit=8),
         kq.top_weapons_used(character_id, days=90, limit=8),
         kq.top_systems(character_id, days=90, limit=8),
         kq.loss_autopsy(character_id, days=90),
+        kq.streaks(character_id),
+        kq.solo_gang_split(character_id, days=90),
     )
 
     from app.db.sde_models import SDEType, SDESystem
@@ -1240,12 +1242,21 @@ async def character_kill_stats(
     system_ids = {s["system_id"] for s in systems}
     type_names: dict[int, str] = {}
     system_names: dict[int, str] = {}
+    system_security: dict[int, float] = {}
     if type_ids:
         trows = await db.execute(select(SDEType.type_id, SDEType.type_name).where(SDEType.type_id.in_(type_ids)))
         type_names = {tid: name for tid, name in trows.all()}
     if system_ids:
-        srows = await db.execute(select(SDESystem.system_id, SDESystem.system_name).where(SDESystem.system_id.in_(system_ids)))
-        system_names = {sid: name for sid, name in srows.all()}
+        srows = await db.execute(
+            select(SDESystem.system_id, SDESystem.system_name, SDESystem.security)
+            .where(SDESystem.system_id.in_(system_ids))
+        )
+        for sid, name, sec in srows.all():
+            system_names[sid] = name
+            if sec is not None:
+                system_security[sid] = sec
+
+    gang_total = sum(gang.values())
 
     return templates.TemplateResponse("partials/character_kill_stats.html", {
         "request": request,
@@ -1258,4 +1269,8 @@ async def character_kill_stats(
         "autopsy": autopsy,
         "type_names": type_names,
         "system_names": system_names,
+        "system_security": system_security,
+        "streak": streaks_d,
+        "gang_split": gang,
+        "gang_total": gang_total,
     })
