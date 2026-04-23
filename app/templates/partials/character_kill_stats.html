@@ -1,0 +1,149 @@
+{# Combat profile partial — lazy-loaded via htmx from /character/{id}/kill-stats #}
+{% set total_kl = (summary['kills'] or 0) + (summary['losses'] or 0) %}
+{% if total_kl == 0 %}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Combat Profile</span></div>
+    <div style="padding:0.75rem;color:var(--muted);font-size:11px;">
+        No killmails stored yet. Data populates within a few minutes of the first backfill.
+    </div>
+</div>
+{% else %}
+
+<style>
+    .km-grid { display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem; }
+    @media (max-width: 900px) { .km-grid { grid-template-columns: 1fr; } }
+    .km-panel { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.75rem; }
+    .km-panel-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.5rem; text-transform:uppercase; }
+    .km-stat-row { display:flex; justify-content:space-between; align-items:baseline; font-size:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+    .km-stat-row:last-child { border-bottom:none; }
+    .km-stat-name { color:var(--fg); }
+    .km-stat-count { color:var(--accent); font-family:monospace; }
+    .km-heatmap { display:grid; grid-template-columns: 28px repeat(24, 1fr); gap:1px; margin-top:0.25rem; }
+    .km-heatmap-h { font-size:8px; color:var(--muted); text-align:center; }
+    .km-heatmap-d { font-size:9px; color:var(--muted); text-align:right; padding-right:4px; line-height:14px; }
+    .km-heatmap-cell { aspect-ratio: 1; background:rgba(255,255,255,0.03); }
+    .km-heatmap-cell[data-c="1"] { background: rgba(80,200,120,0.18); }
+    .km-heatmap-cell[data-c="2"] { background: rgba(80,200,120,0.35); }
+    .km-heatmap-cell[data-c="3"] { background: rgba(80,200,120,0.55); }
+    .km-heatmap-cell[data-c="4"] { background: rgba(80,200,120,0.80); }
+    .km-summary { display:flex; gap:1rem; flex-wrap:wrap; align-items:baseline; font-size:11px; color:var(--muted); }
+    .km-summary b { color:var(--accent); font-family:monospace; font-weight:400; }
+    .km-autopsy-bars { display:flex; gap:2px; height:18px; margin:0.25rem 0 0.5rem; border:1px solid var(--border); }
+    .km-autopsy-bar { display:flex; align-items:center; justify-content:center; font-size:9px; color:#fff; text-shadow:0 0 2px #000; }
+</style>
+
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Combat Profile (90d)</span>
+        <span class="b-label" style="color:var(--muted)">{{ summary['kills'] }} kills · {{ summary['losses'] }} losses</span>
+    </div>
+    <div style="padding:0.75rem;">
+        <div class="km-summary">
+            <div>ISK destroyed <b>{{ (summary['isk_destroyed'] / 1e6) | round(0) | int }}M</b></div>
+            <div>ISK lost <b>{{ (summary['isk_lost'] / 1e6) | round(0) | int }}M</b></div>
+            {% set total_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
+            {% if total_isk > 0 %}
+            <div>Efficiency <b>{{ (summary['isk_destroyed'] / total_isk * 100) | round(0) | int }}%</b></div>
+            {% endif %}
+        </div>
+
+        <div class="km-grid" style="margin-top:0.75rem;">
+            <div class="km-panel">
+                <div class="km-panel-title">Activity — 7×24</div>
+                {% set maxc = heat | map(attribute='count') | max | default(1) %}
+                {% set heat_map = {} %}
+                {% for row in heat %}{% set _ = heat_map.update({ (row['dow'], row['hour']): row['count'] }) %}{% endfor %}
+                <div class="km-heatmap">
+                    <div></div>
+                    {% for h in range(24) %}<div class="km-heatmap-h">{{ '%02d' % h }}</div>{% endfor %}
+                    {% set dow_labels = ['Mo','Tu','We','Th','Fr','Sa','Su'] %}
+                    {% for d in range(7) %}
+                        <div class="km-heatmap-d">{{ dow_labels[d] }}</div>
+                        {% for h in range(24) %}
+                            {% set c = heat_map.get((d, h), 0) %}
+                            {% set lvl = 0 %}
+                            {% if maxc and c %}
+                                {% set r = c / maxc %}
+                                {% if r >= 0.75 %}{% set lvl = 4 %}
+                                {% elif r >= 0.5 %}{% set lvl = 3 %}
+                                {% elif r >= 0.25 %}{% set lvl = 2 %}
+                                {% elif r > 0 %}{% set lvl = 1 %}
+                                {% endif %}
+                            {% endif %}
+                            <div class="km-heatmap-cell" data-c="{{ lvl }}" title="{{ dow_labels[d] }} {{ '%02d:00' % h }} — {{ c }}"></div>
+                        {% endfor %}
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="km-panel">
+                <div class="km-panel-title">Loss Autopsy</div>
+                {% set total_loss = autopsy.values() | sum %}
+                {% if total_loss > 0 %}
+                    <div class="km-autopsy-bars">
+                        {% for label, color in [('solo','#e07b91'), ('small_gang','#d69e2e'), ('fleet','#dd6b20'), ('smartbomb','#805ad5'), ('npc','#4a5568')] %}
+                            {% set c = autopsy[label] or 0 %}
+                            {% if c > 0 %}
+                                <div class="km-autopsy-bar" style="background:{{ color }};flex:{{ c }};" title="{{ label }}: {{ c }}">{{ c }}</div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div style="font-size:10px;color:var(--muted);display:flex;gap:0.75rem;flex-wrap:wrap;">
+                        <span>Solo <b style="color:var(--fg);">{{ autopsy['solo'] }}</b></span>
+                        <span>Small gang <b style="color:var(--fg);">{{ autopsy['small_gang'] }}</b></span>
+                        <span>Fleet <b style="color:var(--fg);">{{ autopsy['fleet'] }}</b></span>
+                        <span>NPC <b style="color:var(--fg);">{{ autopsy['npc'] }}</b></span>
+                        <span>Smartbomb <b style="color:var(--fg);">{{ autopsy['smartbomb'] }}</b></span>
+                    </div>
+                {% else %}
+                    <div style="font-size:11px;color:var(--muted);">No losses recorded.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="km-grid">
+            <div class="km-panel">
+                <div class="km-panel-title">Top Ships Flown</div>
+                {% if ships %}
+                    {% for s in ships %}
+                    <div class="km-stat-row">
+                        <span class="km-stat-name">{{ type_names.get(s['ship_type_id'], s['ship_type_id']) }}</span>
+                        <span class="km-stat-count">{{ s['count'] }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="font-size:11px;color:var(--muted);">No ship data.</div>
+                {% endif %}
+            </div>
+            <div class="km-panel">
+                <div class="km-panel-title">Top Weapons</div>
+                {% if weapons %}
+                    {% for w in weapons %}
+                    <div class="km-stat-row">
+                        <span class="km-stat-name">{{ type_names.get(w['weapon_type_id'], w['weapon_type_id']) }}</span>
+                        <span class="km-stat-count">{{ w['count'] }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="font-size:11px;color:var(--muted);">No weapon data.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="km-panel" style="margin-top:0.75rem;">
+            <div class="km-panel-title">Top Systems</div>
+            {% if systems %}
+                {% for s in systems %}
+                <div class="km-stat-row">
+                    <span class="km-stat-name">{{ system_names.get(s['system_id'], s['system_id']) }}</span>
+                    <span class="km-stat-count">{{ s['count'] }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="font-size:11px;color:var(--muted);">No system data.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endif %}

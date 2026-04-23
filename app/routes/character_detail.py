@@ -520,9 +520,13 @@ async def character_detail(
 
     current_wallet = cache.wallet if cache else None
 
+    from app.config import get_settings as _get_settings_km
+    _km_cfg = _get_settings_km()
+
     return templates.TemplateResponse("character_detail.html", {
         "request": request,
         "char": char,
+        "killmails_enabled": _km_cfg.killmails_enabled,
         "current_wallet": current_wallet,
         "journal": journal,
         "journal_error": journal_error,
@@ -1126,4 +1130,65 @@ async def character_notifications_partial(character_id: int, request: Request, d
     return templates.TemplateResponse("partials/notifications_panel.html", {
         "request": request,
         "notifications": enriched, "notif_error": None,
+    })
+
+
+@router.get("/character/{character_id}/kill-stats", response_class=HTMLResponse)
+async def character_kill_stats(
+    character_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Killmail analytics partial — loaded via htmx on the character detail
+    page. Everything is served from the local killmails table; no ESI."""
+    from app.config import get_settings as _gs
+    if not _gs().killmails_enabled:
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    char_row = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    char = char_row.scalar_one_or_none()
+    if not char:
+        return HTMLResponse("<div class='b-empty'>Not your character.</div>", status_code=404)
+
+    import asyncio as _asyncio
+    from app.intel import kill_queries as kq
+
+    summary, heat, ships, weapons, systems, autopsy = await _asyncio.gather(
+        kq.character_summary(character_id, days=90),
+        kq.weekly_heatmap(character_id, days=90),
+        kq.top_ships_used(character_id, days=90, limit=8),
+        kq.top_weapons_used(character_id, days=90, limit=8),
+        kq.top_systems(character_id, days=90, limit=8),
+        kq.loss_autopsy(character_id, days=90),
+    )
+
+    from app.db.sde_models import SDEType, SDESystem
+    type_ids = {s["ship_type_id"] for s in ships} | {w["weapon_type_id"] for w in weapons}
+    system_ids = {s["system_id"] for s in systems}
+    type_names: dict[int, str] = {}
+    system_names: dict[int, str] = {}
+    if type_ids:
+        trows = await db.execute(select(SDEType.type_id, SDEType.type_name).where(SDEType.type_id.in_(type_ids)))
+        type_names = {tid: name for tid, name in trows.all()}
+    if system_ids:
+        srows = await db.execute(select(SDESystem.system_id, SDESystem.system_name).where(SDESystem.system_id.in_(system_ids)))
+        system_names = {sid: name for sid, name in srows.all()}
+
+    return templates.TemplateResponse("partials/character_kill_stats.html", {
+        "request": request,
+        "char": char,
+        "summary": summary,
+        "heat": heat,
+        "ships": ships,
+        "weapons": weapons,
+        "systems": systems,
+        "autopsy": autopsy,
+        "type_names": type_names,
+        "system_names": system_names,
     })

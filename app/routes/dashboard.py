@@ -889,6 +889,18 @@ async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+def _dashboard_pulse_enabled() -> bool:
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    return cfg.killmails_enabled and cfg.killmail_dashboard_enabled
+
+
+def _dashboard_battles_enabled() -> bool:
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    return cfg.killmails_enabled and cfg.killmail_battles_enabled
+
+
 async def fetch_zkillboard_data(characters: list[Character], db: AsyncSession) -> dict:
     async def _get(char):
         try:
@@ -1588,6 +1600,49 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Contract check error: %s", e)
 
+            # Killmail backfill — one character per 2-minute tick (gated).
+            # Inside backfill_character there is a 10-minute startup grace
+            # window, so this is a no-op right after deploy.
+            from app.config import get_settings as _get_settings
+            _km_settings = _get_settings()
+            if _km_settings.killmails_enabled:
+                if not hasattr(_background_scheduler, '_last_killmail_tick') or \
+                   (now - _background_scheduler._last_killmail_tick).total_seconds() >= 120:
+                    try:
+                        from app.intel.killmail_ingest import (
+                            backfill_character, find_pending_backfill_chars,
+                        )
+                        pending = await find_pending_backfill_chars(limit=1)
+                        if pending:
+                            asyncio.create_task(backfill_character(pending[0]))
+                        _background_scheduler._last_killmail_tick = now
+                    except Exception as e:
+                        logger.warning("Killmail backfill scheduling error: %s", e)
+
+                # Daily GC of discovery-scope killmails (>30d, not-our-char)
+                if not hasattr(_background_scheduler, '_last_killmail_gc') or \
+                   (now - _background_scheduler._last_killmail_gc).total_seconds() >= 86400:
+                    try:
+                        from app.intel.killmail_store import gc_discovery_killmails
+                        removed = await gc_discovery_killmails(retention_days=30)
+                        if removed:
+                            logger.info("killmail GC: removed %d discovery rows", removed)
+                        _background_scheduler._last_killmail_gc = now
+                    except Exception as e:
+                        logger.warning("Killmail GC error: %s", e)
+
+                # Recent battle discovery — every 15 min, also gated by battles flag.
+                # Hard-capped to 100 ESI hydrations per run (see recent_battles.py).
+                if _km_settings.killmail_battles_enabled:
+                    if not hasattr(_background_scheduler, '_last_battle_discovery') or \
+                       (now - _background_scheduler._last_battle_discovery).total_seconds() >= 900:
+                        try:
+                            from app.intel.recent_battles import discover_and_persist_battles
+                            asyncio.create_task(discover_and_persist_battles())
+                            _background_scheduler._last_battle_discovery = now
+                        except Exception as e:
+                            logger.warning("Battle discovery scheduling error: %s", e)
+
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
                 try:
@@ -1866,6 +1921,108 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "skill_map": skill_map,
         "sort": sort,
         "char_groups": char_groups,
+        "killmails_enabled": _dashboard_pulse_enabled(),
+        "battles_enabled": _dashboard_battles_enabled(),
+    })
+
+
+@router.get("/dashboard/kill-pulse", response_class=HTMLResponse)
+async def dashboard_kill_pulse(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    days: int = 30,
+):
+    """Pilot Pulse v2 + Frequent Wingmen + Your Hunters. Lazy-loaded via htmx
+    so the dashboard renders without waiting on these queries."""
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    char_result = await db.execute(
+        select(Character.character_id, Character.character_name).where(Character.user_id == user_id)
+    )
+    char_rows_pulse = char_result.all()
+    char_ids = [r[0] for r in char_rows_pulse]
+    if not char_ids:
+        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+    char_name_map = {r[0]: r[1] for r in char_rows_pulse}
+
+    from app.intel import kill_queries as kq
+    pulse_30, pulse_lifetime, per_char, wingmen, hunters = await asyncio.gather(
+        kq.multi_character_summary(char_ids, days=days),
+        kq.multi_character_summary(char_ids, days=None),
+        kq.per_character_summary(char_ids, days=days),
+        kq.frequent_wingmen(char_ids, days=90, limit=8),
+        kq.your_hunters(char_ids, days=90, limit=8),
+    )
+
+    # Name resolution is deliberately deferred — we don't hit ESI on the page
+    # path. Wingmen / hunters render with IDs + links to zKillboard; a bulk
+    # resolver can be added later if desired.
+    char_names: dict[int, str] = {}
+    corp_names: dict[int, str] = {}
+
+    most_active_cid = None
+    if per_char:
+        ranked = sorted(
+            per_char.items(),
+            key=lambda kv: (kv[1]["kills"] + kv[1]["losses"], kv[1]["isk_destroyed"]),
+            reverse=True,
+        )
+        if ranked and (ranked[0][1]["kills"] + ranked[0][1]["losses"]) > 0:
+            most_active_cid = ranked[0][0]
+
+    return templates.TemplateResponse("partials/dashboard_kill_pulse.html", {
+        "request": request,
+        "pulse_30": pulse_30,
+        "pulse_lifetime": pulse_lifetime,
+        "per_char": per_char,
+        "wingmen": wingmen,
+        "hunters": hunters,
+        "char_name_map": char_name_map,
+        "char_names": char_names,
+        "corp_names": corp_names,
+        "most_active_cid": most_active_cid,
+        "days": days,
+    })
+
+
+@router.get("/dashboard/recent-battles", response_class=HTMLResponse)
+async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(get_db)):
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
+        return HTMLResponse("")
+    from app.intel.recent_battles import query_battles_window, WH_CLASS_ORDER, SEC_BAND_ORDER
+    groups = await query_battles_window(days=7)
+    ordered: list[tuple[str, list]] = []
+    for key in WH_CLASS_ORDER + SEC_BAND_ORDER:
+        if key in groups and groups[key]:
+            ordered.append((key, groups[key]))
+    return templates.TemplateResponse("partials/dashboard_recent_battles.html", {
+        "request": request,
+        "groups": ordered,
+    })
+
+
+@router.get("/dashboard/big-battle-banner", response_class=HTMLResponse)
+async def dashboard_big_battle_banner(request: Request):
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
+        return HTMLResponse("")
+    from app.intel.recent_battles import active_big_battle
+    battle = await active_big_battle()
+    if not battle:
+        return HTMLResponse("")
+    return templates.TemplateResponse("partials/dashboard_big_battle_banner.html", {
+        "request": request,
+        "battle": battle,
     })
 
 

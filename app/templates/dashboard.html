@@ -9,6 +9,42 @@
 
 {% block content %}
 
+{# ── Big battle banner (lazy-loaded; battles flag only) ───────────────────── #}
+{% if battles_enabled %}
+<div id="big-battle-banner"
+     hx-get="/dashboard/big-battle-banner"
+     hx-trigger="load, every 120s"
+     hx-swap="innerHTML"></div>
+{% endif %}
+
+{# ── Kill Pulse (lazy-loaded; killmails feature) ──────────────────────────── #}
+{% if killmails_enabled %}
+<div id="dashboard-kill-pulse"
+     hx-get="/dashboard/kill-pulse"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-bottom:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
+</div>
+{% endif %}
+
+{# ── Recent Battles across New Eden (lazy-loaded; battles flag only) ──────── #}
+{% if battles_enabled %}
+<div id="dashboard-recent-battles"
+     hx-get="/dashboard/recent-battles"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-bottom:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Recent Battles (7d)</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
+</div>
+{% endif %}
+
 {# ── Macros ──────────────────────────────────────────────────────────────── #}
 {% macro format_isk(amount) %}
   {%- if amount >= 1000000000000 -%}

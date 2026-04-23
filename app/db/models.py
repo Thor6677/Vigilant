@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, event
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -9,6 +9,16 @@ settings = get_settings()
 
 engine = create_async_engine(settings.database_url, echo=settings.debug)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _sqlite_pragmas(dbapi_connection, connection_record):
+    if "sqlite" in str(engine.url):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -490,6 +500,78 @@ class AllianceNameCache(Base):
     name = Column(String, nullable=False)
     ticker = Column(String(8), nullable=True)
     cached_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class Killmail(Base):
+    __tablename__ = "killmails"
+
+    killmail_id = Column(Integer, primary_key=True)
+    killmail_hash = Column(String(64), nullable=False)
+    killmail_time = Column(DateTime, nullable=False, index=True)
+    solar_system_id = Column(Integer, nullable=False, index=True)
+    victim_character_id = Column(Integer, nullable=True, index=True)
+    victim_corporation_id = Column(Integer, nullable=True, index=True)
+    victim_alliance_id = Column(Integer, nullable=True, index=True)
+    victim_ship_type_id = Column(Integer, nullable=False, index=True)
+    total_value = Column(Float, nullable=True)
+    is_npc = Column(Boolean, nullable=False, default=False)
+    attacker_count = Column(Integer, nullable=False, default=1)
+    final_blow_character_id = Column(Integer, nullable=True)
+    involves_our_char = Column(Boolean, nullable=False, default=False, index=True)
+    fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class KillmailAttacker(Base):
+    __tablename__ = "killmail_attackers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    killmail_id = Column(Integer, ForeignKey("killmails.killmail_id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=True, index=True)
+    corporation_id = Column(Integer, nullable=True, index=True)
+    alliance_id = Column(Integer, nullable=True, index=True)
+    ship_type_id = Column(Integer, nullable=True, index=True)
+    weapon_type_id = Column(Integer, nullable=True, index=True)
+    final_blow = Column(Boolean, nullable=False, default=False)
+
+
+class CharacterKillIngest(Base):
+    __tablename__ = "character_kill_ingest"
+
+    character_id = Column(Integer, primary_key=True)
+    last_backfill_page = Column(Integer, nullable=False, default=0)
+    backfill_complete = Column(Boolean, nullable=False, default=False)
+    last_seen_killmail_id = Column(Integer, nullable=True)
+    last_synced = Column(DateTime, nullable=True)
+
+
+class DetectedBattle(Base):
+    __tablename__ = "detected_battles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    system_name = Column(String, nullable=True)
+    security = Column(Float, nullable=True)
+    group_label = Column(String, nullable=False, index=True)
+    band = Column(String, nullable=False, index=True)
+    start_time = Column(DateTime, nullable=False, index=True)
+    end_time = Column(DateTime, nullable=False)
+    duration_minutes = Column(Integer, nullable=False, default=0)
+    kill_count = Column(Integer, nullable=False, default=0)
+    pilots_involved = Column(Integer, nullable=False, default=0)
+    total_isk = Column(Float, nullable=False, default=0.0)
+    top_attacker_corp_id = Column(Integer, nullable=True)
+    top_attacker_corp_name = Column(String, nullable=True)
+    top_attacker_corp_kills = Column(Integer, nullable=False, default=0)
+    top_victim_corp_id = Column(Integer, nullable=True)
+    top_victim_corp_name = Column(String, nullable=True)
+    top_victim_corp_kills = Column(Integer, nullable=False, default=0)
+    top_ships_json = Column(Text, nullable=False, default="[]")
+    killmail_ids_json = Column(Text, nullable=False, default="[]")
+    detected_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("system_id", "start_time", name="uix_battle_system_start"),
+    )
 
 
 async def init_db():

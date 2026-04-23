@@ -87,6 +87,31 @@ app.include_router(fitting_router)
 
 @app.on_event("startup")
 async def startup():
+    from sqlalchemy import text
+    # One-time migration: drop the pre-v2 killmail tables if they still carry
+    # the old `raw_json` column fingerprint. This runs once on first deploy of
+    # the redesigned schema, then becomes a no-op forever after.
+    async with AsyncSessionLocal() as db:
+        try:
+            res = await db.execute(text("PRAGMA table_info(killmails)"))
+            cols = [r[1] for r in res.fetchall()]
+            if "raw_json" in cols:
+                for stmt in [
+                    "DROP TABLE IF EXISTS killmail_attackers",
+                    "DROP TABLE IF EXISTS killmails",
+                    "DROP TABLE IF EXISTS character_kill_ingest",
+                    "DROP TABLE IF EXISTS detected_battles",
+                ]:
+                    try:
+                        await db.execute(text(stmt))
+                        await db.commit()
+                    except Exception as drop_exc:
+                        await db.rollback()
+                        logging.warning("Killmail legacy DROP warning for %r: %s", stmt, drop_exc)
+                logging.info("Killmail legacy tables dropped (raw_json fingerprint)")
+        except Exception as e:
+            logging.warning("Killmail schema migration check failed: %s", e)
+
     await init_db()
     # Reset any syncs that were stuck in "syncing" from a previous run
     from sqlalchemy import update
@@ -97,7 +122,6 @@ async def startup():
             .values(sync_status="idle")
         )
         await db.commit()
-    from sqlalchemy import text
     async with AsyncSessionLocal() as db:
         for stmt in [
             "ALTER TABLE characters ADD COLUMN security_status REAL",

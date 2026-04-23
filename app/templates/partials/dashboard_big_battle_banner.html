@@ -1,0 +1,19 @@
+{# Active big-battle banner — shown only when a 10+ kill battle ended <30min ago. #}
+<div class="b-section" style="border-left:3px solid #e53e3e;margin-bottom:0.75rem;">
+    <div style="padding:0.6rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <div>
+            <span class="b-label" style="color:#e53e3e;">Active Battle</span>
+            <span style="font-size:13px;margin-left:0.5rem;color:var(--fg);">
+                {{ battle['system_name'] or battle['system_id'] }}
+                {% if battle['group_label'] %}<span style="color:var(--muted);font-size:10px;letter-spacing:0.1em;"> · {{ battle['group_label'] }}</span>{% endif %}
+            </span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);">
+            <b style="color:var(--fg);font-family:monospace;">{{ battle['kill_count'] }}</b> kills
+            · <b style="color:var(--fg);font-family:monospace;">{{ battle['pilots_involved'] }}</b> pilots
+            {% if battle['total_isk'] %}
+            · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
+            {% endif %}
+        </div>
+    </div>
+</div>

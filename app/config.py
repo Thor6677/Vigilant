@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     eve_sso_verify_url: str = "https://login.eveonline.com/oauth/verify"
     eve_esi_base: str = "https://esi.evetech.net/latest"
 
+    killmails_enabled: bool = False
+    killmail_dashboard_enabled: bool = False
+    killmail_battles_enabled: bool = False
+
     class Config:
         env_file = ".env"
         extra = "ignore"

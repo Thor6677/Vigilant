@@ -1,0 +1,44 @@
+{# Recent battles across New Eden, grouped by WH class / sec band. #}
+<style>
+    .rb-groups { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:0.5rem; }
+    .rb-group { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.6rem; }
+    .rb-group-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; }
+    .rb-battle { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+    .rb-battle:last-child { border-bottom:none; }
+    .rb-sys { color:var(--fg); }
+    .rb-count { color:var(--accent); font-family:monospace; font-size:10px; }
+    .rb-time { color:var(--muted); font-size:9px; }
+</style>
+
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Recent Battles — last 7 days</span>
+    </div>
+    <div style="padding:0.75rem;">
+        {% if groups %}
+        <div class="rb-groups">
+            {% for group, battles in groups %}
+            <div class="rb-group">
+                <div class="rb-group-title">{{ group }}</div>
+                {% for b in battles %}
+                <div class="rb-battle">
+                    <div>
+                        <div class="rb-sys">{{ b['system_name'] or b['system_id'] }}</div>
+                        <div class="rb-time">{{ b['start_time'].strftime('%m/%d %H:%M') }} · {{ b['duration_minutes'] }}m</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div class="rb-count">{{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P</div>
+                        {% if b['total_isk'] and b['total_isk'] > 0 %}
+                        <div class="rb-time">{{ (b['total_isk'] / 1e9) | round(1) }}B</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="font-size:11px;color:var(--muted);">No battles in the last 7 days. Discovery runs every 15 min.</div>
+        {% endif %}
+    </div>
+</div>
