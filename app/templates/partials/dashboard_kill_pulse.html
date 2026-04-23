@@ -1,96 +1,151 @@
-{# Pilot Pulse v2 + Frequent Wingmen + Your Hunters — lazy-loaded partial. #}
-<style>
-    .pulse-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0.5rem; }
-    @media (max-width: 900px) { .pulse-grid { grid-template-columns: 1fr; } }
-    .pulse-card { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.75rem; }
-    .pulse-card-title { font-size:9px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.5rem; text-transform:uppercase; }
-    .pulse-stat { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; padding:2px 0; }
-    .pulse-stat-v { color:var(--accent); font-family:monospace; }
-    .pulse-big { font-size:18px; font-weight:300; color:var(--accent); font-family:monospace; }
-    .pulse-small { font-size:10px; color:var(--muted); }
-</style>
+{# Pilot Pulse v2 + Frequent Wingmen + Your Hunters — lazy-loaded partial.
+   Ported from the original v1 layout (portraits, logos, 5-tile header) and
+   adapted to the v2 data shape (wingmen[i].count, hunters[i].count). #}
 
+{% macro fmt_isk(amount) -%}
+{%- if amount >= 1_000_000_000 -%}{{ "%.2f"|format(amount / 1_000_000_000) }}B
+{%- elif amount >= 1_000_000 -%}{{ "%.1f"|format(amount / 1_000_000) }}M
+{%- elif amount >= 1_000 -%}{{ "%.1f"|format(amount / 1_000) }}K
+{%- else -%}{{ "%.0f"|format(amount) }}{%- endif -%}
+{% endmacro %}
+
+{% set total_kl = pulse_30['kills'] + pulse_30['losses'] %}
+{% set efficiency_pct = none %}
+{% set tot_isk = pulse_30['isk_destroyed'] + pulse_30['isk_lost'] %}
+{% if tot_isk > 0 %}
+    {% set efficiency_pct = (pulse_30['isk_destroyed'] / tot_isk * 100) %}
+{% endif %}
+
+{% if total_kl == 0 and not wingmen and not hunters %}
 <div class="b-section">
-    <div class="b-section-head">
-        <span class="b-label">Pilot Pulse — last {{ days }}d</span>
-        <span class="b-label" style="color:var(--muted)">
-            {{ pulse_30['kills'] }} kills · {{ pulse_30['losses'] }} losses
-        </span>
+    <div class="b-section-head"><span class="b-label">Pilot Pulse · {{ days }}d</span></div>
+    <div style="padding:0.75rem;text-align:center;color:var(--muted);font-size:11px;">
+        Backfilling killmail history… multi-character analytics will appear over the next few minutes.
     </div>
-    <div style="padding:0.75rem;">
-        <div class="pulse-grid">
-            <div class="pulse-card">
-                <div class="pulse-card-title">ISK Destroyed</div>
-                <div class="pulse-big">{{ (pulse_30['isk_destroyed'] / 1e6) | round(0) | int }}M</div>
-                <div class="pulse-small">Lifetime: {{ (pulse_lifetime['isk_destroyed'] / 1e6) | round(0) | int }}M</div>
-            </div>
-            <div class="pulse-card">
-                <div class="pulse-card-title">ISK Lost</div>
-                <div class="pulse-big" style="color:#e07b91;">{{ (pulse_30['isk_lost'] / 1e6) | round(0) | int }}M</div>
-                <div class="pulse-small">Lifetime: {{ (pulse_lifetime['isk_lost'] / 1e6) | round(0) | int }}M</div>
-            </div>
-            <div class="pulse-card">
-                <div class="pulse-card-title">Efficiency</div>
-                {% set tot30 = pulse_30['isk_destroyed'] + pulse_30['isk_lost'] %}
-                {% if tot30 > 0 %}
-                    <div class="pulse-big">{{ (pulse_30['isk_destroyed'] / tot30 * 100) | round(0) | int }}%</div>
-                {% else %}
-                    <div class="pulse-big">—</div>
-                {% endif %}
-                {% if most_active_cid %}
-                <div class="pulse-small">Most active: {{ char_name_map.get(most_active_cid, most_active_cid) }}</div>
-                {% endif %}
-            </div>
-        </div>
+</div>
+{% else %}
 
-        <div class="pulse-grid" style="margin-top:0.5rem;">
-            <div class="pulse-card" style="grid-column: span 1;">
-                <div class="pulse-card-title">Per Character (90d)</div>
-                {% for cid, data in per_char.items() %}
-                    {% if (data['kills'] + data['losses']) > 0 %}
-                    <div class="pulse-stat">
-                        <span>{{ char_name_map.get(cid, cid) }}</span>
-                        <span class="pulse-stat-v">{{ data['kills'] }}W · {{ data['losses'] }}L</span>
-                    </div>
-                    {% endif %}
-                {% endfor %}
+{# ── Pilot Pulse 5-tile header ───────────────────────────────────────────── #}
+<div class="b-panel" style="margin-bottom:0.75rem;">
+    <div class="b-panel-head" style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.75rem;">
+        <span class="b-label">Pilot Pulse · {{ days }}d</span>
+        <span class="b-label" style="color:var(--muted);font-size:9px;">all your characters · stored killmails</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;text-align:center;">
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(pulse_30['isk_destroyed']) }}</div>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Destroyed</div>
+        </div>
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--danger);">{{ fmt_isk(pulse_30['isk_lost']) }}</div>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Lost</div>
+        </div>
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--text);">
+                {% if efficiency_pct is not none %}{{ "%.0f"|format(efficiency_pct) }}%{% else %}—{% endif %}
             </div>
-            <div class="pulse-card">
-                <div class="pulse-card-title">Frequent Wingmen</div>
-                {% if wingmen %}
-                    {% for w in wingmen %}
-                    <div class="pulse-stat">
-                        <span>
-                            <a href="https://zkillboard.com/character/{{ w['character_id'] }}/" target="_blank"
-                               style="color:var(--fg);text-decoration:none;">
-                                {{ char_names.get(w['character_id'], 'Pilot #' ~ w['character_id']) }}
-                            </a>
-                        </span>
-                        <span class="pulse-stat-v">{{ w['count'] }}</span>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="pulse-small">No wingmen data yet.</div>
-                {% endif %}
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Efficiency</div>
+        </div>
+        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+            <div style="font-size:18px;font-weight:300;color:var(--text);">
+                <span style="color:var(--success);">{{ pulse_30['kills'] }}</span>
+                <span style="color:var(--muted);font-size:14px;">/</span>
+                <span style="color:var(--danger);">{{ pulse_30['losses'] }}</span>
             </div>
-            <div class="pulse-card">
-                <div class="pulse-card-title">Your Hunters</div>
-                {% if hunters %}
-                    {% for h in hunters %}
-                    <div class="pulse-stat">
-                        <span>
-                            <a href="https://zkillboard.com/corporation/{{ h['id'] }}/" target="_blank"
-                               style="color:var(--fg);text-decoration:none;">
-                                {{ corp_names.get(h['id'], 'Corp #' ~ h['id']) }}
-                            </a>
-                        </span>
-                        <span class="pulse-stat-v">{{ h['count'] }}</span>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Kills / Losses</div>
+        </div>
+        <div style="flex:1;min-width:140px;padding:0.75rem;">
+            {% if most_active_cid %}
+            <a href="/character/{{ most_active_cid }}" style="text-decoration:none;color:inherit;display:flex;align-items:center;gap:0.5rem;justify-content:center;">
+                <img src="https://images.evetech.net/characters/{{ most_active_cid }}/portrait?size=32" alt="" width="24" height="24" style="border-radius:50%;flex-shrink:0;">
+                <div style="text-align:left;min-width:0;">
+                    <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        {{ char_name_map.get(most_active_cid, most_active_cid).split(' ')[0] }}
                     </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="pulse-small">No hunter data yet.</div>
-                {% endif %}
-            </div>
+                    <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:2px;">Most Active</div>
+                </div>
+            </a>
+            {% else %}
+            <div style="font-size:14px;color:var(--muted);">—</div>
+            <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Most Active</div>
+            {% endif %}
         </div>
     </div>
 </div>
+
+{# ── Per-Character + Frequent Wingmen + Your Hunters ─────────────────────── #}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0.75rem;">
+
+    <div class="b-panel" style="padding:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;">
+            <span class="b-label">Per Character · {{ days }}d</span>
+        </div>
+        {% if per_char %}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            {% for cid, data in per_char.items() %}
+            {% if (data['kills'] + data['losses']) > 0 %}
+            <a href="/character/{{ cid }}"
+               style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;font-size:10px;">
+                <img src="https://images.evetech.net/characters/{{ cid }}/portrait?size=32" alt="" width="18" height="18" style="border-radius:50%;flex-shrink:0;">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char_name_map.get(cid, cid) }}</span>
+                <span style="color:var(--success);font-weight:600;flex-shrink:0;">{{ data['kills'] }}W</span>
+                <span style="color:var(--muted);">·</span>
+                <span style="color:var(--danger);font-weight:600;flex-shrink:0;">{{ data['losses'] }}L</span>
+            </a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="font-size:11px;color:var(--muted);">No activity in window.</div>
+        {% endif %}
+    </div>
+
+    <div class="b-panel" style="padding:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;">
+            <span class="b-label">Frequent Wingmen · 90d</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">co-attackers on your kills</span>
+        </div>
+        {% if wingmen %}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            {% for w in wingmen %}
+            <a href="https://zkillboard.com/character/{{ w['character_id'] }}/" target="_blank" rel="noopener"
+               style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;font-size:10px;">
+                <img src="https://images.evetech.net/characters/{{ w['character_id'] }}/portrait?size=32" alt="" width="18" height="18" style="border-radius:50%;flex-shrink:0;">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ char_names.get(w['character_id'], 'Pilot #' ~ w['character_id']) }}
+                </span>
+                <span style="color:var(--accent);font-weight:600;flex-shrink:0;">×{{ w['count'] }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="font-size:11px;color:var(--muted);">No co-attacker data yet.</div>
+        {% endif %}
+    </div>
+
+    <div class="b-panel" style="padding:0.75rem;">
+        <div class="b-panel-head" style="margin-bottom:0.5rem;">
+            <span class="b-label">Your Hunters · 90d</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">corps that killed you</span>
+        </div>
+        {% if hunters %}
+        <div style="display:flex;flex-direction:column;gap:2px;">
+            {% for h in hunters %}
+            <a href="https://zkillboard.com/corporation/{{ h['id'] }}/" target="_blank" rel="noopener"
+               style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;font-size:10px;">
+                <img src="https://images.evetech.net/corporations/{{ h['id'] }}/logo?size=32" alt="" width="18" height="18" style="border-radius:2px;flex-shrink:0;">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ corp_names.get(h['id'], 'Corp #' ~ h['id']) }}
+                </span>
+                <span style="color:var(--danger);font-weight:600;flex-shrink:0;" title="losses inflicted on your characters">×{{ h['count'] }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="font-size:11px;color:var(--muted);">No hunters tracked.</div>
+        {% endif %}
+    </div>
+
+</div>
+
+{% endif %}

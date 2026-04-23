@@ -17,20 +17,6 @@
      hx-swap="innerHTML"></div>
 {% endif %}
 
-{# ── Kill Pulse (lazy-loaded; killmails feature) ──────────────────────────── #}
-{% if killmails_enabled %}
-<div id="dashboard-kill-pulse"
-     hx-get="/dashboard/kill-pulse"
-     hx-trigger="load"
-     hx-swap="innerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
-    </div>
-</div>
-{% endif %}
-
 {# ── Recent Battles across New Eden (lazy-loaded; battles flag only) ──────── #}
 {% if battles_enabled %}
 <div id="dashboard-recent-battles"
@@ -614,6 +600,20 @@
     {% else %}
     <div class="b-empty">No active contracts</div>
     {% endif %}
+</div>
+{% endif %}
+
+{# ── Pilot Pulse (lazy-loaded; killmails feature) — analytics across all chars #}
+{% if killmails_enabled %}
+<div id="dashboard-kill-pulse"
+     hx-get="/dashboard/kill-pulse"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-bottom:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
 </div>
 {% endif %}
 
