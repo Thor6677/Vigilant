@@ -23,7 +23,7 @@ services:
       resources:
         limits:
           memory: 2560M
-          cpus: "0.5"
+          cpus: "2.0"
           pids: 200
     logging:
       driver: json-file
