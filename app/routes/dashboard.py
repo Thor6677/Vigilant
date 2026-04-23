@@ -2098,6 +2098,9 @@ async def trigger_sync(character_id: int, request: Request, db: AsyncSession = D
 _corp_stats_cache: dict[int, dict] = {}  # user_id -> {html, expires_at}
 _CORP_STATS_TTL = 300  # 5 minutes
 
+_structure_banner_cache: dict[int, dict] = {}  # user_id -> {html, expires_at}
+_STRUCTURE_BANNER_TTL = 30  # seconds
+
 
 @router.get("/notifications/poll")
 async def notifications_poll(request: Request):
@@ -2141,11 +2144,22 @@ async def structure_alert_banners(request: Request, db: AsyncSession = Depends(g
     if not user_id:
         return HTMLResponse(_empty)
 
+    cached = _structure_banner_cache.get(user_id)
+    if cached and cached["expires_at"] > datetime.now(timezone.utc):
+        return HTMLResponse(cached["html"])
+
     result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = result.scalars().all()
     char_ids = [c.character_id for c in characters]
 
+    def _memo(html: str) -> None:
+        _structure_banner_cache[user_id] = {
+            "html": html,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_STRUCTURE_BANNER_TTL),
+        }
+
     if not char_ids:
+        _memo(_empty)
         return HTMLResponse(_empty)
 
     cache_result = await db.execute(
@@ -2260,9 +2274,11 @@ async def structure_alert_banners(request: Request, db: AsyncSession = Depends(g
         })
 
     alerts.sort(key=lambda a: a["timestamp"], reverse=True)
-    return templates.TemplateResponse("partials/structure_alert_banners.html", {
-        "request": request, "alerts": alerts,
-    })
+    html = templates.get_template("partials/structure_alert_banners.html").render(
+        request=request, alerts=alerts,
+    )
+    _memo(html)
+    return HTMLResponse(html)
 
 
 @router.get("/alerts/inventory-banners", response_class=HTMLResponse)

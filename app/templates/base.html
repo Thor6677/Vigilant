@@ -901,23 +901,23 @@
 </div>
 <div id="esi-banner"
      hx-get="/status/banner"
-     hx-trigger="load, every 30s"
+     hx-trigger="load delay:200ms, every 30s"
      hx-swap="outerHTML"></div>
 <div id="structure-alerts"
      hx-get="/alerts/structure-banners"
-     hx-trigger="load, every 60s"
+     hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
 <div id="inventory-alerts"
      hx-get="/alerts/inventory-banners"
-     hx-trigger="load, every 60s"
+     hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
 <div id="contract-alerts"
      hx-get="/alerts/contract-banners"
-     hx-trigger="load, every 60s"
+     hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
 <div id="timer-alerts"
      hx-get="/alerts/timer-banners"
-     hx-trigger="load, every 60s"
+     hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
 {% endif %}
 
