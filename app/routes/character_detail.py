@@ -1,6 +1,7 @@
 """
 Character detail page with wallet history chart and journal.
 """
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
@@ -264,26 +265,6 @@ async def character_detail(
     cache = cache_result.scalar_one_or_none()
     _mark("preamble")
 
-    # Fetch total trained SP from ESI
-    total_trained_sp = 0
-    try:
-        if "esi-skills.read_skills.v1" in (char.scopes or ""):
-            async with AsyncSessionLocal() as skills_db:
-                sc_result = await skills_db.execute(
-                    select(Character).where(Character.character_id == character_id)
-                )
-                sc_char = sc_result.scalar_one_or_none()
-                sc_token = await refresh_token(sc_char, skills_db)
-            sc_client = ESIClient(sc_token, db=db)
-            skills_path = "/characters/" + str(character_id) + "/skills/"
-            raw_skills = await sc_client.get(skills_path)
-            if raw_skills and isinstance(raw_skills, dict):
-                for s in raw_skills.get("skills", []):
-                    total_trained_sp += s.get("skillpoints_in_skill", 0)
-    except Exception as e:
-        logger.warning("Failed to fetch total SP for char %s: %s", character_id, e)
-    _mark("trained_sp")
-
     queue_remaining = 0
     completed_skills = []
     # Parse cached data
@@ -359,93 +340,8 @@ async def character_detail(
             logger.warning("Failed to parse zkill for char %s: %s", character_id, e)
     _mark("skillqueue_parse")
 
-    # Fetch active clone implants + jump clones (share one ESI session and SDE batch lookup)
-    implants = []
-    jump_clones = []
-    if "esi-clones.read_implants.v1" in (char.scopes or "") or \
-       "esi-clones.read_clones.v1" in (char.scopes or ""):
-        try:
-            async with AsyncSessionLocal() as impl_db:
-                ic_result = await impl_db.execute(
-                    select(Character).where(Character.character_id == character_id)
-                )
-                ic_char = ic_result.scalar_one_or_none()
-                ic_token = await refresh_token(ic_char, impl_db)
-            ic_client = ESIClient(ic_token, db=db)
-
-            from app.db.sde_models import SDEType as _SDEType, SDEStation as _SDEStation
-
-            # Active clone implants
-            impl_ids = []
-            if "esi-clones.read_implants.v1" in (char.scopes or ""):
-                impl_ids = await ic_client.get(
-                    "/characters/" + str(character_id) + "/implants/"
-                ) or []
-
-            # Jump clone data
-            clone_data = {}
-            if "esi-clones.read_clones.v1" in (char.scopes or ""):
-                clone_data = await ic_client.get(
-                    "/characters/" + str(character_id) + "/clones/"
-                ) or {}
-
-            # Collect all type IDs for one batch SDE lookup
-            jc_list = clone_data.get("jump_clones", [])
-            all_type_ids = set(impl_ids)
-            for jc in jc_list:
-                all_type_ids.update(jc.get("implants", []))
-
-            type_map = {}
-            if all_type_ids:
-                sde_r = await db.execute(
-                    select(_SDEType).where(_SDEType.type_id.in_(all_type_ids))
-                )
-                type_map = {t.type_id: t for t in sde_r.scalars().all()}
-
-            # Enrich active clone implants
-            implants = _enrich_implants(impl_ids, type_map)
-
-            # Resolve jump clone locations
-            loc_ids = {jc["location_id"] for jc in jc_list}
-            station_ids = [lid for lid in loc_ids if jc_list and
-                           next((j for j in jc_list if j["location_id"] == lid), {})
-                           .get("location_type") == "station"]
-            structure_ids = [lid for lid in loc_ids if lid not in station_ids]
-
-            loc_names = {}
-            if station_ids:
-                st_r = await db.execute(
-                    select(_SDEStation).where(_SDEStation.station_id.in_(station_ids))
-                )
-                for s in st_r.scalars().all():
-                    loc_names[s.station_id] = s.station_name
-
-            _t_sn = _perf_now() if perf_enabled() else 0.0
-            for sid in structure_ids:
-                try:
-                    sd = await ic_client.get("/universe/structures/" + str(sid) + "/")
-                    loc_names[sid] = sd.get("name", "Structure " + str(sid))
-                except Exception:
-                    loc_names[sid] = "Structure " + str(sid)
-            if perf_enabled():
-                _section_ms["structure_names_serial"] = ms_since(_t_sn)
-
-            for jc in jc_list:
-                loc_id = jc["location_id"]
-                loc_name = loc_names.get(loc_id, "Location " + str(loc_id))
-                jump_clones.append({
-                    "location": loc_name,
-                    "implants": _enrich_implants(jc.get("implants", []), type_map),
-                })
-
-        except Exception as e:
-            logger.warning("Failed to fetch implants/clones for char %s: %s", character_id, e)
-    _mark("implants_clones")
-
-    # Assets are loaded lazily via /character/{id}/assets.json when the user clicks "View Assets"
+    # Cached-data derivations (no IO)
     has_assets_scope = "esi-assets.read_assets.v1" in (char.scopes or "")
-
-    # Current location (docked structure or system if in space)
     docked_at = None
     current_system = None
     if cache and cache.location_json:
@@ -455,90 +351,237 @@ async def character_detail(
             current_system = loc.get("system_name")
         except Exception:
             pass
-
-    # Calculate kill/loss stats from zkill data
     kills = sum(1 for km in zkill if not km.get("is_loss"))
     losses = sum(1 for km in zkill if km.get("is_loss"))
 
-    # Fetch wallet journal (live ESI call)
-    journal = []
-    journal_error = None
-    if "esi-wallet.read_character_wallet.v1" in (char.scopes or ""):
+    # Fan out the independent IO that used to run serially (trained SP,
+    # implants/clones, wallet journal, corp history, wallet chart). Each
+    # helper opens its own AsyncSessionLocal for any DB work per CLAUDE.md's
+    # async-session-safety gotcha; helpers that need ESI caching set
+    # client.db to a truthy sentinel because cache_get/cache_set always use
+    # their own isolated sessions internally.
+    scopes = char.scopes or ""
+
+    async def _fetch_trained_sp() -> int:
+        if "esi-skills.read_skills.v1" not in scopes:
+            return 0
+        try:
+            async with AsyncSessionLocal() as tdb:
+                c = (await tdb.execute(
+                    select(Character).where(Character.character_id == character_id)
+                )).scalar_one_or_none()
+                if not c:
+                    return 0
+                token = await refresh_token(c, tdb)
+            client = ESIClient(token)
+            client.db = True
+            raw = await client.get(f"/characters/{character_id}/skills/")
+            if raw and isinstance(raw, dict):
+                return sum(s.get("skillpoints_in_skill", 0) for s in raw.get("skills", []))
+        except Exception as e:
+            logger.warning("Failed to fetch total SP for char %s: %s", character_id, e)
+        return 0
+
+    async def _fetch_implants_clones() -> tuple[list, list]:
+        impl_out: list = []
+        jc_out: list = []
+        if not any(s in scopes for s in ("esi-clones.read_implants.v1", "esi-clones.read_clones.v1")):
+            return impl_out, jc_out
+        try:
+            async with AsyncSessionLocal() as tdb:
+                c = (await tdb.execute(
+                    select(Character).where(Character.character_id == character_id)
+                )).scalar_one_or_none()
+                if not c:
+                    return impl_out, jc_out
+                token = await refresh_token(c, tdb)
+            client = ESIClient(token)
+            client.db = True
+
+            from app.db.sde_models import SDEType as _SDEType, SDEStation as _SDEStation
+
+            # Implants + clones in parallel
+            tasks = []
+            want_impl = "esi-clones.read_implants.v1" in scopes
+            want_clones = "esi-clones.read_clones.v1" in scopes
+            if want_impl:
+                tasks.append(client.get(f"/characters/{character_id}/implants/"))
+            if want_clones:
+                tasks.append(client.get(f"/characters/{character_id}/clones/"))
+            fetched = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+
+            impl_ids: list = []
+            clone_data: dict = {}
+            idx = 0
+            if want_impl:
+                v = fetched[idx] if idx < len(fetched) else None
+                impl_ids = v if isinstance(v, list) else []
+                idx += 1
+            if want_clones:
+                v = fetched[idx] if idx < len(fetched) else None
+                clone_data = v if isinstance(v, dict) else {}
+
+            jc_list = clone_data.get("jump_clones", []) if isinstance(clone_data, dict) else []
+            all_type_ids: set = set(impl_ids)
+            for jc in jc_list:
+                all_type_ids.update(jc.get("implants", []))
+
+            async with AsyncSessionLocal() as sdb:
+                type_map: dict = {}
+                if all_type_ids:
+                    sde_r = await sdb.execute(
+                        select(_SDEType).where(_SDEType.type_id.in_(all_type_ids))
+                    )
+                    type_map = {t.type_id: t for t in sde_r.scalars().all()}
+
+                loc_ids = {jc["location_id"] for jc in jc_list}
+                station_ids = [lid for lid in loc_ids if jc_list and
+                               next((j for j in jc_list if j["location_id"] == lid), {})
+                               .get("location_type") == "station"]
+                structure_ids = [lid for lid in loc_ids if lid not in station_ids]
+
+                loc_names: dict = {}
+                if station_ids:
+                    st_r = await sdb.execute(
+                        select(_SDEStation).where(_SDEStation.station_id.in_(station_ids))
+                    )
+                    for s in st_r.scalars().all():
+                        loc_names[s.station_id] = s.station_name
+
+            # Parallel structure-name lookups (bounded concurrency matches the
+            # ESI bulk-fetch pattern from CLAUDE.md).
+            if structure_ids:
+                sem = asyncio.Semaphore(5)
+
+                async def _resolve_struct(sid: int):
+                    async with sem:
+                        try:
+                            sd = await client.get(f"/universe/structures/{sid}/")
+                            return sid, sd.get("name", f"Structure {sid}")
+                        except Exception:
+                            return sid, f"Structure {sid}"
+
+                res = await asyncio.gather(*[_resolve_struct(s) for s in structure_ids])
+                for sid, name in res:
+                    loc_names[sid] = name
+
+            impl_out = _enrich_implants(impl_ids, type_map)
+            for jc in jc_list:
+                lid = jc["location_id"]
+                jc_out.append({
+                    "location": loc_names.get(lid, f"Location {lid}"),
+                    "implants": _enrich_implants(jc.get("implants", []), type_map),
+                })
+        except Exception as e:
+            logger.warning("Failed to fetch implants/clones for char %s: %s", character_id, e)
+        return impl_out, jc_out
+
+    async def _fetch_wallet_journal() -> tuple[list, str | None]:
+        if "esi-wallet.read_character_wallet.v1" not in scopes:
+            return [], "missing_scope"
         try:
             from app.esi.client import get_client_safe
             client = await get_client_safe(char)
-            client.db = db
+            client.db = True
             raw = await get_wallet_journal(client, character_id, page=1)
-            journal = raw[:20] if raw else []
+            return (raw[:20] if raw else []), None
         except Exception as e:
             logger.warning("Wallet journal fetch failed for char %s: %s", character_id, e)
-            journal_error = "fetch_failed"
-    else:
-        journal_error = "missing_scope"
-    _mark("wallet_journal")
+            return [], "fetch_failed"
 
-    # Fetch corporation history + backfill birthday (public, no auth needed)
-    corp_history = []
-    from app.esi.client import ESIClient as _PubClient
-    pub_client = _PubClient("")
-    try:
-        raw_history = await pub_client.get_public(f"/characters/{character_id}/corporationhistory/")
-        if raw_history:
-            # Resolve corp names
-            corp_ids = list({h.get("corporation_id") for h in raw_history if h.get("corporation_id")})
-            corp_names = {}
-            if corp_ids:
-                try:
-                    names_data = await pub_client.post_public("/universe/names/", corp_ids)
-                    corp_names = {n["id"]: n["name"] for n in names_data}
-                except Exception:
-                    pass
-            # Sort by record_id descending (most recent first) — ESI usually does this already
-            raw_history.sort(key=lambda x: x.get("record_id", 0), reverse=True)
-            now_utc = datetime.now(timezone.utc)
-            for i, h in enumerate(raw_history):
-                cid_h = h.get("corporation_id")
-                start = h.get("start_date", "")
-                # Duration: time between this start_date and the next entry's start_date (or now for current)
-                days_in = None
-                if start:
+    async def _fetch_corp_history() -> list:
+        out: list = []
+        try:
+            from app.esi.client import ESIClient as _PubClient
+            pub = _PubClient("")
+            pub.db = True
+            raw_history = await pub.get_public(f"/characters/{character_id}/corporationhistory/")
+            if raw_history:
+                corp_ids = list({h.get("corporation_id") for h in raw_history if h.get("corporation_id")})
+                corp_names: dict = {}
+                if corp_ids:
                     try:
-                        start_dt = iso_parser.isoparse(start)
-                        if i == 0:
-                            days_in = (now_utc - start_dt).days
-                        else:
-                            prev_start = raw_history[i - 1].get("start_date", "")
-                            if prev_start:
-                                prev_dt = iso_parser.isoparse(prev_start)
-                                days_in = (prev_dt - start_dt).days
+                        names_data = await pub.post_public("/universe/names/", corp_ids)
+                        corp_names = {n["id"]: n["name"] for n in names_data}
                     except Exception:
                         pass
-                corp_history.append({
-                    "corporation_id": cid_h,
-                    "corporation_name": corp_names.get(cid_h, f"Corp {cid_h}"),
-                    "start_date": start[:10] if start else "",
-                    "days_in": days_in,
-                    "is_current": i == 0,
-                })
-    except Exception as e:
-        logger.warning("Corp history fetch failed for char %s: %s", character_id, e)
+                raw_history.sort(key=lambda x: x.get("record_id", 0), reverse=True)
+                now_utc = datetime.now(timezone.utc)
+                for i, h in enumerate(raw_history):
+                    cid_h = h.get("corporation_id")
+                    start = h.get("start_date", "")
+                    days_in = None
+                    if start:
+                        try:
+                            start_dt = iso_parser.isoparse(start)
+                            if i == 0:
+                                days_in = (now_utc - start_dt).days
+                            else:
+                                prev_start = raw_history[i - 1].get("start_date", "")
+                                if prev_start:
+                                    prev_dt = iso_parser.isoparse(prev_start)
+                                    days_in = (prev_dt - start_dt).days
+                        except Exception:
+                            pass
+                    out.append({
+                        "corporation_id": cid_h,
+                        "corporation_name": corp_names.get(cid_h, f"Corp {cid_h}"),
+                        "start_date": start[:10] if start else "",
+                        "days_in": days_in,
+                        "is_current": i == 0,
+                    })
+        except Exception as e:
+            logger.warning("Corp history fetch failed for char %s: %s", character_id, e)
+        return out
 
-    # Backfill birthday if missing
-    if not char.birthday:
+    async def _fetch_chart_data() -> dict:
         try:
-            pub_info = await pub_client.get_public(f"/characters/{character_id}/")
-            bday_str = pub_info.get("birthday")
-            if bday_str:
-                from dateutil import parser as iso_p
-                char.birthday = iso_p.isoparse(bday_str).replace(tzinfo=None)
-                await db.commit()
-        except Exception:
-            pass
-    _mark("corp_history_and_birthday")
+            async with AsyncSessionLocal() as cdb:
+                return await _get_chart_data(character_id, range, cdb)
+        except Exception as e:
+            logger.warning("Chart data fetch failed for char %s: %s", character_id, e)
+            return {"labels": [], "values": []}
 
-    # Initial chart data (default range)
-    chart_data = await _get_chart_data(character_id, range, db)
-    _mark("chart_data")
+    # Birthday backfill runs off the critical path — the template doesn't
+    # wait on it. If the char row was missing a birthday before, it'll be
+    # populated for the next page load.
+    if not char.birthday:
+        async def _bday_backfill():
+            try:
+                from app.esi.client import ESIClient as _PubClient2
+                pub = _PubClient2("")
+                pub.db = True
+                pub_info = await pub.get_public(f"/characters/{character_id}/")
+                bday_str = pub_info.get("birthday") if isinstance(pub_info, dict) else None
+                if bday_str:
+                    from dateutil import parser as iso_p
+                    bday = iso_p.isoparse(bday_str).replace(tzinfo=None)
+                    async with AsyncSessionLocal() as bdb:
+                        c = (await bdb.execute(
+                            select(Character).where(Character.character_id == character_id)
+                        )).scalar_one_or_none()
+                        if c and not c.birthday:
+                            c.birthday = bday
+                            await bdb.commit()
+            except Exception:
+                pass
+
+        asyncio.create_task(_bday_backfill())
+
+    (total_trained_sp,
+     implants_clones_res,
+     wallet_journal_res,
+     corp_history,
+     chart_data) = await asyncio.gather(
+        _fetch_trained_sp(),
+        _fetch_implants_clones(),
+        _fetch_wallet_journal(),
+        _fetch_corp_history(),
+        _fetch_chart_data(),
+    )
+    implants, jump_clones = implants_clones_res
+    journal, journal_error = wallet_journal_res
+    _mark("fanout")
 
     current_wallet = cache.wallet if cache else None
 
