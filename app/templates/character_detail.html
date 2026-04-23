@@ -481,19 +481,6 @@
 
 </div>
 
-{# ── Kill Stats (killmails feature; lazy-loaded) ───────────────────────────── #}
-{% if killmails_enabled %}
-<div id="kill-stats-panel"
-     hx-get="/character/{{ char.character_id }}/kill-stats"
-     hx-trigger="load"
-     hx-swap="innerHTML">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Combat Profile</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
-    </div>
-</div>
-{% endif %}
-
 {# ── Jump Clones ──────────────────────────────────────────────────────────────── #}
 {% if jump_clones %}
 <div class="b-section">
@@ -648,6 +635,19 @@
     </div>
     {% endif %}
 </div>
+
+{# ── Kill Stats (killmails feature; lazy-loaded) ───────────────────────────── #}
+{% if killmails_enabled %}
+<div id="kill-stats-panel"
+     hx-get="/character/{{ char.character_id }}/kill-stats"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Combat Profile</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
+</div>
+{% endif %}
 
 {# ── Chart JS ──────────────────────────────────────────────────────────────── #}
 <script id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>

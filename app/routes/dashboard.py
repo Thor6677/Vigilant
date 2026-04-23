@@ -1988,11 +1988,29 @@ async def dashboard_kill_pulse(
         kq.your_hunters(char_ids, days=90, limit=8),
     )
 
-    # Name resolution is deliberately deferred — we don't hit ESI on the page
-    # path. Wingmen / hunters render with IDs + links to zKillboard; a bulk
-    # resolver can be added later if desired.
+    # Resolve wingmen (characters) and hunters (corps) to names via the
+    # bulk /universe/names/ endpoint. Cached 30 days server-side by
+    # _ttl_for_path, so after the first hit per window this is free.
     char_names: dict[int, str] = {}
     corp_names: dict[int, str] = {}
+    name_ids = list(
+        {w["character_id"] for w in wingmen} | {h["id"] for h in hunters}
+    )
+    if name_ids:
+        try:
+            from app.esi.client import ESIClient as _PubClient
+            pub = _PubClient("")
+            pub.db = True  # enables cache_get / cache_set (own session internally)
+            # /universe/names/ accepts up to 1000 per call; we're well under.
+            resolved = await pub.post_public("/universe/names/", name_ids)
+            for entry in resolved or []:
+                cat = entry.get("category", "")
+                if cat == "character":
+                    char_names[entry["id"]] = entry.get("name", "")
+                elif cat == "corporation":
+                    corp_names[entry["id"]] = entry.get("name", "")
+        except Exception as e:
+            logger.warning("Kill-pulse name resolution failed: %s", e)
 
     most_active_cid = None
     if per_char:
