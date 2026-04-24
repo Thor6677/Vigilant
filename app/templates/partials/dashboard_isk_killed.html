@@ -13,7 +13,7 @@
 <div id="dashboard-isk-killed" style="margin-bottom:0.75rem;">
 <div class="b-section">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
-        <span class="b-label">ISK Killed · {{ fmt_isk(total_isk) }} ISK</span>
+        <span class="b-label">ISK Destroyed · New Eden · {{ fmt_isk(total_isk) }} ISK</span>
         <div style="display:flex;gap:0.25rem;">
             {% for w, label in [('1h','1H'),('24h','24H'),('week','Week'),('month','Month')] %}
             <button type="button" class="b-btn"
@@ -26,11 +26,9 @@
             {% endfor %}
         </div>
     </div>
-    {% if no_chars %}
-    <div class="b-empty" style="padding:0.75rem;">No characters linked.</div>
-    {% elif total_isk == 0 %}
+    {% if total_isk == 0 %}
     <div class="b-empty" style="padding:0.75rem;color:var(--muted);font-size:11px;">
-        No kills by your characters in this window.
+        No killmail data in this window yet. The stream needs time to populate longer windows.
     </div>
     {% else %}
     <div style="position:relative;height:180px;padding:0.5rem 0.75rem;">
@@ -39,7 +37,7 @@
     {% endif %}
 </div>
 
-{% if not no_chars and total_isk > 0 %}
+{% if total_isk > 0 %}
 <script>
 (function() {
     if (typeof Chart === 'undefined') return;

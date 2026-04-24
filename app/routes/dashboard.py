@@ -2258,8 +2258,9 @@ async def dashboard_isk_killed(
     window: str = "24h",
     db: AsyncSession = Depends(get_db),
 ):
-    """Line chart of ISK destroyed (user's characters as attackers) over a
-    selectable time window. Bins killmail.total_value into time buckets."""
+    """Line chart of ISK destroyed across all of New Eden over a selectable
+    time window. Reads every killmail the stream (and 15-min zKB poller)
+    has persisted. Bins killmail.total_value into time buckets."""
     from app.config import get_settings as _gs
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
@@ -2280,37 +2281,13 @@ async def dashboard_isk_killed(
         window = "24h"
     delta, bin_seconds, label_fmt = windows[window]
 
-    char_rows = await db.execute(
-        select(Character.character_id).where(Character.user_id == user_id)
-    )
-    char_ids = [r[0] for r in char_rows.all()]
-    if not char_ids:
-        return templates.TemplateResponse(
-            "partials/dashboard_isk_killed.html",
-            {
-                "request": request,
-                "window": window,
-                "labels": [],
-                "values": [],
-                "total_isk": 0,
-                "no_chars": True,
-            },
-        )
-
-    from app.db.models import Killmail, KillmailAttacker
+    from app.db.models import Killmail
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - delta
 
-    # Distinct killmails where any of user's chars was attacker, within window
-    attacker_subq = (
-        select(KillmailAttacker.killmail_id)
-        .where(KillmailAttacker.character_id.in_(char_ids))
-        .distinct()
-        .subquery()
-    )
+    # Universe-wide: every killmail in the window. No character scoping.
     q = (
         select(Killmail.killmail_time, Killmail.total_value)
-        .where(Killmail.killmail_id.in_(select(attacker_subq.c.killmail_id)))
         .where(Killmail.killmail_time >= cutoff)
     )
     rows = (await db.execute(q)).all()
