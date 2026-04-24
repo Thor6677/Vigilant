@@ -45,7 +45,13 @@ def within_startup_grace() -> bool:
 
 async def find_pending_backfill_chars(limit: int = 1) -> list[int]:
     """Return character IDs that need backfill (never synced, or stale by >6h).
-    Caps the scheduler to one at a time so we don't stampede."""
+    Caps the scheduler to one at a time so we don't stampede.
+
+    Ordering priority (most starved first):
+      1. Never-touched characters (no row in character_kill_ingest yet).
+      2. Incomplete backfills, oldest last_synced first.
+      3. Complete-but-stale refreshes, oldest last_synced first.
+    Within each tier we fall back to character_id for determinism."""
     async with AsyncSessionLocal() as db:
         all_chars = await db.execute(select(Character.character_id))
         all_ids = [r[0] for r in all_chars.all()]
@@ -56,15 +62,23 @@ async def find_pending_backfill_chars(limit: int = 1) -> list[int]:
         state_map = {r.character_id: r for r in state.scalars().all()}
 
         stale_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=6)
-        candidates: list[int] = []
-        for cid in all_ids:
+
+        def _priority(cid: int):
             s = state_map.get(cid)
+            # Sentinel far in the past so None-last_synced sorts before any real time.
+            ls = s.last_synced if (s and s.last_synced) else datetime.min
             if s is None:
-                candidates.append(cid)  # never synced
-            elif not s.backfill_complete:
-                candidates.append(cid)  # incomplete
-            elif s.last_synced is None or s.last_synced < stale_cutoff:
-                candidates.append(cid)  # stale
+                return (0, ls, cid)
+            if not s.backfill_complete:
+                return (1, ls, cid)
+            if s.last_synced is None or s.last_synced < stale_cutoff:
+                return (2, ls, cid)
+            return (99, ls, cid)  # up-to-date — excluded below
+
+        candidates = sorted(
+            (cid for cid in all_ids if _priority(cid)[0] < 99),
+            key=_priority,
+        )
         return candidates[:limit]
 
 
@@ -112,6 +126,17 @@ async def backfill_character(character_id: int) -> dict:
     async with httpx.AsyncClient() as http:
         for page in range(start_page, start_page + max_pages_this_run):
             if page > MAX_PAGES:
+                # zKillboard only serves up to MAX_PAGES — treat this as a
+                # successful terminal state so the scheduler stops re-picking
+                # us, rather than looping forever on an instant-break no-op.
+                async with AsyncSessionLocal() as db:
+                    r = await db.get(CharacterKillIngest, character_id)
+                    if r:
+                        r.backfill_complete = True
+                        r.last_synced = datetime.now(timezone.utc).replace(tzinfo=None)
+                        if new_last_seen and (r.last_seen_killmail_id is None or new_last_seen > r.last_seen_killmail_id):
+                            r.last_seen_killmail_id = new_last_seen
+                        await db.commit()
                 break
             page_data = await _fetch_zkb_page(http, character_id, page)
             pages_walked += 1
