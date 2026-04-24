@@ -171,12 +171,12 @@
 </div>
 
 {# ── Rate limit events (from DB) ─────────────────────────────────────────── #}
-{% if recent_events %}
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Rate Limit Events</span>
         <span style="display:flex;align-items:center;gap:0.6rem;">
             <span style="font-size:10px;color:var(--muted);">{{ recent_events | length }} active</span>
+            {% if recent_events %}
             <button type="button"
                     hx-post="/admin/esi/events/dismiss-all"
                     hx-target="#admin-content" hx-swap="innerHTML"
@@ -184,6 +184,7 @@
                     style="padding:2px 8px;font-size:9px;font-family:inherit;letter-spacing:0.1em;text-transform:uppercase;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;">
                 Dismiss All
             </button>
+            {% endif %}
         </span>
     </div>
     <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
@@ -192,6 +193,7 @@
         <span style="color:var(--warn);">420</span> = error limited (too many failed requests).
         <strong>Retry</strong> = seconds ESI told us to wait. Dismissed events move to the archive below and auto-delete after 30 days.
     </div>
+    {% if recent_events %}
     <div style="max-height:250px;overflow-y:auto;">
         <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Timestamp (UTC)</span>
@@ -224,16 +226,25 @@
         </div>
         {% endfor %}
     </div>
-</div>
-{% endif %}
-
-{# ── Archived rate-limit events ───────────────────────────────────────────── #}
-{% if archived_events %}
-<div class="b-panel">
-    <div class="b-panel-head">
-        <span class="b-label">Archived Rate Limit Events</span>
-        <span style="font-size:10px;color:var(--muted);">{{ archived_events | length }} archived · auto-delete after 30d</span>
+    {% else %}
+    <div class="b-empty" style="padding:1.25rem 0.75rem;text-align:center;font-size:11px;color:var(--muted);">
+        No active rate limit events. Dismissed events drop into the archive below.
     </div>
+    {% endif %}
+</div>
+
+{# ── Archived rate-limit events (collapsed by default) ─────────────────── #}
+{% if archived_events %}
+<details class="b-panel" style="padding:0;">
+    <summary style="cursor:pointer;padding:0;list-style:none;">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label" style="display:flex;align-items:center;gap:0.4rem;">
+                <span class="b-archive-chevron" style="display:inline-block;width:10px;font-size:9px;color:var(--muted);transition:transform 0.15s;">▸</span>
+                Archived Rate Limit Events
+            </span>
+            <span style="font-size:10px;color:var(--muted);">{{ archived_events | length }} archived · auto-delete after 30d</span>
+        </div>
+    </summary>
     <div style="max-height:250px;overflow-y:auto;">
         <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Occurred (UTC)</span>
@@ -256,5 +267,9 @@
         </div>
         {% endfor %}
     </div>
-</div>
+</details>
+<style>
+    details[open] .b-archive-chevron { transform: rotate(90deg); }
+    summary::-webkit-details-marker { display: none; }
+</style>
 {% endif %}
