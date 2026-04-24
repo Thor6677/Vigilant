@@ -177,32 +177,30 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/intel/gatecheck/finder", response_class=HTMLResponse)
 async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
-    """Find active gatecamps across EVE."""
-    # Fetch recent kills (2 pages)
-    page1, page2 = await asyncio.gather(
-        _zkb_get("/kills/pastSeconds/3600/"),
-        _zkb_get("/kills/pastSeconds/3600/page/2/"),
-    )
-    all_kills = page1 + page2
+    """Find active gatecamps across EVE — now backed by the killmail.stream
+    rolling 1h buffer (app/intel/killmail_stream.py::get_recent_kills) instead
+    of per-request zKB polls. No external API call at page-load, and coverage
+    is continuous rather than capped at zKB's 2-page window."""
+    from app.intel.killmail_stream import get_recent_kills
 
-    # Pre-filter: keep only non-NPC kills at gate locations (heuristic)
+    recent = get_recent_kills(window_seconds=3600)
+
+    # Gate kills only (non-NPC, location_id in stargate range)
     gate_kills = []
-    for km in all_kills:
+    for km in recent:
         zkb = km.get("zkb", {})
         if zkb.get("npc"):
             continue
-        loc_id = zkb.get("locationID", 0)
+        loc_id = zkb.get("locationID") or 0
         if _is_gate_location(loc_id):
             gate_kills.append(km)
 
-    # Group by system
+    # Group by system; 3+ gate kills = potential camp
     by_sys: dict[int, list] = defaultdict(list)
     for km in gate_kills:
         sid = km.get("solar_system_id")
         if sid:
             by_sys[sid].append(km)
-
-    # Systems with 3+ gate kills = potential camps
     camp_systems = {sid: kms for sid, kms in by_sys.items() if len(kms) >= 3}
 
     if not camp_systems:
@@ -210,28 +208,9 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
             "request": request, "camps": [],
         })
 
-    # Fetch full killmail details for camps (top 5 camps, 10 kills each)
-    full_kms_by_sys: dict[int, list] = {}
-    top_camps = sorted(camp_systems.items(), key=lambda x: -len(x[1]))[:5]
-    if top_camps:
-        enriched = await asyncio.gather(
-            *[_enrich_kills(kms, max_per_call=10) for _, kms in top_camps]
-        )
-        for (sid, _), full_kms in zip(top_camps, enriched):
-            full_kms_by_sys[sid] = full_kms
-
-    # For remaining camps, use basic zkb data only
-    for sid, kms in camp_systems.items():
-        if sid not in full_kms_by_sys:
-            # Create minimal killmail stubs from zkb data
-            full_kms_by_sys[sid] = [
-                {"killmail_id": km.get("killmail_id"), "zkb": km.get("zkb", {}),
-                 "victim": {}, "attackers": [],
-                 "killmail_time": "", "solar_system_id": sid}
-                for km in kms
-            ]
-
-    type_names, group_ids = await _resolve_type_ids(db, full_kms_by_sys)
+    # Stream buffer already has full ESI shape (victim + attackers + zkb),
+    # so no ESI hydration step needed.
+    type_names, group_ids = await _resolve_type_ids(db, camp_systems)
 
     camps = []
     for sid, kms in sorted(camp_systems.items(), key=lambda x: -len(x[1])):
@@ -239,9 +218,7 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
         if not info:
             continue
         sec = info.get("security", 0)
-        analysis = _analyze_kills(
-            full_kms_by_sys.get(sid, []), type_names, group_ids,
-        )
+        analysis = _analyze_kills(kms, type_names, group_ids)
         camps.append({
             "system_id": sid,
             "system_name": info.get("system_name", str(sid)),

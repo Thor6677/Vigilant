@@ -71,6 +71,75 @@ _sliding_window: dict[int, list[dict]] = defaultdict(list)
 _sys_meta_cache: dict[int, dict | None] = {}
 _last_db_flush: dict[int, datetime] = {}
 
+# Flat 1-hour kill buffer feeding the gate-camp finder + route threat score.
+# Compact shape (no items[], small per-kill footprint) — targets ~40 kills/min
+# × 60 min ≈ 2400 entries, ~1-2 MB.
+RECENT_KILLS_WINDOW_SECONDS = 3600
+_recent_kills: list[dict] = []
+
+
+def get_recent_kills(
+    window_seconds: int = RECENT_KILLS_WINDOW_SECONDS,
+    systems: set[int] | None = None,
+) -> list[dict]:
+    """Snapshot of recent kills from the stream's rolling buffer. Optionally
+    filtered to a set of system_ids. Returns compact dicts matching the
+    ESI killmail shape that analyze_kills() expects (victim, attackers, zkb,
+    solar_system_id, killmail_time) minus heavy fields like items[]."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=window_seconds)
+    out = []
+    for rec in _recent_kills:
+        if rec["_kt"] < cutoff:
+            continue
+        if systems is not None and rec["solar_system_id"] not in systems:
+            continue
+        out.append(rec)
+    return out
+
+
+def _append_recent_kill(ev: dict, kt: datetime) -> None:
+    """Push a compact record into the rolling buffer + prune the front by time."""
+    victim = ev.get("victim") or {}
+    attackers = ev.get("attackers") or []
+    zkb = ev.get("zkb") or {}
+    rec = {
+        "_kt": kt,  # internal tz-naive datetime for pruning/filtering
+        "killmail_id": ev.get("killmail_id"),
+        "killmail_time": ev.get("killmail_time"),  # keep ISO string for time_ago()
+        "solar_system_id": ev.get("solar_system_id"),
+        "victim": {
+            "character_id": victim.get("character_id"),
+            "corporation_id": victim.get("corporation_id"),
+            "alliance_id": victim.get("alliance_id"),
+            "ship_type_id": victim.get("ship_type_id"),
+        },
+        "attackers": [
+            {
+                "character_id": a.get("character_id"),
+                "corporation_id": a.get("corporation_id"),
+                "alliance_id": a.get("alliance_id"),
+                "ship_type_id": a.get("ship_type_id"),
+                "weapon_type_id": a.get("weapon_type_id"),
+                "final_blow": a.get("final_blow"),
+            }
+            for a in attackers
+        ],
+        "zkb": {
+            "totalValue": zkb.get("totalValue"),
+            "locationID": zkb.get("locationID"),
+            "npc": zkb.get("npc"),
+            "solo": zkb.get("solo"),
+            "labels": zkb.get("labels"),
+            "hash": zkb.get("hash"),
+        },
+    }
+    _recent_kills.append(rec)
+    # Prune old entries from the front. Bounded scan — most pruning happens
+    # at the start of the list since appends are chronological.
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=RECENT_KILLS_WINDOW_SECONDS)
+    while _recent_kills and _recent_kills[0]["_kt"] < cutoff:
+        _recent_kills.pop(0)
+
 
 async def _resolve_sys_meta(system_id: int) -> dict | None:
     """Cache system metadata (name, security, band). Negative cache miss too
@@ -369,6 +438,9 @@ async def _handle_kill(ev: dict, our_ids: set[int]) -> None:
         await store_killmail(ev, zkb, our_ids)
     except Exception as e:
         log.debug("killmail_stream: store failed for %s: %s", kid, e)
+
+    # Also stash into the rolling 1h flat buffer for gate-camp / route-threat
+    _append_recent_kill(ev, kt)
 
     victim = ev.get("victim") or {}
     attackers = ev.get("attackers") or []

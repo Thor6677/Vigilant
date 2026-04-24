@@ -300,45 +300,30 @@ async def enrich_kills(zkb_kills: list, max_per_call: int = 15) -> list[dict]:
 # ── Route checking ───────────────────────────────────────────────────────────
 
 async def check_route_systems(route: list[int], db: AsyncSession) -> list[dict]:
-    """For each system on route: get stargates, fetch zKB kills, filter to
-    gate kills only, then fetch full killmail details from ESI."""
+    """Per-system threat analysis for a route. Backed by the killmail.stream
+    rolling 1h buffer (app/intel/killmail_stream.py::get_recent_kills) instead
+    of per-system zKB + ESI calls. Zero external API calls at request time —
+    analysis runs on in-memory data that's kept warm by the live consumer.
 
-    # Step 1: Parallel fetch — zKB kills AND system stargates for every system
-    async def fetch_system(sid: int):
-        kills, gates = await asyncio.gather(
-            zkb_get(f"/kills/systemID/{sid}/pastSeconds/3600/"),
-            get_system_gates(sid),
-        )
-        return sid, kills, gates
+    Gate-kill filter uses the 50M-59.9M stargate ID heuristic (is_gate_location)
+    instead of a per-system ESI stargate lookup.
+    """
+    from app.intel.killmail_stream import get_recent_kills
 
-    sys_results = await asyncio.gather(*[fetch_system(sid) for sid in route])
+    route_set = set(route)
+    recent = get_recent_kills(window_seconds=3600, systems=route_set)
 
-    # Step 2: Filter to gate kills (locationID matches a stargate in the system)
-    gate_kills_by_sys: dict[int, list] = {}
-    for sid, kills, gates in sys_results:
-        gate_kills = []
-        for km in kills:
-            loc_id = km.get("zkb", {}).get("locationID", 0)
-            if loc_id in gates:
-                gate_kills.append(km)
-        gate_kills_by_sys[sid] = gate_kills
+    gate_kills_by_sys: dict[int, list] = {sid: [] for sid in route}
+    for km in recent:
+        sid = km.get("solar_system_id")
+        if sid not in route_set:
+            continue
+        loc_id = km.get("zkb", {}).get("locationID") or 0
+        if is_gate_location(loc_id):
+            gate_kills_by_sys.setdefault(sid, []).append(km)
 
-    # Step 3: Fetch full killmail data from ESI for gate kills
-    full_kms_by_sys: dict[int, list] = {}
-    fetch_tasks = []
-    for sid in route:
-        gk = gate_kills_by_sys.get(sid, [])
-        if gk:
-            fetch_tasks.append((sid, enrich_kills(gk, max_per_call=10)))
-    if fetch_tasks:
-        enriched = await asyncio.gather(*[t for _, t in fetch_tasks])
-        for (sid, _), full_kms in zip(fetch_tasks, enriched):
-            full_kms_by_sys[sid] = full_kms
+    type_names, group_ids = await resolve_type_ids(db, gate_kills_by_sys)
 
-    # Step 4: Resolve type IDs from full killmails
-    type_names, group_ids = await resolve_type_ids(db, full_kms_by_sys)
-
-    # Step 5: Build output
     sys_info: dict[int, dict] = {}
     for sid in route:
         info = await sde.system_info(db, sid)
@@ -350,7 +335,7 @@ async def check_route_systems(route: list[int], db: AsyncSession) -> list[dict]:
         info = sys_info.get(sid, {})
         sec = info.get("security", 0)
         analysis = analyze_kills(
-            full_kms_by_sys.get(sid, []), type_names, group_ids,
+            gate_kills_by_sys.get(sid, []), type_names, group_ids,
         )
         out.append({
             "waypoint": i + 1,
