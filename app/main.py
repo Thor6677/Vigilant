@@ -221,3 +221,14 @@ async def startup():
     asyncio.create_task(ensure_sde_loaded())
     asyncio.create_task(_background_scheduler())
     start_map_poller()
+
+    from app.config import get_settings as _gs
+    _cfg = _gs()
+    if (
+        _cfg.killmails_enabled
+        and _cfg.killmail_battles_enabled
+        and _cfg.killmail_stream_enabled
+    ):
+        from app.intel.killmail_stream import run_consumer, run_sweeper
+        asyncio.create_task(run_consumer())
+        asyncio.create_task(run_sweeper())

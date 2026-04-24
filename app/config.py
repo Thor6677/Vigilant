@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     killmails_enabled: bool = False
     killmail_dashboard_enabled: bool = False
     killmail_battles_enabled: bool = False
+    killmail_stream_enabled: bool = False  # killmail.stream live consumer for big-battle banner
 
     class Config:
         env_file = ".env"
