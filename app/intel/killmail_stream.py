@@ -162,7 +162,31 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
         "killmail_ids_json": json.dumps([k["kill_id"] for k in kills]),
     }
 
+    # The sliding window's start_time drifts forward as old kills age out,
+    # which would miss the (system_id, start_time) conflict index and create
+    # a new row for the same ongoing battle. Reuse an existing row's start_time
+    # if one is active (last seen within BATTLE_GAP_SECONDS) so we update in
+    # place.
+    gap = timedelta(seconds=BATTLE_GAP_SECONDS)
     async with AsyncSessionLocal() as db:
+        existing = (
+            await db.execute(
+                select(DetectedBattle.start_time)
+                .where(
+                    DetectedBattle.system_id == system_id,
+                    DetectedBattle.end_time >= start - gap,
+                )
+                .order_by(DetectedBattle.end_time.desc())
+                .limit(1)
+            )
+        ).first()
+        if existing:
+            row["start_time"] = existing[0]
+            # Keep the widest time span: earliest start wins so duration stays coherent
+            row["duration_minutes"] = max(
+                1, int((end - existing[0]).total_seconds() / 60)
+            )
+
         stmt = sqlite_insert(DetectedBattle).values(**row)
         stmt = stmt.on_conflict_do_update(
             index_elements=["system_id", "start_time"],
