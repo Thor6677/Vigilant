@@ -137,30 +137,102 @@ async def _cluster_system(
     if len(kills) < BATTLE_MIN_KILLS:
         return []
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
-    cutoff_naive = cutoff.replace(tzinfo=None)
-
-    # Parse times + filter to lookback
-    parsed: list[dict] = []
+    # zKB's /api/systemID/ payload only has {killmail_id, zkb{hash,totalValue,...}}
+    # — NO killmail_time. Time comes from our own killmails table (disk-first) or
+    # from ESI hydration. Hence the lookback filter must run AFTER hydration, not
+    # before. Do not re-introduce a pre-hydration time filter here.
+    parsed_raw: list[dict] = []
     for km in kills:
         kid = km.get("killmail_id")
         zkb = km.get("zkb", {}) or {}
         khash = zkb.get("hash")
-        kill_time_raw = km.get("killmail_time")
-        if not (kid and khash and kill_time_raw):
+        if kid and khash:
+            parsed_raw.append({
+                "killmail_id": kid,
+                "killmail_hash": khash,
+                "zkb": zkb,
+            })
+    if len(parsed_raw) < BATTLE_MIN_KILLS:
+        return []
+
+    # Disk-first hydration (includes killmail_time — the field zKB doesn't give us)
+    km_ids = [p["killmail_id"] for p in parsed_raw]
+    hydrated: dict[int, dict] = {}
+    async with AsyncSessionLocal() as db:
+        rows = await db.execute(
+            select(
+                Killmail.killmail_id,
+                Killmail.killmail_time,
+                Killmail.victim_ship_type_id,
+                Killmail.victim_corporation_id,
+                Killmail.total_value,
+                Killmail.attacker_count,
+                Killmail.final_blow_character_id,
+            ).where(Killmail.killmail_id.in_(km_ids))
+        )
+        for r in rows.all():
+            hydrated[r[0]] = {
+                "killmail_time": r[1],
+                "victim_ship_type_id": r[2],
+                "victim_corporation_id": r[3],
+                "total_value": r[4] or 0.0,
+                "attacker_count": r[5] or 1,
+                "final_blow_character_id": r[6],
+            }
+
+    # ESI-fetch misses (zKB returns newest-first, so walk in order). Per-system
+    # cap prevents one big system from starving the other 19 of the 100-budget.
+    PER_SYSTEM_HYDRATION_CAP = 15
+    missing = [p for p in parsed_raw if p["killmail_id"] not in hydrated]
+    if missing and hydration_budget[0] > 0:
+        take = min(hydration_budget[0], PER_SYSTEM_HYDRATION_CAP, len(missing))
+        to_fetch = missing[:take]
+        hydration_budget[0] -= len(to_fetch)
+
+        async def _grab(entry):
+            kid = entry["killmail_id"]
+            khash = entry["killmail_hash"]
+            zkb = entry["zkb"]
+            full = await fetch_killmail(kid, khash)
+            if not full:
+                return kid, None
+            await store_killmail(full, zkb, our_ids)
+            victim = full.get("victim") or {}
+            attackers = full.get("attackers") or []
+            fb = next((a for a in attackers if a.get("final_blow")), None)
+            try:
+                kt = datetime.fromisoformat(
+                    (full.get("killmail_time") or "").replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except (ValueError, AttributeError):
+                kt = None
+            return kid, {
+                "killmail_time": kt,
+                "victim_ship_type_id": victim.get("ship_type_id"),
+                "victim_corporation_id": victim.get("corporation_id"),
+                "total_value": float(zkb.get("totalValue") or 0),
+                "attacker_count": len(attackers),
+                "final_blow_character_id": (fb or {}).get("character_id"),
+            }
+
+        results = await asyncio.gather(*[_grab(e) for e in to_fetch], return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            kid, data = r
+            if data and data.get("killmail_time") is not None:
+                hydrated[kid] = data
+
+    # Apply lookback filter using disk/ESI-sourced times (tz-naive throughout)
+    cutoff_naive = (datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)).replace(tzinfo=None)
+    parsed: list[dict] = []
+    for p in parsed_raw:
+        h = hydrated.get(p["killmail_id"])
+        if not h or h.get("killmail_time") is None:
             continue
-        try:
-            kt = datetime.fromisoformat(kill_time_raw.replace("Z", "+00:00")).replace(tzinfo=None)
-        except (ValueError, AttributeError):
+        if h["killmail_time"] < cutoff_naive:
             continue
-        if kt < cutoff_naive:
-            continue
-        parsed.append({
-            "killmail_id": kid,
-            "killmail_hash": khash,
-            "zkb": zkb,
-            "kill_time": kt,
-        })
+        parsed.append({"killmail_id": p["killmail_id"], "kill_time": h["killmail_time"]})
     if len(parsed) < BATTLE_MIN_KILLS:
         return []
     parsed.sort(key=lambda x: x["kill_time"])
@@ -183,62 +255,6 @@ async def _cluster_system(
 
     if not clusters:
         return []
-
-    # Hydrate kills in clusters, disk-first
-    km_ids_in_clusters = [km["killmail_id"] for c in clusters for km in c]
-    hydrated: dict[int, dict] = {}  # {killmail_id: {fields from killmails}}
-    async with AsyncSessionLocal() as db:
-        rows = await db.execute(
-            select(
-                Killmail.killmail_id,
-                Killmail.victim_ship_type_id,
-                Killmail.victim_corporation_id,
-                Killmail.total_value,
-                Killmail.attacker_count,
-                Killmail.final_blow_character_id,
-            ).where(Killmail.killmail_id.in_(km_ids_in_clusters))
-        )
-        for r in rows.all():
-            hydrated[r[0]] = {
-                "victim_ship_type_id": r[1],
-                "victim_corporation_id": r[2],
-                "total_value": r[3] or 0.0,
-                "attacker_count": r[4] or 1,
-                "final_blow_character_id": r[5],
-            }
-
-    missing = [
-        (km["killmail_id"], km["killmail_hash"], km["zkb"])
-        for c in clusters for km in c
-        if km["killmail_id"] not in hydrated
-    ]
-    if missing and hydration_budget[0] > 0:
-        to_fetch = missing[: hydration_budget[0]]
-        hydration_budget[0] -= len(to_fetch)
-
-        async def _grab(kid, khash, zkb):
-            full = await fetch_killmail(kid, khash)
-            if full:
-                await store_killmail(full, zkb, our_ids)
-                victim = full.get("victim") or {}
-                attackers = full.get("attackers") or []
-                fb = next((a for a in attackers if a.get("final_blow")), None)
-                return kid, {
-                    "victim_ship_type_id": victim.get("ship_type_id"),
-                    "victim_corporation_id": victim.get("corporation_id"),
-                    "total_value": float(zkb.get("totalValue") or 0),
-                    "attacker_count": len(attackers),
-                    "final_blow_character_id": (fb or {}).get("character_id"),
-                }
-            return kid, None
-
-        results = await asyncio.gather(*[_grab(k, h, z) for k, h, z in to_fetch], return_exceptions=True)
-        for r in results:
-            if isinstance(r, Exception):
-                continue
-            kid, data = r
-            if data:
-                hydrated[kid] = data
 
     # Build the DetectedBattle-shaped dicts
     out: list[dict] = []
