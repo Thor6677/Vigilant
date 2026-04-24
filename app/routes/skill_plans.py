@@ -576,6 +576,53 @@ async def rename_plan(plan_id: int, request: Request, db: AsyncSession = Depends
 
 # ── Add skill to plan ────────────────────────────────────────────────────────
 
+async def _apply_skills_with_prereqs(
+    db: AsyncSession,
+    plan: SkillPlan,
+    targets: list[tuple[int, int]],
+) -> tuple[int, int]:
+    """For each (skill_id, required_level) in `targets`, expand the full
+    transitive prerequisite chain and apply it to `plan`:
+
+      - skills not already in the plan are inserted at their required level
+        in training order (prereqs before dependents);
+      - skills already in the plan at a lower level are upgraded;
+      - skills at or above the required level are left alone (no downgrade).
+
+    Returns (added, upgraded). Caller commits."""
+    existing = {e.skill_type_id: e for e in plan.entries}
+    max_order = max((e.sort_order for e in plan.entries), default=-1)
+
+    req_lvl: dict[int, int] = {}
+    req_order: list[int] = []
+    for sid, lvl in targets:
+        chain = await _resolve_prereq_chain(db, sid, lvl)
+        for csid, clvl in chain:
+            if req_lvl.get(csid, 0) < clvl:
+                req_lvl[csid] = clvl
+            if csid not in req_order:
+                req_order.append(csid)
+
+    added = 0
+    upgraded = 0
+    for sid in req_order:
+        lvl = req_lvl[sid]
+        e = existing.get(sid)
+        if e is None:
+            max_order += 1
+            db.add(SkillPlanEntry(
+                plan_id=plan.id,
+                skill_type_id=sid,
+                target_level=lvl,
+                sort_order=max_order,
+            ))
+            added += 1
+        elif lvl > e.target_level:
+            e.target_level = lvl
+            upgraded += 1
+    return added, upgraded
+
+
 async def _resolve_prereq_chain(
     db: AsyncSession,
     root_skill_id: int,
@@ -646,31 +693,10 @@ async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(g
     if not plan:
         return HTMLResponse("", status_code=404)
 
-    # Expand the full transitive prereq chain. Prereqs are added (or upgraded
-    # if already present at a lower level) so the plan represents everything
-    # a character would need to train to complete it.
-    chain = await _resolve_prereq_chain(db, skill_type_id, target_level)
-
-    existing = {e.skill_type_id: e for e in plan.entries}
-    max_order = max((e.sort_order for e in plan.entries), default=-1)
-
-    added = 0
-    upgraded = 0
-    for sid, lvl in chain:
-        e = existing.get(sid)
-        if e is not None:
-            if lvl > e.target_level:
-                e.target_level = lvl
-                upgraded += 1
-            continue
-        max_order += 1
-        db.add(SkillPlanEntry(
-            plan_id=plan_id,
-            skill_type_id=sid,
-            target_level=lvl,
-            sort_order=max_order,
-        ))
-        added += 1
+    # Shared helper expands the prereq chain and applies all adds/upgrades.
+    added, upgraded = await _apply_skills_with_prereqs(
+        db, plan, [(skill_type_id, target_level)]
+    )
 
     if added == 0 and upgraded == 0:
         name = await sde.type_id_to_name(db, skill_type_id) or f"Skill {skill_type_id}"
@@ -935,17 +961,14 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">No skill text provided.</div>')
 
     # Parse lines like "Skill Name I" or "Skill Name 3"
-    added = 0
     not_found = []
-    existing_skills = {e.skill_type_id: e for e in plan.entries}
-    max_order = max((e.sort_order for e in plan.entries), default=-1)
+    targets: list[tuple[int, int]] = []
 
     for line in text.strip().splitlines():
         line = line.strip()
         if not line:
             continue
 
-        # Try to match "Skill Name <roman numeral>" or "Skill Name <digit>"
         match = re.match(r'^(.+?)\s+(I{1,3}V?|IV|V|[1-5])$', line)
         if not match:
             not_found.append(line)
@@ -955,31 +978,21 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
         level_str = match.group(2)
         level = ROMAN.get(level_str) or int(level_str)
 
-        # Look up skill by name
         skill_id = await sde.type_name_to_id(db, skill_name)
         if not skill_id:
             not_found.append(line)
             continue
 
-        # Add or update
-        if skill_id in existing_skills:
-            if existing_skills[skill_id].target_level < level:
-                existing_skills[skill_id].target_level = level
-                added += 1
-        else:
-            max_order += 1
-            entry = SkillPlanEntry(
-                plan_id=plan_id, skill_type_id=skill_id,
-                target_level=level, sort_order=max_order,
-            )
-            db.add(entry)
-            existing_skills[skill_id] = entry
-            added += 1
+        targets.append((skill_id, level))
+
+    added, upgraded = await _apply_skills_with_prereqs(db, plan, targets)
 
     _touch_edit(plan, user_id)
     await db.commit()
 
-    msg = f"Imported {added} skill(s)."
+    msg = f"Imported {added} skill(s) (including prereqs)."
+    if upgraded:
+        msg += f" Upgraded {upgraded}."
     if not_found:
         msg += f" Could not resolve: {', '.join(not_found[:5])}"
         if len(not_found) > 5:
@@ -1081,31 +1094,19 @@ async def import_from_fitting(plan_id: int, request: Request, db: AsyncSession =
     if not needed:
         return HTMLResponse('<div class="b-empty" style="color:var(--warn);">No skill requirements found for these items.</div>')
 
-    # Add to plan
-    existing = {e.skill_type_id: e for e in plan.entries}
-    max_order = max((e.sort_order for e in plan.entries), default=-1)
-    added = 0
-
-    for sid, lvl in needed.items():
-        if sid in existing:
-            if existing[sid].target_level < lvl:
-                existing[sid].target_level = lvl
-                added += 1
-        else:
-            max_order += 1
-            entry = SkillPlanEntry(
-                plan_id=plan_id, skill_type_id=sid,
-                target_level=lvl, sort_order=max_order,
-            )
-            db.add(entry)
-            existing[sid] = entry
-            added += 1
+    # Apply via the shared helper so the skill-on-skill prereq chain is
+    # expanded for anything get_full_skill_tree didn't already cover.
+    added, upgraded = await _apply_skills_with_prereqs(
+        db, plan, list(needed.items())
+    )
 
     plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
     items_resolved = len(resolved)
     msg = f"Added {added} skill(s) from {items_resolved} item(s)."
+    if upgraded:
+        msg += f" Upgraded {upgraded}."
     if not_found:
         msg += f" Not found: {', '.join(not_found[:5])}"
         if len(not_found) > 5:
@@ -1150,32 +1151,18 @@ async def add_from_ship(plan_id: int, request: Request, db: AsyncSession = Depen
     if not skills:
         return HTMLResponse('<div class="b-empty" style="color:var(--warn);">No skills found for this ship.</div>')
 
-    existing = {e.skill_type_id: e for e in plan.entries}
-    max_order = max((e.sort_order for e in plan.entries), default=-1)
-    added = 0
-
-    for s in skills:
-        sid = s["skill_type_id"]
-        lvl = s["required_level"]
-        if sid in existing:
-            if existing[sid].target_level < lvl:
-                existing[sid].target_level = lvl
-                added += 1
-        else:
-            max_order += 1
-            entry = SkillPlanEntry(
-                plan_id=plan_id, skill_type_id=sid,
-                target_level=lvl, sort_order=max_order,
-            )
-            db.add(entry)
-            existing[sid] = entry
-            added += 1
+    targets = [(s["skill_type_id"], s["required_level"]) for s in skills]
+    added, upgraded = await _apply_skills_with_prereqs(db, plan, targets)
 
     plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
     ship_name = await sde.type_id_to_name(db, ship_type_id) or f"Ship {ship_type_id}"
-    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">Added {added} skill(s) from {ship_name}.</div>')
+    extra = f", upgraded {upgraded}" if upgraded else ""
+    return HTMLResponse(
+        f'<div class="b-empty" style="color:var(--success);">'
+        f'Added {added} skill(s) from {ship_name}{extra}.</div>'
+    )
 
 
 # ── Skill search (for add-skill typeahead) ───────────────────────────────────
