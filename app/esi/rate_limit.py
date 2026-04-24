@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 
@@ -30,12 +30,18 @@ class LegacyErrorState:
     last_updated: datetime
 
 
+REJECTION_WINDOW_SECS = 300  # 5 minutes
+
+
 class RateLimitTracker:
     def __init__(self):
         self.groups: dict[str, GroupState] = {}
         self.legacy: Optional[LegacyErrorState] = None
         self.request_log: deque[RequestLogEntry] = deque(maxlen=3000)
         self._warned_groups: set[str] = set()  # prevent DB spam when stuck in warning zone
+        # Rolling record of ACTUAL rejections (429 / 420). Drives the banner's
+        # critical state — proximity warnings alone stay yellow.
+        self.recent_rejections: deque[datetime] = deque(maxlen=500)
 
     def update_from_response(self, path: str, status_code: int, headers: dict) -> list[dict]:
         """
@@ -100,6 +106,10 @@ class RateLimitTracker:
             group=group, tokens_used=tokens, timestamp=now,
         ))
 
+        # Rolling rejection log — drives the banner's critical state.
+        if status_code in (429, 420):
+            self.recent_rejections.append(now)
+
         return events
 
     def throttle_delay(self) -> float:
@@ -124,20 +134,35 @@ class RateLimitTracker:
                 worst = max(worst, 0.2)
         return worst
 
+    def recent_rejection_count(self, window_seconds: int = REJECTION_WINDOW_SECS) -> int:
+        """Number of 429/420 responses in the trailing window. Prunes the
+        rolling deque as a side effect."""
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+        while self.recent_rejections and self.recent_rejections[0] < cutoff:
+            self.recent_rejections.popleft()
+        return len(self.recent_rejections)
+
     def overall_status(self) -> str:
-        """Returns 'ok', 'warning', or 'critical'."""
-        if self.legacy and self.legacy.remaining < 10:
+        """Returns 'ok', 'warning', or 'critical'.
+
+        Critical now requires evidence that we are *actually* being rejected
+        (recent 429/420) or that the legacy error budget is fully depleted
+        (next ESI error = 420). Proximity alone (remaining/limit < 5%) stays
+        in the 'warning' band so the banner doesn't go red pre-emptively.
+        """
+        if self.recent_rejection_count() > 0:
             return "critical"
-        for g in self.groups.values():
-            if g.limit_total == 0:
-                continue
-            pct = g.remaining / g.limit_total
-            if pct < 0.05:
-                return "critical"
-        warning = any(
-            g.remaining / g.limit_total < 0.20
+        if self.legacy and self.legacy.remaining <= 0:
+            return "critical"
+
+        warning = False
+        if self.legacy and self.legacy.remaining < 30:
+            warning = True
+        if any(
+            (g.remaining / g.limit_total) < 0.20
             for g in self.groups.values() if g.limit_total > 0
-        )
+        ):
+            warning = True
         return "warning" if warning else "ok"
 
 

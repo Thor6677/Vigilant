@@ -34,7 +34,10 @@ _PROCESS_STARTED_AT = time.time()
 STARTUP_GRACE_SECONDS = 600  # 10 min before backfill starts
 MAX_PAGES = 10               # zKill caps at ~10 pages / 2000 kills
 PAGE_SLEEP_SECONDS = 5.0     # between zKB pages
-ESI_BATCH_SIZE = 10          # per-wave size for ESI hydration
+# CCP's `killmail` route group gives 3600 tokens per 15 min; a successful
+# 2xx response costs 2 tokens, so the sustainable budget is ~2 req/s. Pace
+# to stay under it: 3 concurrent fetches per 1.5s wave = 2 req/s average.
+ESI_BATCH_SIZE = 3           # per-wave size for ESI hydration
 ESI_BATCH_SLEEP = 1.5        # seconds between ESI waves
 FIRST_RUN_PAGE_LIMIT = 3     # cap pages on first-backfill to 600 kills
 
@@ -151,7 +154,10 @@ async def backfill_character(character_id: int) -> dict:
                         await db.commit()
                 break
 
-            to_fetch: list[tuple[int, str, dict]] = []
+            # Collect page kill-ids and filter out any we've already stored
+            # (disk-first), so we don't burn ESI tokens re-fetching. On warm
+            # caches most of pages 1-N will be no-ops.
+            candidates: list[tuple[int, str, dict]] = []
             for km in page_data:
                 kid = km.get("killmail_id")
                 zkb = km.get("zkb", {}) or {}
@@ -160,7 +166,20 @@ async def backfill_character(character_id: int) -> dict:
                     continue
                 if new_last_seen is None or kid > new_last_seen:
                     new_last_seen = kid
-                to_fetch.append((kid, khash, zkb))
+                candidates.append((kid, khash, zkb))
+
+            already_stored: set[int] = set()
+            if candidates:
+                from app.db.models import Killmail
+                async with AsyncSessionLocal() as db:
+                    rows = await db.execute(
+                        select(Killmail.killmail_id).where(
+                            Killmail.killmail_id.in_([c[0] for c in candidates])
+                        )
+                    )
+                    already_stored = {r[0] for r in rows.all()}
+
+            to_fetch = [c for c in candidates if c[0] not in already_stored]
 
             for i in range(0, len(to_fetch), ESI_BATCH_SIZE):
                 batch = to_fetch[i:i + ESI_BATCH_SIZE]

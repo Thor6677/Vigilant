@@ -194,10 +194,21 @@ async def status_banner(request: Request):
         icon = "⚠"
         msg = "ESI rate limit warning — approaching token limit on one or more route groups."
     else:
+        rejections = rate_limit_tracker.recent_rejection_count()
         border_color = "#cc3333"
         text_color = "#cc3333"
         icon = "✕"
-        msg = "ESI rate limit critical — heavily throttled. Check <a href='/admin' style='text-decoration:underline;'>Admin</a> for details."
+        if rejections > 0:
+            msg = (
+                f"ESI rate limit critical — {rejections} request"
+                f"{'s' if rejections != 1 else ''} rejected in the last 5 min. "
+                "Check <a href='/admin' style='text-decoration:underline;'>Admin</a> for details."
+            )
+        else:
+            msg = (
+                "ESI rate limit critical — error budget exhausted. "
+                "Check <a href='/admin' style='text-decoration:underline;'>Admin</a> for details."
+            )
 
     style = (
         f"border-bottom:1px solid {border_color};"
