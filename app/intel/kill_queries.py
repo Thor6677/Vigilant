@@ -541,3 +541,294 @@ async def ship_usage_timeseries(character_id: int, days: int = 180) -> dict[int,
 
     top_ships = {tid for tid, _ in ship_totals.most_common(10)}
     return {tid: counts for tid, counts in series.items() if tid in top_ships}
+
+
+# ── Multi-character aggregates (dashboard Combat Profile) ──────────────────
+# Each of these takes a list of the logged-in user's character IDs and
+# aggregates across all of them, de-duplicating killmails that two or more
+# of our chars appear on.
+
+async def top_ships_used_multi(character_ids: list[int], days: int = 90, limit: int = 10) -> list[dict]:
+    if not character_ids:
+        return []
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(
+                KillmailAttacker.ship_type_id,
+                func.count(distinct(KillmailAttacker.killmail_id)).label("n"),
+            )
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        q = q.group_by(KillmailAttacker.ship_type_id).order_by(
+            func.count(distinct(KillmailAttacker.killmail_id)).desc()
+        ).limit(limit)
+        rows = await db.execute(q)
+        return [{"ship_type_id": tid, "count": n} for tid, n in rows.all()]
+
+
+async def top_weapons_used_multi(character_ids: list[int], days: int = 90, limit: int = 10) -> list[dict]:
+    if not character_ids:
+        return []
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(
+                KillmailAttacker.weapon_type_id,
+                func.count(distinct(KillmailAttacker.killmail_id)).label("n"),
+            )
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .where(KillmailAttacker.weapon_type_id.is_not(None))
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        q = q.group_by(KillmailAttacker.weapon_type_id).order_by(
+            func.count(distinct(KillmailAttacker.killmail_id)).desc()
+        ).limit(limit)
+        rows = await db.execute(q)
+        return [{"weapon_type_id": tid, "count": n} for tid, n in rows.all()]
+
+
+async def top_systems_multi(character_ids: list[int], days: int = 90, limit: int = 10) -> list[dict]:
+    if not character_ids:
+        return []
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        att_ids = select(KillmailAttacker.killmail_id).where(
+            KillmailAttacker.character_id.in_(character_ids)
+        )
+        q = (
+            select(Killmail.solar_system_id, func.count().label("n"))
+            .where(or_(
+                Killmail.victim_character_id.in_(character_ids),
+                Killmail.killmail_id.in_(att_ids),
+            ))
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        q = q.group_by(Killmail.solar_system_id).order_by(func.count().desc()).limit(limit)
+        rows = await db.execute(q)
+        return [{"system_id": sid, "count": n} for sid, n in rows.all()]
+
+
+async def loss_autopsy_multi(character_ids: list[int], days: int = 90) -> dict:
+    if not character_ids:
+        return {"solo": 0, "small_gang": 0, "fleet": 0, "npc": 0, "smartbomb": 0}
+    cutoff = _cutoff(days)
+    buckets = {"solo": 0, "small_gang": 0, "fleet": 0, "npc": 0, "smartbomb": 0}
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(Killmail.killmail_id, Killmail.attacker_count, Killmail.is_npc)
+            .where(Killmail.victim_character_id.in_(character_ids))
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        losses = (await db.execute(q)).all()
+        if not losses:
+            return buckets
+        loss_ids = [row[0] for row in losses]
+
+        from app.db.sde_models import SDEType
+        smartbomb_q = (
+            select(distinct(KillmailAttacker.killmail_id))
+            .join(SDEType, SDEType.type_id == KillmailAttacker.weapon_type_id)
+            .where(KillmailAttacker.killmail_id.in_(loss_ids))
+            .where(SDEType.type_name.ilike("%Smartbomb%"))
+        )
+        smartbomb_ids = {row[0] for row in (await db.execute(smartbomb_q)).all()}
+
+    for km_id, att_count, is_npc in losses:
+        if km_id in smartbomb_ids:
+            buckets["smartbomb"] += 1
+        elif is_npc:
+            buckets["npc"] += 1
+        elif (att_count or 1) == 1:
+            buckets["solo"] += 1
+        elif (att_count or 1) <= 5:
+            buckets["small_gang"] += 1
+        else:
+            buckets["fleet"] += 1
+    return buckets
+
+
+async def solo_gang_split_multi(character_ids: list[int], days: int = 90) -> dict:
+    buckets = {"solo": 0, "small": 0, "medium": 0, "fleet": 0}
+    if not character_ids:
+        return buckets
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(Killmail.killmail_id, Killmail.attacker_count)
+            .join(KillmailAttacker, KillmailAttacker.killmail_id == Killmail.killmail_id)
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .distinct()
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        result = await db.execute(q)
+        for _kid, count in result.all():
+            c = count or 0
+            if c <= 1:
+                buckets["solo"] += 1
+            elif c <= 5:
+                buckets["small"] += 1
+            elif c <= 20:
+                buckets["medium"] += 1
+            else:
+                buckets["fleet"] += 1
+    return buckets
+
+
+async def calendar_buckets_multi(character_ids: list[int], year: int) -> dict[str, dict]:
+    if not character_ids:
+        return {}
+    start = datetime(year, 1, 1)
+    end = datetime(year + 1, 1, 1)
+    async with AsyncSessionLocal() as db:
+        att_ids = select(KillmailAttacker.killmail_id).where(
+            KillmailAttacker.character_id.in_(character_ids)
+        )
+        q = (
+            select(
+                Killmail.killmail_id,
+                Killmail.killmail_time,
+                Killmail.victim_character_id,
+            )
+            .where(Killmail.killmail_time >= start)
+            .where(Killmail.killmail_time < end)
+            .where(or_(
+                Killmail.victim_character_id.in_(character_ids),
+                Killmail.killmail_id.in_(att_ids),
+            ))
+            .distinct()
+        )
+        rows = (await db.execute(q)).all()
+
+    our_set = set(character_ids)
+    buckets: dict[str, dict] = {}
+    for _kid, kt, vid in rows:
+        key = kt.strftime("%Y-%m-%d")
+        b = buckets.setdefault(key, {"kills": 0, "losses": 0, "total": 0})
+        if vid in our_set:
+            b["losses"] += 1
+        else:
+            b["kills"] += 1
+        b["total"] += 1
+    return buckets
+
+
+async def untouchable_ships_multi(character_ids: list[int], min_uses: int = 5) -> list[dict]:
+    if not character_ids:
+        return []
+    async with AsyncSessionLocal() as db:
+        win_q = (
+            select(KillmailAttacker.ship_type_id, func.count().label("n"))
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+            .group_by(KillmailAttacker.ship_type_id)
+        )
+        wins = {tid: n for tid, n in (await db.execute(win_q)).all()}
+
+        loss_q = (
+            select(distinct(Killmail.victim_ship_type_id))
+            .where(Killmail.victim_character_id.in_(character_ids))
+        )
+        lost_set = {tid for (tid,) in (await db.execute(loss_q)).all()}
+
+    return sorted(
+        ({"ship_type_id": tid, "uses": n} for tid, n in wins.items()
+         if n >= min_uses and tid not in lost_set),
+        key=lambda x: x["uses"],
+        reverse=True,
+    )
+
+
+async def profitability_by_ship_multi(character_ids: list[int], days: int = 90) -> list[dict]:
+    if not character_ids:
+        return []
+    cutoff = _cutoff(days)
+    async with AsyncSessionLocal() as db:
+        # Wins: sum once per (ship, killmail) to avoid double-counting when
+        # two of our chars are both attackers on the same kill.
+        win_sub = (
+            select(
+                KillmailAttacker.ship_type_id.label("sid"),
+                Killmail.killmail_id.label("kid"),
+                Killmail.total_value.label("isk"),
+            )
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+            .distinct()
+        )
+        if cutoff is not None:
+            win_sub = win_sub.where(Killmail.killmail_time >= cutoff)
+        win_sub = win_sub.subquery()
+        win_q = select(win_sub.c.sid, func.sum(win_sub.c.isk)).group_by(win_sub.c.sid)
+        wins = {sid: float(isk or 0) for sid, isk in (await db.execute(win_q)).all()}
+
+        loss_q = (
+            select(Killmail.victim_ship_type_id, func.sum(Killmail.total_value).label("isk"))
+            .where(Killmail.victim_character_id.in_(character_ids))
+        )
+        if cutoff is not None:
+            loss_q = loss_q.where(Killmail.killmail_time >= cutoff)
+        loss_q = loss_q.group_by(Killmail.victim_ship_type_id)
+        losses = {sid: float(isk or 0) for sid, isk in (await db.execute(loss_q)).all()}
+
+    all_ships = (set(wins) | set(losses)) - {None}
+    return sorted(
+        ({
+            "ship_type_id": tid,
+            "isk_destroyed": wins.get(tid, 0),
+            "isk_lost": losses.get(tid, 0),
+            "net": wins.get(tid, 0) - losses.get(tid, 0),
+        } for tid in all_ships),
+        key=lambda x: x["net"],
+        reverse=True,
+    )
+
+
+async def ship_usage_timeseries_multi(character_ids: list[int], days: int = 180) -> dict[int, list[int]]:
+    if not character_ids:
+        return {}
+    cutoff = _cutoff(days)
+    weeks = (days + 6) // 7
+    async with AsyncSessionLocal() as db:
+        q = (
+            select(
+                KillmailAttacker.ship_type_id,
+                Killmail.killmail_id,
+                Killmail.killmail_time,
+            )
+            .join(Killmail, Killmail.killmail_id == KillmailAttacker.killmail_id)
+            .where(KillmailAttacker.character_id.in_(character_ids))
+            .where(KillmailAttacker.ship_type_id.is_not(None))
+            .distinct()
+        )
+        if cutoff is not None:
+            q = q.where(Killmail.killmail_time >= cutoff)
+        rows = (await db.execute(q)).all()
+
+    if not rows:
+        return {}
+
+    ship_totals: Counter = Counter()
+    series: dict[int, list[int]] = {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for tid, _kid, kt in rows:
+        ship_totals[tid] += 1
+        week_idx = max(0, weeks - 1 - ((now - kt).days // 7))
+        if week_idx >= weeks:
+            continue
+        if tid not in series:
+            series[tid] = [0] * weeks
+        series[tid][week_idx] += 1
+
+    top_ships = {tid for tid, _ in ship_totals.most_common(10)}
+    return {tid: counts for tid, counts in series.items() if tid in top_ships}

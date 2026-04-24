@@ -2037,6 +2037,181 @@ async def dashboard_kill_pulse(
     })
 
 
+@router.get("/dashboard/combat-profile", response_class=HTMLResponse)
+async def dashboard_combat_profile(
+    request: Request,
+    year: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """All-pilots Combat Profile — aggregates the same panels as the
+    character-detail Combat Profile across every character the user owns.
+    Lazy-loaded via htmx so it doesn't block the dashboard handler."""
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    char_rows = await db.execute(
+        select(Character.character_id).where(Character.user_id == user_id)
+    )
+    char_ids = [r[0] for r in char_rows.all()]
+    if not char_ids:
+        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+
+    import math as _math
+    from app.intel import kill_queries as kq
+
+    current_year = datetime.now(timezone.utc).year
+    if year is None:
+        year = current_year
+
+    (
+        summary,
+        ships,
+        weapons,
+        systems,
+        autopsy,
+        gang,
+        cal_buckets,
+        untouchable,
+        profitability,
+        ship_timeseries,
+    ) = await asyncio.gather(
+        kq.multi_character_summary(char_ids, days=90),
+        kq.top_ships_used_multi(char_ids, days=90, limit=10),
+        kq.top_weapons_used_multi(char_ids, days=90, limit=10),
+        kq.top_systems_multi(char_ids, days=90, limit=10),
+        kq.loss_autopsy_multi(char_ids, days=90),
+        kq.solo_gang_split_multi(char_ids, days=90),
+        kq.calendar_buckets_multi(char_ids, year=year),
+        kq.untouchable_ships_multi(char_ids, min_uses=5),
+        kq.profitability_by_ship_multi(char_ids, days=90),
+        kq.ship_usage_timeseries_multi(char_ids, days=180),
+    )
+
+    profitability = sorted(profitability, key=lambda x: abs(x["net"]), reverse=True)[:10]
+
+    from app.db.sde_models import SDEType, SDESystem
+    type_ids: set[int] = (
+        {s["ship_type_id"] for s in ships}
+        | {w["weapon_type_id"] for w in weapons}
+        | {u["ship_type_id"] for u in untouchable}
+        | {p["ship_type_id"] for p in profitability}
+        | set(ship_timeseries.keys())
+    )
+    system_ids = {s["system_id"] for s in systems}
+    type_names: dict[int, str] = {}
+    system_names: dict[int, str] = {}
+    system_security: dict[int, float] = {}
+    if type_ids:
+        trows = await db.execute(
+            select(SDEType.type_id, SDEType.type_name).where(SDEType.type_id.in_(type_ids))
+        )
+        type_names = {tid: name for tid, name in trows.all()}
+    if system_ids:
+        srows = await db.execute(
+            select(SDESystem.system_id, SDESystem.system_name, SDESystem.security)
+            .where(SDESystem.system_id.in_(system_ids))
+        )
+        for sid, name, sec in srows.all():
+            system_names[sid] = name
+            if sec is not None:
+                system_security[sid] = sec
+
+    gang_total = sum(gang.values())
+
+    # Calendar 53×7 padded grid
+    year_start = datetime(year, 1, 1)
+    start_weekday = year_start.weekday()
+    is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
+    days_in_year = 366 if is_leap else 365
+    cal_cells: list[dict] = []
+    for _ in range(start_weekday):
+        cal_cells.append({"empty": True})
+    for day_offset in range(days_in_year):
+        d = year_start + timedelta(days=day_offset)
+        key = d.strftime("%Y-%m-%d")
+        b = cal_buckets.get(key, {})
+        cal_cells.append({
+            "empty": False,
+            "date": d,
+            "date_str": key,
+            "kills": b.get("kills", 0),
+            "losses": b.get("losses", 0),
+            "total": b.get("total", 0),
+        })
+    cal_max = max((c.get("total", 0) for c in cal_cells if not c.get("empty")), default=0)
+
+    # Radar — same six axes as per-character version
+    avg_target_value = (summary["isk_destroyed"] / summary["kills"]) if summary["kills"] else 0
+    tot_isk = summary["isk_destroyed"] + summary["isk_lost"]
+    isk_efficiency = (summary["isk_destroyed"] / tot_isk * 100) if tot_isk > 0 else 0
+
+    def _log_norm(v: float, ceiling_at: float) -> float:
+        if v <= 0:
+            return 0.0
+        return float(min(100, _math.log1p(v) / _math.log1p(ceiling_at) * 100))
+
+    radar_labels = ["Kill Volume", "ISK Eff %", "Solo %", "Gang %", "Avg Target", "Spread"]
+    radar_values = [
+        _log_norm(summary["kills"], 500),  # higher ceiling since summed across chars
+        round(isk_efficiency, 1),
+        round((gang["solo"] / gang_total * 100) if gang_total else 0, 1),
+        round(((gang["small"] + gang["medium"] + gang["fleet"]) / gang_total * 100) if gang_total else 0, 1),
+        _log_norm(avg_target_value, 1_000_000_000),
+        _log_norm(len(system_ids), 50),
+    ]
+    radar_raw = [
+        summary["kills"],
+        round(isk_efficiency, 1),
+        gang["solo"],
+        gang["small"] + gang["medium"] + gang["fleet"],
+        avg_target_value,
+        len(system_ids),
+    ]
+
+    ts_datasets = []
+    for tid, weekly in ship_timeseries.items():
+        ts_datasets.append({
+            "label": type_names.get(tid, f"Type {tid}"),
+            "data": weekly,
+            "fill": True,
+            "tension": 0.3,
+        })
+    ts_weeks = max((len(d["data"]) for d in ts_datasets), default=0)
+
+    return templates.TemplateResponse("partials/dashboard_combat_profile.html", {
+        "request": request,
+        "year": year,
+        "current_year": current_year,
+        "summary": summary,
+        "ships": ships,
+        "weapons": weapons,
+        "systems": systems,
+        "autopsy": autopsy,
+        "autopsy_total": sum(autopsy.values()),
+        "type_names": type_names,
+        "system_names": system_names,
+        "system_security": system_security,
+        "gang_split": gang,
+        "gang_total": gang_total,
+        "cal_cells": cal_cells,
+        "cal_max": cal_max,
+        "untouchable": untouchable,
+        "profitability": profitability,
+        "radar_labels": radar_labels,
+        "radar_values": radar_values,
+        "radar_raw": radar_raw,
+        "ts_datasets": ts_datasets,
+        "ts_weeks": ts_weeks,
+        "char_count": len(char_ids),
+    })
+
+
 @router.get("/dashboard/recent-battles", response_class=HTMLResponse)
 async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(get_db)):
     from app.config import get_settings as _gs
