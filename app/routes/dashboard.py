@@ -1645,6 +1645,28 @@ async def _background_scheduler():
                         except Exception as e:
                             logger.warning("Battle discovery scheduling error: %s", e)
 
+            # Daily GC of archived ESI rate-limit events (>30 days old).
+            # Runs regardless of flags — small query, safe cheap.
+            if not hasattr(_background_scheduler, '_last_esi_events_gc') or \
+               (now - _background_scheduler._last_esi_events_gc).total_seconds() >= 86400:
+                try:
+                    from app.db.models import ESIRateLimitEvent
+                    from sqlalchemy import delete as _delete
+                    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                    async with AsyncSessionLocal() as gc_db:
+                        res = await gc_db.execute(
+                            _delete(ESIRateLimitEvent).where(
+                                ESIRateLimitEvent.archived_at.is_not(None),
+                                ESIRateLimitEvent.archived_at < cutoff,
+                            )
+                        )
+                        await gc_db.commit()
+                        if res.rowcount:
+                            logger.info("esi_events GC: removed %d archived events >30d", res.rowcount)
+                    _background_scheduler._last_esi_events_gc = now
+                except Exception as e:
+                    logger.warning("ESI events GC error: %s", e)
+
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
                 try:

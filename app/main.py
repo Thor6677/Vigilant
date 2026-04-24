@@ -164,6 +164,8 @@ async def startup():
             "ALTER TABLE sde_types ADD COLUMN capacity REAL",
             # Fitting tool: nested folders for saved fits
             "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
+            # ESI rate-limit events: soft-archive column for admin dismiss
+            "ALTER TABLE esi_rate_limit_events ADD COLUMN archived_at DATETIME",
         ]:
             try:
                 await db.execute(text(stmt))

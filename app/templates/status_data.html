@@ -217,7 +217,7 @@
           <tbody>
             {% for entry in request_log %}
               <tr class="border-b border-eve-border/40 hover:bg-eve-border/20">
-                <td class="px-3 py-1 text-eve-muted whitespace-nowrap">{{ entry.timestamp.strftime("%H:%M:%S") }}</td>
+                <td class="px-3 py-1 text-eve-muted whitespace-nowrap">{{ entry.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
                 <td class="px-3 py-1">
                   {% if entry.status_code < 300 %}
                     <span class="text-eve-success">{{ entry.status_code }}</span>
@@ -264,7 +264,7 @@
           <tbody>
             {% for ev in recent_events %}
               <tr class="border-b border-eve-border/40 hover:bg-eve-border/20">
-                <td class="px-3 py-1 text-eve-muted whitespace-nowrap">{{ ev.occurred_at | age_str }}</td>
+                <td class="px-3 py-1 text-eve-muted whitespace-nowrap" title="{{ ev.occurred_at | age_str }}">{{ ev.occurred_at.strftime("%Y-%m-%d %H:%M:%S") if ev.occurred_at else "—" }}</td>
                 <td class="px-3 py-1">
                   {% if ev.event_type == "429" %}
                     <span class="px-1.5 py-0.5 rounded bg-eve-danger/20 text-eve-danger border border-eve-danger/30">429</span>

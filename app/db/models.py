@@ -113,6 +113,10 @@ class ESIRateLimitEvent(Base):
     limit_str   = Column(String(64), nullable=True)   # e.g. "150/15m"
     retry_after = Column(Integer, nullable=True)
     occurred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    # Soft-archive: admin-dismissed events persist here with archived_at set
+    # so they drop off the main list but remain auditable. A daily GC deletes
+    # archived rows older than 30 days.
+    archived_at = Column(DateTime, nullable=True)
 
 
 class CharacterAssetCache(Base):

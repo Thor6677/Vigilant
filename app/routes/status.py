@@ -121,9 +121,12 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
 
     syncing_count = sum(1 for r in char_sync_rows if r["sync_status"] == "syncing" or r["queued"])
 
-    # ESI rate limit events
+    # ESI rate limit events (unarchived)
     result = await db.execute(
-        select(ESIRateLimitEvent).order_by(ESIRateLimitEvent.occurred_at.desc()).limit(50)
+        select(ESIRateLimitEvent)
+        .where(ESIRateLimitEvent.archived_at.is_(None))
+        .order_by(ESIRateLimitEvent.occurred_at.desc())
+        .limit(50)
     )
     recent_events = result.scalars().all()
 

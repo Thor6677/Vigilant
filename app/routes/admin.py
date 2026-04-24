@@ -228,11 +228,21 @@ async def admin_esi(request: Request, db: AsyncSession = Depends(get_db),
     # Reuse the full status page context
     ctx = await _build_context(db, admin.id)
 
-    # Significant events from DB
+    # Significant events from DB — split into active (unarchived) and archive.
     ev_result = await db.execute(
-        select(ESIRateLimitEvent).order_by(ESIRateLimitEvent.occurred_at.desc()).limit(50)
+        select(ESIRateLimitEvent)
+        .where(ESIRateLimitEvent.archived_at.is_(None))
+        .order_by(ESIRateLimitEvent.occurred_at.desc())
+        .limit(50)
     )
     recent_events = ev_result.scalars().all()
+    archived_result = await db.execute(
+        select(ESIRateLimitEvent)
+        .where(ESIRateLimitEvent.archived_at.is_not(None))
+        .order_by(ESIRateLimitEvent.archived_at.desc())
+        .limit(50)
+    )
+    archived_events = archived_result.scalars().all()
 
     return templates.TemplateResponse("partials/admin_esi.html", {
         "request": request,
@@ -248,8 +258,43 @@ async def admin_esi(request: Request, db: AsyncSession = Depends(get_db),
         "legacy": rate_limit_tracker.legacy,
         "request_log": list(reversed(rate_limit_tracker.request_log))[:100],
         "recent_events": recent_events,
+        "archived_events": archived_events,
         "chart_data_json": json.dumps(_compute_chart_data()),
     })
+
+
+@router.post("/esi/events/{event_id}/dismiss", response_class=HTMLResponse)
+async def admin_esi_dismiss_event(
+    event_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Soft-archive a single rate-limit event. Rerenders the ESI section."""
+    from app.db.models import ESIRateLimitEvent
+    row = await db.get(ESIRateLimitEvent, event_id)
+    if row is not None and row.archived_at is None:
+        row.archived_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+    return await admin_esi(request, db, admin)
+
+
+@router.post("/esi/events/dismiss-all", response_class=HTMLResponse)
+async def admin_esi_dismiss_all(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Archive every currently-active event. Rerenders the ESI section."""
+    from app.db.models import ESIRateLimitEvent
+    from sqlalchemy import update
+    await db.execute(
+        update(ESIRateLimitEvent)
+        .where(ESIRateLimitEvent.archived_at.is_(None))
+        .values(archived_at=datetime.now(timezone.utc).replace(tzinfo=None))
+    )
+    await db.commit()
+    return await admin_esi(request, db, admin)
 
 
 @router.get("/section/scheduler", response_class=HTMLResponse)
