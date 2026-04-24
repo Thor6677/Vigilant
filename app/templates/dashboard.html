@@ -338,20 +338,6 @@
 </div>
 {% endif %}
 
-{# ── Recent Battles across New Eden (lazy-loaded; battles flag only) ──────── #}
-{% if battles_enabled %}
-<div id="dashboard-recent-battles"
-     hx-get="/dashboard/recent-battles"
-     hx-trigger="load"
-     hx-swap="innerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Recent Battles (7d)</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
-    </div>
-</div>
-{% endif %}
-
 {# ── Wealth Breakdown ─────────────────────────────────────────────────────── #}
 {% if char_rows %}
 <div class="b-section">
@@ -603,6 +589,20 @@
     {% else %}
     <div class="b-empty">No active contracts</div>
     {% endif %}
+</div>
+{% endif %}
+
+{# ── Major Fleet Battles across New Eden (lazy-loaded; battles flag only) ─── #}
+{% if battles_enabled %}
+<div id="dashboard-recent-battles"
+     hx-get="/dashboard/recent-battles"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-bottom:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Major Fleet Battles in New Eden · 7d</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
 </div>
 {% endif %}
 
