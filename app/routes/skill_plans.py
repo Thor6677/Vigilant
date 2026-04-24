@@ -576,6 +576,53 @@ async def rename_plan(plan_id: int, request: Request, db: AsyncSession = Depends
 
 # ── Add skill to plan ────────────────────────────────────────────────────────
 
+async def _resolve_prereq_chain(
+    db: AsyncSession,
+    root_skill_id: int,
+    root_level: int,
+) -> list[tuple[int, int]]:
+    """Return (skill_id, required_level) pairs for the full transitive prereq
+    chain of `root_skill_id`, in training order (prereqs before dependents),
+    deduplicated at the highest required level seen across the tree. The
+    root skill itself is the final entry.
+
+    Example: adding Gallente Battleship V returns roughly
+        [(Spaceship Cmd, 4), (Gallente Frigate, 3), (Gallente Destroyer, 3),
+         (Gallente Cruiser, 3), (Gallente Battleship, 5)]
+    (exact ordering depends on DFS traversal of SDETypeSkillReq)."""
+    from app.db.sde_models import SDETypeSkillReq
+
+    seen_level: dict[int, int] = {}
+    ordered: list[int] = []
+    in_ordered: set[int] = set()
+    stack: set[int] = set()
+
+    async def visit(sid: int, lvl: int) -> None:
+        if sid in stack:
+            # Defensive cycle guard; skill prereq graph is a DAG in practice.
+            return
+        stack.add(sid)
+        try:
+            rows = (await db.execute(
+                select(
+                    SDETypeSkillReq.skill_type_id,
+                    SDETypeSkillReq.required_level,
+                ).where(SDETypeSkillReq.type_id == sid)
+            )).all()
+            for req_sid, req_lvl in rows:
+                await visit(req_sid, req_lvl)
+            if seen_level.get(sid, 0) < lvl:
+                seen_level[sid] = lvl
+            if sid not in in_ordered:
+                ordered.append(sid)
+                in_ordered.add(sid)
+        finally:
+            stack.remove(sid)
+
+    await visit(root_skill_id, root_level)
+    return [(sid, seen_level[sid]) for sid in ordered]
+
+
 @router.post("/{plan_id}/add-skill", response_class=HTMLResponse)
 async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
@@ -599,26 +646,41 @@ async def add_skill(plan_id: int, request: Request, db: AsyncSession = Depends(g
     if not plan:
         return HTMLResponse("", status_code=404)
 
-    # Check if skill already in plan at same or higher level
-    for e in plan.entries:
-        if e.skill_type_id == skill_type_id:
-            if e.target_level >= target_level:
-                name = await sde.type_id_to_name(db, skill_type_id) or f"Skill {skill_type_id}"
-                return HTMLResponse(f'<div class="b-empty" style="color:var(--warn);">{name} {ROMAN_REV.get(e.target_level, "")} already in plan.</div>')
-            # Update to higher level
-            e.target_level = target_level
-            _touch_edit(plan, user_id)
-            await db.commit()
-            return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
+    # Expand the full transitive prereq chain. Prereqs are added (or upgraded
+    # if already present at a lower level) so the plan represents everything
+    # a character would need to train to complete it.
+    chain = await _resolve_prereq_chain(db, skill_type_id, target_level)
 
-    # Add new entry
+    existing = {e.skill_type_id: e for e in plan.entries}
     max_order = max((e.sort_order for e in plan.entries), default=-1)
-    db.add(SkillPlanEntry(
-        plan_id=plan_id,
-        skill_type_id=skill_type_id,
-        target_level=target_level,
-        sort_order=max_order + 1,
-    ))
+
+    added = 0
+    upgraded = 0
+    for sid, lvl in chain:
+        e = existing.get(sid)
+        if e is not None:
+            if lvl > e.target_level:
+                e.target_level = lvl
+                upgraded += 1
+            continue
+        max_order += 1
+        db.add(SkillPlanEntry(
+            plan_id=plan_id,
+            skill_type_id=sid,
+            target_level=lvl,
+            sort_order=max_order,
+        ))
+        added += 1
+
+    if added == 0 and upgraded == 0:
+        name = await sde.type_id_to_name(db, skill_type_id) or f"Skill {skill_type_id}"
+        return HTMLResponse(
+            f'<div class="b-empty" style="color:var(--warn);">'
+            f'{name} {ROMAN_REV.get(target_level, "")} '
+            f'and all prerequisites are already in the plan at or above that level.'
+            f'</div>'
+        )
+
     _touch_edit(plan, user_id)
     await db.commit()
     return RedirectResponse(f"/skill-plans/{plan_id}", status_code=302)
