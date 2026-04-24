@@ -1228,8 +1228,9 @@ async def character_kill_stats(
     import math as _math
     from app.intel import kill_queries as kq
 
+    current_year = datetime.now(timezone.utc).year
     if year is None:
-        year = datetime.now(timezone.utc).year
+        year = current_year
 
     (
         summary,
@@ -1364,6 +1365,7 @@ async def character_kill_stats(
         "char": char,
         "character_id": character_id,
         "year": year,
+        "current_year": current_year,
         "summary": summary,
         "ships": ships,
         "weapons": weapons,
