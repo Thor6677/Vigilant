@@ -31,10 +31,17 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.db.models import AsyncSessionLocal, DetectedBattle
+from app.db.models import (
+    AsyncSessionLocal,
+    Character,
+    DetectedBattle,
+    KillAlertEvent,
+    UserHunterWatch,
+    UserSystemWatch,
+)
 from app.db.sde_models import SDESystem, SDEWormholeClass
 from app.intel.killmail_store import store_killmail, get_our_char_ids
 from app.intel.recent_battles import (
@@ -219,6 +226,131 @@ def _cap_tracked_systems() -> None:
         _last_db_flush.pop(sid, None)
 
 
+async def _fire_watch_alerts(
+    ev: dict,
+    kill_time: datetime,
+    sys_id: int,
+    attacker_char_ids: set[int],
+    attacker_corp_ids: set[int],
+    attacker_alliance_ids: set[int],
+) -> None:
+    """Match this kill against user_system_watches + user_hunter_watches and
+    emit KillAlertEvent rows. Pushes a notification to each user's poll queue
+    so the UI picks it up in seconds. Dedupes via (user_id, killmail_id, kind)
+    unique constraint — safe against killmail.stream's 24h replay."""
+    kid = ev["killmail_id"]
+    sys_name: str | None = None
+    meta = _sys_meta_cache.get(sys_id) if sys_id in _sys_meta_cache else None
+    if meta:
+        sys_name = meta.get("system_name")
+    # Lazy resolve system name on miss so the alert payload is human-readable
+    if sys_name is None:
+        meta = await _resolve_sys_meta(sys_id)
+        if meta:
+            sys_name = meta.get("system_name")
+
+    # Collect matched (user_id, kind, matched_entity_id, matched_label) tuples.
+    matches: list[tuple[int, str, int | None, str | None]] = []
+
+    async with AsyncSessionLocal() as db:
+        # System watch: any user watching this system_id
+        sys_rows = (
+            await db.execute(
+                select(
+                    UserSystemWatch.user_id,
+                    UserSystemWatch.label,
+                ).where(UserSystemWatch.system_id == sys_id)
+            )
+        ).all()
+        for user_id, label in sys_rows:
+            matches.append((user_id, "system_watch", None, label))
+
+        # Hunter watch: any user watching any of this kill's attacker entities
+        hunter_conds = []
+        if attacker_char_ids:
+            hunter_conds.append(
+                and_(
+                    UserHunterWatch.kind == "character",
+                    UserHunterWatch.entity_id.in_(attacker_char_ids),
+                )
+            )
+        if attacker_corp_ids:
+            hunter_conds.append(
+                and_(
+                    UserHunterWatch.kind == "corporation",
+                    UserHunterWatch.entity_id.in_(attacker_corp_ids),
+                )
+            )
+        if attacker_alliance_ids:
+            hunter_conds.append(
+                and_(
+                    UserHunterWatch.kind == "alliance",
+                    UserHunterWatch.entity_id.in_(attacker_alliance_ids),
+                )
+            )
+        if hunter_conds:
+            hrows = (
+                await db.execute(
+                    select(
+                        UserHunterWatch.user_id,
+                        UserHunterWatch.kind,
+                        UserHunterWatch.entity_id,
+                        UserHunterWatch.label,
+                    ).where(or_(*hunter_conds))
+                )
+            ).all()
+            for user_id, kind, entity_id, label in hrows:
+                matches.append((user_id, "hunter_watch", entity_id, label))
+
+        if not matches:
+            return
+
+        # Persist alert events (dedup on unique constraint) and build payload list
+        triggered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        for user_id, kind, matched_entity_id, matched_label in matches:
+            stmt = sqlite_insert(KillAlertEvent).values(
+                user_id=user_id,
+                kind=kind,
+                killmail_id=kid,
+                system_id=sys_id,
+                matched_entity_id=matched_entity_id,
+                matched_label=matched_label,
+                triggered_at=triggered_at,
+            )
+            # Unique (user_id, killmail_id, kind) — existing rows silently skip
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["user_id", "killmail_id", "kind"]
+            )
+            try:
+                await db.execute(stmt)
+            except Exception as e:
+                log.debug("killmail_stream: alert insert skipped: %s", e)
+        await db.commit()
+
+    # Push to the in-memory notification queue used by /notifications/poll.
+    # Import inside the function to avoid circular imports.
+    try:
+        from app.routes.dashboard import _emit_notification
+        zkb = ev.get("zkb") or {}
+        for user_id, kind, matched_entity_id, matched_label in matches:
+            _emit_notification(
+                user_id,
+                {
+                    "type": "kill_alert",
+                    "kind": kind,
+                    "killmail_id": kid,
+                    "system_id": sys_id,
+                    "system_name": sys_name,
+                    "matched_entity_id": matched_entity_id,
+                    "matched_label": matched_label,
+                    "total_value": float(zkb.get("totalValue") or 0),
+                    "zkb_url": f"https://zkillboard.com/kill/{kid}/",
+                },
+            )
+    except Exception as e:
+        log.debug("killmail_stream: emit notification failed: %s", e)
+
+
 async def _handle_kill(ev: dict, our_ids: set[int]) -> None:
     kid = ev.get("killmail_id")
     sys_id = ev.get("solar_system_id")
@@ -241,6 +373,17 @@ async def _handle_kill(ev: dict, our_ids: set[int]) -> None:
     victim = ev.get("victim") or {}
     attackers = ev.get("attackers") or []
     attacker_ids = {a.get("character_id") for a in attackers if a.get("character_id")}
+    attacker_corp_ids = {a.get("corporation_id") for a in attackers if a.get("corporation_id")}
+    attacker_alliance_ids = {a.get("alliance_id") for a in attackers if a.get("alliance_id")}
+
+    # Fan out watch matches. Don't block the cluster/sliding-window update
+    # on this — errors here shouldn't kill the consumer loop.
+    try:
+        await _fire_watch_alerts(
+            ev, kt, sys_id, attacker_ids, attacker_corp_ids, attacker_alliance_ids
+        )
+    except Exception as e:
+        log.exception("killmail_stream: watch fan-out failed for %s: %s", kid, e)
 
     rec = {
         "kill_id": kid,

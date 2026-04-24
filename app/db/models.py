@@ -476,6 +476,61 @@ class UserMapBookmark(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class UserSystemWatch(Base):
+    """Per-user system watchlist. Kills in these systems fan out to
+    KillAlertEvent via the killmail.stream consumer. Manual entries only;
+    the Intel watch page offers a one-click bulk-add for asset-bearing
+    systems."""
+    __tablename__ = "user_system_watches"
+    __table_args__ = (
+        UniqueConstraint("user_id", "system_id", name="uq_user_system_watch"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    label = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class UserHunterWatch(Base):
+    """Per-user enemy watchlist. A kill where a watched entity appears as
+    attacker fans out to KillAlertEvent."""
+    __tablename__ = "user_hunter_watches"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "entity_id", name="uq_user_hunter_watch"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # 'character' | 'corporation' | 'alliance'
+    entity_id = Column(Integer, nullable=False, index=True)
+    label = Column(String(128), nullable=True)  # free-text display name cached at add time
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class KillAlertEvent(Base):
+    """Emitted when a streamed kill matches a user's system or hunter watch.
+    Unique per (user_id, killmail_id, kind) so the killmail.stream 24h
+    replay after restart doesn't double-fire. Feeds both the /notifications
+    poll queue and a history page."""
+    __tablename__ = "kill_alert_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "killmail_id", "kind", name="uq_kill_alert_event"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # 'system_watch' | 'hunter_watch'
+    killmail_id = Column(Integer, nullable=False, index=True)
+    system_id = Column(Integer, nullable=False, index=True)
+    matched_entity_id = Column(Integer, nullable=True)  # for hunter_watch: the entity that matched
+    matched_label = Column(String(128), nullable=True)  # snapshot of watch.label at fire time
+    triggered_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
+    dismissed_at = Column(DateTime, nullable=True)
+
+
 class SystemActivitySnapshot(Base):
     """Hourly kill/jump snapshot per system. Drives the 48h sparkline in the
     map's system info panel and the 'most violent (3h)' trending list."""
