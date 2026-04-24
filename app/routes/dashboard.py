@@ -2252,6 +2252,100 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
     })
 
 
+@router.get("/dashboard/isk-killed", response_class=HTMLResponse)
+async def dashboard_isk_killed(
+    request: Request,
+    window: str = "24h",
+    db: AsyncSession = Depends(get_db),
+):
+    """Line chart of ISK destroyed (user's characters as attackers) over a
+    selectable time window. Bins killmail.total_value into time buckets."""
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    # Window → (cutoff_delta, bin_seconds, label_fmt)
+    windows = {
+        "1h":    (timedelta(hours=1),    5 * 60,       "%H:%M"),
+        "24h":   (timedelta(hours=24),   60 * 60,      "%H:00"),
+        "week":  (timedelta(days=7),     6 * 3600,     "%b %d %H:00"),
+        "month": (timedelta(days=30),    24 * 3600,    "%b %d"),
+    }
+    if window not in windows:
+        window = "24h"
+    delta, bin_seconds, label_fmt = windows[window]
+
+    char_rows = await db.execute(
+        select(Character.character_id).where(Character.user_id == user_id)
+    )
+    char_ids = [r[0] for r in char_rows.all()]
+    if not char_ids:
+        return templates.TemplateResponse(
+            "partials/dashboard_isk_killed.html",
+            {
+                "request": request,
+                "window": window,
+                "labels": [],
+                "values": [],
+                "total_isk": 0,
+                "no_chars": True,
+            },
+        )
+
+    from app.db.models import Killmail, KillmailAttacker
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - delta
+
+    # Distinct killmails where any of user's chars was attacker, within window
+    attacker_subq = (
+        select(KillmailAttacker.killmail_id)
+        .where(KillmailAttacker.character_id.in_(char_ids))
+        .distinct()
+        .subquery()
+    )
+    q = (
+        select(Killmail.killmail_time, Killmail.total_value)
+        .where(Killmail.killmail_id.in_(select(attacker_subq.c.killmail_id)))
+        .where(Killmail.killmail_time >= cutoff)
+    )
+    rows = (await db.execute(q)).all()
+
+    # Bucket
+    total_seconds = int(delta.total_seconds())
+    num_bins = max(1, total_seconds // bin_seconds)
+    buckets = [0.0] * num_bins
+    bin_starts: list[datetime] = [
+        now - timedelta(seconds=total_seconds - i * bin_seconds) for i in range(num_bins)
+    ]
+    for kt, val in rows:
+        if kt is None or val is None:
+            continue
+        offset = (kt - cutoff).total_seconds()
+        idx = int(offset // bin_seconds)
+        if 0 <= idx < num_bins:
+            buckets[idx] += float(val)
+
+    labels = [bs.strftime(label_fmt) for bs in bin_starts]
+    total_isk = sum(buckets)
+
+    return templates.TemplateResponse(
+        "partials/dashboard_isk_killed.html",
+        {
+            "request": request,
+            "window": window,
+            "labels": labels,
+            "values": buckets,
+            "total_isk": total_isk,
+            "no_chars": False,
+        },
+    )
+
+
 @router.get("/dashboard/big-battle-banner", response_class=HTMLResponse)
 async def dashboard_big_battle_banner(request: Request):
     from app.config import get_settings as _gs
