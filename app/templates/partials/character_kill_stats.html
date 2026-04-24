@@ -205,20 +205,25 @@
 
     {# ── Activity Calendar (53×7 GitHub-style, full-width) ─────── #}
     <div class="b-panel" style="padding:0.75rem;margin-bottom:0.75rem;">
-        <div class="b-panel-head" style="margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;">
-            <span class="b-label">Activity Calendar · {{ year }}</span>
-            <div style="display:flex;gap:4px;">
-                {% for y in [current_year - 2, current_year - 1, current_year] %}
-                <button
-                    {% if y != year %}hx-get="/character/{{ character_id }}/kill-stats?year={{ y }}" hx-target="#kill-stats-panel" hx-swap="innerHTML"{% endif %}
-                    style="padding:2px 8px;font-size:9px;font-family:inherit;border:1px solid {% if y == year %}var(--accent){% else %}var(--border){% endif %};background:{% if y == year %}rgba(200,169,81,0.1){% else %}transparent{% endif %};color:{% if y == year %}var(--accent){% else %}var(--muted){% endif %};border-radius:2px;cursor:pointer;">
-                    {{ y }}
-                </button>
-                {% endfor %}
+        <div class="b-panel-head" style="margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <button type="button"
+                        hx-get="/character/{{ character_id }}/kill-stats?year={{ year - 1 }}"
+                        hx-target="#kill-stats-panel" hx-swap="innerHTML"
+                        title="Previous year"
+                        style="padding:2px 8px;font-size:11px;font-family:inherit;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:2px;cursor:pointer;line-height:1;">◀</button>
+                <span class="b-label">Activity Calendar · {{ year }}</span>
+                <button type="button"
+                        {% if year < current_year %}hx-get="/character/{{ character_id }}/kill-stats?year={{ year + 1 }}" hx-target="#kill-stats-panel" hx-swap="innerHTML"{% else %}disabled{% endif %}
+                        title="Next year"
+                        style="padding:2px 8px;font-size:11px;font-family:inherit;border:1px solid var(--border);background:transparent;color:{% if year < current_year %}var(--muted){% else %}rgba(255,255,255,0.15){% endif %};border-radius:2px;cursor:{% if year < current_year %}pointer{% else %}not-allowed{% endif %};line-height:1;">▶</button>
             </div>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">
+                {% if cal_max > 0 %}{{ cal_cells | selectattr('total', 'gt', 0) | list | length }} active days · peak {{ cal_max }}{% else %}no engagements{% endif %}
+            </span>
         </div>
         {% if cal_max > 0 %}
-        <div style="display:grid;grid-template-rows:repeat(7,minmax(12px,1.4vw));grid-template-columns:repeat(53,1fr);grid-auto-flow:column;gap:2px;">
+        <div style="width:100%;display:grid;grid-template-rows:repeat(7,1fr);grid-template-columns:repeat(53,1fr);grid-auto-flow:column;gap:2px;aspect-ratio:53/7;">
             {% for cell in cal_cells %}
                 {% if cell.empty %}
                 <div style="background:transparent;"></div>
