@@ -21,7 +21,7 @@
 
 <div class="b-section">
     <div class="b-section-head">
-        <span class="b-label">All Pilots Combat Profile · 90d</span>
+        <span class="b-label">Your Pilots Combat Profile · 90d</span>
         <span class="b-label" style="color:var(--muted)">
             {{ char_count }} char{{ 's' if char_count != 1 else '' }} · {{ summary['kills'] }} kills · {{ summary['losses'] }} losses
         </span>
@@ -70,7 +70,7 @@
 
     {# ── Solo / Gang / Fleet split ──────────────────────────────── #}
     <div class="b-panel" style="padding:0.75rem;margin-bottom:0.75rem;">
-        <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Solo / Gang / Fleet · all pilots</span></div>
+        <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Solo / Gang / Fleet · your pilots</span></div>
         {% if gang_total > 0 %}
         <div style="display:flex;height:18px;border-radius:2px;overflow:hidden;background:var(--bg);">
             {% set solo_pct = (gang_split['solo'] / gang_total * 100) %}
@@ -177,7 +177,7 @@
     <div class="b-panel" style="padding:0.75rem;margin-bottom:0.75rem;">
         <div class="b-panel-head" style="margin-bottom:0.5rem;">
             <span class="b-label">Untouchable Ships</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">flown 5+ times across all pilots, never lost</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">flown 5+ times across your pilots, never lost</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
             {% for u in untouchable %}
@@ -264,7 +264,7 @@
         <div class="b-panel" style="padding:0.75rem;">
             <div class="b-panel-head" style="margin-bottom:0.5rem;">
                 <span class="b-label">Profitability by Ship</span>
-                <span class="b-label" style="color:var(--muted);font-size:9px;">ISK destroyed vs lost, all pilots</span>
+                <span class="b-label" style="color:var(--muted);font-size:9px;">ISK destroyed vs lost, your pilots</span>
             </div>
             {% if profitability %}
             <div style="position:relative;height:240px;">
@@ -282,7 +282,7 @@
     <div class="b-panel" style="padding:0.75rem;">
         <div class="b-panel-head" style="margin-bottom:0.5rem;">
             <span class="b-label">Ship Usage Stream · 180d</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships across all pilots</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships across your pilots</span>
         </div>
         <div style="position:relative;height:200px;">
             <canvas id="dashboard-stream"></canvas>
