@@ -219,7 +219,7 @@
                         style="padding:2px 8px;font-size:11px;font-family:inherit;border:1px solid var(--border);background:transparent;color:{% if year < current_year %}var(--muted){% else %}rgba(255,255,255,0.15){% endif %};border-radius:2px;cursor:{% if year < current_year %}pointer{% else %}not-allowed{% endif %};line-height:1;">▶</button>
             </div>
             <span class="b-label" style="color:var(--muted);font-size:9px;">
-                {% if cal_max > 0 %}{{ cal_cells | selectattr('total', 'gt', 0) | list | length }} active days · peak {{ cal_max }}{% else %}no engagements{% endif %}
+                {% if cal_max > 0 %}{{ cal_cells | rejectattr('empty') | selectattr('total', 'gt', 0) | list | length }} active days · peak {{ cal_max }}{% else %}no engagements{% endif %}
             </span>
         </div>
         {% if cal_max > 0 %}
