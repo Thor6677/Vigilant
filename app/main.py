@@ -38,6 +38,7 @@ from app.routes.images import router as images_router
 from app.routes.discordtime import router as discordtime_router
 from app.routes.wormholes import router as wormholes_router
 from app.routes.fitting import router as fitting_router
+from app.routes.landings import router as landings_router
 
 settings = get_settings()
 
@@ -101,6 +102,7 @@ app.include_router(images_router)
 app.include_router(discordtime_router)
 app.include_router(wormholes_router)
 app.include_router(fitting_router)
+app.include_router(landings_router)
 
 
 @app.on_event("startup")

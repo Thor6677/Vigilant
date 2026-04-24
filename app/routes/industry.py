@@ -101,8 +101,8 @@ def _format_time(seconds: int) -> str:
     return f"{mins}m"
 
 
-@router.get("/industry", response_class=HTMLResponse)
-async def industry_page(request: Request):
+@router.get("/industry/manufacturing", response_class=HTMLResponse)
+async def industry_manufacturing_page(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")

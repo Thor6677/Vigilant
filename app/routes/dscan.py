@@ -391,7 +391,7 @@ async def resolve_local_scan(names: list[str]) -> dict:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@router.get("/intel", response_class=HTMLResponse)
+@router.get("/intel/dscan", response_class=HTMLResponse)
 async def intel_page(request: Request, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
     history = []
@@ -440,7 +440,7 @@ async def intel_page(request: Request, db: AsyncSession = Depends(get_db)):
 # Keep old /dscan URL working
 @router.get("/dscan", response_class=HTMLResponse)
 async def dscan_redirect(request: Request):
-    return RedirectResponse("/intel")
+    return RedirectResponse("/intel/dscan")
 
 
 @router.post("/intel/parse")

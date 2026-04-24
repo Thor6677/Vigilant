@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} — VIGILANT{% endblock %}
+
+{% block head %}
+<style>
+    .tl-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 1rem;
+    }
+    .tl-card {
+        display: flex;
+        flex-direction: column;
+        padding: 1rem 1.1rem;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s, background 0.15s;
+    }
+    .tl-card:hover {
+        border-color: var(--accent);
+        background: rgba(200, 169, 81, 0.04);
+    }
+    .tl-card-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--accent);
+        letter-spacing: 0.06em;
+        margin-bottom: 0.35rem;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+    .tl-card-url {
+        font-family: monospace;
+        font-size: 9px;
+        color: var(--muted);
+        opacity: 0.7;
+    }
+    .tl-card-desc {
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--text);
+        margin-bottom: 0.5rem;
+        flex: 1;
+    }
+    .tl-card-features {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: auto;
+    }
+    .tl-card-features-label {
+        font-size: 8px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 0.3rem;
+    }
+    .tl-card-features ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .tl-card-features li {
+        padding: 1px 0 1px 0.75rem;
+        position: relative;
+    }
+    .tl-card-features li::before {
+        content: "·";
+        position: absolute;
+        left: 0;
+        color: var(--accent);
+    }
+    .tl-card-external::after {
+        content: "↗";
+        color: var(--muted);
+        margin-left: 0.25rem;
+        font-size: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title" style="font-size:16px;">{{ page_title }}</h1>
+        {% if page_subtitle %}
+        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-top:4px;">{{ page_subtitle }}</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="tl-grid">
+    {% for tool in tools %}
+    <a href="{{ tool.url }}"
+       class="tl-card{% if tool.external %} tl-card-external{% endif %}"
+       {% if tool.external %}target="_blank" rel="noopener"{% endif %}>
+        <div class="tl-card-title">
+            <span>{{ tool.name }}</span>
+            <span class="tl-card-url">{{ tool.url_label or tool.url }}</span>
+        </div>
+        <div class="tl-card-desc">{{ tool.desc }}</div>
+        {% if tool.features %}
+        <div class="tl-card-features">
+            <div class="tl-card-features-label">Features</div>
+            <ul>
+                {% for f in tool.features %}<li>{{ f }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
