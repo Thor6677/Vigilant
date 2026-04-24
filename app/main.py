@@ -30,6 +30,7 @@ from app.routes.mining import router as mining_router
 from app.routes.mining_ledger import router as mining_ledger_router
 from app.routes.dscan import router as dscan_router
 from app.routes.gatecheck import router as gatecheck_router
+from app.routes.intel_watch import router as intel_watch_router
 from app.routes.admin import router as admin_router
 from app.routes.skill_plans import router as skill_plans_router
 from app.routes.structure_timers import router as structure_timers_router
@@ -93,6 +94,7 @@ app.include_router(blueprints_router)
 app.include_router(mining_router)
 app.include_router(mining_ledger_router)
 app.include_router(gatecheck_router)
+app.include_router(intel_watch_router)
 app.include_router(dscan_router)
 app.include_router(admin_router)
 app.include_router(skill_plans_router)

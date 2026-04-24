@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Watchlist — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Watchlist</span></div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .w-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+    @media (max-width: 900px) { .w-grid { grid-template-columns:1fr; } }
+    .w-input { width:100%; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); color:var(--text); font:inherit; font-size:11px; }
+    .w-select { padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); color:var(--text); font:inherit; font-size:11px; }
+    .w-row { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; padding:0.4rem 0.75rem; border-bottom:1px solid var(--border); font-size:11px; }
+    .w-row:last-child { border-bottom:none; }
+    .w-empty { padding:0.75rem; color:var(--muted); font-size:11px; text-align:center; }
+    .w-form { display:flex; gap:0.4rem; padding:0.5rem 0.75rem; border-top:1px solid var(--border); background:var(--bg); flex-wrap:wrap; }
+    .w-banner { padding:0.5rem 0.75rem; background:var(--bg); border-bottom:1px solid var(--border); font-size:10px; color:var(--muted); }
+    .w-banner form { display:inline; }
+    .w-banner button { font-size:10px; padding:2px 8px; }
+    .alert-kind-system { color:var(--accent); }
+    .alert-kind-hunter { color:#ee5555; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if request.query_params.get('err') %}
+<div class="b-section" style="margin-bottom:0.75rem;border-left:3px solid var(--danger);">
+    <div class="w-banner" style="color:var(--danger);">
+        {% set err = request.query_params.get('err') %}
+        {% if err == 'unknown_system' %}Couldn't find that system.
+        {% elif err == 'unknown_entity' %}Couldn't resolve that name — check spelling and try again.
+        {% elif err == 'bad_kind' %}Invalid entity kind.
+        {% else %}Error: {{ err }}
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div class="w-grid">
+
+    {# ── Systems ────────────────────────────────────────────────── #}
+    <div class="b-section">
+        <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="b-label">Watched Systems</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ systems | length }} watched</span>
+        </div>
+
+        {% if asset_system_count > 0 %}
+        <div class="w-banner">
+            {{ asset_system_count }} system{{ 's' if asset_system_count != 1 else '' }} with your assets {% if asset_system_count == 1 %}isn't{% else %}aren't{% endif %} on the watchlist.
+            <form method="POST" action="/intel/watch/system/sync-assets">
+                <button type="submit" class="b-btn">Add all</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if not systems %}
+        <div class="w-empty">No systems watched yet.</div>
+        {% else %}
+        {% for s in systems %}
+        <div class="w-row">
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;">
+                    {% if s.security is not none %}
+                    <span style="color:{% if s.security >= 0.5 %}#78c850{% elif s.security >= 0.0 %}#e0a030{% else %}#d85040{% endif %};font-size:10px;">[{{ "%.1f"|format(s.security) }}]</span>
+                    {% endif %}
+                    {{ s.system_name }}
+                </div>
+                {% if s.label %}<div style="color:var(--muted);font-size:10px;">{{ s.label }}</div>{% endif %}
+            </div>
+            <form method="POST" action="/intel/watch/system/remove/{{ s.id }}" onsubmit="return confirm('Remove {{ s.system_name }}?');">
+                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
+            </form>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <form class="w-form" method="POST" action="/intel/watch/system/add">
+            <input class="w-input" name="system" placeholder="System name or ID" required style="flex:2;min-width:140px;">
+            <input class="w-input" name="label" placeholder="Label (optional)" style="flex:2;min-width:120px;">
+            <button type="submit" class="b-btn" style="flex:none;">Add</button>
+        </form>
+    </div>
+
+    {# ── Hunters ────────────────────────────────────────────────── #}
+    <div class="b-section">
+        <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="b-label">Watched Hunters</span>
+            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ hunters | length }} watched</span>
+        </div>
+
+        {% if not hunters %}
+        <div class="w-empty">No hunters watched yet.</div>
+        {% else %}
+        {% for h in hunters %}
+        <div class="w-row">
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;">
+                    <span style="color:var(--muted);font-size:9px;text-transform:uppercase;">{{ h.kind }}</span>
+                    {{ h.label or h.entity_id }}
+                </div>
+                {% if h.notes %}<div style="color:var(--muted);font-size:10px;">{{ h.notes }}</div>{% endif %}
+            </div>
+            <a href="https://zkillboard.com/{{ h.kind }}/{{ h.entity_id }}/" target="_blank" rel="noopener" class="b-btn" style="font-size:9px;padding:2px 8px;">zkb ↗</a>
+            <form method="POST" action="/intel/watch/hunter/remove/{{ h.id }}" onsubmit="return confirm('Remove {{ h.label or h.entity_id }}?');">
+                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
+            </form>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <form class="w-form" method="POST" action="/intel/watch/hunter/add">
+            <select class="w-select" name="kind" style="flex:none;">
+                <option value="character">Character</option>
+                <option value="corporation">Corporation</option>
+                <option value="alliance">Alliance</option>
+            </select>
+            <input class="w-input" name="name" placeholder="Exact name" required style="flex:2;min-width:140px;">
+            <input class="w-input" name="notes" placeholder="Notes (optional)" style="flex:2;min-width:120px;">
+            <button type="submit" class="b-btn" style="flex:none;">Add</button>
+        </form>
+    </div>
+
+</div>
+
+{# ── Recent alerts ──────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="b-label">Recent Alerts · last 72h</span>
+        <span class="b-label" style="color:var(--muted);font-size:9px;">{{ alerts | length }} event(s)</span>
+    </div>
+    {% if not alerts %}
+    <div class="w-empty">No alerts yet. Fires will appear here as they happen.</div>
+    {% else %}
+    {% for a in alerts %}
+    <div class="w-row">
+        <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;">
+                <span class="alert-kind-{{ 'system' if a.kind == 'system_watch' else 'hunter' }}" style="font-size:9px;text-transform:uppercase;">
+                    {{ 'SYSTEM' if a.kind == 'system_watch' else 'HUNTER' }}
+                </span>
+                {{ a.system_name }}
+                {% if a.matched_label %} · <span style="color:var(--muted);">{{ a.matched_label }}</span>{% endif %}
+            </div>
+            <div style="color:var(--muted);font-size:10px;">
+                {{ a.triggered_at.strftime('%Y-%m-%d %H:%M') }} UTC
+            </div>
+        </div>
+        <a href="https://zkillboard.com/kill/{{ a.killmail_id }}/" target="_blank" rel="noopener" class="b-btn" style="font-size:9px;padding:2px 8px;">kill ↗</a>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+{% endblock %}

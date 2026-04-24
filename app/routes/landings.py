@@ -111,6 +111,17 @@ INTEL_TOOLS = [
         ],
     },
     {
+        "name": "Watchlist",
+        "url": "/intel/watch",
+        "desc": "Live kill alerts from the killmail stream. Watch specific systems (e.g. your home, your asset hubs) and hunter entities (corps/alliances/characters) — alerts fire within seconds.",
+        "features": [
+            "System watches with one-click bulk-add from your assets",
+            "Hunter watches by character / corporation / alliance",
+            "72h alert history",
+            "Live notifications via dashboard poll",
+        ],
+    },
+    {
         "name": "Star Map",
         "url": "/map",
         "desc": "Live New Eden activity map — kill count heatmap, jumps, sov changes, industry activity, and NPC incursions all overlaid on an interactive canvas.",
