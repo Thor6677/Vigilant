@@ -162,17 +162,19 @@ async def store_killmail(
         )
         db.add(km)
 
-        if involves_our:
-            for att in attackers:
-                db.add(KillmailAttacker(
-                    killmail_id=kid,
-                    character_id=att.get("character_id"),
-                    corporation_id=att.get("corporation_id"),
-                    alliance_id=att.get("alliance_id"),
-                    ship_type_id=att.get("ship_type_id"),
-                    weapon_type_id=att.get("weapon_type_id"),
-                    final_blow=bool(att.get("final_blow", False)),
-                ))
+        # Store all attackers regardless of scope. Discovery-scope attacker
+        # rows are needed for unique-pilot counting in recent_battles, and
+        # gc_discovery_killmails now cascades the delete to keep growth bounded.
+        for att in attackers:
+            db.add(KillmailAttacker(
+                killmail_id=kid,
+                character_id=att.get("character_id"),
+                corporation_id=att.get("corporation_id"),
+                alliance_id=att.get("alliance_id"),
+                ship_type_id=att.get("ship_type_id"),
+                weapon_type_id=att.get("weapon_type_id"),
+                final_blow=bool(att.get("final_blow", False)),
+            ))
 
         try:
             await db.commit()
@@ -185,15 +187,27 @@ async def store_killmail(
 
 async def gc_discovery_killmails(retention_days: int = 30) -> int:
     """Delete discovery-scope killmails older than retention_days. Our-char
-    rows are preserved forever. Returns row count deleted."""
+    rows are preserved forever. Cascades to killmail_attackers for the deleted
+    rows (SQLite has no FK cascade, so we delete explicitly). Returns killmail
+    row count deleted."""
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
     async with AsyncSessionLocal() as db:
+        ids_to_delete = [
+            r[0] for r in (await db.execute(
+                select(Killmail.killmail_id).where(
+                    Killmail.killmail_time < cutoff,
+                    Killmail.involves_our_char == False,
+                )
+            )).all()
+        ]
+        if not ids_to_delete:
+            return 0
+        await db.execute(
+            delete(KillmailAttacker).where(KillmailAttacker.killmail_id.in_(ids_to_delete))
+        )
         result = await db.execute(
-            delete(Killmail).where(
-                Killmail.killmail_time < cutoff,
-                Killmail.involves_our_char == False,
-            )
+            delete(Killmail).where(Killmail.killmail_id.in_(ids_to_delete))
         )
         await db.commit()
         return result.rowcount or 0

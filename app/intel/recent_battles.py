@@ -50,6 +50,11 @@ BUSY_SYSTEM_THRESHOLD = 5
 MAX_BUSY_SYSTEMS = 20
 MAX_HYDRATIONS_PER_RUN = 100
 BATTLES_PER_GROUP = 5
+# Minimum unique pilots (attackers ∪ victim) for a cluster to persist.
+# K-space is saturated; keep the bar at real-fleet-fight scale. W-space
+# is sparsely populated, so a handful of pilots is already meaningful.
+MIN_PILOTS_KSPACE = 50
+MIN_PILOTS_WSPACE = 5
 
 
 def wh_class_label(wc: int | None) -> str | None:
@@ -256,6 +261,32 @@ async def _cluster_system(
     if not clusters:
         return []
 
+    # Batched lookup: unique pilots per kill (attackers ∪ victim). One pair of
+    # queries per system covers every cluster. Attackers are stored for all
+    # kills (not just our-char), so discovery-scope clusters count correctly.
+    all_cluster_km_ids = [km["killmail_id"] for c in clusters for km in c]
+    attackers_by_km: dict[int, set[int]] = {}
+    victims_by_km: dict[int, int] = {}
+    if all_cluster_km_ids:
+        async with AsyncSessionLocal() as db:
+            arows = await db.execute(
+                select(KillmailAttacker.killmail_id, KillmailAttacker.character_id)
+                .where(KillmailAttacker.killmail_id.in_(all_cluster_km_ids))
+                .where(KillmailAttacker.character_id.is_not(None))
+            )
+            for kid, cid in arows.all():
+                attackers_by_km.setdefault(kid, set()).add(cid)
+            vrows = await db.execute(
+                select(Killmail.killmail_id, Killmail.victim_character_id)
+                .where(Killmail.killmail_id.in_(all_cluster_km_ids))
+                .where(Killmail.victim_character_id.is_not(None))
+            )
+            for kid, cid in vrows.all():
+                victims_by_km[kid] = cid
+
+    band_is_wspace = sys_meta.get("band") == "w-space"
+    min_pilots = MIN_PILOTS_WSPACE if band_is_wspace else MIN_PILOTS_KSPACE
+
     # Build the DetectedBattle-shaped dicts
     out: list[dict] = []
     for c in clusters:
@@ -265,11 +296,11 @@ async def _cluster_system(
         kill_count = len(c)
         total_isk = 0.0
         ship_counter: Counter = Counter()
-        attacker_corps: Counter = Counter()
         victim_corps: Counter = Counter()
         pilots: set = set()
         for km in c:
-            h = hydrated.get(km["killmail_id"])
+            kid = km["killmail_id"]
+            h = hydrated.get(kid)
             if not h:
                 continue  # couldn't hydrate under budget — skip this kill's detail
             total_isk += h.get("total_value") or 0
@@ -279,11 +310,14 @@ async def _cluster_system(
             vc = h.get("victim_corporation_id")
             if vc:
                 victim_corps[vc] += 1
-            fb = h.get("final_blow_character_id")
-            if fb:
-                pilots.add(fb)
+            pilots.update(attackers_by_km.get(kid, set()))
+            v_cid = victims_by_km.get(kid)
+            if v_cid:
+                pilots.add(v_cid)
         if not ship_counter:
             continue  # cluster had no hydrated data — skip this run, try next
+        if len(pilots) < min_pilots:
+            continue  # below per-band pilot threshold
         top_ships = [
             {"id": sid, "count": n}
             for sid, n in ship_counter.most_common(5)
