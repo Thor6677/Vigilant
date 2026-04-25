@@ -606,15 +606,15 @@
 </div>
 {% endif %}
 
-{# ── ISK Killed (lazy-loaded; killmails feature) — line graph over selectable window #}
+{# ── Activity (lazy-loaded; killmails feature) — PCU + ISK destroyed overlay #}
 {% if killmails_enabled %}
-<div id="dashboard-isk-killed"
-     hx-get="/dashboard/isk-killed?window=24h"
+<div id="dashboard-activity"
+     hx-get="/dashboard/activity?window=24h"
      hx-trigger="load"
      hx-swap="outerHTML"
      style="margin-bottom:0.75rem;">
     <div class="b-section">
-        <div class="b-section-head"><span class="b-label">ISK Killed</span></div>
+        <div class="b-section-head"><span class="b-label">Activity</span></div>
         <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
     </div>
 </div>

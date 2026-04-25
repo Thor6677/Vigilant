@@ -1,0 +1,152 @@
+{# Activity overlay — PCU (left axis, solid blue) + ISK destroyed (right axis,
+   dashed gold) on a single Chart.js line chart. Lazy-loaded + window-switchable
+   via htmx. Expects Chart.js loaded by dashboard.html. #}
+
+{% macro fmt_isk(amount) %}
+  {%- if amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro fmt_pcu(n) %}
+  {%- if n >= 1000 -%}{{ "%.1f"|format(n / 1000) }}K
+  {%- else -%}{{ n }}
+  {%- endif -%}
+{% endmacro %}
+
+<div id="dashboard-activity" style="margin-bottom:0.75rem;">
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+        <span class="b-label">
+            Activity · New Eden · peak {{ fmt_pcu(peak_pcu) }} online · {{ fmt_isk(total_isk) }} ISK destroyed
+        </span>
+        <div style="display:flex;gap:0.25rem;">
+            {% for w, label in [('1h','1H'),('24h','24H'),('week','Week'),('month','Month')] %}
+            <button type="button" class="b-btn"
+                    hx-get="/dashboard/activity?window={{ w }}"
+                    hx-target="#dashboard-activity"
+                    hx-swap="outerHTML"
+                    style="padding:2px 8px;font-size:9px;border:1px solid {% if window == w %}var(--accent){% else %}var(--border){% endif %};{% if window == w %}color:var(--accent);{% endif %}">
+                {{ label }}
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    {% if total_isk == 0 and peak_pcu == 0 %}
+    <div class="b-empty" style="padding:0.75rem;color:var(--muted);font-size:11px;">
+        No data in this window yet. Live samples and the killmail stream
+        accumulate over time; longer windows fill in as they run.
+    </div>
+    {% else %}
+    <div style="position:relative;height:200px;padding:0.5rem 0.75rem;">
+        <canvas id="activity-chart-{{ window }}"></canvas>
+    </div>
+    {% endif %}
+</div>
+
+{% if total_isk > 0 or peak_pcu > 0 %}
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const el = document.getElementById('activity-chart-{{ window }}');
+    if (!el) return;
+    const labels = {{ labels|tojson }};
+    const iskValues = {{ isk_values|tojson }};
+    const pcuValues = {{ pcu_values|tojson }};
+    const fmtISK = (v) => {
+        if (v === null) return '';
+        if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+        if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
+        if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
+        if (v >= 1e3)  return (v/1e3).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    const fmtPCU = (v) => {
+        if (v === null) return '';
+        if (v >= 1000) return (v/1000).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    new Chart(el, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Players online',
+                    data: pcuValues,
+                    yAxisID: 'y',
+                    borderColor: 'rgba(94,177,255,0.95)',
+                    backgroundColor: 'rgba(94,177,255,0.10)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    fill: false,
+                    tension: 0.25,
+                    spanGaps: true,
+                },
+                {
+                    label: 'ISK destroyed',
+                    data: iskValues,
+                    yAxisID: 'y1',
+                    borderColor: 'rgba(200,169,81,0.95)',
+                    backgroundColor: 'rgba(200,169,81,0.08)',
+                    borderWidth: 2,
+                    borderDash: [4, 3],
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    fill: false,
+                    tension: 0.25,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'end',
+                    labels: { font: { size: 9 }, color: '#bfbfbf', boxWidth: 16, boxHeight: 2 },
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const v = ctx.parsed.y;
+                            if (v === null) return ctx.dataset.label + ': —';
+                            if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
+                            return ctx.dataset.label + ': ' + fmtPCU(v);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color:'#7a7a7a', font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:8 },
+                    grid:  { display:false }
+                },
+                y: {
+                    type:'linear', position:'left',
+                    beginAtZero: false,
+                    ticks: { color:'rgba(94,177,255,0.95)', font:{size:9}, callback: (v)=>fmtPCU(v) },
+                    grid:  { color:'rgba(255,255,255,0.05)' },
+                    title: { display:true, text:'Players', color:'rgba(94,177,255,0.7)', font:{size:9} },
+                },
+                y1: {
+                    type:'linear', position:'right',
+                    beginAtZero: true,
+                    ticks: { color:'rgba(200,169,81,0.95)', font:{size:9}, callback: (v)=>fmtISK(v) },
+                    grid:  { drawOnChartArea:false },
+                    title: { display:true, text:'ISK', color:'rgba(200,169,81,0.7)', font:{size:9} },
+                },
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+</div>

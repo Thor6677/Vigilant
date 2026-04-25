@@ -1645,6 +1645,17 @@ async def _background_scheduler():
                         except Exception as e:
                             logger.warning("Battle discovery scheduling error: %s", e)
 
+            # ESI /status/ player-count sample (every 60s; runs regardless of
+            # killmail flag — it's a tiny global health stat).
+            if not hasattr(_background_scheduler, '_last_player_count_tick') or \
+               (now - _background_scheduler._last_player_count_tick).total_seconds() >= 60:
+                try:
+                    from app.intel.player_count import sample_status_from_esi
+                    asyncio.create_task(sample_status_from_esi())
+                    _background_scheduler._last_player_count_tick = now
+                except Exception as e:
+                    logger.warning("Player count sample error: %s", e)
+
             # Daily GC of archived ESI rate-limit events (>30 days old).
             # Runs regardless of flags — small query, safe cheap.
             if not hasattr(_background_scheduler, '_last_esi_events_gc') or \
@@ -2252,15 +2263,15 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
     })
 
 
-@router.get("/dashboard/isk-killed", response_class=HTMLResponse)
-async def dashboard_isk_killed(
+@router.get("/dashboard/activity", response_class=HTMLResponse)
+async def dashboard_activity(
     request: Request,
     window: str = "24h",
     db: AsyncSession = Depends(get_db),
 ):
-    """Line chart of ISK destroyed across all of New Eden over a selectable
-    time window. Reads every killmail the stream (and 15-min zKB poller)
-    has persisted. Bins killmail.total_value into time buckets."""
+    """Activity overlay: ISK destroyed + concurrent player count over a
+    selectable window. Same chart, dual y-axis. Universe-wide ISK from the
+    killmails table; PCU from player_count_snapshots (source='esi')."""
     from app.config import get_settings as _gs
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
@@ -2281,44 +2292,61 @@ async def dashboard_isk_killed(
         window = "24h"
     delta, bin_seconds, label_fmt = windows[window]
 
-    from app.db.models import Killmail
+    from app.db.models import Killmail, PlayerCountSnapshot
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - delta
-
-    # Universe-wide: every killmail in the window. No character scoping.
-    q = (
-        select(Killmail.killmail_time, Killmail.total_value)
-        .where(Killmail.killmail_time >= cutoff)
-    )
-    rows = (await db.execute(q)).all()
-
-    # Bucket
     total_seconds = int(delta.total_seconds())
     num_bins = max(1, total_seconds // bin_seconds)
-    buckets = [0.0] * num_bins
     bin_starts: list[datetime] = [
         now - timedelta(seconds=total_seconds - i * bin_seconds) for i in range(num_bins)
     ]
-    for kt, val in rows:
+    labels = [bs.strftime(label_fmt) for bs in bin_starts]
+
+    # ISK destroyed — sum(total_value) per bin
+    isk_buckets = [0.0] * num_bins
+    isk_rows = (await db.execute(
+        select(Killmail.killmail_time, Killmail.total_value)
+        .where(Killmail.killmail_time >= cutoff)
+    )).all()
+    for kt, val in isk_rows:
         if kt is None or val is None:
             continue
-        offset = (kt - cutoff).total_seconds()
-        idx = int(offset // bin_seconds)
+        idx = int((kt - cutoff).total_seconds() // bin_seconds)
         if 0 <= idx < num_bins:
-            buckets[idx] += float(val)
+            isk_buckets[idx] += float(val)
+    total_isk = sum(isk_buckets)
 
-    labels = [bs.strftime(label_fmt) for bs in bin_starts]
-    total_isk = sum(buckets)
+    # PCU — average per bin (concurrent count, not throughput)
+    pcu_sums = [0.0] * num_bins
+    pcu_counts = [0] * num_bins
+    pcu_rows = (await db.execute(
+        select(PlayerCountSnapshot.recorded_at, PlayerCountSnapshot.player_count)
+        .where(PlayerCountSnapshot.recorded_at >= cutoff)
+        .where(PlayerCountSnapshot.source == "esi")
+    )).all()
+    for rt, pc in pcu_rows:
+        if rt is None or pc is None:
+            continue
+        idx = int((rt - cutoff).total_seconds() // bin_seconds)
+        if 0 <= idx < num_bins:
+            pcu_sums[idx] += float(pc)
+            pcu_counts[idx] += 1
+    pcu_values = [
+        round(pcu_sums[i] / pcu_counts[i]) if pcu_counts[i] else None
+        for i in range(num_bins)
+    ]
+    peak_pcu = max((v for v in pcu_values if v is not None), default=0)
 
     return templates.TemplateResponse(
-        "partials/dashboard_isk_killed.html",
+        "partials/dashboard_activity.html",
         {
             "request": request,
             "window": window,
             "labels": labels,
-            "values": buckets,
+            "isk_values": isk_buckets,
+            "pcu_values": pcu_values,
             "total_isk": total_isk,
-            "no_chars": False,
+            "peak_pcu": peak_pcu,
         },
     )
 

@@ -103,6 +103,29 @@ class WalletSnapshot(Base):
     recorded_at = Column(DateTime, nullable=False)  # naive UTC
 
 
+class PlayerCountSnapshot(Base):
+    """TQ player count over time. One table for live ESI samples + historical
+    backfill from third-party archives. The (source, recorded_at) unique
+    constraint makes idempotent re-runs safe and lets us cross-validate
+    overlapping sources without duplication."""
+    __tablename__ = "player_count_snapshots"
+    __table_args__ = (
+        UniqueConstraint("source", "recorded_at", name="uq_pcs_source_time"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recorded_at = Column(DateTime, nullable=False, index=True)  # naive UTC
+    player_count = Column(Integer, nullable=False)
+    source = Column(String(32), nullable=False, index=True)
+        # 'esi' | 'eve-offline-net' | 'eve-offline-com'
+    granularity = Column(String(16), nullable=False, default="60s")
+        # '60s' | 'hourly' | 'daily'
+    # ESI-only fields (nullable for non-esi rows)
+    server_version = Column(String(32), nullable=True)
+    server_start_time = Column(DateTime, nullable=True)
+    vip_mode = Column(Boolean, nullable=True)
+
+
 class ESIRateLimitEvent(Base):
     __tablename__ = "esi_rate_limit_events"
     id          = Column(Integer, primary_key=True, autoincrement=True)
