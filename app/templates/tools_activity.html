@@ -99,6 +99,29 @@
     </div>
 </div>
 
+{% if breakdowns_available and total_kills > 0 %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">PvP composition · trailing {{ window_label.split(' ')[1] if window != '1d' else '24h' }}</span></div>
+    <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">Solo vs fleet kills</div>
+            <div style="position:relative;height:220px;">
+                <canvas id="solo-fleet-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">NPC vs player kills</div>
+            <div style="position:relative;height:220px;">
+                <canvas id="npc-player-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+    </div>
+    <div style="padding:0 0.75rem 0.75rem;font-size:9px;color:var(--muted);">
+        Killmail data is retained for 30 days, so these breakdowns hide on longer windows. Solo/fleet bucket on attacker count: solo=1, small=2–10, medium=11–50, large=51+.
+    </div>
+</div>
+{% endif %}
+
 {# ── Credits ─────────────────────────────────────────────────────────────── #}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">Credits</span></div>
@@ -208,6 +231,64 @@
             }
         }
     });
+})();
+</script>
+{% endif %}
+
+{% if breakdowns_available and total_kills > 0 %}
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const labels = {{ labels|tojson }};
+    const sf = {{ solo_fleet_series|tojson }};
+    const np = {{ npc_player_series|tojson }};
+
+    const stackedAreaOpts = {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+            legend:{display:true, position:'top', align:'end',
+                    labels:{font:{size:9},color:'#bfbfbf',boxWidth:14,boxHeight:2}},
+            tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+': '+ctx.parsed.y.toLocaleString()}}
+        },
+        scales:{
+            x:{stacked:true, ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:10}, grid:{display:false}},
+            y:{stacked:true, beginAtZero:true,
+               ticks:{color:'#7a7a7a',font:{size:9}}, grid:{color:'rgba(255,255,255,0.05)'}}
+        }
+    };
+
+    const sfEl = document.getElementById('solo-fleet-chart-{{ window }}');
+    if (sfEl && sf && sf.solo) {
+        new Chart(sfEl, {
+            type:'line',
+            data:{
+                labels:labels,
+                datasets:[
+                    {label:'Solo (1)',     data:sf.solo,   borderColor:'rgba(94,177,255,0.9)',   backgroundColor:'rgba(94,177,255,0.35)',   borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Small (2–10)', data:sf.small,  borderColor:'rgba(120,200,140,0.9)',  backgroundColor:'rgba(120,200,140,0.35)',  borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Medium (11–50)', data:sf.medium, borderColor:'rgba(220,170,90,0.9)', backgroundColor:'rgba(220,170,90,0.35)',   borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Large (51+)',  data:sf.large,  borderColor:'rgba(238,85,85,0.9)',    backgroundColor:'rgba(238,85,85,0.4)',     borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                ]
+            },
+            options: stackedAreaOpts
+        });
+    }
+
+    const npEl = document.getElementById('npc-player-chart-{{ window }}');
+    if (npEl && np && np.player) {
+        new Chart(npEl, {
+            type:'line',
+            data:{
+                labels:labels,
+                datasets:[
+                    {label:'Player kills', data:np.player, borderColor:'rgba(238,85,85,0.95)',   backgroundColor:'rgba(238,85,85,0.35)',  borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'NPC kills',    data:np.npc,    borderColor:'rgba(140,140,140,0.85)', backgroundColor:'rgba(140,140,140,0.3)', borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                ]
+            },
+            options: stackedAreaOpts
+        });
+    }
 })();
 </script>
 {% endif %}

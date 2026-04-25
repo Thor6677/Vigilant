@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Integer, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -220,6 +220,59 @@ async def tools_activity(
     # the cluster total — appropriate for "kills in this bin".
     total_kills = sum(kills_buckets)
 
+    # ── Breakdown charts (only on windows ≤ 30d) ──
+    # Killmail rows are GC'd at 30d, so attacker-count + is_npc breakdowns
+    # only make sense on the trailing 30 days. Hide them for longer windows
+    # rather than showing partial data.
+    breakdowns_available = window in ("1d", "7d", "30d")
+    solo_fleet_series: dict[str, list[int]] = {}
+    npc_player_series: dict[str, list[int]] = {}
+    if breakdowns_available:
+        # Solo / small / medium / large bucketing on attacker_count.
+        bucket_expr = case(
+            (Killmail.attacker_count <= 1, "solo"),
+            (Killmail.attacker_count <= 10, "small"),
+            (Killmail.attacker_count <= 50, "medium"),
+            else_="large",
+        ).label("bucket")
+        sf_q = (
+            select(
+                _bin_expr(Killmail.killmail_time).label("b"),
+                bucket_expr,
+                func.count().label("n"),
+            )
+            .where(Killmail.killmail_time >= cutoff)
+            .group_by("b", "bucket")
+        )
+        for name in ("solo", "small", "medium", "large"):
+            solo_fleet_series[name] = [0] * num_bins
+        for b, bucket, n in (await db.execute(sf_q)).all():
+            if b is None or bucket not in solo_fleet_series:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                solo_fleet_series[bucket][i] = int(n or 0)
+
+        # NPC vs player kills — uses is_npc flag.
+        np_q = (
+            select(
+                _bin_expr(Killmail.killmail_time).label("b"),
+                Killmail.is_npc.label("npc"),
+                func.count().label("n"),
+            )
+            .where(Killmail.killmail_time >= cutoff)
+            .group_by("b", "npc")
+        )
+        npc_player_series["npc"] = [0] * num_bins
+        npc_player_series["player"] = [0] * num_bins
+        for b, is_npc, n in (await db.execute(np_q)).all():
+            if b is None:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                key = "npc" if is_npc else "player"
+                npc_player_series[key][i] = int(n or 0)
+
     # Source coverage breakdown. For day+ bins we sum sample_count from the
     # daily aggregate (cheap). For sub-day windows we GROUP BY on the
     # snapshot table — small window, still cheap.
@@ -259,6 +312,9 @@ async def tools_activity(
         "total_kills": total_kills,
         "source_counts": src_counts,
         "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
+        "breakdowns_available": breakdowns_available,
+        "solo_fleet_series": solo_fleet_series,
+        "npc_player_series": npc_player_series,
     }
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
