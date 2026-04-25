@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Integer, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -388,3 +388,130 @@ async def tools_activity(
     return templates.TemplateResponse(
         "tools_activity.html", {"request": request, **payload}
     )
+
+
+# Lazy-loaded prior-period overlay. Lives on its own endpoint so the main
+# /tools/activity render isn't slowed by a second pass over the data, and
+# so the slow-window response cache stays small. JS only fetches this when
+# the user clicks the "Compare to prior period" toggle.
+_compare_cache: dict[str, tuple[datetime, dict]] = {}
+
+
+@router.get("/tools/activity/compare.json")
+async def tools_activity_compare(
+    request: Request,
+    window: str = "30d",
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    if window not in _WINDOWS or window == "all":
+        return JSONResponse({"error": "no prior period for this window"}, status_code=400)
+
+    cached = _compare_cache.get(window) if window in _SLOW_WINDOWS else None
+    if cached is not None:
+        expires_at, body = cached
+        if datetime.now(timezone.utc).replace(tzinfo=None) < expires_at:
+            return JSONResponse(body)
+
+    _label, delta, bin_seconds, label_fmt = _WINDOWS[window]
+    # delta is non-None for every non-'all' window.
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    current_cutoff = now_naive - delta
+    prior_cutoff = current_cutoff - delta
+    total_seconds = int((current_cutoff - prior_cutoff).total_seconds())
+    num_bins = max(1, total_seconds // bin_seconds)
+    bin_starts = [prior_cutoff + timedelta(seconds=i * bin_seconds) for i in range(num_bins)]
+    labels = [bs.strftime(label_fmt) for bs in bin_starts]
+
+    def _bin_expr(time_col):
+        return func.cast(
+            (func.julianday(time_col) - func.julianday(prior_cutoff))
+            * 86400.0 / float(bin_seconds),
+            Integer,
+        )
+
+    # PCU — daily aggregate path for day+ bins, raw for sub-day.
+    pcu_values: list[int | None] = [None] * num_bins
+    if bin_seconds < 86400:
+        for b, avg_pc in (await db.execute(
+            select(_bin_expr(PlayerCountSnapshot.recorded_at).label("b"),
+                   func.avg(PlayerCountSnapshot.player_count))
+            .where(PlayerCountSnapshot.recorded_at >= prior_cutoff,
+                   PlayerCountSnapshot.recorded_at < current_cutoff)
+            .group_by("b")
+        )).all():
+            if b is None or avg_pc is None:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                pcu_values[i] = round(float(avg_pc))
+    else:
+        per_date: dict = {}
+        for d, src, avg_pc in (await db.execute(
+            select(PlayerCountDailyAggregate.date, PlayerCountDailyAggregate.source,
+                   PlayerCountDailyAggregate.avg_pc)
+            .where(PlayerCountDailyAggregate.date >= prior_cutoff.date(),
+                   PlayerCountDailyAggregate.date < current_cutoff.date())
+        )).all():
+            cur = per_date.get(d)
+            new_pri = _PCU_SOURCE_PRIORITY.get(src, 99)
+            if cur is None or new_pri < cur[0]:
+                per_date[d] = (new_pri, float(avg_pc or 0.0))
+        bin_sum = [0.0] * num_bins
+        bin_n = [0] * num_bins
+        for d, (_pri, avg_pc) in per_date.items():
+            d_dt = datetime(d.year, d.month, d.day)
+            idx = int((d_dt - prior_cutoff).total_seconds() // bin_seconds)
+            if 0 <= idx < num_bins:
+                bin_sum[idx] += avg_pc
+                bin_n[idx] += 1
+        for i in range(num_bins):
+            if bin_n[i] > 0:
+                pcu_values[i] = round(bin_sum[i] / bin_n[i])
+
+    # ISK — only available for the trailing 30d of Killmail rows. Older bins
+    # return 0; that's honest given retention.
+    isk_values: list[float] = [0.0] * num_bins
+    for b, isk in (await db.execute(
+        select(_bin_expr(Killmail.killmail_time).label("b"),
+               func.sum(Killmail.total_value))
+        .where(Killmail.killmail_time >= prior_cutoff,
+               Killmail.killmail_time < current_cutoff)
+        .group_by("b")
+    )).all():
+        if b is None:
+            continue
+        i = int(b)
+        if 0 <= i < num_bins:
+            isk_values[i] = float(isk or 0.0)
+
+    # Kills — from KillmailDailyAggregate (multi-source).
+    kills_values = [0] * num_bins
+    by_date: dict = {}
+    for d, kc, src in (await db.execute(
+        select(KillmailDailyAggregate.date, KillmailDailyAggregate.kill_count,
+               KillmailDailyAggregate.source)
+        .where(KillmailDailyAggregate.date >= prior_cutoff.date(),
+               KillmailDailyAggregate.date < current_cutoff.date())
+    )).all():
+        cur = by_date.get(d)
+        if cur is None or (cur[1] == "zkb-totals" and src == "vigilant"):
+            by_date[d] = (int(kc), src)
+    for d, (kc, _src) in by_date.items():
+        d_dt = datetime(d.year, d.month, d.day)
+        idx = int((d_dt - prior_cutoff).total_seconds() // bin_seconds)
+        if 0 <= idx < num_bins:
+            kills_values[idx] += kc
+
+    body = {
+        "window": window,
+        "labels": labels,
+        "pcu_values": pcu_values,
+        "isk_values": isk_values,
+        "kills_values": kills_values,
+    }
+    if window in _SLOW_WINDOWS:
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
+        _compare_cache[window] = (expires_at, body)
+    return JSONResponse(body)

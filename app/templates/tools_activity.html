@@ -89,6 +89,13 @@
             and accumulate over time.
         </div>
         {% else %}
+        {% if window != 'all' %}
+        <div style="display:flex;justify-content:flex-end;margin-bottom:0.4rem;">
+            <button id="ta-compare-toggle" type="button" class="b-btn" style="padding:3px 10px;font-size:10px;">
+                Compare to prior period
+            </button>
+        </div>
+        {% endif %}
         <div style="position:relative;height:360px;">
             <canvas id="activity-chart-{{ window }}"></canvas>
         </div>
@@ -306,7 +313,7 @@
         if (v >= 1000) return (v/1000).toFixed(1) + 'K';
         return v.toFixed(0);
     };
-    new Chart(el, {
+    const mainChart = new Chart(el, {
         type: 'line',
         data: {
             labels: labels,
@@ -353,6 +360,62 @@
             }
         }
     });
+
+    // Compare-to-prior-period toggle. Lazy-fetches /tools/activity/compare.json,
+    // overlays 3 faded datasets on the main chart. Re-clicking removes them.
+    const toggleBtn = document.getElementById('ta-compare-toggle');
+    if (toggleBtn) {
+        let added = false;
+        let cached = null;
+        toggleBtn.addEventListener('click', async () => {
+            if (added) {
+                mainChart.data.datasets = mainChart.data.datasets.filter(d => !d._isCompare);
+                mainChart.update();
+                toggleBtn.classList.remove('is-active');
+                toggleBtn.textContent = 'Compare to prior period';
+                added = false;
+                return;
+            }
+            toggleBtn.disabled = true;
+            toggleBtn.textContent = 'Loading…';
+            try {
+                if (!cached) {
+                    const r = await fetch('/tools/activity/compare.json?window={{ window }}');
+                    if (!r.ok) throw new Error('http '+r.status);
+                    cached = await r.json();
+                }
+                // Pad/truncate prior series to match current chart length so
+                // the lines render aligned to the same x-axis bins.
+                const n = mainChart.data.labels.length;
+                const fit = (arr) => {
+                    if (!arr) return new Array(n).fill(null);
+                    if (arr.length === n) return arr;
+                    if (arr.length > n) return arr.slice(0, n);
+                    return arr.concat(new Array(n - arr.length).fill(null));
+                };
+                mainChart.data.datasets.push(
+                    { label:'Players (prior)', data: fit(cached.pcu_values), yAxisID:'y',
+                      borderColor:'rgba(94,177,255,0.4)', borderWidth:1, borderDash:[2,2],
+                      pointRadius:0, fill:false, tension:0.25, spanGaps:true, _isCompare:true },
+                    { label:'ISK (prior)', data: fit(cached.isk_values), yAxisID:'y1',
+                      borderColor:'rgba(200,169,81,0.4)', borderWidth:1, borderDash:[2,2],
+                      pointRadius:0, fill:false, tension:0.25, _isCompare:true },
+                    { label:'Kills (prior)', data: fit(cached.kills_values), yAxisID:'y2',
+                      borderColor:'rgba(238,85,85,0.4)', borderWidth:1, borderDash:[2,2],
+                      pointRadius:0, fill:false, tension:0.25, _isCompare:true },
+                );
+                mainChart.update();
+                toggleBtn.classList.add('is-active');
+                toggleBtn.textContent = 'Hide prior period';
+                added = true;
+            } catch (e) {
+                toggleBtn.textContent = 'Failed to load';
+                setTimeout(() => { toggleBtn.textContent = 'Compare to prior period'; }, 2000);
+            } finally {
+                toggleBtn.disabled = false;
+            }
+        });
+    }
 })();
 </script>
 {% endif %}
