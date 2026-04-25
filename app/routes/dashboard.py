@@ -1621,6 +1621,19 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("Killmail backfill scheduling error: %s", e)
 
+                # Daily rollup of universe-wide killmails into per-day
+                # aggregate rows. Runs BEFORE the GC tick below so we capture
+                # ISK + kill counts before discovery rows are deleted.
+                if not hasattr(_background_scheduler, '_last_kill_rollup') or \
+                   (now - _background_scheduler._last_kill_rollup).total_seconds() >= 86400:
+                    try:
+                        from app.intel.killmail_daily_rollup import rollup_recent_days
+                        res = await rollup_recent_days(days=35)
+                        logger.info("killmail daily rollup: %s", res)
+                        _background_scheduler._last_kill_rollup = now
+                    except Exception as e:
+                        logger.warning("Killmail daily rollup error: %s", e)
+
                 # Daily GC of discovery-scope killmails (>30d, not-our-char)
                 if not hasattr(_background_scheduler, '_last_killmail_gc') or \
                    (now - _background_scheduler._last_killmail_gc).total_seconds() >= 86400:

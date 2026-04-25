@@ -59,7 +59,7 @@
 
     <div style="padding:0.75rem;">
 
-        <div class="ta-stats">
+        <div class="ta-stats" style="grid-template-columns:repeat(4,1fr);">
             <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_pcu(peak_pcu) }}</div>
                 <div class="ta-stat-label">Peak players</div>
@@ -69,16 +69,19 @@
                 <div class="ta-stat-label">Mean players</div>
             </div>
             <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(total_kills) }}</div>
+                <div class="ta-stat-label">Kills in window</div>
+            </div>
+            <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_isk(total_isk) }}</div>
                 <div class="ta-stat-label">ISK destroyed</div>
             </div>
         </div>
 
-        {% if peak_pcu == 0 and total_isk == 0 %}
+        {% if peak_pcu == 0 and total_isk == 0 and total_kills == 0 %}
         <div class="b-empty" style="padding:1.5rem;color:var(--muted);font-size:11px;text-align:center;">
-            No data in this window yet. Run the historical backfill (admin →
-            <code>POST /admin/player-count/backfill</code>) to populate
-            long-window views; live samples accumulate from now forward.
+            No data in this window yet. Backfills auto-run on first startup
+            and accumulate over time.
         </div>
         {% else %}
         <div style="position:relative;height:360px;">
@@ -100,35 +103,42 @@
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">Credits</span></div>
     <div style="padding:0.75rem 1rem;font-size:11px;line-height:1.55;color:var(--text);">
-        Vigilant doesn't archive EVE's full player-count history itself —
-        the data shown here predating this dashboard's deployment is sourced
-        from two community projects that have been doing the patient work
-        for over two decades:
+        Vigilant doesn't archive EVE's history itself — the long-tail data
+        shown here predating this dashboard's deployment is sourced from
+        community projects that have been doing the patient work for nearly
+        two decades:
         <ul style="margin:0.5rem 0 0.75rem 1.25rem;padding:0;">
             <li>
                 <strong><a href="https://eve-offline.net/?server=tranquility"
                           target="_blank" rel="noopener"
                           style="color:var(--accent);">Chribba / OMG Labs — eve-offline.net</a></strong>
-                — concurrent player count tracking since 2003-05-28, the canonical historical source.
+                — concurrent player count tracking since 2003-05-28, the canonical historical PCU source.
             </li>
             <li style="margin-top:0.25rem;">
                 <strong><a href="https://eve-offline.com/" target="_blank"
                           rel="noopener" style="color:var(--accent);">Adminor.net — eve-offline.com</a></strong>
-                — modern rebuild of the same dataset with a clean JSON API and
+                — modern rebuild of the player-count dataset with a clean JSON API and
                 CCP-newborns overlay.
             </li>
+            <li style="margin-top:0.25rem;">
+                <strong><a href="https://zkillboard.com/" target="_blank"
+                          rel="noopener" style="color:var(--accent);">zKillboard</a></strong>
+                — daily kill-count totals (<code>/api/history/totals.json</code>) since 2007-12-05.
+                Provides the long-tail "Daily kills" line on the chart.
+            </li>
         </ul>
-        Both sites serve their data freely. We pull the historical backfill
-        once at first startup, then go silent — live data going forward
-        comes directly from
+        These sites serve their data freely. Vigilant pulls each historical
+        archive once at first startup, then goes silent — live data going
+        forward comes directly from
         <a href="https://esi.evetech.net/latest/status/" target="_blank"
            rel="noopener" style="color:var(--text);">CCP's ESI /status/</a>
-        endpoint. If you find this view useful, consider visiting their
-        sites directly — community-run infrastructure runs on goodwill.
+        endpoint and the killmail.stream consumer. If you find this view
+        useful, consider visiting their sites directly — community-run
+        infrastructure runs on goodwill.
     </div>
 </div>
 
-{% if peak_pcu > 0 or total_isk > 0 %}
+{% if peak_pcu > 0 or total_isk > 0 or total_kills > 0 %}
 <script>
 (function() {
     if (typeof Chart === 'undefined') return;
@@ -137,6 +147,7 @@
     const labels = {{ labels|tojson }};
     const iskValues = {{ isk_values|tojson }};
     const pcuValues = {{ pcu_values|tojson }};
+    const killsValues = {{ kills_values|tojson }};
     const fmtISK = (v) => {
         if (v === null) return '';
         if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
@@ -161,6 +172,9 @@
                 { label:'ISK destroyed', data: iskValues, yAxisID:'y1',
                   borderColor:'rgba(200,169,81,0.95)', backgroundColor:'rgba(200,169,81,0.08)',
                   borderWidth:2, borderDash:[4,3], pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25 },
+                { label:'Daily kills', data: killsValues, yAxisID:'y2',
+                  borderColor:'rgba(238,85,85,0.85)', backgroundColor:'rgba(238,85,85,0.08)',
+                  borderWidth:1.5, pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25 },
             ],
         },
         options: {
@@ -173,6 +187,7 @@
                     const v = ctx.parsed.y;
                     if (v === null) return ctx.dataset.label + ': —';
                     if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
+                    if (ctx.dataset.yAxisID === 'y2') return ctx.dataset.label + ': ' + v.toLocaleString();
                     return ctx.dataset.label + ': ' + fmtPCU(v);
                 }}}
             },
@@ -186,6 +201,10 @@
                      ticks:{color:'rgba(200,169,81,0.95)',font:{size:9},callback:(v)=>fmtISK(v)},
                      grid:{drawOnChartArea:false},
                      title:{display:true,text:'ISK',color:'rgba(200,169,81,0.7)',font:{size:10}} },
+                // Daily kills — own scale, hidden axis labels (avoid clutter
+                // — three labelled axes is too much). Tooltip shows exact value.
+                y2:{ type:'linear', position:'right', beginAtZero:true,
+                     display:false, grid:{drawOnChartArea:false} },
             }
         }
     });

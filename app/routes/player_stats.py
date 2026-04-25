@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Killmail, PlayerCountSnapshot, get_db
+from app.db.models import Killmail, KillmailDailyAggregate, PlayerCountSnapshot, get_db
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -100,10 +100,42 @@ async def tools_activity(
     nonempty = [v for v in pcu_values if v is not None]
     mean_pcu = round(sum(nonempty) / len(nonempty)) if nonempty else 0
 
+    # Daily kill counts — pulled from killmail_daily_aggregates.
+    # Prefer source='vigilant' on overlapping dates (more recent + has ISK);
+    # fall back to source='zkb-totals' (deep history, kill_count only).
+    kills_buckets = [0] * num_bins
+    kills_counts = [0] * num_bins
+    kda_rows = (await db.execute(
+        select(KillmailDailyAggregate.date, KillmailDailyAggregate.kill_count, KillmailDailyAggregate.source)
+        .where(KillmailDailyAggregate.date >= cutoff.date())
+    )).all()
+    # Build per-date best-source view (vigilant beats zkb-totals)
+    by_date: dict = {}
+    for d, kc, src in kda_rows:
+        cur = by_date.get(d)
+        if cur is None or (cur[1] == "zkb-totals" and src == "vigilant"):
+            by_date[d] = (int(kc), src)
+    for d, (kc, _src) in by_date.items():
+        d_dt = datetime(d.year, d.month, d.day)
+        idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
+        if 0 <= idx < num_bins:
+            kills_buckets[idx] += kc
+            kills_counts[idx] += 1
+    # Average per bin (sum kills/day across days inside the bin) — but here
+    # we want the SUM not the average, since each day-row is independent.
+    # Already summed above. If bin spans multiple days, kills_buckets[i] is
+    # the cluster total — appropriate for "kills in this bin".
+    total_kills = sum(kills_buckets)
+
     # Source coverage breakdown for the attribution footer
     src_counts = {}
     for src, in (await db.execute(
         select(PlayerCountSnapshot.source).where(PlayerCountSnapshot.recorded_at >= cutoff)
+    )).all():
+        src_counts[src] = src_counts.get(src, 0) + 1
+    # Also include kill-aggregate sources
+    for src, in (await db.execute(
+        select(KillmailDailyAggregate.source).where(KillmailDailyAggregate.date >= cutoff.date())
     )).all():
         src_counts[src] = src_counts.get(src, 0) + 1
 
@@ -116,9 +148,11 @@ async def tools_activity(
             "labels": labels,
             "isk_values": isk_buckets,
             "pcu_values": pcu_values,
+            "kills_values": kills_buckets,
             "total_isk": total_isk,
             "peak_pcu": peak_pcu,
             "mean_pcu": mean_pcu,
+            "total_kills": total_kills,
             "source_counts": src_counts,
             "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
         },

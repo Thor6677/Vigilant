@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, event
+from sqlalchemy import Column, Integer, String, DateTime, Date, Boolean, Text, Float, ForeignKey, UniqueConstraint, event
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -101,6 +101,31 @@ class WalletSnapshot(Base):
     character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
     balance = Column(Float, nullable=False)
     recorded_at = Column(DateTime, nullable=False)  # naive UTC
+
+
+class KillmailDailyAggregate(Base):
+    """Daily total kill counts and ISK destroyed. Multi-source by design:
+
+    - source='zkb-totals' rows come from zKillboard's
+      /api/history/totals.json — kill_count only, no ISK, but covers
+      2007-12-05 → today (~6700 days). One-shot fetched at startup.
+    - source='vigilant' rows are rolled up from our killmails table by a
+      daily background task BEFORE the 30-day discovery-scope GC fires.
+      Includes both kill_count and total_isk_destroyed.
+
+    Chart queries prefer 'vigilant' rows on overlapping dates (we have ISK
+    there); 'zkb-totals' carries the long-tail history."""
+    __tablename__ = "killmail_daily_aggregates"
+    __table_args__ = (
+        UniqueConstraint("source", "date", name="uq_kda_source_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    source = Column(String(32), nullable=False, index=True)
+    kill_count = Column(Integer, nullable=False, default=0)
+    total_isk_destroyed = Column(Float, nullable=True)
+    rolled_up_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class PlayerCountSnapshot(Base):

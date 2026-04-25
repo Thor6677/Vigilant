@@ -252,3 +252,12 @@ async def startup():
                 "player-count auto-backfill bootstrap error: %s", e
             )
     asyncio.create_task(_kick_backfill())
+
+    async def _kick_zkb_totals():
+        try:
+            from app.intel.killmail_daily_rollup import auto_zkb_totals_if_needed
+            res = await auto_zkb_totals_if_needed()
+            logging.getLogger(__name__).info("zkb-totals auto-ingest: %s", res)
+        except Exception as e:
+            logging.getLogger(__name__).warning("zkb-totals auto-ingest error: %s", e)
+    asyncio.create_task(_kick_zkb_totals())
