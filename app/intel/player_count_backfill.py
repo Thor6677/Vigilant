@@ -35,6 +35,10 @@ from app.intel.eve_offline_net_scraper import (
     fetch_chribba_archive,
     fetch_chribba_archive_fine,
 )
+from app.intel.eve_offline_com_scraper import (
+    fetch_adminor_archive,
+    fetch_adminor_recent,
+)
 
 log = logging.getLogger(__name__)
 
@@ -217,10 +221,29 @@ async def run_backfill(source: str = "all", mode: str = "fine") -> dict:
                 })
 
     if source in ("all", "com"):
-        summary["errors"].append({
-            "source": "eve-offline-com",
-            "error": "Adminor scraper not yet implemented (DevTools recon pending)",
-        })
+        try:
+            # 'fine' mode pulls the full 'all' archive (daily-ish 110k rows
+            # for the historical depth) PLUS a fine-grained recent slice for
+            # the last month (~50k rows at 1-min resolution to cross-validate
+            # vs Chribba and our live ESI samples).
+            com_rows_all = await fetch_adminor_archive()
+            inserted_archive = await _bulk_upsert_chunk(com_rows_all)
+            inserted_recent = 0
+            recent_count = 0
+            if mode == "fine":
+                com_rows_recent = await fetch_adminor_recent("1m")
+                recent_count = len(com_rows_recent)
+                inserted_recent = await _bulk_upsert_chunk(com_rows_recent)
+            summary["sources_run"].append({
+                "source": "eve-offline-com",
+                "fetched_archive": len(com_rows_all),
+                "newly_inserted_archive": inserted_archive,
+                "fetched_recent_1m": recent_count,
+                "newly_inserted_recent_1m": inserted_recent,
+            })
+        except Exception as e:
+            log.exception("backfill: eve-offline-com failed")
+            summary["errors"].append({"source": "eve-offline-com", "error": str(e)})
 
     summary["validation"] = await validate_overlap()
     summary["fine_state"] = dict(_fine_backfill_state)
