@@ -114,28 +114,40 @@ async def _run_fine_backfill_inner() -> None:
         "error": None,
     })
 
-    # Resume from where we left off (timestamp of the latest minute row).
-    # Subtract one day to ensure full coverage on the boundary day.
+    # Resume from the first uncovered day. Walking from ARCHIVE_START is
+    # wasteful (we re-fetch sparse early years on every restart). Walking
+    # from MAX(recorded_at) is wrong when prior runs left non-sequential
+    # rows (e.g. an earlier manual probe at a recent date). The right
+    # cursor is "first day with no minute coverage" — that fills from the
+    # leading edge of contiguous coverage.
+    from app.intel.eve_offline_net_scraper import ARCHIVE_START as _ARCHIVE_START
+    from datetime import datetime as _dt, timedelta as _td
     async with AsyncSessionLocal() as db:
-        latest_minute = (
+        covered_rows = (
             await db.execute(
-                select(_func.max(PlayerCountSnapshot.recorded_at))
+                select(_func.date(PlayerCountSnapshot.recorded_at))
                 .where(PlayerCountSnapshot.source == "eve-offline-net")
                 .where(PlayerCountSnapshot.granularity == "minute")
+                .distinct()
             )
-        ).scalar()
-    if latest_minute is not None:
-        from datetime import timedelta as _td
-        resume_from = (latest_minute - _td(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        ).all()
+    covered_days = {r[0] for r in covered_rows if r[0]}
+    cursor = _ARCHIVE_START
+    today = _dt.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    while cursor < today and cursor.strftime("%Y-%m-%d") in covered_days:
+        cursor += _td(days=1)
+    if cursor >= today:
         log.info(
-            "eve-offline-net fine backfill: resuming from %s (latest minute row was %s)",
-            resume_from, latest_minute,
+            "eve-offline-net fine backfill: archive fully covered (%d days), nothing to do",
+            len(covered_days),
         )
-    else:
-        resume_from = None
-        log.info("eve-offline-net fine backfill: starting fresh from archive start")
+        state["running"] = False
+        return
+    resume_from = cursor
+    log.info(
+        "eve-offline-net fine backfill: resuming from %s (first uncovered day; %d days already covered)",
+        resume_from, len(covered_days),
+    )
 
     try:
         async for batch in fetch_chribba_archive_fine(start=resume_from):
