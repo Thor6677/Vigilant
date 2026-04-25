@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Activity — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/tools">Tools</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Activity</span></div>
+{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+    .ta-windows { display:flex; gap:0.25rem; flex-wrap:wrap; }
+    .ta-windows .b-btn { padding:3px 10px; font-size:10px; }
+    .ta-windows .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .ta-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:0.75rem; }
+    .ta-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .ta-stat-val { font-size:18px; color:var(--accent); font-weight:600; }
+    .ta-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    .ta-source { font-size:9px; color:var(--muted); }
+    .ta-source code { color:var(--text); }
+</style>
+{% endblock %}
+
+{% macro fmt_isk(amount) %}
+  {%- if amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro fmt_pcu(n) %}
+  {%- if n >= 1000 -%}{{ "%.1f"|format(n / 1000) }}K{%- else -%}{{ n }}{%- endif -%}
+{% endmacro %}
+
+{% block content %}
+
+<div class="b-page-header">
+    <div>
+        <h1 style="margin:0;font-size:14px;letter-spacing:0.18em;">EVE Activity</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Server health + universe-wide kill activity. Live data from CCP ESI; historical archive cross-validated from eve-offline.net (Chribba) and eve-offline.com (Adminor).
+        </p>
+    </div>
+</div>
+
+<div class="b-section" style="margin-bottom:0.75rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">{{ window_label }}</span>
+        <div class="ta-windows">
+            {% for w, label in window_options %}
+            <a href="/tools/activity?window={{ w }}"
+               class="b-btn {% if w == window %}is-active{% endif %}"
+               style="text-decoration:none;">
+                {{ label.split(' ')[1] if w not in ('all','1d') else (label if w == 'all' else '24H') }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div style="padding:0.75rem;">
+
+        <div class="ta-stats">
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(peak_pcu) }}</div>
+                <div class="ta-stat-label">Peak players</div>
+            </div>
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(mean_pcu) }}</div>
+                <div class="ta-stat-label">Mean players</div>
+            </div>
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_isk(total_isk) }}</div>
+                <div class="ta-stat-label">ISK destroyed</div>
+            </div>
+        </div>
+
+        {% if peak_pcu == 0 and total_isk == 0 %}
+        <div class="b-empty" style="padding:1.5rem;color:var(--muted);font-size:11px;text-align:center;">
+            No data in this window yet. Run the historical backfill (admin →
+            <code>POST /admin/player-count/backfill</code>) to populate
+            long-window views; live samples accumulate from now forward.
+        </div>
+        {% else %}
+        <div style="position:relative;height:360px;">
+            <canvas id="activity-chart-{{ window }}"></canvas>
+        </div>
+        {% endif %}
+
+        <div class="ta-source" style="margin-top:0.75rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
+            <span>
+                Sources:
+                {% for src, n in source_counts.items() %}
+                <code>{{ src }}</code>: {{ n }} sample{{ 's' if n != 1 else '' }}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+                {% if not source_counts %}live samples accumulating…{% endif %}
+            </span>
+            <span>
+                Live: <a href="https://esi.evetech.net/latest/status/" target="_blank" rel="noopener">CCP ESI /status/</a> ·
+                Historical: <a href="https://eve-offline.net/?server=tranquility" target="_blank" rel="noopener">Chribba</a>,
+                <a href="https://eve-offline.com/" target="_blank" rel="noopener">Adminor</a>
+            </span>
+        </div>
+    </div>
+</div>
+
+{% if peak_pcu > 0 or total_isk > 0 %}
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const el = document.getElementById('activity-chart-{{ window }}');
+    if (!el) return;
+    const labels = {{ labels|tojson }};
+    const iskValues = {{ isk_values|tojson }};
+    const pcuValues = {{ pcu_values|tojson }};
+    const fmtISK = (v) => {
+        if (v === null) return '';
+        if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+        if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
+        if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
+        if (v >= 1e3)  return (v/1e3).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    const fmtPCU = (v) => {
+        if (v === null) return '';
+        if (v >= 1000) return (v/1000).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    new Chart(el, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label:'Players online', data: pcuValues, yAxisID:'y',
+                  borderColor:'rgba(94,177,255,0.95)', backgroundColor:'rgba(94,177,255,0.10)',
+                  borderWidth:2, pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25, spanGaps:true },
+                { label:'ISK destroyed', data: iskValues, yAxisID:'y1',
+                  borderColor:'rgba(200,169,81,0.95)', backgroundColor:'rgba(200,169,81,0.08)',
+                  borderWidth:2, borderDash:[4,3], pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25 },
+            ],
+        },
+        options: {
+            responsive:true, maintainAspectRatio:false,
+            interaction: { mode:'index', intersect:false },
+            plugins: {
+                legend: { display:true, position:'top', align:'end',
+                          labels:{font:{size:10},color:'#bfbfbf',boxWidth:18,boxHeight:2} },
+                tooltip: { callbacks: { label: (ctx) => {
+                    const v = ctx.parsed.y;
+                    if (v === null) return ctx.dataset.label + ': —';
+                    if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
+                    return ctx.dataset.label + ': ' + fmtPCU(v);
+                }}}
+            },
+            scales: {
+                x: { ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:14}, grid:{display:false} },
+                y: { type:'linear', position:'left', beginAtZero:false,
+                     ticks:{color:'rgba(94,177,255,0.95)',font:{size:9},callback:(v)=>fmtPCU(v)},
+                     grid:{color:'rgba(255,255,255,0.05)'},
+                     title:{display:true,text:'Players',color:'rgba(94,177,255,0.7)',font:{size:10}} },
+                y1:{ type:'linear', position:'right', beginAtZero:true,
+                     ticks:{color:'rgba(200,169,81,0.95)',font:{size:9},callback:(v)=>fmtISK(v)},
+                     grid:{drawOnChartArea:false},
+                     title:{display:true,text:'ISK',color:'rgba(200,169,81,0.7)',font:{size:10}} },
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+
+{% endblock %}

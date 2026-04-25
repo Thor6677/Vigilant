@@ -168,6 +168,17 @@ INTEL_TOOLS = [
 
 TOOLS_TOOLS = [
     {
+        "name": "Activity",
+        "url": "/tools/activity",
+        "desc": "EVE server health + universe-wide ISK destruction over time. PCU and kill data overlaid on one chart, with historical archive going back to 2003 sourced from eve-offline.net + eve-offline.com.",
+        "features": [
+            "1d / 7d / 30d / 90d / 1y / 5y / all-time windows",
+            "Player-count + ISK destroyed overlay",
+            "Peak / mean PCU markers",
+            "Cross-validated historical archive (Chribba + Adminor)",
+        ],
+    },
+    {
         "name": "Asset Search",
         "url": "/assets",
         "desc": "Search across every linked character's assets at once. Find any item by name, see every stack and location.",
