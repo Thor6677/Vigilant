@@ -253,3 +253,81 @@ async def run_backfill(source: str = "all", mode: str = "fine") -> dict:
 def fine_backfill_state() -> dict:
     """Public snapshot of the fine-backfill task state for /admin polling."""
     return dict(_fine_backfill_state)
+
+
+# Heuristic completeness thresholds. The full Chribba archive at 1-min
+# resolution is ~8M rows; we accept a partial ride above 5M as "good
+# enough — already running or ran". Adminor's `all` endpoint returns
+# ~109k rows in one shot.
+_NET_COMPLETE_THRESHOLD = 5_000_000
+_COM_COMPLETE_THRESHOLD = 100_000
+
+
+async def auto_backfill_if_needed() -> dict:
+    """Triggered at app startup. Inspects per-source row counts; if either
+    archive is below its completeness threshold, fires the appropriate
+    backfill in the background. Idempotent across container restarts —
+    the (source, recorded_at) unique constraint handles overlap, and
+    the threshold check prevents re-running once an archive is loaded."""
+    from sqlalchemy import func as _func
+    async with AsyncSessionLocal() as db:
+        net_count = (
+            await db.execute(
+                select(_func.count())
+                .select_from(PlayerCountSnapshot)
+                .where(PlayerCountSnapshot.source == "eve-offline-net")
+            )
+        ).scalar() or 0
+        com_count = (
+            await db.execute(
+                select(_func.count())
+                .select_from(PlayerCountSnapshot)
+                .where(PlayerCountSnapshot.source == "eve-offline-com")
+            )
+        ).scalar() or 0
+
+    decisions: dict = {"net_count": net_count, "com_count": com_count, "actions": []}
+
+    # Adminor — single-shot fetch, no throttling needed (one HTTP call).
+    if com_count < _COM_COMPLETE_THRESHOLD:
+        log.info(
+            "auto-backfill: eve-offline-com has %d rows (< %d), fetching archive",
+            com_count, _COM_COMPLETE_THRESHOLD,
+        )
+        try:
+            com_rows = await fetch_adminor_archive()
+            inserted = await _bulk_upsert_chunk(com_rows)
+            decisions["actions"].append({
+                "source": "eve-offline-com",
+                "inserted": inserted,
+                "fetched": len(com_rows),
+            })
+        except Exception as e:
+            log.exception("auto-backfill: adminor fetch failed")
+            decisions["actions"].append({"source": "eve-offline-com", "error": str(e)})
+    else:
+        decisions["actions"].append({"source": "eve-offline-com", "skipped": "above threshold"})
+
+    # Chribba fine — long-running, polite, kicked off as background task so
+    # we don't block startup. Skip if already past threshold OR currently running.
+    if net_count < _NET_COMPLETE_THRESHOLD:
+        if _fine_backfill_state["running"]:
+            decisions["actions"].append({
+                "source": "eve-offline-net",
+                "skipped": "already running",
+            })
+        else:
+            log.info(
+                "auto-backfill: eve-offline-net has %d rows (< %d), starting "
+                "polite fine backfill in background (~5 hours at 2s/req)",
+                net_count, _NET_COMPLETE_THRESHOLD,
+            )
+            asyncio.create_task(_run_fine_backfill_inner())
+            decisions["actions"].append({
+                "source": "eve-offline-net",
+                "started": "background fine backfill",
+            })
+    else:
+        decisions["actions"].append({"source": "eve-offline-net", "skipped": "above threshold"})
+
+    return decisions

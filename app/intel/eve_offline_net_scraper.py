@@ -137,7 +137,7 @@ async def fetch_chribba_archive_fine(
     start: datetime | None = None,
     end: datetime | None = None,
     chunk_days: int = 1,
-    concurrency: int = 3,
+    request_delay_seconds: float = 2.0,
 ) -> AsyncIterator[list[dict]]:
     """Async generator yielding chunks of fine-grained rows from Chribba's
     zoom endpoint. Walks `start`→`end` in `chunk_days`-sized windows.
@@ -146,10 +146,12 @@ async def fetch_chribba_archive_fine(
     Yields list[dict] per window, each dict shaped for PlayerCountSnapshot
     upsert. Caller is responsible for batching DB inserts.
 
-    `concurrency` caps in-flight requests to be polite (Chribba is a
-    community-run site). 3 is a reasonable middle ground between speed and
-    courtesy. Lower for very long backfills; default-rate of ~3 req/s
-    completes the 23-year archive in ~50 minutes.
+    Polite by default: sequential (no concurrency), `request_delay_seconds`
+    pause between requests. At 2s/req, the full 23-year archive (~8400
+    windows) completes in ~5 hours. Chribba runs the site on a single VPS
+    out of pocket for the community; long backfills should not look like
+    an attack. Tunable via env `EVE_OFFLINE_NET_THROTTLE_S` if you need
+    to slow down further.
     """
     start = start or ARCHIVE_START
     end = end or datetime.utcnow()
@@ -158,20 +160,25 @@ async def fetch_chribba_archive_fine(
     if end.tzinfo is not None:
         end = end.replace(tzinfo=None)
 
-    sem = asyncio.Semaphore(concurrency)
+    import os
+    throttle = float(os.getenv("EVE_OFFLINE_NET_THROTTLE_S", request_delay_seconds))
 
     async with httpx.AsyncClient(
         timeout=60.0,
         headers={"User-Agent": SCRAPER_UA, "Accept": "application/javascript, */*"},
     ) as client:
         cursor = start
+        first = True
         while cursor < end:
+            if not first and throttle > 0:
+                await asyncio.sleep(throttle)
+            first = False
+
             window_end = min(cursor + timedelta(days=chunk_days), end)
             start_ms = int(cursor.replace(tzinfo=timezone.utc).timestamp() * 1000)
             end_ms = int(window_end.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
-            async with sem:
-                pairs = await _fetch_window(client, start_ms, end_ms)
+            pairs = await _fetch_window(client, start_ms, end_ms)
 
             rows: list[dict] = []
             for entry in pairs:

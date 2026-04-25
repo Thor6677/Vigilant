@@ -236,3 +236,19 @@ async def startup():
         from app.intel.killmail_stream import run_consumer, run_sweeper
         asyncio.create_task(run_consumer())
         asyncio.create_task(run_sweeper())
+
+    # Player-count historical backfill — fires once per startup, no-ops if
+    # archives are already loaded. Polite throttling + background task so it
+    # never blocks startup. See app/intel/player_count_backfill.py.
+    async def _kick_backfill():
+        try:
+            from app.intel.player_count_backfill import auto_backfill_if_needed
+            decisions = await auto_backfill_if_needed()
+            logging.getLogger(__name__).info(
+                "player-count auto-backfill decisions: %s", decisions
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "player-count auto-backfill bootstrap error: %s", e
+            )
+    asyncio.create_task(_kick_backfill())

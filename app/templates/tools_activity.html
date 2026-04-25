@@ -86,20 +86,45 @@
         </div>
         {% endif %}
 
-        <div class="ta-source" style="margin-top:0.75rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
-            <span>
-                Sources:
-                {% for src, n in source_counts.items() %}
-                <code>{{ src }}</code>: {{ n }} sample{{ 's' if n != 1 else '' }}{% if not loop.last %} · {% endif %}
-                {% endfor %}
-                {% if not source_counts %}live samples accumulating…{% endif %}
-            </span>
-            <span>
-                Live: <a href="https://esi.evetech.net/latest/status/" target="_blank" rel="noopener">CCP ESI /status/</a> ·
-                Historical: <a href="https://eve-offline.net/?server=tranquility" target="_blank" rel="noopener">Chribba</a>,
-                <a href="https://eve-offline.com/" target="_blank" rel="noopener">Adminor</a>
-            </span>
+        <div class="ta-source" style="margin-top:0.75rem;">
+            Window sample coverage:
+            {% for src, n in source_counts.items() %}
+            <code>{{ src }}</code>: {{ n }} sample{{ 's' if n != 1 else '' }}{% if not loop.last %} · {% endif %}
+            {% endfor %}
+            {% if not source_counts %}live samples accumulating…{% endif %}
         </div>
+    </div>
+</div>
+
+{# ── Credits ─────────────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Credits</span></div>
+    <div style="padding:0.75rem 1rem;font-size:11px;line-height:1.55;color:var(--text);">
+        Vigilant doesn't archive EVE's full player-count history itself —
+        the data shown here predating this dashboard's deployment is sourced
+        from two community projects that have been doing the patient work
+        for over two decades:
+        <ul style="margin:0.5rem 0 0.75rem 1.25rem;padding:0;">
+            <li>
+                <strong><a href="https://eve-offline.net/?server=tranquility"
+                          target="_blank" rel="noopener"
+                          style="color:var(--accent);">Chribba / OMG Labs — eve-offline.net</a></strong>
+                — concurrent player count tracking since 2003-05-28, the canonical historical source.
+            </li>
+            <li style="margin-top:0.25rem;">
+                <strong><a href="https://eve-offline.com/" target="_blank"
+                          rel="noopener" style="color:var(--accent);">Adminor.net — eve-offline.com</a></strong>
+                — modern rebuild of the same dataset with a clean JSON API and
+                CCP-newborns overlay.
+            </li>
+        </ul>
+        Both sites serve their data freely. We pull the historical backfill
+        once at first startup, then go silent — live data going forward
+        comes directly from
+        <a href="https://esi.evetech.net/latest/status/" target="_blank"
+           rel="noopener" style="color:var(--text);">CCP's ESI /status/</a>
+        endpoint. If you find this view useful, consider visiting their
+        sites directly — community-run infrastructure runs on goodwill.
     </div>
 </div>
 
