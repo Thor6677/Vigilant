@@ -128,6 +128,28 @@ class KillmailDailyAggregate(Base):
     rolled_up_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+class KillmailZoneDailyAggregate(Base):
+    """Per-(date, zone) split of vigilant-source kills. Populated by the
+    same rollup that writes KillmailDailyAggregate, joined to sde_systems
+    for security classification. Long-tail history (zkb-totals) cannot be
+    split this way since those rows are universe-totals only — this table
+    only covers dates the vigilant rollup has run for.
+
+    zone ∈ {'highsec','lowsec','nullsec','wormhole','unknown'}.
+    """
+    __tablename__ = "killmail_zone_daily_aggregates"
+    __table_args__ = (
+        UniqueConstraint("date", "zone", name="uq_kzda_date_zone"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    zone = Column(String(16), nullable=False, index=True)
+    kill_count = Column(Integer, nullable=False, default=0)
+    total_isk_destroyed = Column(Float, nullable=True)
+    rolled_up_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 class PlayerCountSnapshot(Base):
     """TQ player count over time. One table for live ESI samples + historical
     backfill from third-party archives. The (source, recorded_at) unique

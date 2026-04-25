@@ -22,10 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     Killmail,
     KillmailDailyAggregate,
+    KillmailZoneDailyAggregate,
     PlayerCountDailyAggregate,
     PlayerCountSnapshot,
     get_db,
 )
+
+_ZONES = ("highsec", "lowsec", "nullsec", "wormhole")
 
 # Source priority when multiple sources have the same date — prefer live
 # ESI samples, fall back to historical archives. Used by the daily-aggregate
@@ -273,6 +276,32 @@ async def tools_activity(
                 key = "npc" if is_npc else "player"
                 npc_player_series[key][i] = int(n or 0)
 
+    # ── Security-zone split (kills by HS/LS/NS/WH) ──
+    # Only meaningful at day-or-coarser resolution (the aggregate is daily).
+    # Data starts the day the zone-split rollup first ran — earlier bins
+    # are simply absent (frontend shows 0). Population by killmail_daily_rollup.
+    zone_available = bin_seconds >= 86400
+    zone_series: dict[str, list[int]] = {z: [0] * num_bins for z in _ZONES}
+    zone_isk_series: dict[str, list[float]] = {z: [0.0] * num_bins for z in _ZONES}
+    if zone_available:
+        zrows = (await db.execute(
+            select(
+                KillmailZoneDailyAggregate.date,
+                KillmailZoneDailyAggregate.zone,
+                KillmailZoneDailyAggregate.kill_count,
+                KillmailZoneDailyAggregate.total_isk_destroyed,
+            ).where(KillmailZoneDailyAggregate.date >= cutoff.date())
+        )).all()
+        for d, z, kc, isk in zrows:
+            if z not in zone_series:
+                continue
+            d_dt = datetime(d.year, d.month, d.day)
+            idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
+            if 0 <= idx < num_bins:
+                zone_series[z][idx] += int(kc or 0)
+                zone_isk_series[z][idx] += float(isk or 0.0)
+    has_zone_data = any(sum(s) > 0 for s in zone_series.values())
+
     # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
     # Independent of the selected chart window — it answers a different
     # question ("when is EVE busiest?") and only makes sense at hourly
@@ -348,6 +377,10 @@ async def tools_activity(
         "npc_player_series": npc_player_series,
         "pcu_heatmap": pcu_heatmap,
         "has_heatmap_data": has_heatmap_data,
+        "zone_available": zone_available,
+        "has_zone_data": has_zone_data,
+        "zone_series": zone_series,
+        "zone_isk_series": zone_isk_series,
     }
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)

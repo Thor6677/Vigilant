@@ -16,14 +16,16 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db.models import (
     AsyncSessionLocal,
     Killmail,
     KillmailDailyAggregate,
+    KillmailZoneDailyAggregate,
 )
+from app.db.sde_models import SDESystem
 from app.intel.zkb_totals_scraper import fetch_zkb_totals
 
 log = logging.getLogger(__name__)
@@ -73,9 +75,62 @@ async def rollup_recent_days(days: int = 35) -> dict:
             )
             await db.execute(stmt)
             upserted += 1
+
+        # ── Per-(date, zone) split. Same source data, joined to sde_systems
+        # for security classification. J-systems (id >= 31000000) are
+        # wormhole regardless of sec; otherwise round security to 1dp and
+        # bucket by the standard k-space rules. Rows without a matching
+        # SDE entry fall into 'unknown' rather than being dropped.
+        zone_expr = case(
+            (Killmail.solar_system_id >= 31000000, "wormhole"),
+            (SDESystem.security.is_(None), "unknown"),
+            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
+            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
+            else_="nullsec",
+        ).label("zone")
+        zone_rows = (
+            await db.execute(
+                select(
+                    func.date(Killmail.killmail_time).label("d"),
+                    zone_expr,
+                    func.count().label("n"),
+                    func.sum(Killmail.total_value).label("isk"),
+                )
+                .select_from(Killmail)
+                .join(SDESystem, SDESystem.system_id == Killmail.solar_system_id, isouter=True)
+                .where(Killmail.killmail_time >= cutoff_date)
+                .group_by("d", "zone")
+            )
+        ).all()
+        zone_upserted = 0
+        for d_str, zone, n, isk in zone_rows:
+            try:
+                d = datetime.strptime(d_str, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                continue
+            stmt = sqlite_insert(KillmailZoneDailyAggregate).values(
+                date=d,
+                zone=zone,
+                kill_count=int(n or 0),
+                total_isk_destroyed=float(isk or 0.0) or None,
+                rolled_up_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["date", "zone"],
+                set_={
+                    "kill_count": stmt.excluded.kill_count,
+                    "total_isk_destroyed": stmt.excluded.total_isk_destroyed,
+                    "rolled_up_at": stmt.excluded.rolled_up_at,
+                },
+            )
+            await db.execute(stmt)
+            zone_upserted += 1
+
         await db.commit()
-    log.info("vigilant rollup: %d day rows upserted (cutoff %s)", upserted, cutoff_date)
-    return {"days_covered": upserted, "cutoff_date": cutoff_date.isoformat()}
+    log.info("vigilant rollup: %d day rows + %d zone rows upserted (cutoff %s)",
+             upserted, zone_upserted, cutoff_date)
+    return {"days_covered": upserted, "zone_rows": zone_upserted,
+            "cutoff_date": cutoff_date.isoformat()}
 
 
 async def auto_zkb_totals_if_needed(min_rows_threshold: int = 5000) -> dict:

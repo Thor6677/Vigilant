@@ -127,6 +127,80 @@
 </div>
 {% endif %}
 
+{% if zone_available and has_zone_data %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Kills by security zone · {{ window_label }}</span></div>
+    <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">Kill count</div>
+            <div style="position:relative;height:240px;">
+                <canvas id="zone-kills-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">ISK destroyed</div>
+            <div style="position:relative;height:240px;">
+                <canvas id="zone-isk-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+    </div>
+    <div style="padding:0 0.75rem 0.75rem;font-size:9px;color:var(--muted);">
+        Zone split is only available for dates after the rollup first ran on this deployment. Long-tail history (zKB totals) is universe-wide only and can't be split. J-systems → wormhole; other systems classified by SDE security rounded to 1 decimal.
+    </div>
+</div>
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const labels = {{ labels|tojson }};
+    const k = {{ zone_series|tojson }};
+    const i = {{ zone_isk_series|tojson }};
+    const colors = {
+        highsec:  ['rgba(120,200,140,0.9)', 'rgba(120,200,140,0.35)'],
+        lowsec:   ['rgba(220,170,90,0.9)',  'rgba(220,170,90,0.35)'],
+        nullsec:  ['rgba(238,85,85,0.9)',   'rgba(238,85,85,0.35)'],
+        wormhole: ['rgba(170,120,220,0.9)', 'rgba(170,120,220,0.35)'],
+    };
+    const order = ['highsec','lowsec','nullsec','wormhole'];
+    const datasetsFrom = (src, fmt) => order.map(z => ({
+        label: z[0].toUpperCase()+z.slice(1),
+        data: src[z],
+        borderColor: colors[z][0],
+        backgroundColor: colors[z][1],
+        borderWidth: 1, pointRadius: 0, fill: true, tension: 0.25,
+    }));
+    const fmtISK = (v) => {
+        if (v == null) return '';
+        if (v >= 1e12) return (v/1e12).toFixed(2)+'T';
+        if (v >= 1e9)  return (v/1e9).toFixed(2)+'B';
+        if (v >= 1e6)  return (v/1e6).toFixed(2)+'M';
+        if (v >= 1e3)  return (v/1e3).toFixed(1)+'K';
+        return v.toFixed(0);
+    };
+    const baseOpts = {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+            legend:{display:true, position:'top', align:'end',
+                    labels:{font:{size:9},color:'#bfbfbf',boxWidth:14,boxHeight:2}},
+        },
+        scales:{
+            x:{stacked:true, ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:10}, grid:{display:false}},
+            y:{stacked:true, beginAtZero:true,
+               ticks:{color:'#7a7a7a',font:{size:9}}, grid:{color:'rgba(255,255,255,0.05)'}}
+        }
+    };
+    const kEl = document.getElementById('zone-kills-chart-{{ window }}');
+    if (kEl) new Chart(kEl, {type:'line', data:{labels:labels, datasets:datasetsFrom(k)},
+        options:{...baseOpts, plugins:{...baseOpts.plugins, tooltip:{callbacks:{label:(c)=>c.dataset.label+': '+c.parsed.y.toLocaleString()}}}}});
+    const iEl = document.getElementById('zone-isk-chart-{{ window }}');
+    if (iEl) new Chart(iEl, {type:'line', data:{labels:labels, datasets:datasetsFrom(i)},
+        options:{...baseOpts,
+            plugins:{...baseOpts.plugins, tooltip:{callbacks:{label:(c)=>c.dataset.label+': '+fmtISK(c.parsed.y)+' ISK'}}},
+            scales:{...baseOpts.scales, y:{...baseOpts.scales.y, ticks:{...baseOpts.scales.y.ticks, callback:(v)=>fmtISK(v)}}}}});
+})();
+</script>
+{% endif %}
+
 {% if has_heatmap_data %}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">When is EVE busiest? · trailing 90 days · UTC</span></div>
