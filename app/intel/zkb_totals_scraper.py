@@ -1,9 +1,10 @@
 """zKillboard daily totals scraper.
 
 Fetches the public bulk-history aggregate at
-https://zkillboard.com/api/history/totals.json — a single 110 KB JSON file
+https://r2z2.zkillboard.com/history/totals.json — a single 110 KB JSON file
 mapping `YYYYMMDD` → integer kill count for that day. Covers 2007-12-05
-through ~yesterday.
+through ~yesterday. (As of Jan 2026, the older /api/history/totals.json
+redirects to this Cloudflare R2 location.)
 
 This is the cheapest way to get a long-tail "destruction activity" line on
 the historical chart. Per-day kill detail (with ISK values) would require
@@ -25,7 +26,7 @@ from app.db.models import KillmailDailyAggregate
 
 log = logging.getLogger(__name__)
 
-ZKB_TOTALS_URL = "https://zkillboard.com/api/history/totals.json"
+ZKB_TOTALS_URL = "https://r2z2.zkillboard.com/history/totals.json"
 SCRAPER_UA = "Vigilant/1.0 backfill (happyfun.fatman@gmail.com)"
 
 
@@ -37,6 +38,7 @@ async def fetch_zkb_totals() -> list[dict]:
     """
     async with httpx.AsyncClient(
         timeout=60.0,
+        follow_redirects=True,  # legacy URL still redirects; harmless on direct R2
         headers={
             "User-Agent": SCRAPER_UA,
             "Accept": "application/json",
