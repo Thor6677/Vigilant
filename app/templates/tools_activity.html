@@ -16,6 +16,11 @@
     .ta-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
     .ta-source { font-size:9px; color:var(--muted); }
     .ta-source code { color:var(--text); }
+    .ta-heatmap { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; font-size:9px; }
+    .ta-heatmap-row-label { color:var(--muted); display:flex; align-items:center; padding-right:4px; justify-content:flex-end; }
+    .ta-heatmap-cell { aspect-ratio:1; min-height:14px; background:rgba(94,177,255,0); border:1px solid rgba(255,255,255,0.03); }
+    .ta-heatmap-col-labels { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; font-size:8px; color:var(--muted); margin-bottom:2px; }
+    .ta-heatmap-col-labels > div { text-align:center; }
 </style>
 {% endblock %}
 
@@ -120,6 +125,49 @@
         Killmail data is retained for 30 days, so these breakdowns hide on longer windows. Solo/fleet bucket on attacker count: solo=1, small=2–10, medium=11–50, large=51+.
     </div>
 </div>
+{% endif %}
+
+{% if has_heatmap_data %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">When is EVE busiest? · trailing 90 days · UTC</span></div>
+    <div style="padding:0.75rem;">
+        <div class="ta-heatmap-col-labels">
+            <div></div>
+            {% for h in range(24) %}<div>{{ "%02d"|format(h) }}</div>{% endfor %}
+        </div>
+        {% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+        <div class="ta-heatmap" id="pcu-heatmap" data-grid='{{ pcu_heatmap|tojson }}'>
+            {% for dow in range(7) %}
+                <div class="ta-heatmap-row-label">{{ days[dow] }}</div>
+                {% for hr in range(24) %}
+                <div class="ta-heatmap-cell" data-dow="{{ dow }}" data-hr="{{ hr }}"
+                     {% if pcu_heatmap[dow][hr] is not none %}title="{{ days[dow] }} {{ '%02d'|format(hr) }}:00 — {{ pcu_heatmap[dow][hr] }} avg players"{% endif %}></div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:0.5rem;">
+            Cell color = average concurrent players online at that hour over the last 90 days. Source: ESI live samples (60 s cadence). Downtime is at 11:00 UTC; expect a dip there.
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    const el = document.getElementById('pcu-heatmap');
+    if (!el) return;
+    const grid = JSON.parse(el.dataset.grid);
+    let max = 0;
+    for (const row of grid) for (const v of row) if (v != null && v > max) max = v;
+    if (max <= 0) return;
+    el.querySelectorAll('.ta-heatmap-cell').forEach(cell => {
+        const dow = parseInt(cell.dataset.dow, 10);
+        const hr = parseInt(cell.dataset.hr, 10);
+        const v = grid[dow][hr];
+        if (v == null) return;
+        const t = v / max;
+        cell.style.background = `rgba(94,177,255,${0.05 + t * 0.85})`;
+    });
+})();
+</script>
 {% endif %}
 
 {# ── Credits ─────────────────────────────────────────────────────────────── #}

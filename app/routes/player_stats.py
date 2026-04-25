@@ -273,6 +273,37 @@ async def tools_activity(
                 key = "npc" if is_npc else "player"
                 npc_player_series[key][i] = int(n or 0)
 
+    # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
+    # Independent of the selected chart window — it answers a different
+    # question ("when is EVE busiest?") and only makes sense at hourly
+    # resolution. Filtered to source='esi' so we don't double-count where
+    # historical archives overlap with live sampling. Cell value is the
+    # avg PCU at that (weekday, hour). SQLite strftime('%w') is 0=Sunday.
+    heatmap_cutoff = now - timedelta(days=90)
+    heatmap_rows = (await db.execute(
+        select(
+            func.strftime("%w", PlayerCountSnapshot.recorded_at).label("dow"),
+            func.strftime("%H", PlayerCountSnapshot.recorded_at).label("hr"),
+            func.avg(PlayerCountSnapshot.player_count).label("avg_pc"),
+        )
+        .where(
+            PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
+            PlayerCountSnapshot.source == "esi",
+        )
+        .group_by("dow", "hr")
+    )).all()
+    # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
+    pcu_heatmap: list[list[int | None]] = [[None] * 24 for _ in range(7)]
+    for dow_str, hr_str, avg_pc in heatmap_rows:
+        if dow_str is None or hr_str is None or avg_pc is None:
+            continue
+        # SQLite: Sun=0 Mon=1 … Sat=6. Rotate so Mon=0 … Sun=6.
+        dow = (int(dow_str) + 6) % 7
+        hr = int(hr_str)
+        if 0 <= dow < 7 and 0 <= hr < 24:
+            pcu_heatmap[dow][hr] = round(float(avg_pc))
+    has_heatmap_data = any(v is not None for row in pcu_heatmap for v in row)
+
     # Source coverage breakdown. For day+ bins we sum sample_count from the
     # daily aggregate (cheap). For sub-day windows we GROUP BY on the
     # snapshot table — small window, still cheap.
@@ -315,6 +346,8 @@ async def tools_activity(
         "breakdowns_available": breakdowns_available,
         "solo_fleet_series": solo_fleet_series,
         "npc_player_series": npc_player_series,
+        "pcu_heatmap": pcu_heatmap,
+        "has_heatmap_data": has_heatmap_data,
     }
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
