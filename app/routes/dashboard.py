@@ -2306,6 +2306,7 @@ async def dashboard_activity(
     delta, bin_seconds, label_fmt = windows[window]
 
     from app.db.models import Killmail, PlayerCountSnapshot
+    from sqlalchemy import Integer, func as _func
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - delta
     total_seconds = int(delta.total_seconds())
@@ -2315,39 +2316,45 @@ async def dashboard_activity(
     ]
     labels = [bs.strftime(label_fmt) for bs in bin_starts]
 
+    # SQL-side binning — see comment in app/routes/player_stats.py. PCU
+    # source filter ('esi') keeps short-window queries narrow, but we
+    # group-aggregate either way so memory stays bounded.
+    def _bin_expr(time_col):
+        return _func.cast(
+            (_func.julianday(time_col) - _func.julianday(cutoff))
+            * 86400.0 / float(bin_seconds),
+            Integer,
+        )
+
     # ISK destroyed — sum(total_value) per bin
     isk_buckets = [0.0] * num_bins
-    isk_rows = (await db.execute(
-        select(Killmail.killmail_time, Killmail.total_value)
+    for b, isk in (await db.execute(
+        select(_bin_expr(Killmail.killmail_time).label("b"),
+               _func.sum(Killmail.total_value).label("isk"))
         .where(Killmail.killmail_time >= cutoff)
-    )).all()
-    for kt, val in isk_rows:
-        if kt is None or val is None:
+        .group_by("b")
+    )).all():
+        if b is None:
             continue
-        idx = int((kt - cutoff).total_seconds() // bin_seconds)
-        if 0 <= idx < num_bins:
-            isk_buckets[idx] += float(val)
+        i = int(b)
+        if 0 <= i < num_bins:
+            isk_buckets[i] = float(isk or 0.0)
     total_isk = sum(isk_buckets)
 
     # PCU — average per bin (concurrent count, not throughput)
-    pcu_sums = [0.0] * num_bins
-    pcu_counts = [0] * num_bins
-    pcu_rows = (await db.execute(
-        select(PlayerCountSnapshot.recorded_at, PlayerCountSnapshot.player_count)
+    pcu_values: list[int | None] = [None] * num_bins
+    for b, avg_pc in (await db.execute(
+        select(_bin_expr(PlayerCountSnapshot.recorded_at).label("b"),
+               _func.avg(PlayerCountSnapshot.player_count).label("avg_pc"))
         .where(PlayerCountSnapshot.recorded_at >= cutoff)
         .where(PlayerCountSnapshot.source == "esi")
-    )).all()
-    for rt, pc in pcu_rows:
-        if rt is None or pc is None:
+        .group_by("b")
+    )).all():
+        if b is None or avg_pc is None:
             continue
-        idx = int((rt - cutoff).total_seconds() // bin_seconds)
-        if 0 <= idx < num_bins:
-            pcu_sums[idx] += float(pc)
-            pcu_counts[idx] += 1
-    pcu_values = [
-        round(pcu_sums[i] / pcu_counts[i]) if pcu_counts[i] else None
-        for i in range(num_bins)
-    ]
+        i = int(b)
+        if 0 <= i < num_bins:
+            pcu_values[i] = round(float(avg_pc))
     peak_pcu = max((v for v in pcu_values if v is not None), default=0)
 
     return templates.TemplateResponse(

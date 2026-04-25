@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Killmail, KillmailDailyAggregate, PlayerCountSnapshot, get_db
@@ -61,44 +61,55 @@ async def tools_activity(
     ]
     labels = [bs.strftime(label_fmt) for bs in bin_starts]
 
-    # ISK destroyed — sum per bin. Killmails table only retains discovery-
-    # scope kills for 30 days, so longer windows naturally trail off.
-    isk_buckets = [0.0] * num_bins
-    isk_rows = (await db.execute(
-        select(Killmail.killmail_time, Killmail.total_value)
-        .where(Killmail.killmail_time >= cutoff)
-    )).all()
-    for kt, val in isk_rows:
-        if kt is None or val is None:
-            continue
-        idx = int((kt - cutoff).total_seconds() // bin_seconds)
-        if 0 <= idx < num_bins:
-            isk_buckets[idx] += float(val)
-    total_isk = sum(isk_buckets)
+    # CRITICAL: aggregate IN SQL, not Python. PlayerCountSnapshot has ~10M
+    # rows at full archive coverage; loading them all into Python and binning
+    # client-side OOMs the 2.5GB container instantly. SQLite GROUP BY on a
+    # cast-to-int bin index returns ~num_bins rows per query.
+    def _bin_expr(time_col):
+        # julianday is in days; *86400 → seconds; / bin_seconds → bin index.
+        return func.cast(
+            (func.julianday(time_col) - func.julianday(cutoff))
+            * 86400.0 / float(bin_seconds),
+            Integer,
+        )
 
-    # PCU — average per bin across ALL sources. ESI samples and daily
-    # backfill rows live in the same table; their timestamps don't collide,
-    # so a flat average across rows in a bin is fine.
-    pcu_sums = [0.0] * num_bins
-    pcu_counts = [0] * num_bins
-    pcu_rows = (await db.execute(
-        select(PlayerCountSnapshot.recorded_at, PlayerCountSnapshot.player_count)
+    # ── PCU: average per bin (concurrent count, not throughput) ──
+    pcu_q = (
+        select(
+            _bin_expr(PlayerCountSnapshot.recorded_at).label("b"),
+            func.avg(PlayerCountSnapshot.player_count).label("avg_pc"),
+        )
         .where(PlayerCountSnapshot.recorded_at >= cutoff)
-    )).all()
-    for rt, pc in pcu_rows:
-        if rt is None or pc is None:
+        .group_by("b")
+    )
+    pcu_values: list[int | None] = [None] * num_bins
+    for b, avg_pc in (await db.execute(pcu_q)).all():
+        if b is None or avg_pc is None:
             continue
-        idx = int((rt - cutoff).total_seconds() // bin_seconds)
-        if 0 <= idx < num_bins:
-            pcu_sums[idx] += float(pc)
-            pcu_counts[idx] += 1
-    pcu_values = [
-        round(pcu_sums[i] / pcu_counts[i]) if pcu_counts[i] else None
-        for i in range(num_bins)
-    ]
+        i = int(b)
+        if 0 <= i < num_bins:
+            pcu_values[i] = round(float(avg_pc))
     peak_pcu = max((v for v in pcu_values if v is not None), default=0)
     nonempty = [v for v in pcu_values if v is not None]
     mean_pcu = round(sum(nonempty) / len(nonempty)) if nonempty else 0
+
+    # ── ISK destroyed: sum per bin ──
+    isk_q = (
+        select(
+            _bin_expr(Killmail.killmail_time).label("b"),
+            func.sum(Killmail.total_value).label("isk"),
+        )
+        .where(Killmail.killmail_time >= cutoff)
+        .group_by("b")
+    )
+    isk_buckets: list[float] = [0.0] * num_bins
+    for b, isk in (await db.execute(isk_q)).all():
+        if b is None:
+            continue
+        i = int(b)
+        if 0 <= i < num_bins:
+            isk_buckets[i] = float(isk or 0.0)
+    total_isk = sum(isk_buckets)
 
     # Daily kill counts — pulled from killmail_daily_aggregates.
     # Prefer source='vigilant' on overlapping dates (more recent + has ISK);
@@ -127,17 +138,21 @@ async def tools_activity(
     # the cluster total — appropriate for "kills in this bin".
     total_kills = sum(kills_buckets)
 
-    # Source coverage breakdown for the attribution footer
+    # Source coverage breakdown — aggregate in SQL, again. Loading every
+    # row's source column for a 10M-row table would OOM.
     src_counts = {}
-    for src, in (await db.execute(
-        select(PlayerCountSnapshot.source).where(PlayerCountSnapshot.recorded_at >= cutoff)
+    for src, n in (await db.execute(
+        select(PlayerCountSnapshot.source, func.count())
+        .where(PlayerCountSnapshot.recorded_at >= cutoff)
+        .group_by(PlayerCountSnapshot.source)
     )).all():
-        src_counts[src] = src_counts.get(src, 0) + 1
-    # Also include kill-aggregate sources
-    for src, in (await db.execute(
-        select(KillmailDailyAggregate.source).where(KillmailDailyAggregate.date >= cutoff.date())
+        src_counts[src] = src_counts.get(src, 0) + int(n)
+    for src, n in (await db.execute(
+        select(KillmailDailyAggregate.source, func.count())
+        .where(KillmailDailyAggregate.date >= cutoff.date())
+        .group_by(KillmailDailyAggregate.source)
     )).all():
-        src_counts[src] = src_counts.get(src, 0) + 1
+        src_counts[src] = src_counts.get(src, 0) + int(n)
 
     return templates.TemplateResponse(
         "tools_activity.html",
