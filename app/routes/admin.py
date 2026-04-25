@@ -541,6 +541,70 @@ async def admin_sde_update(request: Request, db: AsyncSession = Depends(get_db),
     return HTMLResponse('<div class="b-empty" style="color:var(--success);">SDE update started. This may take a few minutes.</div>')
 
 
+@router.post("/player-count/backfill")
+async def admin_player_count_backfill(
+    request: Request,
+    source: str = "all",
+    mode: str = "fine",
+    admin: User = Depends(require_admin),
+):
+    """Trigger historical PCU backfill from third-party archives.
+
+    Params:
+      source: 'all' | 'net' | 'com'  (com not yet implemented)
+      mode:   'fine' (chunked, ~50 min, ~8M rows, 1-min resolution; runs in
+              background — poll /admin/player-count/status)
+              'coarse' (single GET, ~800 rows weekly resolution; synchronous)
+
+    Idempotent — the (source, recorded_at) unique constraint dedups across
+    re-runs.
+    """
+    from fastapi.responses import JSONResponse
+    from app.intel.player_count_backfill import run_backfill
+    if source not in ("all", "net", "com"):
+        return JSONResponse({"error": "source must be 'all' | 'net' | 'com'"}, status_code=400)
+    if mode not in ("fine", "coarse"):
+        return JSONResponse({"error": "mode must be 'fine' | 'coarse'"}, status_code=400)
+    try:
+        summary = await run_backfill(source=source, mode=mode)
+        return JSONResponse(summary)
+    except Exception as e:
+        logger.exception("player-count backfill failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/player-count/status")
+async def admin_player_count_status(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Poll the fine-backfill task's progress + per-source row counts."""
+    from fastapi.responses import JSONResponse
+    from app.intel.player_count_backfill import fine_backfill_state
+    async with AsyncSessionLocal() as db:
+        from app.db.models import PlayerCountSnapshot
+        rows = (await db.execute(
+            select(
+                PlayerCountSnapshot.source,
+                func.count(),
+                func.min(PlayerCountSnapshot.recorded_at),
+                func.max(PlayerCountSnapshot.recorded_at),
+            ).group_by(PlayerCountSnapshot.source)
+        )).all()
+    return JSONResponse({
+        "fine_state": fine_backfill_state(),
+        "rows_per_source": [
+            {
+                "source": s,
+                "rows": int(n),
+                "earliest": str(mn) if mn else None,
+                "latest": str(mx) if mx else None,
+            }
+            for s, n, mn, mx in rows
+        ],
+    })
+
+
 @router.post("/action/cache-purge", response_class=HTMLResponse)
 async def admin_cache_purge(request: Request, db: AsyncSession = Depends(get_db),
                             admin: User = Depends(require_admin)):
