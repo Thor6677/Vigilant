@@ -261,3 +261,12 @@ async def startup():
         except Exception as e:
             logging.getLogger(__name__).warning("zkb-totals auto-ingest error: %s", e)
     asyncio.create_task(_kick_zkb_totals())
+
+    async def _kick_pcu_rollup():
+        try:
+            from app.intel.pcu_daily_rollup import auto_backfill_if_empty
+            res = await auto_backfill_if_empty()
+            logging.getLogger(__name__).info("pcu daily rollup bootstrap: %s", res)
+        except Exception as e:
+            logging.getLogger(__name__).warning("pcu daily rollup bootstrap error: %s", e)
+    asyncio.create_task(_kick_pcu_rollup())

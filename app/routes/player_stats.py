@@ -19,7 +19,18 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Killmail, KillmailDailyAggregate, PlayerCountSnapshot, get_db
+from app.db.models import (
+    Killmail,
+    KillmailDailyAggregate,
+    PlayerCountDailyAggregate,
+    PlayerCountSnapshot,
+    get_db,
+)
+
+# Source priority when multiple sources have the same date — prefer live
+# ESI samples, fall back to historical archives. Used by the daily-aggregate
+# read path so each date contributes exactly one avg_pc to the bin.
+_PCU_SOURCE_PRIORITY = {"esi": 0, "eve-offline-net": 1, "eve-offline-com": 2}
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -38,6 +49,13 @@ _WINDOWS = {
     "all":  ("All time (2003–)",  None,                 90 * 24 * 3600,  "%Y-%m"),
 }
 
+# Slow windows benefit from a short TTL cache — they don't change minute to
+# minute and most of the data is historical. Keyed by window. Values are
+# (expires_at, payload_dict).
+_SLOW_WINDOWS = {"1y", "5y", "all"}
+_SLOW_TTL_SECONDS = 3600
+_payload_cache: dict[str, tuple[datetime, dict]] = {}
+
 
 @router.get("/tools/activity", response_class=HTMLResponse)
 async def tools_activity(
@@ -51,6 +69,16 @@ async def tools_activity(
     if window not in _WINDOWS:
         window = "30d"
     label, delta, bin_seconds, label_fmt = _WINDOWS[window]
+
+    # Slow-window cache: payload is mostly historical, fine to serve a
+    # 1-hour-old version. Skip for short windows where data turns over fast.
+    cached = _payload_cache.get(window) if window in _SLOW_WINDOWS else None
+    if cached is not None:
+        expires_at, payload = cached
+        if datetime.now(timezone.utc).replace(tzinfo=None) < expires_at:
+            return templates.TemplateResponse(
+                "tools_activity.html", {"request": request, **payload}
+            )
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = _FIRST_PCU if delta is None else (now - delta)
@@ -74,22 +102,76 @@ async def tools_activity(
         )
 
     # ── PCU: average per bin (concurrent count, not throughput) ──
-    pcu_q = (
-        select(
-            _bin_expr(PlayerCountSnapshot.recorded_at).label("b"),
-            func.avg(PlayerCountSnapshot.player_count).label("avg_pc"),
-        )
-        .where(PlayerCountSnapshot.recorded_at >= cutoff)
-        .group_by("b")
-    )
+    # For sub-day bins (1d/7d) we GROUP BY on the raw snapshot table — small
+    # window so the scan is cheap. For day+ bins (30d/90d/1y/5y/all) we read
+    # the pre-aggregated PlayerCountDailyAggregate table to avoid a 10M-row
+    # scan per request. Raw snapshots are preserved either way.
     pcu_values: list[int | None] = [None] * num_bins
-    for b, avg_pc in (await db.execute(pcu_q)).all():
-        if b is None or avg_pc is None:
-            continue
-        i = int(b)
-        if 0 <= i < num_bins:
-            pcu_values[i] = round(float(avg_pc))
-    peak_pcu = max((v for v in pcu_values if v is not None), default=0)
+    pcu_peaks: list[int | None] = [None] * num_bins
+    if bin_seconds < 86400:
+        pcu_q = (
+            select(
+                _bin_expr(PlayerCountSnapshot.recorded_at).label("b"),
+                func.avg(PlayerCountSnapshot.player_count).label("avg_pc"),
+                func.max(PlayerCountSnapshot.player_count).label("peak_pc"),
+            )
+            .where(PlayerCountSnapshot.recorded_at >= cutoff)
+            .group_by("b")
+        )
+        for b, avg_pc, peak_pc in (await db.execute(pcu_q)).all():
+            if b is None or avg_pc is None:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                pcu_values[i] = round(float(avg_pc))
+                pcu_peaks[i] = int(peak_pc) if peak_pc is not None else None
+    else:
+        # Read pre-aggregated daily rows. Multiple sources may share a date;
+        # pick the highest-priority source per date so we don't double-count.
+        # The daily rollup runs once per 24h, so today's row would be stale
+        # for hours — supplement with a small live query for today's raw
+        # snapshots so the rightmost bin updates as new samples land.
+        today = now.date()
+        kda_q = select(
+            PlayerCountDailyAggregate.date,
+            PlayerCountDailyAggregate.source,
+            PlayerCountDailyAggregate.avg_pc,
+            PlayerCountDailyAggregate.peak_pc,
+        ).where(
+            PlayerCountDailyAggregate.date >= cutoff.date(),
+            PlayerCountDailyAggregate.date < today,
+        )
+        per_date: dict = {}
+        for d, src, avg_pc, peak_pc in (await db.execute(kda_q)).all():
+            cur = per_date.get(d)
+            new_pri = _PCU_SOURCE_PRIORITY.get(src, 99)
+            if cur is None or new_pri < cur[0]:
+                per_date[d] = (new_pri, float(avg_pc or 0.0), int(peak_pc or 0))
+        # Live today bin from raw snapshots (single day, ~1440 rows for ESI).
+        today_start = datetime(today.year, today.month, today.day)
+        live_q = select(
+            func.avg(PlayerCountSnapshot.player_count),
+            func.max(PlayerCountSnapshot.player_count),
+        ).where(PlayerCountSnapshot.recorded_at >= today_start)
+        row = (await db.execute(live_q)).first()
+        if row and row[0] is not None:
+            per_date[today] = (0, float(row[0]), int(row[1] or 0))
+        # Bin: average avg_pc across the days in each bin (each day weight=1);
+        # peak = max across days.
+        bin_sum = [0.0] * num_bins
+        bin_n = [0] * num_bins
+        for d, (_pri, avg_pc, peak_pc) in per_date.items():
+            d_dt = datetime(d.year, d.month, d.day)
+            idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
+            if 0 <= idx < num_bins:
+                bin_sum[idx] += avg_pc
+                bin_n[idx] += 1
+                if pcu_peaks[idx] is None or peak_pc > pcu_peaks[idx]:
+                    pcu_peaks[idx] = peak_pc
+        for i in range(num_bins):
+            if bin_n[i] > 0:
+                pcu_values[i] = round(bin_sum[i] / bin_n[i])
+    peak_pcu = max((v for v in pcu_peaks if v is not None), default=0)
     nonempty = [v for v in pcu_values if v is not None]
     mean_pcu = round(sum(nonempty) / len(nonempty)) if nonempty else 0
 
@@ -138,15 +220,25 @@ async def tools_activity(
     # the cluster total — appropriate for "kills in this bin".
     total_kills = sum(kills_buckets)
 
-    # Source coverage breakdown — aggregate in SQL, again. Loading every
-    # row's source column for a 10M-row table would OOM.
+    # Source coverage breakdown. For day+ bins we sum sample_count from the
+    # daily aggregate (cheap). For sub-day windows we GROUP BY on the
+    # snapshot table — small window, still cheap.
     src_counts = {}
-    for src, n in (await db.execute(
-        select(PlayerCountSnapshot.source, func.count())
-        .where(PlayerCountSnapshot.recorded_at >= cutoff)
-        .group_by(PlayerCountSnapshot.source)
-    )).all():
-        src_counts[src] = src_counts.get(src, 0) + int(n)
+    if bin_seconds < 86400:
+        src_q = (
+            select(PlayerCountSnapshot.source, func.count())
+            .where(PlayerCountSnapshot.recorded_at >= cutoff)
+            .group_by(PlayerCountSnapshot.source)
+        )
+    else:
+        src_q = (
+            select(PlayerCountDailyAggregate.source,
+                   func.sum(PlayerCountDailyAggregate.sample_count))
+            .where(PlayerCountDailyAggregate.date >= cutoff.date())
+            .group_by(PlayerCountDailyAggregate.source)
+        )
+    for src, n in (await db.execute(src_q)).all():
+        src_counts[src] = src_counts.get(src, 0) + int(n or 0)
     for src, n in (await db.execute(
         select(KillmailDailyAggregate.source, func.count())
         .where(KillmailDailyAggregate.date >= cutoff.date())
@@ -154,21 +246,23 @@ async def tools_activity(
     )).all():
         src_counts[src] = src_counts.get(src, 0) + int(n)
 
+    payload = {
+        "window": window,
+        "window_label": label,
+        "labels": labels,
+        "isk_values": isk_buckets,
+        "pcu_values": pcu_values,
+        "kills_values": kills_buckets,
+        "total_isk": total_isk,
+        "peak_pcu": peak_pcu,
+        "mean_pcu": mean_pcu,
+        "total_kills": total_kills,
+        "source_counts": src_counts,
+        "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
+    }
+    if window in _SLOW_WINDOWS:
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
+        _payload_cache[window] = (expires_at, payload)
     return templates.TemplateResponse(
-        "tools_activity.html",
-        {
-            "request": request,
-            "window": window,
-            "window_label": label,
-            "labels": labels,
-            "isk_values": isk_buckets,
-            "pcu_values": pcu_values,
-            "kills_values": kills_buckets,
-            "total_isk": total_isk,
-            "peak_pcu": peak_pcu,
-            "mean_pcu": mean_pcu,
-            "total_kills": total_kills,
-            "source_counts": src_counts,
-            "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
-        },
+        "tools_activity.html", {"request": request, **payload}
     )

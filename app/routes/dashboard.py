@@ -1669,6 +1669,19 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Player count sample error: %s", e)
 
+            # Daily rollup of player_count_snapshots → daily aggregate.
+            # Trailing-7-day refresh keeps today + recent days fresh as new
+            # samples land. Raw snapshots are preserved.
+            if not hasattr(_background_scheduler, '_last_pcu_rollup') or \
+               (now - _background_scheduler._last_pcu_rollup).total_seconds() >= 86400:
+                try:
+                    from app.intel.pcu_daily_rollup import rollup_pcu
+                    res = await rollup_pcu(days=7)
+                    logger.info("pcu daily rollup: %s", res)
+                    _background_scheduler._last_pcu_rollup = now
+                except Exception as e:
+                    logger.warning("PCU daily rollup error: %s", e)
+
             # Daily GC of archived ESI rate-limit events (>30 days old).
             # Runs regardless of flags — small query, safe cheap.
             if not hasattr(_background_scheduler, '_last_esi_events_gc') or \

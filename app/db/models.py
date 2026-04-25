@@ -151,6 +151,25 @@ class PlayerCountSnapshot(Base):
     vip_mode = Column(Boolean, nullable=True)
 
 
+class PlayerCountDailyAggregate(Base):
+    """Per-(source, date) rollup of PlayerCountSnapshot. Derived cache —
+    raw snapshots remain the source of truth and can rebuild this table
+    from scratch. Long-window activity charts read from here so they don't
+    have to GROUP BY on a 10M-row table per request."""
+    __tablename__ = "player_count_daily_aggregates"
+    __table_args__ = (
+        UniqueConstraint("source", "date", name="uq_pcda_source_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    source = Column(String(32), nullable=False, index=True)
+    avg_pc = Column(Float, nullable=False)
+    peak_pc = Column(Integer, nullable=False)
+    sample_count = Column(Integer, nullable=False, default=0)
+    rolled_up_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 class ESIRateLimitEvent(Base):
     __tablename__ = "esi_rate_limit_events"
     id          = Column(Integer, primary_key=True, autoincrement=True)
