@@ -98,7 +98,12 @@ async def _bulk_upsert_chunk(rows: list[dict]) -> int:
 async def _run_fine_backfill_inner() -> None:
     """Long-running task body. Walks the archive day-by-day, batched-inserts
     each window's rows, updates module-level progress state for /admin/...
-    polling."""
+    polling.
+
+    Resumes from the latest minute-granularity row's recorded_at, so a
+    container restart mid-backfill doesn't redo the early sparse years.
+    """
+    from sqlalchemy import func as _func
     state = _fine_backfill_state
     state.update({
         "running": True,
@@ -108,9 +113,32 @@ async def _run_fine_backfill_inner() -> None:
         "last_window_end": None,
         "error": None,
     })
-    log.info("eve-offline-net fine backfill: starting")
+
+    # Resume from where we left off (timestamp of the latest minute row).
+    # Subtract one day to ensure full coverage on the boundary day.
+    async with AsyncSessionLocal() as db:
+        latest_minute = (
+            await db.execute(
+                select(_func.max(PlayerCountSnapshot.recorded_at))
+                .where(PlayerCountSnapshot.source == "eve-offline-net")
+                .where(PlayerCountSnapshot.granularity == "minute")
+            )
+        ).scalar()
+    if latest_minute is not None:
+        from datetime import timedelta as _td
+        resume_from = (latest_minute - _td(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        log.info(
+            "eve-offline-net fine backfill: resuming from %s (latest minute row was %s)",
+            resume_from, latest_minute,
+        )
+    else:
+        resume_from = None
+        log.info("eve-offline-net fine backfill: starting fresh from archive start")
+
     try:
-        async for batch in fetch_chribba_archive_fine():
+        async for batch in fetch_chribba_archive_fine(start=resume_from):
             inserted = await _bulk_upsert_chunk(batch)
             state["windows_done"] += 1
             state["rows_inserted"] += inserted
