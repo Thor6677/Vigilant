@@ -141,40 +141,75 @@ async def resolve_entity_names(ids: list[int]) -> dict[int, str]:
 
 
 def pick_top_entities(
-    attacker_pilots: dict[int, tuple[int | None, int | None]],
-    victim_pilots: dict[int, tuple[int | None, int | None]],
+    kill_pairs: list[tuple[int | None, int | None, int | None, int | None]],
 ) -> dict:
-    """Pick the dominant attacker and victim entities by unique-pilot count.
-    Each input maps character_id → (corporation_id, alliance_id). Alliance
-    is preferred over corp for the chosen entity (in EVE, fleets fight under
-    alliance banners more meaningfully than per-corp). Returns dict with
-    keys: top_attacker_corp_id/_kills, top_attacker_alliance_id,
-    top_victim_corp_id/_kills, top_victim_alliance_id."""
-    def _tally(pilots: dict[int, tuple[int | None, int | None]]):
-        corp_pilots: dict[int, set[int]] = {}
-        alliance_pilots: dict[int, set[int]] = {}
-        for cid, (corp_id, alliance_id) in pilots.items():
-            if corp_id:
-                corp_pilots.setdefault(corp_id, set()).add(cid)
-            if alliance_id:
-                alliance_pilots.setdefault(alliance_id, set()).add(cid)
-        top_corp = max(corp_pilots.items(), key=lambda x: len(x[1]), default=(None, set()))
-        top_alli = max(alliance_pilots.items(), key=lambda x: len(x[1]), default=(None, set()))
-        return {
-            "corp_id": top_corp[0],
-            "corp_pilots": len(top_corp[1]),
-            "alliance_id": top_alli[0],
-        }
+    """Identify two opposing sides from per-kill (att_alli, att_corp, vic_alli, vic_corp).
 
-    a = _tally(attacker_pilots)
-    v = _tally(victim_pilots)
+    In fleet battles both sides appear as attackers across different kills, so
+    tallying all attackers vs all victims conflates both coalitions. Instead we
+    build a directed kill matrix: att_key → vic_key → count. The undirected pair
+    with the highest total conflict is the two main combatants. The side that
+    inflicted more kills gets the 'attacker' label; the other gets 'victim'.
+    Returns top_attacker_* and top_victim_* keys for DetectedBattle upsert.
+    """
+    _empty = {
+        "top_attacker_corp_id": None, "top_attacker_corp_kills": 0,
+        "top_attacker_alliance_id": None,
+        "top_victim_corp_id": None, "top_victim_corp_kills": 0,
+        "top_victim_alliance_id": None,
+    }
+    if not kill_pairs:
+        return _empty
+
+    from collections import defaultdict
+
+    directed: dict[tuple[int, int], int] = defaultdict(int)
+    # entity_key → (corp_id, alliance_id) for name resolution later
+    entity_meta: dict[int, tuple[int | None, int | None]] = {}
+
+    for att_alli, att_corp, vic_alli, vic_corp in kill_pairs:
+        a_key = att_alli if att_alli else att_corp
+        v_key = vic_alli if vic_alli else vic_corp
+        if not a_key or not v_key or a_key == v_key:
+            continue
+        directed[(a_key, v_key)] += 1
+        entity_meta.setdefault(a_key, (att_corp, att_alli))
+        entity_meta.setdefault(v_key, (vic_corp, vic_alli))
+
+    if not directed:
+        return _empty
+
+    # Find the undirected pair with the most total mutual kills
+    seen: set[tuple[int, int]] = set()
+    best_pair: tuple[int, int] | None = None
+    best_total = 0
+    for a_key, v_key in list(directed):
+        pair = (min(a_key, v_key), max(a_key, v_key))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        total = directed.get((a_key, v_key), 0) + directed.get((v_key, a_key), 0)
+        if total > best_total:
+            best_total = total
+            best_pair = (a_key, v_key)
+
+    if not best_pair:
+        return _empty
+
+    a, b = best_pair
+    a_kills = directed.get((a, b), 0)
+    b_kills = directed.get((b, a), 0)
+    att_key, vic_key = (a, b) if a_kills >= b_kills else (b, a)
+
+    att_corp_id, att_alli_id = entity_meta.get(att_key, (None, None))
+    vic_corp_id, vic_alli_id = entity_meta.get(vic_key, (None, None))
     return {
-        "top_attacker_corp_id": a["corp_id"],
-        "top_attacker_corp_kills": a["corp_pilots"],
-        "top_attacker_alliance_id": a["alliance_id"],
-        "top_victim_corp_id": v["corp_id"],
-        "top_victim_corp_kills": v["corp_pilots"],
-        "top_victim_alliance_id": v["alliance_id"],
+        "top_attacker_corp_id": att_corp_id,
+        "top_attacker_corp_kills": max(a_kills, b_kills),
+        "top_attacker_alliance_id": att_alli_id,
+        "top_victim_corp_id": vic_corp_id,
+        "top_victim_corp_kills": min(a_kills, b_kills),
+        "top_victim_alliance_id": vic_alli_id,
     }
 
 
@@ -404,9 +439,8 @@ async def _cluster_system(
         total_isk = 0.0
         ship_counter: Counter = Counter()
         pilots: set = set()
-        # char_id -> (corp_id, alliance_id) on each side, deduped per cluster
-        attacker_pilots: dict[int, tuple[int | None, int | None]] = {}
-        victim_pilots: dict[int, tuple[int | None, int | None]] = {}
+        # Per-kill (att_alli, att_corp, vic_alli, vic_corp) tuples for conflict matrix
+        kill_pairs: list[tuple[int | None, int | None, int | None, int | None]] = []
         for km in c:
             kid = km["killmail_id"]
             h = hydrated.get(kid)
@@ -416,16 +450,32 @@ async def _cluster_system(
             sid = h.get("victim_ship_type_id")
             if sid:
                 ship_counter[sid] += 1
-            for cid, corp, alli in attacker_orgs_by_km.get(kid, []):
-                attacker_pilots.setdefault(cid, (corp, alli))
-            v = victim_orgs_by_km.get(kid)
-            if v:
-                vid, vcorp, valli = v
-                victim_pilots.setdefault(vid, (vcorp, valli))
             pilots.update(attackers_by_km.get(kid, set()))
             v_cid = victims_by_km.get(kid)
             if v_cid:
                 pilots.add(v_cid)
+            # Build directed kill pair: dominant attacker alliance vs victim alliance
+            v = victim_orgs_by_km.get(kid)
+            vic_alli = v[2] if v else None
+            vic_corp = v[1] if v else None
+            att_orgs = attacker_orgs_by_km.get(kid, [])
+            alli_counts: dict[int, int] = {}
+            corp_counts: dict[int, int] = {}
+            for _, corp, alli in att_orgs:
+                if alli and alli != vic_alli:
+                    alli_counts[alli] = alli_counts.get(alli, 0) + 1
+                elif corp and corp != vic_corp and not alli:
+                    corp_counts[corp] = corp_counts.get(corp, 0) + 1
+            if alli_counts:
+                att_alli = max(alli_counts, key=alli_counts.get)
+                att_corp = next((corp for _, corp, al in att_orgs if al == att_alli and corp), None)
+            elif corp_counts:
+                att_alli = None
+                att_corp = max(corp_counts, key=corp_counts.get)
+            else:
+                att_alli = att_corp = None
+            if (att_alli or att_corp) and (vic_alli or vic_corp):
+                kill_pairs.append((att_alli, att_corp, vic_alli, vic_corp))
         if not ship_counter:
             continue
         if len(pilots) < min_pilots:
@@ -434,7 +484,7 @@ async def _cluster_system(
             {"id": sid, "count": n}
             for sid, n in ship_counter.most_common(5)
         ]
-        ents = pick_top_entities(attacker_pilots, victim_pilots)
+        ents = pick_top_entities(kill_pairs)
         names = await resolve_entity_names([
             i for i in (
                 ents["top_attacker_corp_id"], ents["top_attacker_alliance_id"],

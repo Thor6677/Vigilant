@@ -187,23 +187,36 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
     pilots: set[int] = set()
     ship_counter: dict[int, int] = {}
     total_isk = 0.0
-    attacker_pilots: dict[int, tuple[int | None, int | None]] = {}
-    victim_pilots: dict[int, tuple[int | None, int | None]] = {}
+    kill_pairs: list[tuple[int | None, int | None, int | None, int | None]] = []
     for k in kills:
         pilots |= k["attacker_ids"]
         if k.get("victim_id"):
             pilots.add(k["victim_id"])
-            victim_pilots.setdefault(
-                k["victim_id"],
-                (k.get("victim_corp_id"), k.get("victim_alliance_id")),
-            )
-        for cid, corp, alli in k.get("attacker_orgs") or []:
-            if cid:
-                attacker_pilots.setdefault(cid, (corp, alli))
         sid = k.get("victim_ship_id")
         if sid:
             ship_counter[sid] = ship_counter.get(sid, 0) + 1
         total_isk += k.get("value") or 0
+        # Build directed kill pair for conflict matrix
+        vic_alli = k.get("victim_alliance_id")
+        vic_corp = k.get("victim_corp_id")
+        att_orgs = k.get("attacker_orgs") or []
+        alli_counts: dict[int, int] = {}
+        corp_counts: dict[int, int] = {}
+        for _, corp, alli in att_orgs:
+            if alli and alli != vic_alli:
+                alli_counts[alli] = alli_counts.get(alli, 0) + 1
+            elif corp and corp != vic_corp and not alli:
+                corp_counts[corp] = corp_counts.get(corp, 0) + 1
+        if alli_counts:
+            att_alli = max(alli_counts, key=alli_counts.get)
+            att_corp = next((corp for _, corp, al in att_orgs if al == att_alli and corp), None)
+        elif corp_counts:
+            att_alli = None
+            att_corp = max(corp_counts, key=corp_counts.get)
+        else:
+            att_alli = att_corp = None
+        if (att_alli or att_corp) and (vic_alli or vic_corp):
+            kill_pairs.append((att_alli, att_corp, vic_alli, vic_corp))
 
     if len(pilots) < min_pilots:
         return
@@ -213,7 +226,7 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
     duration = max(1, int((end - start).total_seconds() / 60))
     top_ships = sorted(ship_counter.items(), key=lambda x: -x[1])[:5]
     from app.intel.recent_battles import pick_top_entities, resolve_entity_names
-    ents = pick_top_entities(attacker_pilots, victim_pilots)
+    ents = pick_top_entities(kill_pairs)
     names = await resolve_entity_names([
         i for i in (
             ents["top_attacker_corp_id"], ents["top_attacker_alliance_id"],
