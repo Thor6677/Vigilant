@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface MapBookmark {
   id: number;
@@ -16,6 +16,7 @@ export interface MapBookmark {
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<MapBookmark[]>([]);
   const [loading, setLoading] = useState(true);
+  const tempIdCounter = useRef(0);
 
   const reload = useCallback(async () => {
     try {
@@ -39,7 +40,8 @@ export function useBookmarks() {
   const addBookmark = useCallback(async (
     kind: MapBookmark['kind'], entityId: number, label?: string,
   ) => {
-    const tempId = -Date.now();
+    tempIdCounter.current -= 1;
+    const tempId = tempIdCounter.current;
     const optimistic: MapBookmark = {
       id: tempId, kind, entity_id: entityId,
       label: label ?? null, color: null, notes: null, created_at: null,

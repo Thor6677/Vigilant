@@ -7,7 +7,7 @@ export function useMapData(space: 'k' | 'w' = 'k') {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
 
     // Reset to a loading state on space switch so App unmounts the
     // existing StarMap and remounts a fresh one against the new dataset.
@@ -38,9 +38,9 @@ export function useMapData(space: 'k' | 'w' = 'k') {
               `${base}data/regions.json?v=${v}`,
             ];
         const [systemsRes, edgesRes, regionsRes] = await Promise.all([
-          fetch(systemsURL),
-          fetch(edgesURL),
-          fetch(regionsURL),
+          fetch(systemsURL, { signal: ac.signal }),
+          fetch(edgesURL, { signal: ac.signal }),
+          fetch(regionsURL, { signal: ac.signal }),
         ]);
 
         if (!systemsRes.ok || !edgesRes.ok || !regionsRes.ok) {
@@ -53,7 +53,7 @@ export function useMapData(space: 'k' | 'w' = 'k') {
           regionsRes.json() as Promise<RegionData[]>,
         ]);
 
-        if (cancelled) return;
+        if (ac.signal.aborted) return;
 
         const systemMap = new Map<number, SystemData>();
         for (const sys of systems) {
@@ -62,16 +62,15 @@ export function useMapData(space: 'k' | 'w' = 'k') {
 
         setData({ systems, edges, regions, systemMap });
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Unknown error');
-        }
+        if (ac.signal.aborted) return;
+        setError(e instanceof Error ? e.message : 'Unknown error');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!ac.signal.aborted) setLoading(false);
       }
     }
 
     load();
-    return () => { cancelled = true; };
+    return () => { ac.abort(); };
   }, [space]);
 
   return { data, loading, error };

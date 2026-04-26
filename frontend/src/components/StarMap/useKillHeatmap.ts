@@ -20,15 +20,15 @@ export interface KillHeatmapData {
   buckets: string[];
   max_value: number;
   /** Per-system dense lookup array. Length = buckets.length. */
-  lookup: Map<number, Uint16Array>;
+  lookup: Map<number, Uint32Array>;
 }
 
 function materialize(raw: KillHeatmapResponseRaw): KillHeatmapData {
   const numBuckets = raw.buckets.length;
-  const lookup = new Map<number, Uint16Array>();
+  const lookup = new Map<number, Uint32Array>();
   if (raw.sparse) {
     for (const [sid, pairs] of Object.entries(raw.data)) {
-      const arr = new Uint16Array(numBuckets);
+      const arr = new Uint32Array(numBuckets);
       for (const pair of pairs as number[][]) {
         const [bi, cnt] = pair;
         if (bi >= 0 && bi < numBuckets) arr[bi] = cnt;
@@ -38,7 +38,7 @@ function materialize(raw: KillHeatmapResponseRaw): KillHeatmapData {
   } else {
     for (const [sid, dense] of Object.entries(raw.data)) {
       const src = dense as number[];
-      const arr = new Uint16Array(numBuckets);
+      const arr = new Uint32Array(numBuckets);
       for (let i = 0; i < numBuckets; i++) arr[i] = src[i] ?? 0;
       lookup.set(parseInt(sid, 10), arr);
     }
@@ -55,7 +55,7 @@ function materialize(raw: KillHeatmapResponseRaw): KillHeatmapData {
 
 /**
  * Bulk-fetches the per-system kill heatmap dataset for the selected window.
- * Materializes the response into per-system Uint16Array lookups for fast
+ * Materializes the response into per-system Uint32Array lookups for fast
  * indexed access in the render loop. Refetches on (window, space) change.
  */
 export function useKillHeatmap(window: KillHeatmapWindow, space: 'k' | 'w', enabled: boolean) {

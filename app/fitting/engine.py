@@ -1341,7 +1341,7 @@ async def calculate_fitting_stats(
         if spool_per_cycle > 0 and spool_max > 0:
             spool_volley = volley * (1 + spool_max)
             weapon_dps_max_spool += (spool_volley / (cycle / 1000)) * qty
-            cycles_to_max = int(spool_max / spool_per_cycle)
+            cycles_to_max = math.ceil(spool_max / spool_per_cycle)
             spool_time_s = max(spool_time_s, int(cycles_to_max * cycle / 1000))
         else:
             weapon_dps_max_spool += (volley / (cycle / 1000)) * qty

@@ -85,6 +85,8 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+  // Bumped on every pan/zoom so screen-space overlays (character markers) re-render.
+  const [vpVersion, setVpVersion] = useState(0);
   const [contextMenu, setContextMenu] = useState<{
     system: SystemData;
     position: { x: number; y: number };
@@ -780,7 +782,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       updateView(vp);
 
       // Update on zoom/pan
-      vp.on('zoomed', () => updateView(vp));
+      vp.on('zoomed', () => {
+        updateView(vp);
+        setVpVersion(v => v + 1);
+      });
       vp.on('moved', () => {
         // Update labels and panel on pan
         labelRendererRef.current?.updateViewport(vp);
@@ -789,6 +794,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           const sp = vp.toScreen(sel.x, sel.y);
           setPanelPos({ x: sp.x, y: sp.y });
         }
+        setVpVersion(v => v + 1);
       });
 
       // Note: no drag-start handler here — pixi-viewport fires drag-start on
@@ -799,8 +805,13 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       // panel anchored to the selected system during pans, so leaving it
       // open is fine.
 
-      // Pointer events
+      // Pointer events. We only update React state when the hovered system ID
+      // actually changes — quadtree.find returns a fresh object every call, so
+      // setHoveredSystem(found) would re-render every frame even on the same
+      // system. The renderer-level setHovered/setHoverHighlight are imperative
+      // and cheap; they fire every move.
       let hoverThrottleId: number | null = null;
+      let lastHoveredId: number | null = null;
 
       vp.on('pointermove', (e) => {
         if (hoverThrottleId !== null) return;
@@ -816,35 +827,34 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         const found = qt.find(worldPos.x, worldPos.y, hitRadius);
 
         if (found) {
-          setHoveredSystem(prev => {
-            // Start tooltip delay when hovering a new system
-            if (!prev || prev.id !== found.id) {
-              setTooltipVisible(false);
-              if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-              tooltipTimerRef.current = window.setTimeout(() => setTooltipVisible(true), 150);
-            }
-            return found;
-          });
-          const screenPos = vp.toScreen(found.x, found.y);
-          setTooltipPos({ x: screenPos.x, y: screenPos.y });
           systemRenderer.setHovered(found.id);
           el.style.cursor = 'pointer';
-
-          // Neighbor highlighting
           const neighbors = adjacencyRef.current?.get(found.id);
           if (neighbors) {
             systemRenderer.setHoverHighlight(found.id, neighbors);
             edgeRenderer.setHoverHighlight(found.id, neighbors);
           }
+          if (found.id !== lastHoveredId) {
+            lastHoveredId = found.id;
+            setHoveredSystem(found);
+            const screenPos = vp.toScreen(found.x, found.y);
+            setTooltipPos({ x: screenPos.x, y: screenPos.y });
+            setTooltipVisible(false);
+            if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+            tooltipTimerRef.current = window.setTimeout(() => setTooltipVisible(true), 150);
+          }
         } else {
-          if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-          setTooltipVisible(false);
-          setHoveredSystem(null);
-          setTooltipPos(null);
           systemRenderer.setHovered(null);
           systemRenderer.setHoverHighlight(null, null);
           edgeRenderer.setHoverHighlight(null, null);
           el.style.cursor = 'grab';
+          if (lastHoveredId !== null) {
+            lastHoveredId = null;
+            if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+            setTooltipVisible(false);
+            setHoveredSystem(null);
+            setTooltipPos(null);
+          }
         }
       });
 
@@ -1404,7 +1414,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       {/* Group mode selector */}
       <GroupModeControls mode={groupMode} onModeChange={setGroupMode} isMobile={isMobile} />
 
-      {/* Character location markers */}
+      {/* Character location markers — re-positioned on every pan/zoom via vpVersion */}
       {characters.map(char => {
         if (!char.system_id) return null;
         const sys = data.systemMap.get(char.system_id);
@@ -1413,6 +1423,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         return (
           <div
             key={char.character_id}
+            data-vp={vpVersion}
             style={{
               position: 'absolute',
               left: sp.x,
