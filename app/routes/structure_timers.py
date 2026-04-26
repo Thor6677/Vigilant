@@ -182,6 +182,15 @@ async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
     return False
 
 
+async def _can_modify_acl_group(db: AsyncSession, user_id: int, group: TimerACLGroup) -> bool:
+    """Allowed: group creator or app admin/manager."""
+    if group.created_by == user_id:
+        return True
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    return bool(user and user.role in ("admin", "manager"))
+
+
 def _timer_visible(timer, visible_groups: set[int]) -> bool:
     """Check if a timer is visible given the user's accessible groups."""
     if timer.acl_group_id is None:
@@ -403,6 +412,11 @@ async def acl_add_entry(group_id: int, request: Request, db: AsyncSession = Depe
     if not user_id:
         return HTMLResponse("", status_code=401)
 
+    group_result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
+    group = group_result.scalar_one_or_none()
+    if not group or not await _can_modify_acl_group(db, user_id, group):
+        return HTMLResponse("", status_code=403)
+
     form = await request.form()
     entry_type = form.get("entry_type", "corporation")
     eve_id = form.get("eve_id", "")
@@ -441,6 +455,11 @@ async def acl_remove_entry(group_id: int, entry_id: int, request: Request, db: A
     if not user_id:
         return HTMLResponse("", status_code=401)
 
+    group_result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
+    group = group_result.scalar_one_or_none()
+    if not group or not await _can_modify_acl_group(db, user_id, group):
+        return HTMLResponse("", status_code=403)
+
     result = await db.execute(
         select(TimerACLEntry).where(TimerACLEntry.id == entry_id, TimerACLEntry.group_id == group_id)
     )
@@ -459,15 +478,16 @@ async def delete_acl_group(group_id: int, request: Request, db: AsyncSession = D
 
     result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = result.scalar_one_or_none()
-    if group:
-        # Unlink timers using this group
-        timer_result = await db.execute(
-            select(StructureTimer).where(StructureTimer.acl_group_id == group_id)
-        )
-        for t in timer_result.scalars().all():
-            t.acl_group_id = None
-        await db.delete(group)
-        await db.commit()
+    if not group or not await _can_modify_acl_group(db, user_id, group):
+        return HTMLResponse("", status_code=403)
+    # Unlink timers using this group
+    timer_result = await db.execute(
+        select(StructureTimer).where(StructureTimer.acl_group_id == group_id)
+    )
+    for t in timer_result.scalars().all():
+        t.acl_group_id = None
+    await db.delete(group)
+    await db.commit()
     return RedirectResponse("/structure-timers", status_code=302)
 
 
@@ -475,6 +495,8 @@ async def delete_acl_group(group_id: int, request: Request, db: AsyncSession = D
 
 @router.get("/acl/search", response_class=HTMLResponse)
 async def acl_search(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
     q = request.query_params.get("q", "").strip()
     category = request.query_params.get("category", "corporation")
     if len(q) < 3:

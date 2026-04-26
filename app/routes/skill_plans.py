@@ -1,5 +1,6 @@
 """Skill plan management — create, edit, import, and analyze skill plans."""
 
+import html
 import json
 import logging
 import re
@@ -1294,7 +1295,7 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
         except Exception:
             pass
     except Exception as e:
-        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">Failed to fetch skills: {e}</div>')
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">Failed to fetch skills: {html.escape(str(e))}</div>')
 
     # Build gap analysis
     skill_ids = [e.skill_type_id for e in plan.entries]
@@ -1490,7 +1491,7 @@ async def ship_mastery_check(ship_type_id: int, character_id: int, request: Requ
             attrs_data.get("willpower", 17),
         ]
     except Exception as e:
-        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">Failed to fetch skills: {e}</div>')
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">Failed to fetch skills: {html.escape(str(e))}</div>')
 
     ATTR_INDEX = {164: 0, 165: 1, 166: 2, 167: 3, 168: 4}
 

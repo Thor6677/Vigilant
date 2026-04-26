@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -18,6 +19,7 @@ from app.esi import corporation as esi_corp
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+templates = Jinja2Templates(directory="app/templates")
 
 EVE_SCOPES = " ".join([
     "esi-location.read_location.v1",

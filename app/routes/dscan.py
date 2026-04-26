@@ -446,6 +446,10 @@ async def dscan_redirect(request: Request):
 @router.post("/intel/parse")
 async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
     """Auto-detect paste type (d-scan vs local), parse, store, redirect."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=303)
+
     form = await request.form()
     paste_text = form.get("paste_text", "")
     label = form.get("label", "").strip()[:128] or None
@@ -499,7 +503,6 @@ async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
         })
 
     scan_id = _generate_id()
-    user_id = request.session.get("user_id")
     now = datetime.now(timezone.utc)
 
     dscan = DScanResult(
@@ -579,6 +582,10 @@ async def dscan_view_redirect(scan_id: str, request: Request):
 @router.post("/intel/{scan_id}/merge", response_class=HTMLResponse)
 async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Merge additional d-scan paste into an existing scan result."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=303)
+
     form = await request.form()
     paste_text = form.get("paste_text", "")
     dedup = form.get("dedup", "on") == "on"
@@ -587,6 +594,8 @@ async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends
     dscan = result.scalar_one_or_none()
     if not dscan:
         return RedirectResponse("/intel", status_code=303)
+    if dscan.user_id is not None and dscan.user_id != user_id:
+        return RedirectResponse(f"/intel/{scan_id}", status_code=303)
 
     # Parse the new paste
     new_items = parse_dscan(paste_text)
@@ -641,12 +650,18 @@ async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends
 
 @router.post("/intel/{scan_id}/extend", response_class=HTMLResponse)
 async def intel_extend(scan_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=303)
+
     form = await request.form()
     duration = form.get("duration", "24h")
     result = await db.execute(select(DScanResult).where(DScanResult.id == scan_id))
     dscan = result.scalar_one_or_none()
     if not dscan:
         return RedirectResponse("/intel", status_code=303)
+    if dscan.user_id is not None and dscan.user_id != user_id:
+        return RedirectResponse(f"/intel/{scan_id}", status_code=303)
     delta = EXPIRY_OPTIONS.get(duration, timedelta(hours=24))
     dscan.expires_at = datetime.now(timezone.utc) + delta
     await db.commit()
