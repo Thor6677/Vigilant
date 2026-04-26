@@ -50,7 +50,7 @@ LOOKBACK_HOURS = 4
 BUSY_SYSTEM_THRESHOLD = 5
 MAX_BUSY_SYSTEMS = 20
 MAX_HYDRATIONS_PER_RUN = 100
-BATTLES_PER_GROUP = 5
+BATTLES_PER_GROUP = 10
 # Minimum unique pilots (attackers ∪ victim) for a cluster to persist.
 # K-space is saturated; keep the bar at real-fleet-fight scale. W-space
 # is sparsely populated, so a handful of pilots is already meaningful.

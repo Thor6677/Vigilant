@@ -2291,20 +2291,23 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
         return HTMLResponse("")
     from app.intel.recent_battles import query_battles_window, SEC_BAND_ORDER
     groups = await query_battles_window(days=7)
-    # C1-C6 always render (with placeholder when empty) so the WH grid is
-    # legible at a glance. C13/Drifter/Thera/Pochven and the sec bands only
-    # appear when they actually have battles.
-    always_show = ["C6", "C5", "C4", "C3", "C2", "C1"]
-    conditional = ["Thera", "C13 (Shattered)", "Drifter", "Pochven"] + SEC_BAND_ORDER
-    ordered: list[tuple[str, list]] = []
-    for key in always_show:
-        ordered.append((key, groups.get(key, [])))
-    for key in conditional:
-        if key in groups and groups[key]:
-            ordered.append((key, groups[key]))
+    # Top tier: C1-C6 always render (placeholder when empty); Thera/C13/Drifter/
+    # Pochven appear inline only when they have data. Each card shows top 2.
+    wh_always = ["C1", "C2", "C3", "C4", "C5", "C6"]
+    wh_conditional = ["Thera", "C13 (Shattered)", "Drifter", "Pochven"]
+    wh_cards: list[tuple[str, list]] = [(k, (groups.get(k) or [])[:2]) for k in wh_always]
+    for k in wh_conditional:
+        if groups.get(k):
+            wh_cards.append((k, groups[k][:2]))
+    # Bottom tier: top-3 per band, then merged + sorted desc by kill_count.
+    kspace_pool: list = []
+    for band in SEC_BAND_ORDER:
+        kspace_pool.extend((groups.get(band) or [])[:3])
+    kspace_rows = sorted(kspace_pool, key=lambda b: b["kill_count"], reverse=True)
     return templates.TemplateResponse("partials/dashboard_recent_battles.html", {
         "request": request,
-        "groups": ordered,
+        "wh_cards": wh_cards,
+        "kspace_rows": kspace_rows,
     })
 
 
