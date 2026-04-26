@@ -30,7 +30,10 @@ ZKB_HEADERS = {
     "Accept": "application/json",
 }
 
-_zkb_cache: dict[str, tuple[list, float]] = {}
+from collections import OrderedDict
+
+_zkb_cache: OrderedDict[str, tuple[list, float]] = OrderedDict()
+_ZKB_CACHE_MAX = 500
 _ZKB_CACHE_TTL = 300  # 5 minutes
 _zkb_sem = asyncio.Semaphore(5)
 
@@ -41,11 +44,13 @@ async def zkb_get(path: str) -> list:
     now = time.time()
     cached = _zkb_cache.get(url)
     if cached and cached[1] > now:
+        _zkb_cache.move_to_end(url)
         return cached[0]
 
     async with _zkb_sem:
         cached = _zkb_cache.get(url)
         if cached and cached[1] > now:
+            _zkb_cache.move_to_end(url)
             return cached[0]
 
         client = get_http_client()
@@ -56,10 +61,13 @@ async def zkb_get(path: str) -> list:
                 if not isinstance(data, list):
                     data = []
                 _zkb_cache[url] = (data, now + _ZKB_CACHE_TTL)
-                if len(_zkb_cache) > 500:
-                    expired = [k for k, v in _zkb_cache.items() if v[1] < now]
-                    for k in expired:
-                        del _zkb_cache[k]
+                _zkb_cache.move_to_end(url)
+                # Bounded LRU: evict oldest until under the cap. Previous
+                # cleanup only dropped expired entries — under sustained
+                # traffic with refresh > expiry, the cache could grow past
+                # the cap indefinitely.
+                while len(_zkb_cache) > _ZKB_CACHE_MAX:
+                    _zkb_cache.popitem(last=False)
                 return data
             if resp.status_code == 429:
                 await asyncio.sleep(2)

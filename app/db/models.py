@@ -18,6 +18,12 @@ def _sqlite_pragmas(dbapi_connection, connection_record):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=10000")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # 256MB memory-mapped read region. Pages stay in OS page cache
+        # across queries — measurably reduces latency on the read-heavy
+        # SDE + killmail tables. Cheap on modern Linux; no effect when the
+        # mmap'd region exceeds the file size.
+        cursor.execute("PRAGMA mmap_size=268435456")
+        cursor.execute("PRAGMA cache_size=-20000")  # 20MB page cache per connection
         cursor.close()
 
 
@@ -632,6 +638,10 @@ class SystemActivitySnapshot(Base):
     pod_kills = Column(Integer, nullable=False, default=0)
     npc_kills = Column(Integer, nullable=False, default=0)
     jumps = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("system_id", "captured_at", name="uq_system_activity_snapshot"),
+    )
 
 
 class AllianceNameCache(Base):

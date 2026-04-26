@@ -451,25 +451,30 @@ async def get_skill_requirements(db: AsyncSession, type_id: int) -> list[dict]:
 async def get_full_skill_tree(db: AsyncSession, type_id: int) -> list[dict]:
     """Recursively resolve all prerequisite skills for an item/ship.
     Returns a flat list of {skill_type_id, skill_name, required_level} including
-    transitive prerequisites, deduplicated by highest required level."""
-    needed: dict[int, int] = {}  # skill_type_id -> max required level
+    transitive prerequisites, deduplicated by highest required level.
 
-    async def _walk(tid: int, level: int | None = None):
-        reqs = await db.execute(
-            select(SDETypeSkillReq.skill_type_id, SDETypeSkillReq.required_level)
-            .where(SDETypeSkillReq.type_id == tid)
-        )
-        for row in reqs.fetchall():
-            req_level = row.required_level
-            if level is not None:
-                req_level = min(req_level, level)  # Don't inflate prereq levels
-            current = needed.get(row.skill_type_id, 0)
-            if req_level > current:
-                needed[row.skill_type_id] = req_level
-                # Recurse into this skill's own prerequisites
-                await _walk(row.skill_type_id)
+    Loads the full skill_reqs graph once (it's small — only ~3500 skills with
+    prereqs) and walks it in memory, instead of issuing one DB roundtrip per
+    skill encountered (was N round-trips for a typical ship fit).
+    """
+    all_reqs = (await db.execute(
+        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id, SDETypeSkillReq.required_level)
+    )).fetchall()
+    reqs_by_type: dict[int, list[tuple[int, int]]] = {}
+    for row in all_reqs:
+        reqs_by_type.setdefault(row.type_id, []).append((row.skill_type_id, row.required_level))
 
-    await _walk(type_id)
+    needed: dict[int, int] = {}
+
+    def _walk(tid: int, level: int | None = None):
+        for skill_id, req_level in reqs_by_type.get(tid, ()):
+            effective = req_level if level is None else min(req_level, level)
+            current = needed.get(skill_id, 0)
+            if effective > current:
+                needed[skill_id] = effective
+                _walk(skill_id)
+
+    _walk(type_id)
 
     if not needed:
         return []

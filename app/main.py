@@ -180,6 +180,10 @@ async def startup():
             "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
             # ESI rate-limit events: soft-archive column for admin dismiss
             "ALTER TABLE esi_rate_limit_events ADD COLUMN archived_at DATETIME",
+            # Indexes added in 2026-04 review-followup batch — create_all
+            # skips existing tables, so these need explicit DDL.
+            "CREATE INDEX IF NOT EXISTS ix_killmail_system_time ON killmails(solar_system_id, killmail_time)",
+            "CREATE INDEX IF NOT EXISTS ix_esi_cache_expires_at ON esi_cache(expires_at)",
         ]:
             try:
                 await db.execute(text(stmt))
@@ -189,6 +193,31 @@ async def startup():
                 exc_str = str(migration_exc).lower()
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
+
+    # SystemActivitySnapshot uniqueness — guard the insert path against the
+    # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if
+    # the table already has duplicates; we delete dups first, then the
+    # index install becomes idempotent.
+    async with AsyncSessionLocal() as db:
+        try:
+            res = await db.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name='uq_system_activity_snapshot'"
+            ))
+            if res.fetchone() is None:
+                # Drop duplicates, keeping the lowest id per (system, captured_at)
+                await db.execute(text(
+                    "DELETE FROM system_activity_snapshots "
+                    "WHERE id NOT IN (SELECT MIN(id) FROM system_activity_snapshots GROUP BY system_id, captured_at)"
+                ))
+                await db.execute(text(
+                    "CREATE UNIQUE INDEX uq_system_activity_snapshot "
+                    "ON system_activity_snapshots(system_id, captured_at)"
+                ))
+                await db.commit()
+                logging.info("Installed uq_system_activity_snapshot index.")
+        except Exception as e:
+            await db.rollback()
+            logging.warning("uq_system_activity_snapshot install warning: %s", e)
     # ── Auto-promote first user to admin if no admin exists ────────────
     async with AsyncSessionLocal() as db:
         admin_check = await db.execute(text("SELECT id FROM users WHERE is_admin = 1 LIMIT 1"))

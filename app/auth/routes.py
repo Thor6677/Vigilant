@@ -104,7 +104,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         f"{settings.eve_client_id}:{settings.eve_client_secret}".encode()
     ).decode()
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
             settings.eve_sso_token_url,
             headers={
