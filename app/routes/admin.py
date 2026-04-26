@@ -146,22 +146,39 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
 @router.get("/section/users", response_class=HTMLResponse)
 async def admin_users(request: Request, db: AsyncSession = Depends(get_db),
                       admin: User = Depends(require_admin)):
-    # Users with character counts
+    # Users with character counts. Single bulk query each for users/chars/caches
+    # then join in Python — was N+1 (one chars query per user, one cache query
+    # per character).
     users_result = await db.execute(
         select(User).order_by(User.last_login.desc())
     )
     users = users_result.scalars().all()
 
+    user_ids = [u.id for u in users]
+    chars_by_user: dict[int, list[Character]] = {uid: [] for uid in user_ids}
+    char_ids: list[int] = []
+    if user_ids:
+        all_chars = (await db.execute(
+            select(Character).where(Character.user_id.in_(user_ids))
+            .order_by(Character.character_name)
+        )).scalars().all()
+        for c in all_chars:
+            chars_by_user.setdefault(c.user_id, []).append(c)
+            char_ids.append(c.character_id)
+
+    cache_by_cid: dict[int, CharacterDashboardCache] = {}
+    if char_ids:
+        all_caches = (await db.execute(
+            select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(char_ids))
+        )).scalars().all()
+        cache_by_cid = {c.character_id: c for c in all_caches}
+
     now = datetime.now(timezone.utc)
     user_data = []
     for u in users:
-        chars_result = await db.execute(
-            select(Character).where(Character.user_id == u.id).order_by(Character.character_name)
-        )
-        chars = chars_result.scalars().all()
+        chars = chars_by_user.get(u.id, [])
         main_char = next((c for c in chars if c.is_main), chars[0] if chars else None)
 
-        # Build character data nested under user
         char_list = []
         for c in chars:
             expiry = c.token_expiry
@@ -173,11 +190,7 @@ async def admin_users(request: Request, db: AsyncSession = Depends(get_db),
             else:
                 token_status = "unknown"
 
-            cache_result = await db.execute(
-                select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == c.character_id)
-            )
-            cache = cache_result.scalar_one_or_none()
-
+            cache = cache_by_cid.get(c.character_id)
             char_list.append({
                 "character_id": c.character_id,
                 "character_name": c.character_name,

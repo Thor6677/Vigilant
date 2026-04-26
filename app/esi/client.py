@@ -61,6 +61,22 @@ def get_etag_cache_stats() -> dict:
     }
 
 
+_refresh_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_refresh_lock(character_id: int) -> asyncio.Lock:
+    """Per-character lock so two coroutines refreshing the same character
+    can't both submit refresh_token to SSO concurrently. CCP rotates the
+    refresh_token on each call, so the older response that lands second
+    overwrites the newer one — and the now-unused refresh_token is revoked,
+    silently breaking the character on the next refresh."""
+    lock = _refresh_locks.get(character_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _refresh_locks[character_id] = lock
+    return lock
+
+
 async def refresh_token(character: Character, db: AsyncSession) -> str:
     """Refresh access token if expired, return valid access token."""
     now = datetime.now(timezone.utc)
@@ -71,6 +87,22 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
     if expiry - now > timedelta(minutes=5):
         return character.access_token
 
+    async with _get_refresh_lock(character.character_id):
+        # Re-read after acquiring the lock — another coroutine may have just
+        # refreshed this character. Reload from the same session so we see
+        # the updated token (caller's session, or the get_client_safe()
+        # isolated session — either way the row was committed).
+        await db.refresh(character)
+        now = datetime.now(timezone.utc)
+        expiry = character.token_expiry
+        if expiry and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry and expiry - now > timedelta(minutes=5):
+            return character.access_token
+        return await _do_refresh(character, db)
+
+
+async def _do_refresh(character: Character, db: AsyncSession) -> str:
     credentials = base64.b64encode(
         f"{settings.eve_client_id}:{settings.eve_client_secret}".encode()
     ).decode()

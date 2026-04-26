@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.db.models import get_db, Character, SkillPlan, SkillPlanEntry, SkillPlanACL
@@ -245,16 +245,48 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
 
     ident = await perms.resolve_identities(db, user_id)
 
-    # Fetch every plan the user could potentially see:
-    #   - owned by them (personal and anything else they created)
-    #   - corp plans for any corp they're in
-    #   - alliance plans for any alliance they're in
-    #   - custom plans with ACL entries matching any of their identities
-    # Then filter via can_view to handle edge cases (e.g. a custom plan with no
-    # matching ACL entry for this user).
-    query = select(SkillPlan).options(
-        selectinload(SkillPlan.entries),
-        selectinload(SkillPlan.acl_entries),
+    # Pre-filter at the DB layer so we don't load every plan in the system
+    # into memory. Anything that survives this filter still goes through
+    # perms.can_view to handle edge cases (e.g. a corp role check the SQL
+    # can't do).
+    custom_plan_ids: set[int] = set()
+    if ident.character_ids or ident.corp_ids or ident.alliance_ids:
+        acl_clauses = []
+        if ident.character_ids:
+            acl_clauses.append(and_(SkillPlanACL.subject_type == "character",
+                                    SkillPlanACL.subject_id.in_(ident.character_ids)))
+        if ident.corp_ids:
+            acl_clauses.append(and_(SkillPlanACL.subject_type == "corporation",
+                                    SkillPlanACL.subject_id.in_(ident.corp_ids)))
+        if ident.alliance_ids:
+            acl_clauses.append(and_(SkillPlanACL.subject_type == "alliance",
+                                    SkillPlanACL.subject_id.in_(ident.alliance_ids)))
+        if acl_clauses:
+            custom_plan_ids = set((await db.execute(
+                select(SkillPlanACL.plan_id).where(or_(*acl_clauses))
+            )).scalars().all())
+
+    plan_filters = [SkillPlan.user_id == user_id]
+    if ident.corp_ids:
+        plan_filters.append(and_(
+            SkillPlan.visibility == "corporation",
+            SkillPlan.owner_corp_id.in_(ident.corp_ids),
+        ))
+    if ident.alliance_ids:
+        plan_filters.append(and_(
+            SkillPlan.visibility == "alliance",
+            SkillPlan.owner_alliance_id.in_(ident.alliance_ids),
+        ))
+    if custom_plan_ids:
+        plan_filters.append(SkillPlan.id.in_(custom_plan_ids))
+
+    query = (
+        select(SkillPlan)
+        .where(or_(*plan_filters))
+        .options(
+            selectinload(SkillPlan.entries),
+            selectinload(SkillPlan.acl_entries),
+        )
     )
     all_plans = (await db.execute(query)).scalars().all()
     visible = [p for p in all_plans if perms.can_view(p, ident)]
@@ -342,7 +374,12 @@ async def _resolve_org_names(db: AsyncSession, corp_ids: set[int], alliance_ids:
     alliance_names: dict[int, str] = {}
     if not corp_ids and not alliance_ids:
         return corp_names, alliance_names
-    char_rows = (await db.execute(select(Character))).scalars().all()
+    char_rows = (await db.execute(
+        select(Character).where(or_(
+            Character.corporation_id.in_(corp_ids) if corp_ids else False,
+            Character.alliance_id.in_(alliance_ids) if alliance_ids else False,
+        ))
+    )).scalars().all()
     for c in char_rows:
         if c.corporation_id and c.corporation_id in corp_ids and c.corporation_name:
             corp_names.setdefault(c.corporation_id, c.corporation_name)

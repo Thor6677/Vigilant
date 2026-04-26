@@ -91,6 +91,14 @@ async def _set_meta(db: AsyncSession, key: str, value: str):
 
 
 async def needs_update(db: AsyncSession) -> bool:
+    # Crash-recovery: if a previous import set in_progress=1 but never cleared
+    # it (download_and_import committed partial state then died), force a
+    # full reimport. Without this, the empty-table heuristic below misses the
+    # case where some tables finished but the run failed mid-way.
+    if (await _get_meta(db, "import_in_progress")) == "1":
+        log.warning("Previous SDE import did not complete — forcing reimport.")
+        return True
+
     last = await _get_meta(db, "last_updated")
     if not last:
         return True
@@ -145,6 +153,12 @@ async def download_and_import(db: AsyncSession):
         resp = await client.get(SDE_URL)
         resp.raise_for_status()
     log.info(f"Downloaded {len(resp.content):,} bytes, importing...")
+
+    # Set the in-progress sentinel BEFORE we start mutating tables. Cleared
+    # only when last_updated is written at the end of a successful run.
+    # If the process dies mid-import, needs_update() will see the sentinel
+    # on next boot and force a full reimport.
+    await _set_meta(db, "import_in_progress", "1")
 
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
 
@@ -1098,6 +1112,7 @@ async def download_and_import(db: AsyncSession):
         log.warning("typeBonus.jsonl not present in SDE zip — skipping")
 
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
+    await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")
 
 

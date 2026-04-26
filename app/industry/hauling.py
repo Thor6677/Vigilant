@@ -412,10 +412,16 @@ MINERAL_GROUP_ID = 18
 # ── Stacking penalty ─────────────────────────────────────────────────────────
 
 def stacking_penalty(n: int) -> float:
-    """EVE stacking penalty for the nth module (1-indexed)."""
+    """EVE stacking penalty for the nth module (1-indexed).
+
+    Uses the canonical Pyfa/in-game formula `exp(-(n-1)^2 / 7.1289)`. The
+    older `0.87^((n-1)^2)` approximation is close at n=2,3 but diverges at
+    n>=4 (e.g. n=4 → 0.260 vs correct 0.283). Kept 1-indexed to preserve
+    callers in this module.
+    """
     if n <= 0:
         return 0.0
-    return 0.87 ** ((n - 1) ** 2)
+    return math.exp(-((n - 1) ** 2) / 7.1289)
 
 
 # ── Capacity calculation ──────────────────────────────────────────────────────

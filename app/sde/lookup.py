@@ -2,6 +2,7 @@
 Fast local lookups against the SDE tables.
 Falls back gracefully if SDE isn't loaded yet.
 """
+import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from sqlalchemy import select, func
@@ -16,10 +17,55 @@ from app.db.sde_models import (
     SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute,
 )
 
-# Cached jump graph + cloning stations (loaded once, refreshed after 1h)
+# Cached jump graph + cloning stations (loaded once, refreshed after 1h).
+# Lock guards the rebuild so concurrent first-callers don't all pull 60K rows.
 _graph_cache: dict | None = None
 _graph_cache_ts: datetime | None = None
 _GRAPH_CACHE_TTL = 3600  # seconds
+_graph_cache_lock = asyncio.Lock()
+
+
+async def _ensure_jump_graph(db: AsyncSession) -> dict:
+    """Return the cached jump-graph dict (graph + cloning stations), rebuilding
+    from SQL if the cache is cold or stale. Single-flight via _graph_cache_lock
+    so concurrent first-callers wait on one rebuild instead of duplicating it.
+    """
+    global _graph_cache, _graph_cache_ts
+    now = datetime.now(timezone.utc)
+    if (
+        _graph_cache is not None
+        and _graph_cache_ts is not None
+        and (now - _graph_cache_ts).total_seconds() <= _GRAPH_CACHE_TTL
+    ):
+        return _graph_cache
+
+    async with _graph_cache_lock:
+        # Re-check after acquiring the lock — another waiter may have rebuilt.
+        now = datetime.now(timezone.utc)
+        if (
+            _graph_cache is not None
+            and _graph_cache_ts is not None
+            and (now - _graph_cache_ts).total_seconds() <= _GRAPH_CACHE_TTL
+        ):
+            return _graph_cache
+
+        jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
+        graph: dict[int, list[int]] = {}
+        for row in jumps_result.fetchall():
+            graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+        stations_result = await db.execute(
+            select(SDEStation.station_id, SDEStation.station_name, SDEStation.system_id)
+            .where(SDEStation.has_cloning == True)
+        )
+        cloning: dict[int, list[dict]] = {}
+        for row in stations_result.fetchall():
+            cloning.setdefault(row.system_id, []).append({
+                "station_id": row.station_id,
+                "station_name": row.station_name,
+            })
+        _graph_cache = {"graph": graph, "cloning": cloning}
+        _graph_cache_ts = now
+        return _graph_cache
 
 
 async def type_name_to_id(db: AsyncSession, name: str) -> int | None:
@@ -162,28 +208,9 @@ async def nearest_cloning_facilities(
     BFS across the full jump graph to find nearest NPC stations
     with cloning services. Returns list sorted by jump distance.
     """
-    global _graph_cache, _graph_cache_ts
-    now = datetime.now(timezone.utc)
-    if _graph_cache is None or _graph_cache_ts is None or (now - _graph_cache_ts).total_seconds() > _GRAPH_CACHE_TTL:
-        jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
-        graph: dict[int, list[int]] = {}
-        for row in jumps_result.fetchall():
-            graph.setdefault(row.from_system_id, []).append(row.to_system_id)
-        stations_result = await db.execute(
-            select(SDEStation.station_id, SDEStation.station_name, SDEStation.system_id)
-            .where(SDEStation.has_cloning == True)
-        )
-        cloning: dict[int, list[dict]] = {}
-        for row in stations_result.fetchall():
-            cloning.setdefault(row.system_id, []).append({
-                "station_id": row.station_id,
-                "station_name": row.station_name,
-            })
-        _graph_cache = {"graph": graph, "cloning": cloning}
-        _graph_cache_ts = now
-
-    graph = _graph_cache["graph"]
-    cloning_by_system = _graph_cache["cloning"]
+    cache = await _ensure_jump_graph(db)
+    graph = cache["graph"]
+    cloning_by_system = cache["cloning"]
 
     # BFS
     visited = {start_system_id}
@@ -221,10 +248,7 @@ async def system_jump_distance(db: AsyncSession, origin_id: int, destination_id:
     """BFS jump distance between two systems. Returns 0 if same, int if reachable, None if unreachable."""
     if origin_id == destination_id:
         return 0
-    jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
-    graph: dict[int, list[int]] = {}
-    for row in jumps_result.fetchall():
-        graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+    graph = (await _ensure_jump_graph(db))["graph"]
     visited = {origin_id}
     queue = deque([(origin_id, 0)])
     while queue:
@@ -240,10 +264,7 @@ async def system_jump_distance(db: AsyncSession, origin_id: int, destination_id:
 
 async def jump_distances_from(db: AsyncSession, origin_id: int) -> dict[int, int]:
     """Full BFS from origin. Returns {system_id: jump_count} for all reachable systems."""
-    jumps_result = await db.execute(select(SDEJump.from_system_id, SDEJump.to_system_id))
-    graph: dict[int, list[int]] = {}
-    for row in jumps_result.fetchall():
-        graph.setdefault(row.from_system_id, []).append(row.to_system_id)
+    graph = (await _ensure_jump_graph(db))["graph"]
     distances: dict[int, int] = {origin_id: 0}
     queue = deque([origin_id])
     while queue:
@@ -1070,48 +1091,57 @@ async def get_market_group_children(
     q = q.order_by(SDEMarketGroup.market_group_name)
     result = await db.execute(q)
     rows = result.scalars().all()
-    out = []
-    for r in rows:
-        # Check if this group has children (is a folder)
-        child_check = await db.execute(
-            select(func.count()).where(SDEMarketGroup.parent_group_id == r.market_group_id)
-        )
-        has_children = child_check.scalar() > 0
-        out.append({
+    if not rows:
+        return []
+
+    # Single query for "has children" instead of one per row.
+    row_ids = [r.market_group_id for r in rows]
+    parents_with_kids = set((await db.execute(
+        select(SDEMarketGroup.parent_group_id)
+        .where(SDEMarketGroup.parent_group_id.in_(row_ids))
+        .distinct()
+    )).scalars().all())
+
+    return [
+        {
             "market_group_id": r.market_group_id,
             "market_group_name": r.market_group_name,
             "parent_group_id": r.parent_group_id,
-            "has_children": has_children,
+            "has_children": r.market_group_id in parents_with_kids,
             "icon_id": r.icon_id,
-        })
-    return out
+        }
+        for r in rows
+    ]
 
 
 async def get_market_group_items(
     db: AsyncSession, market_group_id: int
 ) -> list[dict]:
     """Get all published items in a market group with slot type info."""
-    result = await db.execute(
+    rows = (await db.execute(
         select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
         .where(SDEType.market_group_id == market_group_id)
         .where(SDEType.published == True)
         .order_by(SDEType.type_name)
-    )
-    items = []
-    for r in result.fetchall():
-        # Get slot type if it's a module
-        slot_result = await db.execute(
-            select(SDEModuleSlot.slot_type)
-            .where(SDEModuleSlot.type_id == r.type_id)
-        )
-        slot_type = slot_result.scalar_one_or_none()
-        items.append({
+    )).fetchall()
+    if not rows:
+        return []
+
+    type_ids = [r.type_id for r in rows]
+    slot_by_tid = dict((await db.execute(
+        select(SDEModuleSlot.type_id, SDEModuleSlot.slot_type)
+        .where(SDEModuleSlot.type_id.in_(type_ids))
+    )).fetchall())
+
+    return [
+        {
             "type_id": r.type_id,
             "type_name": r.type_name,
             "group_id": r.group_id,
-            "slot_type": slot_type,
-        })
-    return items
+            "slot_type": slot_by_tid.get(r.type_id),
+        }
+        for r in rows
+    ]
 
 
 # ── Module fit restriction checking ──────────────────────────────────────

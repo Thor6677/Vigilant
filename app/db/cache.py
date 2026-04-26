@@ -105,18 +105,23 @@ async def cache_get(db: AsyncSession, path: str, params: dict = None):
 
 
 async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
+    """Atomic upsert via SQLite's INSERT OR REPLACE.
+
+    Previous SELECT-then-INSERT pattern raced two concurrent writers: both
+    missed the row, both INSERTed, the second commit failed on the PK
+    collision and was silently swallowed by the outer cache_set try/except,
+    losing that write entirely. INSERT OR REPLACE is single-statement atomic.
+    """
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
-    result = await db.execute(select(ESICache).where(ESICache.key == key))
-    row = result.scalar_one_or_none()
-    if row:
-        row.data = json.dumps(data, default=str)
-        row.expires_at = expires_at
-    else:
-        db.add(ESICache(
-            key=key,
-            data=json.dumps(data, default=str),
-            expires_at=expires_at,
-        ))
+    payload = json.dumps(data, default=str)
+    stmt = sqlite_insert(ESICache).values(
+        key=key, data=payload, expires_at=expires_at,
+    ).on_conflict_do_update(
+        index_elements=[ESICache.key],
+        set_={"data": payload, "expires_at": expires_at},
+    )
+    await db.execute(stmt)
     await db.commit()
 
 
