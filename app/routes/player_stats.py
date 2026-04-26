@@ -27,6 +27,7 @@ from app.db.models import (
     PlayerCountSnapshot,
     get_db,
 )
+from app.db.sde_models import SDESystem
 
 _ZONES = ("highsec", "lowsec", "nullsec", "wormhole")
 
@@ -228,6 +229,7 @@ async def tools_activity(
     # only make sense on the trailing 30 days. Hide them for longer windows
     # rather than showing partial data.
     breakdowns_available = window in ("1d", "7d", "30d")
+    has_breakdown_data = False
     solo_fleet_series: dict[str, list[int]] = {}
     npc_player_series: dict[str, list[int]] = {}
     if breakdowns_available:
@@ -275,15 +277,48 @@ async def tools_activity(
             if 0 <= i < num_bins:
                 key = "npc" if is_npc else "player"
                 npc_player_series[key][i] = int(n or 0)
+        has_breakdown_data = (
+            any(sum(v) > 0 for v in solo_fleet_series.values())
+            or any(sum(v) > 0 for v in npc_player_series.values())
+        )
 
-    # ── Security-zone split (kills by HS/LS/NS/WH) ──
-    # Only meaningful at day-or-coarser resolution (the aggregate is daily).
-    # Data starts the day the zone-split rollup first ran — earlier bins
-    # are simply absent (frontend shows 0). Population by killmail_daily_rollup.
-    zone_available = bin_seconds >= 86400
+    # ── Security-zone split (kills + ISK by HS/LS/NS/WH) ──
+    # Two paths: sub-day bins (1d/7d) GROUP BY directly on Killmail joined
+    # to sde_systems — small windows, scan is cheap. Day+ bins read the
+    # pre-aggregated KillmailZoneDailyAggregate so we don't scan all of
+    # killmails on the longer windows. The aggregate is populated by
+    # killmail_daily_rollup; pre-rollup bins simply show as 0.
+    zone_available = True
     zone_series: dict[str, list[int]] = {z: [0] * num_bins for z in _ZONES}
     zone_isk_series: dict[str, list[float]] = {z: [0.0] * num_bins for z in _ZONES}
-    if zone_available:
+    if bin_seconds < 86400:
+        zone_expr = case(
+            (Killmail.solar_system_id >= 31000000, "wormhole"),
+            (SDESystem.security.is_(None), "unknown"),
+            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
+            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
+            else_="nullsec",
+        ).label("zone")
+        zrows = (await db.execute(
+            select(
+                _bin_expr(Killmail.killmail_time).label("b"),
+                zone_expr,
+                func.count().label("n"),
+                func.sum(Killmail.total_value).label("isk"),
+            )
+            .select_from(Killmail)
+            .join(SDESystem, SDESystem.system_id == Killmail.solar_system_id, isouter=True)
+            .where(Killmail.killmail_time >= cutoff)
+            .group_by("b", "zone")
+        )).all()
+        for b, z, n, isk in zrows:
+            if b is None or z not in zone_series:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                zone_series[z][i] += int(n or 0)
+                zone_isk_series[z][i] += float(isk or 0.0)
+    else:
         zrows = (await db.execute(
             select(
                 KillmailZoneDailyAggregate.date,
@@ -373,6 +408,7 @@ async def tools_activity(
         "source_counts": src_counts,
         "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
         "breakdowns_available": breakdowns_available,
+        "has_breakdown_data": has_breakdown_data,
         "solo_fleet_series": solo_fleet_series,
         "npc_player_series": npc_player_series,
         "pcu_heatmap": pcu_heatmap,

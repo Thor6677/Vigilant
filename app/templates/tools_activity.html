@@ -111,7 +111,7 @@
     </div>
 </div>
 
-{% if breakdowns_available and total_kills > 0 %}
+{% if breakdowns_available and has_breakdown_data %}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">PvP composition · trailing {{ window_label.split(' ')[1] if window != '1d' else '24h' }}</span></div>
     <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -420,7 +420,7 @@
 </script>
 {% endif %}
 
-{% if breakdowns_available and total_kills > 0 %}
+{% if breakdowns_available and has_breakdown_data %}
 <script>
 (function() {
     if (typeof Chart === 'undefined') return;
