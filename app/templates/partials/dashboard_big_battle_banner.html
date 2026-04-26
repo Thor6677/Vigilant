@@ -1,10 +1,11 @@
 {# Active big-battle banner — up to 3 entries balanced across NS/LS/WH.
-   Per-band thresholds in active_big_battles(). Each row links to zKB. #}
+   Per-band thresholds in active_big_battles(). Each row links to the
+   killmail.app live battle page for that system + start hour. #}
 <div style="margin-bottom:0.75rem;display:flex;flex-direction:column;gap:2px;">
     {% for battle in battles %}
     {% set band_short = {'Highsec':'HS','Lowsec':'LS','Nullsec':'NS','w-space':'WH'}.get(battle['band'], '?') %}
     {% set band_color = {'Highsec':'#7fd99a','Lowsec':'#e0a85a','Nullsec':'#e07a7a','w-space':'#7fb8e0'}.get(battle['band'], '#aaa') %}
-    <a href="https://zkillboard.com/system/{{ battle['system_id'] }}/" target="_blank" rel="noopener"
+    <a href="https://killmail.app/related/{{ battle['system_id'] }}/{{ battle['start_time'].strftime('%Y%m%d%H00') }}/" target="_blank" rel="noopener"
        style="text-decoration:none;color:inherit;display:block;">
     <div class="b-section" style="border-left:3px solid #e53e3e;cursor:pointer;margin:0;">
         <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
@@ -29,7 +30,7 @@
                 {% if battle['total_isk'] %}
                 · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
                 {% endif %}
-                <span style="margin-left:0.4rem;color:var(--accent);">↗ zKB</span>
+                <span style="margin-left:0.4rem;color:var(--accent);">↗ killmail.app</span>
             </div>
         </div>
     </div>

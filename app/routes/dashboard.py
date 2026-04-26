@@ -19,8 +19,6 @@ from app.utils.perf import perf_log, perf_enabled, ms_since
 from time import perf_counter as _perf_now
 from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
-from app.esi import market as esi_market
-from app.esi import industry as esi_industry
 from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
@@ -181,25 +179,6 @@ async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: d
         current_keys = {f"{e.get('skill_id')}_{e.get('finished_level')}" for e in new_sq if e.get("skill_id")}
         _notified_skills[cid] = _notified_skills[cid] & current_keys
 
-    # 2. Industry job ready
-    old_ind = old_cache.get("industry")
-    new_ind = new_cache.get("industry")
-    if isinstance(old_ind, dict) and isinstance(new_ind, dict):
-        old_ready = old_ind.get("ready_count", 0)
-        new_ready = new_ind.get("ready_count", 0)
-        if new_ready > old_ready:
-            diff = new_ready - old_ready
-            product = new_ind.get("soonest_product", "")
-            body = f"{char_name} — {diff} job{'s' if diff > 1 else ''} ready for delivery"
-            if diff == 1 and product:
-                body = f"{char_name} — {product} ready for delivery"
-            _emit_notification(user_id, {
-                "type": "job_ready",
-                "title": "Industry Job Ready",
-                "body": body,
-                "icon": portrait,
-            })
-
     # 3. PI extractors expiring
     old_pi = old_cache.get("pi")
     new_pi = new_cache.get("pi")
@@ -216,21 +195,6 @@ async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: d
                     "body": f"{char_name} — extractors {'expiring soon' if warning == 'critical' else 'expired'} on {pname}",
                     "icon": portrait,
                 })
-
-    # 4. New mail
-    old_mail = old_cache.get("mail")
-    new_mail = new_cache.get("mail")
-    if isinstance(old_mail, dict) and isinstance(new_mail, dict):
-        old_unread = old_mail.get("unread_count", 0)
-        new_unread = new_mail.get("unread_count", 0)
-        if new_unread > old_unread:
-            diff = new_unread - old_unread
-            _emit_notification(user_id, {
-                "type": "new_mail",
-                "title": "New Mail",
-                "body": f"{char_name} — {diff} new message{'s' if diff > 1 else ''}",
-                "icon": portrait,
-            })
 
     # 5. Structure / POS / moon / sov alerts from ESI notifications
     new_notifs = new_cache.get("notifications")
@@ -371,11 +335,8 @@ _corp_403_cache: set[tuple[int, int]] = set()
 FIELD_CACHE_SECONDS: dict[str, int] = {
     "wallet":        120,   # ESI max-age: 120s
     "location":       60,   # ESI max-age:   5s  — 60s is adequate for a dashboard
-    "industry":      300,   # ESI max-age: 300s
     "clones":       3600,   # ESI max-age: 3600s
-    "orders":        300,   # ESI max-age: 300s
-    "mail":          120,   # ESI max-age:  30s  — 120s reduces churn without missing much
-    "notifications": 600,   # ESI max-age: 600s
+    "notifications": 600,   # ESI max-age: 600s — feeds structure-alert banners
     "contracts":     300,   # ESI max-age: 300s
     "pi":            600,   # ESI max-age: 600s
     "skillqueue":    120,   # ESI max-age: 120s
@@ -387,10 +348,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
 FIELD_SCOPES: dict[str, str] = {
     "wallet":        "esi-wallet.read_character_wallet.v1",
     "location":      "esi-location.read_location.v1",
-    "industry":      "esi-industry.read_character_jobs.v1",
     "clones":        "esi-clones.read_clones.v1",
-    "orders":        "esi-markets.read_character_orders.v1",
-    "mail":          "esi-mail.read_mail.v1",
     "notifications": "esi-characters.read_notifications.v1",
     "contracts":     "esi-contracts.read_character_contracts.v1",
     "pi":            "esi-planets.manage_planets.v1",
@@ -404,10 +362,7 @@ FIELD_SCOPES: dict[str, str] = {
 _FIELD_DB_COLUMN: dict[str, str | None] = {
     "wallet":        None,
     "location":      "location_json",
-    "industry":      "industry_json",
     "clones":        "clones_json",
-    "orders":        "orders_json",
-    "mail":          "mail_json",
     "notifications": "notifications_json",
     "contracts":     "contracts_json",
     "pi":            "pi_json",
@@ -598,41 +553,6 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
-async def fetch_industry_data(characters: list[Character], db: AsyncSession) -> dict:
-    async def _get(char):
-        if not _has_scope(char, "esi-industry.read_character_jobs.v1"):
-            return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
-        if not client:
-            return char.character_id, None, err
-        try:
-            jobs = await esi_industry.get_character_jobs(client, char.character_id, include_completed=False)
-            active = [j for j in jobs if j.get("status") == "active"]
-            if not active:
-                return char.character_id, {"active_count": 0, "soonest_time_str": None, "soonest_product": None}, None
-            now = datetime.now(timezone.utc)
-            soonest_end, soonest_job = None, None
-            for job in active:
-                end_raw = job.get("end_date")
-                if end_raw:
-                    end = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
-                    if soonest_end is None or end < soonest_end:
-                        soonest_end, soonest_job = end, job
-            soonest_product, soonest_time_str = None, None
-            if soonest_job:
-                pid = soonest_job.get("product_type_id")
-                if pid:
-                    soonest_product = await sde.type_id_to_name(db, pid)
-                if soonest_end:
-                    soonest_time_str = _format_duration((soonest_end - now).total_seconds())
-            return char.character_id, {"active_count": len(active), "soonest_time_str": soonest_time_str, "soonest_product": soonest_product}, None
-        except Exception as e:
-            logger.warning("Industry fetch failed for char %s: %s", char.character_id, e)
-            return char.character_id, None, f"esi_error: {type(e).__name__}"
-
-    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
-
-
 async def fetch_clone_data(characters: list[Character], db: AsyncSession) -> dict:
     async def _get(char):
         if not _has_scope(char, "esi-clones.read_clones.v1"):
@@ -659,57 +579,10 @@ async def fetch_clone_data(characters: list[Character], db: AsyncSession) -> dic
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
-async def fetch_orders_data(characters: list[Character], db: AsyncSession) -> dict:
-    async def _get(char):
-        if not _has_scope(char, "esi-markets.read_character_orders.v1"):
-            return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
-        if not client:
-            return char.character_id, None, err
-        try:
-            orders = await esi_market.get_character_orders(client, char.character_id)
-            sell = sum(1 for o in orders if not o.get("is_buy_order"))
-            buy = sum(1 for o in orders if o.get("is_buy_order"))
-            return char.character_id, {"active_count": len(orders), "sell_count": sell, "buy_count": buy}, None
-        except Exception as e:
-            logger.warning("Orders fetch failed for char %s: %s", char.character_id, e)
-            return char.character_id, None, f"esi_error: {type(e).__name__}"
-
-    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
-
-
-async def fetch_mail_data(characters: list[Character], db: AsyncSession) -> dict:
-    async def _get(char):
-        if not _has_scope(char, "esi-mail.read_mail.v1"):
-            return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
-        if not client:
-            return char.character_id, None, err
-        try:
-            headers = await esi_char.get_mail_headers(client, char.character_id)
-            unread = sum(1 for m in headers if not m.get("is_read", False))
-            return char.character_id, {
-                "unread_count": unread,
-                "headers": [
-                    {
-                        "mail_id": m.get("mail_id"),
-                        "subject": m.get("subject", "(No Subject)"),
-                        "from": m.get("from"),
-                        "timestamp": m.get("timestamp"),
-                        "is_read": m.get("is_read", False),
-                        "labels": m.get("labels", []),
-                    }
-                    for m in headers[:20]
-                ],
-            }, None
-        except Exception as e:
-            logger.warning("Mail fetch failed for char %s: %s", char.character_id, e)
-            return char.character_id, None, f"esi_error: {type(e).__name__}"
-
-    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
-
-
 async def fetch_notification_data(characters: list[Character], db: AsyncSession) -> dict:
+    """Notifications are no longer rendered on the dashboard, but the cached
+    payload feeds the structure-alert banner system (StructureUnderAttack,
+    StructureLostShields, fuel alerts, etc.). Keep fetching them."""
     async def _get(char):
         if not _has_scope(char, "esi-characters.read_notifications.v1"):
             return char.character_id, None, "missing_scope"
@@ -719,10 +592,8 @@ async def fetch_notification_data(characters: list[Character], db: AsyncSession)
         try:
             notifs = await esi_char.get_notifications(client, char.character_id)
             unread = [n for n in notifs if not n.get("is_read", True)]
-            types = list({n.get("type") for n in unread[:20] if n.get("type")})[:5]
             return char.character_id, {
                 "unread_count": len(unread),
-                "recent_types": types,
                 "notifications": [
                     {
                         "notification_id": n.get("notification_id"),
@@ -1137,10 +1008,7 @@ async def fetch_corp_roles_data(characters: list[Character], db: AsyncSession) -
 _FIELD_FETCHERS = {
     "wallet":        fetch_wallet_data,
     "location":      fetch_location_data,
-    "industry":      fetch_industry_data,
     "clones":        fetch_clone_data,
-    "orders":        fetch_orders_data,
-    "mail":          fetch_mail_data,
     "notifications": fetch_notification_data,
     "contracts":     fetch_contracts_data,
     "pi":            fetch_pi_data,
@@ -1292,7 +1160,7 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
         for sf in stale_fields:
             col = _FIELD_DB_COLUMN.get(sf)
             json_attr = f"{sf}_json" if sf != "wallet" else None
-            if json_attr and sf in ("skillqueue", "industry", "pi", "mail", "notifications"):
+            if json_attr and sf in ("skillqueue", "pi", "notifications"):
                 raw = getattr(cache, json_attr, None)
                 if raw:
                     try:
@@ -1400,7 +1268,7 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     # Detect notification events by comparing old vs new data
     if _old_cache and char.user_id:
         _new_cache = {}
-        for field in ("skillqueue", "industry", "pi", "mail", "notifications"):
+        for field in ("skillqueue", "pi", "notifications"):
             raw = getattr(cache, f"{field}_json", None)
             if raw:
                 try:
@@ -1757,8 +1625,8 @@ def _collect_stale(characters: list[Character], char_caches: dict) -> list[int]:
 
 def _build_data_from_caches(characters: list[Character], char_caches: dict) -> dict:
     """Unpack JSON columns from cache rows into the same dict structure the template expects."""
-    wallets, locations, industry, clones, orders = {}, {}, {}, {}, {}
-    mail, notifications, contracts, pi = {}, {}, {}, {}
+    wallets, locations, clones = {}, {}, {}
+    contracts, pi = {}, {}
     skillqueue_raw, zkill = {}, {}
     sync_warnings = {}
 
@@ -1773,12 +1641,8 @@ def _build_data_from_caches(characters: list[Character], char_caches: dict) -> d
 
         wallets[cid] = cache.wallet if cache else None
         locations[cid] = _load("location_json")
-        industry[cid] = _load("industry_json")
         clones[cid] = _load("clones_json")
-        orders[cid] = _load("orders_json")
 
-        mail[cid] = "no_scope" if "esi-mail.read_mail.v1" not in scopes else _load("mail_json")
-        notifications[cid] = "no_scope" if "esi-characters.read_notifications.v1" not in scopes else _load("notifications_json")
         contracts[cid] = "no_scope" if "esi-contracts.read_character_contracts.v1" not in scopes else _load("contracts_json")
         pi[cid] = "no_scope" if "esi-planets.manage_planets.v1" not in scopes else _load("pi_json")
 
@@ -1791,8 +1655,8 @@ def _build_data_from_caches(characters: list[Character], char_caches: dict) -> d
         raw_warn = getattr(cache, "sync_warnings_json", None) if cache else None
         sync_warnings[cid] = json.loads(raw_warn) if raw_warn else {}
 
-    return dict(wallets=wallets, locations=locations, industry=industry, clones=clones,
-                orders=orders, mail=mail, notifications=notifications, contracts=contracts, pi=pi,
+    return dict(wallets=wallets, locations=locations, clones=clones,
+                contracts=contracts, pi=pi,
                 skillqueue_raw=skillqueue_raw, zkill=zkill,
                 sync_warnings=sync_warnings)
 
@@ -1844,11 +1708,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     data = _build_data_from_caches(list(characters), char_caches)
     wallets = data["wallets"]
     locations = data["locations"]
-    industry = data["industry"]
     clones = data["clones"]
-    orders = data["orders"]
-    mail = data["mail"]
-    notifications = data["notifications"]
     contracts = data["contracts"]
     pi = data["pi"]
     sync_warnings = data["sync_warnings"]
@@ -1909,13 +1769,6 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
 
     # Aggregates
     total_wallet = sum(v for v in wallets.values() if v is not None)
-    total_unread_mail = sum(v.get("unread_count", 0) for v in mail.values() if isinstance(v, dict))
-    total_unread_notifs = sum(v.get("unread_count", 0) for v in notifications.values() if isinstance(v, dict))
-    total_active_jobs = sum(v.get("active_count", 0) for v in industry.values() if isinstance(v, dict))
-    total_active_orders = sum(v.get("active_count", 0) for v in orders.values() if isinstance(v, dict))
-
-    needs_mail_scope = any(v == "no_scope" for v in mail.values())
-    needs_notif_scope = any(v == "no_scope" for v in notifications.values())
     needs_contracts_scope = any(v == "no_scope" for v in contracts.values())
     needs_pi_scope = any(v == "no_scope" for v in pi.values())
 
@@ -1990,22 +1843,12 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "skill_groups": skill_groups,
         "wallets": wallets,
         "locations": locations,
-        "industry": industry,
         "clones": clones,
-        "orders": orders,
-        "mail": mail,
-        "notifications": notifications,
         "contracts": contracts,
         "pi": pi,
         "server_status": server_status,
         "zkill": zkill,
         "total_wallet": total_wallet,
-        "total_unread_mail": total_unread_mail,
-        "total_unread_notifs": total_unread_notifs,
-        "total_active_jobs": total_active_jobs,
-        "total_active_orders": total_active_orders,
-        "needs_mail_scope": needs_mail_scope,
-        "needs_notif_scope": needs_notif_scope,
         "needs_contracts_scope": needs_contracts_scope,
         "needs_pi_scope": needs_pi_scope,
         "sync_statuses": sync_statuses,

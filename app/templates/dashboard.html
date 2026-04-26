@@ -99,26 +99,6 @@
         <div class="b-stat-val is-accent">{{ format_isk(total_wallet) }}</div>
         <div class="b-stat-label">Total Wallet</div>
     </a>
-    <a href="/industry" class="b-stat" style="text-decoration:none;cursor:pointer;">
-        <div class="b-stat-val">{{ total_active_jobs }}</div>
-        <div class="b-stat-label">Active Jobs</div>
-    </a>
-    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
-        <div class="b-stat-val">{{ total_active_orders }}</div>
-        <div class="b-stat-label">Market Orders</div>
-    </a>
-    <a href="#mail-panel" class="b-stat" style="text-decoration:none;cursor:pointer;">
-        <div class="b-stat-val {% if total_unread_mail > 0 %}is-accent{% endif %}">
-            {{ total_unread_mail if not needs_mail_scope else "—" }}
-        </div>
-        <div class="b-stat-label">Unread Mail</div>
-    </a>
-    <a href="/dashboard" class="b-stat" style="text-decoration:none;cursor:pointer;">
-        <div class="b-stat-val {% if total_unread_notifs > 0 %}is-accent{% endif %}">
-            {{ total_unread_notifs if not needs_notif_scope else "—" }}
-        </div>
-        <div class="b-stat-label">Notifications</div>
-    </a>
     <div hx-get="/dashboard/corp-stats" hx-trigger="load" hx-swap="outerHTML" style="display:contents;">
         <a href="/corporations" class="b-stat" style="text-decoration:none;cursor:pointer;">
             <div class="b-stat-val" style="font-size:10px;color:var(--muted);">…</div>
@@ -146,12 +126,10 @@
     <a href="/auth/add-character" class="b-link" style="flex-shrink:0;color:var(--danger);">Re-auth →</a>
 </div>
 {% endif %}
-{% if needs_mail_scope or needs_notif_scope or needs_contracts_scope or needs_pi_scope %}
+{% if needs_contracts_scope or needs_pi_scope %}
 <div class="b-banner" style="margin-bottom:2rem;">
     <span style="color:var(--accent)">
         New scopes available —
-        {% if needs_mail_scope %}<span class="b-badge is-warn" style="margin-left:4px;">Mail</span>{% endif %}
-        {% if needs_notif_scope %}<span class="b-badge is-warn" style="margin-left:4px;">Notifications</span>{% endif %}
         {% if needs_contracts_scope %}<span class="b-badge is-warn" style="margin-left:4px;">Contracts</span>{% endif %}
         {% if needs_pi_scope %}<span class="b-badge is-warn" style="margin-left:4px;">PI</span>{% endif %}
     </span>
@@ -256,6 +234,8 @@
             {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
+            {% set cd = clones.get(char.character_id) %}
+            {% if cd %}<div class="b-row"><span class="b-row-label">Clones</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.5rem;font-size:10px;"><span style="color:var(--muted);">{{ cd.jump_clones_count }} clone{% if cd.jump_clones_count != 1 %}s{% endif %}</span>{% if cd.jump_cooldown_str %}<span style="color:var(--accent);">⏱ {{ cd.jump_cooldown_str }}</span>{% else %}<span style="color:var(--success);">✓ Ready</span>{% endif %}</span></div>{% endif %}
             {% if sk.get('current_skill') %}
             <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.current_finish_str %}<span style="font-size:9px;color:var(--text);">{{ sk.current_finish_str }}</span>{% endif %}{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}</span></div>
             {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
@@ -318,6 +298,8 @@
             {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
+            {% set cd = clones.get(char.character_id) %}
+            {% if cd %}<div class="b-row"><span class="b-row-label">Clones</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.5rem;font-size:10px;"><span style="color:var(--muted);">{{ cd.jump_clones_count }} clone{% if cd.jump_clones_count != 1 %}s{% endif %}</span>{% if cd.jump_cooldown_str %}<span style="color:var(--accent);">⏱ {{ cd.jump_cooldown_str }}</span>{% else %}<span style="color:var(--success);">✓ Ready</span>{% endif %}</span></div>{% endif %}
             {% if sk.get('current_skill') %}
             <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val" style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;"><span style="font-size:10px;">{{ sk.current_skill }} {{ sk.current_level }}</span>{% if sk.current_finish_str %}<span style="font-size:9px;color:var(--text);">{{ sk.current_finish_str }}</span>{% endif %}{% if sk.time_remaining_str %}<span style="font-size:9px;color:var(--muted);">queue {{ sk.time_remaining_str }}</span>{% endif %}</span></div>
             {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
@@ -365,190 +347,6 @@
     {% endfor %}
 </div>
 {% endif %}
-
-{# ── Industry Jobs + Market Orders ───────────────────────────────────────── #}
-<div class="b-grid-2 b-section">
-
-    {# Industry Jobs #}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Industry Jobs</span>
-        </div>
-        {% set has_any_jobs = namespace(found=false) %}
-        {% for char in characters %}
-        {% set ind = industry.get(char.character_id) %}
-        {% if ind and ind.active_count > 0 %}{% set has_any_jobs.found = true %}{% endif %}
-        {% endfor %}
-
-        {% if has_any_jobs.found %}
-        {% for char in characters %}
-        {% set ind = industry.get(char.character_id) %}
-        {% if ind and ind.active_count > 0 %}
-        <div class="b-table-row">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                 class="b-portrait-sm" alt="">
-            <div style="flex:1;min-width:0;">
-                <div style="font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</div>
-                {% if ind.soonest_product %}
-                <div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Next: {{ ind.soonest_product }}</div>
-                {% endif %}
-            </div>
-            <div style="text-align:right;flex-shrink:0;">
-                <div style="font-size:11px;color:var(--text);">{{ ind.active_count }} active</div>
-                {% if ind.soonest_time_str %}
-                <div style="font-size:10px;color:var(--muted);">in {{ ind.soonest_time_str }}</div>
-                {% endif %}
-            </div>
-        </div>
-        {% endif %}
-        {% endfor %}
-        {% else %}
-        <div class="b-empty">No active jobs</div>
-        {% endif %}
-    </div>
-
-    {# Market Orders #}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Market Orders</span>
-        </div>
-        {% set has_any_orders = namespace(found=false) %}
-        {% for char in characters %}
-        {% set ord = orders.get(char.character_id) %}
-        {% if ord and ord.active_count > 0 %}{% set has_any_orders.found = true %}{% endif %}
-        {% endfor %}
-
-        {% if has_any_orders.found %}
-        {% for char in characters %}
-        {% set ord = orders.get(char.character_id) %}
-        {% if ord and ord.active_count > 0 %}
-        <div class="b-table-row">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                 class="b-portrait-sm" alt="">
-            <span style="flex:1;font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</span>
-            <div style="display:flex;gap:0.75rem;font-size:11px;">
-                <span style="color:var(--success);">▲ {{ ord.sell_count }}</span>
-                <span style="color:var(--danger);">▼ {{ ord.buy_count }}</span>
-            </div>
-        </div>
-        {% endif %}
-        {% endfor %}
-        {% else %}
-        <div class="b-empty">No active orders</div>
-        {% endif %}
-    </div>
-
-</div>
-
-{# ── Jump Clones (PI moved to /industry/planetary) ────────────────────────── #}
-<div class="b-section">
-
-    {# Jump Clones #}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Jump Clones</span>
-        </div>
-        {% for char in characters %}
-        {% set cd = clones.get(char.character_id) %}
-        <div class="b-table-row">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                 class="b-portrait-sm" alt="">
-            <div style="flex:1;">
-                <div style="font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</div>
-                {% if cd %}
-                <div style="font-size:10px;color:var(--muted);">{{ cd.jump_clones_count }} clone{% if cd.jump_clones_count != 1 %}s{% endif %}</div>
-                {% endif %}
-            </div>
-            {% if cd %}
-                {% if cd.jump_cooldown_str %}
-                <span style="font-size:11px;color:var(--accent);">⏱ {{ cd.jump_cooldown_str }}</span>
-                {% else %}
-                <span style="font-size:11px;color:var(--success);">Ready</span>
-                {% endif %}
-            {% else %}
-            <span style="font-size:11px;color:var(--muted);">—</span>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </div>
-
-</div>
-
-{# ── Mail + Notifications ─────────────────────────────────────────────────── #}
-<div class="b-grid-2 b-section">
-
-    {# Mail #}
-    <div class="b-panel">
-        <div class="b-panel-head" id="mail-panel">
-            <span class="b-label">Mail</span>
-            {% if needs_mail_scope %}
-            <a href="/auth/add-character" class="b-link" style="color:var(--accent);">Re-auth →</a>
-            {% endif %}
-        </div>
-        {% if needs_mail_scope %}
-        <div class="b-empty">Re-authorize to view mail</div>
-        {% else %}
-        {% for char in characters %}
-        {% set m = mail.get(char.character_id) %}
-        <a href="/character/{{ char.character_id }}" class="b-table-row" style="text-decoration:none;cursor:pointer;">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                 class="b-portrait-sm" alt="">
-            <span style="flex:1;font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</span>
-            {% if m and m is mapping %}
-                {% if m.unread_count > 0 %}
-                <span class="b-badge is-accent" style="color:var(--accent);">{{ m.unread_count }} unread</span>
-                {% else %}
-                <span style="font-size:10px;color:var(--muted);">No unread</span>
-                {% endif %}
-            {% else %}
-            <span style="font-size:11px;color:var(--muted);">—</span>
-            {% endif %}
-        </a>
-        {% endfor %}
-        {% endif %}
-    </div>
-
-    {# Notifications #}
-    <div class="b-panel">
-        <div class="b-panel-head">
-            <span class="b-label">Notifications</span>
-            {% if needs_notif_scope %}
-            <a href="/auth/add-character" class="b-link" style="color:var(--accent);">Re-auth →</a>
-            {% endif %}
-        </div>
-        {% if needs_notif_scope %}
-        <div class="b-empty">Re-authorize to view notifications</div>
-        {% else %}
-        {% for char in characters %}
-        {% set n = notifications.get(char.character_id) %}
-        <div style="border-bottom:1px solid var(--border);">
-            <div class="b-table-row" style="border-bottom:none;">
-                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                     class="b-portrait-sm" alt="">
-                <span style="flex:1;font-size:11px;color:var(--text);">{{ char.character_name.split(' ')[0] }}</span>
-                {% if n and n is mapping %}
-                    {% if n.unread_count > 0 %}
-                    <span class="b-badge is-warn">{{ n.unread_count }}</span>
-                    {% else %}
-                    <span style="font-size:10px;color:var(--muted);">None</span>
-                    {% endif %}
-                {% else %}
-                <span style="font-size:11px;color:var(--muted);">—</span>
-                {% endif %}
-            </div>
-            {% if n and n is mapping and n.recent_types %}
-            <div style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;flex-wrap:wrap;gap:3px;">
-                {% for t in n.recent_types %}
-                <span style="font-size:9px;letter-spacing:0.08em;color:var(--muted);border:1px solid var(--border);padding:1px 5px;">{{ t }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </div>
-        {% endfor %}
-        {% endif %}
-    </div>
-
-</div>
 
 {# ── Contracts ───────────────────────────────────────────────────────────── #}
 {% set has_any_contracts = namespace(found=false) %}
