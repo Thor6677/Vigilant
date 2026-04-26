@@ -95,27 +95,52 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [killHeatmapWindow, setKillHeatmapWindow] = useState<KillHeatmapWindow>('1d');
   const [killHeatmapBucketIdx, setKillHeatmapBucketIdx] = useState<number>(0);
   const [killHeatmapPlaying, setKillHeatmapPlaying] = useState<boolean>(false);
+  // Fractional progress 0..1 within the current bucket. Animated by RAF
+  // when playing so the map fades smoothly between hourly samples instead
+  // of stepping. The slider/label still snap to integer buckets.
+  const [killHeatmapPlayProgress, setKillHeatmapPlayProgress] = useState<number>(0);
   const killHeatmap = useKillHeatmap(killHeatmapWindow, space, activeOverlay === 'killHeatmap');
   // When the heatmap dataset arrives, jump to the most recent bucket so the
   // map shows "now" by default. Resetting on window change too.
   useEffect(() => {
     if (!killHeatmap.data) return;
     setKillHeatmapBucketIdx(Math.max(0, killHeatmap.data.buckets.length - 1));
+    setKillHeatmapPlayProgress(0);
   }, [killHeatmap.data]);
-  // Auto-advance when playing.
+  // Auto-advance when playing — RAF loop, ~1500 ms per bucket, smoothly
+  // animating playProgress from 0→1, then incrementing bucketIdx.
   useEffect(() => {
     if (!killHeatmapPlaying || !killHeatmap.data) return;
-    const max = killHeatmap.data.buckets.length - 1;
-    const id = window.setInterval(() => {
-      setKillHeatmapBucketIdx((i) => {
-        if (i >= max) {
+    const numBuckets = killHeatmap.data.buckets.length;
+    const msPerBucket = 1500;
+    let lastTs = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const dt = now - lastTs;
+      lastTs = now;
+      const step = dt / msPerBucket;
+      setKillHeatmapPlayProgress((p) => {
+        const next = p + step;
+        if (next < 1) return next;
+        // Crossed a bucket boundary — advance bucketIdx, reset progress.
+        let stop = false;
+        setKillHeatmapBucketIdx((i) => {
+          if (i >= numBuckets - 1) {
+            stop = true;
+            return numBuckets - 1;
+          }
+          return i + 1;
+        });
+        if (stop) {
           setKillHeatmapPlaying(false);
-          return max;
+          return 1;
         }
-        return i + 1;
+        return next - 1;
       });
-    }, 600);
-    return () => window.clearInterval(id);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [killHeatmapPlaying, killHeatmap.data]);
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
@@ -369,14 +394,26 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       // dataset — systems with no kills get the dim baseline. Reuse the
       // existing heatmapColor ramp for visual consistency with the
       // shipKills/podKills overlays.
+      //
+      // When playing, lerp the value between bucket i and i+1 by
+      // playProgress so the color fades smoothly hour-to-hour. Lerping
+      // the value (not the color) is correct because heatmapColor is
+      // non-linear in t — lerping colors directly would give wrong
+      // intermediate hues.
       const hm = killHeatmap.data;
       const max = hm?.max_value ?? 0;
       if (hm && max > 0) {
+        const i = killHeatmapBucketIdx;
+        const j = Math.min(i + 1, hm.buckets.length - 1);
+        const p = killHeatmapPlaying ? killHeatmapPlayProgress : 0;
+        const oneMinusP = 1 - p;
         for (const sys of data.systems) {
           const arr = hm.data[String(sys.id)];
-          const v = arr ? (arr[killHeatmapBucketIdx] ?? 0) : 0;
+          if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
+          const v0 = arr[i] ?? 0;
+          const v1 = arr[j] ?? 0;
+          const v = v0 * oneMinusP + v1 * p;
           if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
-          // sqrt compresses long tail so smaller systems still light up.
           tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
         }
       } else {
@@ -385,7 +422,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
 
     return tints;
-  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach, killHeatmap.data, killHeatmapBucketIdx]);
+  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach, killHeatmap.data, killHeatmapBucketIdx, killHeatmapPlaying, killHeatmapPlayProgress]);
 
   // Apply overlay tints to renderer
   useEffect(() => {
@@ -1640,9 +1677,26 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           }}
           killHeatmapBuckets={killHeatmap.data?.buckets ?? []}
           killHeatmapBucketIdx={killHeatmapBucketIdx}
-          onKillHeatmapBucketIdxChange={setKillHeatmapBucketIdx}
+          onKillHeatmapBucketIdxChange={(i) => {
+            // Manual scrub — snap to bucket and clear any in-flight
+            // interpolation residue from a play-pause cycle.
+            setKillHeatmapBucketIdx(i);
+            setKillHeatmapPlayProgress(0);
+          }}
           killHeatmapPlaying={killHeatmapPlaying}
-          onKillHeatmapPlayPauseToggle={() => setKillHeatmapPlaying((p) => !p)}
+          onKillHeatmapPlayPauseToggle={() => {
+            setKillHeatmapPlaying((playing) => {
+              if (playing) return false;
+              // Starting play. If we're parked at the last bucket, rewind
+              // so the user gets a fresh playthrough instead of a no-op.
+              const buckets = killHeatmap.data?.buckets ?? [];
+              if (buckets.length > 0 && killHeatmapBucketIdx >= buckets.length - 1) {
+                setKillHeatmapBucketIdx(0);
+                setKillHeatmapPlayProgress(0);
+              }
+              return true;
+            });
+          }}
           killHeatmapLoading={killHeatmap.loading}
           killHeatmapMaxValue={killHeatmap.data?.max_value ?? 0}
         />
