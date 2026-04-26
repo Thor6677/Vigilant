@@ -2289,10 +2289,17 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
         return HTMLResponse("")
-    from app.intel.recent_battles import query_battles_window, WH_CLASS_ORDER, SEC_BAND_ORDER
+    from app.intel.recent_battles import query_battles_window, SEC_BAND_ORDER
     groups = await query_battles_window(days=7)
+    # C1-C6 always render (with placeholder when empty) so the WH grid is
+    # legible at a glance. C13/Drifter/Thera/Pochven and the sec bands only
+    # appear when they actually have battles.
+    always_show = ["C6", "C5", "C4", "C3", "C2", "C1"]
+    conditional = ["Thera", "C13 (Shattered)", "Drifter", "Pochven"] + SEC_BAND_ORDER
     ordered: list[tuple[str, list]] = []
-    for key in WH_CLASS_ORDER + SEC_BAND_ORDER:
+    for key in always_show:
+        ordered.append((key, groups.get(key, [])))
+    for key in conditional:
         if key in groups and groups[key]:
             ordered.append((key, groups[key]))
     return templates.TemplateResponse("partials/dashboard_recent_battles.html", {

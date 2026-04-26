@@ -21,6 +21,7 @@
             {% for group, battles in groups %}
             <div class="rb-group">
                 <div class="rb-group-title">{{ group }}</div>
+                {% if battles %}
                 {% for b in battles %}
                 <a class="rb-battle" href="https://zkillboard.com/system/{{ b['system_id'] }}/" target="_blank" rel="noopener" title="Open {{ b['system_name'] }} on zKillboard">
                     <div>
@@ -35,6 +36,9 @@
                     </div>
                 </a>
                 {% endfor %}
+                {% else %}
+                <div style="font-size:10px;color:var(--muted);font-style:italic;padding:3px 0;">No battles</div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
