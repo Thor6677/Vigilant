@@ -340,9 +340,12 @@ async def tools_activity(
     # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
     # Independent of the selected chart window — it answers a different
     # question ("when is EVE busiest?") and only makes sense at hourly
-    # resolution. Filtered to source='esi' so we don't double-count where
-    # historical archives overlap with live sampling. Cell value is the
-    # avg PCU at that (weekday, hour). SQLite strftime('%w') is 0=Sunday.
+    # resolution. We include all sources (esi + Chribba's eve-offline-net
+    # + Adminor's eve-offline-com) since avg(player_count) across
+    # overlapping sources is unbiased — they're all measuring the same
+    # PCU at the same minute. Coarse-granularity rows (daily/weekly
+    # rollups loaded from older archives) are excluded so they don't
+    # blur the hourly buckets. SQLite strftime('%w') is 0=Sunday.
     heatmap_cutoff = now - timedelta(days=90)
     heatmap_rows = (await db.execute(
         select(
@@ -352,7 +355,7 @@ async def tools_activity(
         )
         .where(
             PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
-            PlayerCountSnapshot.source == "esi",
+            PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
         )
         .group_by("dow", "hr")
     )).all()
