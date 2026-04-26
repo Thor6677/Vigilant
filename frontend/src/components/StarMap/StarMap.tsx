@@ -107,12 +107,15 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     setKillHeatmapBucketIdx(Math.max(0, killHeatmap.data.buckets.length - 1));
     setKillHeatmapPlayProgress(0);
   }, [killHeatmap.data]);
-  // Auto-advance when playing — RAF loop, ~1500 ms per bucket, smoothly
-  // animating playProgress from 0→1, then incrementing bucketIdx.
+  // Auto-advance when playing — RAF loop, animating playProgress from
+  // 0→1 and incrementing bucketIdx on overflow. Tick rate scales with
+  // bucket count so the full window plays in roughly the same wall time
+  // regardless of granularity (1d=1440 minute buckets vs 7d=7 daily).
   useEffect(() => {
     if (!killHeatmapPlaying || !killHeatmap.data) return;
     const numBuckets = killHeatmap.data.buckets.length;
-    const msPerBucket = 1500;
+    // Target ~45s for a full playthrough.
+    const msPerBucket = Math.max(20, Math.floor(45000 / numBuckets));
     let lastTs = performance.now();
     let raf = 0;
     const tick = (now: number) => {
@@ -408,10 +411,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         const p = killHeatmapPlaying ? killHeatmapPlayProgress : 0;
         const oneMinusP = 1 - p;
         for (const sys of data.systems) {
-          const arr = hm.data[String(sys.id)];
+          const arr = hm.lookup.get(sys.id);
           if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
-          const v0 = arr[i] ?? 0;
-          const v1 = arr[j] ?? 0;
+          const v0 = arr[i] || 0;
+          const v1 = arr[j] || 0;
           const v = v0 * oneMinusP + v1 * p;
           if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
           tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));

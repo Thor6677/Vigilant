@@ -1332,39 +1332,40 @@ async def map_kill_heatmap(request: Request, window: str = "1d", space: str = "k
     from app.db.models import AsyncSessionLocal, Killmail, SystemActivitySnapshot
 
     if window == "1d":
-        # 24 hourly buckets aligned to wall-clock hours, ending at the top
-        # of the current hour (so the rightmost bucket is "the most recent
-        # full hour"). Source: SystemActivitySnapshot.
-        end = now_utc.replace(minute=0, second=0, microsecond=0)
-        start = end - timedelta(hours=24)
-        bucket_seconds = 3600
-        num_buckets = 24
+        # 1440 minute buckets aligned to the top of the current minute
+        # (rightmost bucket = the current minute). Source: raw killmails —
+        # gives true minute-resolution playback, where SystemActivitySnapshot
+        # is only hourly.
+        end = now_utc.replace(second=0, microsecond=0)
+        start = end - timedelta(minutes=1440)
+        bucket_seconds = 60
+        num_buckets = 1440
         buckets = [(start + timedelta(seconds=i * bucket_seconds)).isoformat() + "Z"
                    for i in range(num_buckets)]
 
         async with AsyncSessionLocal() as db:
             sys_filter = (
-                SystemActivitySnapshot.system_id < 31000000 if space == "k"
-                else SystemActivitySnapshot.system_id >= 31000000
+                Killmail.solar_system_id < 31000000 if space == "k"
+                else Killmail.solar_system_id >= 31000000
             )
-            # bucket index = (captured_at - start) / 3600s, integer.
+            # bucket index = (killmail_time - start) / 60s, integer.
             bin_expr = func.cast(
-                (func.julianday(SystemActivitySnapshot.captured_at) - func.julianday(start))
-                * 24.0,
+                (func.julianday(Killmail.killmail_time) - func.julianday(start))
+                * 1440.0,
                 Integer,
             )
             rows = (await db.execute(
                 select(
-                    SystemActivitySnapshot.system_id,
+                    Killmail.solar_system_id.label("system_id"),
                     bin_expr.label("b"),
-                    func.sum(SystemActivitySnapshot.ship_kills + SystemActivitySnapshot.pod_kills).label("k"),
+                    func.count().label("k"),
                 )
                 .where(
-                    SystemActivitySnapshot.captured_at >= start,
-                    SystemActivitySnapshot.captured_at < end,
+                    Killmail.killmail_time >= start,
+                    Killmail.killmail_time < end,
                     sys_filter,
                 )
-                .group_by(SystemActivitySnapshot.system_id, "b")
+                .group_by(Killmail.solar_system_id, "b")
             )).all()
     else:
         days = 7 if window == "7d" else 30
@@ -1398,8 +1399,12 @@ async def map_kill_heatmap(request: Request, window: str = "1d", space: str = "k
                 .group_by(Killmail.solar_system_id, "b")
             )).all()
 
-    # Pivot to {system_id: [v0, v1, ...]} — sparse, only systems with ≥1 kill.
-    data: dict[str, list[int]] = {}
+    # Pivot to per-system buckets. For 1d (1440 minute buckets) we use a
+    # sparse encoding — only the non-zero (bucket_idx, count) pairs — so
+    # the payload doesn't blow up to multiple MB. For 7d/30d the dense
+    # per-system array is more compact since num_buckets is small.
+    sparse = window == "1d"
+    data: dict = {}
     max_value = 0
     for sys_id, b, k in rows:
         if sys_id is None or b is None:
@@ -1410,11 +1415,19 @@ async def map_kill_heatmap(request: Request, window: str = "1d", space: str = "k
         kv = int(k or 0)
         if kv <= 0:
             continue
-        arr = data.get(str(sys_id))
-        if arr is None:
-            arr = [0] * num_buckets
-            data[str(sys_id)] = arr
-        arr[bi] = kv
+        key = str(sys_id)
+        if sparse:
+            arr = data.get(key)
+            if arr is None:
+                arr = []
+                data[key] = arr
+            arr.append([bi, kv])
+        else:
+            arr = data.get(key)
+            if arr is None:
+                arr = [0] * num_buckets
+                data[key] = arr
+            arr[bi] = kv
         if kv > max_value:
             max_value = kv
 
@@ -1424,6 +1437,7 @@ async def map_kill_heatmap(request: Request, window: str = "1d", space: str = "k
         "bucket_seconds": bucket_seconds,
         "buckets": buckets,
         "max_value": max_value,
+        "sparse": sparse,
         "data": data,
     }
     _HEATMAP_CACHE[cache_key] = (

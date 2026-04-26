@@ -298,13 +298,15 @@ export function OverlayControls({
   const fmtBucket = (iso: string, win: KillHeatmapWindow): string => {
     if (!iso) return '';
     if (win === '1d') {
-      // ISO with trailing Z; show "Apr 25 14:00 UTC"
+      // ISO with trailing Z; show "Apr 25 14:23 UTC" — minute precision
+      // since the 1d dataset is now per-minute.
       const d = new Date(iso);
       if (isNaN(d.valueOf())) return iso;
       const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
       const day = d.getUTCDate();
       const hr = String(d.getUTCHours()).padStart(2, '0');
-      return `${mon} ${day} ${hr}:00 UTC`;
+      const min = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${mon} ${day} ${hr}:${min} UTC`;
     }
     // Daily bucket — already a YYYY-MM-DD string from the server.
     return iso;
@@ -354,7 +356,10 @@ export function OverlayControls({
         type="range"
         min={0}
         max={Math.max(0, killHeatmapBuckets.length - 1)}
-        step={1}
+        // 1d window is per-minute (1440 buckets) but we snap manual scrub
+        // to the hour (step=60). Play advances minute-by-minute through
+        // intermediate values regardless of step.
+        step={killHeatmapWindow === '1d' ? 60 : 1}
         value={killHeatmapBucketIdx}
         onChange={(e) => onKillHeatmapBucketIdxChange?.(parseInt(e.target.value, 10))}
         disabled={killHeatmapBuckets.length === 0}
