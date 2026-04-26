@@ -1,15 +1,17 @@
+import { useState } from 'react';
 import { useMapData } from './components/StarMap/useMapData';
 import { StarMap } from './components/StarMap/StarMap';
 
-// Read the space ('k' | 'w') from the #map-root data attribute set by the
-// page template. Defaults to 'k' (k-space) for the legacy /map page.
-function readSpace(): 'k' | 'w' {
+// Initial space ('k' | 'w') comes from the #map-root data attribute set by
+// the page template. /map → 'k', /map/wormholes → 'w'. After load the user
+// can toggle live within the StarMap UI without navigating.
+function readInitialSpace(): 'k' | 'w' {
   const root = document.getElementById('map-root');
   return root?.dataset.space === 'w' ? 'w' : 'k';
 }
 
 export default function App() {
-  const space = readSpace();
+  const [space, setSpace] = useState<'k' | 'w'>(readInitialSpace);
   const { data, loading, error } = useMapData(space);
 
   if (error) {
@@ -28,5 +30,5 @@ export default function App() {
     return null; // Template shows the loading spinner
   }
 
-  return <StarMap data={data} space={space} />;
+  return <StarMap data={data} space={space} onSpaceChange={setSpace} />;
 }

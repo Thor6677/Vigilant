@@ -135,8 +135,9 @@ async def build_wormhole_layout() -> dict[str, Any]:
 
     cache = _wh_class_cache or {}
 
-    # Group J-systems into buckets.
-    grouped: dict[str, list[tuple[int, str, float | None, int | None, int | None]]] = {
+    # Group J-systems into buckets, remembering each system's resolved
+    # wormhole_class_id so the frontend can render a per-class overlay.
+    grouped: dict[str, list[tuple[int, str, float | None, int | None, int | None, int | None]]] = {
         k: [] for k in _BUCKETS
     }
     skipped = 0
@@ -146,7 +147,7 @@ async def build_wormhole_layout() -> dict[str, Any]:
         if bucket is None:
             skipped += 1
             continue
-        grouped[bucket].append((sid, name, sec, con_id, reg_id))
+        grouped[bucket].append((sid, name, sec, con_id, reg_id, wh))
 
     # Stable sort within each bucket so positions are deterministic.
     for bucket in grouped:
@@ -158,7 +159,7 @@ async def build_wormhole_layout() -> dict[str, Any]:
         ox, oy = _cell_origin(col, row)
         members = grouped[bucket]
         positions = _hex_pack(len(members))
-        for (sid, name, sec, con_id, reg_id), (px, py) in zip(members, positions):
+        for (sid, name, sec, con_id, reg_id, wh), (px, py) in zip(members, positions):
             systems.append({
                 "id": int(sid),
                 "name": name,
@@ -175,6 +176,7 @@ async def build_wormhole_layout() -> dict[str, Any]:
                 "x3": 0.0,
                 "y3": 0.0,
                 "z3": 0.0,
+                "whClass": int(wh) if wh is not None else None,
             })
         # Region label centered in the cell.
         regions.append({

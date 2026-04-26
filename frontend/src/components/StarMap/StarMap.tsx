@@ -18,6 +18,7 @@ import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './uti
 import {
   heatmapColor, allianceColor, FACTION_COLORS,
   industryColor, admColor, dominantPlanetColor, PLANET_TYPE_COLORS,
+  wormholeClassColor,
 } from './utils/colors';
 import { SystemRenderer } from './renderer/SystemRenderer';
 import { EdgeRenderer } from './renderer/EdgeRenderer';
@@ -59,9 +60,10 @@ interface StarMapProps {
   data: MapData;
   onSystemClick?: (system: SystemData) => void;
   space?: 'k' | 'w';
+  onSpaceChange?: (space: 'k' | 'w') => void;
 }
 
-export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystemClick, space = 'k' }, ref) => {
+export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystemClick, space = 'k', onSpaceChange }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
@@ -421,6 +423,11 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         }
       } else {
         for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
+    } else if (activeOverlay === 'wormholeClass') {
+      // W-space-only overlay. Color each system by its wormhole class.
+      for (const sys of data.systems) {
+        tints.set(sys.id, wormholeClassColor(sys.whClass));
       }
     }
 
@@ -1654,6 +1661,15 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       {/* Bottom overlay controls */}
       <div ref={overlayBarRef}>
         <OverlayControls
+          space={space}
+          onSpaceChange={onSpaceChange ? (s) => {
+            onSpaceChange(s);
+            // Snap the overlay to a sensible default for the new space so
+            // the user doesn't land on something that's hidden/empty.
+            if (s === 'w') setActiveOverlay('wormholeClass');
+            else setActiveOverlay('security');
+            setSovTimeRange(null);
+          } : undefined}
           activeOverlay={activeOverlay}
           onOverlayChange={(o) => {
             setActiveOverlay(o === activeOverlay ? 'security' : o);

@@ -56,6 +56,28 @@ export function heatmapColor(t: number): number {
   return (r << 16) | (g << 8) | b;
 }
 
+/** Wormhole class → fill color. Picks visually distinct hues across
+ *  the C1–C6 ladder, with separate shades for the specials.
+ *  Returns the dim baseline if the class is unknown. */
+export function wormholeClassColor(cls: number | undefined): number {
+  if (cls == null) return 0x141414;
+  switch (cls) {
+    case 1: return 0x4f86ee;  // C1 — soft blue
+    case 2: return 0x5ed4d4;  // C2 — cyan
+    case 3: return 0x57c873;  // C3 — green
+    case 4: return 0xe6cd55;  // C4 — yellow
+    case 5: return 0xe78b3a;  // C5 — orange
+    case 6: return 0xe05050;  // C6 — red
+    case 12: return 0xc8a951; // Thera — gold
+    case 13: return 0x8a8a8a; // Drifter shattered — gray
+    case 14: case 15: case 16: case 17: case 18:
+      return 0xa97bd0;        // Drifter complexes — purple
+    case 19: return 0x6e6e6e; // Other shattered — slightly darker gray
+    case 25: return 0xd03ed0; // Pochven — magenta
+    default: return 0x474747;
+  }
+}
+
 /**
  * Deterministic color from an alliance/corp ID.
  * Produces consistent, visually distinct colors.

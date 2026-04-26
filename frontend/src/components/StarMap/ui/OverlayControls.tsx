@@ -15,7 +15,19 @@ const OVERLAYS: { key: OverlayType; label: string }[] = [
   { key: 'planetType',      label: 'Planets' },
   { key: 'radar',           label: 'Radar' },
   { key: 'killHeatmap',     label: 'Kill Heatmap' },
+  { key: 'wormholeClass',   label: 'WH Class' },
 ];
+
+// CCP doesn't expose ESI activity (jumps, kills, sov, FW, incursions, ADM,
+// industry indices, planet types) for J-space, and there's no static jump
+// graph for radar. In W-space mode we hide overlays that would render empty.
+const W_SPACE_OVERLAYS = new Set<OverlayType>([
+  'security', 'killHeatmap', 'wormholeClass',
+]);
+// wormholeClass is meaningless in K-space (no whClass on systems).
+const K_SPACE_HIDDEN = new Set<OverlayType>([
+  'wormholeClass',
+]);
 
 const KILL_WINDOWS: { key: KillHeatmapWindow; label: string }[] = [
   { key: '1d',  label: '1D' },
@@ -54,6 +66,8 @@ const SOV_RANGES: { key: SovTimeRange; label: string }[] = [
 ];
 
 interface Props {
+  space?: 'k' | 'w';
+  onSpaceChange?: (space: 'k' | 'w') => void;
   activeOverlay: OverlayType;
   onOverlayChange: (overlay: OverlayType) => void;
   statsLoaded: boolean;
@@ -84,6 +98,7 @@ interface Props {
 const FONT = "'JetBrains Mono', monospace";
 
 export function OverlayControls({
+  space = 'k', onSpaceChange,
   activeOverlay, onOverlayChange, statsLoaded,
   sovTimeRange, onSovTimeRangeChange, sovChangesCount = 0, sovChangesLoading = false,
   isMobile,
@@ -412,9 +427,47 @@ export function OverlayControls({
           overflowX: 'auto',
           flex: 1,
         }}>
-          {OVERLAYS.map(({ key, label }) => {
+          {/* K-space ⇄ W-space toggle. Lives at the head of the overlay
+              row so it's always visible regardless of which sub-bar is open. */}
+          {onSpaceChange && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 0,
+              padding: isMobile ? '0 8px 0 4px' : '0 10px 0 4px',
+              borderRight: '1px solid #191919',
+              marginRight: 4,
+            }}>
+              {(['k', 'w'] as const).map((s) => {
+                const isActive = space === s;
+                const lbl = s === 'k' ? 'K-SPACE' : 'W-SPACE';
+                return (
+                  <button
+                    key={s}
+                    onClick={() => !isActive && onSpaceChange(s)}
+                    style={{
+                      padding: isMobile ? '10px 8px' : '8px 10px',
+                      fontSize: isMobile ? 10 : 9,
+                      letterSpacing: '0.12em',
+                      fontFamily: FONT,
+                      background: isActive ? '#0e0e0e' : 'transparent',
+                      color: isActive ? '#c8a951' : '#474747',
+                      border: 'none',
+                      borderTop: isActive ? '2px solid #c8a951' : '2px solid transparent',
+                      cursor: isActive ? 'default' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {OVERLAYS.filter(({ key }) => {
+            if (space === 'w') return W_SPACE_OVERLAYS.has(key);
+            return !K_SPACE_HIDDEN.has(key);
+          }).map(({ key, label }) => {
             const isActive = activeOverlay === key;
-            const isDisabled = key !== 'security' && !statsLoaded;
+            const isDisabled = key !== 'security' && key !== 'wormholeClass' && !statsLoaded;
             return (
               <button
                 key={key}
@@ -464,6 +517,7 @@ export function OverlayControls({
           {activeOverlay === 'incursions' && <IncursionLegend />}
           {activeOverlay === 'planetType' && <PlanetLegend />}
           {activeOverlay === 'radar' && <RadarLegend />}
+          {activeOverlay === 'wormholeClass' && <WHClassLegend />}
         </div>
       </div>
     </div>
@@ -567,6 +621,22 @@ function RadarLegend() {
       <Dot color="#48f148" label="1J" />
       <Dot color="#ccaa33" label="2J" />
       <Dot color="#ef6f00" label="3J+" />
+    </>
+  );
+}
+
+function WHClassLegend() {
+  return (
+    <>
+      <Dot color="#4f86ee" label="C1" />
+      <Dot color="#5ed4d4" label="C2" />
+      <Dot color="#57c873" label="C3" />
+      <Dot color="#e6cd55" label="C4" />
+      <Dot color="#e78b3a" label="C5" />
+      <Dot color="#e05050" label="C6" />
+      <Dot color="#c8a951" label="THERA" />
+      <Dot color="#a97bd0" label="DRFT" />
+      <Dot color="#d03ed0" label="POCH" />
     </>
   );
 }

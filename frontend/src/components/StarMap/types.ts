@@ -14,6 +14,9 @@ export interface SystemData {
   x3: number;  // 3D position in light-years (for jump drive calculations)
   y3: number;
   z3: number;
+  /** Wormhole class id for J-systems (1-6 standard, 12 Thera, 13/19 shattered,
+   * 14-18 Drifter complexes, 25 Pochven). Only set on the W-space layout. */
+  whClass?: number;
 }
 
 export interface RegionData {
@@ -45,7 +48,8 @@ export type OverlayType =
   | 'adm'             // Tier 2.7 — sov Activity Defense Multiplier (1.0 – 6.0)
   | 'planetType'      // Tier 2.6 — dominant planet type in system (PI site selection)
   | 'radar'           // Tier 1.2 — N-jump reach from a chosen pivot system
-  | 'killHeatmap';    // Per-system kill heatmap with time-scrubber slider
+  | 'killHeatmap'     // Per-system kill heatmap with time-scrubber slider
+  | 'wormholeClass';  // W-space only — color systems by wormhole class
 
 export type KillHeatmapWindow = '1d' | '7d' | '30d';
 
