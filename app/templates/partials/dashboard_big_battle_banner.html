@@ -1,12 +1,12 @@
 {# Active big-battle banner — up to 3 entries balanced across NS/LS/WH.
    Per-band thresholds in active_big_battles(). Each row links to zKB. #}
-<div style="margin-bottom:0.75rem;display:flex;flex-direction:column;gap:4px;">
+<div style="margin-bottom:0.75rem;display:flex;flex-direction:column;gap:2px;">
     {% for battle in battles %}
     {% set band_short = {'Highsec':'HS','Lowsec':'LS','Nullsec':'NS','w-space':'WH'}.get(battle['band'], '?') %}
     {% set band_color = {'Highsec':'#7fd99a','Lowsec':'#e0a85a','Nullsec':'#e07a7a','w-space':'#7fb8e0'}.get(battle['band'], '#aaa') %}
     <a href="https://zkillboard.com/system/{{ battle['system_id'] }}/" target="_blank" rel="noopener"
        style="text-decoration:none;color:inherit;display:block;">
-    <div class="b-section" style="border-left:3px solid #e53e3e;cursor:pointer;">
+    <div class="b-section" style="border-left:3px solid #e53e3e;cursor:pointer;margin:0;">
         <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
             <div>
                 <span class="b-label" style="color:#e53e3e;">Active Battle</span>
