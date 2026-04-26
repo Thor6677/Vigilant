@@ -227,7 +227,7 @@
             {% endfor %}
         </div>
         <div style="font-size:9px;color:var(--muted);margin-top:0.5rem;">
-            Cell color = average concurrent players online at that hour over the last 90 days. Source: ESI live samples (60 s cadence). Downtime is at 11:00 UTC; expect a dip there.
+            Cell color = average concurrent players online at that hour over the last 90 days. Combines ESI live samples with eve-offline.net (Chribba) and eve-offline.com (Adminor) minute-resolution archives. Downtime is at 11:00 UTC; expect a dip there.
         </div>
     </div>
 </div>
@@ -236,16 +236,42 @@
     const el = document.getElementById('pcu-heatmap');
     if (!el) return;
     const grid = JSON.parse(el.dataset.grid);
-    let max = 0;
-    for (const row of grid) for (const v of row) if (v != null && v > max) max = v;
-    if (max <= 0) return;
+    let min = Infinity, max = -Infinity;
+    for (const row of grid) for (const v of row) {
+        if (v == null) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (!isFinite(min) || max <= min) return;
+    // EVE's PCU never goes near zero, so a (0, max) scale collapses every
+    // cell into a narrow band. Rescale to (min, max) and lerp through a
+    // perceptually distinct ramp: deep blue → cyan → gold → red. Anchor
+    // colors picked to read on the dark theme.
+    const stops = [
+        [0.00, [22,  40,  90 ]],   // deep blue
+        [0.35, [60, 130, 200 ]],   // mid blue
+        [0.65, [220,170, 90  ]],   // gold
+        [1.00, [238, 85, 85  ]],   // red
+    ];
+    const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+    const colorAt = (t) => {
+        for (let i = 1; i < stops.length; i++) {
+            if (t <= stops[i][0]) {
+                const [t0, c0] = stops[i-1], [t1, c1] = stops[i];
+                const k = (t - t0) / (t1 - t0);
+                return [lerp(c0[0],c1[0],k), lerp(c0[1],c1[1],k), lerp(c0[2],c1[2],k)];
+            }
+        }
+        return stops[stops.length-1][1];
+    };
     el.querySelectorAll('.ta-heatmap-cell').forEach(cell => {
         const dow = parseInt(cell.dataset.dow, 10);
         const hr = parseInt(cell.dataset.hr, 10);
         const v = grid[dow][hr];
         if (v == null) return;
-        const t = v / max;
-        cell.style.background = `rgba(94,177,255,${0.05 + t * 0.85})`;
+        const t = (v - min) / (max - min);
+        const [r, g, b] = colorAt(t);
+        cell.style.background = `rgb(${r},${g},${b})`;
     });
 })();
 </script>

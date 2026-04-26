@@ -340,23 +340,41 @@ async def tools_activity(
     # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
     # Independent of the selected chart window — it answers a different
     # question ("when is EVE busiest?") and only makes sense at hourly
-    # resolution. We include all sources (esi + Chribba's eve-offline-net
-    # + Adminor's eve-offline-com) since avg(player_count) across
-    # overlapping sources is unbiased — they're all measuring the same
-    # PCU at the same minute. Coarse-granularity rows (daily/weekly
-    # rollups loaded from older archives) are excluded so they don't
-    # blur the hourly buckets. SQLite strftime('%w') is 0=Sunday.
+    # resolution. Source preference: ESI when present (our own live
+    # samples), fall back to Chribba's eve-offline-net, then Adminor's
+    # eve-offline-com. Implemented via row_number() window function —
+    # picks one row per recorded_at minute by source priority. Coarse
+    # granularities (daily/weekly archive rollups) excluded so they
+    # don't blur the hourly buckets. SQLite strftime('%w') is 0=Sunday.
     heatmap_cutoff = now - timedelta(days=90)
-    heatmap_rows = (await db.execute(
+    src_rank = case(
+        (PlayerCountSnapshot.source == "esi", 0),
+        (PlayerCountSnapshot.source == "eve-offline-net", 1),
+        (PlayerCountSnapshot.source == "eve-offline-com", 2),
+        else_=3,
+    )
+    ranked = (
         select(
-            func.strftime("%w", PlayerCountSnapshot.recorded_at).label("dow"),
-            func.strftime("%H", PlayerCountSnapshot.recorded_at).label("hr"),
-            func.avg(PlayerCountSnapshot.player_count).label("avg_pc"),
+            PlayerCountSnapshot.recorded_at,
+            PlayerCountSnapshot.player_count,
+            func.row_number().over(
+                partition_by=PlayerCountSnapshot.recorded_at,
+                order_by=src_rank,
+            ).label("rn"),
         )
         .where(
             PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
             PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
         )
+        .subquery()
+    )
+    heatmap_rows = (await db.execute(
+        select(
+            func.strftime("%w", ranked.c.recorded_at).label("dow"),
+            func.strftime("%H", ranked.c.recorded_at).label("hr"),
+            func.avg(ranked.c.player_count).label("avg_pc"),
+        )
+        .where(ranked.c.rn == 1)
         .group_by("dow", "hr")
     )).all()
     # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
