@@ -31,8 +31,9 @@ from app.db.models import (
     KillmailAttacker,
     SystemActivitySnapshot,
 )
-from app.db.sde_models import SDESystem, SDEWormholeClass
+from app.db.sde_models import SDESystem
 from app.intel.killmail_store import fetch_killmail, store_killmail, get_our_char_ids
+from app.sde.lookup import get_system_wh_class
 
 log = logging.getLogger(__name__)
 
@@ -353,7 +354,9 @@ async def discover_and_persist_battles() -> dict:
     if not busy:
         return {"systems": 0, "battles": 0}
 
-    # Resolve SDE system metadata + wormhole class (separate table) in two queries
+    # Resolve SDE system metadata. wormholeClassID in the SDE is mostly stored
+    # at the constellation/region level, not per-system — so use the lookup
+    # helper which walks system → constellation → region.
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
             select(
@@ -363,15 +366,10 @@ async def discover_and_persist_battles() -> dict:
             ).where(SDESystem.system_id.in_(busy))
         )
         sys_rows = rows.all()
-        wh_rows = await db.execute(
-            select(SDEWormholeClass.location_id, SDEWormholeClass.wormhole_class_id)
-            .where(SDEWormholeClass.location_id.in_(busy))
-        )
-        wh_map = {lid: wc for lid, wc in wh_rows.all()}
 
         sys_meta: dict[int, dict] = {}
         for sid, name, sec in sys_rows:
-            wc = wh_map.get(sid)
+            wc = await get_system_wh_class(db, sid)
             wh_label = wh_class_label(wc)
             sys_meta[sid] = {
                 "system_name": name,
@@ -479,9 +477,18 @@ async def query_battles_window(days: int = 7, per_group: int = BATTLES_PER_GROUP
     return dict(out)
 
 
+BIG_BATTLE_KSPACE_KILLS = 25
+BIG_BATTLE_KSPACE_PILOTS = 25
+BIG_BATTLE_WSPACE_KILLS = 15
+BIG_BATTLE_WSPACE_PILOTS = 15
+
+
 async def active_big_battle() -> dict | None:
-    """Return the most recent big-battle (>=10 kills, ended <30 min ago)."""
+    """Return the most recent genuinely-big battle ended <30 min ago.
+    Per-band thresholds: K-space requires more kills+pilots than W-space
+    because K-space brawls are common; W-space fleets are rarer and smaller."""
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(tzinfo=None)
+    from sqlalchemy import or_, and_
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
             select(
@@ -495,7 +502,18 @@ async def active_big_battle() -> dict | None:
                 DetectedBattle.total_isk,
             )
             .where(DetectedBattle.end_time >= cutoff)
-            .where(DetectedBattle.kill_count >= 10)
+            .where(or_(
+                and_(
+                    DetectedBattle.band == "w-space",
+                    DetectedBattle.kill_count >= BIG_BATTLE_WSPACE_KILLS,
+                    DetectedBattle.pilots_involved >= BIG_BATTLE_WSPACE_PILOTS,
+                ),
+                and_(
+                    DetectedBattle.band != "w-space",
+                    DetectedBattle.kill_count >= BIG_BATTLE_KSPACE_KILLS,
+                    DetectedBattle.pilots_involved >= BIG_BATTLE_KSPACE_PILOTS,
+                ),
+            ))
             .order_by(DetectedBattle.kill_count.desc())
             .limit(1)
         )).first()

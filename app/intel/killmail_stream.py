@@ -42,8 +42,9 @@ from app.db.models import (
     UserHunterWatch,
     UserSystemWatch,
 )
-from app.db.sde_models import SDESystem, SDEWormholeClass
+from app.db.sde_models import SDESystem
 from app.intel.killmail_store import store_killmail, get_our_char_ids
+from app.sde.lookup import get_system_wh_class
 from app.intel.recent_battles import (
     BATTLE_GAP_SECONDS,
     BATTLE_MIN_KILLS,
@@ -158,14 +159,10 @@ async def _resolve_sys_meta(system_id: int) -> dict | None:
         if not row:
             _sys_meta_cache[system_id] = None
             return None
-        whrow = (
-            await db.execute(
-                select(SDEWormholeClass.wormhole_class_id).where(
-                    SDEWormholeClass.location_id == system_id
-                )
-            )
-        ).first()
-        wh_label = wh_class_label(whrow[0]) if whrow else None
+        # wormholeClassID is mostly stored at constellation/region level —
+        # use the resolver that walks system → constellation → region.
+        wc = await get_system_wh_class(db, system_id)
+        wh_label = wh_class_label(wc)
         meta = {
             "system_name": row[0],
             "security": row[1],

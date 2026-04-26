@@ -218,6 +218,34 @@ async def startup():
         except Exception as e:
             await db.rollback()
             logging.warning("uq_system_activity_snapshot install warning: %s", e)
+    # ── Backfill detected_battles.band/group_label for w-space rows that
+    # were mis-labeled before we started using get_system_wh_class (which
+    # walks system → constellation → region). Surgical: only touches rows
+    # whose system actually resolves to a wormhole class, not all rows.
+    try:
+        from app.intel.recent_battles import wh_class_label
+        from app.sde.lookup import get_system_wh_class
+        async with AsyncSessionLocal() as db:
+            sys_ids = (await db.execute(text(
+                "SELECT DISTINCT system_id FROM detected_battles WHERE band != 'w-space'"
+            ))).fetchall()
+            fixed = 0
+            for (sid,) in sys_ids:
+                wc = await get_system_wh_class(db, sid)
+                label = wh_class_label(wc)
+                if label is None:
+                    continue
+                await db.execute(text(
+                    "UPDATE detected_battles SET band='w-space', group_label=:lbl "
+                    "WHERE system_id=:sid AND band != 'w-space'"
+                ), {"lbl": label, "sid": sid})
+                fixed += 1
+            if fixed:
+                await db.commit()
+                logging.info("detected_battles: fixed band/group_label for %d w-space systems", fixed)
+    except Exception as e:
+        logging.warning("detected_battles wh-class backfill warning: %s", e)
+
     # ── Auto-promote first user to admin if no admin exists ────────────
     async with AsyncSessionLocal() as db:
         admin_check = await db.execute(text("SELECT id FROM users WHERE is_admin = 1 LIMIT 1"))

@@ -1,5 +1,8 @@
-{# Active big-battle banner — shown only when a 10+ kill battle ended <30min ago. #}
-<div class="b-section" style="border-left:3px solid #e53e3e;margin-bottom:0.75rem;">
+{# Active big-battle banner — only fires for genuinely-large fleet engagements
+   (per-band thresholds in active_big_battle()). Clicking opens zKillboard. #}
+<a href="https://zkillboard.com/system/{{ battle['system_id'] }}/" target="_blank" rel="noopener"
+   style="text-decoration:none;color:inherit;display:block;">
+<div class="b-section" style="border-left:3px solid #e53e3e;margin-bottom:0.75rem;cursor:pointer;">
     <div style="padding:0.6rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
         <div>
             <span class="b-label" style="color:#e53e3e;">Active Battle</span>
@@ -14,6 +17,8 @@
             {% if battle['total_isk'] %}
             · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
             {% endif %}
+            <span style="margin-left:0.5rem;color:var(--accent);">↗ zKB</span>
         </div>
     </div>
 </div>
+</a>
