@@ -26,7 +26,21 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "Either commit/stash these or run 'git checkout .' before deploying."
     exit 1
 fi
+prev_head=$(git rev-parse HEAD)
 git pull --ff-only
+new_head=$(git rev-parse HEAD)
+
+# nginx/*.conf are bind-mounted as individual files. git pull replaces the
+# inode, but the container's mount still points at the old one — `nginx -s
+# reload` then reloads stale content. Detect nginx config changes here so we
+# can force-recreate the nginx container later in step 5.
+nginx_recreate=0
+if [[ "$prev_head" != "$new_head" ]]; then
+    if git diff --name-only "$prev_head" "$new_head" | grep -qE '^nginx/'; then
+        nginx_recreate=1
+        echo "     nginx config changed — will recreate nginx container in step 5"
+    fi
+fi
 
 echo "[2/6] Tag current image as :prev (for fast rollback)"
 if docker image inspect vigilant-app:latest >/dev/null 2>&1; then
@@ -49,10 +63,20 @@ docker compose up -d --no-deps nginx
 echo "[5/6] Validate + reload nginx"
 # Validate first so a bad config doesn't take nginx down on reload.
 docker exec vigilant-nginx-1 nginx -t
-# Graceful reload: existing connections keep using the old worker until
-# they finish; new ones use the new config + re-resolved app upstream.
-docker exec vigilant-nginx-1 nginx -s reload
-echo "     nginx reloaded"
+if [[ $nginx_recreate -eq 1 ]]; then
+    # File-bind-mount inode swap from git pull means nginx -s reload reads
+    # stale content. Recreate the container so the bind picks up the new
+    # inode. Brief blip on mapper.thunderborn.dev (~2s).
+    docker compose up -d --no-deps --force-recreate nginx
+    sleep 2
+    docker exec vigilant-nginx-1 nginx -t
+    echo "     nginx recreated (config changed)"
+else
+    # Graceful reload: existing connections keep using the old worker until
+    # they finish; new ones use the new config + re-resolved app upstream.
+    docker exec vigilant-nginx-1 nginx -s reload
+    echo "     nginx reloaded"
+fi
 
 echo "[6/6] Post-deploy checks"
 # Wait for the app to bind and respond. /healthz is a stub that returns
