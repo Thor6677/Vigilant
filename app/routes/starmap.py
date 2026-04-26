@@ -1242,6 +1242,54 @@ async def map_planet_types(request: Request):
 
 # ── 48h activity history (sparkline in system info panel) ─────────────────
 
+# ── Wormhole-space synthetic map data ─────────────────────────────────────
+# J-systems have no canonical positions — see app/intel/wormhole_layout.py
+# for the synthetic 3×3 class-grid layout. Three endpoints mirror the
+# k-space static bundles so the React app can use the same useMapData
+# hook with a different base URL.
+
+@router.get("/map/wormholes", response_class=HTMLResponse)
+async def map_wormholes_page(request: Request):
+    """Wormhole-space spatial map — same React bundle as /map, fed
+    a synthetic per-class layout for J-systems."""
+    if not request.session.get("user_id"):
+        return RedirectResponse("/")
+    assets = _read_vite_assets()
+    response = templates.TemplateResponse(
+        "map_wormholes.html", {"request": request, **assets}
+    )
+    response.headers["Cache-Control"] = "no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@router.get("/api/map/wormholes-data/systems.json")
+async def map_wormholes_systems(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from app.intel.wormhole_layout import build_wormhole_layout
+    layout = await build_wormhole_layout()
+    return JSONResponse(layout["systems"])
+
+
+@router.get("/api/map/wormholes-data/edges.json")
+async def map_wormholes_edges(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from app.intel.wormhole_layout import build_wormhole_layout
+    layout = await build_wormhole_layout()
+    return JSONResponse(layout["edges"])
+
+
+@router.get("/api/map/wormholes-data/regions.json")
+async def map_wormholes_regions(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from app.intel.wormhole_layout import build_wormhole_layout
+    layout = await build_wormhole_layout()
+    return JSONResponse(layout["regions"])
+
+
 # Per-(window, space) cache for the bulk heatmap response. Buckets are
 # stable within a window (e.g. hourly in 1d) so we can serve the same
 # JSON to every scrubber tick. Short TTL keeps live data fresh.

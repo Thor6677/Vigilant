@@ -58,9 +58,10 @@ export interface StarMapHandle {
 interface StarMapProps {
   data: MapData;
   onSystemClick?: (system: SystemData) => void;
+  space?: 'k' | 'w';
 }
 
-export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystemClick }, ref) => {
+export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystemClick, space = 'k' }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
@@ -94,7 +95,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [killHeatmapWindow, setKillHeatmapWindow] = useState<KillHeatmapWindow>('1d');
   const [killHeatmapBucketIdx, setKillHeatmapBucketIdx] = useState<number>(0);
   const [killHeatmapPlaying, setKillHeatmapPlaying] = useState<boolean>(false);
-  const killHeatmap = useKillHeatmap(killHeatmapWindow, 'k', activeOverlay === 'killHeatmap');
+  const killHeatmap = useKillHeatmap(killHeatmapWindow, space, activeOverlay === 'killHeatmap');
   // When the heatmap dataset arrives, jump to the most recent bucket so the
   // map shows "now" by default. Resetting on window change too.
   useEffect(() => {
