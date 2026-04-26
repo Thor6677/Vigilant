@@ -9,6 +9,15 @@ export function useMapData(space: 'k' | 'w' = 'k') {
   useEffect(() => {
     let cancelled = false;
 
+    // Reset to a loading state on space switch so App unmounts the
+    // existing StarMap and remounts a fresh one against the new dataset.
+    // Otherwise the previous space's data + viewport + renderer state
+    // sticks around between the click and the fetch resolving — that
+    // window is where W→K showed a black screen.
+    setData(null);
+    setLoading(true);
+    setError(null);
+
     async function load() {
       try {
         const base = import.meta.env.BASE_URL;
