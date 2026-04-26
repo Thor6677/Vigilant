@@ -1583,8 +1583,20 @@ async def _background_scheduler():
             except Exception as e:
                 logger.warning("Background scheduler error: %s", e)
 
-            # Inventory threshold check (every 5 minutes)
+            # ESI cache GC (every hour) — drops rows whose expires_at has passed.
             now = datetime.now(timezone.utc)
+            if not hasattr(_background_scheduler, '_last_cache_gc') or \
+               (now - _background_scheduler._last_cache_gc).total_seconds() >= 3600:
+                try:
+                    from app.db.cache import cache_gc
+                    removed = await cache_gc()
+                    if removed:
+                        logger.info("ESI cache GC removed %d expired rows", removed)
+                    _background_scheduler._last_cache_gc = now
+                except Exception as e:
+                    logger.warning("Cache GC error: %s", e)
+
+            # Inventory threshold check (every 5 minutes)
             if not hasattr(_background_scheduler, '_last_inv_check') or \
                (now - _background_scheduler._last_inv_check).total_seconds() >= 300:
                 try:

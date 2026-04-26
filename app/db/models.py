@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Boolean, Text, Float, ForeignKey, UniqueConstraint, event
+from sqlalchemy import Column, Integer, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -667,6 +667,10 @@ class Killmail(Base):
     final_blow_character_id = Column(Integer, nullable=True)
     involves_our_char = Column(Boolean, nullable=False, default=False, index=True)
     fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_killmail_system_time", "solar_system_id", "killmail_time"),
+    )
 
 
 class KillmailAttacker(Base):

@@ -35,7 +35,7 @@ class ESICache(Base):
 
     key = Column(String, primary_key=True)
     data = Column(Text, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
 
 
 def _cache_key(path: str, params: dict = None) -> str:
@@ -135,6 +135,24 @@ async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
             await _cache_set_impl(fresh_db, key, data, ttl)
     except Exception:
         pass  # cache writes must never break the caller
+
+
+async def cache_gc() -> int:
+    """Delete expired cache rows. Returns number of rows removed.
+
+    Without this, expired rows accumulate forever — they're only ever cleaned
+    on a read miss for the same key, which never happens for keys that are
+    never read again.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    from app.db.models import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(delete(ESICache).where(ESICache.expires_at < now))
+            await db.commit()
+            return result.rowcount or 0
+    except Exception:
+        return 0
 
 
 _CACHE_STATS_MEMO: dict = {"at": None, "val": None}
