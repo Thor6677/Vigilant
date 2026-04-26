@@ -21,8 +21,10 @@ if ! docker image inspect vigilant-app:prev >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "[1/4] Tag the broken :latest as :broken for later inspection"
-docker tag vigilant-app:latest vigilant-app:broken
+echo "[1/4] Tag the broken :latest with a timestamp for later inspection"
+broken_tag="vigilant-app:broken-$(date +%Y%m%d-%H%M%S)"
+docker tag vigilant-app:latest "$broken_tag"
+echo "     tagged ${broken_tag}"
 
 echo "[2/4] Swap :prev -> :latest"
 docker tag vigilant-app:prev vigilant-app:latest
@@ -42,7 +44,7 @@ docker logs --since 30s vigilant-app-1 2>&1 | tail -20
 
 echo ""
 echo "✓ Rolled back to the previous image."
-echo "  The broken image is tagged vigilant-app:broken for debugging."
+echo "  The broken image is tagged ${broken_tag} for debugging."
 echo ""
 echo "⚠ REMEMBER: this restored the IMAGE only. The repo still contains the"
 echo "  bad commit. Follow up with:"

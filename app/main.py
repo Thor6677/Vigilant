@@ -78,6 +78,14 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness probe for Docker HEALTHCHECK and the deploy script's HTTP
+    probe. Cheap — no DB or ESI calls, just confirms uvicorn is serving.
+    """
+    return {"ok": True}
+
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(characters_router)
