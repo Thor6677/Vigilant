@@ -1,18 +1,22 @@
 {# Two-tier recent battles widget.
-   Top: 6-col WH grid (C1-C6 always; Thera/C13/Drifter/Pochven inline if present).
-   Bottom: combined HS/LS/NS list ranked by kill_count, capped 3 per band. #}
+   Top: WH grid — only classes with battles (no empty placeholders).
+   Bottom: combined HS/LS/NS list ranked by kill_count, capped 3 per band.
+   Each row shows top combatant entities (alliance preferred over corp). #}
 <style>
     .rb-wh-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:0.5rem; }
     @media (max-width: 1100px) { .rb-wh-grid { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 600px)  { .rb-wh-grid { grid-template-columns: repeat(2, 1fr); } }
-    .rb-wh-card { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.5rem; min-height:96px; display:flex; flex-direction:column; }
+    .rb-wh-card { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.5rem; display:flex; flex-direction:column; }
     .rb-wh-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.35rem; text-transform:uppercase; }
-    .rb-wh-row { display:flex; justify-content:space-between; align-items:baseline; gap:0.35rem; padding:2px 0; font-size:11px; text-decoration:none; color:inherit; border-bottom:1px solid rgba(255,255,255,0.04); }
+    .rb-wh-row { display:block; padding:3px 0; font-size:11px; text-decoration:none; color:inherit; border-bottom:1px solid rgba(255,255,255,0.04); }
     .rb-wh-row:last-of-type { border-bottom:none; }
     .rb-wh-row:hover { background:rgba(255,255,255,0.04); }
+    .rb-wh-line { display:flex; justify-content:space-between; align-items:baseline; gap:0.35rem; }
     .rb-wh-sys { color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .rb-wh-stat { color:var(--accent); font-family:monospace; font-size:10px; white-space:nowrap; }
-    .rb-empty-row { font-size:11px; color:var(--muted); opacity:0.35; padding:2px 0; }
+    .rb-vs { font-size:9px; color:var(--muted); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .rb-vs-att { color:#e07a7a; }
+    .rb-vs-vic { color:#7fb8e0; }
 
     .rb-kspace { margin-top:0.75rem; display:flex; flex-direction:column; gap:1px; }
     .rb-kspace-row { display:grid; grid-template-columns: 42px 1fr auto; gap:0.5rem; align-items:baseline; padding:5px 8px; background:var(--bg-raised, #111); text-decoration:none; color:inherit; font-size:11px; border:1px solid var(--border); }
@@ -40,13 +44,18 @@
                 <div class="rb-wh-title">{{ label }}</div>
                 {% for b in battles %}
                 <a class="rb-wh-row" href="https://zkillboard.com/system/{{ b['system_id'] }}/" target="_blank" rel="noopener" title="Open {{ b['system_name'] }} on zKillboard">
-                    <span class="rb-wh-sys">{{ b['system_name'] or b['system_id'] }}</span>
-                    <span class="rb-wh-stat">{{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P</span>
+                    <div class="rb-wh-line">
+                        <span class="rb-wh-sys">{{ b['system_name'] or b['system_id'] }}</span>
+                        <span class="rb-wh-stat">{{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P</span>
+                    </div>
+                    {% if b['attacker_label'] or b['victim_label'] %}
+                    <div class="rb-vs">
+                        <span class="rb-vs-att">{{ b['attacker_label'] or '—' }}</span>
+                        <span> vs </span>
+                        <span class="rb-vs-vic">{{ b['victim_label'] or '—' }}</span>
+                    </div>
+                    {% endif %}
                 </a>
-                {% endfor %}
-                {# Pad to 2 rows for consistent card height #}
-                {% for _ in range(2 - battles|length) %}
-                <div class="rb-empty-row">—</div>
                 {% endfor %}
             </div>
             {% endfor %}
@@ -62,6 +71,13 @@
                 <span>
                     <span class="rb-ks-sys">{{ b['system_name'] or b['system_id'] }}</span>
                     <span class="rb-ks-meta">{{ b['start_time'].strftime('%m/%d %H:%M') }} · {{ b['duration_minutes'] }}m</span>
+                    {% if b['attacker_label'] or b['victim_label'] %}
+                    <div class="rb-vs">
+                        <span class="rb-vs-att">{{ b['attacker_label'] or '—' }}</span>
+                        <span> vs </span>
+                        <span class="rb-vs-vic">{{ b['victim_label'] or '—' }}</span>
+                    </div>
+                    {% endif %}
                 </span>
                 <span class="rb-ks-stat">
                     {{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P{% if b['total_isk'] and b['total_isk'] > 0 %} · {{ (b['total_isk'] / 1e9) | round(1) }}B{% endif %}

@@ -2291,12 +2291,11 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
         return HTMLResponse("")
     from app.intel.recent_battles import query_battles_window, SEC_BAND_ORDER
     groups = await query_battles_window(days=7)
-    # Top tier: C1-C6 always render (placeholder when empty); Thera/C13/Drifter/
-    # Pochven appear inline only when they have data. Each card shows top 2.
-    wh_always = ["C1", "C2", "C3", "C4", "C5", "C6"]
-    wh_conditional = ["Thera", "C13 (Shattered)", "Drifter", "Pochven"]
-    wh_cards: list[tuple[str, list]] = [(k, (groups.get(k) or [])[:2]) for k in wh_always]
-    for k in wh_conditional:
+    # Top tier: only render WH classes that actually have battles. C1-C6 are
+    # listed first in their natural order, then Thera/C13/Drifter/Pochven.
+    wh_order = ["C1", "C2", "C3", "C4", "C5", "C6", "Thera", "C13 (Shattered)", "Drifter", "Pochven"]
+    wh_cards: list[tuple[str, list]] = []
+    for k in wh_order:
         if groups.get(k):
             wh_cards.append((k, groups[k][:2]))
     # Bottom tier: top-3 per band, then merged + sorted desc by kill_count.
@@ -2412,13 +2411,13 @@ async def dashboard_big_battle_banner(request: Request):
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
         return HTMLResponse("")
-    from app.intel.recent_battles import active_big_battle
-    battle = await active_big_battle()
-    if not battle:
+    from app.intel.recent_battles import active_big_battles
+    battles = await active_big_battles()
+    if not battles:
         return HTMLResponse("")
     return templates.TemplateResponse("partials/dashboard_big_battle_banner.html", {
         "request": request,
-        "battle": battle,
+        "battles": battles,
     })
 
 

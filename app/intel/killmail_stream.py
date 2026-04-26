@@ -185,16 +185,21 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
     min_pilots = MIN_PILOTS_WSPACE if meta["band"] == "w-space" else MIN_PILOTS_KSPACE
 
     pilots: set[int] = set()
-    victim_corps: dict[int, int] = {}
     ship_counter: dict[int, int] = {}
     total_isk = 0.0
+    attacker_pilots: dict[int, tuple[int | None, int | None]] = {}
+    victim_pilots: dict[int, tuple[int | None, int | None]] = {}
     for k in kills:
         pilots |= k["attacker_ids"]
         if k.get("victim_id"):
             pilots.add(k["victim_id"])
-        vc = k.get("victim_corp_id")
-        if vc:
-            victim_corps[vc] = victim_corps.get(vc, 0) + 1
+            victim_pilots.setdefault(
+                k["victim_id"],
+                (k.get("victim_corp_id"), k.get("victim_alliance_id")),
+            )
+        for cid, corp, alli in k.get("attacker_orgs") or []:
+            if cid:
+                attacker_pilots.setdefault(cid, (corp, alli))
         sid = k.get("victim_ship_id")
         if sid:
             ship_counter[sid] = ship_counter.get(sid, 0) + 1
@@ -207,11 +212,14 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
     end = max(k["kill_time"] for k in kills)
     duration = max(1, int((end - start).total_seconds() / 60))
     top_ships = sorted(ship_counter.items(), key=lambda x: -x[1])[:5]
-    top_victim_corp_id = 0
-    top_victim_corp_kills = 0
-    if victim_corps:
-        tv = max(victim_corps.items(), key=lambda x: x[1])
-        top_victim_corp_id, top_victim_corp_kills = tv[0], tv[1]
+    from app.intel.recent_battles import pick_top_entities, resolve_entity_names
+    ents = pick_top_entities(attacker_pilots, victim_pilots)
+    names = await resolve_entity_names([
+        i for i in (
+            ents["top_attacker_corp_id"], ents["top_attacker_alliance_id"],
+            ents["top_victim_corp_id"], ents["top_victim_alliance_id"],
+        ) if i
+    ])
 
     row = {
         "system_id": system_id,
@@ -225,12 +233,16 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
         "kill_count": len(kills),
         "pilots_involved": len(pilots),
         "total_isk": total_isk,
-        "top_attacker_corp_id": None,
-        "top_attacker_corp_name": None,
-        "top_attacker_corp_kills": 0,
-        "top_victim_corp_id": top_victim_corp_id or None,
-        "top_victim_corp_name": None,
-        "top_victim_corp_kills": top_victim_corp_kills,
+        "top_attacker_corp_id": ents["top_attacker_corp_id"],
+        "top_attacker_corp_name": names.get(ents["top_attacker_corp_id"]),
+        "top_attacker_corp_kills": ents["top_attacker_corp_kills"],
+        "top_attacker_alliance_id": ents["top_attacker_alliance_id"],
+        "top_attacker_alliance_name": names.get(ents["top_attacker_alliance_id"]),
+        "top_victim_corp_id": ents["top_victim_corp_id"],
+        "top_victim_corp_name": names.get(ents["top_victim_corp_id"]),
+        "top_victim_corp_kills": ents["top_victim_corp_kills"],
+        "top_victim_alliance_id": ents["top_victim_alliance_id"],
+        "top_victim_alliance_name": names.get(ents["top_victim_alliance_id"]),
         "top_ships_json": json.dumps([{"id": sid, "count": n} for sid, n in top_ships]),
         "killmail_ids_json": json.dumps([k["kill_id"] for k in kills]),
     }
@@ -269,8 +281,16 @@ async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
                 "kill_count": stmt.excluded.kill_count,
                 "pilots_involved": stmt.excluded.pilots_involved,
                 "total_isk": stmt.excluded.total_isk,
+                "top_attacker_corp_id": stmt.excluded.top_attacker_corp_id,
+                "top_attacker_corp_name": stmt.excluded.top_attacker_corp_name,
+                "top_attacker_corp_kills": stmt.excluded.top_attacker_corp_kills,
+                "top_attacker_alliance_id": stmt.excluded.top_attacker_alliance_id,
+                "top_attacker_alliance_name": stmt.excluded.top_attacker_alliance_name,
                 "top_victim_corp_id": stmt.excluded.top_victim_corp_id,
+                "top_victim_corp_name": stmt.excluded.top_victim_corp_name,
                 "top_victim_corp_kills": stmt.excluded.top_victim_corp_kills,
+                "top_victim_alliance_id": stmt.excluded.top_victim_alliance_id,
+                "top_victim_alliance_name": stmt.excluded.top_victim_alliance_name,
                 "top_ships_json": stmt.excluded.top_ships_json,
                 "killmail_ids_json": stmt.excluded.killmail_ids_json,
             },
@@ -459,8 +479,13 @@ async def _handle_kill(ev: dict, our_ids: set[int]) -> None:
         "kill_time": kt,
         "victim_id": victim.get("character_id"),
         "victim_corp_id": victim.get("corporation_id"),
+        "victim_alliance_id": victim.get("alliance_id"),
         "victim_ship_id": victim.get("ship_type_id"),
         "attacker_ids": attacker_ids,
+        "attacker_orgs": [
+            (a.get("character_id"), a.get("corporation_id"), a.get("alliance_id"))
+            for a in attackers if a.get("character_id")
+        ],
         "value": float(zkb.get("totalValue") or 0),
     }
 

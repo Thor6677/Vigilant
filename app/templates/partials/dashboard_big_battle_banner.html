@@ -1,24 +1,38 @@
-{# Active big-battle banner — only fires for genuinely-large fleet engagements
-   (per-band thresholds in active_big_battle()). Clicking opens zKillboard. #}
-<a href="https://zkillboard.com/system/{{ battle['system_id'] }}/" target="_blank" rel="noopener"
-   style="text-decoration:none;color:inherit;display:block;">
-<div class="b-section" style="border-left:3px solid #e53e3e;margin-bottom:0.75rem;cursor:pointer;">
-    <div style="padding:0.6rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
-        <div>
-            <span class="b-label" style="color:#e53e3e;">Active Battle</span>
-            <span style="font-size:13px;margin-left:0.5rem;color:var(--fg);">
-                {{ battle['system_name'] or battle['system_id'] }}
-                {% if battle['group_label'] %}<span style="color:var(--muted);font-size:10px;letter-spacing:0.1em;"> · {{ battle['group_label'] }}</span>{% endif %}
-            </span>
-        </div>
-        <div style="font-size:11px;color:var(--muted);">
-            <b style="color:var(--fg);font-family:monospace;">{{ battle['kill_count'] }}</b> kills
-            · <b style="color:var(--fg);font-family:monospace;">{{ battle['pilots_involved'] }}</b> pilots
-            {% if battle['total_isk'] %}
-            · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
-            {% endif %}
-            <span style="margin-left:0.5rem;color:var(--accent);">↗ zKB</span>
+{# Active big-battle banner — up to 3 entries balanced across NS/LS/WH.
+   Per-band thresholds in active_big_battles(). Each row links to zKB. #}
+<div style="margin-bottom:0.75rem;display:flex;flex-direction:column;gap:4px;">
+    {% for battle in battles %}
+    {% set band_short = {'Highsec':'HS','Lowsec':'LS','Nullsec':'NS','w-space':'WH'}.get(battle['band'], '?') %}
+    {% set band_color = {'Highsec':'#7fd99a','Lowsec':'#e0a85a','Nullsec':'#e07a7a','w-space':'#7fb8e0'}.get(battle['band'], '#aaa') %}
+    <a href="https://zkillboard.com/system/{{ battle['system_id'] }}/" target="_blank" rel="noopener"
+       style="text-decoration:none;color:inherit;display:block;">
+    <div class="b-section" style="border-left:3px solid #e53e3e;cursor:pointer;">
+        <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+            <div>
+                <span class="b-label" style="color:#e53e3e;">Active Battle</span>
+                <span style="font-family:monospace;font-size:9px;letter-spacing:0.1em;padding:1px 5px;margin-left:0.4rem;background:rgba(255,255,255,0.06);color:{{ band_color }};">{{ band_short }}</span>
+                <span style="font-size:13px;margin-left:0.4rem;color:var(--fg);">
+                    {{ battle['system_name'] or battle['system_id'] }}
+                    {% if battle['group_label'] %}<span style="color:var(--muted);font-size:10px;letter-spacing:0.1em;"> · {{ battle['group_label'] }}</span>{% endif %}
+                </span>
+                {% if battle['attacker_label'] or battle['victim_label'] %}
+                <div style="font-size:10px;color:var(--muted);margin-top:2px;">
+                    <span style="color:#e07a7a;">{{ battle['attacker_label'] or '—' }}</span>
+                    <span style="color:var(--muted);margin:0 4px;">vs</span>
+                    <span style="color:#7fb8e0;">{{ battle['victim_label'] or '—' }}</span>
+                </div>
+                {% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--muted);">
+                <b style="color:var(--fg);font-family:monospace;">{{ battle['kill_count'] }}</b> kills
+                · <b style="color:var(--fg);font-family:monospace;">{{ battle['pilots_involved'] }}</b> pilots
+                {% if battle['total_isk'] %}
+                · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
+                {% endif %}
+                <span style="margin-left:0.4rem;color:var(--accent);">↗ zKB</span>
+            </div>
         </div>
     </div>
+    </a>
+    {% endfor %}
 </div>
-</a>

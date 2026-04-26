@@ -184,6 +184,11 @@ async def startup():
             # skips existing tables, so these need explicit DDL.
             "CREATE INDEX IF NOT EXISTS ix_killmail_system_time ON killmails(solar_system_id, killmail_time)",
             "CREATE INDEX IF NOT EXISTS ix_esi_cache_expires_at ON esi_cache(expires_at)",
+            # Top combatant alliance for major-battles widget
+            "ALTER TABLE detected_battles ADD COLUMN top_attacker_alliance_id INTEGER",
+            "ALTER TABLE detected_battles ADD COLUMN top_attacker_alliance_name TEXT",
+            "ALTER TABLE detected_battles ADD COLUMN top_victim_alliance_id INTEGER",
+            "ALTER TABLE detected_battles ADD COLUMN top_victim_alliance_name TEXT",
         ]:
             try:
                 await db.execute(text(stmt))

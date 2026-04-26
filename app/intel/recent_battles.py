@@ -88,6 +88,96 @@ def sec_band(sec: float | None) -> str:
     return "Nullsec"
 
 
+# Process-level cache for entity ID → name. Alliance/corp names are stable
+# enough that a single fetch per process is plenty for our purposes.
+_entity_name_cache: dict[int, str | None] = {}
+
+
+async def resolve_entity_names(ids: list[int]) -> dict[int, str]:
+    """Resolve a mixed list of corp/alliance IDs to names via ESI bulk
+    /universe/names/. Returns {id: name} for resolved IDs only. Caches in
+    process; safe to call with overlapping IDs from many call sites."""
+    out: dict[int, str] = {}
+    missing: list[int] = []
+    for i in ids:
+        if not i:
+            continue
+        if i in _entity_name_cache:
+            n = _entity_name_cache[i]
+            if n:
+                out[i] = n
+        else:
+            missing.append(i)
+    if not missing:
+        return out
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            for chunk_start in range(0, len(missing), 1000):
+                chunk = missing[chunk_start:chunk_start + 1000]
+                resp = await http.post(
+                    "https://esi.evetech.net/latest/universe/names/",
+                    json=chunk,
+                    headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
+                )
+                if resp.status_code != 200:
+                    # Negative-cache the chunk so we don't keep retrying bad IDs
+                    for i in chunk:
+                        _entity_name_cache.setdefault(i, None)
+                    continue
+                seen: set[int] = set()
+                for entry in resp.json():
+                    eid = entry.get("id")
+                    name = entry.get("name")
+                    if isinstance(eid, int) and isinstance(name, str):
+                        _entity_name_cache[eid] = name
+                        out[eid] = name
+                        seen.add(eid)
+                for i in chunk:
+                    if i not in seen:
+                        _entity_name_cache.setdefault(i, None)
+    except Exception as e:
+        log.debug("resolve_entity_names: %s", e)
+    return out
+
+
+def pick_top_entities(
+    attacker_pilots: dict[int, tuple[int | None, int | None]],
+    victim_pilots: dict[int, tuple[int | None, int | None]],
+) -> dict:
+    """Pick the dominant attacker and victim entities by unique-pilot count.
+    Each input maps character_id → (corporation_id, alliance_id). Alliance
+    is preferred over corp for the chosen entity (in EVE, fleets fight under
+    alliance banners more meaningfully than per-corp). Returns dict with
+    keys: top_attacker_corp_id/_kills, top_attacker_alliance_id,
+    top_victim_corp_id/_kills, top_victim_alliance_id."""
+    def _tally(pilots: dict[int, tuple[int | None, int | None]]):
+        corp_pilots: dict[int, set[int]] = {}
+        alliance_pilots: dict[int, set[int]] = {}
+        for cid, (corp_id, alliance_id) in pilots.items():
+            if corp_id:
+                corp_pilots.setdefault(corp_id, set()).add(cid)
+            if alliance_id:
+                alliance_pilots.setdefault(alliance_id, set()).add(cid)
+        top_corp = max(corp_pilots.items(), key=lambda x: len(x[1]), default=(None, set()))
+        top_alli = max(alliance_pilots.items(), key=lambda x: len(x[1]), default=(None, set()))
+        return {
+            "corp_id": top_corp[0],
+            "corp_pilots": len(top_corp[1]),
+            "alliance_id": top_alli[0],
+        }
+
+    a = _tally(attacker_pilots)
+    v = _tally(victim_pilots)
+    return {
+        "top_attacker_corp_id": a["corp_id"],
+        "top_attacker_corp_kills": a["corp_pilots"],
+        "top_attacker_alliance_id": a["alliance_id"],
+        "top_victim_corp_id": v["corp_id"],
+        "top_victim_corp_kills": v["corp_pilots"],
+        "top_victim_alliance_id": v["alliance_id"],
+    }
+
+
 async def _find_busy_systems() -> list[int]:
     """Seed the discovery from SystemActivitySnapshot — pick systems above the
     kill threshold. Avoids zKB's entity-filter restriction entirely."""
@@ -262,28 +352,44 @@ async def _cluster_system(
     if not clusters:
         return []
 
-    # Batched lookup: unique pilots per kill (attackers ∪ victim). One pair of
-    # queries per system covers every cluster. Attackers are stored for all
-    # kills (not just our-char), so discovery-scope clusters count correctly.
+    # Batched lookup: unique pilots per kill plus corp/alliance for each
+    # pilot so we can derive the dominant attacker/victim entities.
     all_cluster_km_ids = [km["killmail_id"] for c in clusters for km in c]
     attackers_by_km: dict[int, set[int]] = {}
     victims_by_km: dict[int, int] = {}
+    # character_id -> (corp_id, alliance_id) for each side, scoped per cluster
+    attacker_pilot_orgs: dict[int, dict[int, tuple[int | None, int | None]]] = {}
+    victim_pilot_orgs: dict[int, dict[int, tuple[int | None, int | None]]] = {}
     if all_cluster_km_ids:
         async with AsyncSessionLocal() as db:
             arows = await db.execute(
-                select(KillmailAttacker.killmail_id, KillmailAttacker.character_id)
+                select(
+                    KillmailAttacker.killmail_id,
+                    KillmailAttacker.character_id,
+                    KillmailAttacker.corporation_id,
+                    KillmailAttacker.alliance_id,
+                )
                 .where(KillmailAttacker.killmail_id.in_(all_cluster_km_ids))
                 .where(KillmailAttacker.character_id.is_not(None))
             )
-            for kid, cid in arows.all():
+            attacker_orgs_by_km: dict[int, list[tuple[int, int | None, int | None]]] = {}
+            for kid, cid, corp, alli in arows.all():
                 attackers_by_km.setdefault(kid, set()).add(cid)
+                attacker_orgs_by_km.setdefault(kid, []).append((cid, corp, alli))
             vrows = await db.execute(
-                select(Killmail.killmail_id, Killmail.victim_character_id)
+                select(
+                    Killmail.killmail_id,
+                    Killmail.victim_character_id,
+                    Killmail.victim_corporation_id,
+                    Killmail.victim_alliance_id,
+                )
                 .where(Killmail.killmail_id.in_(all_cluster_km_ids))
                 .where(Killmail.victim_character_id.is_not(None))
             )
-            for kid, cid in vrows.all():
+            victim_orgs_by_km: dict[int, tuple[int, int | None, int | None]] = {}
+            for kid, cid, corp, alli in vrows.all():
                 victims_by_km[kid] = cid
+                victim_orgs_by_km[kid] = (cid, corp, alli)
 
     band_is_wspace = sys_meta.get("band") == "w-space"
     min_pilots = MIN_PILOTS_WSPACE if band_is_wspace else MIN_PILOTS_KSPACE
@@ -297,8 +403,10 @@ async def _cluster_system(
         kill_count = len(c)
         total_isk = 0.0
         ship_counter: Counter = Counter()
-        victim_corps: Counter = Counter()
         pilots: set = set()
+        # char_id -> (corp_id, alliance_id) on each side, deduped per cluster
+        attacker_pilots: dict[int, tuple[int | None, int | None]] = {}
+        victim_pilots: dict[int, tuple[int | None, int | None]] = {}
         for km in c:
             kid = km["killmail_id"]
             h = hydrated.get(kid)
@@ -308,22 +416,31 @@ async def _cluster_system(
             sid = h.get("victim_ship_type_id")
             if sid:
                 ship_counter[sid] += 1
-            vc = h.get("victim_corporation_id")
-            if vc:
-                victim_corps[vc] += 1
+            for cid, corp, alli in attacker_orgs_by_km.get(kid, []):
+                attacker_pilots.setdefault(cid, (corp, alli))
+            v = victim_orgs_by_km.get(kid)
+            if v:
+                vid, vcorp, valli = v
+                victim_pilots.setdefault(vid, (vcorp, valli))
             pilots.update(attackers_by_km.get(kid, set()))
             v_cid = victims_by_km.get(kid)
             if v_cid:
                 pilots.add(v_cid)
         if not ship_counter:
-            continue  # cluster had no hydrated data — skip this run, try next
+            continue
         if len(pilots) < min_pilots:
-            continue  # below per-band pilot threshold
+            continue
         top_ships = [
             {"id": sid, "count": n}
             for sid, n in ship_counter.most_common(5)
         ]
-        top_victim_corp_id, top_victim_corp_kills = (victim_corps.most_common(1) or [(None, 0)])[0]
+        ents = pick_top_entities(attacker_pilots, victim_pilots)
+        names = await resolve_entity_names([
+            i for i in (
+                ents["top_attacker_corp_id"], ents["top_attacker_alliance_id"],
+                ents["top_victim_corp_id"], ents["top_victim_alliance_id"],
+            ) if i
+        ])
         out.append({
             "system_id": system_id,
             "system_name": sys_meta.get("system_name"),
@@ -336,12 +453,16 @@ async def _cluster_system(
             "kill_count": kill_count,
             "pilots_involved": len(pilots),
             "total_isk": total_isk,
-            "top_attacker_corp_id": None,
-            "top_attacker_corp_name": None,
-            "top_attacker_corp_kills": 0,
-            "top_victim_corp_id": top_victim_corp_id,
-            "top_victim_corp_name": None,
-            "top_victim_corp_kills": top_victim_corp_kills,
+            "top_attacker_corp_id": ents["top_attacker_corp_id"],
+            "top_attacker_corp_name": names.get(ents["top_attacker_corp_id"]),
+            "top_attacker_corp_kills": ents["top_attacker_corp_kills"],
+            "top_attacker_alliance_id": ents["top_attacker_alliance_id"],
+            "top_attacker_alliance_name": names.get(ents["top_attacker_alliance_id"]),
+            "top_victim_corp_id": ents["top_victim_corp_id"],
+            "top_victim_corp_name": names.get(ents["top_victim_corp_id"]),
+            "top_victim_corp_kills": ents["top_victim_corp_kills"],
+            "top_victim_alliance_id": ents["top_victim_alliance_id"],
+            "top_victim_alliance_name": names.get(ents["top_victim_alliance_id"]),
             "top_ships_json": json.dumps(top_ships),
             "killmail_ids_json": json.dumps([km["killmail_id"] for km in c]),
         })
@@ -409,8 +530,16 @@ async def discover_and_persist_battles() -> dict:
                     "kill_count": stmt.excluded.kill_count,
                     "pilots_involved": stmt.excluded.pilots_involved,
                     "total_isk": stmt.excluded.total_isk,
+                    "top_attacker_corp_id": stmt.excluded.top_attacker_corp_id,
+                    "top_attacker_corp_name": stmt.excluded.top_attacker_corp_name,
+                    "top_attacker_corp_kills": stmt.excluded.top_attacker_corp_kills,
+                    "top_attacker_alliance_id": stmt.excluded.top_attacker_alliance_id,
+                    "top_attacker_alliance_name": stmt.excluded.top_attacker_alliance_name,
                     "top_victim_corp_id": stmt.excluded.top_victim_corp_id,
+                    "top_victim_corp_name": stmt.excluded.top_victim_corp_name,
                     "top_victim_corp_kills": stmt.excluded.top_victim_corp_kills,
+                    "top_victim_alliance_id": stmt.excluded.top_victim_alliance_id,
+                    "top_victim_alliance_name": stmt.excluded.top_victim_alliance_name,
                     "top_ships_json": stmt.excluded.top_ships_json,
                     "killmail_ids_json": stmt.excluded.killmail_ids_json,
                 },
@@ -452,6 +581,10 @@ async def query_battles_window(days: int = 7, per_group: int = BATTLES_PER_GROUP
                 DetectedBattle.pilots_involved,
                 DetectedBattle.total_isk,
                 DetectedBattle.top_ships_json,
+                DetectedBattle.top_attacker_corp_name,
+                DetectedBattle.top_attacker_alliance_name,
+                DetectedBattle.top_victim_corp_name,
+                DetectedBattle.top_victim_alliance_name,
             )
             .where(DetectedBattle.start_time >= cutoff)
             .order_by(DetectedBattle.kill_count.desc())
@@ -473,6 +606,8 @@ async def query_battles_window(days: int = 7, per_group: int = BATTLES_PER_GROUP
                 "pilots_involved": row[9],
                 "total_isk": row[10],
                 "top_ships": json.loads(row[11] or "[]"),
+                "attacker_label": row[14] or row[13],  # alliance over corp
+                "victim_label": row[16] or row[15],
             })
     return dict(out)
 
@@ -483,25 +618,36 @@ BIG_BATTLE_WSPACE_KILLS = 15
 BIG_BATTLE_WSPACE_PILOTS = 15
 
 
-async def active_big_battle() -> dict | None:
-    """Return the most recent genuinely-big battle ended <30 min ago.
-    Per-band thresholds: K-space requires more kills+pilots than W-space
-    because K-space brawls are common; W-space fleets are rarer and smaller."""
+BANNER_CATEGORIES = ["Nullsec", "Lowsec", "w-space"]
+BANNER_MAX = 3
+
+
+async def active_big_battles() -> list[dict]:
+    """Return up to 3 active big battles (ended <30 min ago), balanced across
+    Nullsec / Lowsec / w-space. Picks the top battle per category first, then
+    fills remaining slots from the largest leftovers (any of the three bands).
+    Highsec is excluded — fleet brawls there are rare/CONCORD-shaped."""
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(tzinfo=None)
     from sqlalchemy import or_, and_
     async with AsyncSessionLocal() as db:
-        row = (await db.execute(
+        rows = (await db.execute(
             select(
                 DetectedBattle.system_id,
                 DetectedBattle.system_name,
                 DetectedBattle.group_label,
+                DetectedBattle.band,
                 DetectedBattle.start_time,
                 DetectedBattle.end_time,
                 DetectedBattle.kill_count,
                 DetectedBattle.pilots_involved,
                 DetectedBattle.total_isk,
+                DetectedBattle.top_attacker_corp_name,
+                DetectedBattle.top_attacker_alliance_name,
+                DetectedBattle.top_victim_corp_name,
+                DetectedBattle.top_victim_alliance_name,
             )
             .where(DetectedBattle.end_time >= cutoff)
+            .where(DetectedBattle.band.in_(BANNER_CATEGORIES))
             .where(or_(
                 and_(
                     DetectedBattle.band == "w-space",
@@ -515,17 +661,46 @@ async def active_big_battle() -> dict | None:
                 ),
             ))
             .order_by(DetectedBattle.kill_count.desc())
-            .limit(1)
-        )).first()
-    if not row:
-        return None
-    return {
-        "system_id": row[0],
-        "system_name": row[1],
-        "group_label": row[2],
-        "start_time": row[3],
-        "end_time": row[4],
-        "kill_count": row[5],
-        "pilots_involved": row[6],
-        "total_isk": row[7],
-    }
+            .limit(BANNER_MAX * len(BANNER_CATEGORIES))
+        )).all()
+
+    def _row_to_dict(r) -> dict:
+        return {
+            "system_id": r[0],
+            "system_name": r[1],
+            "group_label": r[2],
+            "band": r[3],
+            "start_time": r[4],
+            "end_time": r[5],
+            "kill_count": r[6],
+            "pilots_involved": r[7],
+            "total_isk": r[8],
+            "attacker_label": r[10] or r[9],
+            "victim_label": r[12] or r[11],
+        }
+
+    by_cat: dict[str, list] = {c: [] for c in BANNER_CATEGORIES}
+    for r in rows:
+        band = r[3]
+        if band in by_cat:
+            by_cat[band].append(r)
+
+    selected: list = []
+    used_keys: set = set()
+    # Pass 1: top from each category if present
+    for cat in BANNER_CATEGORIES:
+        if by_cat[cat]:
+            r = by_cat[cat][0]
+            selected.append(r)
+            used_keys.add((r[0], r[4]))
+            if len(selected) >= BANNER_MAX:
+                break
+    # Pass 2: fill remaining slots from leftover rows by kill_count desc
+    if len(selected) < BANNER_MAX:
+        leftovers = [r for r in rows if (r[0], r[4]) not in used_keys]
+        for r in leftovers:
+            selected.append(r)
+            if len(selected) >= BANNER_MAX:
+                break
+
+    return [_row_to_dict(r) for r in selected]
