@@ -2,23 +2,21 @@
 
 J-systems have no canonical 2D positions in the SDE — wormhole connections
 rotate constantly so there's no static graph. This module groups the ~3000
-J-systems by wormhole class into a 3×3 grid of cells, hex-packs systems
-within each cell, and exposes the result in the same JSON shape as the
-k-space map's static bundles (`systems.json`, `edges.json`, `regions.json`)
-so the frontend can render it through the existing StarMap component.
+J-systems by wormhole class and lays them out as a hex-flower:
 
-Layout is deterministic (sorted by system_id within each class) and built
-once at startup — cached in memory and served by /api/map/wormholes-data/*.
+   - Center cluster: Thera + Drifter complexes + small shattered systems
+     (all the rare specials packed tightly at the origin).
+   - Outer hex ring: C1–C6, each its own circular cluster at one of the
+     six hexagonal points around the center.
+   - Outliers: the bigger shattered groups (class 19, 20–23) get their
+     own small clusters tucked between the hex ring and the center.
 
-Class buckets (3×3 grid, top-left → bottom-right):
-  C1  | C2  | C3
-  C4  | C5  | C6
-  Drft| Thra| Pchv
+Within each cluster, systems are distributed by Vogel's phyllotaxis
+("sunflower spiral") — no overlap, organic look, no rectangular grid
+artifacts.
 
-Where:
-- "Drft" cell: shattered (class 13) + small drifter complexes (14–18)
-- "Thra" cell: Thera (class 12)
-- "Pchv" cell: Pochven (class 25) + any leftover specials
+Layout is deterministic (sorted by system_id) and built once at first
+hit, cached in memory and served by /api/map/wormholes-data/*.
 """
 
 from __future__ import annotations
@@ -35,78 +33,83 @@ from app.sde import lookup as sde_lookup
 
 log = logging.getLogger(__name__)
 
-# Layout constants. Cell size and grid spacing chosen so the whole map is
-# visually similar in scale to k-space (~5000 units across).
-_CELL_SIZE = 1500.0
-_CELL_GAP = 200.0
-_GRID_ORIGIN_X = -((_CELL_SIZE * 3 + _CELL_GAP * 2) / 2)
-_GRID_ORIGIN_Y = -((_CELL_SIZE * 3 + _CELL_GAP * 2) / 2)
+# Layout origin in world coordinates. Matches CANVAS_SIZE/2 in the
+# frontend (constants.ts CANVAS_SIZE=10000) so the viewport's default
+# moveCenter(CANVAS_SIZE/2, CANVAS_SIZE/2) lands on us.
+_ORIGIN_X = 5000.0
+_ORIGIN_Y = 5000.0
 
-# Bucket → (col, row, label)
-_BUCKETS: dict[str, tuple[int, int, str]] = {
-    "c1":      (0, 0, "C1"),
-    "c2":      (1, 0, "C2"),
-    "c3":      (2, 0, "C3"),
-    "c4":      (0, 1, "C4"),
-    "c5":      (1, 1, "C5"),
-    "c6":      (2, 1, "C6"),
-    "drifter": (0, 2, "Drifter / Shattered"),
-    "thera":   (1, 2, "Thera"),
-    "pochven": (2, 2, "Pochven / Special"),
+# Hex-ring radius (distance from origin to each C1-C6 cluster center).
+_HEX_RING_RADIUS = 1400.0
+
+# Maximum cluster radius (per-class). Picked so clusters don't overlap on
+# the hex ring (chord between adjacent hex points = ring radius = 1400).
+_CLUSTER_RADIUS_MAX = 600.0
+
+# Center cluster radius for specials (Thera + drifter complexes).
+_CENTER_CLUSTER_RADIUS = 280.0
+
+
+# Bucket → (display_label, optional fixed center offset relative to origin).
+# C1–C6 are placed on the hex ring (None means "compute by hex angle").
+# Specials cluster around the center.
+_BUCKETS: dict[str, tuple[str, tuple[float, float] | None]] = {
+    "c1":         ("C1",                 None),  # hex ring slot 0 (north)
+    "c2":         ("C2",                 None),  # slot 1 (NE)
+    "c3":         ("C3",                 None),  # slot 2 (SE)
+    "c4":         ("C4",                 None),  # slot 3 (south)
+    "c5":         ("C5",                 None),  # slot 4 (SW)
+    "c6":         ("C6",                 None),  # slot 5 (NW)
+    "specials":   ("Thera / Drifter",    (0.0, 0.0)),
+    "shattered":  ("Shattered",          (-700.0, 0.0)),
+    "triglavian": ("Triglavian",         (700.0, 0.0)),
 }
+
+# Hex-ring slot order: 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW
+_HEX_ORDER = ["c1", "c2", "c3", "c4", "c5", "c6"]
 
 
 def _classify(wh_class: int | None) -> str | None:
-    """Map a raw wormhole class id to one of our 9 buckets, or None to drop."""
     if wh_class is None:
         return None
     if 1 <= wh_class <= 6:
         return f"c{wh_class}"
     if wh_class == 12:
-        return "thera"
-    if wh_class in (13, 14, 15, 16, 17, 18, 19):
-        return "drifter"
-    if wh_class == 25:
-        return "pochven"
-    if wh_class in (10, 11, 20, 21, 22, 23):
-        return "pochven"
+        return "specials"  # Thera
+    if wh_class in (13, 14, 15, 16, 17, 18):
+        return "specials"  # Drifter complexes + drifter shattered
+    if wh_class == 19:
+        return "shattered"
+    if wh_class in (20, 21, 22, 23, 25):
+        return "triglavian"
     return None
 
 
-def _cell_origin(col: int, row: int) -> tuple[float, float]:
+def _hex_ring_position(slot: int) -> tuple[float, float]:
+    # slot 0 = north (-y), then clockwise. Pixi uses y-down.
+    angle = -math.pi / 2 + slot * (math.pi / 3)
     return (
-        _GRID_ORIGIN_X + col * (_CELL_SIZE + _CELL_GAP),
-        _GRID_ORIGIN_Y + row * (_CELL_SIZE + _CELL_GAP),
+        _HEX_RING_RADIUS * math.cos(angle),
+        _HEX_RING_RADIUS * math.sin(angle),
     )
 
 
-def _hex_pack(n: int) -> list[tuple[float, float]]:
-    """Return n positions hex-packed inside a unit square [0,1]×[0,1].
-
-    Picks a square-ish grid, applies row-offset for hex packing, scales to
-    fit within the unit square with a small margin.
+def _phyllotaxis(n: int, radius: float) -> list[tuple[float, float]]:
+    """Vogel's sunflower spiral. Distributes n points evenly within a
+    disk of given radius. No overlaps, no obvious rows, looks organic.
     """
     if n <= 0:
         return []
-    # Roughly square grid: cols ≈ rows ≈ sqrt(n) but biased to slightly more
-    # cols since the cell is square and hex offsets cost vertical room.
-    cols = max(1, int(math.ceil(math.sqrt(n * 1.15))))
-    rows = max(1, int(math.ceil(n / cols)))
-    margin = 0.06
-    avail = 1.0 - 2 * margin
-    dx = avail / max(1, cols - 1) if cols > 1 else 0.0
-    dy = avail / max(1, rows - 1) if rows > 1 else 0.0
-    pos: list[tuple[float, float]] = []
+    if n == 1:
+        return [(0.0, 0.0)]
+    golden_angle = math.pi * (3 - math.sqrt(5))  # ~137.5°
+    out: list[tuple[float, float]] = []
     for i in range(n):
-        r = i // cols
-        c = i % cols
-        x = margin + c * dx
-        if r % 2 == 1:
-            x += dx * 0.5  # hex offset
-            x = min(x, 1.0 - margin)
-        y = margin + r * dy
-        pos.append((x, y))
-    return pos
+        # Vogel's formula. The +0.5 keeps i=0 off the exact origin.
+        r = radius * math.sqrt((i + 0.5) / n)
+        theta = i * golden_angle
+        out.append((r * math.cos(theta), r * math.sin(theta)))
+    return out
 
 
 _layout_cache: dict[str, Any] | None = None
@@ -114,8 +117,8 @@ _layout_cache: dict[str, Any] | None = None
 
 async def build_wormhole_layout() -> dict[str, Any]:
     """Compute the wormhole-space layout. Idempotent — caches the first
-    result. Returns a dict with three keys: systems, edges, regions —
-    matching the shape of the static k-space bundles.
+    result. Returns {systems, edges, regions} matching the k-space bundle
+    shape so the frontend can use the same useMapData hook.
     """
     global _layout_cache
     if _layout_cache is not None:
@@ -133,13 +136,9 @@ async def build_wormhole_layout() -> dict[str, Any]:
             ).where(SDESystem.system_id >= 31000000)
         )).all()
 
-    # Access through the module so we see the populated dict (importing the
-    # name directly would bind to None forever — Python doesn't re-bind
-    # `from x import y` when the module reassigns y).
     cache = sde_lookup._wh_class_cache or {}
 
-    # Group J-systems into buckets, remembering each system's resolved
-    # wormhole_class_id so the frontend can render a per-class overlay.
+    # Group J-systems into layout buckets.
     grouped: dict[str, list[tuple[int, str, float | None, int | None, int | None, int | None]]] = {
         k: [] for k in _BUCKETS
     }
@@ -158,16 +157,33 @@ async def build_wormhole_layout() -> dict[str, Any]:
 
     systems: list[dict] = []
     regions: list[dict] = []
-    for bucket, (col, row, label) in _BUCKETS.items():
-        ox, oy = _cell_origin(col, row)
-        members = grouped[bucket]
-        positions = _hex_pack(len(members))
+
+    for bucket, members in grouped.items():
+        label, fixed_offset = _BUCKETS[bucket]
+        if fixed_offset is not None:
+            cx, cy = _ORIGIN_X + fixed_offset[0], _ORIGIN_Y + fixed_offset[1]
+            # Shrink secondary cluster radius to ~280 since these are
+            # smaller, dense groups crowded near the center.
+            if bucket == "specials":
+                cluster_r = _CENTER_CLUSTER_RADIUS
+            else:
+                # Scale by sqrt of count, capped to a sensible max.
+                cluster_r = min(_CLUSTER_RADIUS_MAX * 0.7, 80.0 + 18.0 * math.sqrt(len(members)))
+        else:
+            slot = _HEX_ORDER.index(bucket)
+            ox, oy = _hex_ring_position(slot)
+            cx, cy = _ORIGIN_X + ox, _ORIGIN_Y + oy
+            # Hex-ring clusters: scale by count so big classes get bigger
+            # circles, but cap at the layout-safe max.
+            cluster_r = min(_CLUSTER_RADIUS_MAX, 80.0 + 22.0 * math.sqrt(len(members)))
+
+        positions = _phyllotaxis(len(members), cluster_r)
         for (sid, name, sec, con_id, reg_id, wh), (px, py) in zip(members, positions):
             systems.append({
                 "id": int(sid),
                 "name": name,
-                "x": ox + px * _CELL_SIZE,
-                "y": oy + py * _CELL_SIZE,
+                "x": cx + px,
+                "y": cy + py,
                 "sec": float(sec) if sec is not None else 0.0,
                 "conId": int(con_id) if con_id else 0,
                 "conName": "",
@@ -181,15 +197,18 @@ async def build_wormhole_layout() -> dict[str, Any]:
                 "z3": 0.0,
                 "whClass": int(wh) if wh is not None else None,
             })
-        # Region label centered in the cell.
+        # Synthetic region label centered on the cluster. Negative ids so
+        # they don't collide with SDE region ids.
         regions.append({
-            "id": -col - row * 3 - 1,  # synthetic negative id, won't collide with SDE
+            "id": -(list(_BUCKETS).index(bucket) + 1),
             "name": label,
-            "cx": ox + _CELL_SIZE / 2,
-            "cy": oy + _CELL_SIZE / 2,
+            "cx": cx,
+            "cy": cy - cluster_r - 60.0,  # label sits above the cluster
         })
 
-    log.info("wormhole layout: %d systems placed across %d cells (skipped %d)",
-             len(systems), len(_BUCKETS), skipped)
+    log.info(
+        "wormhole layout: %d systems placed across %d clusters (skipped %d)",
+        len(systems), len(_BUCKETS), skipped,
+    )
     _layout_cache = {"systems": systems, "edges": [], "regions": regions}
     return _layout_cache
