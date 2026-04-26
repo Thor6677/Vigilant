@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from app.db.models import AsyncSessionLocal
 from app.db.sde_models import SDESystem
-from app.sde.lookup import _ensure_wh_class_cache, _wh_class_cache  # type: ignore
+from app.sde import lookup as sde_lookup
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def build_wormhole_layout() -> dict[str, Any]:
         return _layout_cache
 
     async with AsyncSessionLocal() as db:
-        await _ensure_wh_class_cache(db)
+        await sde_lookup._ensure_wh_class_cache(db)
         rows = (await db.execute(
             select(
                 SDESystem.system_id,
@@ -133,7 +133,10 @@ async def build_wormhole_layout() -> dict[str, Any]:
             ).where(SDESystem.system_id >= 31000000)
         )).all()
 
-    cache = _wh_class_cache or {}
+    # Access through the module so we see the populated dict (importing the
+    # name directly would bind to None forever — Python doesn't re-bind
+    # `from x import y` when the module reassigns y).
+    cache = sde_lookup._wh_class_cache or {}
 
     # Group J-systems into buckets, remembering each system's resolved
     # wormhole_class_id so the frontend can render a per-class overlay.
