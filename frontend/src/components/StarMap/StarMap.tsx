@@ -400,26 +400,53 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       // existing heatmapColor ramp for visual consistency with the
       // shipKills/podKills overlays.
       //
-      // When playing, lerp the value between bucket i and i+1 by
-      // playProgress so the color fades smoothly hour-to-hour. Lerping
-      // the value (not the color) is correct because heatmapColor is
-      // non-linear in t — lerping colors directly would give wrong
-      // intermediate hues.
+      // Paused view: lerp the kill *value* (not color) between bucket i
+      // and i+1 by playProgress. Lerping the color directly would give
+      // wrong intermediate hues since heatmapColor is non-linear.
+      //
+      // Playing at minute resolution (1d window): each bucket is on
+      // screen for ~31ms — too fast to spot a brief kill. Switch to a
+      // spark-and-decay model: the current bucket's value flashes at
+      // full intensity and decays exponentially over ~30 past buckets
+      // (~1s of playback time), so kills linger as a fading afterglow.
+      // Daily-resolution windows (7d/30d) already show each bucket for
+      // >1s, so they keep the simple lerp.
       const hm = killHeatmap.data;
       const max = hm?.max_value ?? 0;
       if (hm && max > 0) {
         const i = killHeatmapBucketIdx;
-        const j = Math.min(i + 1, hm.buckets.length - 1);
         const p = killHeatmapPlaying ? killHeatmapPlayProgress : 0;
-        const oneMinusP = 1 - p;
-        for (const sys of data.systems) {
-          const arr = hm.lookup.get(sys.id);
-          if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
-          const v0 = arr[i] || 0;
-          const v1 = arr[j] || 0;
-          const v = v0 * oneMinusP + v1 * p;
-          if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
-          tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+        const useDecay = killHeatmapPlaying && hm.bucket_seconds === 60;
+        if (useDecay) {
+          const DECAY = 0.92;
+          const K = 30;
+          // Pre-compute per-frame weights so the inner loop is a single
+          // multiply per past bucket.
+          const weights = new Array<number>(K + 1);
+          weights[0] = Math.pow(DECAY, p);
+          for (let k = 1; k <= K; k++) weights[k] = weights[k - 1] * DECAY;
+          for (const sys of data.systems) {
+            const arr = hm.lookup.get(sys.id);
+            if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
+            let v = (arr[i] || 0) * weights[0];
+            const limit = Math.min(K, i);
+            for (let k = 1; k <= limit; k++) {
+              const past = (arr[i - k] || 0) * weights[k];
+              if (past > v) v = past;
+            }
+            if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
+            tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+          }
+        } else {
+          const j = Math.min(i + 1, hm.buckets.length - 1);
+          const oneMinusP = 1 - p;
+          for (const sys of data.systems) {
+            const arr = hm.lookup.get(sys.id);
+            if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
+            const v = (arr[i] || 0) * oneMinusP + (arr[j] || 0) * p;
+            if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
+            tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+          }
         }
       } else {
         for (const sys of data.systems) tints.set(sys.id, 0x141414);
