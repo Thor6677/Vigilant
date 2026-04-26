@@ -52,6 +52,30 @@ def _etag_key(path: str, token: str) -> str:
     return f"{path}:{token[:16]}"
 
 
+# Global ESI throttle: a single asyncio.Event coordinates 429/420 backoff
+# across all in-flight coroutines. Without this, a fan-out of N requests
+# that all hit 429 each sleeps independently for `retry-after` seconds —
+# correct, but wasteful and (worse) every coroutine then races to retry
+# at the same instant, which can re-trigger the 429.
+_global_throttle = asyncio.Event()
+_global_throttle.set()
+_global_throttle_until: float = 0.0
+
+
+def _set_global_throttle(seconds: float) -> None:
+    """Block all ESI calls for `seconds`. If already blocked for longer, no-op."""
+    global _global_throttle_until
+    loop = asyncio.get_event_loop()
+    until = loop.time() + seconds
+    if until <= _global_throttle_until:
+        return
+    _global_throttle_until = until
+    _global_throttle.clear()
+    # Schedule the release. Using call_later avoids spawning a coroutine
+    # we'd have to track for cancellation.
+    loop.call_later(seconds, _global_throttle.set)
+
+
 def get_etag_cache_stats() -> dict:
     """Return ETag cache statistics for admin dashboard."""
     return {
@@ -192,6 +216,10 @@ class ESIClient:
         }
 
     async def _throttle_if_needed(self) -> None:
+        # Wait for any global ESI throttle (set by a sibling coroutine that
+        # hit 429/420) before consulting the per-group limiter.
+        if not _global_throttle.is_set():
+            await _global_throttle.wait()
         delay = rate_limit_tracker.throttle_delay()
         if delay > 0:
             await asyncio.sleep(delay)
@@ -254,12 +282,16 @@ class ESIClient:
         if resp.status_code == 429:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
             asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
-            await asyncio.sleep(retry_after)
+            # Block ALL ESI traffic for retry_after seconds. Sibling coroutines
+            # already in flight will await this event before their next call.
+            _set_global_throttle(retry_after)
+            await _global_throttle.wait()
             resp = await self._raw_get(url, self.headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code == 420:
             asyncio.create_task(log_event("420", path, dict(resp.headers)))
-            await asyncio.sleep(60)
+            _set_global_throttle(60)
+            await _global_throttle.wait()
             resp = await self._raw_get(url, self.headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code >= 500:
@@ -312,12 +344,14 @@ class ESIClient:
         if resp.status_code == 429:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
             asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
-            await asyncio.sleep(retry_after)
+            _set_global_throttle(retry_after)
+            await _global_throttle.wait()
             resp = await self._raw_get(url, pub_headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code == 420:
             asyncio.create_task(log_event("420", path, dict(resp.headers)))
-            await asyncio.sleep(60)
+            _set_global_throttle(60)
+            await _global_throttle.wait()
             resp = await self._raw_get(url, pub_headers, params or {})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code >= 500:
@@ -364,12 +398,14 @@ class ESIClient:
         if resp.status_code == 429:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
             asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
-            await asyncio.sleep(retry_after)
+            _set_global_throttle(retry_after)
+            await _global_throttle.wait()
             resp = await client.post(url, **kwargs)
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code == 420:
             asyncio.create_task(log_event("420", path, dict(resp.headers)))
-            await asyncio.sleep(60)
+            _set_global_throttle(60)
+            await _global_throttle.wait()
             resp = await client.post(url, **kwargs)
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
 
@@ -394,12 +430,14 @@ class ESIClient:
         if resp.status_code == 429:
             retry_after = int(float(resp.headers.get("retry-after", "60")))
             asyncio.create_task(log_event("429", path, dict(resp.headers), retry_after))
-            await asyncio.sleep(retry_after)
+            _set_global_throttle(retry_after)
+            await _global_throttle.wait()
             resp = await client.post(url, json=body, headers={"Accept": "application/json"})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         elif resp.status_code == 420:
             asyncio.create_task(log_event("420", path, dict(resp.headers)))
-            await asyncio.sleep(60)
+            _set_global_throttle(60)
+            await _global_throttle.wait()
             resp = await client.post(url, json=body, headers={"Accept": "application/json"})
             rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
 
