@@ -9,6 +9,7 @@ export class SystemRenderer {
   private sprites = new Map<number, Sprite>();
   private glowSprites = new Map<number, Sprite>();
   private systems: SystemData[] = [];
+  private systemById = new Map<number, SystemData>();
   private circleTexture: Texture | null = null;
   private glowTexture: Texture | null = null;
   private currentLOD: LODTier = LODTier.Galaxy;
@@ -21,7 +22,12 @@ export class SystemRenderer {
   private highlightedNeighbors: Set<number> | null = null;
   private persistentHighlightOrigin: number | null = null;
   private persistentHighlightIds: Set<number> | null = null;
-  private targetAlphas = new Map<number, number>(); // for smooth transitions
+  // Source of truth for each sprite's intended alpha. Default (absent key) = 1.
+  // Tracking this lets us write deltas only — the 99% of systems whose alpha
+  // doesn't change between hover/persistent transitions skip both the
+  // targetAlphas write AND the per-frame tick walk.
+  private currentLogicalAlpha = new Map<number, number>();
+  private targetAlphas = new Map<number, number>(); // active animations only
 
   // Selection ring
   private selectionRing = new Graphics();
@@ -29,6 +35,8 @@ export class SystemRenderer {
 
   init(app: Application, systems: SystemData[]) {
     this.systems = systems;
+    this.systemById.clear();
+    for (const sys of systems) this.systemById.set(sys.id, sys);
     this.container.label = 'systems';
     this.container.cullable = true;
 
@@ -106,25 +114,29 @@ export class SystemRenderer {
       this.selectionRing.alpha = 0.3 + pulse * 0.5;
     }
 
-    // Smooth alpha transitions for neighbor highlighting
+    // Smooth alpha transitions for neighbor highlighting. Settled entries
+    // are removed from targetAlphas regardless of value — currentLogicalAlpha
+    // tracks the steady state, so we don't need to keep dimmed entries here.
     if (this.targetAlphas.size > 0) {
       const speed = delta * 0.15; // ~200ms to full transition
+      const settled: number[] = [];
       for (const [id, target] of this.targetAlphas) {
         const sprite = this.sprites.get(id);
         const glow = this.glowSprites.get(id);
-        if (!sprite) continue;
+        if (!sprite) { settled.push(id); continue; }
         const current = sprite.alpha;
         const diff = target - current;
         if (Math.abs(diff) < 0.01) {
           sprite.alpha = target;
           if (glow) glow.alpha = target;
-          if (target === 1) this.targetAlphas.delete(id);
+          settled.push(id);
         } else {
           const next = current + diff * speed;
           sprite.alpha = next;
           if (glow) glow.alpha = next;
         }
       }
+      for (const id of settled) this.targetAlphas.delete(id);
     }
   }
 
@@ -157,11 +169,8 @@ export class SystemRenderer {
     this.highlightedNeighbors = neighborIds;
 
     for (const sys of this.systems) {
-      if (sys.id === systemId || neighborIds.has(sys.id)) {
-        this.targetAlphas.set(sys.id, 1);
-      } else {
-        this.targetAlphas.set(sys.id, 0.12);
-      }
+      const target = (sys.id === systemId || neighborIds.has(sys.id)) ? 1 : 0.12;
+      this._setLogicalAlpha(sys.id, target);
     }
   }
 
@@ -176,22 +185,29 @@ export class SystemRenderer {
     }
   }
 
+  /** Set the logical alpha for one sprite. No-op if already at target. */
+  private _setLogicalAlpha(id: number, target: number) {
+    const current = this.currentLogicalAlpha.get(id) ?? 1;
+    if (current === target) return;
+    if (target === 1) this.currentLogicalAlpha.delete(id);
+    else this.currentLogicalAlpha.set(id, target);
+    this.targetAlphas.set(id, target);
+  }
+
   /** Internal: apply the stored persistent highlight, or restore all to 1. */
   private _applyPersistentHighlight() {
     const ids = this.persistentHighlightIds;
     const origin = this.persistentHighlightOrigin;
     if (ids === null || ids.size === 0) {
-      for (const sys of this.systems) {
-        this.targetAlphas.set(sys.id, 1);
+      // Restore only the systems we'd previously dimmed.
+      for (const id of Array.from(this.currentLogicalAlpha.keys())) {
+        this._setLogicalAlpha(id, 1);
       }
       return;
     }
     for (const sys of this.systems) {
-      if (sys.id === origin || ids.has(sys.id)) {
-        this.targetAlphas.set(sys.id, 1);
-      } else {
-        this.targetAlphas.set(sys.id, 0.25);
-      }
+      const target = (sys.id === origin || ids.has(sys.id)) ? 1 : 0.25;
+      this._setLogicalAlpha(sys.id, target);
     }
   }
 
@@ -206,7 +222,7 @@ export class SystemRenderer {
     this.selectionPhase = 0;
 
     if (systemId !== null) {
-      const sys = this.systems.find(s => s.id === systemId);
+      const sys = this.systemById.get(systemId);
       if (sys) {
         // Position and show selection ring
         this.selectionRing.clear();

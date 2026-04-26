@@ -496,38 +496,33 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, [activeOverlay, stats, data.systems, sovChanges.data]);
 
-  // Apply jump planner highlight: route systems stay bright, others dimmed
+  // Panel hover callbacks set this to preview an alternative path; null = no
+  // preview. The unified highlight resolver (below) gives it top priority over
+  // the active route/reachable highlights so previews always win.
+  const [previewHighlight, setPreviewHighlight] = useState<{ ids: Set<number>; origin: number | null } | null>(null);
+
+  // Apply jump-range overlay (the dotted reachability circles) — separate
+  // concern from the persistent system-alpha highlight, which is owned by the
+  // unified resolver below.
   useEffect(() => {
-    const sr = systemRendererRef.current;
     const jr = jumpRangeRendererRef.current;
-    if (!sr || !jr) return;
+    if (!jr) return;
 
     if (!jumpPlanner.active) {
-      sr.setJumpRangeHighlight(null, null);
       jr.setReachable(null, []);
-      // Same panelHoverRef fix as the gate planner — onPointerLeave won't
-      // fire when the panel DOM element is removed while the cursor is over it.
       panelHoverRef.current = false;
       return;
     }
-
-    // If a route exists, highlight the route systems
     if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
-      const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
-      sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
-      jr.setReachable(null, []); // range lines not needed when route is shown
+      jr.setReachable(null, []);
     } else if (jumpPlanner.jumpOrigin !== null) {
-      // No route yet — show reachable systems from origin
       const origin = data.systemMap.get(jumpPlanner.jumpOrigin);
-      if (origin) {
-        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
-        jr.setReachable(origin, jumpPlanner.reachableSystems);
-      }
+      if (origin) jr.setReachable(origin, jumpPlanner.reachableSystems);
+      else jr.setReachable(null, []);
     } else {
-      sr.setJumpRangeHighlight(null, null);
       jr.setReachable(null, []);
     }
-  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.jumpRoute, jumpPlanner.reachableIds, jumpPlanner.reachableSystems, data.systemMap]);
+  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.jumpRoute, jumpPlanner.reachableSystems, data.systemMap]);
 
   // Apply jump route visualization (only when planner is active)
   useEffect(() => {
@@ -1076,45 +1071,54 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     }
   }, [gateRoutePlanner.activeRoute]);
 
-  // Single consolidated highlight effect for the gate route planner.
-  // Derives the correct persistent highlight from the current state so
-  // competing effects can't step on each other:
-  //   panel closed → clear
-  //   route active → highlight route systems
-  //   neither → clear (unless jump planner owns the highlight)
+  // Reset panelHoverRef when the gate planner panel closes. onPointerLeave
+  // never fires when the panel DOM element is removed while the cursor is
+  // over it (the click on × destroys the element before the event can
+  // propagate), so without this the ref stays stuck at true and blocks all
+  // map hover processing.
+  useEffect(() => {
+    if (!gateRoutePlanner.active) panelHoverRef.current = false;
+  }, [gateRoutePlanner.active]);
+
+  // Single owner of the persistent system-alpha highlight slot. Resolved
+  // from state by priority — previously four call sites raced for this slot
+  // and order-dependent batches caused stale dim/highlight states.
+  //   1. previewHighlight  (panel-hovered alternative path)
+  //   2. gate route planner (active gate route)
+  //   3. jump planner route (multi-hop jumps)
+  //   4. jump planner reachable (range circle)
+  //   5. clear
   useEffect(() => {
     const sr = systemRendererRef.current;
     if (!sr) return;
 
-    if (!gateRoutePlanner.active) {
-      // Panel closed — clear gate-planner highlight (don't touch jump planner)
-      if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
-        sr.setJumpRangeHighlight(null, null);
-      }
-      // CRITICAL: reset panelHoverRef. When the user clicks × with their
-      // cursor over the panel, onPointerLeave never fires (the DOM element
-      // is removed before the event can propagate). This leaves the ref
-      // stuck at true, which blocks ALL map hover processing in the
-      // viewport pointermove handler (if (panelHoverRef.current) return).
-      panelHoverRef.current = false;
+    if (previewHighlight) {
+      sr.setJumpRangeHighlight(previewHighlight.origin, previewHighlight.ids);
       return;
     }
-
-    // Panel is open — derive highlight from state
-    const route = gateRoutePlanner.activeRoute;
-    if (route && route.length >= 2) {
-      sr.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(route));
-    } else {
-      // No active route — clear unless jump planner owns highlight
-      if (!jumpPlanner.active || (!jumpPlanner.jumpRoute && jumpPlanner.reachableIds.size === 0)) {
-        sr.setJumpRangeHighlight(null, null);
+    if (gateRoutePlanner.active && gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
+      sr.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(gateRoutePlanner.activeRoute));
+      return;
+    }
+    if (jumpPlanner.active) {
+      if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+        const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
+        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
+        return;
+      }
+      if (jumpPlanner.jumpOrigin !== null && jumpPlanner.reachableIds.size > 0) {
+        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
+        return;
       }
     }
+    sr.setJumpRangeHighlight(null, null);
   }, [
+    previewHighlight,
     gateRoutePlanner.active,
     gateRoutePlanner.activeRoute,
     gateRoutePlanner.origin,
     jumpPlanner.active,
+    jumpPlanner.jumpOrigin,
     jumpPlanner.jumpRoute,
     jumpPlanner.reachableIds,
   ]);
@@ -1506,19 +1510,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
               }
             }}
             onHighlightSystems={(ids) => {
-              const sr = systemRendererRef.current;
-              if (!sr) return;
-              if (ids && ids.size > 0) {
-                sr.setJumpRangeHighlight(null, ids);
-              } else if (gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
-                // Restore route highlight
-                sr.setJumpRangeHighlight(
-                  gateRoutePlanner.origin,
-                  new Set(gateRoutePlanner.activeRoute),
-                );
-              } else {
-                sr.setJumpRangeHighlight(null, null);
-              }
+              setPreviewHighlight(ids && ids.size > 0 ? { ids, origin: null } : null);
             }}
           />
         </div>
@@ -1549,18 +1541,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
               }
             }}
             onHighlightSystems={(ids) => {
-              const sr = systemRendererRef.current;
-              if (!sr) return;
-              if (ids && ids.size > 0) {
-                // Temporarily highlight these alternatives
-                sr.setJumpRangeHighlight(null, ids);
-              } else if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
-                // Restore route highlight
-                const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
-                sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
-              } else {
-                sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
-              }
+              setPreviewHighlight(ids && ids.size > 0 ? { ids, origin: null } : null);
             }}
           />
         </div>

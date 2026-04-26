@@ -195,11 +195,17 @@ def solve_compression(
     # Precompute effective minerals per BATCH (not per unit!)
     # typeMaterials gives base minerals per reprocessing batch
     # portion_size = how many units per batch (1 for old batch compressed, 100 for new compressed)
+    #
+    # Keep yields as FLOATS throughout the LP. In-game reprocessing accumulates
+    # fractional minerals across the queue and rounds at the very end, so a
+    # per-batch floor here under-counts trace minerals (Megacyte from a 50%
+    # Veldspar yield would floor to 0 every batch). Integer flooring happens
+    # at the report stage below, after summing across the chosen batch counts.
     effective = {}
     for oid in ore_ids:
         y = yield_per_ore.get(oid, 0.5)
         mins = ore_data[oid]["minerals"]
-        effective[oid] = {mid: math.floor(qty * y) for mid, qty in mins.items()}
+        effective[oid] = {mid: qty * y for mid, qty in mins.items()}
 
     # LP variables are in BATCHES — cost/volume per batch accounts for portion_size
     portion_sizes = {oid: ore_data[oid].get("portion_size", 1) or 1 for oid in ore_ids}
@@ -252,11 +258,12 @@ def solve_compression(
                 "minerals_produced": {}, "minerals_surplus": {},
                 "error": str(e)}
 
-    # Build results — convert batches to units
+    # Build results — convert batches to units. Mineral output is summed as
+    # floats then floored once per mineral, matching in-game behavior.
     ores_result = []
     total_isk = 0.0
     total_volume = 0.0
-    minerals_produced = {mid: 0 for mid in MINERAL_IDS}
+    minerals_produced_float: dict[int, float] = {mid: 0.0 for mid in MINERAL_IDS}
 
     for i, oid in enumerate(ore_ids):
         batches = quantities[i]
@@ -272,7 +279,7 @@ def solve_compression(
         total_volume += line_vol
 
         for mid in MINERAL_IDS:
-            minerals_produced[mid] += effective[oid].get(mid, 0) * batches
+            minerals_produced_float[mid] += effective[oid].get(mid, 0) * batches
 
         ores_result.append({
             "type_id": oid,
@@ -284,6 +291,9 @@ def solve_compression(
         })
 
     ores_result.sort(key=lambda x: x["total_price"], reverse=True)
+
+    # Floor at the end so a 0.6 + 0.6 across two batches becomes 1, not 0.
+    minerals_produced = {mid: math.floor(minerals_produced_float[mid]) for mid in MINERAL_IDS}
 
     minerals_surplus = {
         MINERAL_NAMES.get(mid, str(mid)): minerals_produced[mid] - target_minerals.get(mid, 0)

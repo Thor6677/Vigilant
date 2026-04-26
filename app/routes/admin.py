@@ -693,8 +693,46 @@ async def admin_remove_user(user_id: int, request: Request,
         await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": char.character_id})
         await db.delete(char)
 
-    # Delete user's inventory thresholds
-    await db.execute(text("DELETE FROM corp_inventory_thresholds WHERE user_id = :uid"), {"uid": user_id})
+    # Delete user-owned data so the user row's removal doesn't leave orphans
+    # behind. Skill plans go through the ORM so SkillPlanEntry + SkillPlanACL
+    # cascade via the relationship; the rest are simple by-user_id deletes.
+    from app.db.models import SkillPlan as _SkillPlan
+    owned_plans = (await db.execute(
+        select(_SkillPlan).where(_SkillPlan.user_id == user_id)
+    )).scalars().all()
+    for plan in owned_plans:
+        await db.delete(plan)
+
+    USER_OWNED_TABLES = (
+        "corp_inventory_thresholds",
+        "corp_contract_thresholds",
+        "user_avoid_entries",
+        "saved_gate_routes",
+        "user_fittings",
+        "user_fitting_folders",
+        "user_map_bookmarks",
+        "user_system_watches",
+        "user_hunter_watches",
+        "hosted_images",  # row only — on-disk files are not touched here
+    )
+    for tbl in USER_OWNED_TABLES:
+        await db.execute(text(f"DELETE FROM {tbl} WHERE user_id = :uid"), {"uid": user_id})
+
+    # Where the FK is metadata rather than ownership, null it out instead
+    # of dropping the surrounding row.
+    NULLABLE_FKS = (
+        ("structure_timers", "created_by"),
+        ("timer_acl_groups", "created_by"),
+        ("registration_allowlist", "added_by"),
+        ("skill_plans", "last_edited_by_user_id"),
+        ("admin_audit_log", "user_id"),
+    )
+    for tbl, col in NULLABLE_FKS:
+        await db.execute(
+            text(f"UPDATE {tbl} SET {col} = NULL WHERE {col} = :uid"),
+            {"uid": user_id},
+        )
+
     await db.delete(user)
     await db.commit()
 
