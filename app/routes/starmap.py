@@ -1242,16 +1242,17 @@ async def map_planet_types(request: Request):
 
 # ── 48h activity history (sparkline in system info panel) ─────────────────
 
-# ── Wormhole-space synthetic map data ─────────────────────────────────────
-# J-systems have no canonical positions — see app/intel/wormhole_layout.py
-# for the synthetic 3×3 class-grid layout. Three endpoints mirror the
+# ── Wormhole-space (Anoikis) map data ─────────────────────────────────────
+# J-systems have real 3-D coordinates in the SDE — see
+# app/intel/wormhole_layout.py for the top-down (XZ) projection that
+# mirrors the natural Anoikis cluster. Three endpoints mirror the
 # k-space static bundles so the React app can use the same useMapData
 # hook with a different base URL.
 
 @router.get("/map/wormholes", response_class=HTMLResponse)
 async def map_wormholes_page(request: Request):
     """Wormhole-space spatial map — same React bundle as /map, fed
-    a synthetic per-class layout for J-systems."""
+    the natural Anoikis layout from real SDE coordinates."""
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     assets = _read_vite_assets()
