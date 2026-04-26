@@ -1242,6 +1242,149 @@ async def map_planet_types(request: Request):
 
 # ── 48h activity history (sparkline in system info panel) ─────────────────
 
+# Per-(window, space) cache for the bulk heatmap response. Buckets are
+# stable within a window (e.g. hourly in 1d) so we can serve the same
+# JSON to every scrubber tick. Short TTL keeps live data fresh.
+_HEATMAP_CACHE: dict[tuple[str, str], tuple[datetime, dict]] = {}
+_HEATMAP_TTL_SECONDS = 30
+
+
+@router.get("/api/map/kill-heatmap")
+async def map_kill_heatmap(request: Request, window: str = "1d", space: str = "k"):
+    """Bulk per-system kill counts time-bucketed for the heatmap scrubber.
+
+    window=1d  → 24 hourly buckets (sourced from SystemActivitySnapshot)
+    window=7d  → 7  daily  buckets (sourced from killmails)
+    window=30d → 30 daily  buckets (sourced from killmails)
+
+    space=k → k-space systems only (id < 31000000)
+    space=w → wormhole systems only (id >= 31000000)
+
+    Sparse encoding: response.data only includes systems with ≥1 kill in
+    any bucket. All other systems are implicit zeros.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    if window not in ("1d", "7d", "30d"):
+        return JSONResponse({"error": "invalid window"}, status_code=400)
+    if space not in ("k", "w"):
+        return JSONResponse({"error": "invalid space"}, status_code=400)
+
+    cache_key = (window, space)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    cached = _HEATMAP_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, body = cached
+        if now_utc < expires_at:
+            return JSONResponse(body)
+
+    from sqlalchemy import Integer, func, select
+    from app.db.models import AsyncSessionLocal, Killmail, SystemActivitySnapshot
+
+    if window == "1d":
+        # 24 hourly buckets aligned to wall-clock hours, ending at the top
+        # of the current hour (so the rightmost bucket is "the most recent
+        # full hour"). Source: SystemActivitySnapshot.
+        end = now_utc.replace(minute=0, second=0, microsecond=0)
+        start = end - timedelta(hours=24)
+        bucket_seconds = 3600
+        num_buckets = 24
+        buckets = [(start + timedelta(seconds=i * bucket_seconds)).isoformat() + "Z"
+                   for i in range(num_buckets)]
+
+        async with AsyncSessionLocal() as db:
+            sys_filter = (
+                SystemActivitySnapshot.system_id < 31000000 if space == "k"
+                else SystemActivitySnapshot.system_id >= 31000000
+            )
+            # bucket index = (captured_at - start) / 3600s, integer.
+            bin_expr = func.cast(
+                (func.julianday(SystemActivitySnapshot.captured_at) - func.julianday(start))
+                * 24.0,
+                Integer,
+            )
+            rows = (await db.execute(
+                select(
+                    SystemActivitySnapshot.system_id,
+                    bin_expr.label("b"),
+                    func.sum(SystemActivitySnapshot.ship_kills + SystemActivitySnapshot.pod_kills).label("k"),
+                )
+                .where(
+                    SystemActivitySnapshot.captured_at >= start,
+                    SystemActivitySnapshot.captured_at < end,
+                    sys_filter,
+                )
+                .group_by(SystemActivitySnapshot.system_id, "b")
+            )).all()
+    else:
+        days = 7 if window == "7d" else 30
+        end = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        start = end - timedelta(days=days)
+        bucket_seconds = 86400
+        num_buckets = days
+        buckets = [(start + timedelta(days=i)).date().isoformat()
+                   for i in range(num_buckets)]
+
+        async with AsyncSessionLocal() as db:
+            sys_filter = (
+                Killmail.solar_system_id < 31000000 if space == "k"
+                else Killmail.solar_system_id >= 31000000
+            )
+            bin_expr = func.cast(
+                func.julianday(Killmail.killmail_time) - func.julianday(start),
+                Integer,
+            )
+            rows = (await db.execute(
+                select(
+                    Killmail.solar_system_id.label("system_id"),
+                    bin_expr.label("b"),
+                    func.count().label("k"),
+                )
+                .where(
+                    Killmail.killmail_time >= start,
+                    Killmail.killmail_time < end,
+                    sys_filter,
+                )
+                .group_by(Killmail.solar_system_id, "b")
+            )).all()
+
+    # Pivot to {system_id: [v0, v1, ...]} — sparse, only systems with ≥1 kill.
+    data: dict[str, list[int]] = {}
+    max_value = 0
+    for sys_id, b, k in rows:
+        if sys_id is None or b is None:
+            continue
+        bi = int(b)
+        if bi < 0 or bi >= num_buckets:
+            continue
+        kv = int(k or 0)
+        if kv <= 0:
+            continue
+        arr = data.get(str(sys_id))
+        if arr is None:
+            arr = [0] * num_buckets
+            data[str(sys_id)] = arr
+        arr[bi] = kv
+        if kv > max_value:
+            max_value = kv
+
+    body = {
+        "window": window,
+        "space": space,
+        "bucket_seconds": bucket_seconds,
+        "buckets": buckets,
+        "max_value": max_value,
+        "data": data,
+    }
+    _HEATMAP_CACHE[cache_key] = (
+        now_utc + timedelta(seconds=_HEATMAP_TTL_SECONDS),
+        body,
+    )
+    return JSONResponse(body)
+
+
 @router.get("/api/map/history/{system_id}")
 async def map_system_history(system_id: int, request: Request):
     """Return hourly kill/jump snapshots for a system over the last 48 hours.

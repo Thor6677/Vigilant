@@ -1,4 +1,4 @@
-import type { OverlayType, IndustryIndexKind, PlanetTypeId } from '../types';
+import type { OverlayType, IndustryIndexKind, PlanetTypeId, KillHeatmapWindow } from '../types';
 import type { SovTimeRange } from '../useSovChanges';
 
 const OVERLAYS: { key: OverlayType; label: string }[] = [
@@ -14,6 +14,13 @@ const OVERLAYS: { key: OverlayType; label: string }[] = [
   { key: 'industry',        label: 'Industry' },
   { key: 'planetType',      label: 'Planets' },
   { key: 'radar',           label: 'Radar' },
+  { key: 'killHeatmap',     label: 'Kill Heatmap' },
+];
+
+const KILL_WINDOWS: { key: KillHeatmapWindow; label: string }[] = [
+  { key: '1d',  label: '1D' },
+  { key: '7d',  label: '7D' },
+  { key: '30d', label: '30D' },
 ];
 
 const INDUSTRY_KINDS: { key: IndustryIndexKind; label: string }[] = [
@@ -63,6 +70,15 @@ interface Props {
   radarJumps?: number;
   onRadarJumpsChange?: (n: number) => void;
   onRadarClear?: () => void;
+  killHeatmapWindow?: KillHeatmapWindow;
+  onKillHeatmapWindowChange?: (w: KillHeatmapWindow) => void;
+  killHeatmapBuckets?: string[];
+  killHeatmapBucketIdx?: number;
+  onKillHeatmapBucketIdxChange?: (i: number) => void;
+  killHeatmapPlaying?: boolean;
+  onKillHeatmapPlayPauseToggle?: () => void;
+  killHeatmapLoading?: boolean;
+  killHeatmapMaxValue?: number;
 }
 
 const FONT = "'JetBrains Mono', monospace";
@@ -78,6 +94,15 @@ export function OverlayControls({
   radarPivotName,
   radarJumps = 3,
   onRadarJumpsChange,
+  killHeatmapWindow = '1d',
+  onKillHeatmapWindowChange,
+  killHeatmapBuckets = [],
+  killHeatmapBucketIdx = 0,
+  onKillHeatmapBucketIdxChange,
+  killHeatmapPlaying = false,
+  onKillHeatmapPlayPauseToggle,
+  killHeatmapLoading = false,
+  killHeatmapMaxValue = 0,
   onRadarClear,
 }: Props) {
   // ── Sub-bar renderers ──────────────────────────────────────────────────
@@ -270,6 +295,93 @@ export function OverlayControls({
     </div>
   ) : null;
 
+  const fmtBucket = (iso: string, win: KillHeatmapWindow): string => {
+    if (!iso) return '';
+    if (win === '1d') {
+      // ISO with trailing Z; show "Apr 25 14:00 UTC"
+      const d = new Date(iso);
+      if (isNaN(d.valueOf())) return iso;
+      const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+      const day = d.getUTCDate();
+      const hr = String(d.getUTCHours()).padStart(2, '0');
+      return `${mon} ${day} ${hr}:00 UTC`;
+    }
+    // Daily bucket — already a YYYY-MM-DD string from the server.
+    return iso;
+  };
+
+  const killHeatmapSubBar = activeOverlay === 'killHeatmap' ? (
+    <div style={{ ...subBarStyle, gap: 8, padding: '4px 8px', flexWrap: 'wrap' }}>
+      <span style={{
+        fontSize: 8, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#333',
+      }}>
+        Window
+      </span>
+      {KILL_WINDOWS.map(({ key, label }) => {
+        const isActive = killHeatmapWindow === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onKillHeatmapWindowChange?.(key)}
+            style={{
+              padding: '4px 10px', fontSize: 9, fontFamily: FONT,
+              background: isActive ? '#0e0e0e' : 'transparent',
+              color: isActive ? '#c8a951' : '#474747',
+              border: '1px solid ' + (isActive ? '#c8a951' : '#191919'),
+              cursor: 'pointer', transition: 'color 0.15s',
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+      <button
+        onClick={onKillHeatmapPlayPauseToggle}
+        disabled={killHeatmapBuckets.length === 0}
+        style={{
+          padding: '4px 10px', fontSize: 9, fontFamily: FONT,
+          background: killHeatmapPlaying ? '#0e0e0e' : 'transparent',
+          color: killHeatmapPlaying ? '#c8a951' : '#888',
+          border: '1px solid ' + (killHeatmapPlaying ? '#c8a951' : '#191919'),
+          cursor: killHeatmapBuckets.length === 0 ? 'default' : 'pointer',
+          marginLeft: 4,
+        }}
+      >
+        {killHeatmapPlaying ? '❚❚' : '▶'}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(0, killHeatmapBuckets.length - 1)}
+        step={1}
+        value={killHeatmapBucketIdx}
+        onChange={(e) => onKillHeatmapBucketIdxChange?.(parseInt(e.target.value, 10))}
+        disabled={killHeatmapBuckets.length === 0}
+        style={{ flex: 1, minWidth: 120, accentColor: '#c8a951' }}
+      />
+      <span style={{
+        fontSize: 9, color: killHeatmapLoading ? '#444' : '#c8a951',
+        fontFamily: FONT, minWidth: 130, textAlign: 'right',
+        letterSpacing: '0.05em',
+      }}>
+        {killHeatmapLoading
+          ? 'loading…'
+          : (killHeatmapBuckets.length > 0
+              ? fmtBucket(killHeatmapBuckets[killHeatmapBucketIdx] ?? '', killHeatmapWindow)
+              : 'no data')}
+      </span>
+      {killHeatmapMaxValue > 0 && !killHeatmapLoading && (
+        <span style={{
+          fontSize: 8, letterSpacing: '0.12em', color: '#333',
+          textTransform: 'uppercase',
+        }}>
+          peak {killHeatmapMaxValue}
+        </span>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div style={{ fontFamily: FONT }}>
       {/* Sub-bars render ABOVE the main overlay row. Only one is ever active
@@ -278,6 +390,7 @@ export function OverlayControls({
       {planetSubBar}
       {radarSubBar}
       {sovSubBar}
+      {killHeatmapSubBar}
 
       {/* Main overlay row — the persistent tab strip along the bottom. */}
       <div style={{
@@ -339,7 +452,7 @@ export function OverlayControls({
           flexShrink: 0,
         }}>
           {activeOverlay === 'security' && <SecurityLegend />}
-          {['jumps', 'shipKills', 'podKills', 'npcKills', 'industry'].includes(activeOverlay) && <HeatmapLegend />}
+          {['jumps', 'shipKills', 'podKills', 'npcKills', 'industry', 'killHeatmap'].includes(activeOverlay) && <HeatmapLegend />}
           {activeOverlay === 'sovereignty' && <SovLegend hasChanges={sovTimeRange != null && sovChangesCount > 0} />}
           {activeOverlay === 'adm' && <ADMLegend />}
           {activeOverlay === 'factionWarfare' && <FWLegend />}

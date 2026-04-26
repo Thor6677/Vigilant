@@ -28,6 +28,8 @@ import { AllianceTerritoryRenderer } from './renderer/AllianceTerritoryRenderer'
 import { TheraRenderer } from './renderer/TheraRenderer';
 import { buildGraph } from './graph/buildGraph';
 import { useOverlayData, usePlanetTypes } from './useOverlayData';
+import { useKillHeatmap } from './useKillHeatmap';
+import type { KillHeatmapWindow } from './types';
 import type { TheraConnection } from './useOverlayData';
 import { useSovChanges, type SovTimeRange } from './useSovChanges';
 import { useCharacterLocations } from './useCharacterLocations';
@@ -89,6 +91,31 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const [planetKind, setPlanetKind] = useState<PlanetTypeId | null>(null);
   const [radarPivotId, setRadarPivotId] = useState<number | null>(null);
   const [radarJumps, setRadarJumps] = useState<number>(3);
+  const [killHeatmapWindow, setKillHeatmapWindow] = useState<KillHeatmapWindow>('1d');
+  const [killHeatmapBucketIdx, setKillHeatmapBucketIdx] = useState<number>(0);
+  const [killHeatmapPlaying, setKillHeatmapPlaying] = useState<boolean>(false);
+  const killHeatmap = useKillHeatmap(killHeatmapWindow, 'k', activeOverlay === 'killHeatmap');
+  // When the heatmap dataset arrives, jump to the most recent bucket so the
+  // map shows "now" by default. Resetting on window change too.
+  useEffect(() => {
+    if (!killHeatmap.data) return;
+    setKillHeatmapBucketIdx(Math.max(0, killHeatmap.data.buckets.length - 1));
+  }, [killHeatmap.data]);
+  // Auto-advance when playing.
+  useEffect(() => {
+    if (!killHeatmapPlaying || !killHeatmap.data) return;
+    const max = killHeatmap.data.buckets.length - 1;
+    const id = window.setInterval(() => {
+      setKillHeatmapBucketIdx((i) => {
+        if (i >= max) {
+          setKillHeatmapPlaying(false);
+          return max;
+        }
+        return i + 1;
+      });
+    }, 600);
+    return () => window.clearInterval(id);
+  }, [killHeatmapPlaying, killHeatmap.data]);
   const [groupMode, setGroupMode] = useState<GroupMode>('systems');
   const [overlayBarHeight, setOverlayBarHeight] = useState(36);
   const overlayBarRef = useRef<HTMLDivElement>(null);
@@ -336,10 +363,28 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       } else {
         for (const sys of data.systems) tints.set(sys.id, 0x141414);
       }
+    } else if (activeOverlay === 'killHeatmap') {
+      // Per-system kill count at the currently scrubbed bucket. Sparse
+      // dataset — systems with no kills get the dim baseline. Reuse the
+      // existing heatmapColor ramp for visual consistency with the
+      // shipKills/podKills overlays.
+      const hm = killHeatmap.data;
+      const max = hm?.max_value ?? 0;
+      if (hm && max > 0) {
+        for (const sys of data.systems) {
+          const arr = hm.data[String(sys.id)];
+          const v = arr ? (arr[killHeatmapBucketIdx] ?? 0) : 0;
+          if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
+          // sqrt compresses long tail so smaller systems still light up.
+          tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
     }
 
     return tints;
-  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach]);
+  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach, killHeatmap.data, killHeatmapBucketIdx]);
 
   // Apply overlay tints to renderer
   useEffect(() => {
@@ -1587,6 +1632,18 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
           radarJumps={radarJumps}
           onRadarJumpsChange={setRadarJumps}
           onRadarClear={() => setRadarPivotId(null)}
+          killHeatmapWindow={killHeatmapWindow}
+          onKillHeatmapWindowChange={(w) => {
+            setKillHeatmapWindow(w);
+            setKillHeatmapPlaying(false);
+          }}
+          killHeatmapBuckets={killHeatmap.data?.buckets ?? []}
+          killHeatmapBucketIdx={killHeatmapBucketIdx}
+          onKillHeatmapBucketIdxChange={setKillHeatmapBucketIdx}
+          killHeatmapPlaying={killHeatmapPlaying}
+          onKillHeatmapPlayPauseToggle={() => setKillHeatmapPlaying((p) => !p)}
+          killHeatmapLoading={killHeatmap.loading}
+          killHeatmapMaxValue={killHeatmap.data?.max_value ?? 0}
         />
       </div>
     </div>
