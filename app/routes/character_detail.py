@@ -358,8 +358,8 @@ async def character_detail(
     # implants/clones, wallet journal, corp history, wallet chart). Each
     # helper opens its own AsyncSessionLocal for any DB work per CLAUDE.md's
     # async-session-safety gotcha; helpers that need ESI caching set
-    # client.db to a truthy sentinel because cache_get/cache_set always use
-    # their own isolated sessions internally.
+    # client.cache_enabled = True (cache_get/cache_set always use their own
+    # isolated sessions internally so the request session is never shared).
     scopes = char.scopes or ""
 
     async def _fetch_trained_sp() -> int:
@@ -374,7 +374,7 @@ async def character_detail(
                     return 0
                 token = await refresh_token(c, tdb)
             client = ESIClient(token)
-            client.db = True
+            client.cache_enabled = True
             raw = await client.get(f"/characters/{character_id}/skills/")
             if raw and isinstance(raw, dict):
                 return sum(s.get("skillpoints_in_skill", 0) for s in raw.get("skills", []))
@@ -396,7 +396,7 @@ async def character_detail(
                     return impl_out, jc_out
                 token = await refresh_token(c, tdb)
             client = ESIClient(token)
-            client.db = True
+            client.cache_enabled = True
 
             from app.db.sde_models import SDEType as _SDEType, SDEStation as _SDEStation
 
@@ -482,7 +482,7 @@ async def character_detail(
         try:
             from app.esi.client import get_client_safe
             client = await get_client_safe(char)
-            client.db = True
+            client.cache_enabled = True
             raw = await get_wallet_journal(client, character_id, page=1)
             return (raw[:20] if raw else []), None
         except Exception as e:
@@ -494,7 +494,7 @@ async def character_detail(
         try:
             from app.esi.client import ESIClient as _PubClient
             pub = _PubClient("")
-            pub.db = True
+            pub.cache_enabled = True
             raw_history = await pub.get_public(f"/characters/{character_id}/corporationhistory/")
             if raw_history:
                 corp_ids = list({h.get("corporation_id") for h in raw_history if h.get("corporation_id")})
@@ -550,7 +550,7 @@ async def character_detail(
             try:
                 from app.esi.client import ESIClient as _PubClient2
                 pub = _PubClient2("")
-                pub.db = True
+                pub.cache_enabled = True
                 pub_info = await pub.get_public(f"/characters/{character_id}/")
                 bday_str = pub_info.get("birthday") if isinstance(pub_info, dict) else None
                 if bday_str:

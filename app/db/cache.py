@@ -87,7 +87,7 @@ async def _cache_get_impl(db: AsyncSession, key: str):
     return json.loads(row.data)
 
 
-async def cache_get(db: AsyncSession, path: str, params: dict = None):
+async def cache_get(db: AsyncSession | None, path: str, params: dict = None):
     """Return cached data if present and not expired, else None.
 
     Always uses an isolated AsyncSessionLocal so concurrent cache operations
@@ -95,11 +95,14 @@ async def cache_get(db: AsyncSession, path: str, params: dict = None):
     API compatibility but not used — previous behavior shared the caller's
     session, which cascaded SQLAlchemy errors during dashboard fan-outs.
     """
+    del db  # explicitly unused — kept for backwards-compat callsites
     key = _cache_key(path, params)
     from app.db.models import AsyncSessionLocal
     try:
         async with AsyncSessionLocal() as fresh_db:
-            return await _cache_get_impl(fresh_db, key)
+            result = await _cache_get_impl(fresh_db, key)
+            await fresh_db.commit()  # commit any expired-row delete
+            return result
     except Exception:
         return None  # cache lookup must never break the caller
 
@@ -125,13 +128,14 @@ async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
     await db.commit()
 
 
-async def cache_set(db: AsyncSession, path: str, data, params: dict = None):
+async def cache_set(db: AsyncSession | None, path: str, data, params: dict = None):
     """Store data in cache with the appropriate TTL.
 
     Always uses an isolated AsyncSessionLocal; see cache_get() for rationale.
     Cache writes are best-effort: any failure is swallowed so the caller's
     flow is never interrupted.
     """
+    del db  # explicitly unused — kept for backwards-compat callsites
     key = _cache_key(path, params)
     ttl = _ttl_for_path(path)
     from app.db.models import AsyncSessionLocal

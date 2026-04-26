@@ -87,7 +87,7 @@ async def _cache_corp_structures(corp_id: int, scope_chars: list[Character]) -> 
         try:
             async with AsyncSessionLocal() as s_db:
                 client = await get_client_safe(ch)
-                client.db = s_db
+                client.cache_enabled = True
                 raw = await esi_corp.get_corporation_structures(client, corp_id)
                 if not raw:
                     return 0
@@ -111,13 +111,12 @@ async def _fetch_corp_jobs(
     params = {"include_completed": "true" if include_completed else "false"}
     for ch in scope_chars:
         try:
-            async with AsyncSessionLocal() as char_db:
-                client = await get_client_safe(ch)
-                client.db = char_db
-                jobs = await client.get(
-                    f"/corporations/{corp_id}/industry/jobs/", params=params,
-                )
-                return corp_id, corp_name, list(jobs or []), None
+            client = await get_client_safe(ch)
+            client.cache_enabled = True
+            jobs = await client.get(
+                f"/corporations/{corp_id}/industry/jobs/", params=params,
+            )
+            return corp_id, corp_name, list(jobs or []), None
         except Exception as e:
             err = str(e)
             last_error = err
@@ -246,7 +245,7 @@ async def _resolve_location_names(
                 try:
                     async with AsyncSessionLocal() as s_db:
                         client = await get_client_safe(ch)
-                        client.db = s_db
+                        client.cache_enabled = True
                         data = await esi_universe.get_structure(client, struct_id, db=s_db)
                         name = (data or {}).get("name")
                         if name and name != "Unknown Structure":

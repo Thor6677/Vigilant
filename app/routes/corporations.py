@@ -134,7 +134,7 @@ async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
     from app.esi.client import get_client_safe
     try:
         client = await get_client_safe(char)
-        client.db = db  # Attach request-scoped db for cache operations
+        client.cache_enabled = True
         return client
     except Exception as e:
         logger.error("Token refresh failed for char %s (%s): %s", char.character_name, char.character_id, e, exc_info=True)

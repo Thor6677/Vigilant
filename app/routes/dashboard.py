@@ -508,7 +508,7 @@ async def _client_for(char: Character, db: AsyncSession) -> tuple[ESIClient | No
     async with _get_token_lock(char.character_id):
         try:
             client = await get_client_safe(char)
-            client.db = db  # Attach request-scoped db for cache operations
+            client.cache_enabled = True
             return client, None
         except TokenRevoked as e:
             logger.warning("Token revoked for char %s — user must re-authenticate: %s", char.character_id, e)
@@ -2071,7 +2071,7 @@ async def dashboard_kill_pulse(
         try:
             from app.esi.client import ESIClient as _PubClient
             pub = _PubClient("")
-            pub.db = True  # enables cache_get / cache_set (own session internally)
+            pub.cache_enabled = True
             # /universe/names/ accepts up to 1000 per call; we're well under.
             resolved = await pub.post_public("/universe/names/", name_ids)
             for entry in resolved or []:

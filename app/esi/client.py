@@ -172,9 +172,18 @@ async def get_client_safe(character: Character) -> ESIClient:
 
 
 class ESIClient:
-    def __init__(self, token: str, db: AsyncSession = None):
+    def __init__(self, token: str, db: AsyncSession | None = None, *, cache_enabled: bool | None = None):
+        """Authenticated ESI client.
+
+        cache_enabled controls whether GETs go through the db-backed cache.
+        For backward compat, passing a non-None `db` enables the cache. The db
+        argument itself is NOT stored — the cache layer always uses an isolated
+        AsyncSessionLocal internally, so passing a request-scoped session into
+        an asyncio.gather fan-out used to be safe-by-accident; now the field
+        cannot be misused for writes against a shared session.
+        """
         self.token = token
-        self.db = db
+        self.cache_enabled = cache_enabled if cache_enabled is not None else (db is not None)
         self.base = settings.eve_esi_base
         self.headers = {
             "Authorization": f"Bearer {token}",
@@ -206,9 +215,9 @@ class ESIClient:
              If-None-Match so the ESI server can short-circuit with 304.
         """
         # Tier 1: DB cache check — survives restarts, skips network entirely.
-        if self.db and not bypass_cache:
+        if self.cache_enabled and not bypass_cache:
             try:
-                cached = await cache_get(self.db, path, params)
+                cached = await cache_get(None, path, params)
                 if cached is not None:
                     return cached
             except Exception:
@@ -235,9 +244,9 @@ class ESIClient:
             _etag_cache.move_to_end(ek)
             # Refresh the DB cache so subsequent (and post-restart) calls can
             # skip the network entirely — we just confirmed the data is valid.
-            if self.db and not bypass_cache:
+            if self.cache_enabled and not bypass_cache:
                 try:
-                    await cache_set(self.db, path, cached_entry["data"], params)
+                    await cache_set(None, path, cached_entry["data"], params)
                 except Exception:
                     pass
             return cached_entry["data"]
@@ -277,9 +286,9 @@ class ESIClient:
         # Persist to DB cache so the next restart (or concurrent caller) can
         # skip the network entirely. TTL is resolved per-path in the cache
         # module — see _ttl_for_path().
-        if self.db and not bypass_cache:
+        if self.cache_enabled and not bypass_cache:
             try:
-                await cache_set(self.db, path, data, params)
+                await cache_set(None, path, data, params)
             except Exception:
                 pass
 
@@ -287,8 +296,8 @@ class ESIClient:
 
     async def get_public(self, path: str, params: dict = None, bypass_cache: bool = False) -> dict | list:
         """Public GET — cached when db session is available."""
-        if self.db and not bypass_cache:
-            cached = await cache_get(self.db, path, params)
+        if self.cache_enabled and not bypass_cache:
+            cached = await cache_get(None, path, params)
             if cached is not None:
                 return cached
 
@@ -324,8 +333,8 @@ class ESIClient:
         resp.raise_for_status()
         data = resp.json()
 
-        if self.db and not bypass_cache:
-            await cache_set(self.db, path, data, params)
+        if self.cache_enabled and not bypass_cache:
+            await cache_set(None, path, data, params)
 
         return data
 
@@ -369,8 +378,8 @@ class ESIClient:
     async def post_public(self, path: str, body: list | dict) -> dict | list:
         """Public POST with cache (used for name resolution)."""
         cache_key_params = {"_body": json.dumps(body, sort_keys=True)}
-        if self.db:
-            cached = await cache_get(self.db, path, cache_key_params)
+        if self.cache_enabled:
+            cached = await cache_get(None, path, cache_key_params)
             if cached is not None:
                 return cached
 
@@ -397,7 +406,7 @@ class ESIClient:
         resp.raise_for_status()
         data = resp.json()
 
-        if self.db:
-            await cache_set(self.db, path, data, cache_key_params)
+        if self.cache_enabled:
+            await cache_set(None, path, data, cache_key_params)
 
         return data
