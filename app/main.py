@@ -71,7 +71,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     session_cookie="vigilant_session",
-    max_age=86400 * 30,  # 30 days
+    max_age=86400 * 7,  # 7 days
     https_only=not settings.debug,
     same_site="lax",
 )
