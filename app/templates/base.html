@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ request.session.get('csrf_token', '') }}">
     <title>{% block title %}VIGILANT{% endblock %}</title>
     <link rel=icon href=/static/favicon.ico type=image/x-icon>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -954,6 +955,76 @@
 </footer>
 {% endif %}
 
+<script>
+/* CSRF token wiring (paired with app/middleware/csrf.py).
+   - Adds X-CSRF-Token header to all htmx requests.
+   - Adds X-CSRF-Token header to same-origin non-safe fetch() calls.
+   - Adds a hidden csrf_token input to native HTML form submits (urlencoded).
+   - For multipart forms (image upload), intercepts and resubmits via fetch
+     because the server middleware does not parse multipart bodies. */
+(function() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    var token = meta ? meta.getAttribute('content') : '';
+    if (!token) return;
+    var SAFE = {GET:1, HEAD:1, OPTIONS:1};
+
+    document.addEventListener('htmx:configRequest', function(evt) {
+        var verb = (evt.detail.verb || 'get').toUpperCase();
+        if (!SAFE[verb]) evt.detail.headers['X-CSRF-Token'] = token;
+    });
+
+    var origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        init = init || {};
+        var method = (init.method || (typeof input === 'object' && input ? input.method : null) || 'GET').toUpperCase();
+        if (!SAFE[method]) {
+            try {
+                var urlStr = typeof input === 'string' ? input : input.url;
+                var u = new URL(urlStr, window.location.href);
+                if (u.origin === window.location.origin) {
+                    var h = new Headers(init.headers || (typeof input === 'object' && input ? input.headers : null) || {});
+                    if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', token);
+                    init.headers = h;
+                }
+            } catch(e) { /* not a parseable URL — leave alone */ }
+        }
+        return origFetch(input, init);
+    };
+
+    document.addEventListener('submit', function(evt) {
+        var form = evt.target;
+        if (!form || form.tagName !== 'FORM') return;
+        var method = (form.method || 'GET').toUpperCase();
+        if (SAFE[method]) return;
+        var enctype = (form.getAttribute('enctype') || 'application/x-www-form-urlencoded').toLowerCase();
+        if (enctype.indexOf('multipart/form-data') === 0) {
+            evt.preventDefault();
+            /* Patched fetch above will inject the header. */
+            fetch(form.action, {
+                method: method,
+                body: new FormData(form),
+                credentials: 'same-origin',
+            }).then(function(resp) {
+                if (resp.redirected) { window.location.href = resp.url; return; }
+                if (resp.ok) { window.location.reload(); return; }
+                return resp.text().then(function(html) {
+                    document.open(); document.write(html); document.close();
+                });
+            }).catch(function(err) {
+                console.error('Form submit failed:', err);
+                window.alert('Submit failed: ' + err);
+            });
+            return;
+        }
+        if (form.querySelector('input[name="csrf_token"]')) return;
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'csrf_token';
+        input.value = token;
+        form.appendChild(input);
+    }, true);
+})();
+</script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 /* Global dismiss handler for alert banners — runs after every htmx swap */

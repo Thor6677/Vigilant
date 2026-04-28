@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.middleware.csrf import CSRFMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
@@ -66,6 +67,13 @@ class _RequestTimingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_RequestTimingMiddleware)
+
+# CSRF must be added BEFORE SessionMiddleware so that the latter wraps it —
+# Starlette's middleware stack runs the most-recently-added one first, so
+# this places SessionMiddleware on the outside (sets up scope["session"])
+# and CSRFMiddleware on the inside (reads/writes the token in that session
+# before the route handler runs).
+app.add_middleware(CSRFMiddleware)
 
 app.add_middleware(
     SessionMiddleware,
