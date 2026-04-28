@@ -991,6 +991,23 @@
         return origFetch(input, init);
     };
 
+    /* Programmatic form.submit() bypasses the submit event entirely, so a few
+       JS-built forms (skill_plans/skill_plan_detail/ship_mastery/structure_timers)
+       wouldn't get the auto-injected hidden input. Monkey-patch
+       HTMLFormElement.prototype.submit to add the input synchronously. */
+    var origFormSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+        var m = (this.method || 'GET').toUpperCase();
+        if (!SAFE[m] && !this.querySelector('input[name="csrf_token"]')) {
+            var i = document.createElement('input');
+            i.type = 'hidden';
+            i.name = 'csrf_token';
+            i.value = token;
+            this.appendChild(i);
+        }
+        return origFormSubmit.apply(this, arguments);
+    };
+
     document.addEventListener('submit', function(evt) {
         var form = evt.target;
         if (!form || form.tagName !== 'FORM') return;
