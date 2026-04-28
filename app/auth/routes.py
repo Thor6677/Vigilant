@@ -311,10 +311,10 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     return RedirectResponse("/dashboard")
 
 
-@router.get("/logout")
+@router.post("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/")
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/switch/{character_id}")
