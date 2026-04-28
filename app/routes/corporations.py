@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
+from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -663,8 +664,8 @@ async def corp_inventory_structures(corp_id: int, request: Request, db: AsyncSes
     if structs:
         await esi_universe.cache_corp_structures(db, structs)
         for s in sorted(structs, key=lambda x: x.get("name", "")):
-            sid = s.get("structure_id", 0)
-            name = s.get("name", "Unknown")
+            sid = int(s.get("structure_id", 0))
+            name = html_escape(s.get("name", "Unknown"))
             html += f'<option value="{sid}">{name}</option>'
     return HTMLResponse(html)
 

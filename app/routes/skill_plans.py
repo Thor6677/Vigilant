@@ -609,7 +609,7 @@ async def rename_plan(plan_id: int, request: Request, db: AsyncSession = Depends
     plan.name = name
     _touch_edit(plan, user_id)
     await db.commit()
-    return HTMLResponse(f'<span class="b-label">{name}</span>')
+    return HTMLResponse(f'<span class="b-label">{html.escape(name)}</span>')
 
 
 # ── Add skill to plan ────────────────────────────────────────────────────────
@@ -1032,7 +1032,8 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
     if upgraded:
         msg += f" Upgraded {upgraded}."
     if not_found:
-        msg += f" Could not resolve: {', '.join(not_found[:5])}"
+        safe_unresolved = ", ".join(html.escape(n) for n in not_found[:5])
+        msg += f" Could not resolve: {safe_unresolved}"
         if len(not_found) > 5:
             msg += f" (+{len(not_found) - 5} more)"
     return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">{msg}</div>')
@@ -1146,7 +1147,8 @@ async def import_from_fitting(plan_id: int, request: Request, db: AsyncSession =
     if upgraded:
         msg += f" Upgraded {upgraded}."
     if not_found:
-        msg += f" Not found: {', '.join(not_found[:5])}"
+        safe_unresolved = ", ".join(html.escape(n) for n in not_found[:5])
+        msg += f" Not found: {safe_unresolved}"
         if len(not_found) > 5:
             msg += f" (+{len(not_found) - 5} more)"
     return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">{msg}</div>')

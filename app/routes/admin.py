@@ -1,6 +1,7 @@
 """Admin dashboard — system health, user management, and operational tools."""
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -879,7 +880,7 @@ async def admin_allowlist_add(request: Request, db: AsyncSession = Depends(get_d
         )
     )
     if existing.scalar_one_or_none():
-        return HTMLResponse(f'<div class="b-empty" style="color:var(--warn);">{name} is already on the allowlist.</div>')
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--warn);">{html.escape(name)} is already on the allowlist.</div>')
 
     db.add(RegistrationAllowlist(
         entry_type=entry_type, eve_id=eve_id_int, name=name, added_by=admin.id,
