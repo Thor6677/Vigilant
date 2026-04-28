@@ -40,14 +40,9 @@ COPY README.md ./
 # Frontend bundle from the node builder stage.
 COPY --from=frontend /build/dist ./frontend/dist
 
-RUN groupadd --system --gid 10001 vigilant \
- && useradd  --system --uid 10001 --gid vigilant --no-create-home vigilant \
- && mkdir -p /data \
- && chown -R vigilant:vigilant /app /data
+RUN mkdir -p /data
 
 ENV DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
-
-USER vigilant
 
 # Liveness probe. Uses urllib so we don't have to apt-install curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
