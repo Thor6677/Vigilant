@@ -3,8 +3,10 @@
    killmail.app live battle page for that system + start hour. #}
 <div style="margin-bottom:0.75rem;display:flex;flex-direction:column;gap:2px;">
     {% for battle in battles %}
-    {% set band_short = {'Highsec':'HS','Lowsec':'LS','Nullsec':'NS','w-space':'WH'}.get(battle['band'], '?') %}
-    {% set band_color = {'Highsec':'#7fd99a','Lowsec':'#e0a85a','Nullsec':'#e07a7a','w-space':'#7fb8e0'}.get(battle['band'], '#aaa') %}
+    {# group_label='Pochven' takes precedence — older rows may still have band='w-space'. #}
+    {% set effective_band = 'Pochven' if battle['group_label'] == 'Pochven' else battle['band'] %}
+    {% set band_short = {'Highsec':'HS','Lowsec':'LS','Nullsec':'NS','w-space':'WH','Pochven':'POCH'}.get(effective_band, '?') %}
+    {% set band_color = {'Highsec':'#7fd99a','Lowsec':'#e0a85a','Nullsec':'#e07a7a','w-space':'#7fb8e0','Pochven':'#d27aae'}.get(effective_band, '#aaa') %}
     <a href="https://killmail.app/related/{{ battle['system_id'] }}/{{ battle['start_time'].strftime('%Y%m%d%H00') }}/" target="_blank" rel="noopener"
        style="text-decoration:none;color:inherit;display:block;">
     <div class="b-section" style="border-left:3px solid #e53e3e;cursor:pointer;margin:0;">

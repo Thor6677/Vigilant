@@ -426,7 +426,7 @@ async def _cluster_system(
                 victims_by_km[kid] = cid
                 victim_orgs_by_km[kid] = (cid, corp, alli)
 
-    band_is_wspace = sys_meta.get("band") == "w-space"
+    band_is_wspace = sys_meta.get("band") in ("w-space", "Pochven")
     min_pilots = MIN_PILOTS_WSPACE if band_is_wspace else MIN_PILOTS_KSPACE
 
     # Build the DetectedBattle-shaped dicts
@@ -546,7 +546,7 @@ async def discover_and_persist_battles() -> dict:
                 "system_name": name,
                 "security": sec,
                 "group_label": wh_label or sec_band(sec),
-                "band": "w-space" if wh_label else sec_band(sec),
+                "band": ("Pochven" if wh_label == "Pochven" else "w-space") if wh_label else sec_band(sec),
             }
 
     our_ids = await get_our_char_ids()
@@ -668,7 +668,7 @@ BIG_BATTLE_WSPACE_KILLS = 15
 BIG_BATTLE_WSPACE_PILOTS = 15
 
 
-BANNER_CATEGORIES = ["Nullsec", "Lowsec", "w-space"]
+BANNER_CATEGORIES = ["Nullsec", "Lowsec", "w-space", "Pochven"]
 BANNER_MAX = 3
 
 
@@ -700,12 +700,12 @@ async def active_big_battles() -> list[dict]:
             .where(DetectedBattle.band.in_(BANNER_CATEGORIES))
             .where(or_(
                 and_(
-                    DetectedBattle.band == "w-space",
+                    DetectedBattle.band.in_(["w-space", "Pochven"]),
                     DetectedBattle.kill_count >= BIG_BATTLE_WSPACE_KILLS,
                     DetectedBattle.pilots_involved >= BIG_BATTLE_WSPACE_PILOTS,
                 ),
                 and_(
-                    DetectedBattle.band != "w-space",
+                    DetectedBattle.band.notin_(["w-space", "Pochven"]),
                     DetectedBattle.kill_count >= BIG_BATTLE_KSPACE_KILLS,
                     DetectedBattle.pilots_involved >= BIG_BATTLE_KSPACE_PILOTS,
                 ),
