@@ -52,11 +52,12 @@
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
         <span class="b-label">{{ window_label }}</span>
         <div class="ta-windows">
+            {% set btn_label = {'1h':'1H','1d':'24H','36h':'36H','7d':'7D','30d':'30D','90d':'90D','1y':'1Y','5y':'5Y','all':'ALL'} %}
             {% for w, label in window_options %}
             <a href="/tools/activity?window={{ w }}"
                class="b-btn {% if w == window %}is-active{% endif %}"
                style="text-decoration:none;">
-                {{ label.split(' ')[1] if w not in ('all','1d') else (label if w == 'all' else '24H') }}
+                {{ btn_label.get(w, w) }}
             </a>
             {% endfor %}
         </div>
@@ -162,7 +163,7 @@
 
 {% if breakdowns_available and has_breakdown_data %}
 <div class="b-section" style="margin-top:1rem;">
-    <div class="b-section-head"><span class="b-label">PvP composition · trailing {{ window_label.split(' ')[1] if window != '1d' else '24h' }}</span></div>
+    <div class="b-section-head"><span class="b-label">PvP composition · {{ window_label.lower() }}</span></div>
     <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
         <div>
             <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">Solo vs fleet kills</div>

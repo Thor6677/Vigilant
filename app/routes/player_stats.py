@@ -43,14 +43,21 @@ templates = Jinja2Templates(directory="app/templates")
 # Window → (cutoff_delta, bin_seconds, label_fmt). For all-time we use a
 # fixed cutoff at 2003-05-28 (first PCU data point per Chribba's archive).
 _FIRST_PCU = datetime(2003, 5, 28)
+# Bin sizes target ~150-300 points per window so each chart has similar
+# visual density. Sub-day windows (≤90d) hit raw player_count_snapshots
+# via ix_recorded_at — cheap because the time filter narrows the scan.
+# Longer windows (1y/5y/all) keep day+ bins so the PCU read stays on
+# PlayerCountDailyAggregate; raw scans over years would be expensive.
 _WINDOWS = {
-    "1d":   ("Last 24 hours",     timedelta(days=1),    5 * 60,          "%H:%M"),
-    "7d":   ("Last 7 days",       timedelta(days=7),    6 * 3600,        "%b %d %H:00"),
-    "30d":  ("Last 30 days",      timedelta(days=30),   24 * 3600,       "%b %d"),
-    "90d":  ("Last 90 days",      timedelta(days=90),   24 * 3600,       "%b %d"),
-    "1y":   ("Last year",         timedelta(days=365),  7 * 24 * 3600,   "%Y-%m-%d"),
-    "5y":   ("Last 5 years",      timedelta(days=365 * 5),  30 * 24 * 3600,  "%Y-%m"),
-    "all":  ("All time (2003–)",  None,                 90 * 24 * 3600,  "%Y-%m"),
+    "1h":   ("Last hour",         timedelta(hours=1),       60,              "%H:%M"),
+    "1d":   ("Last 24 hours",     timedelta(days=1),        5 * 60,          "%H:%M"),
+    "36h":  ("Last 36 hours",     timedelta(hours=36),      10 * 60,         "%a %H:%M"),
+    "7d":   ("Last 7 days",       timedelta(days=7),        30 * 60,         "%b %d %H:%M"),
+    "30d":  ("Last 30 days",      timedelta(days=30),       3 * 3600,        "%b %d %H:00"),
+    "90d":  ("Last 90 days",      timedelta(days=90),       12 * 3600,       "%b %d"),
+    "1y":   ("Last year",         timedelta(days=365),      24 * 3600,       "%Y-%m-%d"),
+    "5y":   ("Last 5 years",      timedelta(days=365 * 5),  7 * 24 * 3600,   "%Y-%m-%d"),
+    "all":  ("All time (2003–)",  None,                     30 * 24 * 3600,  "%Y-%m"),
 }
 
 # Slow windows benefit from a short TTL cache — they don't change minute to
@@ -254,7 +261,7 @@ async def tools_activity(
     # Killmail rows are GC'd at 30d, so attacker-count + is_npc breakdowns
     # only make sense on the trailing 30 days. Hide them for longer windows
     # rather than showing partial data.
-    breakdowns_available = window in ("1d", "7d", "30d")
+    breakdowns_available = window in ("1h", "1d", "36h", "7d", "30d")
     has_breakdown_data = False
     solo_fleet_series: dict[str, list[int]] = {}
     npc_player_series: dict[str, list[int]] = {}
