@@ -111,6 +111,55 @@
     </div>
 </div>
 
+{% if daily_kills_counts and daily_kills_counts|sum > 0 %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Daily kills · trailing 30 days</span></div>
+    <div style="padding:0.75rem;">
+        <div style="position:relative;height:220px;">
+            <canvas id="daily-kills-chart"></canvas>
+        </div>
+        <div style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
+            One point per day from killmail_daily_aggregates. Independent of the window selector — gives a smoothed view of recent activity that doesn't collapse into a single bin on short windows.
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const el = document.getElementById('daily-kills-chart');
+    if (!el) return;
+    const labels = {{ daily_kills_labels|tojson }};
+    const data = {{ daily_kills_counts|tojson }};
+    new Chart(el, {
+        type:'line',
+        data:{
+            labels:labels,
+            datasets:[{
+                label:'Kills', data:data,
+                borderColor:'rgba(238,85,85,0.95)',
+                backgroundColor:'rgba(238,85,85,0.18)',
+                borderWidth:1.5, pointRadius:0, pointHoverRadius:3,
+                fill:true, tension:0.35,
+            }],
+        },
+        options:{
+            responsive:true, maintainAspectRatio:false,
+            interaction:{mode:'index', intersect:false},
+            plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:(ctx) => 'Kills: ' + ctx.parsed.y.toLocaleString()}}},
+            scales:{
+                x:{ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:12},
+                   grid:{display:false}},
+                y:{beginAtZero:true,
+                   ticks:{color:'#7a7a7a',font:{size:9},callback:(v)=>v.toLocaleString()},
+                   grid:{color:'rgba(255,255,255,0.05)'}},
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+
 {% if breakdowns_available and has_breakdown_data %}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">PvP composition · trailing {{ window_label.split(' ')[1] if window != '1d' else '24h' }}</span></div>
@@ -302,7 +351,7 @@
                 <strong><a href="https://zkillboard.com/" target="_blank"
                           rel="noopener" style="color:var(--accent);">zKillboard</a></strong>
                 — daily kill-count totals (<code>/api/history/totals.json</code>) since 2007-12-05.
-                Provides the long-tail "Daily kills" line on the chart.
+                Provides the long-tail daily-kills series.
             </li>
         </ul>
         These sites serve their data freely. Vigilant pulls each historical
@@ -346,13 +395,10 @@
             datasets: [
                 { label:'Players online', data: pcuValues, yAxisID:'y',
                   borderColor:'rgba(94,177,255,0.95)', backgroundColor:'rgba(94,177,255,0.10)',
-                  borderWidth:2, pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25, spanGaps:true },
+                  borderWidth:1.5, pointRadius:0, pointHoverRadius:3, fill:false, tension:0, spanGaps:true },
                 { label:'ISK destroyed', data: iskValues, yAxisID:'y1',
                   borderColor:'rgba(200,169,81,0.95)', backgroundColor:'rgba(200,169,81,0.08)',
-                  borderWidth:2, borderDash:[4,3], pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25 },
-                { label:'Daily kills', data: killsValues, yAxisID:'y2',
-                  borderColor:'rgba(238,85,85,0.85)', backgroundColor:'rgba(238,85,85,0.08)',
-                  borderWidth:1.5, pointRadius:0, pointHoverRadius:3, fill:false, tension:0.25 },
+                  borderWidth:1.5, borderDash:[4,3], pointRadius:0, pointHoverRadius:3, fill:false, tension:0 },
             ],
         },
         options: {
@@ -365,7 +411,6 @@
                     const v = ctx.parsed.y;
                     if (v === null) return ctx.dataset.label + ': —';
                     if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
-                    if (ctx.dataset.yAxisID === 'y2') return ctx.dataset.label + ': ' + v.toLocaleString();
                     return ctx.dataset.label + ': ' + fmtPCU(v);
                 }}}
             },
@@ -379,10 +424,6 @@
                      ticks:{color:'rgba(200,169,81,0.95)',font:{size:9},callback:(v)=>fmtISK(v)},
                      grid:{drawOnChartArea:false},
                      title:{display:true,text:'ISK',color:'rgba(200,169,81,0.7)',font:{size:10}} },
-                // Daily kills — own scale, hidden axis labels (avoid clutter
-                // — three labelled axes is too much). Tooltip shows exact value.
-                y2:{ type:'linear', position:'right', beginAtZero:true,
-                     display:false, grid:{drawOnChartArea:false} },
             }
         }
     });
@@ -422,13 +463,10 @@
                 mainChart.data.datasets.push(
                     { label:'Players (prior)', data: fit(cached.pcu_values), yAxisID:'y',
                       borderColor:'rgba(94,177,255,0.4)', borderWidth:1, borderDash:[2,2],
-                      pointRadius:0, fill:false, tension:0.25, spanGaps:true, _isCompare:true },
+                      pointRadius:0, fill:false, tension:0, spanGaps:true, _isCompare:true },
                     { label:'ISK (prior)', data: fit(cached.isk_values), yAxisID:'y1',
                       borderColor:'rgba(200,169,81,0.4)', borderWidth:1, borderDash:[2,2],
-                      pointRadius:0, fill:false, tension:0.25, _isCompare:true },
-                    { label:'Kills (prior)', data: fit(cached.kills_values), yAxisID:'y2',
-                      borderColor:'rgba(238,85,85,0.4)', borderWidth:1, borderDash:[2,2],
-                      pointRadius:0, fill:false, tension:0.25, _isCompare:true },
+                      pointRadius:0, fill:false, tension:0, _isCompare:true },
                 );
                 mainChart.update();
                 toggleBtn.classList.add('is-active');

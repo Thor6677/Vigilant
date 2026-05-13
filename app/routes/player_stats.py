@@ -44,7 +44,7 @@ templates = Jinja2Templates(directory="app/templates")
 # fixed cutoff at 2003-05-28 (first PCU data point per Chribba's archive).
 _FIRST_PCU = datetime(2003, 5, 28)
 _WINDOWS = {
-    "1d":   ("Last 24 hours",     timedelta(days=1),    1 * 3600,        "%H:%M"),
+    "1d":   ("Last 24 hours",     timedelta(days=1),    5 * 60,          "%H:%M"),
     "7d":   ("Last 7 days",       timedelta(days=7),    6 * 3600,        "%b %d %H:00"),
     "30d":  ("Last 30 days",      timedelta(days=30),   24 * 3600,       "%b %d"),
     "90d":  ("Last 90 days",      timedelta(days=90),   24 * 3600,       "%b %d"),
@@ -228,6 +228,27 @@ async def tools_activity(
     # Already summed above. If bin spans multiple days, kills_buckets[i] is
     # the cluster total — appropriate for "kills in this bin".
     total_kills = sum(kills_buckets)
+
+    # Standalone daily-kills series — one point per actual day. Used by a
+    # dedicated chart so the value doesn't collapse into a single spike when
+    # the main chart's bins are sub-day (1d/7d). Always trailing 30 days
+    # (the killmail aggregate's effective horizon for kill_count); for short
+    # windows this gives recent context, for long windows it complements the
+    # binned main chart with day-resolution detail.
+    dk_cutoff = (now - timedelta(days=30)).date()
+    dk_rows = (await db.execute(
+        select(KillmailDailyAggregate.date, KillmailDailyAggregate.kill_count,
+               KillmailDailyAggregate.source)
+        .where(KillmailDailyAggregate.date >= dk_cutoff)
+    )).all()
+    dk_by_date: dict = {}
+    for d, kc, src in dk_rows:
+        cur = dk_by_date.get(d)
+        if cur is None or (cur[1] == "zkb-totals" and src == "vigilant"):
+            dk_by_date[d] = (int(kc), src)
+    daily_kills_dates = sorted(dk_by_date.keys())
+    daily_kills_labels = [d.strftime("%b %d") for d in daily_kills_dates]
+    daily_kills_counts = [dk_by_date[d][0] for d in daily_kills_dates]
 
     # ── Breakdown charts (only on windows ≤ 30d) ──
     # Killmail rows are GC'd at 30d, so attacker-count + is_npc breakdowns
@@ -459,6 +480,8 @@ async def tools_activity(
         "has_zone_data": has_zone_data,
         "zone_series": zone_series,
         "zone_isk_series": zone_isk_series,
+        "daily_kills_labels": daily_kills_labels,
+        "daily_kills_counts": daily_kills_counts,
     }
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
