@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Integer, case, func, select
+from sqlalchemy import Integer, case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -407,18 +407,19 @@ async def tools_activity(
 
     # Source coverage breakdown. For day+ bins we sum sample_count from the
     # daily aggregate (cheap). For sub-day windows we GROUP BY on the
-    # snapshot table — wrap the time filter in a subquery so SQLite uses
-    # ix_recorded_at to narrow to ~1440 rows BEFORE grouping. The flat form
-    # (`WHERE … GROUP BY source`) makes the planner pick the (source,
-    # recorded_at) unique covering index and full-scan all 10M rows (~13s).
+    # snapshot table — use `GROUP BY +source` so SQLite picks the
+    # ix_recorded_at index to filter to ~1440 rows BEFORE grouping. The
+    # plain `GROUP BY source` form makes the planner choose the
+    # (source, recorded_at) unique covering index and full-scan all 10M
+    # rows (~13s). The unary `+` defeats that index match. A subquery
+    # rewrite does NOT help — SQLite flattens it back to the same plan.
     src_counts = {}
     if bin_seconds < 86400:
-        src_sub = (
-            select(PlayerCountSnapshot.source.label("s"))
+        src_q = (
+            select(PlayerCountSnapshot.source, func.count())
             .where(PlayerCountSnapshot.recorded_at >= cutoff)
-            .subquery()
+            .group_by(literal_column("+source"))
         )
-        src_q = select(src_sub.c.s, func.count()).group_by(src_sub.c.s)
     else:
         src_q = (
             select(PlayerCountDailyAggregate.source,
