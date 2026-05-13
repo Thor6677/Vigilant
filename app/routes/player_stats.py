@@ -60,6 +60,11 @@ _SLOW_WINDOWS = {"1y", "5y", "all"}
 _SLOW_TTL_SECONDS = 3600
 _payload_cache: dict[str, tuple[datetime, dict]] = {}
 
+# Heatmap is a 90-day aggregate, window-independent, and runs ~1.5s via a
+# row_number() over 200k+ rows. Cache the result for all windows to share.
+_HEATMAP_TTL_SECONDS = 1800
+_heatmap_cache: tuple[datetime, list[list[int | None]], bool] | None = None
+
 
 @router.get("/tools/activity", response_class=HTMLResponse)
 async def tools_activity(
@@ -346,59 +351,74 @@ async def tools_activity(
     # picks one row per recorded_at minute by source priority. Coarse
     # granularities (daily/weekly archive rollups) excluded so they
     # don't blur the hourly buckets. SQLite strftime('%w') is 0=Sunday.
-    heatmap_cutoff = now - timedelta(days=90)
-    src_rank = case(
-        (PlayerCountSnapshot.source == "esi", 0),
-        (PlayerCountSnapshot.source == "eve-offline-net", 1),
-        (PlayerCountSnapshot.source == "eve-offline-com", 2),
-        else_=3,
-    )
-    ranked = (
-        select(
-            PlayerCountSnapshot.recorded_at,
-            PlayerCountSnapshot.player_count,
-            func.row_number().over(
-                partition_by=PlayerCountSnapshot.recorded_at,
-                order_by=src_rank,
-            ).label("rn"),
+    global _heatmap_cache
+    pcu_heatmap: list[list[int | None]]
+    if _heatmap_cache is not None and now < _heatmap_cache[0]:
+        pcu_heatmap = _heatmap_cache[1]
+        has_heatmap_data = _heatmap_cache[2]
+    else:
+        heatmap_cutoff = now - timedelta(days=90)
+        src_rank = case(
+            (PlayerCountSnapshot.source == "esi", 0),
+            (PlayerCountSnapshot.source == "eve-offline-net", 1),
+            (PlayerCountSnapshot.source == "eve-offline-com", 2),
+            else_=3,
         )
-        .where(
-            PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
-            PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
+        ranked = (
+            select(
+                PlayerCountSnapshot.recorded_at,
+                PlayerCountSnapshot.player_count,
+                func.row_number().over(
+                    partition_by=PlayerCountSnapshot.recorded_at,
+                    order_by=src_rank,
+                ).label("rn"),
+            )
+            .where(
+                PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
+                PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
+            )
+            .subquery()
         )
-        .subquery()
-    )
-    heatmap_rows = (await db.execute(
-        select(
-            func.strftime("%w", ranked.c.recorded_at).label("dow"),
-            func.strftime("%H", ranked.c.recorded_at).label("hr"),
-            func.avg(ranked.c.player_count).label("avg_pc"),
+        heatmap_rows = (await db.execute(
+            select(
+                func.strftime("%w", ranked.c.recorded_at).label("dow"),
+                func.strftime("%H", ranked.c.recorded_at).label("hr"),
+                func.avg(ranked.c.player_count).label("avg_pc"),
+            )
+            .where(ranked.c.rn == 1)
+            .group_by("dow", "hr")
+        )).all()
+        # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
+        pcu_heatmap = [[None] * 24 for _ in range(7)]
+        for dow_str, hr_str, avg_pc in heatmap_rows:
+            if dow_str is None or hr_str is None or avg_pc is None:
+                continue
+            # SQLite: Sun=0 Mon=1 … Sat=6. Rotate so Mon=0 … Sun=6.
+            dow = (int(dow_str) + 6) % 7
+            hr = int(hr_str)
+            if 0 <= dow < 7 and 0 <= hr < 24:
+                pcu_heatmap[dow][hr] = round(float(avg_pc))
+        has_heatmap_data = any(v is not None for row in pcu_heatmap for v in row)
+        _heatmap_cache = (
+            now + timedelta(seconds=_HEATMAP_TTL_SECONDS),
+            pcu_heatmap,
+            has_heatmap_data,
         )
-        .where(ranked.c.rn == 1)
-        .group_by("dow", "hr")
-    )).all()
-    # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
-    pcu_heatmap: list[list[int | None]] = [[None] * 24 for _ in range(7)]
-    for dow_str, hr_str, avg_pc in heatmap_rows:
-        if dow_str is None or hr_str is None or avg_pc is None:
-            continue
-        # SQLite: Sun=0 Mon=1 … Sat=6. Rotate so Mon=0 … Sun=6.
-        dow = (int(dow_str) + 6) % 7
-        hr = int(hr_str)
-        if 0 <= dow < 7 and 0 <= hr < 24:
-            pcu_heatmap[dow][hr] = round(float(avg_pc))
-    has_heatmap_data = any(v is not None for row in pcu_heatmap for v in row)
 
     # Source coverage breakdown. For day+ bins we sum sample_count from the
     # daily aggregate (cheap). For sub-day windows we GROUP BY on the
-    # snapshot table — small window, still cheap.
+    # snapshot table — wrap the time filter in a subquery so SQLite uses
+    # ix_recorded_at to narrow to ~1440 rows BEFORE grouping. The flat form
+    # (`WHERE … GROUP BY source`) makes the planner pick the (source,
+    # recorded_at) unique covering index and full-scan all 10M rows (~13s).
     src_counts = {}
     if bin_seconds < 86400:
-        src_q = (
-            select(PlayerCountSnapshot.source, func.count())
+        src_sub = (
+            select(PlayerCountSnapshot.source.label("s"))
             .where(PlayerCountSnapshot.recorded_at >= cutoff)
-            .group_by(PlayerCountSnapshot.source)
+            .subquery()
         )
+        src_q = select(src_sub.c.s, func.count()).group_by(src_sub.c.s)
     else:
         src_q = (
             select(PlayerCountDailyAggregate.source,
