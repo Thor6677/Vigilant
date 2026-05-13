@@ -2171,12 +2171,14 @@ async def dashboard_activity(
     if not user_id:
         return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
 
-    # Window → (cutoff_delta, bin_seconds, label_fmt)
+    # Window → (cutoff_delta, bin_seconds, label_fmt). Bins match the
+    # /tools/activity panel so both views read the same way (~150-300
+    # points per window).
     windows = {
-        "1h":    (timedelta(hours=1),    5 * 60,       "%H:%M"),
-        "24h":   (timedelta(hours=24),   60 * 60,      "%H:00"),
-        "week":  (timedelta(days=7),     6 * 3600,     "%b %d %H:00"),
-        "month": (timedelta(days=30),    24 * 3600,    "%b %d"),
+        "1h":    (timedelta(hours=1),    60,           "%H:%M"),
+        "24h":   (timedelta(hours=24),   5 * 60,       "%H:%M"),
+        "week":  (timedelta(days=7),     30 * 60,      "%b %d %H:%M"),
+        "month": (timedelta(days=30),    3 * 3600,     "%b %d %H:00"),
     }
     if window not in windows:
         window = "24h"
