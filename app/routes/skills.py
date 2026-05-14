@@ -177,12 +177,10 @@ async def skill_planner(
 
     scope = "esi-skills.read_skills.v1"
     if scope not in char_info["scopes"]:
-        return templates.TemplateResponse("skills.html", {
-            "request": request, "char": char_info,
+        return templates.TemplateResponse(request, "skills.html", {"char": char_info,
             "error": "Skills scope not available — re-authorize this character.",
             "attributes": None, "queue_items": [], "total_sp": 0,
-            "current_time_str": "", "implants": [0]*5,
-        })
+            "current_time_str": "", "implants": [0]*5})
 
     try:
         token = await refresh_token(char, db)
@@ -282,16 +280,12 @@ async def skill_planner(
 
     except Exception as exc:
         logger.warning("Skill planner failed for char %s: %s", character_id, exc, exc_info=True)
-        return templates.TemplateResponse("skills.html", {
-            "request": request, "char": char_info,
+        return templates.TemplateResponse(request, "skills.html", {"char": char_info,
             "error": f"Failed to load skill data: {type(exc).__name__}",
             "attributes": None, "queue_items": [], "total_sp": 0,
-            "current_time_str": "", "implants": [0]*5,
-        })
+            "current_time_str": "", "implants": [0]*5})
 
-    return templates.TemplateResponse("skills.html", {
-        "request": request,
-        "char": char_info,
+    return templates.TemplateResponse(request, "skills.html", {"char": char_info,
         "error": None,
         "attributes": current_attrs,
         "attr_names": ATTR_NAMES,
@@ -308,8 +302,7 @@ async def skill_planner(
         "time_saved_str": _format_duration(abs(time_saved)),
         "bonus_remaps": bonus_remaps,
         "last_remap": last_remap[:10] if last_remap else "",
-        "next_remap": next_remap[:10] if next_remap else "",
-    })
+        "next_remap": next_remap[:10] if next_remap else ""})
 
 
 @router.get("/character/{character_id}/skills/remap-calc", response_class=HTMLResponse)
@@ -419,9 +412,7 @@ async def remap_calculate(
 
     time_diff = current_total - proposed_total
 
-    return templates.TemplateResponse("partials/remap_results.html", {
-        "request": request,
-        "rows": rows,
+    return templates.TemplateResponse(request, "partials/remap_results.html", {"rows": rows,
         "proposed": proposed,
         "total_points": total_points,
         "valid": total_points == 99,
@@ -430,5 +421,4 @@ async def remap_calculate(
         "time_diff": time_diff,
         "time_diff_str": _format_duration(abs(time_diff)),
         "is_faster": time_diff > 0,
-        "attr_names": ATTR_NAMES,
-    })
+        "attr_names": ATTR_NAMES})

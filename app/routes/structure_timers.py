@@ -253,14 +253,11 @@ async def timers_page(request: Request, db: AsyncSession = Depends(get_db)):
             except Exception:
                 continue
 
-    return templates.TemplateResponse("structure_timers.html", {
-        "request": request,
-        "active_timers": active_timers,
+    return templates.TemplateResponse(request, "structure_timers.html", {"active_timers": active_timers,
         "archived_timers": archived_timers,
         "acl_groups": acl_groups,
         "user_id": user_id,
-        "is_privileged": is_privileged,
-    })
+        "is_privileged": is_privileged})
 
 
 # ── Create timer ─────────────────────────────────────────────────────────────

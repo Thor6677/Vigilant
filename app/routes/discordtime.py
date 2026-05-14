@@ -10,4 +10,4 @@ templates = Jinja2Templates(directory="app/templates")
 
 @router.get("/tools/discordtime", response_class=HTMLResponse)
 async def discordtime_page(request: Request):
-    return templates.TemplateResponse("discordtime.html", {"request": request})
+    return templates.TemplateResponse(request, "discordtime.html", {})

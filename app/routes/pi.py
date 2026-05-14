@@ -170,9 +170,7 @@ async def planetary_page(
     expiring_soon = sum(1 for r in rows if r["planet"].get("expiry_warning") in ("critical", "expired"))
     warning_cnt = sum(1 for r in rows if r["planet"].get("expiry_warning") == "warning")
 
-    return templates.TemplateResponse("planetary.html", {
-        "request": request,
-        "rows": rows,
+    return templates.TemplateResponse(request, "planetary.html", {"rows": rows,
         "missing_scope_chars": missing_scope_chars,
         "sort": sort,
         "filter_type": filter_type,
@@ -181,8 +179,7 @@ async def planetary_page(
         "total_planets": total_planets,
         "expiring_soon": expiring_soon,
         "warning_cnt": warning_cnt,
-        "pin_group_names": pi_const.PIN_GROUP_NAMES,
-    })
+        "pin_group_names": pi_const.PIN_GROUP_NAMES})
 
 
 @router.get("/industry/planetary/planet/{character_id}/{planet_id}", response_class=HTMLResponse)
@@ -303,13 +300,10 @@ async def planet_detail_partial(
                 pin["_schematic_output"] = sch.get("output_name")
                 pin["_schematic_output_qty"] = sch.get("output_qty")
 
-    return templates.TemplateResponse("partials/planetary_planet_detail.html", {
-        "request": request,
-        "planet": planet,
+    return templates.TemplateResponse(request, "partials/planetary_planet_detail.html", {"planet": planet,
         "pins": pins,
         "type_names": type_names,
-        "pin_group_names": pi_const.PIN_GROUP_NAMES,
-    })
+        "pin_group_names": pi_const.PIN_GROUP_NAMES})
 
 
 async def _get_schematics_info(db: AsyncSession, schematic_ids: list[int]) -> dict[int, dict]:
@@ -365,12 +359,9 @@ async def planetary_lookup_page(request: Request, db: AsyncSession = Depends(get
         pt: pi_const.P0_BY_PLANET_TYPE[pt.lower()]
         for pt in pi_const.PLANET_TYPES
     }
-    return templates.TemplateResponse("planetary_lookup.html", {
-        "request": request,
-        "planet_types": pi_const.PLANET_TYPES,
+    return templates.TemplateResponse(request, "planetary_lookup.html", {"planet_types": pi_const.PLANET_TYPES,
         "p0_materials": pi_const.P0_MATERIALS,
-        "p0_by_type": ordered_by_type,
-    })
+        "p0_by_type": ordered_by_type})
 
 
 @router.get("/industry/planetary/lookup/search", response_class=JSONResponse)
@@ -429,16 +420,13 @@ async def planetary_lookup_system(
     # producible or not based on this system's combined P0 pool.
     tier_view = await _tier_view_for_system(db, system_p0_names)
 
-    return templates.TemplateResponse("partials/planetary_lookup_system.html", {
-        "request": request,
-        "system": sys_info,
+    return templates.TemplateResponse(request, "partials/planetary_lookup_system.html", {"system": sys_info,
         "planets": rendered_planets,
         "no_sde": not planets,
         "all_tiers": tier_view["all_tiers"],
         "tier_counts": tier_view["counts"],
         "system_p0_names": sorted(system_p0_names),
-        "space_type": space_type,
-    })
+        "space_type": space_type})
 
 
 def _space_type(region_id: int | None, security: float | None) -> str:
@@ -739,11 +727,8 @@ async def planetary_chain_page(
                 if total_input_cost > 0:
                     item["margin_pct"] = item["margin_per_cycle"] / total_input_cost * 100
 
-    return templates.TemplateResponse("planetary_chain.html", {
-        "request": request,
-        "chain": chain,
-        "p0_by_planet_type": pi_const.P0_BY_PLANET_TYPE,
-    })
+    return templates.TemplateResponse(request, "planetary_chain.html", {"chain": chain,
+        "p0_by_planet_type": pi_const.P0_BY_PLANET_TYPE})
 
 
 @router.get("/industry/planetary/chain/node/{type_id}", response_class=HTMLResponse)
@@ -842,9 +827,7 @@ async def planetary_chain_node(
     revenue_per_cycle = (price or 0.0) * (output_qty or 0)
     margin_per_cycle = revenue_per_cycle - input_cost if inputs else None
 
-    return templates.TemplateResponse("partials/planetary_chain_node.html", {
-        "request": request,
-        "type_id": type_id,
+    return templates.TemplateResponse(request, "partials/planetary_chain_node.html", {"type_id": type_id,
         "name": name or f"Type {type_id}",
         "tier": tier,
         "planet_types": planet_types,
@@ -855,8 +838,7 @@ async def planetary_chain_node(
         "price": price,
         "input_cost": input_cost,
         "revenue_per_cycle": revenue_per_cycle,
-        "margin_per_cycle": margin_per_cycle,
-    })
+        "margin_per_cycle": margin_per_cycle})
 
 
 # ── Phase 4: /industry/planetary/calculator ───────────────────────────────────
@@ -978,9 +960,7 @@ async def planetary_calculator_page(
             planets_per_char=planets_per_char,
         )
 
-    return templates.TemplateResponse("planetary_calculator.html", {
-        "request": request,
-        "target": target,
+    return templates.TemplateResponse(request, "planetary_calculator.html", {"target": target,
         "system": system,
         "cycles": cycles,
         "max_chars": max_chars_int,
@@ -996,8 +976,7 @@ async def planetary_calculator_page(
         "system_p0_names": sorted(system_p0_names),
         "no_sde": graph is None,
         "tier_names": {0: "P0 · Raw", 1: "P1 · Basic", 2: "P2 · Basic",
-                       3: "P3 · Specialized", 4: "P4 · Advanced"},
-    })
+                       3: "P3 · Specialized", 4: "P4 · Advanced"}})
 
 
 def _expand_bom(graph: dict, target_tid: int, target_cycles: int,

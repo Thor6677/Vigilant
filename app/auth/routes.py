@@ -184,10 +184,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                     allowed = True
                     break
             if not allowed:
-                return templates.TemplateResponse("index.html", {
-                    "request": request,
-                    "error": "Registration is restricted. Your character, corporation, or alliance is not on the allowlist.",
-                })
+                return templates.TemplateResponse(request, "index.html", {"error": "Registration is restricted. Your character, corporation, or alliance is not on the allowlist."})
 
     if intent == "login":
         if existing_char and existing_char.user_id:

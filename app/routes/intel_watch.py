@@ -249,9 +249,9 @@ async def intel_watch(request: Request, db: AsyncSession = Depends(get_db)):
     ]
 
     return templates.TemplateResponse(
+        request,
         "intel_watch.html",
         {
-            "request": request,
             "systems": systems,
             "hunters": hunters,
             "unwatched_asset_systems": unwatched_asset_systems,

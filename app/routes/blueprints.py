@@ -139,12 +139,10 @@ async def character_blueprints(
 
     scope = "esi-characters.read_blueprints.v1"
     if scope not in (char.scopes or ""):
-        return templates.TemplateResponse("blueprints.html", {
-            "request": request, "char": char_info, "blueprints": [], "groups": {},
+        return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
             "error": "Blueprints scope not available — re-authorize this character.",
-            "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by,
-        })
+            "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by})
 
     try:
         token = await refresh_token(char, db)
@@ -170,18 +168,14 @@ async def character_blueprints(
 
     except Exception as exc:
         logger.warning("Blueprints fetch failed for char %s: %s", character_id, exc, exc_info=True)
-        return templates.TemplateResponse("blueprints.html", {
-            "request": request, "char": char_info, "blueprints": [], "groups": {},
+        return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
             "error": f"Failed to load blueprints: {type(exc).__name__}",
-            "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by,
-        })
+            "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by})
 
-    return templates.TemplateResponse("blueprints.html", {
-        "request": request, "char": char_info, "blueprints": blueprints,
+    return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": blueprints,
         "groups": groups, "stats": stats, "error": None,
-        "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by,
-    })
+        "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by})
 
 
 @router.get("/corporations/{corp_id}/blueprints", response_class=HTMLResponse)
@@ -209,12 +203,10 @@ async def corp_blueprints(
     }
 
     if not corp_chars:
-        return templates.TemplateResponse("blueprints.html", {
-            "request": request, "char": char_info, "blueprints": [], "groups": {},
+        return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
             "error": "No character with corp blueprint access. Requires Director role and re-authorization.",
-            "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by,
-        })
+            "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by})
 
     try:
         scope_chars = {"blueprints": corp_chars}
@@ -243,15 +235,11 @@ async def corp_blueprints(
 
     except Exception as exc:
         logger.warning("Corp blueprints fetch failed for corp %s: %s", corp_id, exc, exc_info=True)
-        return templates.TemplateResponse("blueprints.html", {
-            "request": request, "char": char_info, "blueprints": [], "groups": {},
+        return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
             "error": f"Failed to load corp blueprints: {type(exc).__name__}",
-            "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by,
-        })
+            "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by})
 
-    return templates.TemplateResponse("blueprints.html", {
-        "request": request, "char": char_info, "blueprints": blueprints,
+    return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": blueprints,
         "groups": groups, "stats": stats, "error": None,
-        "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by,
-    })
+        "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by})

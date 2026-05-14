@@ -431,10 +431,7 @@ async def intel_page(request: Request, db: AsyncSession = Depends(get_db)):
                 "created_at": r.created_at,
                 "expires_in": exp_str,
             })
-    return templates.TemplateResponse("intel.html", {
-        "request": request,
-        "history": history,
-    })
+    return templates.TemplateResponse(request, "intel.html", {"history": history})
 
 
 # Keep old /dscan URL working
@@ -455,20 +452,14 @@ async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
     label = form.get("label", "").strip()[:128] or None
 
     if not paste_text.strip():
-        return templates.TemplateResponse("intel.html", {
-            "request": request,
-            "error": "Paste your d-scan or local scan above.",
-        })
+        return templates.TemplateResponse(request, "intel.html", {"error": "Paste your d-scan or local scan above."})
 
     paste_type = detect_paste_type(paste_text)
 
     if paste_type == "dscan":
         items = parse_dscan(paste_text)
         if not items:
-            return templates.TemplateResponse("intel.html", {
-                "request": request,
-                "error": "Could not parse d-scan. Make sure you paste from the d-scan window.",
-            })
+            return templates.TemplateResponse(request, "intel.html", {"error": "Could not parse d-scan. Make sure you paste from the d-scan window."})
 
         type_ids = list(set(item["type_id"] for item in items))
         group_ids = await sde.get_type_group_ids(db, type_ids)
@@ -488,19 +479,13 @@ async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
     elif paste_type == "local":
         names = parse_local_names(paste_text)
         if not names:
-            return templates.TemplateResponse("intel.html", {
-                "request": request,
-                "error": "Could not parse any character names.",
-            })
+            return templates.TemplateResponse(request, "intel.html", {"error": "Could not parse any character names."})
 
         summary = await resolve_local_scan(names)
         parsed_json = json.dumps(summary.get("characters", []))
 
     else:
-        return templates.TemplateResponse("intel.html", {
-            "request": request,
-            "error": "Could not detect paste type. Paste d-scan or local chat.",
-        })
+        return templates.TemplateResponse(request, "intel.html", {"error": "Could not detect paste type. Paste d-scan or local chat."})
 
     scan_id = _generate_id()
     now = datetime.now(timezone.utc)
@@ -528,10 +513,7 @@ async def intel_view(scan_id: str, request: Request, db: AsyncSession = Depends(
     dscan = result.scalar_one_or_none()
 
     if not dscan:
-        return templates.TemplateResponse("intel.html", {
-            "request": request,
-            "error": "Intel not found or has expired.",
-        })
+        return templates.TemplateResponse(request, "intel.html", {"error": "Intel not found or has expired."})
 
     now = datetime.now(timezone.utc)
     expires = dscan.expires_at
@@ -540,10 +522,7 @@ async def intel_view(scan_id: str, request: Request, db: AsyncSession = Depends(
     if expires < now:
         await db.execute(delete(DScanResult).where(DScanResult.id == scan_id))
         await db.commit()
-        return templates.TemplateResponse("intel.html", {
-            "request": request,
-            "error": "This intel has expired.",
-        })
+        return templates.TemplateResponse(request, "intel.html", {"error": "This intel has expired."})
 
     summary = json.loads(dscan.summary_json) if dscan.summary_json else {}
     items = json.loads(dscan.parsed_json) if dscan.parsed_json else []
@@ -561,8 +540,7 @@ async def intel_view(scan_id: str, request: Request, db: AsyncSession = Depends(
 
     template = "intel_dscan.html" if scan_type == "dscan" else "intel_local.html"
 
-    return templates.TemplateResponse(template, {
-        "request": request,
+    return templates.TemplateResponse(request, template, {
         "dscan": dscan,
         "items": items,
         "non_ship_items": non_ship_items,

@@ -92,9 +92,7 @@ async def tools_activity(
     if cached is not None:
         expires_at, payload = cached
         if datetime.now(timezone.utc).replace(tzinfo=None) < expires_at:
-            return templates.TemplateResponse(
-                "tools_activity.html", {"request": request, **payload}
-            )
+            return templates.TemplateResponse(request, "tools_activity.html", {**payload})
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = _FIRST_PCU if delta is None else (now - delta)
@@ -493,9 +491,7 @@ async def tools_activity(
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
         _payload_cache[window] = (expires_at, payload)
-    return templates.TemplateResponse(
-        "tools_activity.html", {"request": request, **payload}
-    )
+    return templates.TemplateResponse(request, "tools_activity.html", {**payload})
 
 
 # Lazy-loaded prior-period overlay. Lives on its own endpoint so the main

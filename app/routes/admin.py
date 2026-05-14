@@ -92,7 +92,7 @@ def _format_duration(seconds: float) -> str:
 @router.get("", response_class=HTMLResponse)
 async def admin_page(request: Request, db: AsyncSession = Depends(get_db),
                      admin: User = Depends(require_admin)):
-    return templates.TemplateResponse("admin.html", {"request": request})
+    return templates.TemplateResponse(request, "admin.html", {})
 
 
 # ── Section endpoints ────────────────────────────────────────────────────────
@@ -129,9 +129,7 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
 
     esi_status = rate_limit_tracker.overall_status()
 
-    return templates.TemplateResponse("partials/admin_overview.html", {
-        "request": request,
-        "uptime": _format_duration(uptime_secs),
+    return templates.TemplateResponse(request, "partials/admin_overview.html", {"uptime": _format_duration(uptime_secs),
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "db_size": _format_bytes(db_size),
         "sde_age_days": sde_age,
@@ -140,8 +138,7 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
         "char_count": char_count,
         "queue_depth": sched["queue_depth"],
         "active_syncs": sched["sync_concurrency"] - sched["semaphore_available"],
-        "sync_concurrency": sched["sync_concurrency"],
-    })
+        "sync_concurrency": sched["sync_concurrency"]})
 
 
 @router.get("/section/users", response_class=HTMLResponse)
@@ -219,15 +216,12 @@ async def admin_users(request: Request, db: AsyncSession = Depends(get_db),
     # Check if allowlist is enabled (has any entries)
     allowlist_enabled = len(allowlist) > 0
 
-    return templates.TemplateResponse("partials/admin_users.html", {
-        "request": request,
-        "users": user_data,
+    return templates.TemplateResponse(request, "partials/admin_users.html", {"users": user_data,
         "allowlist": allowlist,
         "allowlist_enabled": allowlist_enabled,
         "format_age": _format_age,
         "admin_id": admin.id,
-        "admin_role": admin.role or "admin",
-    })
+        "admin_role": admin.role or "admin"})
 
 
 @router.get("/section/esi", response_class=HTMLResponse)
@@ -258,9 +252,7 @@ async def admin_esi(request: Request, db: AsyncSession = Depends(get_db),
     )
     archived_events = archived_result.scalars().all()
 
-    return templates.TemplateResponse("partials/admin_esi.html", {
-        "request": request,
-        "etag_cache": etag,
+    return templates.TemplateResponse(request, "partials/admin_esi.html", {"etag_cache": etag,
         "db_cache": db_cache,
         "esi_status": ctx["overall_status"],
         "total_requests": ctx["total_requests"],
@@ -273,8 +265,7 @@ async def admin_esi(request: Request, db: AsyncSession = Depends(get_db),
         "request_log": list(reversed(rate_limit_tracker.request_log))[:100],
         "recent_events": recent_events,
         "archived_events": archived_events,
-        "chart_data_json": json.dumps(_compute_chart_data()),
-    })
+        "chart_data_json": json.dumps(_compute_chart_data())})
 
 
 @router.post("/esi/events/{event_id}/dismiss", response_class=HTMLResponse)
@@ -361,17 +352,14 @@ async def admin_scheduler(request: Request, db: AsyncSession = Depends(get_db),
             "sync_error": cache.sync_error if cache else None,
         })
 
-    return templates.TemplateResponse("partials/admin_scheduler.html", {
-        "request": request,
-        "queue_depth": sched["queue_depth"],
+    return templates.TemplateResponse(request, "partials/admin_scheduler.html", {"queue_depth": sched["queue_depth"],
         "active_syncs": sched["sync_concurrency"] - sched["semaphore_available"],
         "sync_concurrency": sched["sync_concurrency"],
         "semaphore_available": sched["semaphore_available"],
         "last_inv_check": _format_age(sched.get("last_inv_check")),
         "notification_queues": sched["notification_queues"],
         "stuck_characters": stuck,
-        "char_sync_rows": char_sync_rows,
-    })
+        "char_sync_rows": char_sync_rows})
 
 
 @router.get("/section/database", response_class=HTMLResponse)
@@ -427,13 +415,10 @@ async def admin_database(request: Request, db: AsyncSession = Depends(get_db),
 
     db_cache = await cache_stats(db)
 
-    return templates.TemplateResponse("partials/admin_database.html", {
-        "request": request,
-        "db_size": _format_bytes(db_size),
+    return templates.TemplateResponse(request, "partials/admin_database.html", {"db_size": _format_bytes(db_size),
         "app_tables": app_rows,
         "sde_tables": sde_rows,
-        "db_cache": db_cache,
-    })
+        "db_cache": db_cache})
 
 
 @router.get("/section/sde", response_class=HTMLResponse)
@@ -451,12 +436,9 @@ async def admin_sde(request: Request, db: AsyncSession = Depends(get_db),
         except Exception:
             sde_last_str = sde_last
 
-    return templates.TemplateResponse("partials/admin_sde.html", {
-        "request": request,
-        "sde_last_updated": sde_last_str,
+    return templates.TemplateResponse(request, "partials/admin_sde.html", {"sde_last_updated": sde_last_str,
         "sde_age_days": sde_age_days,
-        "needs_update": sde_age_days is not None and sde_age_days >= 30,
-    })
+        "needs_update": sde_age_days is not None and sde_age_days >= 30})
 
 
 @router.get("/section/audit", response_class=HTMLResponse)
@@ -476,13 +458,10 @@ async def admin_audit(request: Request, filter: str = "",
         cr = await db.execute(select(Character.character_id, Character.character_name).where(Character.character_id.in_(char_ids)))
         char_names = {r.character_id: r.character_name for r in cr.fetchall()}
 
-    return templates.TemplateResponse("partials/admin_audit.html", {
-        "request": request,
-        "events": events,
+    return templates.TemplateResponse(request, "partials/admin_audit.html", {"events": events,
         "char_names": char_names,
         "filter": filter,
-        "format_age": _format_age,
-    })
+        "format_age": _format_age})
 
 
 # ── Action handlers ──────────────────────────────────────────────────────────

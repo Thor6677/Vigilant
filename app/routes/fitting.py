@@ -68,10 +68,7 @@ async def fitting_tool(request: Request, db: AsyncSession = Depends(get_db)):
         [{"id": fid, "path": p} for fid, p in path_map.items()],
         key=lambda x: x["path"].lower(),
     )
-    return templates.TemplateResponse("fitting_tool.html", {
-        "request": request,
-        "folder_paths": folder_paths,
-    })
+    return templates.TemplateResponse(request, "fitting_tool.html", {"folder_paths": folder_paths})
 
 
 @router.get("/tools/fitting/saved", response_class=HTMLResponse)
@@ -201,13 +198,10 @@ async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_d
         key=lambda x: x["path"].lower(),
     )
 
-    return templates.TemplateResponse("fitting_saved.html", {
-        "request": request,
-        "rows": rows,
+    return templates.TemplateResponse(request, "fitting_saved.html", {"rows": rows,
         "folders": folders,
         "folder_paths": folder_paths,
-        "total": len(rows),
-    })
+        "total": len(rows)})
 
 
 @router.get("/tools/fitting/search/ships", response_class=HTMLResponse)
@@ -217,11 +211,8 @@ async def search_ships(
     db: AsyncSession = Depends(get_db),
 ):
     results = await sde.search_ships(db, q, limit=15)
-    return templates.TemplateResponse("partials/fitting_search_results.html", {
-        "request": request,
-        "results": results,
-        "search_type": "ship",
-    })
+    return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
+        "search_type": "ship"})
 
 
 @router.get("/tools/fitting/search/modules", response_class=HTMLResponse)
@@ -245,11 +236,8 @@ async def search_modules(
         r["is_turret"] = slot_row.is_turret if slot_row else False
         r["is_launcher"] = slot_row.is_launcher if slot_row else False
 
-    return templates.TemplateResponse("partials/fitting_search_results.html", {
-        "request": request,
-        "results": results,
-        "search_type": "module",
-    })
+    return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
+        "search_type": "module"})
 
 
 @router.get("/tools/fitting/search/drones", response_class=HTMLResponse)
@@ -259,11 +247,8 @@ async def search_drones(
     db: AsyncSession = Depends(get_db),
 ):
     results = await sde.search_drones(db, q, limit=15)
-    return templates.TemplateResponse("partials/fitting_search_results.html", {
-        "request": request,
-        "results": results,
-        "search_type": "drone",
-    })
+    return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
+        "search_type": "drone"})
 
 
 @router.get("/tools/fitting/search/charges", response_class=HTMLResponse)
@@ -273,11 +258,8 @@ async def search_charges(
     db: AsyncSession = Depends(get_db),
 ):
     results = await sde.search_charges(db, q, limit=15)
-    return templates.TemplateResponse("partials/fitting_search_results.html", {
-        "request": request,
-        "results": results,
-        "search_type": "charge",
-    })
+    return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
+        "search_type": "charge"})
 
 
 @router.post("/tools/fitting/stats", response_class=HTMLResponse)
@@ -325,13 +307,10 @@ async def fitting_stats(
     # Get ship name
     ship_name = await sde.type_id_to_name(db, int(ship_type_id))
 
-    return templates.TemplateResponse("partials/fitting_stats.html", {
-        "request": request,
-        "stats": stats,
+    return templates.TemplateResponse(request, "partials/fitting_stats.html", {"stats": stats,
         "ship_name": ship_name or f"Ship {ship_type_id}",
         "ship_type_id": ship_type_id,
-        "character_name": character_name,
-    })
+        "character_name": character_name})
 
 
 @router.get("/tools/fitting/ship-slots/{ship_type_id}")
@@ -1371,13 +1350,10 @@ async def fitting_info(
         })
     attrs.sort(key=lambda a: a["_sort"])
 
-    return templates.TemplateResponse("partials/fitting_info.html", {
-        "request": request,
-        "type_id": type_id,
+    return templates.TemplateResponse(request, "partials/fitting_info.html", {"type_id": type_id,
         "type_name": t.type_name,
         "group_name": group_name,
         "meta_level": meta_level,
         "volume": t.volume,
         "description": description,
-        "attrs": attrs,
-    })
+        "attrs": attrs})

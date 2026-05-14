@@ -590,9 +590,7 @@ async def character_detail(
 
     if perf_enabled():
         perf_log("character_detail", total_ms=ms_since(_t0), **_section_ms)
-    return templates.TemplateResponse("character_detail.html", {
-        "request": request,
-        "char": char,
+    return templates.TemplateResponse(request, "character_detail.html", {"char": char,
         "killmails_enabled": _km_cfg.killmails_enabled,
         "current_wallet": current_wallet,
         "journal": journal,
@@ -615,8 +613,7 @@ async def character_detail(
         "current_system": current_system,
         "implants": implants,
         "jump_clones": jump_clones,
-        "now": datetime.utcnow(),
-    })
+        "now": datetime.utcnow()})
 
 
 @router.get("/character/{character_id}/assets.json")
@@ -732,11 +729,8 @@ async def character_assets_partial(
         if docked_at:
             locations.sort(key=lambda x: (0 if x["location"] == docked_at else 1, x["location"] or ""))
 
-        return templates.TemplateResponse("partials/assets_partial.html", {
-            "request": request,
-            "locations": locations,
-            "docked_at": docked_at,
-        })
+        return templates.TemplateResponse(request, "partials/assets_partial.html", {"locations": locations,
+            "docked_at": docked_at})
     except Exception as e:
         logger.warning("Assets partial failed for char %s: %s", character_id, e)
         return HTMLResponse('<div style="color:var(--muted);font-size:10px;padding:1rem 0.75rem;">Failed to load assets.</div>', status_code=500)
@@ -1096,16 +1090,12 @@ async def character_mail_partial(character_id: int, request: Request, db: AsyncS
 
     mail_data = json.loads(cache.mail_json) if cache and cache.mail_json else None
     if mail_data is None or mail_data == "no_scope":
-        return templates.TemplateResponse("partials/mail_panel.html", {
-            "request": request, "character_id": character_id,
-            "mail_headers": [], "mail_error": "Mail scope not available — re-authorize to view mail.",
-        })
+        return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
+            "mail_headers": [], "mail_error": "Mail scope not available — re-authorize to view mail."})
 
     headers = mail_data.get("headers", []) if isinstance(mail_data, dict) else []
-    return templates.TemplateResponse("partials/mail_panel.html", {
-        "request": request, "character_id": character_id,
-        "mail_headers": headers, "mail_error": None,
-    })
+    return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
+        "mail_headers": headers, "mail_error": None})
 
 
 @router.get("/character/{character_id}/mail/{mail_id}", response_class=HTMLResponse)
@@ -1152,10 +1142,8 @@ async def character_mail_body(character_id: int, mail_id: int, request: Request,
         body = re.sub(r"<[^>]+>", "", body)
         body = body.strip()
 
-        return templates.TemplateResponse("partials/mail_body.html", {
-            "request": request, "subject": subject, "body": body,
-            "timestamp": timestamp, "sender_name": sender_name, "recipients": [],
-        })
+        return templates.TemplateResponse(request, "partials/mail_body.html", {"subject": subject, "body": body,
+            "timestamp": timestamp, "sender_name": sender_name, "recipients": []})
     except Exception as e:
         return HTMLResponse(f'<div class="b-empty">Failed to load mail: {type(e).__name__}</div>')
 
@@ -1174,10 +1162,7 @@ async def character_notifications_partial(character_id: int, request: Request, d
 
     notif_data = json.loads(cache.notifications_json) if cache and cache.notifications_json else None
     if notif_data is None or notif_data == "no_scope":
-        return templates.TemplateResponse("partials/notifications_panel.html", {
-            "request": request,
-            "notifications": [], "notif_error": "Notification scope not available — re-authorize.",
-        })
+        return templates.TemplateResponse(request, "partials/notifications_panel.html", {"notifications": [], "notif_error": "Notification scope not available — re-authorize."})
 
     raw_notifs = notif_data.get("notifications", []) if isinstance(notif_data, dict) else []
     enriched = []
@@ -1194,10 +1179,7 @@ async def character_notifications_partial(character_id: int, request: Request, d
             "sender_id": n.get("sender_id"),
         })
 
-    return templates.TemplateResponse("partials/notifications_panel.html", {
-        "request": request,
-        "notifications": enriched, "notif_error": None,
-    })
+    return templates.TemplateResponse(request, "partials/notifications_panel.html", {"notifications": enriched, "notif_error": None})
 
 
 @router.get("/character/{character_id}/kill-stats", response_class=HTMLResponse)
@@ -1360,9 +1342,7 @@ async def character_kill_stats(
         })
     ts_weeks = max((len(d["data"]) for d in ts_datasets), default=0)
 
-    return templates.TemplateResponse("partials/character_kill_stats.html", {
-        "request": request,
-        "char": char,
+    return templates.TemplateResponse(request, "partials/character_kill_stats.html", {"char": char,
         "character_id": character_id,
         "year": year,
         "current_year": current_year,
@@ -1387,5 +1367,4 @@ async def character_kill_stats(
         "radar_raw": radar_raw,
         "ts_datasets": ts_datasets,
         "ts_weeks": ts_weeks,
-        "backfill_complete": backfill_complete,
-    })
+        "backfill_complete": backfill_complete})

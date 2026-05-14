@@ -166,10 +166,7 @@ async def mining_ledger(request: Request, db: AsyncSession = Depends(get_db)):
     # Sort corps by name, put "No Corporation" last
     corps_list = sorted(corps.values(), key=lambda c: (c["corp_id"] == 0, c["corp_name"]))
 
-    return templates.TemplateResponse("mining_ledger.html", {
-        "request": request,
-        "corps": corps_list,
-    })
+    return templates.TemplateResponse(request, "mining_ledger.html", {"corps": corps_list})
 
 
 @router.get("/industry/mining-ledger/corp/{corp_id}", response_class=HTMLResponse)
@@ -184,29 +181,23 @@ async def mining_ledger_corp(request: Request, corp_id: int, db: AsyncSession = 
     corp_chars = [c for c in all_chars if (c.corporation_id or 0) == corp_id and MINING_SCOPE in (c.scopes or "")]
 
     if not corp_chars:
-        return templates.TemplateResponse("partials/mining_ledger_corp.html", {
-            "request": request,
-            "corp_id": corp_id,
+        return templates.TemplateResponse(request, "partials/mining_ledger_corp.html", {"corp_id": corp_id,
             "char_stats": [],
             "corp_total_value": 0,
             "corp_total_quantity": 0,
             "corp_days": 0,
-            "error": None,
-        })
+            "error": None})
 
     try:
         _, per_char, _, _, _, _ = await _fetch_chars_mining(corp_chars, db)
     except Exception as exc:
         logger.warning("Mining ledger corp %s failed: %s", corp_id, exc)
-        return templates.TemplateResponse("partials/mining_ledger_corp.html", {
-            "request": request,
-            "corp_id": corp_id,
+        return templates.TemplateResponse(request, "partials/mining_ledger_corp.html", {"corp_id": corp_id,
             "char_stats": [],
             "corp_total_value": 0,
             "corp_total_quantity": 0,
             "corp_days": 0,
-            "error": str(exc),
-        })
+            "error": str(exc)})
 
     char_stats = []
     for c in corp_chars:
@@ -220,15 +211,12 @@ async def mining_ledger_corp(request: Request, corp_id: int, db: AsyncSession = 
         })
     char_stats.sort(key=lambda x: x["value"], reverse=True)
 
-    return templates.TemplateResponse("partials/mining_ledger_corp.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "partials/mining_ledger_corp.html", {"corp_id": corp_id,
         "char_stats": char_stats,
         "corp_total_value": sum(s["value"] for s in char_stats),
         "corp_total_quantity": sum(s["quantity"] for s in char_stats),
         "corp_days": max((s["days"] for s in char_stats), default=0),
-        "error": None,
-    })
+        "error": None})
 
 
 @router.get("/industry/mining-ledger/view", response_class=HTMLResponse)
@@ -263,9 +251,6 @@ async def mining_ledger_view(request: Request, char_ids: str = "", db: AsyncSess
     data = _aggregate_ledger(all_raw, type_names, system_names, price_map)
     chart_data = _build_chart_data(all_raw, type_names, price_map)
 
-    return templates.TemplateResponse("partials/mining_ledger_data.html", {
-        "request": request,
-        "data": data,
+    return templates.TemplateResponse(request, "partials/mining_ledger_data.html", {"data": data,
         "characters": char_names,
-        "chart_data_json": json.dumps(chart_data),
-    })
+        "chart_data_json": json.dumps(chart_data)})

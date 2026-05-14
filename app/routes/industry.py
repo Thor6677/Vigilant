@@ -106,12 +106,9 @@ async def industry_manufacturing_page(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
-    return templates.TemplateResponse("industry.html", {
-        "request": request,
-        "structures": STRUCTURES,
+    return templates.TemplateResponse(request, "industry.html", {"structures": STRUCTURES,
         "rigs": RIGS,
-        "sec_statuses": SEC_STATUS,
-    })
+        "sec_statuses": SEC_STATUS})
 
 
 @router.get("/industry/search", response_class=HTMLResponse)
@@ -257,9 +254,7 @@ async def industry_calculate(
     total_time_parallel = max_component_time + main_time_secs  # parallel components, then main
     total_time_sequential = sum(component_times) + main_time_secs  # all sequential
 
-    return templates.TemplateResponse("partials/calc_results.html", {
-        "request": request,
-        "bp_name": bp_name,
+    return templates.TemplateResponse(request, "partials/calc_results.html", {"bp_name": bp_name,
         "rows": rows,
         "runs": runs,
         "me": me,
@@ -273,8 +268,7 @@ async def industry_calculate(
         "main_time_str": _format_time(main_time_secs),
         "parallel_time_str": _format_time(total_time_parallel),
         "sequential_time_str": _format_time(total_time_sequential),
-        "main_time_secs": main_time_secs,
-    })
+        "main_time_secs": main_time_secs})
 
 
 @router.get("/industry/component", response_class=HTMLResponse)
@@ -344,9 +338,7 @@ async def industry_component(
         buy_price = prod_prices.get(type_id, 0)
     total_buy_cost = buy_price * needed
 
-    return templates.TemplateResponse("partials/component_panel.html", {
-        "request": request,
-        "product_name": product_name,
+    return templates.TemplateResponse(request, "partials/component_panel.html", {"product_name": product_name,
         "type_id": type_id,
         "needed": needed,
         "me": me,
@@ -359,8 +351,7 @@ async def industry_component(
         "buy_unit_price": buy_price,
         "structures": STRUCTURES,
         "rigs": RIGS,
-        "sec_statuses": SEC_STATUS,
-    })
+        "sec_statuses": SEC_STATUS})
 
 
 
@@ -466,16 +457,13 @@ async def industry_shopping_list(
     multibuy_lines = [f'{item["name"]} x{item["qty"]}' for item in sorted_items]
     multibuy_text = "\n".join(multibuy_lines)
 
-    return templates.TemplateResponse("partials/shopping_list.html", {
-        "request": request,
-        "items": sorted_items,
+    return templates.TemplateResponse(request, "partials/shopping_list.html", {"items": sorted_items,
         "item_count": len(sorted_items),
         "total_cost": total_cost,
         "total_volume": total_volume,
         "multibuy_text": multibuy_text,
         "price_map": {shopping[tid]["name"]: price_map.get(tid, 0) for tid in shopping},
-        "mineral_items": mineral_items,
-    })
+        "mineral_items": mineral_items})
 
 
 
@@ -503,17 +491,14 @@ async def compression_page(request: Request, db: AsyncSession = Depends(get_db))
         except (ValueError, TypeError):
             prefill[mid] = 0
 
-    return templates.TemplateResponse("compression.html", {
-        "request": request,
-        "characters": characters,
+    return templates.TemplateResponse(request, "compression.html", {"characters": characters,
         "minerals": MINERALS,
         "structures": REPRO_STRUCTURES,
         "rigs": REPRO_RIGS,
         "security": REPRO_SECURITY,
         "implants": REPRO_IMPLANTS,
         "trade_hubs": TRADE_HUBS,
-        "prefill": prefill,
-    })
+        "prefill": prefill})
 
 
 @router.get("/industry/compression/skills/{character_id}", response_class=HTMLResponse)
@@ -666,9 +651,7 @@ async def compression_calculate(
 
     target_named = {MINERAL_NAMES.get(mid, str(mid)): qty for mid, qty in target.items() if qty > 0}
 
-    return templates.TemplateResponse("partials/compression_results.html", {
-        "request": request,
-        "ores": result["ores"],
+    return templates.TemplateResponse(request, "partials/compression_results.html", {"ores": result["ores"],
         "total_isk": result["total_isk"],
         "total_volume": result["total_volume"],
         "minerals_produced": result["minerals_produced"],
@@ -676,8 +659,7 @@ async def compression_calculate(
         "target_minerals": target_named,
         "multibuy_text": multibuy_text,
         "mode": mode,
-        "hub_label": hub_info["label"],
-    })
+        "hub_label": hub_info["label"]})
 
 
 # ── Hauling Calculator ────────────────────────────────────────────────────────
@@ -693,14 +675,11 @@ from app.industry.hauling import (
 async def industry_hauling(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    return templates.TemplateResponse("hauling.html", {
-        "request": request,
-        "ships_by_group": get_ships_by_group(),
+    return templates.TemplateResponse(request, "hauling.html", {"ships_by_group": get_ships_by_group(),
         "all_ships": HAULING_SHIPS,
         "cargo_modules": CARGO_MODULES,
         "cargo_rigs": CARGO_RIGS,
-        "bay_labels": BAY_LABELS,
-    })
+        "bay_labels": BAY_LABELS})
 
 
 @router.post("/industry/hauling/resolve", response_class=HTMLResponse)
@@ -754,15 +733,12 @@ async def hauling_resolve(
     # Get recommendations
     recommendations = recommend_ships(items_by_bay)
 
-    return templates.TemplateResponse("partials/hauling_resolved.html", {
-        "request": request,
-        "items": resolved,
+    return templates.TemplateResponse(request, "partials/hauling_resolved.html", {"items": resolved,
         "unresolved": unresolved,
         "items_by_bay": items_by_bay,
         "total_volume": total_volume,
         "recommendations": recommendations,
-        "bay_labels": BAY_LABELS,
-    })
+        "bay_labels": BAY_LABELS})
 
 
 # ── Appraisal Calculator ─────────────────────────────────────────────────────
@@ -775,10 +751,7 @@ from app.industry.hauling import parse_eve_paste
 async def industry_appraisal(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    return templates.TemplateResponse("appraisal.html", {
-        "request": request,
-        "hubs": APPRAISAL_HUBS,
-    })
+    return templates.TemplateResponse(request, "appraisal.html", {"hubs": APPRAISAL_HUBS})
 
 
 @router.post("/industry/appraisal/calculate", response_class=HTMLResponse)
@@ -849,12 +822,9 @@ async def appraisal_calculate(
 
     hub = APPRAISAL_HUBS[hub_key]
 
-    return templates.TemplateResponse("partials/appraisal_results.html", {
-        "request": request,
-        "items": items,
+    return templates.TemplateResponse(request, "partials/appraisal_results.html", {"items": items,
         "unresolved": unresolved,
         "total_isk": total_isk,
         "total_volume": total_volume,
         "hub_label": hub["label"],
-        "item_count": len(items),
-    })
+        "item_count": len(items)})

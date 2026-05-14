@@ -187,12 +187,9 @@ async def corporations_page(request: Request, db: AsyncSession = Depends(get_db)
         key=lambda c: c["corp_name"].lower(),
     )
 
-    return templates.TemplateResponse("corporations.html", {
-        "request": request,
-        "corps": player_corps,
+    return templates.TemplateResponse(request, "corporations.html", {"corps": player_corps,
         "npc_corps": npc_corps,
-        "total_corps": len(player_corps) + len(npc_corps),
-    })
+        "total_corps": len(player_corps) + len(npc_corps)})
 
 
 @router.get("/{corp_id}/detail", response_class=HTMLResponse)
@@ -436,9 +433,7 @@ async def corp_detail(
     inv_thresholds = inv_result.scalars().all()
     inv_alert_count = sum(1 for t in inv_thresholds if t.alert_state in ("low", "critical"))
 
-    return templates.TemplateResponse("partials/corp_detail.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "partials/corp_detail.html", {"corp_id": corp_id,
         "corp_info": corp_info,
         "corp_chars": corp_chars,
         "ceo_name": ceo_name,
@@ -449,8 +444,7 @@ async def corp_detail(
         "corp_orders": corp_orders,
         "corp_structures": corp_structures,
         "corp_contracts": corp_contracts,
-        "inv_alert_count": inv_alert_count,
-    })
+        "inv_alert_count": inv_alert_count})
 
 
 # ── Corp Inventory Tracker ────────────────────────────────────────────────────
@@ -530,14 +524,11 @@ async def corp_inventory(corp_id: int, request: Request, db: AsyncSession = Depe
             by_location[lid] = {"location_name": t.location_name or f"Location {lid}", "items": []}
         by_location[lid]["items"].append(t)
 
-    return templates.TemplateResponse("corp_inventory.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "corp_inventory.html", {"corp_id": corp_id,
         "corp_name": corp_name,
         "by_location": by_location,
         "thresholds": thresholds,
-        "hangar_labels": HANGAR_LABELS,
-    })
+        "hangar_labels": HANGAR_LABELS})
 
 
 @router.get("/{corp_id}/inventory/scan", response_class=HTMLResponse)
@@ -622,12 +613,9 @@ async def corp_inventory_scan(corp_id: int, location_id: int = 0, request: Reque
         })
     items.sort(key=lambda x: x["type_name"])
 
-    return templates.TemplateResponse("partials/corp_inventory_scan.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "partials/corp_inventory_scan.html", {"corp_id": corp_id,
         "location_name": location_name,
-        "items": items,
-    })
+        "items": items})
 
 
 @router.get("/{corp_id}/inventory/type-search", response_class=HTMLResponse)
@@ -849,12 +837,9 @@ async def _render_inventory_items(user_id: int, corp_id: int, db: AsyncSession, 
             by_location[lid] = {"location_name": t.location_name or f"Location {lid}", "items": []}
         by_location[lid]["items"].append(t)
 
-    return templates.TemplateResponse("partials/corp_inventory_items.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "partials/corp_inventory_items.html", {"corp_id": corp_id,
         "by_location": by_location,
-        "thresholds": thresholds,
-    })
+        "thresholds": thresholds})
 
 
 # ── Contract Threshold Monitoring ──────────────────────────────────────────────
@@ -876,12 +861,9 @@ async def corp_contracts_page(corp_id: int, request: Request, db: AsyncSession =
     )
     thresholds = thresh_result.scalars().all()
 
-    return templates.TemplateResponse("corp_contracts.html", {
-        "request": request,
-        "corp_id": corp_id,
+    return templates.TemplateResponse(request, "corp_contracts.html", {"corp_id": corp_id,
         "corp_name": corp_name,
-        "thresholds": thresholds,
-    })
+        "thresholds": thresholds})
 
 
 @router.post("/{corp_id}/contracts/threshold", response_class=HTMLResponse)
@@ -1125,8 +1107,5 @@ async def _render_contract_items(user_id: int, corp_id: int, db: AsyncSession, r
     )
     thresholds = thresh_result.scalars().all()
 
-    return templates.TemplateResponse("partials/corp_contract_items.html", {
-        "request": request,
-        "corp_id": corp_id,
-        "thresholds": thresholds,
-    })
+    return templates.TemplateResponse(request, "partials/corp_contract_items.html", {"corp_id": corp_id,
+        "thresholds": thresholds})

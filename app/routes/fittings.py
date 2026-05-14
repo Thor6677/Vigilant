@@ -147,11 +147,9 @@ async def fittings_list(
 
     scope = "esi-fittings.read_fittings.v1"
     if scope not in (char.scopes or ""):
-        return templates.TemplateResponse("fittings.html", {
-            "request": request, "char": char_info, "fittings": [],
+        return templates.TemplateResponse(request, "fittings.html", {"char": char_info, "fittings": [],
             "error": "Fittings scope not available — re-authorize this character to grant the fittings permission.",
-            "ship_groups": {},
-        })
+            "ship_groups": {}})
 
     try:
         token = await refresh_token(char, db)
@@ -159,10 +157,8 @@ async def fittings_list(
 
         raw_fittings = await esi_char.get_fittings(client, character_id)
         if not raw_fittings:
-            return templates.TemplateResponse("fittings.html", {
-                "request": request, "char": char_info, "fittings": [],
-                "error": None, "ship_groups": {},
-            })
+            return templates.TemplateResponse(request, "fittings.html", {"char": char_info, "fittings": [],
+                "error": None, "ship_groups": {}})
 
         # Collect all type IDs (ships + modules)
         all_type_ids = set()
@@ -197,20 +193,15 @@ async def fittings_list(
 
     except Exception as exc:
         logger.warning("Fittings fetch failed for char %s: %s", character_id, exc, exc_info=True)
-        return templates.TemplateResponse("fittings.html", {
-            "request": request, "char": char_info, "fittings": [],
+        return templates.TemplateResponse(request, "fittings.html", {"char": char_info, "fittings": [],
             "error": f"Failed to load fittings: {type(exc).__name__}",
-            "ship_groups": {},
-        })
+            "ship_groups": {}})
 
-    return templates.TemplateResponse("fittings.html", {
-        "request": request,
-        "char": char_info,
+    return templates.TemplateResponse(request, "fittings.html", {"char": char_info,
         "fittings": fittings,
         "ship_groups": ship_groups,
         "error": None,
-        "slot_labels": SLOT_LABELS,
-    })
+        "slot_labels": SLOT_LABELS})
 
 
 @router.get("/character/{character_id}/fittings/{fitting_id}/eft", response_class=PlainTextResponse)

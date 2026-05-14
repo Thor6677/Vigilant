@@ -1667,7 +1667,7 @@ def _build_data_from_caches(characters: list[Character], char_caches: dict) -> d
 async def index(request: Request):
     if request.session.get("user_id"):
         return RedirectResponse("/dashboard")
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html", {})
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -1836,9 +1836,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
             cache_stats=_cache_stats_ms,
             skillqueue=_skillqueue_ms,
         )
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "characters": characters,
+    return templates.TemplateResponse(request, "dashboard.html", {"characters": characters,
         "cache_stats": stats,
         "skill_groups": skill_groups,
         "wallets": wallets,
@@ -1863,8 +1861,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "sort": sort,
         "char_groups": char_groups,
         "killmails_enabled": _dashboard_pulse_enabled(),
-        "battles_enabled": _dashboard_battles_enabled(),
-    })
+        "battles_enabled": _dashboard_battles_enabled()})
 
 
 @router.get("/dashboard/kill-pulse", response_class=HTMLResponse)
@@ -1936,9 +1933,7 @@ async def dashboard_kill_pulse(
         if ranked and (ranked[0][1]["kills"] + ranked[0][1]["losses"]) > 0:
             most_active_cid = ranked[0][0]
 
-    return templates.TemplateResponse("partials/dashboard_kill_pulse.html", {
-        "request": request,
-        "pulse_30": pulse_30,
+    return templates.TemplateResponse(request, "partials/dashboard_kill_pulse.html", {"pulse_30": pulse_30,
         "pulse_lifetime": pulse_lifetime,
         "per_char": per_char,
         "wingmen": wingmen,
@@ -1947,8 +1942,7 @@ async def dashboard_kill_pulse(
         "char_names": char_names,
         "corp_names": corp_names,
         "most_active_cid": most_active_cid,
-        "days": days,
-    })
+        "days": days})
 
 
 @router.get("/dashboard/combat-profile", response_class=HTMLResponse)
@@ -2098,9 +2092,7 @@ async def dashboard_combat_profile(
         })
     ts_weeks = max((len(d["data"]) for d in ts_datasets), default=0)
 
-    return templates.TemplateResponse("partials/dashboard_combat_profile.html", {
-        "request": request,
-        "year": year,
+    return templates.TemplateResponse(request, "partials/dashboard_combat_profile.html", {"year": year,
         "current_year": current_year,
         "summary": summary,
         "ships": ships,
@@ -2122,8 +2114,7 @@ async def dashboard_combat_profile(
         "radar_raw": radar_raw,
         "ts_datasets": ts_datasets,
         "ts_weeks": ts_weeks,
-        "char_count": len(char_ids),
-    })
+        "char_count": len(char_ids)})
 
 
 @router.get("/dashboard/recent-battles", response_class=HTMLResponse)
@@ -2146,11 +2137,8 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
     for band in SEC_BAND_ORDER:
         kspace_pool.extend((groups.get(band) or [])[:3])
     kspace_rows = sorted(kspace_pool, key=lambda b: b["kill_count"], reverse=True)
-    return templates.TemplateResponse("partials/dashboard_recent_battles.html", {
-        "request": request,
-        "wh_cards": wh_cards,
-        "kspace_rows": kspace_rows,
-    })
+    return templates.TemplateResponse(request, "partials/dashboard_recent_battles.html", {"wh_cards": wh_cards,
+        "kspace_rows": kspace_rows})
 
 
 @router.get("/dashboard/activity", response_class=HTMLResponse)
@@ -2236,11 +2224,7 @@ async def dashboard_activity(
             pcu_values[i] = round(float(avg_pc))
     peak_pcu = max((v for v in pcu_values if v is not None), default=0)
 
-    return templates.TemplateResponse(
-        "partials/dashboard_activity.html",
-        {
-            "request": request,
-            "window": window,
+    return templates.TemplateResponse(request, "partials/dashboard_activity.html", {"window": window,
             "labels": labels,
             "isk_values": isk_buckets,
             "pcu_values": pcu_values,
@@ -2260,10 +2244,8 @@ async def dashboard_big_battle_banner(request: Request):
     battles = await active_big_battles()
     if not battles:
         return HTMLResponse("")
-    return templates.TemplateResponse("partials/dashboard_big_battle_banner.html", {
-        "request": request,
-        "battles": battles,
-    })
+    return templates.TemplateResponse(request, "partials/dashboard_big_battle_banner.html", {
+        "battles": battles})
 
 
 @router.post("/dashboard/group-order")
@@ -2524,9 +2506,7 @@ async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(g
         "corp_id": t.corp_id,
     } for t in critical_items]
 
-    return templates.TemplateResponse("partials/inventory_alert_banners.html", {
-        "request": request, "alerts": alerts,
-    })
+    return templates.TemplateResponse(request, "partials/inventory_alert_banners.html", {"alerts": alerts})
 
 
 @router.get("/alerts/contract-banners", response_class=HTMLResponse)
@@ -2549,9 +2529,7 @@ async def contract_alert_banners(request: Request, db: AsyncSession = Depends(ge
     if not alerts_list:
         return HTMLResponse(_empty)
 
-    return templates.TemplateResponse("partials/contract_alert_banners.html", {
-        "request": request, "alerts": alerts_list,
-    })
+    return templates.TemplateResponse(request, "partials/contract_alert_banners.html", {"alerts": alerts_list})
 
 
 @router.get("/alerts/timer-banners", response_class=HTMLResponse)
@@ -2588,9 +2566,7 @@ async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_d
     if not timers:
         return HTMLResponse(_empty)
 
-    return templates.TemplateResponse("partials/timer_alert_banners.html", {
-        "request": request, "timers": timers,
-    })
+    return templates.TemplateResponse(request, "partials/timer_alert_banners.html", {"timers": timers})
 
 
 @router.get("/dashboard/corp-stats", response_class=HTMLResponse)

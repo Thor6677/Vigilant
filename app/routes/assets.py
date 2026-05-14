@@ -52,11 +52,8 @@ async def assets_page(request: Request, db: AsyncSession = Depends(get_db)):
             "system_name": loc.get("system_name") if loc else None,
         })
 
-    return templates.TemplateResponse("assets.html", {
-        "request": request,
-        "characters": chars_with_loc,
-        "active_char_id": active_id,
-    })
+    return templates.TemplateResponse(request, "assets.html", {"characters": chars_with_loc,
+        "active_char_id": active_id})
 
 
 @router.get("/search", response_class=HTMLResponse)
@@ -176,8 +173,5 @@ async def assets_search(
     if not groups:
         return HTMLResponse(f'<div class="b-empty">No results for &quot;{html_module.escape(q)}&quot;</div>')
 
-    return templates.TemplateResponse("partials/assets_results.html", {
-        "request": request,
-        "groups": groups,
-        "sorted_group_names": sorted_group_names,
-    })
+    return templates.TemplateResponse(request, "partials/assets_results.html", {"groups": groups,
+        "sorted_group_names": sorted_group_names})

@@ -152,12 +152,9 @@ async def images_upload_page(request: Request, db: AsyncSession = Depends(get_db
     )
     images = result.scalars().all()
 
-    return templates.TemplateResponse("tools_images.html", {
-        "request": request,
-        "images": images,
+    return templates.TemplateResponse(request, "tools_images.html", {"images": images,
         "max_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
-        "expiry_options": EXPIRY_LABELS,
-    })
+        "expiry_options": EXPIRY_LABELS})
 
 
 @router.post("/tools/images/upload")
@@ -179,9 +176,7 @@ async def images_upload(
             .order_by(HostedImage.created_at.desc())
             .limit(50)
         )
-        return templates.TemplateResponse("tools_images.html", {
-            "request": request,
-            "error": message,
+        return templates.TemplateResponse(request, "tools_images.html", {"error": message,
             "images": recent.scalars().all(),
             "max_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
             "expiry_options": EXPIRY_LABELS,
@@ -284,8 +279,7 @@ async def image_view(image_id: str, request: Request, db: AsyncSession = Depends
     result = await db.execute(select(HostedImage).where(HostedImage.id == image_id))
     img = result.scalar_one_or_none()
     if not img:
-        return templates.TemplateResponse("tools_image_view.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "tools_image_view.html", {
             "error": "Image not found or has expired.",
             "img": None,
         }, status_code=404)
@@ -302,8 +296,7 @@ async def image_view(image_id: str, request: Request, db: AsyncSession = Depends
                 pass
             await db.delete(img)
             await db.commit()
-            return templates.TemplateResponse("tools_image_view.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "tools_image_view.html", {
                 "error": "This image has expired.",
                 "img": None,
             }, status_code=410)
@@ -312,8 +305,6 @@ async def image_view(image_id: str, request: Request, db: AsyncSession = Depends
     await db.commit()
 
     is_owner = request.session.get("user_id") == img.user_id
-    return templates.TemplateResponse("tools_image_view.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "tools_image_view.html", {
         "img": img,
-        "is_owner": is_owner,
-    })
+        "is_owner": is_owner})

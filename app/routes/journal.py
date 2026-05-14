@@ -120,12 +120,10 @@ async def character_journal(
 
     scope = "esi-wallet.read_character_wallet.v1"
     if scope not in (char.scopes or ""):
-        return templates.TemplateResponse("journal.html", {
-            "request": request, "char": char, "entries": [],
+        return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": [],
             "error": "Wallet scope not available — re-authorize this character.",
             "page": 1, "has_more": False, "category": "all",
-            "categories": CATEGORY_LABELS, "is_corp": False, "corp_id": None, "division": None,
-        })
+            "categories": CATEGORY_LABELS, "is_corp": False, "corp_id": None, "division": None})
 
     try:
         token = await refresh_token(char, db)
@@ -176,19 +174,15 @@ async def character_journal(
 
     except Exception as exc:
         logger.warning("Journal fetch failed for char %s: %s", character_id, exc)
-        return templates.TemplateResponse("journal.html", {
-            "request": request, "char": char, "entries": [],
+        return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": [],
             "error": f"Failed to load journal: {type(exc).__name__}",
             "page": page, "has_more": False, "category": category,
-            "categories": CATEGORY_LABELS, "is_corp": False, "corp_id": None, "division": None,
-        })
+            "categories": CATEGORY_LABELS, "is_corp": False, "corp_id": None, "division": None})
 
-    return templates.TemplateResponse("journal.html", {
-        "request": request, "char": char, "entries": entries,
+    return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": entries,
         "error": None, "page": page, "has_more": has_more,
         "category": category, "categories": CATEGORY_LABELS,
-        "is_corp": False, "corp_id": None, "division": None,
-    })
+        "is_corp": False, "corp_id": None, "division": None})
 
 
 @router.get("/character/{character_id}/journal-entries", response_class=HTMLResponse)
@@ -251,11 +245,9 @@ async def character_journal_entries(
         entries = []
         has_more = False
 
-    return templates.TemplateResponse("partials/journal_entries.html", {
-        "request": request, "entries": entries, "has_more": has_more,
+    return templates.TemplateResponse(request, "partials/journal_entries.html", {"entries": entries, "has_more": has_more,
         "page": page, "character_id": character_id, "category": category,
-        "is_corp": False, "corp_id": None, "division": None,
-    })
+        "is_corp": False, "corp_id": None, "division": None})
 
 
 # ── Corporation wallet journal ────────────────────────────────────────────────
@@ -281,13 +273,11 @@ async def corp_journal(
     corp_chars = [c for c in characters if c.corporation_id == corp_id and scope in (c.scopes or "")]
 
     if not corp_chars:
-        return templates.TemplateResponse("journal.html", {
-            "request": request, "char": characters[0] if characters else None,
+        return templates.TemplateResponse(request, "journal.html", {"char": characters[0] if characters else None,
             "entries": [], "error": "No character with corp wallet access for this corporation.",
             "page": 1, "has_more": False, "category": "all",
             "categories": CATEGORY_LABELS, "is_corp": True,
-            "corp_id": corp_id, "division": division,
-        })
+            "corp_id": corp_id, "division": division})
 
     char = corp_chars[0]  # For template display
 
@@ -350,17 +340,13 @@ async def corp_journal(
 
     except Exception as exc:
         logger.warning("Corp journal fetch failed for corp %s div %s: %s", corp_id, division, exc)
-        return templates.TemplateResponse("journal.html", {
-            "request": request, "char": char, "entries": [],
+        return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": [],
             "error": f"Failed to load corp journal: {type(exc).__name__}",
             "page": page, "has_more": False, "category": category,
             "categories": CATEGORY_LABELS, "is_corp": True,
-            "corp_id": corp_id, "division": division,
-        })
+            "corp_id": corp_id, "division": division})
 
-    return templates.TemplateResponse("journal.html", {
-        "request": request, "char": char, "entries": entries,
+    return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": entries,
         "error": None, "page": page, "has_more": has_more,
         "category": category, "categories": CATEGORY_LABELS,
-        "is_corp": True, "corp_id": corp_id, "division": division,
-    })
+        "is_corp": True, "corp_id": corp_id, "division": division})

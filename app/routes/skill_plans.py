@@ -354,17 +354,14 @@ async def list_plans(request: Request, db: AsyncSession = Depends(get_db)):
         for aid in sorted(eligible_alliances)
     ]
 
-    return templates.TemplateResponse("skill_plans.html", {
-        "request": request,
-        "groups": groups,
+    return templates.TemplateResponse(request, "skill_plans.html", {"groups": groups,
         "plan_stats": plan_stats,
         "editable": editable,
         "characters": characters,
         "corp_names": corp_names,
         "alliance_names": alliance_names,
         "eligible_corps": eligible_corp_options,
-        "eligible_alliances": eligible_alliance_options,
-    })
+        "eligible_alliances": eligible_alliance_options})
 
 
 async def _resolve_org_names(db: AsyncSession, corp_ids: set[int], alliance_ids: set[int]) -> tuple[dict, dict]:
@@ -500,9 +497,7 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
                          key=lambda e: (e.subject_type, e.subject_name.lower()))
     acl_err = request.query_params.get("acl_err")
 
-    return templates.TemplateResponse("skill_plan_detail.html", {
-        "request": request,
-        "plan": plan,
+    return templates.TemplateResponse(request, "skill_plan_detail.html", {"plan": plan,
         "entries": entries,
         "characters": characters,
         "corp_names": corp_names,
@@ -513,8 +508,7 @@ async def view_plan(plan_id: int, request: Request, db: AsyncSession = Depends(g
         "eligible_corps": eligible_corp_options,
         "eligible_alliances": eligible_alliance_options,
         "acl_entries": acl_entries,
-        "acl_err": acl_err,
-    })
+        "acl_err": acl_err})
 
 
 # ── Delete plan ──────────────────────────────────────────────────────────────
@@ -971,13 +965,10 @@ async def shared_plan(share_token: str, request: Request, db: AsyncSession = Dep
         )
         characters = char_result.scalars().all()
 
-    return templates.TemplateResponse("skill_plan_shared.html", {
-        "request": request,
-        "plan": plan,
+    return templates.TemplateResponse(request, "skill_plan_shared.html", {"plan": plan,
         "entries": entries,
         "characters": characters,
-        "share_token": share_token,
-    })
+        "share_token": share_token})
 
 
 # ── Import from EVE text ────────────────────────────────────────────────────
@@ -1387,17 +1378,14 @@ async def gap_analysis(plan_id: int, character_id: int, request: Request, db: As
         large_price, small_price = await _get_injector_prices()
         injectors = _calc_injectors(total_sp_needed, char_total_sp, large_price, small_price)
 
-    return templates.TemplateResponse("partials/skill_plan_gap.html", {
-        "request": request,
-        "rows": rows,
+    return templates.TemplateResponse(request, "partials/skill_plan_gap.html", {"rows": rows,
         "total_sp": total_sp_needed,
         "total_time": _format_duration(total_time_mins),
         "completed": completed,
         "total": len(plan.entries),
         "char": char,
         "char_total_sp": char_total_sp,
-        "injectors": injectors,
-    })
+        "injectors": injectors})
 
 
 # ── Export as text ───────────────────────────────────────────────────────────
@@ -1484,17 +1472,14 @@ async def ship_detail(ship_type_id: int, request: Request, db: AsyncSession = De
     )
     plans = [p for p in plan_result.scalars().all() if perms.can_edit(p, ident)]
 
-    return templates.TemplateResponse("ship_mastery.html", {
-        "request": request,
-        "ship_type_id": ship_type_id,
+    return templates.TemplateResponse(request, "ship_mastery.html", {"ship_type_id": ship_type_id,
         "ship_name": ship_name,
         "group_name": group_name,
         "direct_reqs": direct_reqs,
         "full_tree": full_tree,
         "mastery_data": mastery_data,
         "characters": characters,
-        "plans": plans,
-    })
+        "plans": plans})
 
 
 # ── Ship mastery character check (htmx partial) ─────────────────────────────
@@ -1593,15 +1578,12 @@ async def ship_mastery_check(ship_type_id: int, character_id: int, request: Requ
             "time_str": _format_duration(time_mins),
         })
 
-    return templates.TemplateResponse("partials/ship_mastery_check.html", {
-        "request": request,
-        "char": char,
+    return templates.TemplateResponse(request, "partials/ship_mastery_check.html", {"char": char,
         "can_fly": can_fly,
         "direct_reqs": direct_reqs,
         "trained": trained,
         "mastery_results": mastery_results,
-        "achieved_level": achieved_level,
-    })
+        "achieved_level": achieved_level})
 
 
 # ── Custom ACL management (Phase 3) ──────────────────────────────────────────

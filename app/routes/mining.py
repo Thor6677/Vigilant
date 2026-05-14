@@ -215,11 +215,9 @@ async def character_mining(
 
     scope = "esi-industry.read_character_mining.v1"
     if scope not in (char.scopes or ""):
-        return templates.TemplateResponse("mining.html", {
-            "request": request, "char": char_info, "data": None,
+        return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
             "error": "Mining scope not available — re-authorize this character.",
-            "is_corp": False, "corp_id": None, "characters": [],
-        })
+            "is_corp": False, "corp_id": None, "characters": []})
 
     try:
         token = await refresh_token(char, db)
@@ -238,16 +236,12 @@ async def character_mining(
 
     except Exception as exc:
         logger.warning("Mining fetch failed for char %s: %s", character_id, exc, exc_info=True)
-        return templates.TemplateResponse("mining.html", {
-            "request": request, "char": char_info, "data": None,
+        return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
             "error": f"Failed to load mining data: {type(exc).__name__}",
-            "is_corp": False, "corp_id": None, "characters": [],
-        })
+            "is_corp": False, "corp_id": None, "characters": []})
 
-    return templates.TemplateResponse("mining.html", {
-        "request": request, "char": char_info, "data": data,
-        "error": None, "is_corp": False, "corp_id": None, "characters": [],
-    })
+    return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": data,
+        "error": None, "is_corp": False, "corp_id": None, "characters": []})
 
 
 @router.get("/corporations/{corp_id}/mining", response_class=HTMLResponse)
@@ -275,12 +269,10 @@ async def corp_mining(
     }
 
     if not corp_chars:
-        return templates.TemplateResponse("mining.html", {
-            "request": request, "char": char_info, "data": None,
+        return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
             "error": "No characters with mining scope in this corporation. Re-authorize to grant mining permissions.",
             "is_corp": True, "corp_id": corp_id,
-            "characters": [],
-        })
+            "characters": []})
 
     try:
         # Fetch mining ledger for each corp character in parallel
@@ -315,14 +307,10 @@ async def corp_mining(
 
     except Exception as exc:
         logger.warning("Corp mining fetch failed for corp %s: %s", corp_id, exc, exc_info=True)
-        return templates.TemplateResponse("mining.html", {
-            "request": request, "char": char_info, "data": None,
+        return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
             "error": f"Failed to load mining data: {type(exc).__name__}",
-            "is_corp": True, "corp_id": corp_id, "characters": [],
-        })
+            "is_corp": True, "corp_id": corp_id, "characters": []})
 
-    return templates.TemplateResponse("mining.html", {
-        "request": request, "char": char_info, "data": data,
+    return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": data,
         "error": None, "is_corp": True, "corp_id": corp_id,
-        "characters": char_names_used,
-    })
+        "characters": char_names_used})

@@ -607,9 +607,7 @@ async def industry_jobs_page(
 
     npc_corps_list = sorted(npc_corps_skipped.values(), key=str.lower)
 
-    return templates.TemplateResponse("industry_jobs.html", {
-        "request": request,
-        "rows": rows,
+    return templates.TemplateResponse(request, "industry_jobs.html", {"rows": rows,
         "counts_by_activity": sorted(counts_by_activity.items(), key=lambda kv: -kv[1]),
         "counts_by_source": counts_by_source,
         "counts_by_status": counts_by_status,
@@ -619,5 +617,4 @@ async def industry_jobs_page(
         "include_completed": inc_completed,
         "char_count_with_scope": len(char_fetch_targets),
         "corp_count_with_scope": len(corp_scope_by_corp),
-        "npc_corps_skipped": npc_corps_list,
-    })
+        "npc_corps_skipped": npc_corps_list})

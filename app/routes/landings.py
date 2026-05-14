@@ -259,33 +259,24 @@ TOOLS_TOOLS = [
 async def industry_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    return templates.TemplateResponse("tool_landing.html", {
-        "request": request,
-        "page_title": "Industry",
+    return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Industry",
         "page_subtitle": "Manufacturing, hauling, compression, PI — pick a tool.",
-        "tools": INDUSTRY_TOOLS,
-    })
+        "tools": INDUSTRY_TOOLS})
 
 
 @router.get("/intel", response_class=HTMLResponse)
 async def intel_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    return templates.TemplateResponse("tool_landing.html", {
-        "request": request,
-        "page_title": "Intel",
+    return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Intel",
         "page_subtitle": "Scans, gate checks, star map, wormhole reference.",
-        "tools": INTEL_TOOLS,
-    })
+        "tools": INTEL_TOOLS})
 
 
 @router.get("/tools", response_class=HTMLResponse)
 async def tools_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    return templates.TemplateResponse("tool_landing.html", {
-        "request": request,
-        "page_title": "Tools",
+    return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Tools",
         "page_subtitle": "Fittings, assets, timers, image host, timezone converter.",
-        "tools": TOOLS_TOOLS,
-    })
+        "tools": TOOLS_TOOLS})

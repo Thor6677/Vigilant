@@ -109,9 +109,7 @@ async def wormhole_systems_page(request: Request):
     if not user_id:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/")
-    return templates.TemplateResponse("wormholes.html", {
-        "request": request,
-        "effects_list": list(_wh_data.get("effects", {}).keys()),
+    return templates.TemplateResponse(request, "wormholes.html", {"effects_list": list(_wh_data.get("effects", {}).keys()),
         "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
         "effect_colors": EFFECT_COLORS,
         "class_colors": _wh_data.get("class_colors", {}),
@@ -168,17 +166,14 @@ async def wormhole_systems_search(
 
     total_pages = (total + per_page - 1) // per_page if total > 0 else 1
 
-    return templates.TemplateResponse("partials/wormhole_system_list.html", {
-        "request": request,
-        "systems": systems,
+    return templates.TemplateResponse(request, "partials/wormhole_system_list.html", {"systems": systems,
         "total": total,
         "page": page,
         "total_pages": total_pages,
         "class_label": _class_label,
         "class_color": _class_color,
         "effect_label": _effect_label,
-        "wh_data": _wh_data,
-    })
+        "wh_data": _wh_data})
 
 
 # ── System Detail ───────────────────────────────────────────────────────────
@@ -192,9 +187,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
 
     sys_detail = await sde.get_wormhole_system_detail(db, name)
     if not sys_detail:
-        return templates.TemplateResponse("wormholes.html", {
-            "request": request,
-            "error": f"System '{name}' not found.",
+        return templates.TemplateResponse(request, "wormholes.html", {"error": f"System '{name}' not found.",
             "effects_list": list(_wh_data.get("effects", {}).keys()),
             "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
         })
@@ -248,9 +241,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
                                 "from_class": from_class,
                             })
 
-    return templates.TemplateResponse("wormhole_system.html", {
-        "request": request,
-        "system": sys_detail,
+    return templates.TemplateResponse(request, "wormhole_system.html", {"system": sys_detail,
         "celestials": celestials,
         "statics": static_details,
         "wandering": wandering,
@@ -259,8 +250,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
         "class_label": _class_label,
         "class_color": _class_color,
         "effect_label": _effect_label,
-        "wh_data": _wh_data,
-    })
+        "wh_data": _wh_data})
 
 
 @router.get("/wormholes/system/{name}/kills", response_class=HTMLResponse)
@@ -288,17 +278,14 @@ async def wormhole_system_kills(
         kills_data = []
 
     if not kills_data:
-        return templates.TemplateResponse("partials/wormhole_kills.html", {
-            "request": request,
-            "kill_count": 0,
+        return templates.TemplateResponse(request, "partials/wormhole_kills.html", {"kill_count": 0,
             "kills": [],
             "heatmap": [],
             "corps": [],
             "alliances": [],
             "most_recent": None,
             "days": days,
-            "system_name": name,
-        })
+            "system_name": name})
 
     # Fetch full killmail details from ESI (for timestamps + corp/alliance)
     sem = asyncio.Semaphore(5)
@@ -537,9 +524,7 @@ async def wormhole_system_kills(
     # Age bucket labels for the legend
     age_labels = [f"<{third}d", f"{third}-{third*2}d", f"{third*2}-{days}d"]
 
-    return templates.TemplateResponse("partials/wormhole_kills.html", {
-        "request": request,
-        "kill_count": filtered_count,
+    return templates.TemplateResponse(request, "partials/wormhole_kills.html", {"kill_count": filtered_count,
         "heatmap": heatmap,
         "heatmap_ids": heatmap_ids,
         "heatmap_npc": heatmap_npc,
@@ -553,8 +538,7 @@ async def wormhole_system_kills(
         "age_labels": age_labels,
         "system_name": name,
         "top_corps": top_corps,
-        "top_alliances": top_alliances,
-    })
+        "top_alliances": top_alliances})
 
 
 # ── Wormhole Types / Connection Matrix ──────────────────────────────────────
@@ -574,9 +558,7 @@ async def wormhole_types_page(request: Request, db: AsyncSession = Depends(get_d
         short = t["type_name"].replace("Wormhole ", "")
         type_lookup[short] = t
 
-    return templates.TemplateResponse("wormhole_types.html", {
-        "request": request,
-        "matrix": _wh_data.get("connection_matrix", {}),
+    return templates.TemplateResponse(request, "wormhole_types.html", {"matrix": _wh_data.get("connection_matrix", {}),
         "wh_meta": _wh_data.get("wormhole_meta", {}),
         "type_lookup": type_lookup,
         "class_label": _class_label,
@@ -595,7 +577,6 @@ async def wormhole_type_detail(code: str, request: Request, db: AsyncSession = D
     meta = _wh_data.get("wormhole_meta", {}).get(code, {})
 
     ctx = {
-        "request": request,
         "code": code,
         "wh_type": wh_type,
         "meta": meta,
@@ -609,8 +590,8 @@ async def wormhole_type_detail(code: str, request: Request, db: AsyncSession = D
 
     # htmx request → return partial; direct navigation → full page
     if request.headers.get("HX-Request"):
-        return templates.TemplateResponse("partials/wormhole_type_detail.html", ctx)
-    return templates.TemplateResponse("wormhole_type_page.html", ctx)
+        return templates.TemplateResponse(request, "partials/wormhole_type_detail.html", ctx)
+    return templates.TemplateResponse(request, "wormhole_type_page.html", ctx)
 
 
 # ── System Effects Reference ────────────────────────────────────────────────
@@ -622,7 +603,5 @@ async def wormhole_effects_page(request: Request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/")
 
-    return templates.TemplateResponse("wormhole_effects.html", {
-        "request": request,
-        "effects": _wh_data.get("effects", {}),
+    return templates.TemplateResponse(request, "wormhole_effects.html", {"effects": _wh_data.get("effects", {}),
     })

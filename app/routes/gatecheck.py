@@ -92,10 +92,7 @@ async def gatecheck_page(request: Request, db: AsyncSession = Depends(get_db)):
                         "system_name": loc["system_name"],
                     })
 
-    return templates.TemplateResponse("gatecheck.html", {
-        "request": request,
-        "char_locations": char_locations,
-    })
+    return templates.TemplateResponse(request, "gatecheck.html", {"char_locations": char_locations})
 
 
 @router.get("/intel/gatecheck/systems", response_class=JSONResponse)
@@ -161,9 +158,7 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
         "insecure": "lowsec",
     }.get(flag, "shortest")
 
-    return templates.TemplateResponse("partials/gatecheck_route.html", {
-        "request": request,
-        "systems": systems,
+    return templates.TemplateResponse(request, "partials/gatecheck_route.html", {"systems": systems,
         "total_jumps": len(route),
         "total_kills": total_kills,
         "dangerous_count": dangerous,
@@ -171,8 +166,7 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
         "origin": origin,
         "destination": dest,
         "avoid_ids": avoid_ids,
-        "starmap_pref": starmap_pref,
-    })
+        "starmap_pref": starmap_pref})
 
 
 @router.get("/intel/gatecheck/finder", response_class=HTMLResponse)
@@ -204,9 +198,7 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
     camp_systems = {sid: kms for sid, kms in by_sys.items() if len(kms) >= 3}
 
     if not camp_systems:
-        return templates.TemplateResponse("partials/gatecheck_finder.html", {
-            "request": request, "camps": [],
-        })
+        return templates.TemplateResponse(request, "partials/gatecheck_finder.html", {"camps": []})
 
     # Stream buffer already has full ESI shape (victim + attackers + zkb),
     # so no ESI hydration step needed.
@@ -228,9 +220,7 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
             **analysis,
         })
 
-    return templates.TemplateResponse("partials/gatecheck_finder.html", {
-        "request": request, "camps": camps,
-    })
+    return templates.TemplateResponse(request, "partials/gatecheck_finder.html", {"camps": camps})
 
 
 @router.post("/intel/gatecheck/wartargets", response_class=HTMLResponse)
@@ -301,14 +291,11 @@ async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
             **analysis,
         })
 
-    return templates.TemplateResponse("partials/gatecheck_wartarget.html", {
-        "request": request,
-        "entity_name": resolved,
+    return templates.TemplateResponse(request, "partials/gatecheck_wartarget.html", {"entity_name": resolved,
         "entity_type": entity_type.replace("ID", ""),
         "total_kills": len(kills_data),
         "total_losses": len(losses_data),
-        "systems": systems,
-    })
+        "systems": systems})
 
 
 def _err(msg: str) -> str:

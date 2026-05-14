@@ -327,7 +327,7 @@ async def map_page(request: Request):
     if not user_id:
         return RedirectResponse("/")
     assets = _read_vite_assets()
-    response = templates.TemplateResponse("map.html", {"request": request, **assets})
+    response = templates.TemplateResponse(request, "map.html", {**assets})
     # Never cache the HTML — it embeds content-hashed bundle filenames that
     # change on every deploy. Caching the HTML causes the browser/Cloudflare
     # to reference deleted bundle hashes after a deploy, leaving a black map.
@@ -1256,9 +1256,7 @@ async def map_wormholes_page(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     assets = _read_vite_assets()
-    response = templates.TemplateResponse(
-        "map_wormholes.html", {"request": request, **assets}
-    )
+    response = templates.TemplateResponse(request, "map_wormholes.html", {**assets})
     response.headers["Cache-Control"] = "no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return response
@@ -1739,7 +1737,7 @@ async def trending_page(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
-    return templates.TemplateResponse("trending.html", {"request": request})
+    return templates.TemplateResponse(request, "trending.html", {})
 
 
 # ── Alliance detail page (sov summary, 7d changes) ────────────────────────
@@ -1857,7 +1855,4 @@ async def alliance_page(alliance_id: int, request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
-    return templates.TemplateResponse("alliance_detail.html", {
-        "request": request,
-        "alliance_id": alliance_id,
-    })
+    return templates.TemplateResponse(request, "alliance_detail.html", {"alliance_id": alliance_id})

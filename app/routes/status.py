@@ -163,8 +163,7 @@ async def status_data(request: Request, db: AsyncSession = Depends(get_db)):
     if not user_id:
         return HTMLResponse("", status_code=401)
     ctx = await _build_context(db, user_id)
-    ctx["request"] = request
-    return templates.TemplateResponse("status_data.html", ctx)
+    return templates.TemplateResponse(request, "status_data.html", ctx)
 
 
 @router.get("/status/chart.json")
