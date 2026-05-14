@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "xmldom/postcss/vite were patched via `5ffcac3` (npm audit fix). Run `npm audit` in `frontend/`, confirm 0 critical/high, then run sec_findings.py mark-attempted so /audit can close the finding. Low-risk verification work — no code change expected.",
+  "id": "T-003",
+  "order": 30,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Verify frontend dep fix landed (VVP-2026-002)",
+  "type": "chore"
+}

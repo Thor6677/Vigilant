@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Fitting builder currently shows raw DPS only. Add a damage profile selector (EM/Therm/Kin/Exp distribution) and recompute DPS against the target's resists. Provide presets (Sansha, Blood Raiders, Guristas, Serpentis, Angels, NPC default, Player average). Display both raw and resist-weighted DPS in the offense panel.",
+  "id": "T-021",
+  "order": 50,
+  "phase": "roadmap-and-gaps",
+  "status": "open",
+  "title": "Fitting: damage profile UI for resist-weighted DPS",
+  "type": "feature"
+}

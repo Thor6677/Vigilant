@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Prior attempt added `USER 10001` directly to Dockerfile and broke sqlite WAL writes (volume was root-owned) AND broke fast rollback (rolled-back :prev image runs as root inside cap_drop=ALL → can't override 10001 ownership). New approach: Docker entrypoint that runs `chown -R vigilant:vigilant /data` as root, then drops to vigilant uid via `gosu` (or `su-exec`). Must test BOTH the forward path AND the `:prev` rollback path against a sacrificial volume before shipping. Must NOT be co-merged with T-002 (dep bump) — that bundling caused the 2026-04-28 outage.",
+  "id": "T-004",
+  "order": 40,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Non-root container via entrypoint + gosu (VVP-2026-003)",
+  "type": "task"
+}

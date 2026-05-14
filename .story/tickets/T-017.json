@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "`app/data/wormholes.json` is missing ~32 shattered/drifter systems. Generate the missing entries deterministically from SDE — J-systems use real coords in `mapSolarSystems` (XZ projection for top-down map). Then re-run `scripts/build_wormhole_positions.py` to regenerate `wormhole_positions.json` so the star map actually renders the new entries. Verify on /map after deploy. Pochven systems are NOT J-space (they have K-space IDs ~30002000) — keep them outside this scope.",
+  "id": "T-017",
+  "order": 10,
+  "phase": "roadmap-and-gaps",
+  "status": "open",
+  "title": "Fill wormhole data gaps and regenerate positions",
+  "type": "task"
+}

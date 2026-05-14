@@ -1,0 +1,20 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-010",
+  "impact": "`.spin-anim` (1.5s infinite, base.html:571-572) and `.pulse-anim` (1.8s infinite, 574-575) run continuously: the spin appears on the sync indicator in the server bar, the pulse on the no-training dot in the dashboard skill summary, plus character location markers on the star map. The platform reference is explicit: \"Always respect prefers-reduced-motion.\" Users with vestibular conditions get persistent on-screen motion they can't dismiss. Recommended: append `@media (prefers-reduced-motion: reduce) { .spin-anim, .pulse-anim { animation: none; } }` at the end of the base.html style block. One block, fixes everything.",
+  "location": [
+    "app/templates/base.html:570-575"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "No prefers-reduced-motion support for spin/pulse animations"
+}

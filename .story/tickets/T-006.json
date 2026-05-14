@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Multiple raw-HTML construction sites with user-controlled values flagged: 005a admin allowlist (`app/routes/admin.py:882`), 005c (`app/routes/corporations.py:668`), 005d/e/f (`app/routes/skill_plans.py:612/1038/1152`). Commit `8df48c9` already attempted these; sweep to confirm coverage, escape any remaining via Markup/escape or refactor to template renders, add a regression test for the admin allowlist render path, then mark-attempted so /audit can close them.",
+  "id": "T-006",
+  "order": 60,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Audit raw-HTML construction sites (VVP-2026-005a/c/d/e/f)",
+  "type": "task"
+}

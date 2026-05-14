@@ -1,0 +1,21 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-008",
+  "impact": "At ≤1100px the fit-grid drops the persistent left module browser and exposes a \"Browse Modules\" toggle (fitting_tool.html:55). The toggle's onclick handler positions the panel `fixed; left:0; top:0; bottom:0; z-index:50; width:300px` — full-height overlay with no backdrop click-to-close, no X button, no ESC handler, no focus trap. Mobile/tablet users who open the browser are stranded — they can scroll the browser pane and tap modules, but there is no obvious way to close it short of refreshing or tapping the toggle a second time (which the toggle's onclick does NOT do — it only opens). Recommended: convert to a real modal pattern reusing the existing info-modal style at line 171 (backdrop, click-outside-to-close, X button), add ESC binding, and toggle aria-hidden on the panel. Extract the inline onclick handler into a function so the close path can be unit-testable.",
+  "location": [
+    "app/templates/fitting_tool.html:55",
+    "app/templates/fitting_tool.html:45-49"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Fitting tool's mobile module-browser overlay has no dismiss affordance"
+}

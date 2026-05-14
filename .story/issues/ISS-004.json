@@ -1,0 +1,22 @@
+{
+  "components": [
+    "design",
+    "web",
+    "performance"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-004",
+  "impact": "`<script src=\"https://cdn.tailwindcss.com\">` (base.html:9) loads the Tailwind JIT runtime (~80KB compressed) on every page load. Tailwind's own docs flag this as dev-only. Three downstream problems: (1) blocks first-paint until the runtime compiles utilities, causing the FOUC pattern users may see between the inline `<style>` block applying and the first Tailwind utility class painting; (2) introduces a third-party origin used for the inline-config evaluation, complicating the planned CSP `unsafe-inline` removal (ties directly to T-012); (3) the in-file tailwind.config (base.html:11-32) declares `eve.bg/surface/border/accent/gold/danger/success/muted` but most templates use mixed `b-*` semantic classes — Tailwind utilities and the b-* system are both shipping, only one is needed. Recommended: replace with the official `@tailwindcss/cli` build during the Docker image build, output a minified CSS file served from `/static/`, drop the CDN script. Coordinates with T-012 (CSP).",
+  "location": [
+    "app/templates/base.html:9-33"
+  ],
+  "phase": "performance-and-ops",
+  "relatedTickets": [
+    "T-012"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "Tailwind via CDN ships in production"
+}

@@ -1,0 +1,21 @@
+{
+  "components": [
+    "design",
+    "web"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-009",
+  "impact": "The login landing page uses `eve-border eve-glow rounded`, `bg-eve-surface`, `text-eve-muted`, `text-eve-accent`, and crucially `bg-blue-400` on the primary CTA (index.html:39). The in-file `tailwind.config` (base.html:11-32) declares `eve.bg/surface/border/accent/gold/danger/success/muted` — so `eve-border` (no hyphen prefix in config) and `eve-glow` (no such color at all) resolve to nothing. The page only looks correct because the CDN's JIT silently emits empty rules and the underlying b-* system provides the dark surface. The `bg-blue-400` is plain Tailwind blue — inconsistent with the gold (`--accent: #c8a951`) used everywhere else in the app, breaking brand on the FIRST page logged-out visitors see. Recommended: rewrite index.html using the b-* class system (matches the rest of the app), or correctly use `bg-eve-accent`/`bg-eve-surface` Tailwind utilities, and definitely replace `bg-blue-400` with the gold accent on the CTA. Quick win, high visibility (it's the public login page).",
+  "location": [
+    "app/templates/index.html:12",
+    "app/templates/index.html:18-32",
+    "app/templates/index.html:38-41"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "index.html references undefined Tailwind classes and off-brand colors"
+}

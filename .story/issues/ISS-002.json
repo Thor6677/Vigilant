@@ -1,0 +1,22 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-002",
+  "impact": "`body { font-size: 12px }` (base.html:62) with secondary labels at 9–10px (`.b-row-label` 9px, `.b-stat-label` 9px, `.b-btn` 9px, `.b-nav-link` 10px). Desktop reading at 9–12px in dim gray is the dominant experience. Mobile bumps to 13px at ≤640px but still under 16px. The platform reference explicitly requires \"16px minimum on mobile\" and the tactical aesthetic doesn't depend on microtype — Bloomberg Terminal works at 13–14px on dark. Recommended scale: body 14px, secondary 12px, micro-label 10px, mobile body 16px. Don't blanket-bump — keep `.b-card-name`/`.b-stat-val` at their visual roles and rescale relatively. Pairs with the --muted contrast fix; both have to land together for readability.",
+  "location": [
+    "app/templates/base.html:62",
+    "app/templates/base.html:379-382",
+    "app/templates/base.html:298-303"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": "Rescaled the desktop type system: body 12→14px, .b-stat-val 17→18, .b-card-name 12→13, .b-row-val 11→12, .b-card-sub 10→11, .b-banner 11→12, .b-server-bar 10→11, .structure-alert-banner 11→12 + alert-time 10→11, .b-empty 10→11, .b-label 10→11, .b-link 10→11, .b-stat-label 9→10, .b-row-label 9→10, .b-btn 9→10, .b-badge 9→10, .b-nav-logo 12→13, .b-nav-link 10→11, .b-nav-dropdown-item 10→11, .b-breadcrumbs 9→10, .b-tab-strip 9→10, .b-footer-link 9→10, .b-footer-brand 10→11, .b-hamburger 9→10, .b-mobile-menu links 11→13. Mobile (≤640px): body 13→16px (eliminates iOS Safari input auto-zoom), .b-page-title 16→18. Combined with ISS-001 contrast fix, micro-labels at 10px in --muted are now legible. Density and tactical aesthetic preserved; remaining 9px inline-style sites in the notification dropdown (base.html:818-838) are auxiliary checkbox labels and read fine at the new --muted.",
+  "resolvedDate": "2026-05-13",
+  "severity": "high",
+  "status": "resolved",
+  "title": "Body type-scale at 12px violates web 16px minimum"
+}

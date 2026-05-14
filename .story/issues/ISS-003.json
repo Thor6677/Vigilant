@@ -1,0 +1,22 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-003",
+  "impact": "`.b-btn`, `.b-nav-link`, `.b-tab-strip a`, `.b-link`, `.b-nav-dropdown-item`, `.b-card`, `.b-row`, mobile-menu links, and the notification bell all define `:hover` only — there are no `:focus-visible` or `:focus` rules anywhere in base.html. Keyboard users tab through ghost-invisible navigation; screen-reader-only users have no visual anchor. Native `<button>`/`<a>` default outlines are not customized away explicitly, but the dark theme makes the default browser outline (typically blue) clash with the gold accent system. Recommended fix: add a single global rule `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` and a thin underline variant for inline `.b-link` elements. Test tab order through dashboard, fitting tool, and admin pages — those have the most interactive density.",
+  "location": [
+    "app/templates/base.html:96-107",
+    "app/templates/base.html:166-182",
+    "app/templates/base.html:407-428"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "No :focus-visible styles on any interactive element"
+}

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "CSP is currently Report-Only with `unsafe-inline` allowed. Audit every inline `<script>` in `app/templates/`, move to external files or use nonce-based CSP, then switch from Content-Security-Policy-Report-Only to enforced CSP and drop unsafe-inline. Verify no console violations on /, /dashboard, /map, /tools/fitting, /skill-plans, /industry, /admin.",
+  "id": "T-012",
+  "order": 120,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Remove CSP unsafe-inline (VVP-2026-007)",
+  "type": "task"
+}

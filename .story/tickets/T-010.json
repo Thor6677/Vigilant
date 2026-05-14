@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "A nested `repo/` directory at project root contains duplicate vulnerable copies that scanners pick up. Confirm nothing in CI/Docker references it, then `git rm -r repo/`. One-line fix.",
+  "id": "T-010",
+  "order": 100,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Delete nested repo/ directory (VVP-2026-018)",
+  "type": "chore"
+}

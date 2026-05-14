@@ -27,3 +27,8 @@ frontend/dist/
 scripts/.sde_cache.zip
 .superpowers/
 nginx/thunderborn.conf
+
+# Storybloq local-only state
+.story/snapshots/
+.story/sessions/
+.story/status.json

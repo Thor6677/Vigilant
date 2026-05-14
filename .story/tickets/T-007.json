@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "First registered user is auto-promoted to admin — privilege-escalation risk on any new deploy. Replace with explicit bootstrap (env var ADMIN_CHARACTER_ID, or one-time CLI promote command) so admin is granted intentionally, not by registration race. Update README's \"first user is admin\" line accordingly.",
+  "id": "T-007",
+  "order": 70,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Disable first-user auto-admin (VVP-2026-013)",
+  "type": "task"
+}

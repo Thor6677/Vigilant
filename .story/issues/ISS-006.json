@@ -1,0 +1,21 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-006",
+  "impact": "`<button class=\"b-hamburger\" onclick=\"document.getElementById('mobile-menu').classList.toggle('is-open')\" aria-label=\"Toggle menu\">` (base.html:876) lacks `aria-expanded` (screen readers can't announce open/closed state), `aria-controls` (no relationship to the menu region), and no ESC key handler. The menu is `position:fixed; top:46px; bottom:0` — when open, background body remains scrollable so users can scroll the page content behind the menu. The hamburger is the only way to close it (no overlay click-to-close, no X button at top). Recommended fix: convert to a small inline JS toggle that flips `aria-expanded` on the button, adds `aria-controls=\"mobile-menu\"`, locks `document.body.style.overflow = 'hidden'` when open, and registers an `Escape` keyup listener. Mobile menu structure itself is fine — fixes are all on the trigger and lifecycle.",
+  "location": [
+    "app/templates/base.html:876-880",
+    "app/templates/base.html:657-689"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Mobile menu missing aria-expanded, body-scroll lock, and ESC dismiss"
+}

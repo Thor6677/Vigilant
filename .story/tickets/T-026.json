@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-13",
+  "createdDate": "2026-05-13",
+  "description": "Placeholder ticket capturing this phase as completed pre-storybloq adoption. See phase description for delivered scope. Marked complete so phase status derives correctly.",
+  "id": "T-026",
+  "order": 10,
+  "phase": "star-map",
+  "status": "complete",
+  "title": "Phase milestone (pre-storybloq)",
+  "type": "chore"
+}

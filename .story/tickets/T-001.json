@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Starlette 0.49+ changed TemplateResponse to take `request` as the first positional arg. Existing call sites use `templates.TemplateResponse(name, context)` which throws `unhashable type: dict` once the dict context is treated as the template name. This ticket migrates every call site to the new `(request, name, context)` signature on its OWN branch — no dep bump. Deploy, smoke-test every templated route, then T-001b can land the dep bump cleanly. Prior bundled fix (7216dd1) was reverted after a 22-min outage on 2026-04-28; this split is the root-cause remediation.",
+  "id": "T-001",
+  "order": 10,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Migrate templates.TemplateResponse to (request, name, context) signature",
+  "type": "task"
+}

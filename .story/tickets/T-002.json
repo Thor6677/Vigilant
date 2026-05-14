@@ -1,0 +1,14 @@
+{
+  "blockedBy": [
+    "T-001"
+  ],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Bump fastapi/starlette/jinja2/python-multipart/python-dotenv to patched ranges per VVP-2026-001 (8 outdated deps with CVEs). MUST land in a separate PR from infrastructure changes (no bundling with VVP-2026-003). After deploy, run sec_findings.py mark-attempted so the next /audit run can flip the status to fixed.",
+  "id": "T-002",
+  "order": 20,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Bump pinned Python deps (VVP-2026-001)",
+  "type": "task"
+}

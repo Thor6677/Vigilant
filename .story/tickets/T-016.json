@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Vigilant's nginx reverse-proxies the Wanderer mapper via a shared external Docker network named `web`. This footgun has bitten the deploy twice. Add a preflight to `scripts/deploy.sh` that verifies `docker network inspect web` succeeds AND that `external: true, name: web` is set in compose; abort the deploy with a clear error message if either is missing. Also reload nginx by recreating the nginx container after any nginx/*.conf change (bind-mount inode trap).",
+  "id": "T-016",
+  "order": 40,
+  "phase": "performance-and-ops",
+  "status": "open",
+  "title": "Preflight external `web` network check in deploy.sh",
+  "type": "task"
+}

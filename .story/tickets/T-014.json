@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Cgroup limit was raised to 2.5 GB on 2026-04-23. Verify limit still in `docker-compose.yml`, add a memory-percent gauge to `/status`, and wire a Discord webhook alert when ExitCode 137 (OOM) appears in container restart logs — OOM ≠ 502 so current monitoring misses it. Reuse the existing `notify()` helper from `/etc/vigilant/scripts/` (VPS auto-update stack), don't reinvent.",
+  "id": "T-014",
+  "order": 20,
+  "phase": "performance-and-ops",
+  "status": "open",
+  "title": "Container memory-budget guard + OOM alerting",
+  "type": "task"
+}

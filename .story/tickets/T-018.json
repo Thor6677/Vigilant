@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "The wormhole system kills route resolves character/corp/alliance names per-row without hitting the existing batch resolver. Switch to the shared `ESINameCache` (used in dashboard/contracts) so repeat resolutions land in cache and bulk calls go through the batched `/universe/names/` endpoint. Should noticeably drop ESI traffic on busy w-space systems and reduce 429 risk.",
+  "id": "T-018",
+  "order": 20,
+  "phase": "roadmap-and-gaps",
+  "status": "open",
+  "title": "ESI name caching in wormhole kills route",
+  "type": "task"
+}

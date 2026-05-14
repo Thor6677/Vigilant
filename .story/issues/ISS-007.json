@@ -1,0 +1,21 @@
+{
+  "components": [
+    "design",
+    "web"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-007",
+  "impact": "Corp stats block (dashboard.html:102-115) shows \"…\" filler while the hx-get fetches. That's a placeholder, not a skeleton — users get three empty cards with no indication they will populate, and if the request 500s the cards stay forever-loading. Same pattern across big-battle-banner (line 16), sync-poller, and all `/alerts/*-banners` swaps in base.html (915-934). Recommended: (a) replace \"…\" filler with shimmer/skeleton cards that match the final shape, (b) add `hx-on:htmx:response-error` handlers that render an inline error pill with a retry link, (c) for the corp-stats specifically, render server-side placeholders with realistic field labels so the layout doesn't reflow when the swap lands. Pattern can be a Jinja2 macro `{% call skeleton_card() %}…{% endcall %}` reused across all lazy panels. Also relevant for the empty state on first-time login (no characters added yet) — no primary CTA besides the small \"+ Add Character\" in the header.",
+  "location": [
+    "app/templates/dashboard.html:102-115",
+    "app/templates/dashboard.html:16-21",
+    "app/templates/base.html:915-934"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Dashboard lazy-loaded panels missing skeleton and error states"
+}

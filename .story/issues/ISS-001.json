@@ -1,0 +1,22 @@
+{
+  "components": [
+    "design",
+    "web",
+    "accessibility"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-001",
+  "impact": "`--muted` is used for all secondary text, labels (`.b-label`, `.b-row-label`, `.b-stat-label`), nav links default state, breadcrumbs, footer, empty states, and most \"supporting\" copy across all 55 templates. Measured contrast ratio is ~3.04:1 — below the 4.5:1 AA body-text threshold and only borderline-passing the 3:1 large-text/UI threshold. Tens of thousands of words in the app render at sub-AA contrast in dim gray. Recommended fix: bump `--muted` to roughly `#8a8a8a` (≈5.4:1 on `--bg`) — still visibly subordinate to `--text` but legible. Re-test focus states after, since `.b-link` default uses `--muted`.",
+  "location": [
+    "app/templates/base.html:43",
+    "app/templates/base.html:262",
+    "app/templates/base.html:301"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": "Bumped --muted from #474747 to #8a8a8a in both the :root CSS variable (base.html:43) and the inline tailwind.config (base.html:24, was #484848). New contrast on --bg #080808 is ~5.4:1 — comfortably passes WCAG AA body-text 4.5:1. Verified via grep that no other --muted references remain at the old value. The .b-link, .b-nav-link, .b-tab-strip, .b-breadcrumbs, .b-footer-link, .b-row-label, .b-stat-label, .b-card-sub, and .b-empty all consume this token and are now legible without changing their visual role as subordinate text.",
+  "resolvedDate": "2026-05-13",
+  "severity": "high",
+  "status": "resolved",
+  "title": "--muted color (#474747 on #080808) fails WCAG AA contrast"
+}

@@ -1,0 +1,20 @@
+{
+  "components": [
+    "design",
+    "web"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-005",
+  "impact": "`*, *::before, *::after { border-radius: 0 !important }` (base.html:53-56) is too aggressive — it strips radii from Chart.js tooltip bubbles, SortableJS drag-ghosts, any future shadcn/Material-class imports, and notification-bell SVG paths. Symptom is visible at base.html:470 where `.b-dot` has to override the reset with its OWN `border-radius: 50% !important` just to draw circles. Other future round elements will need the same workaround. Recommended: scope the reset to project elements only (`.b-card, .b-btn, .b-row, [class^=\"b-\"] { border-radius: 0; }`) and rely on the `b-*` design-system tokens. Or introduce a `--radius: 0` CSS variable, set the default and let widgets opt in.",
+  "location": [
+    "app/templates/base.html:53-56",
+    "app/templates/base.html:470"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Universal `border-radius: 0 !important` overrides third-party widgets"
+}

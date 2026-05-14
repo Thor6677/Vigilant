@@ -1,0 +1,63 @@
+{
+  "blockers": [],
+  "date": "2026-05-14",
+  "phases": [
+    {
+      "description": "Initial backend, auth, ESI client, encrypted token storage, SQLite + SDE import, async sync scheduler. Completed pre-storybloq adoption — no tickets to backfill.",
+      "id": "foundation",
+      "label": "PHASE 1",
+      "name": "Foundation",
+      "summary": "FastAPI + EVE SSO + ESI + SDE foundation"
+    },
+    {
+      "description": "Multi-character dashboard with account grouping, sort modes, wealth breakdown, aggregated panels (industry, markets, mail, contracts, PI), background per-field ESI sync respecting cache timers, alert banners with dismiss persistence. Completed.",
+      "id": "dashboard-and-sync",
+      "label": "PHASE 2",
+      "name": "Dashboard & Sync",
+      "summary": "Multi-char dashboard + background ESI sync"
+    },
+    {
+      "description": "React/Vite + Pixi.js v8 interactive 2D map of K-space and J-space (~5,485 systems, ~6,984 gates), pixi-viewport pan/zoom, overlays (security, jumps, kills, sov, FW, incursions), gate routing via Graphology, jump drive planner with 8 ship classes and fatigue, system info panel, search with service filters, ETag-cached background polling. Completed v1; J-space layout + Pochven follow-ups absorbed by T-008 and T-018.",
+      "id": "star-map",
+      "label": "PHASE 3",
+      "name": "Star Map",
+      "summary": "Pixi.js star map with overlays, routing, jump planner"
+    },
+    {
+      "description": "Manufacturing calculator with nested build/buy and shopping list, compression calculator backed by scipy LP solver across three modes, unified cross-character/corp mining ledger, Dogma-accurate ship fitting builder with per-character skill scaling, overheating, T3C subsystems, EFT import/export, saved fittings folder tree. Completed; modifier accuracy follow-ups absorbed by T-011a/b/c and T-018.",
+      "id": "industry-and-fitting",
+      "label": "PHASE 4",
+      "name": "Industry & Fitting",
+      "summary": "Manufacturing, compression, mining, Dogma fitting tool"
+    },
+    {
+      "description": "Gatecheck route safety, D-Scan paste parser, structure timer board with ACL groups, killmails v2 disk-backed storage (all flags ON since 2026-04-24), zKillboard polling at 2 req/s budget, killmail.stream live consumer, battle detection with deduped start_time. Completed.",
+      "id": "intel-and-killmails",
+      "label": "PHASE 5",
+      "name": "Intel & Killmails",
+      "summary": "Gatecheck, D-Scan, structure timers, killmails v2"
+    },
+    {
+      "description": "Track and close all sec-toolkit findings. Open/fix-in-progress findings include outdated Python deps (VVP-001), frontend deps (VVP-002), root container (VVP-003), CSRF (VVP-004, deployed), raw-HTML XSS sites (VVP-005a/c/d/e/f), hardcoded secrets in wanderer-compose (VVP-006), CSP unsafe-inline (VVP-007), first-user auto-admin (VVP-013), image endpoint rate limit (VVP-015), nested repo/ dir (VVP-018). DO NOT bundle dep bumps with infrastructure changes — that caused a 22-min outage 2026-04-28.",
+      "id": "security-hardening",
+      "label": "PHASE 6",
+      "name": "Security Hardening",
+      "summary": "Close all open sec-toolkit findings; no bundle-merges"
+    },
+    {
+      "description": "Query performance re-baselining after recent activity-page index work, container memory budget guard with OOM alerting (ExitCode 137 ≠ 502), startup migration block guard for CREATE INDEX IF NOT EXISTS, external `web` network preflight in deploy.sh to prevent wanderer co-host outages.",
+      "id": "performance-and-ops",
+      "label": "PHASE 7",
+      "name": "Performance & Ops",
+      "summary": "Perf re-baseline + ops guards (OOM, indexes, web network)"
+    },
+    {
+      "description": "Data gap fills (wormholes.json shattered/drifter systems with positions regenerated), ESI name caching cleanups, leftover debug logging removal, fitting modifier accuracy follow-ups (drone skills, damage profile UI, implants, Sacrilege modifierInfo + ship-to-self hull resists).",
+      "id": "roadmap-and-gaps",
+      "label": "PHASE 8",
+      "name": "Roadmap & Gaps",
+      "summary": "Wormhole data, fitting accuracy, cleanups"
+    }
+  ],
+  "title": "vigilant-vps"
+}
