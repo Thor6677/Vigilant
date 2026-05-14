@@ -14,9 +14,9 @@
   "relatedTickets": [
     "T-012"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Replaced cdn.tailwindcss.com runtime + inline `tailwind.config` with a build-time `@tailwindcss/cli` v4 step. New `frontend/tailwind.input.css` re-declares the `eve-*` color palette and `font-mono` family via `@theme` and uses class-based `dark` via `@custom-variant`. The Dockerfile frontend stage copies `app/templates/` into `./tailwind-content/` so Tailwind can scan templates for utility classes used; output is written to `dist/tailwind.css` and copied into the runtime image at `/app/static/css/tailwind.css`. `base.html` now serves the minified CSS via a single `<link rel=\"stylesheet\" href=\"/static/css/tailwind.css\">`. Local build verified: 21 KB minified output containing all `eve-*` utilities and the `md:`/`lg:`/`hover:` variants used in templates. CDN third-party origin removed, simplifying the planned CSP `unsafe-inline` work in T-012. The `b-*` semantic system in `base.html`'s `<style>` block is unchanged; the duplication mentioned in the impact will be addressed separately.",
+  "resolvedDate": "2026-05-13",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "Tailwind via CDN ships in production"
 }

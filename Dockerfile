@@ -12,6 +12,8 @@ WORKDIR /build
 COPY frontend/package*.json ./
 RUN npm ci --ignore-scripts
 COPY frontend/ ./
+# Tailwind scans these for utility classes used in the server-side templates.
+COPY app/templates/ ./tailwind-content/
 RUN npm run build
 
 # ---- Stage 2: python deps ----
@@ -39,6 +41,8 @@ COPY static/ ./static/
 COPY README.md ./
 # Frontend bundle from the node builder stage.
 COPY --from=frontend /build/dist ./frontend/dist
+# Tailwind CSS built from server-template content scan; replaces the dev-only CDN.
+COPY --from=frontend /build/dist/tailwind.css ./static/css/tailwind.css
 
 RUN mkdir -p /data
 

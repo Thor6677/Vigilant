@@ -24,6 +24,7 @@ wanderer-conf.env
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/tailwind-content/
 scripts/.sde_cache.zip
 .superpowers/
 nginx/thunderborn.conf
