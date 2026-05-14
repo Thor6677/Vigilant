@@ -14,9 +14,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Added focus-visible rules to base.html after the standalone color utilities section. Global rule: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` paired with `:focus:not(:focus-visible) { outline: none; }` to suppress browser default outline on mouse click. Inline-text affordances (.b-link, .b-nav-link, .b-nav-dropdown-item, .b-tab-strip a, .b-footer-link, .b-breadcrumbs a, .b-mobile-menu a) get a thin gold underline instead of a box outline since a 2px box on uppercase micro-text looks chunky and clips line-height. The gold matches the existing --accent token system. Keyboard tab navigation now has a visible anchor through nav, dropdowns, tabs, cards (.b-card, .b-row inherit the global rule), buttons (.b-btn inherits), and the mobile menu. CSS brace count balanced (167/167).",
+  "resolvedDate": "2026-05-13",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "No :focus-visible styles on any interactive element"
 }
