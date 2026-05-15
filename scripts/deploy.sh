@@ -16,6 +16,31 @@ set -euo pipefail
 
 cd /opt/vigilant
 
+# Preflight: the app attaches to an external Docker bridge named `web`
+# that is shared with /opt/edge/'s nginx. If it doesn't exist, compose
+# fails mid-deploy with a confusing "network web declared as external,
+# but could not be found" error — and by then the :prev tag has already
+# moved. Fail fast here instead, before touching any state.
+echo "[0/4] preflight: external 'web' network + compose declaration"
+if ! docker network inspect web >/dev/null 2>&1; then
+    echo "ERROR: docker network 'web' is missing."
+    echo "Create it once with: docker network create web"
+    echo "(Edge nginx at /opt/edge/ also attaches here.)"
+    exit 1
+fi
+# Defensive: confirm the compose file still declares the network as
+# external with the right name. A silent edit that removes `external: true`
+# would cause compose to create a NEW per-project network and silently
+# detach the app from edge nginx.
+if ! grep -qE '^[[:space:]]+external:[[:space:]]+true' docker-compose.yml \
+    || ! grep -qE '^[[:space:]]+name:[[:space:]]+web' docker-compose.yml; then
+    echo "ERROR: docker-compose.yml no longer declares the 'web' network"
+    echo "       as 'external: true, name: web'. Refusing to deploy — a"
+    echo "       non-external network would detach vigilant from edge nginx."
+    exit 1
+fi
+echo "     'web' network present; compose declaration intact"
+
 echo "[1/4] git pull"
 # Refuse to overwrite local edits silently — surface them so the operator
 # can decide what to do (commit, stash, or discard).
