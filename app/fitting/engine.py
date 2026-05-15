@@ -677,11 +677,33 @@ DAMAGE_PROFILES = {
     "drifter": (0.0, 0.0, 0.0, 1.0),
 }
 
+# Target ship's resist profile by damage type (em, therm, kin, expl) — values
+# 0.0–1.0. Used to compute effective ("resist-weighted") DPS: how much DPS
+# actually lands on a target with these resists. Numbers are approximate
+# averages across NPC ships of each faction; players can pick the closest
+# preset rather than entering 4 resists by hand. "uniform" = no resists.
+TARGET_RESIST_PROFILES = {
+    "uniform":    (0.00, 0.00, 0.00, 0.00),
+    "em":         (0.00, 0.00, 0.00, 0.00),
+    "thermal":    (0.00, 0.00, 0.00, 0.00),
+    "kinetic":    (0.00, 0.00, 0.00, 0.00),
+    "explosive":  (0.00, 0.00, 0.00, 0.00),
+    "sansha":     (0.45, 0.55, 0.00, 0.00),
+    "blood":      (0.45, 0.60, 0.00, 0.00),
+    "guristas":   (0.00, 0.50, 0.55, 0.40),
+    "serpentis":  (0.00, 0.55, 0.45, 0.40),
+    "angel":      (0.55, 0.50, 0.40, 0.30),
+    "sleeper":    (0.60, 0.60, 0.60, 0.60),
+    "triglavian": (0.60, 0.65, 0.50, 0.65),
+    "drifter":    (0.55, 0.55, 0.55, 0.55),
+}
+
 
 async def calculate_fitting_stats(
     db: AsyncSession, ship_type_id: int, items: list[dict],
     damage_profile: str = "uniform",
     skill_levels: dict[int, int] | None = None,
+    target_resist_profile: str = "uniform",
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
 
@@ -1332,6 +1354,10 @@ async def calculate_fitting_stats(
     weapon_volley = 0.0
     drone_dps = 0.0
     spool_time_s = 0  # Time to reach max spool
+    # Per-type DPS accumulators for resist-weighted effective DPS calc.
+    # Order: (em, therm, kin, expl)
+    weapon_dps_typed = [0.0, 0.0, 0.0, 0.0]
+    drone_dps_typed = [0.0, 0.0, 0.0, 0.0]
 
     # Determine how many drones of each type are active (within bandwidth).
     # Sort by bandwidth cost ascending to maximize active drone count,
@@ -1388,6 +1414,12 @@ async def calculate_fitting_stats(
             if cycle > 0 and (em + therm + kin + expl) > 0:
                 volley = (em + therm + kin + expl) * dmg_mult
                 drone_dps += (volley / (cycle / 1000)) * active_qty
+                # Per-type contribution for resist-weighted DPS
+                cycle_s = cycle / 1000
+                drone_dps_typed[0] += (em * dmg_mult / cycle_s) * active_qty
+                drone_dps_typed[1] += (therm * dmg_mult / cycle_s) * active_qty
+                drone_dps_typed[2] += (kin * dmg_mult / cycle_s) * active_qty
+                drone_dps_typed[3] += (expl * dmg_mult / cycle_s) * active_qty
             continue
 
         if slot in ("cargo", "drone"):
@@ -1426,6 +1458,16 @@ async def calculate_fitting_stats(
         volley = total_dmg * dmg_mult
         weapon_volley += volley * qty
         weapon_dps += (volley / (cycle / 1000)) * qty
+        # Per-type contribution for resist-weighted DPS. char_missile_dmg_mult
+        # already folded into total_dmg above; preserve the same proportions
+        # across the four types so the typed sum matches the scalar volley.
+        if total_dmg > 0:
+            cycle_s = cycle / 1000
+            scale = (volley / (em + therm + kin + expl)) if (em + therm + kin + expl) > 0 else 0
+            weapon_dps_typed[0] += (em * scale / cycle_s) * qty
+            weapon_dps_typed[1] += (therm * scale / cycle_s) * qty
+            weapon_dps_typed[2] += (kin * scale / cycle_s) * qty
+            weapon_dps_typed[3] += (expl * scale / cycle_s) * qty
 
         # Spool-up: Triglavian entropic disintegrators ramp damage per cycle.
         # Spool is a separate multiplier on the volley (matching Pyfa/in-game):
@@ -1445,6 +1487,23 @@ async def calculate_fitting_stats(
 
     total_dps = weapon_dps + drone_dps
     total_dps_max_spool = weapon_dps_max_spool + drone_dps
+
+    # Resist-weighted effective DPS against the target's resist profile.
+    # effective = raw_per_type * (1 - target_resist_per_type), summed.
+    target_resists = TARGET_RESIST_PROFILES.get(target_resist_profile,
+                                                TARGET_RESIST_PROFILES["uniform"])
+    effective_weapon_dps = sum(
+        weapon_dps_typed[i] * (1.0 - target_resists[i]) for i in range(4)
+    )
+    effective_drone_dps = sum(
+        drone_dps_typed[i] * (1.0 - target_resists[i]) for i in range(4)
+    )
+    effective_total_dps = effective_weapon_dps + effective_drone_dps
+    # Spool ratio (only weapons can spool) — apply the same uplift to typed
+    # weapon DPS for the effective max-spool figure.
+    weapon_spool_ratio = (weapon_dps_max_spool / weapon_dps) if weapon_dps > 0 else 1.0
+    effective_total_dps_max_spool = (effective_weapon_dps * weapon_spool_ratio
+                                     + effective_drone_dps)
 
     return {
         "cpu_used": round(cpu_used, 1),
@@ -1527,6 +1586,14 @@ async def calculate_fitting_stats(
         "weapon_dps_max_spool": round(weapon_dps_max_spool, 1),
         "total_dps_max_spool": round(total_dps_max_spool, 1),
         "spool_time_s": spool_time_s,
+        # Resist-weighted effective DPS against target_resist_profile.
+        # When the profile is "uniform" (no resists) these equal the raw
+        # DPS values above; the template only shows them when they differ.
+        "effective_weapon_dps": round(effective_weapon_dps, 1),
+        "effective_drone_dps": round(effective_drone_dps, 1),
+        "effective_total_dps": round(effective_total_dps, 1),
+        "effective_total_dps_max_spool": round(effective_total_dps_max_spool, 1),
+        "target_resist_profile": target_resist_profile,
     }
 
 

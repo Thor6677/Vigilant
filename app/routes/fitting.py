@@ -279,6 +279,11 @@ async def fitting_stats(
 
     items = body.get("items", [])
     damage_profile = body.get("damage_profile", "uniform")
+    # Profile selector in the UI drives BOTH defensive EHP weighting
+    # (damage_profile = incoming damage type fractions) AND offensive
+    # effective DPS (target_resist_profile = the target's resists). One
+    # selector, both calcs — matches what most fitting tools do.
+    target_resist_profile = body.get("target_resist_profile", damage_profile)
 
     # Optional: scale by a specific character's trained skills instead of All V.
     user_id = request.session.get("user_id")
@@ -302,6 +307,7 @@ async def fitting_stats(
     stats = await calculate_fitting_stats(
         db, int(ship_type_id), items, damage_profile,
         skill_levels=skill_levels,
+        target_resist_profile=target_resist_profile,
     )
 
     # Get ship name

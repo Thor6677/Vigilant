@@ -14,6 +14,23 @@
             <option value="">All V (default)</option>
             {# populated via JS on init #}
         </select>
+        <select id="dmg-profile-select" onchange="onProfileChange()"
+                title="Drives BOTH defensive EHP (incoming damage type) and offensive resist-weighted DPS (target's resists)"
+                style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
+            <option value="uniform">Profile: Uniform (default)</option>
+            <option value="sansha">Sansha</option>
+            <option value="blood">Blood Raiders</option>
+            <option value="guristas">Guristas</option>
+            <option value="serpentis">Serpentis</option>
+            <option value="angel">Angel Cartel</option>
+            <option value="sleeper">Sleepers</option>
+            <option value="triglavian">Triglavians</option>
+            <option value="drifter">Drifters</option>
+            <option value="em">EM only</option>
+            <option value="thermal">Thermal only</option>
+            <option value="kinetic">Kinetic only</option>
+            <option value="explosive">Explosive only</option>
+        </select>
         <a href="/tools/fitting/saved" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;">Saved Fits</a>
         <button onclick="showImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import EFT</button>
         <button onclick="showCharImportModal()" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import from Character</button>
@@ -517,10 +534,36 @@ function renderSlots() {
     });
 }
 
+/* ── Damage / target profile selector ─────────────────────────────── */
+var PROFILE_KEY = 'vigilant_fit_dmg_profile';
+
+function getSelectedProfile() {
+    var sel = document.getElementById('dmg-profile-select');
+    return sel ? sel.value : 'uniform';
+}
+
+function onProfileChange() {
+    var sel = document.getElementById('dmg-profile-select');
+    if (sel) {
+        try { localStorage.setItem(PROFILE_KEY, sel.value); } catch (e) {}
+    }
+    recalcStats();
+}
+
+function restoreProfileSelection() {
+    var sel = document.getElementById('dmg-profile-select');
+    if (!sel) return;
+    try {
+        var saved = localStorage.getItem(PROFILE_KEY);
+        if (saved) sel.value = saved;
+    } catch (e) {}
+}
+
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
 function recalcStats() {
     if (!state.shipTypeId) return;
     var charId = getSelectedSkillCharId();
+    var profile = getSelectedProfile();
     fetch('/tools/fitting/stats', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -528,6 +571,8 @@ function recalcStats() {
             ship_type_id: state.shipTypeId,
             items: state.items,
             character_id: charId,
+            damage_profile: profile,
+            target_resist_profile: profile,
         })
     })
     .then(function(r) { return r.text(); })
@@ -1255,6 +1300,9 @@ function refreshOverheatCache() {
 
 /* ── Initialize ───────────────────────────────────────────────────────────── */
 (function init() {
+    /* Restore profile dropdown FIRST so the first recalcStats triggered
+       by restoreState/loadFitting uses the saved selection, not "uniform". */
+    restoreProfileSelection();
     /* ?load=<fit_id> — opened from the saved-fits page. Takes precedence
        over localStorage, and we strip it from the URL so refreshing the
        builder doesn't keep force-loading the same fit. */

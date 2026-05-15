@@ -59,30 +59,44 @@
 
 {# ── Offense ──────────────────────────────────────────────────────────────── #}
 {% if stats.total_dps > 0 or stats.drone_dps > 0 %}
+{% set show_effective = stats.target_resist_profile and stats.target_resist_profile != "uniform" and stats.effective_total_dps != stats.total_dps %}
 <div class="b-section">
-    <div class="b-section-head"><span class="b-label">Offense</span></div>
+    <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="b-label">Offense</span>
+        {% if show_effective %}
+        <span style="font-size:9px;color:var(--muted);">vs <span style="color:var(--accent);">{{ stats.target_resist_profile }}</span> resists</span>
+        {% endif %}
+    </div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
         <table style="width:100%;font-size:10px;border-collapse:collapse;">
             {% if stats.weapon_dps > 0 %}
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Weapon DPS</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.weapon_dps) }}</td>
+                <td style="text-align:right;color:var(--text);">
+                    {{ "{:,.1f}".format(stats.weapon_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_weapon_dps) }}</span>{% endif %}
+                </td>
             </tr>
             {% endif %}
             {% if stats.drone_dps > 0 %}
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Drone DPS</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.drone_dps) }}</td>
+                <td style="text-align:right;color:var(--text);">
+                    {{ "{:,.1f}".format(stats.drone_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_drone_dps) }}</span>{% endif %}
+                </td>
             </tr>
             {% endif %}
             <tr style="border-top:1px solid var(--border);">
                 <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total DPS</td>
-                <td style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.1f}".format(stats.total_dps) }}</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">
+                    {{ "{:,.1f}".format(stats.total_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;font-weight:400;">&rarr;</span> <span style="color:var(--accent);">{{ "{:,.1f}".format(stats.effective_total_dps) }}</span>{% endif %}
+                </td>
             </tr>
             {% if stats.spool_time_s > 0 %}
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Max Spool DPS</td>
-                <td style="text-align:right;color:var(--accent);font-weight:600;">{{ "{:,.1f}".format(stats.total_dps_max_spool) }}</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">
+                    {{ "{:,.1f}".format(stats.total_dps_max_spool) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;font-weight:400;">&rarr;</span> <span style="color:var(--accent);">{{ "{:,.1f}".format(stats.effective_total_dps_max_spool) }}</span>{% endif %}
+                </td>
             </tr>
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Spool Time</td>
