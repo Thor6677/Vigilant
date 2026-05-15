@@ -431,6 +431,86 @@ async def _apply_ship_hull_bonuses(
 
 
 
+# Drone size + racial specialization skills that have a
+# damageMultiplierBonus attr but no OwnerRequiredSkillModifier row to
+# propagate it to drones. Pyfa hard-codes these in effects.py — same
+# fix here. Each skill's bonus applies to drones requiring that skill.
+# Drone Interfacing (3442) is NOT in this list — its modifierInfo
+# already targets all drones via skill=3436 (Drones).
+_DRONE_SKILL_BONUS_GAPS: tuple[int, ...] = (
+    3441,   # Heavy Drone Operation        (5%/level)
+    33699,  # Medium Drone Operation       (5%/level)
+    24241,  # Light Drone Operation        (5%/level)
+    23594,  # Sentry Drone Interfacing     (5%/level)
+    12484,  # Amarr Drone Specialization   (2%/level)
+    12485,  # Minmatar Drone Specialization
+    12486,  # Gallente Drone Specialization
+    12487,  # Caldari Drone Specialization
+    60515,  # Mutated Drone Specialization
+)
+# damageMultiplierBonus attribute_id
+_ATTR_DAMAGE_MULT_BONUS = 64
+
+
+async def _apply_drone_skill_bonuses(
+    db: AsyncSession,
+    module_attrs_map: dict[int, dict[int, float]],
+    items: list[dict],
+    skill_levels: dict[int, int] | None = None,
+) -> None:
+    """Apply drone-skill damage bonuses that the SDE doesn't propagate.
+
+    Light/Medium/Heavy Drone Operation, Sentry Drone Interfacing, and the
+    four racial drone specializations each carry a `damageMultiplierBonus`
+    attr but have no SDEModifier row mapping it to actual drone damage
+    (only their internal skillLevel→damageMultiplierBonus self-modifier).
+    Pyfa works around this with hard-coded handlers in effects.py.
+
+    For each gap skill, find the drones in `items` that require it and
+    multiply their damageMultiplier by (1 + bonus*level/100). Stacking
+    bonuses are not penalized — drone skills are explicitly non-stacking
+    per CCP design (matches Pyfa).
+    """
+    drone_type_ids = {i["type_id"] for i in items if i.get("slot") == "drone"}
+    if not drone_type_ids:
+        return
+
+    # Skill-req lookup: which of our drones require each gap skill?
+    skill_reqs: dict[int, set[int]] = defaultdict(set)
+    res = await db.execute(
+        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+        .where(SDETypeSkillReq.type_id.in_(list(drone_type_ids)))
+        .where(SDETypeSkillReq.skill_type_id.in_(_DRONE_SKILL_BONUS_GAPS))
+    )
+    for tid, skill_id in res.fetchall():
+        skill_reqs[skill_id].add(tid)
+    if not skill_reqs:
+        return
+
+    # Fetch each gap skill's damageMultiplierBonus value
+    res = await db.execute(
+        select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id.in_(list(skill_reqs.keys())))
+        .where(SDETypeDogmaAttribute.attribute_id == _ATTR_DAMAGE_MULT_BONUS)
+    )
+    bonus_pct: dict[int, float] = {tid: val for tid, val in res.fetchall()}
+
+    for skill_id, drones in skill_reqs.items():
+        pct = bonus_pct.get(skill_id)
+        if not pct:
+            continue
+        level = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
+        if not level:
+            continue
+        mult = 1 + (pct * level) / 100.0
+        for tid in drones:
+            attrs = module_attrs_map.get(tid)
+            if attrs is None:
+                continue
+            current = attrs.get(ATTR_DAMAGE_MULTIPLIER, 1.0)
+            attrs[ATTR_DAMAGE_MULTIPLIER] = current * mult
+
+
 async def _apply_all_v_skill_bonuses(
     db: AsyncSession,
     module_attrs_map: dict[int, dict[int, float]],
@@ -919,6 +999,12 @@ async def calculate_fitting_stats(
     # skill_base_attr * 5, applied as postPercent.
     await _apply_all_v_skill_bonuses(
         db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
+    )
+
+    # Fill the drone-skill modifier gaps the SDE doesn't propagate
+    # (Light/Med/Heavy Drone Operation + racial specs + Sentry Interfacing).
+    await _apply_drone_skill_bonuses(
+        db, module_attrs_map, items, skill_levels=skill_levels,
     )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
