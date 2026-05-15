@@ -3,13 +3,13 @@
     "T-003",
     "T-006"
   ],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Several findings (VVP-002, VVP-004, plus 005a/c/d/e/f, VVP-008 session lifetime, VVP-009 logout POST, VVP-014 nginx h2c) are sitting at fix-in-progress waiting for the next /audit run. Schedule it once the verification tickets are done, regenerate SECURITY_TODO.md, and check that statuses flipped to fixed. This is the phase-closing bookkeeping step.",
   "id": "T-011",
   "order": 110,
   "phase": "security-hardening",
-  "status": "open",
+  "status": "complete",
   "title": "Run sec-toolkit /audit to close fix-in-progress findings",
   "type": "chore"
 }
