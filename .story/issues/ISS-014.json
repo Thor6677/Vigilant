@@ -1,0 +1,23 @@
+{
+  "components": [
+    "data",
+    "wormholes"
+  ],
+  "discoveredDate": "2026-05-15",
+  "id": "ISS-014",
+  "impact": "Discovered during T-017. The community-sourced wormholes.json covers 2,568 of the SDE's 2,604 J-space systems; 37 are unrepresented in system_statics (and 13 in both statics + effects). The gap is concentrated in shattered class-13 systems (~32 J-numbered) and the 5 named drifter complexes (Azdaja Redoubt, Conflux Eyrie, Liberated Barbican, Sanctified Vidette, Sentinel MZ) — exactly the systems WHDBX-derived datasets don't track.\n\nUser impact today: NONE. `wormhole_positions.json` includes all 2,604 systems (positions are SDE-driven, not community-driven), so /map renders every J-system correctly. The wormhole system detail route calls `_wh_data.get('system_statics', {}).get(system_name, [])` and `_wh_data.get('system_effects', {}).get(system_name)` — missing keys silently fall back to empty list / None and the partial just renders without a statics block. The kills route doesn't touch system_statics at all.\n\nThis is not data we can fill from SDE — statics are per-system community-curated knowledge that EVE doesn't expose. Realistic remediation is either pulling fresher community data (anoikis.info / fuzzwork export / WHDBX successor) on a recurring basis, or accepting the gap.\n\nFiling as low severity, primarily as documentation. The position pipeline was verified current against today's SDE during T-017 (no diff).",
+  "location": [
+    "app/data/wormholes.json",
+    "app/routes/wormholes.py:199",
+    "app/sde/lookup.py:778-806"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [
+    "T-017"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "37 J-systems known to SDE but absent from wormholes.json:system_statics"
+}

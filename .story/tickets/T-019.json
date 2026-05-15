@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Sweep `print()` and `logger.debug` left over from incident investigations (per project_cleanup_tasks memory). Specifically scrub `app/routes/wormholes.py`. Also drop the stale `db` param on `_client_for(char, db)` in `app/routes/dashboard.py:500`. Keep useful entries (perf timings, error context with traceback) — drop only diagnostic-only noise. No behavioral change.",
   "id": "T-019",
   "order": 30,
   "phase": "roadmap-and-gaps",
-  "status": "open",
+  "status": "complete",
   "title": "Remove leftover debug logging",
   "type": "chore"
 }
