@@ -431,6 +431,107 @@ async def _apply_ship_hull_bonuses(
 
 
 
+async def _apply_implant_bonuses(
+    db: AsyncSession,
+    module_attrs_map: dict[int, dict[int, float]],
+    charge_attrs_map: dict[int, dict[int, float]],
+    implant_type_ids: list[int],
+) -> None:
+    """Apply implant attribute modifiers to modules and charges.
+
+    Implants don't scale with level (you either have one plugged in or
+    you don't — implantness slot 1-10), so the logic is simpler than
+    _apply_all_v_skill_bonuses. We mirror the same domain/func dispatch
+    because implants overwhelmingly use OwnerRequiredSkillModifier (a
+    skill-filtered modifier on the character) plus the occasional
+    ItemModifier targeting the character directly.
+
+    Stat implants in slots 1-5 (perception/willpower/etc.) have no
+    combat impact and are no-ops here — they only matter for skill
+    training time, which Vigilant doesn't model.
+    """
+    if not implant_type_ids:
+        return
+
+    all_type_ids = list(module_attrs_map.keys())
+    charge_type_ids = list(charge_attrs_map.keys())
+    combined = list(set(all_type_ids + charge_type_ids))
+    if not combined:
+        return
+
+    # Group + skill-req lookups for matching against modules/drones/charges
+    res = await db.execute(
+        select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(combined))
+    )
+    group_ids = {r.type_id: r.group_id for r in res.fetchall()}
+
+    skill_reqs: dict[int, set[int]] = defaultdict(set)
+    res = await db.execute(
+        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+        .where(SDETypeSkillReq.type_id.in_(combined))
+    )
+    for r in res.fetchall():
+        skill_reqs[r.type_id].add(r.skill_type_id)
+    charge_tid_set = set(charge_type_ids)
+
+    # Implant modifiers via the implant's type effects. Implants typically
+    # have a single passive effect. Use the same domain/func vocabulary.
+    res = await db.execute(
+        select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
+               SDEModifier.modified_attribute_id, SDEModifier.operator,
+               SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value,
+               SDETypeEffect.type_id)
+        .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
+        .where(SDETypeEffect.type_id.in_(implant_type_ids))
+        .where(SDEModifier.domain.in_(["shipID", "charID"]))
+        .where(SDEModifier.func.in_([
+            "LocationGroupModifier", "LocationRequiredSkillModifier",
+            "OwnerRequiredSkillModifier",
+        ]))
+    )
+    modifiers = res.fetchall()
+    if not modifiers:
+        return
+
+    # Look up each implant's bonus-source attributes (e.g. damageMultiplierBonus=2.0)
+    src_attr_ids = list({r.modifying_attribute_id for r in modifiers})
+    impl_attrs = await get_types_dogma_attrs(db, implant_type_ids)
+
+    for row in modifiers:
+        implant_tid = row.type_id
+        src_val = impl_attrs.get(implant_tid, {}).get(row.modifying_attribute_id)
+        if not src_val:
+            continue
+
+        matching_type_ids: set[int] = set()
+        matching_charge_ids: set[int] = set()
+
+        if row.func == "LocationGroupModifier" and row.filter_type == "group":
+            for tid, gid in group_ids.items():
+                if gid == row.filter_value and tid not in charge_tid_set:
+                    matching_type_ids.add(tid)
+        elif row.func == "LocationRequiredSkillModifier" and row.filter_type == "skill":
+            for tid, skills in skill_reqs.items():
+                if row.filter_value in skills and tid not in charge_tid_set:
+                    matching_type_ids.add(tid)
+        elif row.func == "OwnerRequiredSkillModifier" and row.filter_type == "skill":
+            for tid, skills in skill_reqs.items():
+                if row.filter_value in skills:
+                    if tid in charge_tid_set:
+                        matching_charge_ids.add(tid)
+                    else:
+                        matching_type_ids.add(tid)
+
+        for tid in matching_type_ids:
+            if tid in module_attrs_map:
+                _apply_modifier(module_attrs_map[tid], row.modified_attribute_id,
+                                row.operator, src_val)
+        for tid in matching_charge_ids:
+            if tid in charge_attrs_map:
+                _apply_modifier(charge_attrs_map[tid], row.modified_attribute_id,
+                                row.operator, src_val)
+
+
 # Drone size + racial specialization skills that have a
 # damageMultiplierBonus attr but no OwnerRequiredSkillModifier row to
 # propagate it to drones. Pyfa hard-codes these in effects.py — same
@@ -704,6 +805,7 @@ async def calculate_fitting_stats(
     damage_profile: str = "uniform",
     skill_levels: dict[int, int] | None = None,
     target_resist_profile: str = "uniform",
+    implants: list[int] | None = None,
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
 
@@ -1028,6 +1130,14 @@ async def calculate_fitting_stats(
     await _apply_drone_skill_bonuses(
         db, module_attrs_map, items, skill_levels=skill_levels,
     )
+
+    # Apply implant bonuses (slots 1-10). Stat-training implants in slots
+    # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
+    # range, cap recharge, etc. via the same modifier vocabulary as skills.
+    if implants:
+        await _apply_implant_bonuses(
+            db, module_attrs_map, charge_attrs_map, implants,
+        )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
     # Makes deep copies so we don't mutate cached SDE data

@@ -145,6 +145,26 @@
 </div>
 {% endfor %}
 
+{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring) #}
+<div class="b-section" id="section-implant" style="display:none;">
+    <div class="b-section-head">
+        <span class="b-label">Implants</span>
+        <span style="font-size:9px;color:var(--muted);">slots 1-5 stat · 6-10 combat</span>
+    </div>
+    <div id="slots-implant" style="padding:0.25rem 0;"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" id="implant-search"
+                   placeholder="+ Search implants by name..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   oninput="searchImplant(this.value)">
+            <div id="implant-results"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+
 {# Drones #}
 <div class="b-section" id="section-drone">
     <div class="b-section-head">
@@ -231,7 +251,10 @@ var state = {
     shipName: '',
     fittingName: 'Unnamed',
     fittingId: null,
-    items: []
+    items: [],
+    // Implants: sparse array indexed 1..10 → {type_id, name} per slot.
+    // Stored as an object keyed by slot string for JSON safety.
+    implants: {}
 };
 
 /* Ship slot limits — populated from stats response */
@@ -281,9 +304,11 @@ function applyState() {
     document.getElementById('fitting-name-section').style.display = '';
     document.getElementById('fitting-name').value = state.fittingName || 'Unnamed';
     document.getElementById('slot-layout').style.display = '';
+    document.getElementById('section-implant').style.display = '';
 
     fetchShipSlots(state.shipTypeId);
     renderSlots();
+    renderImplantSlots();
     recalcStats();
 }
 
@@ -534,6 +559,85 @@ function renderSlots() {
     });
 }
 
+/* ── Implants (10 slots, auto-routed by implantness) ───────────────── */
+function getImplantTypeIds() {
+    if (!state.implants) return [];
+    var out = [];
+    for (var s = 1; s <= 10; s++) {
+        var rec = state.implants[String(s)];
+        if (rec && rec.type_id) out.push(rec.type_id);
+    }
+    return out;
+}
+
+function renderImplantSlots() {
+    var host = document.getElementById('slots-implant');
+    if (!host) return;
+    var html = '';
+    for (var s = 1; s <= 10; s++) {
+        var rec = (state.implants || {})[String(s)];
+        var nameCell = rec
+            ? '<span style="color:var(--text);">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' +
+              '<button onclick="removeImplant(' + s + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
+            : '<span style="color:var(--muted);font-style:italic;">empty</span>';
+        html +=
+            '<div style="display:flex;align-items:center;gap:0.5rem;font-size:10px;padding:2px 0.5rem;border-bottom:1px solid var(--border);">' +
+                '<span style="color:var(--muted);width:24px;">#' + s + '</span>' +
+                '<span style="flex:1;">' + nameCell + '</span>' +
+            '</div>';
+    }
+    host.innerHTML = html;
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+}
+
+var implantSearchTimer = null;
+function searchImplant(q) {
+    clearTimeout(implantSearchTimer);
+    var resultsEl = document.getElementById('implant-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    implantSearchTimer = setTimeout(function() {
+        fetch('/tools/fitting/search/implants?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(rows) {
+                if (!rows || !rows.length) {
+                    resultsEl.innerHTML = '<div style="padding:0.4rem 0.5rem;color:var(--muted);font-size:10px;">No matches</div>';
+                    resultsEl.style.display = '';
+                    return;
+                }
+                resultsEl.innerHTML = rows.map(function(r) {
+                    return '<div onclick="addImplant(' + r.type_id + ',' + r.slot + ',' + JSON.stringify(r.name).replace(/"/g, '&quot;') + ')" ' +
+                           'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);" ' +
+                           'onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">' +
+                           '<span style="color:var(--muted);">#' + r.slot + '</span> ' + escapeHtml(r.name) +
+                           '</div>';
+                }).join('');
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+function addImplant(typeId, slot, name) {
+    if (!state.implants) state.implants = {};
+    state.implants[String(slot)] = {type_id: typeId, name: name};
+    saveState();
+    renderImplantSlots();
+    document.getElementById('implant-search').value = '';
+    document.getElementById('implant-results').style.display = 'none';
+    recalcStats();
+}
+
+function removeImplant(slot) {
+    if (state.implants) delete state.implants[String(slot)];
+    saveState();
+    renderImplantSlots();
+    recalcStats();
+}
+
 /* ── Damage / target profile selector ─────────────────────────────── */
 var PROFILE_KEY = 'vigilant_fit_dmg_profile';
 
@@ -573,6 +677,7 @@ function recalcStats() {
             character_id: charId,
             damage_profile: profile,
             target_resist_profile: profile,
+            implants: getImplantTypeIds(),
         })
     })
     .then(function(r) { return r.text(); })
@@ -999,7 +1104,7 @@ function deleteFitting(id, btn) {
 }
 
 function clearFitting() {
-    state = {shipTypeId: null, shipName: '', fittingName: 'Unnamed', fittingId: null, items: []};
+    state = {shipTypeId: null, shipName: '', fittingName: 'Unnamed', fittingId: null, items: [], implants: {}};
     localStorage.removeItem(FIT_KEY);
     location.reload();
 }

@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Depends, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -251,6 +251,42 @@ async def search_drones(
         "search_type": "drone"})
 
 
+@router.get("/tools/fitting/search/implants")
+async def search_implants(
+    q: str = Query("", min_length=2),
+    slot: int | None = Query(None, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return implants matching a name query, optionally filtered to a
+    single slot (1-10 via implantness dogma attribute 331).
+
+    Returns JSON: [{type_id, name, slot}, ...] — the caller (fitting UI)
+    drives a vanilla <input> + <ul> rather than the htmx partial used
+    for modules/drones, because each slot picks one item only.
+    """
+    from sqlalchemy import select
+    from app.db.models import SDEType, SDETypeDogmaAttribute
+    pattern = f"%{q}%"
+    # Implant types have implantness (attr_id 331) set to their slot.
+    stmt = (
+        select(SDEType.type_id, SDEType.type_name, SDETypeDogmaAttribute.value)
+        .join(SDETypeDogmaAttribute,
+              (SDETypeDogmaAttribute.type_id == SDEType.type_id)
+              & (SDETypeDogmaAttribute.attribute_id == 331))
+        .where(SDEType.type_name.like(pattern))
+        .where(SDEType.published == True)
+        .order_by(SDEType.type_name)
+        .limit(30)
+    )
+    if slot is not None:
+        stmt = stmt.where(SDETypeDogmaAttribute.value == float(slot))
+    rows = (await db.execute(stmt)).fetchall()
+    return JSONResponse([
+        {"type_id": r[0], "name": r[1], "slot": int(r[2])}
+        for r in rows
+    ])
+
+
 @router.get("/tools/fitting/search/charges", response_class=HTMLResponse)
 async def search_charges(
     request: Request,
@@ -284,6 +320,10 @@ async def fitting_stats(
     # effective DPS (target_resist_profile = the target's resists). One
     # selector, both calcs — matches what most fitting tools do.
     target_resist_profile = body.get("target_resist_profile", damage_profile)
+    # Implant type IDs (slots 1-10) — slots 1-5 are no-ops; 6-10 are combat
+    # hardwirings whose modifiers apply via _apply_implant_bonuses.
+    implants_raw = body.get("implants", []) or []
+    implants = [int(x) for x in implants_raw if x]
 
     # Optional: scale by a specific character's trained skills instead of All V.
     user_id = request.session.get("user_id")
@@ -308,6 +348,7 @@ async def fitting_stats(
         db, int(ship_type_id), items, damage_profile,
         skill_levels=skill_levels,
         target_resist_profile=target_resist_profile,
+        implants=implants,
     )
 
     # Get ship name
