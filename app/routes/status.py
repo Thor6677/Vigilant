@@ -15,6 +15,30 @@ router = APIRouter(tags=["status"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _read_container_memory() -> dict | None:
+    # cgroup v2 exposes per-container usage and limit at fixed paths
+    # when the host kernel is unified-hierarchy (Debian 12+ / Docker
+    # default since ~2023). Returns None on cgroup v1 hosts or if the
+    # files are unreadable — caller treats absence as "don't render".
+    try:
+        with open("/sys/fs/cgroup/memory.current") as f:
+            used = int(f.read().strip())
+        with open("/sys/fs/cgroup/memory.max") as f:
+            raw = f.read().strip()
+        if raw == "max":  # no limit set — gauge would be meaningless
+            return None
+        limit = int(raw)
+        if limit <= 0:
+            return None
+        return {
+            "used_mb": used // (1024 * 1024),
+            "limit_mb": limit // (1024 * 1024),
+            "percent": round(used / limit * 100),
+        }
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+
+
 def _age_str(dt: datetime | None) -> str:
     if dt is None:
         return "never"
@@ -144,6 +168,7 @@ async def _build_context(db: AsyncSession, user_id: int) -> dict:
         char_sync_rows=char_sync_rows,
         syncing_count=syncing_count,
         chart_data=json.dumps(_compute_chart_data()),
+        container_memory=_read_container_memory(),
     )
 
 

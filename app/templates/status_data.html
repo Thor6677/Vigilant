@@ -40,6 +40,29 @@
     </div>
   </div>
 
+  {% if container_memory %}
+  <!-- Container memory -->
+  <div class="eve-border rounded p-3 bg-eve-surface space-y-2 mb-6">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Container Memory</h2>
+      <span class="text-xs text-eve-muted font-mono">cgroup v2</span>
+    </div>
+    <div class="w-full h-2 rounded bg-eve-border overflow-hidden">
+      {% if container_memory.percent < 70 %}
+        <div class="h-full rounded bg-eve-success transition-all" style="width: {{ container_memory.percent }}%"></div>
+      {% elif container_memory.percent < 85 %}
+        <div class="h-full rounded bg-yellow-500 transition-all" style="width: {{ container_memory.percent }}%"></div>
+      {% else %}
+        <div class="h-full rounded bg-eve-danger transition-all" style="width: {{ container_memory.percent }}%"></div>
+      {% endif %}
+    </div>
+    <div class="flex items-center justify-between text-xs text-eve-muted font-mono">
+      <span>{{ container_memory.used_mb }} / {{ container_memory.limit_mb }} MiB</span>
+      <span>{{ container_memory.percent }}%</span>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Background sync status -->
   <div class="eve-border rounded bg-eve-surface mb-6">
     <div class="px-3 py-2 border-b border-eve-border flex items-center justify-between">
