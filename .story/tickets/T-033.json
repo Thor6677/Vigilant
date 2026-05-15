@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-15",
+  "description": "Step 4 of T-012's 4-step CSP roadmap. Depends on T-031 (Step 2 inline handlers) and T-032 (Step 3 inline styles) being complete, OR the explicit decision in T-032 to accept `'unsafe-inline'` for style-src only.\n\n**Changes:**\n1. **In-repo:** edit `app/middleware/csp_nonce.py:_CSP_TEMPLATE` to drop `'unsafe-inline'` from `script-src` (and from `style-src` if T-032's decision allows). Rename header from `Content-Security-Policy-Report-Only` to `Content-Security-Policy` (enforcing).\n2. **On VPS (`/opt/edge/nginx/conf.d/vigilant.conf:47`):** DELETE the static `add_header Content-Security-Policy-Report-Only ...` line entirely. The app's per-request header replaces it. Reload edge nginx (`docker exec edge-nginx-1 nginx -s reload`).\n\n**Verification gate (don't skip):**\n- Open browser devtools on every major page (dashboard, fitting tool, star map, killmails, admin, intel pages, structure timers, account settings).\n- Confirm zero CSP errors in the console.\n- Test every major action that uses htmx partials (button clicks, form submits, dropdown changes).\n- Test once with a hard refresh (Ctrl+Shift+R) to ensure no cached pages with old inline handlers slip through.\n\n**Rollback plan:** if violations show up post-flip, immediately revert the app commit (`git revert <sha> && deploy.sh`). The CSP middleware change is cleanly reversible — the nonce annotations on templates stay (they're inert under Report-Only).\n\n**Closes VVP-2026-007** after deploy + verification.</description>",
+  "id": "T-033",
+  "order": 170,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "CSP Step 4: drop unsafe-inline + flip Report-Only to enforcing (VVP-2026-007)",
+  "type": "task"
+}

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-15",
+  "description": "Step 3 of T-012's 4-step CSP roadmap. Depends on T-031 (Step 2 inline-handler refactor) not being a hard prereq — they're independent.\n\n**Scope (inventoried 2026-05-15 with `grep -rl 'style=\"' app/templates/`):**\n- 101 templates with inline `style=\"...\"` attributes\n- 3,296 total `style=\"` occurrences\n\n**The right pattern:**\n- Most uses are layout (`display:flex`, `gap:`, `width:`, color tokens like `var(--muted)`) that map cleanly to existing `b-*` utility classes in the design system OR to new utility classes worth adding.\n- For one-offs (e.g., `style=\"width: {{ pct }}%\"` for progress bars), convert to CSS custom properties: `style=\"--pct: {{ pct }}%\"` + a static class `.bar-fill { width: var(--pct); }` — the nonce'd `<style>` block in base.html handles the static class, and the custom-property setter is still inline but contains no executable content (no CSP violation for inline style; the violation is on the `style=` attribute itself).\n\nWait — `style=` attribute IS what unsafe-inline allows. Removing unsafe-inline from style-src will block ALL `style=` attributes, regardless of content. Even `style=\"--pct: 80%\"` would fail.\n\nSo either:\n- Convert every dynamic value to JS-driven `element.style.setProperty()` after page load, or\n- Accept `'unsafe-inline'` in style-src (drop only from script-src). Most apps do this — style is less of a XSS vector than script.\n\n**Decision needed at start of this ticket:** drop style-src unsafe-inline entirely, or keep it (and only the script-src tightening lands in Step 4).\n\n**Out of scope:** the inline event handlers (Step 2, separate ticket).\n\n**Done when:** decision recorded, refactor (if any) executed, and browser devtools shows 0 CSP violations for inline styles across the major routes (or the decision documents why some remain acceptable).</description>",
+  "id": "T-032",
+  "order": 160,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "CSP Step 3: refactor 101 templates with inline style= attrs to utility classes (VVP-2026-007)",
+  "type": "task"
+}

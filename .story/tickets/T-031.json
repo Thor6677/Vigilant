@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-15",
+  "description": "Step 2 of T-012's 4-step CSP roadmap. T-012 Step 1 (per-request nonce middleware + nonced script/style tags) landed in commit 6d1d9de — nonces are live and the CSP Report-Only header reports any inline event handler now.\n\n**Scope (re-inventoried 2026-05-15 with `grep -roh ' on[a-z]+=\"[^\"]*\"' app/templates/`):**\n- 364 inline event handler attribute occurrences across templates\n  (onclick, onchange, onsubmit, onmouseover, etc.)\n\n**The right pattern:**\n- Convert each `onclick=\"foo(arg)\"` to `data-action=\"foo\" data-arg=\"...\"`.\n- Add a single delegated listener at the bottom of `base.html`:\n  ```js\n  document.addEventListener('click', (e) => {\n    const action = e.target.closest('[data-action]')?.dataset.action;\n    if (action && window.actions?.[action]) window.actions[action](e);\n  });\n  ```\n- Bundle action handlers into `static/js/actions.js` (one new external file, served as `'self'`).\n- For non-click events, same pattern with separate delegated listeners.\n\n**How to execute:**\n- Best done with parallel agents working on file batches (one agent per top-level dir or per-feature subset under `templates/`).\n- Test each affected page after conversion — htmx partials count too.\n- Browser devtools console should show CSP report counts dropping after each batch.\n\n**Out of scope:** the 101 templates with inline `style=` attrs (Step 3, separate ticket).\n\n**Done when:** browser devtools shows 0 CSP violations for inline event handlers across the major routes (dashboard, fitting tool, star map, admin, intel, structure timers).</description>",
+  "id": "T-031",
+  "order": 150,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "CSP Step 2: refactor 364 inline event handlers to addEventListener (VVP-2026-007)",
+  "type": "task"
+}
