@@ -433,6 +433,7 @@ async def _apply_ship_hull_bonuses(
 
 async def _apply_implant_bonuses(
     db: AsyncSession,
+    ship_attrs: dict[int, float],
     module_attrs_map: dict[int, dict[int, float]],
     charge_attrs_map: dict[int, dict[int, float]],
     implant_type_ids: list[int],
@@ -456,26 +457,29 @@ async def _apply_implant_bonuses(
     all_type_ids = list(module_attrs_map.keys())
     charge_type_ids = list(charge_attrs_map.keys())
     combined = list(set(all_type_ids + charge_type_ids))
-    if not combined:
-        return
+    # Don't early-return on empty modules — ItemModifier+shipID implant
+    # rows (CPU subprocessors, agility hardwirings, sig-radius implants,
+    # etc.) modify ship_attrs directly and must fire even on bare hulls.
 
     # Group + skill-req lookups for matching against modules/drones/charges
-    res = await db.execute(
-        select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(combined))
-    )
-    group_ids = {r.type_id: r.group_id for r in res.fetchall()}
-
+    group_ids: dict[int, int] = {}
     skill_reqs: dict[int, set[int]] = defaultdict(set)
-    res = await db.execute(
-        select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
-        .where(SDETypeSkillReq.type_id.in_(combined))
-    )
-    for r in res.fetchall():
-        skill_reqs[r.type_id].add(r.skill_type_id)
+    if combined:
+        res = await db.execute(
+            select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(combined))
+        )
+        group_ids = {r.type_id: r.group_id for r in res.fetchall()}
+        res = await db.execute(
+            select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+            .where(SDETypeSkillReq.type_id.in_(combined))
+        )
+        for r in res.fetchall():
+            skill_reqs[r.type_id].add(r.skill_type_id)
     charge_tid_set = set(charge_type_ids)
 
     # Implant modifiers via the implant's type effects. Implants typically
-    # have a single passive effect. Use the same domain/func vocabulary.
+    # have a single passive effect. Use the same domain/func vocabulary as
+    # skills + the ItemModifier branch from T-023 (ship-self attrs).
     res = await db.execute(
         select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
                SDEModifier.modified_attribute_id, SDEModifier.operator,
@@ -485,6 +489,7 @@ async def _apply_implant_bonuses(
         .where(SDETypeEffect.type_id.in_(implant_type_ids))
         .where(SDEModifier.domain.in_(["shipID", "charID"]))
         .where(SDEModifier.func.in_([
+            "ItemModifier",
             "LocationGroupModifier", "LocationRequiredSkillModifier",
             "OwnerRequiredSkillModifier",
         ]))
@@ -501,6 +506,13 @@ async def _apply_implant_bonuses(
         implant_tid = row.type_id
         src_val = impl_attrs.get(implant_tid, {}).get(row.modifying_attribute_id)
         if not src_val:
+            continue
+
+        # Ship-to-self implant modifier (CPU subprocessors, agility, sig radius,
+        # max velocity etc.). Same shape as the ship-hull-self fix in T-023:
+        # ItemModifier + shipID targets the ship's own attribute.
+        if row.func == "ItemModifier" and row.domain == "shipID":
+            _apply_modifier(ship_attrs, row.modified_attribute_id, row.operator, src_val)
             continue
 
         matching_type_ids: set[int] = set()
@@ -1133,10 +1145,11 @@ async def calculate_fitting_stats(
 
     # Apply implant bonuses (slots 1-10). Stat-training implants in slots
     # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
-    # range, cap recharge, etc. via the same modifier vocabulary as skills.
+    # range, cap recharge, agility, CPU/PG, etc. Mix of OwnerRequiredSkillModifier
+    # (damage-via-skill) and ItemModifier+shipID (ship-self attrs like CPU).
     if implants:
         await _apply_implant_bonuses(
-            db, module_attrs_map, charge_attrs_map, implants,
+            db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
         )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
