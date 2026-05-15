@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-15",
+  "description": "`static/js/notifications.js:161` — `_renderEvent` builds an HTML string by concatenating `ev.body`, `ev.title`, and `ev.type` into innerHTML. Source trace per audit: these fields originate at `app/routes/dashboard.py:174,195,268` — built from char_name (EVE Online), skill_name/pname (SDE), and label (hardcoded `_STRUCTURE_ALERT_LABELS`).\n\nCurrent attack surface: **essentially zero**. CCP disallows `<>\"'&` in character names; SDE values and the hardcoded label map are server-controlled. But:\n- The pattern is fragile — depends on third-party input restrictions remaining strict\n- `_renderEvent` may be reused for less-trusted bodies later (corp join requests, mail subjects, anything user-typed)\n\nFix two options:\n1. **Preferred:** rewrite `_renderEvent` to build DOM nodes via `document.createElement` + `textContent` rather than string concatenation\n2. **Minimal:** add a tiny `esc()` helper (same pattern as the one in fitting_tool.html's implant code we added today) and wrap all interpolations\n\nAfter fix, mark-attempted then re-run /audit to flip the finding.",
+  "id": "T-030",
+  "order": 140,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Escape innerHTML interpolation in notifications.js (VVP-2026-021)",
+  "type": "task"
+}
