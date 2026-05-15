@@ -1,0 +1,17 @@
+{
+  "components": [],
+  "discoveredDate": "2026-05-15",
+  "id": "ISS-017",
+  "impact": "**Symptom:** On the fitting page (`/tools/fitting`), the right-hand stats panel sometimes shows raw JSON instead of stats, e.g.:\n\n```\n{\"detail\": \"CSRF token invalid or missing — refresh the page and retry.\"}\n```\n\nThe fit itself loads fine (modules in their slots, ship picker works), but stats are missing. Hit observed 2026-05-15 on a Babaroga fit named `*BABABOOEY`.\n\n**Why it happens:** `recalcStats()` in `app/templates/fitting_tool.html` does:\n\n```js\nfetch('/tools/fitting/stats', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: ... })\n  .then(r => r.text())\n  .then(html => { document.getElementById('stats-panel').innerHTML = html; });\n```\n\nIt never checks `r.ok` / `r.status`. On any non-2xx response, the JSON error body gets stuffed into the panel as HTML. The CSRF middleware (`app/middleware/csrf.py`) returns 403 with a JSON body when the session's CSRF token doesn't match the X-CSRF-Token header.\n\n**Why CSRF triggers here:** The page-level fetch wrapper in `base.html` auto-injects X-CSRF-Token from the `<meta name=\"csrf-token\">` tag (line 6: `{{ request.session.get('csrf_token', '') }}`). That meta tag is filled at page-render time. If the session rotates the token mid-session (or if the page sits long enough for the session itself to time out), the meta tag becomes stale and the header doesn't match. The header IS being sent — it's just wrong.\n\n**Fix (defensive, narrow):**\n- In `recalcStats()`, check `response.ok` and `response.status`. On 403, render a friendly \"session expired — refresh to retry\" panel instead of `r.text()`. On 5xx, \"server error, see logs\".\n- Consider applying the same pattern to the other `fetch()` callers in `fitting_tool.html` (there are several — ship search, module search, etc.).\n\n**Fix (root-cause, broader):**\n- The page-level fetch wrapper could re-read the meta tag on each call so it always uses the freshest token visible to the page — but that doesn't help if the session itself rotated server-side without the page knowing.\n- A more durable fix: add a small \"/csrf/refresh\" endpoint that returns a fresh token, and have the wrapper retry once on 403 by fetching a new token + updating the meta tag.\n\n**Workaround for now:** refresh the page. The fit is auto-saved to localStorage so nothing is lost.\n\n**Out of scope:** the same brittleness probably affects other htmx-loaded panels (admin, structure timers, etc.), but htmx surfaces errors differently (it doesn't auto-innerHTML failed responses), so they're less likely to expose raw JSON. Worth a sweep but not in this ticket.</impact>\n<parameter name=\"components\">[\"fitting\", \"csrf\"]",
+  "location": [
+    "app/templates/fitting_tool.html",
+    "app/middleware/csrf.py"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Fitting stats panel renders raw JSON error on CSRF/auth failure"
+}

@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-15",
   "description": "`docs/nginx-sample.conf` was added when nginx was decoupled to /opt/edge/ (2026-05-14). Two patterns flagged by audit #2:\n\n1. **Lines 35, 71** — `proxy_set_header Host $host` accepts upstream-controlled Host. The operative config at /opt/edge/ uses Cloudflare-controlled Host; the sample should reflect that.\n2. **Line 85** — `proxy_http_version 1.1` + line 87 `proxy_set_header Connection $connection_upgrade` BUT does not include the corresponding `map $http_upgrade $connection_upgrade { default upgrade; '' close; }` block. A fork copying only this file gets `Connection: upgrade` always-on, which re-introduces h2c smuggling (same class as VVP-2026-014 fixed earlier).\n\nRisk to deployed instance: zero (operative config is /opt/edge/ and correct).\nRisk to forks following the README: medium.\n\nFix:\n- Add the `map $http_upgrade $connection_upgrade {...}` block to the sample.\n- Document the Host-header contract in a comment.\n- Optionally: add a short README note explaining that this sample is single-app/single-vhost only and the production vigilant deployment uses a separate shared edge stack.\n\nAfter fix, mark-attempted then re-run /audit to flip the finding.",
   "id": "T-029",
   "order": 130,
   "phase": "security-hardening",
-  "status": "open",
+  "status": "complete",
   "title": "Harden docs/nginx-sample.conf (VVP-2026-020)",
   "type": "task"
 }
