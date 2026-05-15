@@ -483,7 +483,8 @@ async def _apply_implant_bonuses(
     res = await db.execute(
         select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
                SDEModifier.modified_attribute_id, SDEModifier.operator,
-               SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value,
+               SDEModifier.func, SDEModifier.domain,
+               SDEModifier.filter_type, SDEModifier.filter_value,
                SDETypeEffect.type_id)
         .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
         .where(SDETypeEffect.type_id.in_(implant_type_ids))
