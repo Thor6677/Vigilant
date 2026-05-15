@@ -805,7 +805,7 @@
             </div>
         </span>
         {% if request.session.get('is_admin') %}<a href="/admin" class="b-nav-link {{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
-        <span id="notif-btn" onclick="onBellClick()" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
+        <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -823,42 +823,42 @@
                 <div id="notif-settings" style="display:none;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
                     <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.4rem;">Show notifications for:</div>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="skill_complete" onchange="saveNotifPrefs()" checked> Skill Completion
+                        <input type="checkbox" data-notif-type="skill_complete" data-change="saveNotifPrefs" checked> Skill Completion
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="job_ready" onchange="saveNotifPrefs()" checked> Industry Jobs
+                        <input type="checkbox" data-notif-type="job_ready" data-change="saveNotifPrefs" checked> Industry Jobs
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="new_mail" onchange="saveNotifPrefs()" checked> New Mail
+                        <input type="checkbox" data-notif-type="new_mail" data-change="saveNotifPrefs" checked> New Mail
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="pi_expiring" onchange="saveNotifPrefs()" checked> PI Alerts
+                        <input type="checkbox" data-notif-type="pi_expiring" data-change="saveNotifPrefs" checked> PI Alerts
                     </label>
                     <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin:0.3rem 0 0.2rem;">Structures</div>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="structure_attack" onchange="saveNotifPrefs()" checked> Structure Attacks
+                        <input type="checkbox" data-notif-type="structure_attack" data-change="saveNotifPrefs" checked> Structure Attacks
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="structure_fuel" onchange="saveNotifPrefs()" checked> Fuel / Services
+                        <input type="checkbox" data-notif-type="structure_fuel" data-change="saveNotifPrefs" checked> Fuel / Services
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="structure_change" onchange="saveNotifPrefs()" checked> Anchoring / Online
+                        <input type="checkbox" data-notif-type="structure_change" data-change="saveNotifPrefs" checked> Anchoring / Online
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="sovereignty" onchange="saveNotifPrefs()" checked> Sovereignty
+                        <input type="checkbox" data-notif-type="sovereignty" data-change="saveNotifPrefs" checked> Sovereignty
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="moonmining" onchange="saveNotifPrefs()" checked> Moonmining
+                        <input type="checkbox" data-notif-type="moonmining" data-change="saveNotifPrefs" checked> Moonmining
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                        <input type="checkbox" data-notif-type="poco" onchange="saveNotifPrefs()" checked> POCO
+                        <input type="checkbox" data-notif-type="poco" data-change="saveNotifPrefs" checked> POCO
                     </label>
                     <div style="border-top:1px solid var(--border);margin-top:0.3rem;padding-top:0.3rem;">
                         <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                            <input type="checkbox" data-notif-type="inventory_low" onchange="saveNotifPrefs()" checked> Inventory Alerts
+                            <input type="checkbox" data-notif-type="inventory_low" data-change="saveNotifPrefs" checked> Inventory Alerts
                         </label>
                         <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
-                            <input type="checkbox" data-notif-type="contract_low" onchange="saveNotifPrefs()" checked> Contract Alerts
+                            <input type="checkbox" data-notif-type="contract_low" data-change="saveNotifPrefs" checked> Contract Alerts
                         </label>
                     </div>
                 </div>
@@ -1041,6 +1041,7 @@
     }, true);
 })();
 </script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=4"></script>
 <script nonce="{{ request.state.csp_nonce }}">
 /* Global dismiss handler for alert banners — runs after every htmx swap */

@@ -16,9 +16,9 @@
         </div>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
-        <button onclick="copyShareUrl()" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
-        <button onclick="toggleAddScan()" id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
-        <button onclick="toggleRawPaste()" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
+        <button data-click="copyShareUrl" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        <button data-click="toggleAddScan" id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
+        <button data-click="toggleRawPaste" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
 </div>
@@ -29,7 +29,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Raw Paste</span>
-            <button onclick="copyRawPaste()" id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            <button data-click="copyRawPaste" id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
         </div>
         <div style="padding:0.5rem 0.75rem;">
             <textarea id="raw-paste-text" readonly rows="12"

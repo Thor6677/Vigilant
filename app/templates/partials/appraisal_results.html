@@ -13,11 +13,11 @@
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Appraisal — {{ hub_label }} Sell</span>
             <div style="display:flex;gap:6px;">
-                <button onclick="copyAppraisal()" id="copy-btn"
+                <button data-click="copyAppraisal" id="copy-btn"
                         class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">
                     Copy Total
                 </button>
-                <button onclick="sendToHauling()" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--text);color:var(--text);">
+                <button data-click="sendToHauling" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--text);color:var(--text);">
                     Send to Hauling
                 </button>
             </div>

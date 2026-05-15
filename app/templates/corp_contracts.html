@@ -44,7 +44,7 @@
             {# Match type selector #}
             <div style="min-width:120px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Match By</label>
-                <select id="ct-match-type" onchange="toggleContractMatchType()"
+                <select id="ct-match-type" data-change="toggleContractMatchType"
                         style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="title">Title Keyword</option>
                     <option value="item">Item Type</option>
@@ -84,7 +84,7 @@
                 <input type="number" id="ct-critical" value="5" min="0"
                        style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
             </div>
-            <button onclick="addContractThreshold()" class="b-btn" style="padding:0.35rem 0.6rem;border:1px solid var(--accent);color:var(--accent);flex:none;font-size:10px;">Add</button>
+            <button data-click="addContractThreshold" class="b-btn" style="padding:0.35rem 0.6rem;border:1px solid var(--accent);color:var(--accent);flex:none;font-size:10px;">Add</button>
         </div>
         <div style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
             Monitors outstanding item exchange contracts. Title match counts contracts whose title contains the keyword. Item match counts contracts containing the item type.

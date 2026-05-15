@@ -44,7 +44,7 @@
                 <span style="font-size:10px;color:var(--muted);">{{ runs }} run{{ 's' if runs != 1 else '' }}</span>
                 {% set buildable_rows = rows | selectattr('buildable') | list %}
                 {% if buildable_rows %}
-                <button id="build-all-btn" onclick="toggleBuildAll()"
+                <button id="build-all-btn" data-click="toggleBuildAll"
                         class="b-btn" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
                     Build All
                 </button>

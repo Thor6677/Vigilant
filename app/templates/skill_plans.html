@@ -23,7 +23,7 @@
             <input type="text" id="new-plan-name" placeholder="Plan name…"
                    style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
 
-            <select id="new-plan-scope" onchange="onScopeChange()"
+            <select id="new-plan-scope" data-change="onScopeChange"
                     style="padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 <option value="personal">Personal</option>
                 <option value="corporation" {% if not eligible_corps %}disabled title="No corp where you hold Communications_Officer / Director / CEO"{% endif %}>Corporation</option>
@@ -41,7 +41,7 @@
                 {% endfor %}
             </select>
 
-            <button class="b-btn" onclick="createPlan()"
+            <button class="b-btn" data-click="createPlan"
                     style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
                 Create
             </button>

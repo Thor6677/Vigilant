@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
 <div class="b-page-header">
     <h1 class="b-page-title">Compression Calculator</h1>
-    <button onclick="resetCompression()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+    <button data-click="resetCompression" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
 </div>
 
 <form id="compression-form" hx-post="/industry/compression/calculate" hx-target="#compression-results" hx-swap="innerHTML">

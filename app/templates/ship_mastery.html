@@ -120,7 +120,7 @@
                 <option value="{{ c.character_id }}">{{ c.character_name }}</option>
                 {% endfor %}
             </select>
-            <button class="b-btn" onclick="checkMastery()"
+            <button class="b-btn" data-click="checkMastery"
                     style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
                 Check
             </button>
@@ -146,7 +146,7 @@
                 {% endif %}
             </select>
             <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                <select id="add-mode" onchange="toggleMasterySelect()"
+                <select id="add-mode" data-change="toggleMasterySelect"
                         style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <option value="requirements">Skill Requirements</option>
                     <option value="mastery">Mastery Level</option>
@@ -158,7 +158,7 @@
                     <option value="3">IV</option>
                     <option value="4">V</option>
                 </select>
-                <button class="b-btn" onclick="addToPlan()"
+                <button class="b-btn" data-click="addToPlan"
                         style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
                     Add
                 </button>
@@ -178,7 +178,7 @@
             <input type="text" id="new-plan-name" value="{{ ship_name }} Plan"
                    style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                <select id="new-plan-mode" onchange="toggleNewMasterySelect()"
+                <select id="new-plan-mode" data-change="toggleNewMasterySelect"
                         style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <option value="requirements">Skill Requirements</option>
                     <option value="mastery">Mastery Level</option>
@@ -190,7 +190,7 @@
                     <option value="3">IV</option>
                     <option value="4">V</option>
                 </select>
-                <button class="b-btn" onclick="createPlanFromShip()"
+                <button class="b-btn" data-click="createPlanFromShip"
                         style="padding:0.25rem 0.5rem;border:1px solid var(--success);color:var(--success);font-size:9px;">
                     Create Plan
                 </button>

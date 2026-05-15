@@ -7,7 +7,7 @@
 
 <div class="b-page-header">
     <h1 class="b-page-title">Hauling Calculator</h1>
-    <button onclick="resetHauling()" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+    <button data-click="resetHauling" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
 </div>
 
 {# ── Fleet Configuration ─────────────────────────────────────────────────── #}
@@ -15,7 +15,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Fleet</span>
-            <button onclick="addShipEntry()" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">+ Add Ship</button>
+            <button data-click="addShipEntry" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">+ Add Ship</button>
         </div>
         <div id="fleet-entries"></div>
     </div>
@@ -62,7 +62,7 @@
         <div id="panel-manual" style="padding:0.75rem;">
             <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Total Volume to Haul (m³)</label>
-                <input type="text" id="vol-total" value="0" oninput="recalcTrips()"
+                <input type="text" id="vol-total" value="0" data-input="recalcTrips"
                        style="padding:0.5rem;background:var(--bg);border:1px solid var(--accent);color:var(--text);font-family:inherit;font-size:14px;text-align:right;max-width:250px;">
             </div>
         </div>
@@ -87,12 +87,12 @@
         <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
             <div style="display:flex;flex-direction:column;gap:3px;min-width:50px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Qty</label>
-                <input type="number" data-field="qty" value="1" min="1" max="50" onchange="recalcAll()"
+                <input type="number" data-field="qty" value="1" min="1" max="50" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:160px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Ship</label>
-                <select data-field="ship" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <select data-field="ship" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="">Select a ship…</option>
                     {% for group_name, ships in ships_by_group.items() %}
                     <optgroup label="{{ group_name }}">
@@ -105,7 +105,7 @@
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Expander</label>
-                <select data-field="mod" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <select data-field="mod" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, mod in cargo_modules.items() %}
                     <option value="{{ key }}">{{ mod.label }}{% if mod.bonus > 0 %} (+{{ "%.1f"|format(mod.bonus * 100) }}%){% endif %}</option>
                     {% endfor %}
@@ -113,12 +113,12 @@
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Mods</label>
-                <input type="number" data-field="modCount" value="0" min="0" max="8" onchange="recalcAll()"
+                <input type="number" data-field="modCount" value="0" min="0" max="8" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Rig</label>
-                <select data-field="rig" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <select data-field="rig" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, rig in cargo_rigs.items() %}
                     <option value="{{ key }}">{{ rig.label }}{% if rig.bonus > 0 %} (+{{ "%.1f"|format(rig.bonus * 100) }}%){% endif %}</option>
                     {% endfor %}
@@ -126,12 +126,12 @@
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rigs</label>
-                <input type="number" data-field="rigCount" value="0" min="0" max="3" onchange="recalcAll()"
+                <input type="number" data-field="rigCount" value="0" min="0" max="3" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Skill</label>
-                <select data-field="skill" onchange="recalcAll()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                <select data-field="skill" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="0">0</option><option value="1">1</option><option value="2">2</option>
                     <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
                 </select>

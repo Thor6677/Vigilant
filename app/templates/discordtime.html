@@ -107,11 +107,11 @@
                 <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
                     <div style="flex:1;min-width:140px;">
                         <label class="dt-lbl">Date</label>
-                        <input type="date" id="dt-utc-date" class="dt-input" style="width:100%;" oninput="dtUpdate()">
+                        <input type="date" id="dt-utc-date" class="dt-input" style="width:100%;" data-input="dtUpdate">
                     </div>
                     <div style="width:100px;">
                         <label class="dt-lbl">Time (24hr)</label>
-                        <input type="text" id="dt-utc-time" class="dt-input" style="width:100%;" placeholder="HH:MM" maxlength="8" oninput="dtUpdate()">
+                        <input type="text" id="dt-utc-time" class="dt-input" style="width:100%;" placeholder="HH:MM" maxlength="8" data-input="dtUpdate">
                     </div>
                 </div>
                 <div id="dt-utc-error" style="display:none;font-size:10px;color:var(--danger);margin-top:4px;"></div>
@@ -122,21 +122,21 @@
                 <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
                     <div style="flex:1;min-width:140px;">
                         <label class="dt-lbl">Date</label>
-                        <input type="date" id="dt-local-date" class="dt-input" style="width:100%;" oninput="dtUpdate()">
+                        <input type="date" id="dt-local-date" class="dt-input" style="width:100%;" data-input="dtUpdate">
                     </div>
                     <div style="display:flex;gap:4px;align-items:end;">
                         <div>
                             <label class="dt-lbl">Hour</label>
-                            <input type="number" id="dt-local-hour" class="dt-input" style="width:50px;" min="1" max="12" placeholder="12" oninput="dtUpdate()">
+                            <input type="number" id="dt-local-hour" class="dt-input" style="width:50px;" min="1" max="12" placeholder="12" data-input="dtUpdate">
                         </div>
                         <span style="color:var(--muted);padding-bottom:0.4rem;">:</span>
                         <div>
                             <label class="dt-lbl">Min</label>
-                            <input type="number" id="dt-local-min" class="dt-input" style="width:50px;" min="0" max="59" placeholder="00" oninput="dtUpdate()">
+                            <input type="number" id="dt-local-min" class="dt-input" style="width:50px;" min="0" max="59" placeholder="00" data-input="dtUpdate">
                         </div>
                         <div>
                             <label class="dt-lbl">&nbsp;</label>
-                            <select id="dt-local-ampm" class="dt-input" onchange="dtUpdate()">
+                            <select id="dt-local-ampm" class="dt-input" data-change="dtUpdate">
                                 <option value="AM">AM</option>
                                 <option value="PM">PM</option>
                             </select>
@@ -145,7 +145,7 @@
                 </div>
                 <div style="margin-top:0.5rem;">
                     <label class="dt-lbl">Timezone</label>
-                    <select id="dt-local-tz" class="dt-input" style="width:100%;max-width:300px;" onchange="dtUpdate()"></select>
+                    <select id="dt-local-tz" class="dt-input" style="width:100%;max-width:300px;" data-change="dtUpdate"></select>
                 </div>
             </div>
 
@@ -154,15 +154,15 @@
                 <div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
                     <div>
                         <label class="dt-lbl">Days</label>
-                        <input type="number" id="dt-off-days" class="dt-input" style="width:60px;" min="0" value="0" oninput="dtUpdate()">
+                        <input type="number" id="dt-off-days" class="dt-input" style="width:60px;" min="0" value="0" data-input="dtUpdate">
                     </div>
                     <div>
                         <label class="dt-lbl">Hours</label>
-                        <input type="number" id="dt-off-hours" class="dt-input" style="width:60px;" min="0" max="23" value="0" oninput="dtUpdate()">
+                        <input type="number" id="dt-off-hours" class="dt-input" style="width:60px;" min="0" max="23" value="0" data-input="dtUpdate">
                     </div>
                     <div>
                         <label class="dt-lbl">Minutes</label>
-                        <input type="number" id="dt-off-mins" class="dt-input" style="width:60px;" min="0" max="59" value="0" oninput="dtUpdate()">
+                        <input type="number" id="dt-off-mins" class="dt-input" style="width:60px;" min="0" max="59" value="0" data-input="dtUpdate">
                     </div>
                 </div>
             </div>
@@ -195,8 +195,8 @@
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Discord Timestamps</span>
         <div style="display:flex;gap:0.5rem;">
-            <button class="dt-copy-btn" onclick="dtCopyAll()" id="dt-copy-all-btn" style="display:none;">Copy All</button>
-            <button class="dt-copy-btn" onclick="dtShareLink()" id="dt-share-btn" style="display:none;">Share Link</button>
+            <button class="dt-copy-btn" data-click="dtCopyAll" id="dt-copy-all-btn" style="display:none;">Copy All</button>
+            <button class="dt-copy-btn" data-click="dtShareLink" id="dt-share-btn" style="display:none;">Share Link</button>
         </div>
     </div>
     <div id="dt-output">

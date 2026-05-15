@@ -114,21 +114,21 @@
 
     {# Add new allowlist entry #}
     <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-        <select id="allow-type" onchange="clearAllowlistSearch()" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+        <select id="allow-type" data-change="clearAllowlistSearch" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <option value="character">Character</option>
             <option value="corporation">Corporation</option>
             <option value="alliance">Alliance</option>
         </select>
         <div style="flex:1;min-width:180px;position:relative;">
             <input type="text" id="allow-search" placeholder="Search by name…" autocomplete="off"
-                   oninput="searchAllowlist()"
+                   data-input="searchAllowlist"
                    style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <div id="allow-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
         </div>
         <input type="hidden" id="allow-id" value="">
         <input type="hidden" id="allow-name" value="">
         <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
-                onclick="addAllowlistEntry()">Add</button>
+                data-click="addAllowlistEntry">Add</button>
     </div>
 </div>
 
