@@ -1105,7 +1105,8 @@ async def import_from_fitting(plan_id: int, request: Request, db: AsyncSession =
     if not resolved:
         msg = "Could not resolve any items."
         if not_found:
-            msg += f" Not found: {', '.join(not_found[:5])}"
+            safe_unresolved = ", ".join(html.escape(n) for n in not_found[:5])
+            msg += f" Not found: {safe_unresolved}"
         return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{msg}</div>')
 
     # Get all unique type_ids to look up skill requirements

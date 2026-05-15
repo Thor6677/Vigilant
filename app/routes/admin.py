@@ -491,7 +491,7 @@ async def admin_force_sync(character_id: int, request: Request,
                      f"Force sync triggered for {char.character_name}",
                      request.client.host if request.client else None)
 
-    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">Sync queued for {char.character_name}.</div>')
+    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">Sync queued for {html.escape(char.character_name)}.</div>')
 
 
 @router.post("/action/sync-all", response_class=HTMLResponse)

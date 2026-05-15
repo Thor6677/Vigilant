@@ -548,7 +548,8 @@ async def corp_inventory_scan(corp_id: int, location_id: int = 0, request: Reque
         "assets", scope_chars, esi_corp.get_corporation_assets, corp_id, db
     )
     if not raw_assets:
-        return HTMLResponse(f'<div class="b-empty">Failed to fetch assets{": " + error if error else ""}.</div>')
+        safe_error = (": " + html_escape(error)) if error else ""
+        return HTMLResponse(f'<div class="b-empty">Failed to fetch assets{safe_error}.</div>')
 
     # Map office item_ids to structure_ids, then filter hangar items at the target structure
     office_map = _build_office_to_structure_map(raw_assets)
