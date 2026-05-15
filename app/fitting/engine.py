@@ -291,12 +291,13 @@ async def _apply_ship_hull_bonuses(
     where the scaling skill is the subsystem's required skill rather than
     a ship traits row).
     """
-    # Combine module + charge type IDs for skill-req lookup
+    # Combine module + charge type IDs for skill-req lookup. Note: we do
+    # NOT early-return when both maps are empty — ship-to-self ItemModifier
+    # bonuses (resists, sig radius, etc.) still need to fire on a bare hull
+    # with no modules fitted.
     all_type_ids = list(module_attrs_map.keys())
     charge_type_ids = list(charge_attrs_map.keys())
     combined_type_ids = list(set(all_type_ids + charge_type_ids))
-    if not combined_type_ids:
-        return
 
     # Build group lookup for modules/drones
     result = await db.execute(
