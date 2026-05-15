@@ -375,6 +375,21 @@ async def _apply_ship_hull_bonuses(
         if src_val is None:
             continue
 
+        # Per-level if source attribute is named shipBonus* or eliteBonus*
+        is_per_level = mod.modifying_attribute_id in per_level_attr_ids
+        effective_val = src_val * effective_skill_level if is_per_level else src_val
+        target_attr = mod.modified_attribute_id
+
+        # Ship-to-self modifier: target is the ship's OWN attribute (shield
+        # resists, sig radius, mass, max velocity, etc.) The other branches
+        # below match modules/drones/charges only — those silently dropped
+        # ship-self bonuses (Drake/HAC/command-ship shield-resist traits etc.)
+        # until this branch landed. See project_fitting_modifier_gaps memory
+        # item 6 for the full failure case.
+        if mod.func == "ItemModifier" and mod.domain == "shipID":
+            _apply_modifier(ship_attrs, target_attr, mod.operator, effective_val)
+            continue
+
         # Determine matching type IDs based on func type
         matching_type_ids = set()
         matching_charge_ids = set()
@@ -400,11 +415,6 @@ async def _apply_ship_hull_bonuses(
 
         if not matching_type_ids and not matching_charge_ids:
             continue
-
-        # Per-level if source attribute is named shipBonus* or eliteBonus*
-        is_per_level = mod.modifying_attribute_id in per_level_attr_ids
-        effective_val = src_val * effective_skill_level if is_per_level else src_val
-        target_attr = mod.modified_attribute_id
 
         # Apply to matching modules/drones
         for tid in matching_type_ids:
