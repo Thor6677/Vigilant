@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "SQLAlchemy `create_all` skips existing tables, so any `Index()` added to an existing model never deploys. Add a `CREATE INDEX IF NOT EXISTS` block in `app/main.py`'s migration section that enumerates every Index() defined on models and ensures it exists. Optionally extend with a startup lint that diffs declared indexes against `sqlite_master` and warns on mismatch.",
   "id": "T-015",
   "order": 30,
   "phase": "performance-and-ops",
-  "status": "open",
+  "status": "complete",
   "title": "Add CREATE INDEX IF NOT EXISTS guard to startup migration",
   "type": "task"
 }
