@@ -147,7 +147,7 @@
     </div>
 </template>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var ALL_SHIPS = {{ all_ships | tojson }};
 var CARGO_MODULES = {{ cargo_modules | tojson }};
 var CARGO_RIGS = {{ cargo_rigs | tojson }};

@@ -36,8 +36,8 @@
         <canvas id="admin-request-chart"></canvas>
     </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var data = {{ chart_data_json | safe }};
     var canvas = document.getElementById('admin-request-chart');
@@ -268,7 +268,7 @@
         {% endfor %}
     </div>
 </details>
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     details[open] .b-archive-chevron { transform: rotate(90deg); }
     summary::-webkit-details-marker { display: none; }
 </style>

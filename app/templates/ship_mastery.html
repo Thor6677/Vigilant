@@ -202,11 +202,11 @@
 </div>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
 .is-hidden { display: none !important; }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var shipTypeId = {{ ship_type_id }};
 
 function checkMastery() {

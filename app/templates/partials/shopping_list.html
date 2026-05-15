@@ -14,7 +14,7 @@
                         class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);flex:none;">
                     Send Minerals to Compressor
                 </button>
-                <script>
+                <script nonce="{{ request.state.csp_nonce }}">
                 function sendToCompressor() {
                     var url = '/industry/compression?{% for tid, qty in mineral_items.items() %}mineral_{{ tid }}={{ qty }}{% if not loop.last %}&{% endif %}{% endfor %}';
                     var existing = localStorage.getItem('vigilant_comp_state');
@@ -41,7 +41,7 @@
                         class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--text);color:var(--text);flex:none;">
                     Send to Hauling
                 </button>
-                <script>
+                <script nonce="{{ request.state.csp_nonce }}">
                 function sendToHauling() {
                     var items = [
                         {% for item in items %}
@@ -96,7 +96,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function copyShoppingList() {
     var text = document.getElementById('multibuy-text').value;
     navigator.clipboard.writeText(text).then(function() {

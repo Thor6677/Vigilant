@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }} — VIGILANT{% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .tl-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

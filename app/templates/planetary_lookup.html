@@ -49,12 +49,12 @@
     </div>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .sys-dd-item:hover { background:#222; }
     .sys-dd-item:last-child { border-bottom:0; }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var _tmr;
     window.piSysSearch = function(input) {
@@ -86,7 +86,7 @@
         document.getElementById('sys-dd').style.display = 'none';
         piSysSubmit();
     };
-    // innerHTML does NOT execute <script> tags in inserted HTML — re-parent
+    // innerHTML does NOT execute <script nonce="{{ request.state.csp_nonce }}"> tags in inserted HTML — re-parent
     // them as fresh script nodes so the hover-graph wiring runs.
     function injectHtml(el, html) {
         el.innerHTML = html;

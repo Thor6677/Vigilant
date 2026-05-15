@@ -16,7 +16,7 @@
     </div>
 </div>
 {% endfor %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var KEY = 'vigilant_dismissed_contract_alerts';
     function getDismissed() {

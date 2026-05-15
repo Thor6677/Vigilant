@@ -3,7 +3,7 @@
 
 {% block head %}
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .b-main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
     .b-footer { display: none !important; }
     #map-root {
@@ -49,8 +49,8 @@
 {% for js in preload_js %}
 <link rel="modulepreload" crossorigin href="{{ js }}">
 {% endfor %}
-<script type="module" crossorigin src="{{ entry_js }}"></script>
+<script nonce="{{ request.state.csp_nonce }}" type="module" crossorigin src="{{ entry_js }}"></script>
 {% else %}
-<script>document.getElementById('map-loading').innerHTML = '<span style="color:var(--danger)">Star map not built. Run: cd frontend && npm run build</span>';</script>
+<script nonce="{{ request.state.csp_nonce }}">document.getElementById('map-loading').innerHTML = '<span style="color:var(--danger)">Star map not built. Run: cd frontend && npm run build</span>';</script>
 {% endif %}
 {% endblock %}

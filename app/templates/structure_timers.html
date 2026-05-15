@@ -375,7 +375,7 @@
 </details>
 {% endif %}
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
 @keyframes timer-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }
@@ -390,7 +390,7 @@
 .timer-expired .timer-countdown { color: var(--muted) !important; }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function toggleTimerMode() {
     var mode = document.getElementById('timer-mode').value;
     document.getElementById('countdown-input').style.display = mode === 'countdown' ? '' : 'none';

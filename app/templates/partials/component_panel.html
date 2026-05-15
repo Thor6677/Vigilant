@@ -128,7 +128,7 @@
     {% endfor %}
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function(){
     window.recalcComponent = window.recalcComponent || function(typeId, qty) {
         var p = new URLSearchParams({

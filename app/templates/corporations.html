@@ -2,7 +2,7 @@
 {% block title %}Corporations — VIGILANT{% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .corp-accordion {
         border: 1px solid var(--border);
         background: var(--surface);
@@ -177,7 +177,7 @@
 
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ── Drag-and-drop reorder for player corporations ────────────────────────── */
 (function() {
     var container = document.getElementById('player-corps');

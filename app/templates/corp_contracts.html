@@ -92,7 +92,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function toggleContractMatchType() {
     var type = document.getElementById('ct-match-type').value;
     document.getElementById('ct-title-field').style.display = type === 'title' ? '' : 'none';

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}INDUSTRY — VIGILANT
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ── Persist manufacturing state in localStorage ────────────────────────── */
 var MFG_KEY = 'vigilant_mfg_state';
 
@@ -165,7 +165,7 @@ document.addEventListener('DOMContentLoaded', function() {
     </button>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var selectedTypeId = null;
 var recalcTimer = null;
 

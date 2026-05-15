@@ -10,7 +10,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .ws-header { display:flex; align-items:baseline; gap:0.75rem; margin-bottom:0.25rem; flex-wrap:wrap; }
     .ws-name { font-size:28px; font-weight:700; color:var(--text); letter-spacing:-0.02em; }
     .ws-class-badge { font-size:13px; font-weight:600; padding:0.15rem 0.5rem; border:1px solid; border-radius:2px; }
@@ -128,7 +128,7 @@
                 </div>
             </div>
         </div>
-        <script>
+        <script nonce="{{ request.state.csp_nonce }}">
         var _diagramPlanets = {{ celestials['planets'] | tojson }};
         function drawDiagram(mode) {
             var planets = _diagramPlanets;

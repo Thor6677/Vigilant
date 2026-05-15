@@ -2,7 +2,7 @@
    Top: WH grid — only classes with battles (no empty placeholders).
    Bottom: combined HS/LS/NS list ranked by kill_count, capped 3 per band.
    Each row shows top combatant entities (alliance preferred over corp). #}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .rb-wh-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:0.5rem; }
     @media (max-width: 1100px) { .rb-wh-grid { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 600px)  { .rb-wh-grid { grid-template-columns: repeat(2, 1fr); } }

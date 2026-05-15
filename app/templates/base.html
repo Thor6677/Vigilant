@@ -7,10 +7,10 @@
     <title>{% block title %}VIGILANT{% endblock %}</title>
     <link rel=icon href=/static/favicon.ico type=image/x-icon>
     <link rel="stylesheet" href="/static/css/tailwind.css">
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
-    <style>
+    <style nonce="{{ request.state.csp_nonce }}">
         /* ── Design tokens ───────────────────────────────────────────────── */
         :root {
             --bg:      #080808;
@@ -954,7 +954,7 @@
 </footer>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* CSRF token wiring (paired with app/middleware/csrf.py).
    - Adds X-CSRF-Token header to all htmx requests.
    - Adds X-CSRF-Token header to same-origin non-safe fetch() calls.
@@ -1041,8 +1041,8 @@
     }, true);
 })();
 </script>
-<script src="/static/js/notifications.js?v=3"></script>
-<script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=3"></script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* Global dismiss handler for alert banners — runs after every htmx swap */
 (function() {
     function applyDismissState() {

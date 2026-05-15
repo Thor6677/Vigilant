@@ -3,7 +3,7 @@
 <div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Compression</span></div>
 {% endblock %}
 {% block title %}COMPRESSION CALCULATOR — VIGILANT
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ── Persist compression state in localStorage ──────────────────────────── */
 var COMP_KEY = 'vigilant_comp_state';
 
@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 {# ── Results ──────────────────────────────────────────────────────────────── #}
 <div id="compression-results"></div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // When character skill data loads, update the hidden ore_skills input
 document.body.addEventListener('htmx:afterSwap', function(evt) {
     if (evt.detail.target.id === 'skill-display') {

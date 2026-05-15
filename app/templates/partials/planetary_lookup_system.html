@@ -130,7 +130,7 @@
     </div>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .pi-tier-item { transition:background 0.12s, color 0.12s, opacity 0.12s; }
     .pi-tier-item.is-producible { color:var(--text); }
     .pi-tier-item.is-unavail { color:var(--muted); opacity:0.55; }
@@ -167,7 +167,7 @@
     }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var container = document.querySelector('.pi-tier-container');
     if (!container) return;

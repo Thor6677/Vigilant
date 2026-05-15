@@ -20,7 +20,7 @@
 {% else %}
 <div style="color:var(--muted);font-size:10px;padding:1rem 0.75rem;">No assets found.</div>
 {% endfor %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 document.querySelectorAll('#assets-inner .asset-location-header').forEach(function(h) {
     h.addEventListener('click', function() {
         this.nextElementSibling.classList.toggle('open');

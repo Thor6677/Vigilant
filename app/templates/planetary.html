@@ -133,7 +133,7 @@
     {% endif %}
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .pi-row.is-expanded .pi-row-top { background:var(--panel-hover, rgba(255,255,255,0.02)); }
     .pi-row.is-expanded .pi-arrow { transform:rotate(90deg); display:inline-block; }
     .pi-row.is-expanded .pi-row-detail { display:block; }

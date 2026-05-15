@@ -43,7 +43,7 @@
     </div>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .b-change-row {
         display:grid;
         grid-template-columns:auto 1fr auto auto;
@@ -61,7 +61,7 @@
     }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (async function () {
     const allianceId = {{ alliance_id }};
 

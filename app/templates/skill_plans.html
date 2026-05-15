@@ -146,7 +146,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function onScopeChange() {
     var scope = document.getElementById('new-plan-scope').value;
     var targetSel = document.getElementById('new-plan-target');

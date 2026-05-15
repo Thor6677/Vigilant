@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
 .sf-toolbar {
     display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;
     margin-bottom:0.75rem; font-size:10px;
@@ -149,7 +149,7 @@
     {% endfor %}
 </datalist>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var tbody = document.getElementById('sf-tbody');
     if (!tbody) return;

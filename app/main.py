@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.middleware.csrf import CSRFMiddleware
+from app.middleware.csp_nonce import CSPNonceMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
@@ -67,6 +68,12 @@ class _RequestTimingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_RequestTimingMiddleware)
+
+# CSP nonce middleware (T-012 Step 1). Stamps a per-request nonce on
+# request.state.csp_nonce and emits Content-Security-Policy-Report-Only
+# with the nonce inlined. Outermost-ish so the nonce is available for
+# every handler that renders a template.
+app.add_middleware(CSPNonceMiddleware)
 
 # CSRF must be added BEFORE SessionMiddleware so that the latter wraps it —
 # Starlette's middleware stack runs the most-recently-added one first, so

@@ -16,7 +16,7 @@
     <button class="alert-dismiss" onclick="dismissStructureAlert('inv-{{ alert.id }}')" title="Dismiss">&times;</button>
 </div>
 {% endfor %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var KEY = 'vigilant_dismissed_alerts';
     function getDismissed() {

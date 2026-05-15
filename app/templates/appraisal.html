@@ -45,7 +45,7 @@
 
 <div id="appraisal-results"></div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var APPRAISAL_KEY = 'vigilant_appraisal_hub';
 
 function saveHubPref() {

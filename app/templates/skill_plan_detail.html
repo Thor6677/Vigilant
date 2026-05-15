@@ -435,7 +435,7 @@
 </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var planId = {{ plan.id }};
 var _skillTimer = null, _shipTimer = null;
 
@@ -582,7 +582,7 @@ function exportPlan(e) {
 
 /* Copy the export textarea's contents to the clipboard. Lives on the parent
    page because the export response is htmx-swapped as innerHTML, which does
-   not execute inline <script> tags reliably. */
+   not execute inline <script nonce="{{ request.state.csp_nonce }}"> tags reliably. */
 function copyExportText(btn) {
     var ta = document.getElementById('export-text');
     if (!ta) return;

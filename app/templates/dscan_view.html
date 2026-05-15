@@ -93,7 +93,7 @@
 </details>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function copyShareUrl() {
     var url = document.getElementById('share-url').value;
     navigator.clipboard.writeText(url).then(function() {

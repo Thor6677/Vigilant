@@ -5,9 +5,9 @@
 {% endblock %}
 
 {% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-<style>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style nonce="{{ request.state.csp_nonce }}">
     .range-btn {
         padding: 0.25rem 0.6rem;
         font-size: 9px;
@@ -650,8 +650,8 @@
 </div>
 
 {# ── Chart JS ──────────────────────────────────────────────────────────────── #}
-<script id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>
-<script>
+<script nonce="{{ request.state.csp_nonce }}" id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
     const initialData = JSON.parse(document.getElementById('chart-data').textContent);
     let chart = null;
@@ -769,7 +769,7 @@
 })();
 </script>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Jump clone expand/collapse
 document.querySelectorAll('#jump-clones-list .asset-location-header').forEach(function(h) {
     h.addEventListener('click', function() {

@@ -439,11 +439,11 @@
 </div>
 
 {# JSON blob for JS — uses |tojson for safe embedding #}
-<script type="application/json" id="pi-flow-data">
+<script nonce="{{ request.state.csp_nonce }}" type="application/json" id="pi-flow-data">
 {{ character_plan.flow | tojson }}
 </script>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .pi-flow-node { transition:opacity 0.12s, background 0.12s, border-color 0.12s; }
     .pi-flow-node:hover { background:rgba(200,169,81,0.12); border-color:var(--accent); }
     .pi-flow-row-label:hover { background:rgba(200,169,81,0.06); }
@@ -471,7 +471,7 @@
     .pi-flow-container.is-tracing .pi-flow-row-label:not(.is-related) { opacity:0.45; }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var container = document.querySelector('.pi-flow-container');
     if (!container) return;
@@ -747,7 +747,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Persist the last selection in localStorage so a reload keeps state.
 (function() {
     var LS_KEY = 'vigilant_pi_calc_state';
@@ -814,7 +814,7 @@
 })();
 </script>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .calc-dd-item:hover { background:#222; }
     .calc-dd-item:last-child { border-bottom:0; }
 </style>

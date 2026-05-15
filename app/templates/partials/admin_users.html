@@ -132,7 +132,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var _allowSearchTimer = null;
 function searchAllowlist() {
     clearTimeout(_allowSearchTimer);

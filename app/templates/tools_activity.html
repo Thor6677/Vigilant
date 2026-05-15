@@ -5,8 +5,8 @@
 {% endblock %}
 
 {% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style nonce="{{ request.state.csp_nonce }}">
     .ta-windows { display:flex; gap:0.25rem; flex-wrap:wrap; }
     .ta-windows .b-btn { padding:3px 10px; font-size:10px; }
     .ta-windows .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
@@ -124,7 +124,7 @@
         </div>
     </div>
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     if (typeof Chart === 'undefined') return;
     const el = document.getElementById('daily-kills-chart');
@@ -205,7 +205,7 @@
         Zone split is only available for dates after the rollup first ran on this deployment. Long-tail history (zKB totals) is universe-wide only and can't be split. J-systems → wormhole; other systems classified by SDE security rounded to 1 decimal.
     </div>
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     if (typeof Chart === 'undefined') return;
     const labels = {{ labels|tojson }};
@@ -281,7 +281,7 @@
         </div>
     </div>
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     const el = document.getElementById('pcu-heatmap');
     if (!el) return;
@@ -367,7 +367,7 @@
 </div>
 
 {% if peak_pcu > 0 or total_isk > 0 or total_kills > 0 %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     if (typeof Chart === 'undefined') return;
     const el = document.getElementById('activity-chart-{{ window }}');
@@ -486,7 +486,7 @@
 {% endif %}
 
 {% if breakdowns_available and has_breakdown_data %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     if (typeof Chart === 'undefined') return;
     const labels = {{ labels|tojson }};

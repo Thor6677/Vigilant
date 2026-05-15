@@ -26,7 +26,7 @@
 {% endfor %}
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var _openMailId = null;
 function toggleMail(mailId, charId, headerEl) {
     var bodyEl = document.getElementById('mail-body-' + mailId);

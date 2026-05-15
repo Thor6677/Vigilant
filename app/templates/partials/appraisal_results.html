@@ -96,7 +96,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function copyAppraisal() {
     var text = '{{ hub_label }} Sell Appraisal: {{ fmt_isk(total_isk) }} ISK ({{ "{:,.1f}".format(total_volume) }} m³)';
     navigator.clipboard.writeText(text).then(function() {

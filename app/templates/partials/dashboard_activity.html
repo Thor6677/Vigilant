@@ -48,7 +48,7 @@
 </div>
 
 {% if total_isk > 0 or peak_pcu > 0 %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     if (typeof Chart === 'undefined') return;
     const el = document.getElementById('activity-chart-{{ window }}');

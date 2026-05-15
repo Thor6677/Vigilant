@@ -193,7 +193,7 @@
 </div>
 
 {# ── JavaScript ───────────────────────────────────────────────────────────── #}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var currentAttrs = {{ attributes | tojson }};
 var optimalAttrs = {{ optimal_attrs | tojson if optimal_attrs else '[17,17,17,17,17]' }};
 var charId = {{ char.character_id }};

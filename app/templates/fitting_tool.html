@@ -44,7 +44,7 @@
     <span class="ssb-text"></span>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
 .fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
 .fit-stats-sticky { position:sticky; top:80px; }
 .skill-warn {
@@ -243,7 +243,7 @@ Module 2
     </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ── Fitting State ────────────────────────────────────────────────────────── */
 var FIT_KEY = 'vigilant_fit_state';
 var state = {

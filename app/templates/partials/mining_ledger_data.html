@@ -158,5 +158,5 @@
 {% endif %}
 
 {# ── Chart data injection ─────────────────────────────────────────────────── #}
-<script id="mining-chart-data" type="application/json">{{ chart_data_json | safe }}</script>
-<script>document.dispatchEvent(new CustomEvent('mining-chart-ready'));</script>
+<script nonce="{{ request.state.csp_nonce }}" id="mining-chart-data" type="application/json">{{ chart_data_json | safe }}</script>
+<script nonce="{{ request.state.csp_nonce }}">document.dispatchEvent(new CustomEvent('mining-chart-ready'));</script>

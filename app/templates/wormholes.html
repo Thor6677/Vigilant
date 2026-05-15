@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
     .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
               color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
@@ -101,7 +101,7 @@
     <div class="b-empty">Select filters above to find wormhole systems.</div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function getFilterValues(filterName) {
     var vals = [];
     document.querySelectorAll('.wf-btn.is-on[data-filter="' + filterName + '"]').forEach(function(b) {

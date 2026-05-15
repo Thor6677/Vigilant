@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .asset-search-bar {
         display: flex;
         align-items: center;

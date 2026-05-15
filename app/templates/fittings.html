@@ -129,7 +129,7 @@
 {% endfor %}
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function toggleFit(id, header) {
     var el = document.getElementById(id);
     var arrow = header.querySelector('.fit-arrow');

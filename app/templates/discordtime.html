@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .dt-tabs { display: flex; gap: 1px; margin-bottom: 0.75rem; }
     .dt-tab {
         background: var(--surface); border: 1px solid var(--border);
@@ -208,7 +208,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ── State ───────────────────────────────────────────────────────────────── */
 var dtCurrentMode = 'utc';
 var dtCurrentTs = null;

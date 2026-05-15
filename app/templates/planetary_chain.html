@@ -87,12 +87,12 @@
     </div>
 </div>
 
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .chain-item:hover { background:var(--panel-hover, rgba(255,255,255,0.03)); }
     .chain-item.is-active { background:var(--accent-bg, rgba(100,200,255,0.08)); border-left:2px solid var(--accent); }
 </style>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Deep-linking from other PI pages: /industry/planetary/chain#12345 preloads
 // the node panel and scrolls the tile into view.
 (function() {

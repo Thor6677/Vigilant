@@ -3,10 +3,10 @@
 
 {% block head %}
 {% if sort == 'custom' %}
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
 {% endif %}
 {% if killmails_enabled %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endif %}
 {% endblock %}
 
@@ -496,7 +496,7 @@
         </div>
     </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function updateServerStatus() {
     fetch('/api/server-status')
         .then(r => r.json())
@@ -539,7 +539,7 @@ setInterval(updateEveTime, 10000);
 </div>
 
 {% if sort == 'custom' %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 var editMode = false;
 var sortables = [];
 

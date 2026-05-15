@@ -10,7 +10,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
     .wh-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
     .wh-tab { padding:0.5rem 1rem; font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
               color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; text-decoration:none; }
@@ -84,7 +84,7 @@
 
 <div id="wh-type-detail" class="wm-detail"></div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Highlight row/col on hover
 document.querySelectorAll('.wm-table td').forEach(function(td) {
     td.addEventListener('mouseenter', function() {

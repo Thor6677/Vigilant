@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block head %}
-<style>
+<style nonce="{{ request.state.csp_nonce }}">
 .ij-summary {
     display:flex; flex-wrap:wrap; gap:0.5rem 1.25rem;
     padding:0.6rem 0.9rem;
@@ -259,7 +259,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     /* Each picker has two state knobs:
        - `all`: every box checked → filter disabled (treat as no-op)

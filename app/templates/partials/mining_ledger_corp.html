@@ -51,7 +51,7 @@
 {% endfor %}
 
 {# ── Restore checkbox state for previously selected chars ─────────────────── #}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function() {
     try {
         var sel = JSON.parse(localStorage.getItem('vigilant_mining_selection') || '[]');

@@ -119,7 +119,7 @@
     Paste into EVE's Multibuy window (Alt+M). Format: <code>Item Name x{qty}</code>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function copyCompressionMultibuy() {
     var text = document.getElementById('comp-multibuy-text').value;
     navigator.clipboard.writeText(text).then(function() {

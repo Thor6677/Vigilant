@@ -71,7 +71,7 @@
 </div>
 
 {% if characters %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function runGap() {
     var charId = document.getElementById('gap-char').value;
     if (!charId) { alert('Select a character.'); return; }

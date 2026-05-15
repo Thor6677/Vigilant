@@ -114,7 +114,7 @@
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
     // Helper for intra-partial navigation between commodity nodes.
     if (typeof piLoadNode === 'undefined') {
         window.piLoadNode = function(typeId) {
