@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import get_db, AsyncSessionLocal
+from app.db.models import get_db
 from app.esi.client import ESIClient
 from app.sde import lookup as sde
 from app.intel.safety import zkb_get, fetch_killmail
@@ -445,55 +445,46 @@ async def wormhole_system_kills(
     all_corp_ids = set(top_corp_ids) | kill_corp_ids
     all_alliance_ids = set(top_alliance_ids) | kill_alliance_ids
 
-    name_sem = asyncio.Semaphore(5)
+    # Resolve all IDs in one bulk POST /universe/names/ call (≤1000 mixed
+    # IDs per call, returns category-tagged entries). 30-day cache TTL via
+    # _ttl_for_path so repeat resolutions are free. Matches the dashboard
+    # kill-pulse pattern (dashboard.py:1908). Replaces three per-ID ESI
+    # endpoints that previously fired one request per character/corp/alliance.
     char_names: dict[int, str] = {}
     corp_names: dict[int, str] = {}
     alliance_names: dict[int, str] = {}
 
-    async def _resolve_char(cid: int):
-        async with name_sem:
-            async with AsyncSessionLocal() as sess:
-                c = ESIClient("", db=sess)
-                try:
-                    data = await c.get_public(f"/characters/{cid}/")
-                    if isinstance(data, dict):
-                        char_names[cid] = data.get("name", f"Char {cid}")
-                        return
-                except Exception:
-                    pass
-                char_names[cid] = f"Char {cid}"
+    all_ids = list(set(kill_char_ids) | all_corp_ids | all_alliance_ids)
+    if all_ids:
+        try:
+            pub = ESIClient("")
+            pub.cache_enabled = True
+            for chunk_start in range(0, len(all_ids), 1000):
+                chunk = all_ids[chunk_start:chunk_start + 1000]
+                resolved = await pub.post_public("/universe/names/", chunk)
+                for entry in resolved or []:
+                    cat = entry.get("category", "")
+                    eid = entry.get("id")
+                    name = entry.get("name", "")
+                    if not (isinstance(eid, int) and name):
+                        continue
+                    if cat == "character":
+                        char_names[eid] = name
+                    elif cat == "corporation":
+                        corp_names[eid] = name
+                    elif cat == "alliance":
+                        alliance_names[eid] = name
+        except Exception as e:
+            log.warning("wormhole_kills name resolution failed: %s", e)
 
-    async def _resolve_corp(cid: int):
-        async with name_sem:
-            async with AsyncSessionLocal() as sess:
-                c = ESIClient("", db=sess)
-                try:
-                    data = await c.get_public(f"/corporations/{cid}/")
-                    if isinstance(data, dict):
-                        corp_names[cid] = data.get("name", f"Corp {cid}")
-                        return
-                except Exception:
-                    pass
-                corp_names[cid] = f"Corp {cid}"
-
-    async def _resolve_alliance(aid: int):
-        async with name_sem:
-            async with AsyncSessionLocal() as sess:
-                c = ESIClient("", db=sess)
-                try:
-                    data = await c.get_public(f"/alliances/{aid}/")
-                    if isinstance(data, dict):
-                        alliance_names[aid] = data.get("name", f"Alliance {aid}")
-                        return
-                except Exception:
-                    pass
-                alliance_names[aid] = f"Alliance {aid}"
-
-    await asyncio.gather(
-        *[_resolve_char(cid) for cid in kill_char_ids],
-        *[_resolve_corp(cid) for cid in all_corp_ids],
-        *[_resolve_alliance(aid) for aid in all_alliance_ids],
-    )
+    # Fallback placeholders for any IDs that didn't resolve (biomassed
+    # characters, dissolved corps, or a poisoned bulk batch from one bad ID).
+    for cid in kill_char_ids:
+        char_names.setdefault(cid, f"Char {cid}")
+    for cid in all_corp_ids:
+        corp_names.setdefault(cid, f"Corp {cid}")
+    for aid in all_alliance_ids:
+        alliance_names.setdefault(aid, f"Alliance {aid}")
 
     top_corps = [{"id": cid, "name": corp_names.get(cid, f"Corp {cid}"), "count": corp_kills[cid]} for cid in top_corp_ids]
     top_alliances = [{"id": aid, "name": alliance_names.get(aid, f"Alliance {aid}"), "count": alliance_kills[aid]} for aid in top_alliance_ids]
