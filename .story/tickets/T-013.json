@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Capture a fresh page-load latency baseline. Since the original ticket was filed:\n\n- CPU cap was raised from 0.5 → 2.0 in docker-compose.yml (verify before measuring, since perf assumptions changed)\n- Memory cap is now 2560M (raised 2026-04-23)\n- Activity-page index/query work landed\n- Killmails v2 disk-backed storage all 3 flags ON (2026-04-24)\n\nProcedure:\n1. Set VIGILANT_PERF_LOG=1, exercise the dashboard + slow routes (activity, killmails, fitting, star map, structure timers).\n2. Use middleware timing — handler spans miss Jinja render time. Refer to `feedback_page_load_perf` memory for known traps: `now` name shadowing in templates, cache_stats SELECT scan, public ESI `db` flag default, token-refresh serialization.\n3. Identify the top 3 slow routes and file each as its own issue (severity by user-visible impact).\n4. Confirm killmails v2 stays within the 2 req/s ESI budget and that disk-first skip in fetch_killmail is firing (per `project_disk_backed_killmails`).\n\nMeasurement only — no code change in this ticket. Remediation issues are filed off the findings.",
   "id": "T-013",
   "order": 10,
   "phase": "performance-and-ops",
-  "status": "open",
+  "status": "complete",
   "title": "Re-baseline page-load perf with VIGILANT_PERF_LOG=1",
   "type": "task"
 }

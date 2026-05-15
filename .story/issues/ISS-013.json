@@ -1,0 +1,16 @@
+{
+  "components": [],
+  "discoveredDate": "2026-05-15",
+  "id": "ISS-013",
+  "impact": "T-013 ran in a measurement window of ~35 min post-T-014 deploy. Natural traffic in the window consisted entirely of background htmx banner polls (all sub-100ms p95 — no findings). Synthetic unauthenticated probes from inside the container hit only 302 redirects (~1-3ms) plus one false signal (/auth/login at 329ms client-side, which is just urllib following the 302 to EVE SSO HTTPS — vigilant.perf middleware shows the actual handler is 1-2ms).\n\nHeavy authenticated routes were NOT exercised in this session: /admin (the full status page with the new memory gauge), /killmails (list with 405k rows), /fitting (with a fit loaded), /map (with full data load), /activity (dashboard charts), /structures/timers. These are the routes most likely to surface real latency issues.\n\nPrior-container log mining returned nothing useful — vigilant's previous container directories had already been cleaned up by docker; only logs from sibling containers (wanderer-kills) remained on disk.\n\nWhat was confirmed positive:\n- CPU cap is 2.0 (was 0.5 in old memory) — already addressed\n- Memory cap is 2.5GB\n- Killmail ESI pacing: 3 fetches per 1.5s wave + page sleep 5s = 2 req/s avg (killmail_ingest.py:39-41)\n- Disk-first skip: candidates filtered against existing Killmail PKs before fetch (killmail_ingest.py:171-182)\n- `now` name shadowing: 4 matches in templates but all are JS-scope (`const now = new Date()`), not Jinja\n- cache_stats SELECT COUNT(*) on /admin only counts small operational tables (esi_cache 4k, etc), NOT the big ones (killmails 405k, killmail_attackers 2.5M, wallet_snapshots 748k)\n\nSuggested follow-up (NOT in this ticket's scope): a dedicated session where the user browses the app for ~10 minutes while logs accumulate, or persisting vigilant.perf lines to a rolling file (not just stdout) so a future rebaseline survives container recreates.",
+  "location": [],
+  "phase": "performance-and-ops",
+  "relatedTickets": [
+    "T-013"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "Perf rebaseline incomplete — heavy authed routes not measured this session"
+}
