@@ -269,7 +269,6 @@ async def wormhole_system_kills(
     # Normalise to one of the supported ranges
     if days not in (30, 60, 90):
         days = 30
-    log.info("wh_kills: system=%s days=%d", name, days)
 
     # Fetch recent killmails from zKillboard (up to 200 most recent)
     try:
@@ -309,12 +308,9 @@ async def wormhole_system_kills(
         return None
 
     full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data])
-    fetched_ok = sum(1 for km in full_kms if km)
-    log.info("wh_kills: zkb=%d, esi_ok=%d", len(kills_data), fetched_ok)
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
-    log.info("wh_kills: cutoff=%s (days=%d)", cutoff.isoformat(), days)
 
     # Age bucket boundaries (thirds of the range)
     third = days // 3
@@ -512,7 +508,6 @@ async def wormhole_system_kills(
             kill["alliance_name"] = alliance_names.get(kill["alliance_id"])
 
     filtered_count = sum(sum(row) for row in heatmap)
-    log.info("wh_kills: result days=%d kill_count=%d", days, filtered_count)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     max_kills = max(max(row) for row in heatmap) if filtered_count else 1
 

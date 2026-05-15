@@ -452,12 +452,13 @@ def _any_field_stale(char: Character, cache: CharacterDashboardCache | None) -> 
     return False
 
 
-async def _client_for(char: Character, db: AsyncSession) -> tuple[ESIClient | None, str | None]:
+async def _client_for(char: Character) -> tuple[ESIClient | None, str | None]:
     """Return an authenticated ESI client for the character.
 
-    Uses a per-character lock + independent DB session so concurrent field
-    fetches inside asyncio.gather() don't race on the same SQLAlchemy session
-    or fire duplicate SSO refresh requests (EVE rotates refresh tokens).
+    Uses a per-character lock so concurrent field fetches inside
+    asyncio.gather() don't fire duplicate SSO refresh requests (EVE
+    rotates refresh tokens). get_client_safe creates its own DB session
+    internally for the token-row update.
     """
     from app.esi.client import get_client_safe, TokenRevoked
     async with _get_token_lock(char.character_id):
@@ -480,7 +481,7 @@ async def fetch_wallet_data(characters: list[Character], db: AsyncSession) -> di
     async def _get(char):
         if not _has_scope(char, "esi-wallet.read_character_wallet.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -506,7 +507,7 @@ async def fetch_location_data(characters: list[Character], db: AsyncSession) -> 
     async def _get(char):
         if not _has_scope(char, "esi-location.read_location.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -557,7 +558,7 @@ async def fetch_clone_data(characters: list[Character], db: AsyncSession) -> dic
     async def _get(char):
         if not _has_scope(char, "esi-clones.read_clones.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -586,7 +587,7 @@ async def fetch_notification_data(characters: list[Character], db: AsyncSession)
     async def _get(char):
         if not _has_scope(char, "esi-characters.read_notifications.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -618,7 +619,7 @@ async def fetch_contracts_data(characters: list[Character], db: AsyncSession) ->
     async def _get(char):
         if not _has_scope(char, "esi-contracts.read_character_contracts.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -650,7 +651,7 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
     async def _get(char):
         if not _has_scope(char, "esi-planets.manage_planets.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -749,7 +750,7 @@ async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -
     async def _get(char):
         if not _has_scope(char, "esi-skills.read_skillqueue.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -962,7 +963,7 @@ async def fetch_assets_data(characters: list[Character], db: AsyncSession) -> di
     async def _get(char):
         if not _has_scope(char, "esi-assets.read_assets.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -984,7 +985,7 @@ async def fetch_corp_roles_data(characters: list[Character], db: AsyncSession) -
     async def _get(char):
         if not _has_scope(char, "esi-characters.read_corporation_roles.v1"):
             return char.character_id, None, "missing_scope"
-        client, err = await _client_for(char, db)
+        client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
         try:
@@ -2605,7 +2606,7 @@ async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db
             if (char.character_id, corp_id) in _corp_403_cache:
                 continue  # Already know this char lacks the role
             try:
-                client, err = await _client_for(char, db)
+                client, err = await _client_for(char)
                 if err or not client:
                     continue
                 return await api_func(client, corp_id)
