@@ -6,6 +6,20 @@
     var EVENTS_KEY = 'vigilant_notif_events';
     var LOCK_KEY = 'vigilant_notif_lock';
     var PREFS_KEY = 'vigilant_notif_prefs';
+
+    /* HTML-escape any server-derived string before innerHTML concatenation.
+       VVP-2026-021 defense-in-depth: ev.title/body/type currently come from
+       char names (CCP filters <>"'&), SDE values (server-controlled), and
+       a hardcoded label map, so today's attack surface is essentially
+       zero. The pattern is fragile though — if _renderEvent gets reused
+       for less-trusted bodies later this stops it being a regression
+       waiting to happen. */
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;',
+                    '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
     var pollTimer = null;
     var storedEvents = [];
     var dropdownOpen = false;
@@ -150,18 +164,18 @@
         var enabled = isTypeEnabled(ev.type);
         var opacity = enabled ? '1' : '0.4';
 
-        var muteBtn = '<svg onclick="event.stopPropagation();muteNotifType(\'' + ev.type + '\')" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer;flex-shrink:0;opacity:0.8;" title="Mute ' + typeLabel + ' notifications"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21" stroke="var(--danger)" stroke-width="2.5"/></svg>';
+        var muteBtn = '<svg onclick="event.stopPropagation();muteNotifType(\'' + esc(ev.type) + '\')" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer;flex-shrink:0;opacity:0.8;" title="Mute ' + esc(typeLabel) + ' notifications"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21" stroke="var(--danger)" stroke-width="2.5"/></svg>';
 
         var h = '<div style="display:flex;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);align-items:flex-start;opacity:' + opacity + ';">';
         if (ev.icon) {
-            h += '<img src="' + ev.icon + '" style="width:28px;height:28px;flex-shrink:0;border-radius:2px;" onerror="this.style.display=\'none\'">';
+            h += '<img src="' + esc(ev.icon) + '" style="width:28px;height:28px;flex-shrink:0;border-radius:2px;" onerror="this.style.display=\'none\'">';
         }
         h += '<div style="flex:1;min-width:0;">';
-        h += '<div style="font-size:11px;color:' + color + ';font-weight:600;">' + (ev.title || '') + '</div>';
-        h += '<div style="font-size:10px;color:var(--text);margin-top:1px;word-break:break-word;">' + (ev.body || '') + '</div>';
+        h += '<div style="font-size:11px;color:' + color + ';font-weight:600;">' + esc(ev.title || '') + '</div>';
+        h += '<div style="font-size:10px;color:var(--text);margin-top:1px;word-break:break-word;">' + esc(ev.body || '') + '</div>';
         h += '<div style="display:flex;align-items:center;gap:0.5rem;margin-top:2px;">';
-        h += '<span style="font-size:9px;color:var(--muted);">' + formatTime(ev.timestamp) + '</span>';
-        h += '<span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">' + typeLabel + '</span>';
+        h += '<span style="font-size:9px;color:var(--muted);">' + esc(formatTime(ev.timestamp)) + '</span>';
+        h += '<span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">' + esc(typeLabel) + '</span>';
         h += '</div></div>';
         if (showMute && enabled) { h += muteBtn; }
         h += '</div>';
