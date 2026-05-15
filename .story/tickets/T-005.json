@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-14",
   "createdDate": "2026-05-13",
   "description": "CSRF middleware (`app/middleware/csrf.py`) is deployed live as of 2026-04-28 on commit 131aaee. Verified manually that POST /auth/logout and POST /skill-plans/create return 403 without X-CSRF-Token header, meta tag renders on /. Just need to run sec-toolkit /audit so the toolkit flips status from fix-in-progress to fixed.",
   "id": "T-005",
   "order": 50,
   "phase": "security-hardening",
-  "status": "open",
+  "status": "complete",
   "title": "Verify CSRF middleware finding closed (VVP-2026-004)",
   "type": "chore"
 }

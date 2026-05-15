@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-14",
   "createdDate": "2026-05-13",
   "description": "`app/routes/images.py:252` has no rate limit and is a DoS surface (image proxy/resize requests can be expensive). Apply existing rate-limit middleware (or add a per-IP token bucket) appropriate for image traffic — generous for normal browsing, hard cap to prevent abuse. Confirm behavior under burst with curl.",
   "id": "T-009",
   "order": 90,
   "phase": "security-hardening",
-  "status": "open",
+  "status": "complete",
   "title": "Rate-limit image endpoint (VVP-2026-015)",
   "type": "task"
 }

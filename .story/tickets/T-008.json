@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-14",
   "createdDate": "2026-05-13",
   "description": "`wanderer-compose.yml:93` ships hardcoded secrets. Move to `wanderer-conf.env` (already gitignored pattern in repo) or a dedicated `.env.wanderer`, reference via env_file. Rotate any secrets that ever landed in git history.",
   "id": "T-008",
   "order": 80,
   "phase": "security-hardening",
-  "status": "open",
+  "status": "complete",
   "title": "Remove hardcoded secrets from wanderer-compose.yml (VVP-2026-006)",
   "type": "task"
 }

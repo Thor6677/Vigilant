@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-13",
+  "id": "ISS-011",
+  "impact": "Add pip --dry-run resolver check.",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": "Superseded by the docker-build TestClient boot smoke that ran on the VPS during T-002 (and again during T-004). The smoke executes a real `pip install` via the docker build then imports the app — same coverage as `pip install --dry-run` would give, but against a real target environment. No additional resolver-check step needed.",
+  "resolvedDate": "2026-05-14",
+  "severity": "medium",
+  "status": "resolved",
+  "title": "[process] Add pip --dry-run resolver check."
+}
