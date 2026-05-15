@@ -4,12 +4,11 @@
 # Tags the currently-running image as :prev before rebuilding, so a bad
 # deploy can be swapped back instantly via rollback.sh without rebuilding.
 #
-# nginx is NEVER torn down by this script. The Wanderer mapper
-# (mapper.thunderborn.dev) shares this nginx as its reverse proxy via
-# the external `web` bridge, so stopping nginx would disconnect every
-# LiveView socket on the mapper. Instead we rebuild + recreate only the
-# `app` service, then graceful-reload nginx so it picks up the new app
-# container's IP (and any nginx/*.conf changes in this commit).
+# As of 2026-05-14, vigilant no longer ships its own nginx — the shared
+# reverse proxy lives in /opt/edge/. This script only touches the `app`
+# service. Edge nginx re-resolves vigilant's container IP at request
+# time (resolver 127.0.0.11 + variable upstream) so a fresh app
+# container is picked up automatically with no nginx reload needed.
 #
 # Usage (on the VPS):
 #   /opt/vigilant/scripts/deploy.sh
@@ -17,7 +16,7 @@ set -euo pipefail
 
 cd /opt/vigilant
 
-echo "[1/6] git pull"
+echo "[1/4] git pull"
 # Refuse to overwrite local edits silently — surface them so the operator
 # can decide what to do (commit, stash, or discard).
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -26,23 +25,9 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "Either commit/stash these or run 'git checkout .' before deploying."
     exit 1
 fi
-prev_head=$(git rev-parse HEAD)
 git pull --ff-only
-new_head=$(git rev-parse HEAD)
 
-# nginx/*.conf are bind-mounted as individual files. git pull replaces the
-# inode, but the container's mount still points at the old one — `nginx -s
-# reload` then reloads stale content. Detect nginx config changes here so we
-# can force-recreate the nginx container later in step 5.
-nginx_recreate=0
-if [[ "$prev_head" != "$new_head" ]]; then
-    if git diff --name-only "$prev_head" "$new_head" | grep -qE '^nginx/'; then
-        nginx_recreate=1
-        echo "     nginx config changed — will recreate nginx container in step 5"
-    fi
-fi
-
-echo "[2/6] Tag current image as :prev (for fast rollback)"
+echo "[2/4] Tag current image as :prev (for fast rollback)"
 if docker image inspect vigilant-app:latest >/dev/null 2>&1; then
     docker tag vigilant-app:latest vigilant-app:prev
     echo "     tagged vigilant-app:prev"
@@ -50,35 +35,13 @@ else
     echo "     no existing :latest image (first deploy?)"
 fi
 
-echo "[3/6] Rebuild + recreate app (nginx left running)"
-# --no-deps prevents compose from touching nginx or any other dependent
-# service. --force-recreate ensures the new image is actually swapped in.
+echo "[3/4] Rebuild + recreate app"
+# --no-deps keeps compose from touching anything else (vigilant doesn't
+# own any sibling services any more, but the flag is cheap insurance).
+# --force-recreate ensures the new image is actually swapped in.
 docker compose up -d --build --no-deps --force-recreate app
 
-echo "[4/6] Ensure nginx is up (no-op if already running)"
-# If nginx somehow died (or this is a first-time deploy), bring it up
-# without recreating — idempotent.
-docker compose up -d --no-deps nginx
-
-echo "[5/6] Validate + reload nginx"
-# Validate first so a bad config doesn't take nginx down on reload.
-docker exec vigilant-nginx-1 nginx -t
-if [[ $nginx_recreate -eq 1 ]]; then
-    # File-bind-mount inode swap from git pull means nginx -s reload reads
-    # stale content. Recreate the container so the bind picks up the new
-    # inode. Brief blip on mapper.thunderborn.dev (~2s).
-    docker compose up -d --no-deps --force-recreate nginx
-    sleep 2
-    docker exec vigilant-nginx-1 nginx -t
-    echo "     nginx recreated (config changed)"
-else
-    # Graceful reload: existing connections keep using the old worker until
-    # they finish; new ones use the new config + re-resolved app upstream.
-    docker exec vigilant-nginx-1 nginx -s reload
-    echo "     nginx reloaded"
-fi
-
-echo "[6/6] Post-deploy checks"
+echo "[4/4] Post-deploy checks"
 # Wait for the app to bind and respond. /healthz is a stub that returns
 # 200 OK with no DB/ESI work — the cheapest possible liveness probe.
 ok=0

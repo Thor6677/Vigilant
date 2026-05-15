@@ -31,56 +31,16 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/vigilant.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/thunderborn.conf:/etc/nginx/conf.d/thunderborn.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    networks:
-      - web
-    depends_on:
-      - app
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETGID
-      - SETUID
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/cache/nginx
-      - /run
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: "0.25"
-          pids: 100
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
 volumes:
   app_data:
 
 networks:
-  # Shared with the Wanderer mapper stack (mapper.thunderborn.dev).
-  # Declared external so we attach to the pre-existing `web` bridge
-  # created by /opt/wanderer/docker-compose.yml, rather than compose
-  # creating its own `vigilant_web`.
+  # Shared external bridge. Edge nginx (separate stack at /opt/edge/ on
+  # the VPS, or whatever reverse proxy you're running) attaches here and
+  # upstreams vigilant by container name (`vigilant-app-1:8000`).
+  # Bring vigilant up alongside other apps with:
+  #   docker network create web   # one-time, host-level
+  # See docs/nginx-sample.conf for a single-app vhost example.
   web:
     external: true
     name: web

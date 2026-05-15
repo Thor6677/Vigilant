@@ -264,35 +264,21 @@ Before getting an SSL certificate, your domain needs to point to your VPS:
    dig vigilant.yourdomain.com
    ```
 
-### Step 4: Get an SSL Certificate
+### Step 4: Stand up a reverse proxy
 
-Vigilant requires HTTPS. You have two options:
+Vigilant's app container exposes port 8000 internally on a Docker network — it does NOT bind 80/443. You need a reverse proxy in front of it that terminates TLS and routes traffic to the container.
 
-#### Option A: Let's Encrypt (free, auto-renewing)
+If you already have nginx/caddy/traefik on the host, point it at `vigilant-app-1:8000` on the `web` Docker bridge. If you don't, the simplest path is to copy `docs/nginx-sample.conf` from this repo into `/etc/nginx/conf.d/` (or use a small companion nginx container) and adjust the `server_name` + cert paths.
 
+You'll need a TLS cert. Two common options:
+
+- **Let's Encrypt** — `certbot certonly --standalone -d vigilant.yourdomain.com`, then point the proxy at `/etc/letsencrypt/live/vigilant.yourdomain.com/`.
+- **Cloudflare Origin Certificate** (if you proxy through Cloudflare) — generate from **SSL/TLS** > **Origin Server**, save the cert + key wherever your proxy expects them.
+
+Create the shared Docker network so the proxy and the app can talk:
 ```bash
-# Make sure port 80 is free, then run (as root):
-docker run --rm -p 80:80 -v /opt/vigilant/nginx/ssl:/etc/letsencrypt certbot/certbot certonly \
-  --standalone \
-  -d vigilant.yourdomain.com \
-  --email your@email.com \
-  --agree-tos
-
-# Copy certs to the expected location
-cp /opt/vigilant/nginx/ssl/live/vigilant.yourdomain.com/fullchain.pem /opt/vigilant/nginx/ssl/origin.pem
-cp /opt/vigilant/nginx/ssl/live/vigilant.yourdomain.com/privkey.pem /opt/vigilant/nginx/ssl/origin.key
+docker network create web
 ```
-
-#### Option B: Cloudflare Origin Certificate (if using Cloudflare proxy)
-
-1. In Cloudflare dashboard, go to **SSL/TLS** > **Origin Server**
-2. Create a certificate for your domain
-3. Save the certificate and key to your VPS:
-   ```bash
-   mkdir -p /opt/vigilant/nginx/ssl
-   nano /opt/vigilant/nginx/ssl/origin.pem   # Paste the certificate
-   nano /opt/vigilant/nginx/ssl/origin.key    # Paste the private key
-   ```
 
 ### Step 5: Clone and Configure
 
@@ -323,35 +309,25 @@ Generate a secure `SECRET_KEY`:
 python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-### Step 6: Update the Nginx Config
-
-The included nginx config references a specific domain. Update it to match yours:
-
-```bash
-nano /opt/vigilant/nginx/vigilant.conf
-```
-
-Replace `vigilant.thunderborn.dev` with your domain on the `server_name` lines (there are two `server` blocks — update both).
-
-### Step 7: Deploy
+### Step 6: Deploy
 
 ```bash
 cd /opt/vigilant
 docker compose up -d --build
 ```
 
-The first build takes a few minutes (it installs Python dependencies, builds the React frontend, and pulls the nginx image). Subsequent builds are faster thanks to Docker's layer cache.
+The first build takes a few minutes (it installs Python dependencies and builds the React frontend). Subsequent builds are faster thanks to Docker's layer cache.
 
 **Verify everything is working:**
 ```bash
-# Check containers are running
+# Check the app container is running
 docker compose ps
 
 # Check app logs for errors
 docker compose logs app
 
-# Validate nginx config
-docker exec vigilant-nginx-1 nginx -t
+# Hit the healthcheck through the proxy
+curl https://vigilant.yourdomain.com/healthz
 ```
 
 Visit `https://vigilant.yourdomain.com` — you should see the login page.
@@ -510,8 +486,8 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 
 ### Transport & Docker Hardening
 
-- **HTTPS enforced** — nginx redirects HTTP to HTTPS, TLS 1.2/1.3 only, HSTS (1 year)
-- **Security headers** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
+- **HTTPS expected** — sample reverse-proxy config (`docs/nginx-sample.conf`) terminates TLS 1.2/1.3, redirects HTTP→HTTPS, sets HSTS (2 years), and adds `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`.
+- **Security headers** — recommended set baked into the sample vhost; replicate in your own proxy config if you don't use it.
 - **Container hardening** — read-only filesystem, `no-new-privileges`, `cap_drop: ALL`, memory/CPU/PID limits
 
 ### Production Checklist
@@ -536,10 +512,10 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 | Layer | Technology |
 |---|---|
 | **Backend** | FastAPI, SQLAlchemy (async), aiosqlite, Uvicorn, scipy (LP solver) |
-| **Templates** | Jinja2, htmx, Tailwind CSS (CDN), Chart.js |
+| **Templates** | Jinja2, htmx, Tailwind CSS (built at image build), Chart.js |
 | **Star Map** | React, TypeScript, Vite, Pixi.js v8 (WebGL), pixi-viewport, d3-quadtree, Graphology |
 | **Data** | EVE ESI REST API, zKillboard API, EVE SDE (Static Data Export) |
-| **Deployment** | Docker, Docker Compose, Nginx (reverse proxy + TLS) |
+| **Deployment** | Docker, Docker Compose; bring-your-own reverse proxy (sample nginx vhost in `docs/`) |
 
 ---
 
