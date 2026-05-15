@@ -1,0 +1,22 @@
+{
+  "components": [
+    "fitting"
+  ],
+  "discoveredDate": "2026-05-15",
+  "id": "ISS-016",
+  "impact": "T-022 shipped the implant infrastructure (10 slots, search, modifier propagation, localStorage persistence within the active builder session) but deferred two pieces:\n\n1. **Saved-fitting persistence.** UserFitting currently has items_json but no implants_json column. To save an implant loadout with a fit:\n   - Add implants_json (Text, default \"{}\") to UserFitting model\n   - Migration in app/main.py startup block (idempotent ALTER TABLE)\n   - Update /tools/fitting/save endpoint to read body.implants and store\n   - Update /tools/fitting/load/{id} to return implants in response\n   - Update fitting_tool.html loadFitting() to populate state.implants\n\n2. **Active jump-clone auto-import.** When a character is selected via the skill-char dropdown, fetch their currently-active clone's implants from ESI (GET /characters/{character_id}/clones/) and offer a \"Load active clone\" button. Needs:\n   - esi-clones.read_implants.v1 scope (already in EVE_SCOPES if dashboard uses clones)\n   - New route /tools/fitting/clone-implants/{character_id} returning the active clone's implant type IDs\n   - Frontend button next to the implant search that fetches + populates the slots\n   - Visual indicator showing which slots came from the clone vs. manual\n\nBoth are well-scoped follow-ups for a future session. MVP in main implant features works as of 0fbd6d6 (drake align time changes when an Evasive Maneuvering hardwiring is added, verified live).",
+  "location": [
+    "app/db/models.py",
+    "app/routes/fitting.py",
+    "app/templates/fitting_tool.html"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [
+    "T-022"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "Implants: persist with saved fits + auto-import from active jump clone"
+}

@@ -1,0 +1,20 @@
+{
+  "components": [
+    "fitting"
+  ],
+  "discoveredDate": "2026-05-15",
+  "id": "ISS-015",
+  "impact": "Item 1 from T-023, separated from the ship-to-self hull bonus fix (which landed in 58d3dfd).\n\nSome ships have modifierInfo in the SDE that targets the wrong skill. Documented case: Sacrilege's modifierInfo targets skill 3306 (Medium Energy Turret) but the ship actually has missile bonuses in-game. Pyfa works around this with ~5000 hand-coded effect handlers in `effects.py`. Vigilant's engine trusts modifierInfo and produces wrong bonuses for these ships.\n\nTo fix properly: build an effect-handler override table for known-broken ships, keyed by ship_type_id × effect_id, that overrides the SDE modifier_info with hand-coded targeting. Or: parse `typeBonus.jsonl` trait descriptions to infer correct targeting (riskier).\n\nScope is large (~200+ overrides expected based on Pyfa's coverage). Splitting off to keep T-023's primary fix (ship-to-self hull bonuses) bite-sized.\n\nAffected: Sacrilege confirmed. Other Amarr Recon ships, possibly some force recon, possibly other ships where CCP renamed/redirected hull bonuses without updating modifierInfo. Pyfa's effects.py is the canonical reference for which ships need overrides.",
+  "location": [
+    "app/fitting/engine.py:373-419"
+  ],
+  "phase": "roadmap-and-gaps",
+  "relatedTickets": [
+    "T-023"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "Sacrilege-class SDE modifierInfo mistargets — needs Pyfa-style effect handler override"
+}

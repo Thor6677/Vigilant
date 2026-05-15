@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Add 10 implant slots to the fitting builder UI. Pull implant types from SDE (group_id for implants), apply attribute modifiers to the active character's effective stats during fit evaluation. Persist implant set per saved fitting. When a character is selected via the dropdown, pre-fill from the character's active jump clone's implants.",
   "id": "T-022",
   "order": 60,
   "phase": "roadmap-and-gaps",
-  "status": "open",
+  "status": "complete",
   "title": "Fitting: implant slot UI on builder",
   "type": "feature"
 }

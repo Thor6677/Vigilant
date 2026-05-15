@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Drone-related skills (Drone Interfacing, Combat Drone Operation, racial drone specs, drone damage amount) don't fully propagate to drone DPS in the fitting engine. Cross-check against Pyfa v2.66.2 + Theorycrafter v1.9.6-ag7 (the project audit reference). Fix the modifier resolution; verify against the saved reference fits used in earlier audit rounds.",
   "id": "T-020",
   "order": 40,
   "phase": "roadmap-and-gaps",
-  "status": "open",
+  "status": "complete",
   "title": "Fitting: drone skill propagation to drone DPS",
   "type": "task"
 }

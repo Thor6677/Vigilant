@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-15",
   "createdDate": "2026-05-13",
   "description": "Two highest-impact accuracy bugs from the project_fitting_modifier_gaps audit: (1) Sacrilege-class modifierInfo entries don't apply correctly (SDE modifierInfo unreliability — known issue requires explicit mapping). (2) `_apply_ship_hull_bonuses` is missing the branch that handles \"bonus to ship's own resists\" traits — affects Drake, HACs, command ships. Fix both, regression-test against Pyfa for Drake, Sacrilege, Damnation, Eagle.",
   "id": "T-023",
   "order": 70,
   "phase": "roadmap-and-gaps",
-  "status": "open",
+  "status": "complete",
   "title": "Fitting: Sacrilege modifierInfo + ship-to-self hull resist bonuses",
   "type": "task"
 }
