@@ -16,6 +16,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Minimum caps the entrypoint needs to run as root, chown /data,
+    # and drop to the vigilant uid via gosu before exec'ing uvicorn.
+    # See docker-entrypoint.sh and VVP-2026-003 / T-004. Once the
+    # entrypoint has handed off, the running uvicorn process holds no
+    # capabilities (gosu drops them along with the uid).
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     read_only: true
     tmpfs:
       - /tmp

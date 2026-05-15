@@ -29,6 +29,23 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.12-slim
 WORKDIR /app
 
+# gosu — used by docker-entrypoint.sh to drop from root to the
+# `vigilant` user after fixing /data ownership. Tiny apt-installed
+# binary, well-vetted (Tianon Gravi). See VVP-2026-003 / T-004.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    # Sanity-check gosu works at build time so we don't discover it's
+    # broken at container start time.
+    && gosu nobody true
+
+# Non-root runtime user. Fixed uid/gid 10001 — matches the file
+# ownership we'll chown the /data volume to in the entrypoint, and
+# matches the uid the prior rolled-back attempt used so any leftover
+# host artifacts line up.
+RUN groupadd --system --gid 10001 vigilant \
+    && useradd --system --uid 10001 --gid vigilant --shell /usr/sbin/nologin vigilant
+
 # Pull in the pip-installed packages from the deps stage. No gcc/node in
 # the runtime image — significantly smaller than the previous single-stage
 # build that left the build toolchain behind.
@@ -44,14 +61,26 @@ COPY --from=frontend /build/dist ./frontend/dist
 # Tailwind CSS built from server-template content scan; replaces the dev-only CDN.
 COPY --from=frontend /build/dist/tailwind.css ./static/css/tailwind.css
 
-RUN mkdir -p /data
+# Entrypoint chowns /data and drops to the vigilant uid via gosu.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+RUN mkdir -p /data && chown vigilant:vigilant /data
 
 ENV DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
 
 # Liveness probe. Uses urllib so we don't have to apt-install curl.
+# Runs as the vigilant uid (the entrypoint has already dropped privs
+# by the time docker invokes the healthcheck against the running pid).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python3 -c "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3); sys.exit(0 if r.status==200 else 1)" || exit 1
 
 EXPOSE 8000
 
+# Note: NO `USER vigilant` here. The entrypoint runs as root inside
+# the container (with caps trimmed to CHOWN + SETUID + SETGID via the
+# compose cap_add list), fixes /data ownership, then exec's the CMD
+# under gosu vigilant. Setting USER would bypass the chown step and
+# re-create the WAL-readonly bug from the 2026-04-28 outage.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
