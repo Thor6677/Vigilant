@@ -740,9 +740,20 @@ class DetectedBattle(Base):
     )
 
 
+def _create_missing_indexes(sync_conn) -> None:
+    # create_all skips tables that already exist, so any Index() added
+    # to an existing model (or `index=True` on a new column) never
+    # deploys. Walk every declared index and let SQLAlchemy emit a
+    # checkfirst CREATE — idempotent for already-present indexes.
+    for table in Base.metadata.tables.values():
+        for index in table.indexes:
+            index.create(bind=sync_conn, checkfirst=True)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_create_missing_indexes)
 
 
 async def get_db() -> AsyncSession:
