@@ -1865,30 +1865,25 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "battles_enabled": _dashboard_battles_enabled()})
 
 
-@router.get("/dashboard/kill-pulse", response_class=HTMLResponse)
-async def dashboard_kill_pulse(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    days: int = 30,
-):
-    """Pilot Pulse v2 + Frequent Wingmen + Your Hunters. Lazy-loaded via htmx
-    so the dashboard renders without waiting on these queries."""
-    from app.config import get_settings as _gs
-    cfg = _gs()
-    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
-        return HTMLResponse("")
+# ISS-018: SWR cache for kill-pulse. Keyed by (user_id, days). Each entry
+# holds the rendered context dict; the partial template is re-rendered
+# every request so per-request bits like CSP nonces stay fresh.
+_kill_pulse_cache: dict[tuple[int, int], dict] = {}
+_kill_pulse_revalidating: set[tuple[int, int]] = set()
+_KILL_PULSE_TTL = 300  # 5 minutes — killmails accumulate, don't mutate
 
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
 
+async def _compute_kill_pulse_context(user_id: int, days: int, db: AsyncSession) -> dict | None:
+    """Compute the kill-pulse template context. Returns None if the user
+    has no linked characters (so the caller can emit the empty-state
+    HTML instead of caching a useless empty dict)."""
     char_result = await db.execute(
         select(Character.character_id, Character.character_name).where(Character.user_id == user_id)
     )
     char_rows_pulse = char_result.all()
     char_ids = [r[0] for r in char_rows_pulse]
     if not char_ids:
-        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+        return None
     char_name_map = {r[0]: r[1] for r in char_rows_pulse}
 
     from app.intel import kill_queries as kq
@@ -1913,7 +1908,6 @@ async def dashboard_kill_pulse(
             from app.esi.client import ESIClient as _PubClient
             pub = _PubClient("")
             pub.cache_enabled = True
-            # /universe/names/ accepts up to 1000 per call; we're well under.
             resolved = await pub.post_public("/universe/names/", name_ids)
             for entry in resolved or []:
                 cat = entry.get("category", "")
@@ -1934,7 +1928,8 @@ async def dashboard_kill_pulse(
         if ranked and (ranked[0][1]["kills"] + ranked[0][1]["losses"]) > 0:
             most_active_cid = ranked[0][0]
 
-    return templates.TemplateResponse(request, "partials/dashboard_kill_pulse.html", {"pulse_30": pulse_30,
+    return {
+        "pulse_30": pulse_30,
         "pulse_lifetime": pulse_lifetime,
         "per_char": per_char,
         "wingmen": wingmen,
@@ -1943,18 +1938,37 @@ async def dashboard_kill_pulse(
         "char_names": char_names,
         "corp_names": corp_names,
         "most_active_cid": most_active_cid,
-        "days": days})
+        "days": days,
+    }
 
 
-@router.get("/dashboard/combat-profile", response_class=HTMLResponse)
-async def dashboard_combat_profile(
+async def _refresh_kill_pulse_background(user_id: int, days: int) -> None:
+    key = (user_id, days)
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            ctx = await _compute_kill_pulse_context(user_id, days, bg_db)
+        if ctx is not None:
+            _kill_pulse_cache[key] = {
+                "context": ctx,
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_KILL_PULSE_TTL),
+            }
+    except Exception as e:
+        logger.info("kill-pulse SWR refresh failed for user %s days %s: %s", user_id, days, e)
+    finally:
+        _kill_pulse_revalidating.discard(key)
+
+
+@router.get("/dashboard/kill-pulse", response_class=HTMLResponse)
+async def dashboard_kill_pulse(
     request: Request,
-    year: int | None = None,
     db: AsyncSession = Depends(get_db),
+    days: int = 30,
 ):
-    """All-pilots Combat Profile — aggregates the same panels as the
-    character-detail Combat Profile across every character the user owns.
-    Lazy-loaded via htmx so it doesn't block the dashboard handler."""
+    """Pilot Pulse v2 + Frequent Wingmen + Your Hunters. Lazy-loaded via htmx
+    so the dashboard renders without waiting on these queries. ISS-018:
+    stale-while-revalidate — cache the heavy queries' result context
+    keyed by (user_id, days), serve cached instantly, refresh in
+    background when stale."""
     from app.config import get_settings as _gs
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
@@ -1964,19 +1978,50 @@ async def dashboard_combat_profile(
     if not user_id:
         return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
 
+    key = (user_id, days)
+    cached = _kill_pulse_cache.get(key)
+    now = datetime.now(timezone.utc)
+    if cached:
+        if cached["expires_at"] <= now and key not in _kill_pulse_revalidating:
+            _kill_pulse_revalidating.add(key)
+            asyncio.create_task(_refresh_kill_pulse_background(user_id, days))
+        return templates.TemplateResponse(
+            request, "partials/dashboard_kill_pulse.html", cached["context"]
+        )
+
+    # Cold path — synchronous compute, prime cache.
+    ctx = await _compute_kill_pulse_context(user_id, days, db)
+    if ctx is None:
+        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+    _kill_pulse_cache[key] = {
+        "context": ctx,
+        "expires_at": now + timedelta(seconds=_KILL_PULSE_TTL),
+    }
+    return templates.TemplateResponse(request, "partials/dashboard_kill_pulse.html", ctx)
+
+
+# ISS-018: SWR cache for combat-profile. Keyed by (user_id, year).
+_combat_profile_cache: dict[tuple[int, int], dict] = {}
+_combat_profile_revalidating: set[tuple[int, int]] = set()
+_COMBAT_PROFILE_TTL = 600  # 10 minutes — historical data, changes slowly
+
+
+async def _compute_combat_profile_context(user_id: int, year: int, db: AsyncSession) -> dict | None:
+    """Compute the combat-profile template context dict.
+
+    Returns None if the user has no linked characters (caller emits
+    the empty-state HTML and skips caching)."""
     char_rows = await db.execute(
         select(Character.character_id).where(Character.user_id == user_id)
     )
     char_ids = [r[0] for r in char_rows.all()]
     if not char_ids:
-        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+        return None
 
     import math as _math
     from app.intel import kill_queries as kq
 
     current_year = datetime.now(timezone.utc).year
-    if year is None:
-        year = current_year
 
     (
         summary,
@@ -2093,7 +2138,8 @@ async def dashboard_combat_profile(
         })
     ts_weeks = max((len(d["data"]) for d in ts_datasets), default=0)
 
-    return templates.TemplateResponse(request, "partials/dashboard_combat_profile.html", {"year": year,
+    return {
+        "year": year,
         "current_year": current_year,
         "summary": summary,
         "ships": ships,
@@ -2115,7 +2161,67 @@ async def dashboard_combat_profile(
         "radar_raw": radar_raw,
         "ts_datasets": ts_datasets,
         "ts_weeks": ts_weeks,
-        "char_count": len(char_ids)})
+        "char_count": len(char_ids),
+    }
+
+
+async def _refresh_combat_profile_background(user_id: int, year: int) -> None:
+    key = (user_id, year)
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            ctx = await _compute_combat_profile_context(user_id, year, bg_db)
+        if ctx is not None:
+            _combat_profile_cache[key] = {
+                "context": ctx,
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_COMBAT_PROFILE_TTL),
+            }
+    except Exception as e:
+        logger.info("combat-profile SWR refresh failed for user %s year %s: %s", user_id, year, e)
+    finally:
+        _combat_profile_revalidating.discard(key)
+
+
+@router.get("/dashboard/combat-profile", response_class=HTMLResponse)
+async def dashboard_combat_profile(
+    request: Request,
+    year: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """All-pilots Combat Profile — aggregates per-character Combat Profile
+    panels across every character the user owns. Lazy-loaded via htmx.
+    ISS-018: stale-while-revalidate."""
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    if year is None:
+        year = datetime.now(timezone.utc).year
+
+    key = (user_id, year)
+    cached = _combat_profile_cache.get(key)
+    now = datetime.now(timezone.utc)
+    if cached:
+        if cached["expires_at"] <= now and key not in _combat_profile_revalidating:
+            _combat_profile_revalidating.add(key)
+            asyncio.create_task(_refresh_combat_profile_background(user_id, year))
+        return templates.TemplateResponse(
+            request, "partials/dashboard_combat_profile.html", cached["context"]
+        )
+
+    # Cold path — synchronous compute, prime cache.
+    ctx = await _compute_combat_profile_context(user_id, year, db)
+    if ctx is None:
+        return HTMLResponse("<div class='b-empty' style='padding:0.75rem;'>No characters linked.</div>")
+    _combat_profile_cache[key] = {
+        "context": ctx,
+        "expires_at": now + timedelta(seconds=_COMBAT_PROFILE_TTL),
+    }
+    return templates.TemplateResponse(request, "partials/dashboard_combat_profile.html", ctx)
 
 
 @router.get("/dashboard/recent-battles", response_class=HTMLResponse)
