@@ -63,20 +63,51 @@
     .fit-grid { grid-template-columns:1fr 1fr; }
     #browser-panel { display:none !important; }
     #browser-toggle { display:inline-block !important; }
+    #browser-close { display:inline-block !important; }
+    /* When browser-panel is opened as an overlay, JS sets data-overlay="1";
+       restore display so the CSS hide above does not clobber it. */
+    #browser-panel[data-overlay="1"] { display:flex !important; }
+    #browser-backdrop[data-open="1"] { display:block !important; }
 }
 @media (max-width:768px) {
     .fit-grid { grid-template-columns:1fr; }
     .fit-stats-sticky { position:static; }
 }
+#browser-close { display:none; }
+#browser-backdrop {
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.55);
+    z-index:49;
+}
+/* Default (desktop) layout for the browser-panel. Moved out of the
+   element's inline style so closeModuleBrowser() can wipe inline styles
+   without destroying the sticky-positioned defaults. */
+#browser-panel {
+    border:1px solid var(--border);
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    min-height:500px;
+    max-height:calc(100vh - 120px);
+    position:sticky;
+    top:80px;
+}
 </style>
-<button id="browser-toggle" onclick="document.getElementById('browser-panel').style.display='';document.getElementById('browser-panel').style.position='fixed';document.getElementById('browser-panel').style.left='0';document.getElementById('browser-panel').style.top='0';document.getElementById('browser-panel').style.bottom='0';document.getElementById('browser-panel').style.zIndex='50';document.getElementById('browser-panel').style.width='300px';document.getElementById('browser-panel').style.maxHeight='100vh';" style="display:none;margin-bottom:0.5rem;padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);background:none;cursor:pointer;">Browse Modules</button>
+<button id="browser-toggle" data-click="openModuleBrowser" style="display:none;margin-bottom:0.5rem;padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);background:none;cursor:pointer;">Browse Modules</button>
+<div id="browser-backdrop" data-click="closeModuleBrowser" aria-hidden="true"></div>
 <div class="fit-grid">
 
 {# ── Left: Module Browser (persistent) ──────────────────────────────────── #}
-<div id="browser-panel" style="border:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-height:500px;max-height:calc(100vh - 120px);position:sticky;top:80px;">
+<div id="browser-panel">
     {# Browser header + breadcrumbs #}
     <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
-        <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:0.35rem;">Module Browser</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.35rem;">
+            <div style="font-size:11px;font-weight:600;color:var(--text);">Module Browser</div>
+            <button id="browser-close" type="button" data-click="closeModuleBrowser" aria-label="Close module browser"
+                    style="background:none;border:1px solid var(--border);color:var(--muted);font-size:14px;line-height:1;padding:2px 8px;cursor:pointer;">×</button>
+        </div>
         <div id="browse-breadcrumbs" style="font-size:9px;color:var(--muted);display:flex;gap:0.2rem;flex-wrap:wrap;min-height:14px;"></div>
     </div>
     {# Two-pane: tree + items #}
@@ -312,6 +343,65 @@ function applyState() {
     recalcStats();
 }
 
+/* Friendly error HTML for fitting fetch failures. Keeps JSON error bodies
+   from being rendered as panel HTML when the server returns 4xx/5xx
+   (e.g. stale CSRF token after a long session). */
+function _fitErrorHtml(status) {
+    if (status === 403) {
+        return '<div style="padding:0.5rem;color:var(--warning);font-size:11px;">Session expired — refresh the page to continue. Your fit is saved locally.</div>';
+    }
+    return '<div style="padding:0.5rem;color:var(--danger);font-size:11px;">Request failed (HTTP ' + (status || 'network') + ').</div>';
+}
+function _fitCheckOk(r) {
+    if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    return r;
+}
+
+/* ── Mobile module-browser overlay (ISS-008) ────────────────────────────── */
+window.openModuleBrowser = function() {
+    var panel = document.getElementById('browser-panel');
+    var bd = document.getElementById('browser-backdrop');
+    if (!panel) return;
+    panel.setAttribute('data-overlay', '1');
+    panel.style.position = 'fixed';
+    panel.style.left = '0';
+    panel.style.top = '0';
+    panel.style.bottom = '0';
+    panel.style.zIndex = '50';
+    panel.style.width = '300px';
+    panel.style.maxHeight = '100vh';
+    if (bd) bd.setAttribute('data-open', '1');
+    document.body.style.overflow = 'hidden';
+};
+window.closeModuleBrowser = function() {
+    var panel = document.getElementById('browser-panel');
+    var bd = document.getElementById('browser-backdrop');
+    if (panel) {
+        panel.removeAttribute('data-overlay');
+        /* Wipe the inline styles the open path applied so the panel returns
+           to its CSS-defined desktop layout (sticky) and mobile state
+           (display:none via media query). */
+        panel.style.position = '';
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.bottom = '';
+        panel.style.zIndex = '';
+        panel.style.width = '';
+        panel.style.maxHeight = '';
+        panel.style.display = '';
+    }
+    if (bd) bd.removeAttribute('data-open');
+    document.body.style.overflow = '';
+};
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var panel = document.getElementById('browser-panel');
+        if (panel && panel.getAttribute('data-overlay') === '1') {
+            window.closeModuleBrowser();
+        }
+    }
+});
+
 /* ── Ship Search ──────────────────────────────────────────────────────────── */
 var shipSearchTimer = null;
 function searchShip(q) {
@@ -320,10 +410,15 @@ function searchShip(q) {
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     shipSearchTimer = setTimeout(function() {
         fetch('/tools/fitting/search/ships?q=' + encodeURIComponent(q))
+            .then(_fitCheckOk)
             .then(function(r) { return r.text(); })
             .then(function(html) {
                 resultsEl.innerHTML = html;
                 resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
             });
     }, 200);
 }
@@ -371,10 +466,15 @@ function searchModule(q, slot, inputEl) {
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     moduleSearchTimers[slot] = setTimeout(function() {
         fetch('/tools/fitting/search/modules?q=' + encodeURIComponent(q) + '&slot=' + slot)
+            .then(_fitCheckOk)
             .then(function(r) { return r.text(); })
             .then(function(html) {
                 resultsEl.innerHTML = html;
                 resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
             });
     }, 200);
 }
@@ -385,10 +485,15 @@ function searchDrone(q, inputEl) {
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     moduleSearchTimers['drone'] = setTimeout(function() {
         fetch('/tools/fitting/search/drones?q=' + encodeURIComponent(q))
+            .then(_fitCheckOk)
             .then(function(r) { return r.text(); })
             .then(function(html) {
                 resultsEl.innerHTML = html;
                 resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
             });
     }, 200);
 }
@@ -680,9 +785,13 @@ function recalcStats() {
             implants: getImplantTypeIds(),
         })
     })
+    .then(_fitCheckOk)
     .then(function(r) { return r.text(); })
     .then(function(html) {
         document.getElementById('stats-panel').innerHTML = html;
+    })
+    .catch(function(e) {
+        document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
     });
     /* Skill check runs in parallel with the stats fetch — warnings don't
        block stats from appearing. */
@@ -1008,6 +1117,7 @@ function exportEFT() {
             items: state.items
         })
     })
+    .then(_fitCheckOk)
     .then(function(r) { return r.text(); })
     .then(function(text) {
         navigator.clipboard.writeText(text).then(function() {
@@ -1021,6 +1131,17 @@ function exportEFT() {
                 btn.style.borderColor = 'var(--accent)';
             }, 2000);
         });
+    })
+    .catch(function(e) {
+        var btn = document.getElementById('btn-export');
+        btn.textContent = e.status === 403 ? 'Refresh page' : 'Export failed';
+        btn.style.color = 'var(--danger)';
+        btn.style.borderColor = 'var(--danger)';
+        setTimeout(function() {
+            btn.textContent = 'Export EFT';
+            btn.style.color = 'var(--accent)';
+            btn.style.borderColor = 'var(--accent)';
+        }, 2500);
     });
 }
 
