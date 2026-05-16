@@ -9,9 +9,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 95698ce. Added _fitCheckOk() and _fitErrorHtml() helpers in app/templates/fitting_tool.html. recalcStats() now checks response.ok before rendering — on 403 shows \"Session expired — refresh the page to continue. Your fit is saved locally\", on other failures shows \"Request failed (HTTP n)\". Same defensive pattern applied to ship/module/drone search and exportEFT (so a JSON error doesn't get copied to clipboard).",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Fitting stats panel renders raw JSON error on CSRF/auth failure"
 }

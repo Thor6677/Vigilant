@@ -751,6 +751,13 @@
             .b-nav { padding: 0 0.75rem; }
             .b-stat { flex: 1 1 100%; }
         }
+        /* ISS-010: respect user motion preferences. The spin and pulse
+           classes run continuously across the app (sync indicator, no-
+           training dot, star map character markers); hold them still
+           for users with vestibular conditions. */
+        @media (prefers-reduced-motion: reduce) {
+            .spin-anim, .pulse-anim { animation: none; }
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -872,12 +879,13 @@
             <button type="submit" class="b-nav-link is-danger" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;padding:0;">Logout</button>
         </form>
     </div>
-    <button class="b-hamburger" onclick="document.getElementById('mobile-menu').classList.toggle('is-open')" aria-label="Toggle menu">
+    <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
+            aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         Menu
     </button>
 </nav>
-<div id="mobile-menu" class="b-mobile-menu">
+<div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
     <a href="/dashboard" class="{{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
     <a href="/corporations" class="{{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
     <a href="/skill-plans" class="{{ 'is-active' if _path.startswith('/skill-plans') }}">Skill Plans</a>
@@ -1073,6 +1081,34 @@
     });
     /* Also run on initial page load after htmx processes */
     document.addEventListener('htmx:load', function() { applyDismissState(); });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* ISS-006: mobile menu lifecycle. Toggles is-open class, mirrors state into
+   aria-expanded on the trigger and aria-hidden on the menu, locks body
+   scroll while the menu is open, and listens for ESC to dismiss. */
+(function() {
+    function getMenu() { return document.getElementById('mobile-menu'); }
+    function getBtn() { return document.querySelector('.b-hamburger'); }
+    function setOpen(open) {
+        var menu = getMenu();
+        var btn = getBtn();
+        if (!menu) return;
+        menu.classList.toggle('is-open', open);
+        menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        document.body.style.overflow = open ? 'hidden' : '';
+    }
+    window.toggleMobileMenu = function() {
+        var menu = getMenu();
+        if (!menu) return;
+        setOpen(!menu.classList.contains('is-open'));
+    };
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        var menu = getMenu();
+        if (menu && menu.classList.contains('is-open')) setOpen(false);
+    });
 })();
 </script>
 </body>

@@ -13,9 +13,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 95698ce. Mobile module-browser overlay now has three dismiss paths: (1) backdrop click (full-screen rgba(0,0,0,0.55) under z-index:49), (2) X close button in panel header (mobile-only via media query), (3) ESC keydown. openModuleBrowser/closeModuleBrowser functions handle data-overlay attribute toggling. Replaced the inline onclick blob on #browser-toggle with data-click=\"openModuleBrowser\" aligned with T-031 delegation. Panel default styles moved from inline style= into CSS so the close path can cleanly wipe inline overrides without breaking the desktop sticky layout. Body scroll-locked while overlay is open.",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Fitting tool's mobile module-browser overlay has no dismiss affordance"
 }
