@@ -13,9 +13,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit cd0676c. Replaced 4x `eve-border rounded p-3` with `border border-eve-border p-3` and the outer card's `eve-border eve-glow rounded` with `border border-eve-border` (Tailwind v4 generates border-eve-border from the --color-eve-border theme token). eve-glow had no theme token at all — dropped entirely. Primary CTA's `hover:bg-blue-400` (off-brand plain Tailwind blue on the login page) → `hover:opacity-90` with `transition-opacity`, keeping the gold accent through the hover state. Verified deploy: commit cd0676c, healthz 200.",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "index.html references undefined Tailwind classes and off-brand colors"
 }

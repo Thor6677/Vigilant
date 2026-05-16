@@ -13,9 +13,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 12641e2. Trigger button now has data-click=\"toggleMobileMenu\" (T-031 delegation), aria-expanded mirrors menu state, aria-controls=\"mobile-menu\", and aria-hidden flips on the menu region. window.toggleMobileMenu uses a setOpen() helper that synchronizes all three a11y attrs and toggles body.style.overflow for scroll lock. ESC keydown listener dismisses the menu when open. Verified post-deploy: healthz 200, commit 12641e2.",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Mobile menu missing aria-expanded, body-scroll lock, and ESC dismiss"
 }

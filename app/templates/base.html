@@ -28,7 +28,16 @@
         /* ── Global reset ────────────────────────────────────────────────── */
         *, *::before, *::after {
             box-sizing: border-box;
-            border-radius: 0 !important;
+        }
+        /* ISS-005: brutalist no-radius look is project-wide, but the prior
+           universal `* !important` reset clobbered third-party widget DOM
+           (Chart.js tooltips, SortableJS drag-ghosts, notification badges).
+           Scope it to b-* classes via :where() so the reset has zero
+           specificity — any element that wants curves (.b-dot at 50%, the
+           notif-badge with inline border-radius, future widgets) wins
+           without needing an !important override. */
+        :where([class^="b-"], [class*=" b-"]) {
+            border-radius: 0;
         }
 
         body {
@@ -443,7 +452,7 @@
         .b-dot {
             width: 6px;
             height: 6px;
-            border-radius: 50% !important;
+            border-radius: 50%;
             display: inline-block;
             flex-shrink: 0;
         }

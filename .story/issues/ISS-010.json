@@ -12,9 +12,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 12641e2. Added @media (prefers-reduced-motion: reduce) rule at end of base.html style block disabling .spin-anim and .pulse-anim animations.",
+  "resolvedDate": "2026-05-15",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "No prefers-reduced-motion support for spin/pulse animations"
 }
