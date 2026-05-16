@@ -1120,5 +1120,34 @@
     });
 })();
 </script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* ISS-007: surface failed lazy-loaded panels. Default htmx behavior on
+   4xx/5xx is to log to console and leave the element untouched — so an
+   hx-trigger="load" panel sits in its loading-state filler forever
+   (e.g. dashboard corp-stats showing "…" with no indication anything
+   went wrong). This body-level listener replaces the failing element's
+   innerHTML with a small "couldn't load" pill so the user knows to
+   refresh. Opt-out via data-htmx-no-error="1" for panels where the
+   default is intentional (e.g. polling endpoints that retry on their
+   own). */
+(function() {
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.getAttribute('data-htmx-no-error') === '1') return;
+        var status = evt.detail.xhr ? evt.detail.xhr.status : '?';
+        el.innerHTML = '<div style="padding:0.3rem 0.6rem;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--surface);display:inline-block;">'
+            + 'couldn\'t load (HTTP ' + status + ') — refresh to retry'
+            + '</div>';
+    });
+    /* Network failure (no response at all) — same friendly fallback. */
+    document.body.addEventListener('htmx:sendError', function(evt) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.getAttribute('data-htmx-no-error') === '1') return;
+        el.innerHTML = '<div style="padding:0.3rem 0.6rem;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--surface);display:inline-block;">'
+            + 'network error — refresh to retry'
+            + '</div>';
+    });
+})();
+</script>
 </body>
 </html>

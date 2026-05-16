@@ -12,9 +12,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit b6c0cc6. Replaced universal `* { border-radius: 0 !important }` reset with `:where([class^=\"b-\"], [class*=\" b-\"]) { border-radius: 0 }` — zero-specificity scoped rule that applies brutalist look only to b-* design-system classes. Third-party widgets (Chart.js tooltips, SortableJS drag-ghosts) keep native radii. Dropped the now-redundant `!important` from .b-dot, #map-loading .spinner (map.html + map_wormholes.html), and .scope-pip (corporations.html). Side effect: previously-clobbered template radii like `.ws-class-badge` 2px and character portraits 2px now take effect — author intent surfacing properly. Verified post-deploy: commit b6c0cc6, healthz 200.",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Universal `border-radius: 0 !important` overrides third-party widgets"
 }
