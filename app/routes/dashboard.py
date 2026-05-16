@@ -2291,7 +2291,12 @@ async def trigger_sync(character_id: int, request: Request, db: AsyncSession = D
 
 
 # In-memory cache for corp stats (avoids hitting ESI on every dashboard load)
+# ISS-018: stale-while-revalidate — once a user has any cached value we
+# always return it instantly and refresh in the background when stale.
+# _corp_stats_revalidating tracks in-flight refresh tasks so a burst of
+# dashboard hits doesn't fan out into many duplicate ESI cycles.
 _corp_stats_cache: dict[int, dict] = {}  # user_id -> {html, expires_at}
+_corp_stats_revalidating: set[int] = set()
 _CORP_STATS_TTL = 300  # 5 minutes
 
 _structure_banner_cache: dict[int, dict] = {}  # user_id -> {html, expires_at}
@@ -2570,18 +2575,12 @@ async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_d
     return templates.TemplateResponse(request, "partials/timer_alert_banners.html", {"timers": timers})
 
 
-@router.get("/dashboard/corp-stats", response_class=HTMLResponse)
-async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
-    """HTMX lazy-loaded corporation stats for the dashboard summary bar."""
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return HTMLResponse("")
+async def _compute_corp_stats_html(user_id: int, db: AsyncSession) -> str:
+    """Render the corp-stats HTML fragment for `user_id`.
 
-    # Check in-memory cache first
-    cached = _corp_stats_cache.get(user_id)
-    if cached and cached["expires_at"] > datetime.now(timezone.utc):
-        return HTMLResponse(cached["html"])
-
+    Separated from the request handler so SWR background-refresh can run
+    it with its own AsyncSessionLocal without holding the request open.
+    """
     char_result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = char_result.scalars().all()
 
@@ -2700,10 +2699,55 @@ async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db
         <div class="b-stat-label">Corp Orders</div>
     </a>
     """
-    # Cache the result
+    return html
+
+
+async def _refresh_corp_stats_background(user_id: int) -> None:
+    """Background SWR worker. Opens its own session, recomputes the HTML,
+    and writes it back into the in-process cache. Always clears its
+    revalidating-set entry so future stale hits can retry."""
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            html = await _compute_corp_stats_html(user_id, bg_db)
+        _corp_stats_cache[user_id] = {
+            "html": html,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_CORP_STATS_TTL),
+        }
+    except Exception as e:
+        logger.info("corp-stats SWR refresh failed for user %s: %s", user_id, e)
+    finally:
+        _corp_stats_revalidating.discard(user_id)
+
+
+@router.get("/dashboard/corp-stats", response_class=HTMLResponse)
+async def corp_stats_partial(request: Request, db: AsyncSession = Depends(get_db)):
+    """HTMX lazy-loaded corporation stats for the dashboard summary bar.
+
+    ISS-018: stale-while-revalidate. If we have any cached value, return
+    it immediately — even if stale — and fire a background refresh. Users
+    only pay the synchronous ESI-fan-out cost on the very first hit per
+    container (or after a multi-hour gap if the cache entry was evicted).
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+
+    cached = _corp_stats_cache.get(user_id)
+    now = datetime.now(timezone.utc)
+    if cached:
+        # Always serve cache. If it's stale, kick off a single background
+        # refresh (no duplicates while one is in flight).
+        if cached["expires_at"] <= now and user_id not in _corp_stats_revalidating:
+            _corp_stats_revalidating.add(user_id)
+            asyncio.create_task(_refresh_corp_stats_background(user_id))
+        return HTMLResponse(cached["html"])
+
+    # Cold path — no cache at all. Compute synchronously so the user gets
+    # real data, then prime the cache for everyone.
+    html = await _compute_corp_stats_html(user_id, db)
     _corp_stats_cache[user_id] = {
         "html": html,
-        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_CORP_STATS_TTL),
+        "expires_at": now + timedelta(seconds=_CORP_STATS_TTL),
     }
     return HTMLResponse(html)
 
