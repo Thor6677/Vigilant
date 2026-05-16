@@ -114,7 +114,7 @@
                 data-name="{{ r.name | lower }}"
                 data-ship="{{ r.ship_name | lower }}"
                 data-folder="{{ r.folder_path | lower }}"
-                data-dps="{{ r.dps }}"
+                data-dps="{{ r.dps if r.dps is not none else '' }}"
                 data-cost="{{ r.cost }}"
                 onclick="if(!event.target.closest('button,.sf-actions'))window.location='/tools/fitting?load={{ r.id }}'">
                 <td>
@@ -126,7 +126,7 @@
                 </td>
                 <td><span style="color:var(--text);">{{ r.name }}</span></td>
                 <td><span class="sf-folder">{{ r.folder_path or '—' }}</span></td>
-                <td class="sf-dps">{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}</td>
+                <td class="sf-dps">{% if r.dps is none %}<span class="sf-dps-loading" style="color:var(--muted);font-weight:normal;">…</span>{% else %}{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}{% endif %}</td>
                 <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>
                 <td class="sf-actions">
                     <button onclick="event.stopPropagation();moveFit({{ r.id }})" title="Move to folder">&#8644;</button>
@@ -154,6 +154,34 @@
     var tbody = document.getElementById('sf-tbody');
     if (!tbody) return;
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+
+    /* --- Lazy DPS fill (ISS-018) -----------------------------------------
+       DPS calc is heavy (calculate_fitting_stats × n_fits, in parallel),
+       so we render the page first and fetch {fit_id: dps} after. Updates
+       both the data-dps attribute (so the existing sort logic picks it
+       up on the user's next sort click) and the cell text. */
+    function fillDps() {
+        if (!rows.length) return;
+        fetch('/tools/fitting/saved/dps', {credentials: 'same-origin'})
+            .then(function(r) { return r.ok ? r.json() : {}; })
+            .then(function(map) {
+                if (!map || map.error) return;
+                rows.forEach(function(tr) {
+                    var fid = tr.dataset.fitId;
+                    if (!fid || !(fid in map)) return;
+                    var dps = map[fid];
+                    tr.dataset.dps = dps;
+                    var cell = tr.querySelector('.sf-dps');
+                    if (cell) {
+                        cell.innerHTML = dps
+                            ? Number(dps).toLocaleString('en-US', {maximumFractionDigits: 0})
+                            : '—';
+                    }
+                });
+            })
+            .catch(function() { /* leave the … placeholders — non-fatal */ });
+    }
+    fillDps();
 
     /* --- Filter --- */
     var searchInput = document.getElementById('sf-search');

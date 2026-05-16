@@ -8,9 +8,9 @@
   "relatedTickets": [
     "T-013"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Resolved in two parts:\n\n(1) Persistence half — commit f5f9296: vigilant.perf logger now also writes to /data/logs/perf.log via RotatingFileHandler (5 MiB × 4 backups). Measurements survive container recreates. Stdout still gets every line. Wired via VIGILANT_PERF_FILE in docker-compose.yml.\n\n(2) Measurement half — user browsed /admin, /tools/fitting, /map, /dashboard, character detail, /tools/activity, /industry. Baseline captured in /data/logs/perf.log. Findings: 7 routes exceed 500ms p95; /tools/activity peaked at 6.2s, /dashboard/corp-stats and /tools/fitting/saved both ~2s. Detailed table filed as a follow-up issue.\n\nImportant caveats: sample size n=1-5 per route from a single session, so individual numbers are noisy. The persistence fix means future sessions can accumulate data without losing it.",
+  "resolvedDate": "2026-05-15",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "Perf rebaseline incomplete — heavy authed routes not measured this session"
 }

@@ -75,11 +75,11 @@ async def fitting_tool(request: Request, db: AsyncSession = Depends(get_db)):
 async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Dedicated list view for saved fittings.
 
-    Computes DPS and cost per fit at request time, in parallel.  Prices
-    are pulled from the global /markets/prices/ endpoint (a single ESI
-    call batched across all type_ids in the table).  Clicking a row
-    navigates to /tools/fitting?load=<id> which the builder reads on
-    init.
+    DPS is computed lazily via /tools/fitting/saved/dps after page render
+    (ISS-018 — was ~700ms warm because calculate_fitting_stats ran in
+    parallel for every fit before the page returned). Cost stays in
+    the synchronous render because it's a single batched ESI call
+    (cached by the ESI layer) and a cheap arithmetic loop.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -125,45 +125,18 @@ async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_d
 
     ship_names = await sde.type_ids_to_names(db, [f.ship_type_id for f in fits if f.ship_type_id]) if fits else {}
 
-    # --- Prices + DPS (parallel) -------------------------------------------
-    async def _dps_for(f: UserFitting) -> tuple[int, float]:
-        items = items_by_fit.get(f.id, [])
-        if not items:
-            return f.id, 0.0
-        try:
-            async with AsyncSessionLocal() as fdb:
-                stats = await calculate_fitting_stats(fdb, f.ship_type_id, items)
-            return f.id, float(stats.get("total_dps") or 0.0)
-        except Exception as e:
-            logger.info("DPS calc failed for fit %s: %s", f.id, e)
-            return f.id, 0.0
-
-    async def _price_map() -> dict[int, float]:
-        if not all_type_ids:
-            return {}
+    # --- Prices only (DPS deferred to /saved/dps) -------------------------
+    price_map: dict[int, float] = {}
+    if all_type_ids:
         try:
             client = ESIClient("", db=db)
             prices = await esi_market.get_market_prices(client)
-            m: dict[int, float] = {}
             for p in prices or []:
                 tid = p.get("type_id")
                 if tid in all_type_ids:
-                    m[tid] = float(p.get("average_price") or p.get("adjusted_price") or 0)
-            return m
+                    price_map[tid] = float(p.get("average_price") or p.get("adjusted_price") or 0)
         except Exception as e:
             logger.info("market price fetch failed: %s", e)
-            return {}
-
-    dps_task = asyncio.gather(*[_dps_for(f) for f in fits], return_exceptions=True)
-    price_task = _price_map()
-    dps_results, price_map = await asyncio.gather(dps_task, price_task)
-
-    dps_by_fit: dict[int, float] = {}
-    for r in dps_results:
-        if isinstance(r, Exception):
-            continue
-        fid, dps = r
-        dps_by_fit[fid] = dps
 
     # --- Compose rows ------------------------------------------------------
     rows = []
@@ -185,7 +158,9 @@ async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_d
             "ship_name": ship_names.get(f.ship_type_id, f"Type {f.ship_type_id}"),
             "folder_id": f.folder_id,
             "folder_path": path_map.get(f.folder_id) if f.folder_id else "",
-            "dps": round(dps_by_fit.get(f.id, 0.0), 1),
+            # DPS is filled in client-side from /tools/fitting/saved/dps —
+            # None signals "loading" to the template.
+            "dps": None,
             "cost": round(cost, 2),
             "updated_at": f.updated_at,
         })
@@ -202,6 +177,54 @@ async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_d
         "folders": folders,
         "folder_paths": folder_paths,
         "total": len(rows)})
+
+
+@router.get("/tools/fitting/saved/dps")
+async def saved_fittings_dps(request: Request, db: AsyncSession = Depends(get_db)):
+    """Batched DPS computation for the saved-fits list (ISS-018).
+
+    Returns {fit_id: dps} for every fit owned by the session user.
+    Computed in parallel — each fit gets its own AsyncSessionLocal so
+    they don't contend on a single SQLAlchemy session.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"error": "Not logged in"}
+
+    fit_rows = await db.execute(
+        select(UserFitting.id, UserFitting.ship_type_id, UserFitting.items_json)
+        .where(UserFitting.user_id == user_id)
+    )
+    fits = [(fid, sid, ij) for fid, sid, ij in fit_rows.all()]
+    if not fits:
+        return {}
+
+    async def _dps_for(fit_id: int, ship_type_id: int, items_json: str) -> tuple[int, float]:
+        try:
+            items = json.loads(items_json) if items_json else []
+        except Exception:
+            items = []
+        if not items:
+            return fit_id, 0.0
+        try:
+            async with AsyncSessionLocal() as fdb:
+                stats = await calculate_fitting_stats(fdb, ship_type_id, items)
+            return fit_id, float(stats.get("total_dps") or 0.0)
+        except Exception as e:
+            logger.info("DPS calc failed for fit %s: %s", fit_id, e)
+            return fit_id, 0.0
+
+    results = await asyncio.gather(
+        *[_dps_for(fid, sid, ij) for fid, sid, ij in fits],
+        return_exceptions=True,
+    )
+    out: dict[int, float] = {}
+    for r in results:
+        if isinstance(r, Exception):
+            continue
+        fid, dps = r
+        out[fid] = round(dps, 1)
+    return out
 
 
 @router.get("/tools/fitting/search/ships", response_class=HTMLResponse)
