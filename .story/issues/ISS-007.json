@@ -13,9 +13,9 @@
   ],
   "phase": "roadmap-and-gaps",
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 82a6af8. Added body-level `htmx:responseError` and `htmx:sendError` listeners in base.html. On 4xx/5xx the failing element's innerHTML is replaced with \"couldn't load (HTTP n) — refresh to retry\"; on network failure shows \"network error — refresh to retry\". For polling panels (60s alert-banners), the next successful poll outerHTML-swaps the whole element so the pill is transient — no manual recovery needed. Opt-out attribute `data-htmx-no-error=\"1\"` for panels where silent-fail is intentional. Skeleton-card / shimmer treatment from the recommendation deferred — not user-blocking. Verified post-deploy: commit 82a6af8, healthz 200.",
+  "resolvedDate": "2026-05-15",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Dashboard lazy-loaded panels missing skeleton and error states"
 }

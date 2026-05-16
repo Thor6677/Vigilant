@@ -6,6 +6,11 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
       - UPLOADS_DIR=/data/uploads
+      # ISS-013: persist vigilant.perf lines to a rotating file on the
+      # /data volume so perf measurements survive container recreates.
+      # Stdout is still written for `docker logs` visibility; this is
+      # additive. VIGILANT_PERF_LOG=1 lives in .env.
+      - VIGILANT_PERF_FILE=/data/logs/perf.log
     volumes:
       - app_data:/data
     networks:
