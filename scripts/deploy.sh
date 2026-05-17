@@ -20,7 +20,7 @@ cd /opt/vigilant
 # brief container churn doesn't fire DOWN alerts. The flag auto-expires
 # after 30 min in case this script exits non-zero in a path that skips
 # the trap below; the explicit cleanup keeps the normal path tidy.
-MAINTENANCE=/etc/vigilant/scripts/maintenance.sh
+MAINTENANCE=/opt/thunderborn-ops/scripts/maintenance.sh
 if [ -x "$MAINTENANCE" ]; then
     "$MAINTENANCE" on >/dev/null
     trap '"$MAINTENANCE" off >/dev/null 2>&1 || true' EXIT
