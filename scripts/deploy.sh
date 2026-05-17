@@ -16,6 +16,16 @@ set -euo pipefail
 
 cd /opt/vigilant
 
+# Silence the 5-min service-monitor for the duration of the deploy so the
+# brief container churn doesn't fire DOWN alerts. The flag auto-expires
+# after 30 min in case this script exits non-zero in a path that skips
+# the trap below; the explicit cleanup keeps the normal path tidy.
+MAINTENANCE=/etc/vigilant/scripts/maintenance.sh
+if [ -x "$MAINTENANCE" ]; then
+    "$MAINTENANCE" on >/dev/null
+    trap '"$MAINTENANCE" off >/dev/null 2>&1 || true' EXIT
+fi
+
 # Preflight: the app attaches to an external Docker bridge named `web`
 # that is shared with /opt/edge/'s nginx. If it doesn't exist, compose
 # fails mid-deploy with a confusing "network web declared as external,
