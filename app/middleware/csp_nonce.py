@@ -12,10 +12,32 @@ Why both nonce + unsafe-inline in Report-Only:
   is *reported* (Report-Only = no enforcement, just CSP violation events).
 - Legacy browsers without CSP3 nonce support fall back to `'unsafe-inline'`
   and execute everything as before.
-- This is the foundation step: after Steps 2-4 land (514 inline handlers
-  refactored to addEventListener, 100+ style attrs moved to utility
-  classes, then header flipped from Report-Only to enforcing), we drop
-  `'unsafe-inline'` entirely.
+
+## T-012 roadmap status (updated 2026-05-19 per T-032 decision)
+
+- **Step 1 (T-012):** ✅ nonce middleware + nonced inline blocks (commit 6d1d9de).
+- **Step 2 (T-031):** in-progress — inline event handlers (`onclick=` etc.)
+  being migrated to delegated `data-<event>="fn"` attributes via
+  `static/js/actions.js`. Round 3 closed bulk patterns (~75 handlers); the
+  remaining ~184 arg-bearing handlers are tracked under ISS-020/021/022.
+- **Step 3 (T-032):** ✅ DECISION — `style-src` keeps `'unsafe-inline'`
+  permanently. Refactoring 3,296 inline `style="..."` declarations across
+  101 templates to JS-driven `setProperty` calls would be a months-long
+  undertaking with real first-paint regressions, for marginal hardening of
+  a threat (style-based XSS) that is dramatically less exploitable than
+  script injection. Industry precedent (GitHub, Linear, Notion, Stripe
+  Dashboard) keeps `style-src 'unsafe-inline'` while tightening
+  `script-src`. The OWASP CSP cheat-sheet and Google's web.dev "Strict
+  CSP" guide both treat this stance as acceptable. For a single-tenant
+  authenticated EVE companion app with no untrusted user-generated HTML
+  surface, the residual style-based XSS risk is effectively zero. Future
+  contributors: do NOT remove `'unsafe-inline'` from `style-src` thinking
+  it's the natural next step — that scope was explicitly killed in T-032.
+  Design-system hygiene for the most-repeated inline patterns is a
+  separate concern, tracked under ISS-028.
+- **Step 4 (T-033):** drops `'unsafe-inline'` from `script-src` only
+  (style-src untouched) and flips the header from `Report-Only` to
+  enforcing.
 
 The edge nginx config at /opt/edge/nginx/conf.d/vigilant.conf:47 still
 sends its own static Content-Security-Policy-Report-Only header. That's
@@ -35,6 +57,12 @@ from starlette.requests import Request
 # request. Mirrors the existing nginx Report-Only policy at
 # /opt/edge/nginx/conf.d/vigilant.conf:47 with the addition of a nonce
 # source in script-src and style-src.
+#
+# IMPORTANT (T-032 decision, 2026-05-19): `style-src 'unsafe-inline'` is
+# permanent — vigilant intentionally keeps inline `style="..."` attrs.
+# See module docstring for rationale. Removing it is not part of T-033 or
+# any planned future step; doing so requires a separate ticket with
+# explicit reconsideration of the threat model.
 _CSP_TEMPLATE = (
     "default-src 'self'; "
     "script-src 'self' 'nonce-{nonce}' 'unsafe-inline'; "

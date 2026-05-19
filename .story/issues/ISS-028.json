@@ -1,0 +1,22 @@
+{
+  "components": [
+    "frontend",
+    "design-system"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-028",
+  "impact": "T-032 decided not to refactor inline styles for CSP reasons (kept style-src unsafe-inline). But the codebase has clear design-system hygiene wins independent of CSP. The top-5 static, non-interpolated inline-style patterns alone cover ~250 of the 3,237 occurrences and are mechanically sed-replaceable: (a) `font-size:10px;color:var(--muted);` — 68 sites, (b) `color:var(--muted);` — 58 sites, (c) `color:var(--text);` — 46 sites, (d) `padding:0.75rem;` — 40 sites, (e) `font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);` — 39 sites (clearly a 'section eyebrow label' utility). Adding 5 utility classes to base.html's <style> block (.muted, .text-label, .section-eyebrow, etc.) and a sed pass to swap them would shrink the inline-style count by ~8% with zero functional risk. Pure DX/maintainability win, not security. Independent of T-033.",
+  "location": [
+    "app/templates/",
+    "app/templates/base.html"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-032"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "Design-system hygiene: consolidate top-5 repeated inline-style patterns into utility classes"
+}

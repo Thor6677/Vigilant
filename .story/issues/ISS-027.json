@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-027",
+  "impact": "Top-5 repeated static inline-style patterns (~250 occurrences) are mechanically consolidatable into utility classes. Out of scope for this CSP-only ticket; will file as a design-hygiene follow-up issue.",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[scope] Top-5 repeated static inline-style patterns (~250 occurrences) are mechanically "
+}
