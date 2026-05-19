@@ -54,12 +54,12 @@
         <div style="padding:0.3rem 0.75rem 0.3rem 2.5rem;font-size:10px;border-top:1px solid var(--border);display:flex;gap:0.5rem;flex-wrap:wrap;align-items:baseline;">
             <span style="color:var(--muted);min-width:55px;">{{ k.time_str }}</span>
             <a href="https://zkillboard.com/kill/{{ k.killmail_id }}/" target="_blank" rel="noopener"
-               style="color:var(--danger);text-decoration:none;" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">{{ k.victim_ship }}</a>
+               class="b-hover-underline" style="color:var(--danger);text-decoration:none;">{{ k.victim_ship }}</a>
             <span style="color:var(--muted);">by {{ k.attacker_count }}</span>
             <span style="color:var(--accent);">{{ k.value_str }}</span>
             {% if k.attacker_ships %}
             <span style="color:var(--muted);">·
-                {% for ship in k.attacker_ships %}<a href="https://zkillboard.com/ship/{{ ship.type_id }}/" target="_blank" rel="noopener" style="color:var(--muted);text-decoration:none;" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">{{ ship.name }}{% if ship.count > 1 %}&nbsp;×{{ ship.count }}{% endif %}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+                {% for ship in k.attacker_ships %}<a href="https://zkillboard.com/ship/{{ ship.type_id }}/" target="_blank" rel="noopener" class="b-hover-underline" style="color:var(--muted);text-decoration:none;">{{ ship.name }}{% if ship.count > 1 %}&nbsp;×{{ ship.count }}{% endif %}</a>{% if not loop.last %}, {% endif %}{% endfor %}
             </span>
             {% endif %}
         </div>

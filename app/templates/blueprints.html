@@ -17,7 +17,7 @@
             {% if corp_id %}
             <img src="https://images.evetech.net/corporations/{{ corp_id }}/logo?size=32"
                  style="width:20px;height:20px;border:1px solid var(--border);" alt=""
-                 onerror="this.style.display='none'">
+                 data-on-error="hide">
             {% endif %}
             <span style="font-size:11px;color:var(--muted);">{{ char.corporation_name }}</span>
         </div>

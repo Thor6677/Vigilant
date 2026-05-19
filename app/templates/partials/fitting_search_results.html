@@ -3,46 +3,38 @@
 {% else %}
 {% for r in results %}
 {% if search_type == 'ship' %}
-<div style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
-     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
-     onmouseout="this.style.background=''">
+<div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
     <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.style.display='none'">
+         data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="selectShip({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">{{ r.type_name }}</span>
     <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'module' %}
-<div style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
-     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
-     onmouseout="this.style.background=''">
+<div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
     <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.style.display='none'">
+         data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', '{{ r.slot_type }}')">{{ r.type_name }}</span>
     <span style="font-size:9px;color:var(--muted);text-transform:uppercase;">{{ r.slot_type }}</span>
     <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'drone' %}
-<div style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
-     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
-     onmouseout="this.style.background=''">
+<div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
     <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.style.display='none'">
+         data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addDrone({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">{{ r.type_name }}</span>
     <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'charge' %}
-<div style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);"
-     onmouseover="this.style.background='rgba(200,169,81,0.07)'"
-     onmouseout="this.style.background=''">
+<div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
     <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32"
          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.style.display='none'">
+         data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', 'cargo')">{{ r.type_name }}</span>
     <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>

@@ -155,11 +155,11 @@
             {% for entry in group.entries %}
             <div style="display:flex;align-items:center;gap:0.4rem;padding:0.15rem 0;font-size:10px;">
                 {% if entry.entry_type == 'corporation' %}
-                <img src="https://images.evetech.net/corporations/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                <img src="https://images.evetech.net/corporations/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">
                 {% elif entry.entry_type == 'alliance' %}
-                <img src="https://images.evetech.net/alliances/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                <img src="https://images.evetech.net/alliances/{{ entry.eve_id }}/logo?size=32" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">
                 {% elif entry.entry_type == 'character' %}
-                <img src="https://images.evetech.net/characters/{{ entry.eve_id }}/portrait?size=32" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                <img src="https://images.evetech.net/characters/{{ entry.eve_id }}/portrait?size=32" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">
                 {% endif %}
                 <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
                 <span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>

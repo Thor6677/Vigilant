@@ -35,7 +35,7 @@
     <span style="flex:0 0 24px;">
         <img src="https://images.evetech.net/characters/{{ c.character_id }}/portrait?size=32"
              style="width:20px;height:20px;border:1px solid var(--border);" alt=""
-             onerror="this.style.display='none'">
+             data-on-error="hide">
     </span>
     <span style="flex:2;font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.character_name }}</span>
     <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(c.value) }}</span>

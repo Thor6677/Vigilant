@@ -64,7 +64,7 @@
             <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
                 <img src="https://images.evetech.net/types/{{ ore.type_id }}/icon?size=32"
                      style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-                     onerror="this.style.display='none'">
+                     data-on-error="hide">
                 <span style="font-size:11px;color:var(--text);">{{ ore.name }}</span>
             </span>
             <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:600;">{{ "{:,}".format(ore.quantity) }}</span>

@@ -83,7 +83,7 @@
         {% for item in non_ship_items %}
         <div class="b-table-row" style="padding:0.25rem 0.75rem;">
             <span style="flex:3;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;overflow:hidden;">
-                <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" onerror="this.style.display='none'">
+                <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" data-on-error="hide">
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.type_name }}</span>
             </span>
             <span style="flex:1;font-size:10px;color:var(--muted);text-align:right;">{{ item.distance_str }}</span>

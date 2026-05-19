@@ -1,0 +1,24 @@
+{
+  "components": [
+    "admin",
+    "starmap",
+    "sde"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-019",
+  "impact": "When CCP ships a new SDE (new systems, new gate connections like Yulai↔Manifest in the recent expansion), the admin \"Force Update SDE\" button only refreshes DB tables. The k-space star map at /map reads three static JSON files (systems.json, edges.json, regions.json) baked into the Vite bundle at build time, so the on-screen topology stays stale until someone manually runs `python scripts/build_map_data.py` and re-deploys the frontend. W-space map is unaffected (it reads from /api/map/wormholes-data/* which is DB-backed). Fix options: (a) add a FastAPI endpoint that serves these three JSONs from a writable runtime path, and have the SDE update flow regenerate them from the now-fresh DB tables; (b) call build_map_data.py from the SDE update flow and write into the runtime path; (c) leave static files for caching but also expose a runtime-override endpoint when fresher data exists on disk. Option (a) is cleanest — DB → JSON via the same projection logic build_map_data.py already does, written to /data/map/*.json, served by FastAPI with no-store. Manually unblocked on 2026-05-19 by running build_map_data.py locally and committing the regenerated JSONs (commit 7c8f43d).",
+  "location": [
+    "app/routes/admin.py:519",
+    "app/routes/starmap.py:1252-1289",
+    "scripts/build_map_data.py",
+    "frontend/public/data/",
+    "frontend/src/components/StarMap/useMapData.ts:36-39"
+  ],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "SDE force-update doesn't refresh k-space star map static JSONs"
+}

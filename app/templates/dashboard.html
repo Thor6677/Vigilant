@@ -218,7 +218,7 @@
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
                     {% if char.corporation_id %}
-                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" onerror="this.style.display='none'">
+                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" data-on-error="hide">
                     {% endif %}
                     {{ char.corporation_name }}
                 </div>
@@ -231,7 +231,7 @@
             <div class="b-row"><span class="b-row-label">Location</span><span class="b-row-val">{% if loc.security is not none %}<span class="{{ sec_cls(loc.security) }}">[{{ "%.1f"|format(loc.security) }}]</span> {% endif %}{{ loc.system_name or "Unknown" }}</span></div>
             {% if loc.docked_at %}<div class="b-row"><span class="b-row-label">Dock</span><span class="b-row-val is-muted" style="max-width:160px;">{{ loc.docked_at }}</span></div>
             {% else %}<div class="b-row"><span class="b-row-label">Status</span><span class="b-row-val is-warn">In Space</span></div>{% endif %}
-            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
+            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" data-on-error="hide"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
             {% set cd = clones.get(char.character_id) %}
@@ -282,7 +282,7 @@
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
                     {% if char.corporation_id %}
-                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" onerror="this.style.display='none'">
+                    <img src="https://images.evetech.net/corporations/{{ char.corporation_id }}/logo?size=32" class="corp-logo" data-on-error="hide">
                     {% endif %}
                     {{ char.corporation_name }}
                 </div>
@@ -295,7 +295,7 @@
             <div class="b-row"><span class="b-row-label">Location</span><span class="b-row-val">{% if loc.security is not none %}<span class="{{ sec_cls(loc.security) }}">[{{ "%.1f"|format(loc.security) }}]</span> {% endif %}{{ loc.system_name or "Unknown" }}</span></div>
             {% if loc.docked_at %}<div class="b-row"><span class="b-row-label">Dock</span><span class="b-row-val is-muted" style="max-width:160px;">{{ loc.docked_at }}</span></div>
             {% else %}<div class="b-row"><span class="b-row-label">Status</span><span class="b-row-val is-warn">In Space</span></div>{% endif %}
-            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none'"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
+            {% if loc.ship_type_id %}<div class="b-row"><span class="b-row-label">Ship</span><span class="b-row-val" style="display:flex;align-items:center;gap:0.35rem;justify-content:flex-end;"><img src="https://images.evetech.net/types/{{ loc.ship_type_id }}/render?size=32" style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;" data-on-error="hide"><span>{{ loc.ship_type_name or "Unknown" }}</span></span></div>{% endif %}
             {% endif %}
             {% if wallet is not none %}<div class="b-row"><span class="b-row-label">Wallet</span><span class="b-row-val is-accent">{{ format_isk(wallet) }}</span></div>{% endif %}
             {% set cd = clones.get(char.character_id) %}

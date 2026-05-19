@@ -50,7 +50,7 @@
         {% if fits[0].ship_type_id %}
         <img src="https://images.evetech.net/types/{{ fits[0].ship_type_id }}/render?size=64"
              style="width:28px;height:28px;border:1px solid var(--border);"
-             onerror="this.style.display='none'">
+             data-on-error="hide">
         {% endif %}
         <span class="b-label">{{ ship_name }}</span>
         <span style="font-size:10px;color:var(--muted);">{{ fits | length }} fit{{ 's' if fits | length != 1 else '' }}</span>
@@ -95,7 +95,7 @@
                 <div class="b-table-row" style="padding:0.2rem 0.75rem;">
                     <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
                          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
-                         onerror="this.style.display='none'">
+                         data-on-error="hide">
                     <span style="flex:1;font-size:11px;color:var(--text);">{{ item.name }}</span>
                     {% if item.quantity > 1 %}
                     <span style="font-size:10px;color:var(--muted);">x{{ item.quantity }}</span>

@@ -15,8 +15,8 @@
     </div>
     {% for sys in systems %}
     <a href="/wormholes/system/{{ sys['system_name'] }}"
-       style="display:grid;grid-template-columns:1fr 0.6fr 1fr 1.5fr;gap:0.5rem;padding:0.4rem 0.75rem;border-top:1px solid var(--border);text-decoration:none;color:var(--text);transition:background 0.15s;"
-       onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
+       class="b-hover-surface"
+       style="display:grid;grid-template-columns:1fr 0.6fr 1fr 1.5fr;gap:0.5rem;padding:0.4rem 0.75rem;border-top:1px solid var(--border);text-decoration:none;color:var(--text);transition:background 0.15s;">
         <span style="color:var(--accent);">{{ sys['system_name'] }}</span>
         <span style="color:{{ class_color(sys['wh_class']) }};">{{ class_label(sys['wh_class']) }}</span>
         <span style="color:{% if sys['effect'] %}var(--text){% else %}var(--muted){% endif %};">{{ effect_label(sys['effect']) or '—' }}</span>

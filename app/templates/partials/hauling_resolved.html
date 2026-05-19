@@ -47,7 +47,7 @@
     {% for item in items %}
     <div class="b-table-row">
         <span style="flex:3;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
-            <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;" onerror="this.style.display='none'">
+            <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;" data-on-error="hide">
             {{ item.name }}
         </span>
         <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,}".format(item.qty) }}</span>
@@ -83,7 +83,7 @@
     {% for rec in recommendations %}
     <div class="b-table-row" {% if loop.first %}style="background:rgba(var(--accent-rgb,200,170,110),0.05);"{% endif %}>
         <span style="flex:2;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
-            <img src="https://images.evetech.net/types/{{ rec.type_id }}/render?size=32" style="width:20px;height:20px;" onerror="this.style.display='none'">
+            <img src="https://images.evetech.net/types/{{ rec.type_id }}/render?size=32" style="width:20px;height:20px;" data-on-error="hide">
             {{ rec.name }}
         </span>
         <span style="flex:1;font-size:10px;color:var(--muted);">{{ rec.group }}</span>

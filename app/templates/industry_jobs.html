@@ -222,7 +222,7 @@
                     <div class="ij-row-product">
                         {% if r.product_id %}
                         <img src="https://images.evetech.net/types/{{ r.product_id }}/icon?size=32"
-                             onerror="this.style.display='none'" alt="">
+                             data-on-error="hide" alt="">
                         {% endif %}
                         <div style="min-width:0;">
                             <div class="ij-product-name">{{ r.product_name }}</div>

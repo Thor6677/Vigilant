@@ -6,7 +6,7 @@
         <div style="display:flex;align-items:center;gap:0.4rem;">
             <img src="https://images.evetech.net/types/{{ type_id }}/icon?size=32"
                  style="width:20px;height:20px;border:1px solid var(--border);"
-                 onerror="this.style.display='none'">
+                 data-on-error="hide">
             <span style="font-size:11px;font-weight:600;color:var(--accent);">{{ product_name }}</span>
             <span style="font-size:10px;color:var(--muted);">× {{ "{:,}".format(needed) }}</span>
         </div>
@@ -96,7 +96,7 @@
             <span style="flex:3;display:flex;align-items:center;gap:0.35rem;">
                 <img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
                      style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
-                     onerror="this.style.display='none'">
+                     data-on-error="hide">
                 <span style="font-size:10px;color:var(--text);">{{ row.name }}</span>
             </span>
             <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(row.base_qty) }}</span>

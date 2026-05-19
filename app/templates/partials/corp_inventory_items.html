@@ -10,7 +10,7 @@
     <div class="b-row" style="gap:0.4rem;padding:0.35rem 0.75rem;">
         <img src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
              style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
-             onerror="this.style.display='none'">
+             data-on-error="hide">
         <span style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {{ t.type_name }}
             {% if t.location_flag %}<span style="color:var(--muted);font-size:9px;">{{ HANGAR_LABELS.get(t.location_flag, t.location_flag) }}</span>{% endif %}

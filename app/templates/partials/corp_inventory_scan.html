@@ -11,7 +11,7 @@
      data-flag="{{ item.flag }}">
     <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
          style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.style.display='none'">
+         data-on-error="hide">
     <span style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ item.type_name }}
         <span style="color:var(--muted);font-size:9px;">{{ item.flag_label }}</span>

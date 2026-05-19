@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
             {% for name, mid in minerals.items() %}
             <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:110px;">
                 <label style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:4px;">
-                    <img src="https://images.evetech.net/types/{{ mid }}/icon?size=32" style="width:14px;height:14px;" onerror="this.style.display='none'">
+                    <img src="https://images.evetech.net/types/{{ mid }}/icon?size=32" style="width:14px;height:14px;" data-on-error="hide">
                     {{ name }}
                 </label>
                 <input type="text" name="mineral_{{ mid }}" value="{{ prefill.get(mid, 0) if prefill else 0 }}" placeholder="0"
