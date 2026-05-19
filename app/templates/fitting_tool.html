@@ -912,7 +912,17 @@ function refreshSkillWarnings() {
 }
 
 /* ── Module Info Modal ─────────────────────────────────────────────────── */
-function showModuleInfo(typeId) {
+function showModuleInfo(typeIdOrEvent) {
+    // ISS-021/022: dispatcher calls this as `fn.call(el, event)` so `this`
+    // is the element and the arg is the event. Legacy callers in this file
+    // (innerHTML string-concat sites in ISS-020) still call
+    // `showModuleInfo(typeId)` directly. Detect via dataset.
+    var typeId;
+    if (this && this.dataset && this.dataset.typeId) {
+        typeId = parseInt(this.dataset.typeId, 10);
+    } else {
+        typeId = typeIdOrEvent;
+    }
     if (!typeId) return;
     var modal = document.getElementById('info-modal');
     var body = document.getElementById('info-modal-body');

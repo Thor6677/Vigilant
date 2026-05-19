@@ -9,7 +9,7 @@
          data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="selectShip({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">{{ r.type_name }}</span>
-    <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
+    <button data-click="showModuleInfo" data-type-id="{{ r.type_id }}" data-stop style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'module' %}
 <div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
@@ -19,7 +19,7 @@
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', '{{ r.slot_type }}')">{{ r.type_name }}</span>
     <span style="font-size:9px;color:var(--muted);text-transform:uppercase;">{{ r.slot_type }}</span>
-    <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
+    <button data-click="showModuleInfo" data-type-id="{{ r.type_id }}" data-stop style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'drone' %}
 <div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
@@ -28,7 +28,7 @@
          data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addDrone({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}')">{{ r.type_name }}</span>
-    <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
+    <button data-click="showModuleInfo" data-type-id="{{ r.type_id }}" data-stop style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'charge' %}
 <div class="b-hover-accent" style="padding:0.3rem 0.5rem;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);">
@@ -37,7 +37,7 @@
          data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
           onclick="addModule({{ r.type_id }}, '{{ r.type_name | replace("'", "\\'") }}', 'cargo')">{{ r.type_name }}</span>
-    <button onclick="event.stopPropagation();showModuleInfo({{ r.type_id }})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
+    <button data-click="showModuleInfo" data-type-id="{{ r.type_id }}" data-stop style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% endif %}
 {% endfor %}
