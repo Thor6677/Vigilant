@@ -1,0 +1,22 @@
+{
+  "components": [
+    "frontend",
+    "csp"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-022",
+  "impact": "After T-031 round 3 (bulk-pattern slice) and ISS-021 (data-click-arg contract), ~150 inline handlers remain across these templates needing per-template migration with form/feature smoke tests: structure_timers.html (18), gatecheck.html (14), discordtime.html (10), skill_plan_detail.html (8), partials/component_panel.html (8), mining_ledger.html (8), partials/fitting_search_results.html (~14 after hover removal — onclick selectShip/addModule/addDrone), partials/admin_users.html (5), and others. Each ticket should scope to one template = one PR-sized review. Also includes 16 oninput Jinja-arg search filters, 13 onchange selects, 12 onsubmit return-validate forms, 3 onfocus/onkeydown, 6 onmousedown sites. Blocker for T-033 unsafe-inline drop.",
+  "location": [
+    "app/templates/"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-031",
+    "T-033"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "CSP T-031 follow-up: migrate per-template handlers (~150 sites)"
+}

@@ -1,0 +1,32 @@
+{
+  "components": [
+    "frontend",
+    "fitting-tool",
+    "csp"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-020",
+  "impact": "fitting_tool.html builds many rows via innerHTML string-concat with inline onclick/onerror/onmouseover/onmouseout attrs embedded in the string (lines 627, 653, 720, 990, 1295, 1297, 1397, 1405, 1444, 1446 — 36 inline handlers total). These were excluded from T-031 round 3 because the migration script can't safely regex into JS string literals. Right approach: refactor the relevant renderers to use document.createElement + addEventListener, OR templatize via a hidden <template> element. Until done, this file remains the single largest blocker for T-033's unsafe-inline drop.",
+  "location": [
+    "app/templates/fitting_tool.html:627",
+    "app/templates/fitting_tool.html:653",
+    "app/templates/fitting_tool.html:720",
+    "app/templates/fitting_tool.html:990",
+    "app/templates/fitting_tool.html:1295",
+    "app/templates/fitting_tool.html:1297",
+    "app/templates/fitting_tool.html:1397",
+    "app/templates/fitting_tool.html:1405",
+    "app/templates/fitting_tool.html:1444",
+    "app/templates/fitting_tool.html:1446"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-031",
+    "T-033"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "CSP T-031 follow-up: fitting_tool.html innerHTML refactor"
+}

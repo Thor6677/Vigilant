@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-026",
+  "impact": "intel.html scan history rows shifted from transparent rest-state to var(--bg) rest-state with the new .b-hover-row class. Reviewer flagged as non-blocking. Filed as ISS-025 for follow-up consideration.",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[ux] intel.html scan history rows shifted from transparent rest-state to var(--bg) re"
+}

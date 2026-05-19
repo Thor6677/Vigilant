@@ -1,0 +1,23 @@
+{
+  "components": [
+    "frontend",
+    "ui",
+    "intel"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-025",
+  "impact": "app/templates/intel.html:57 — the scan-history table rows now use class b-hover-row which declares base background=var(--bg) and hover=var(--surface). The original onmouseover/out pair was effectively a no-op (it referenced an undefined var(--hover) and reset to 'transparent'). Net effect: rest state is now slightly darker than the surrounding panel, and hover blends the row INTO the panel instead of away from it — inverts the typical 'highlight on hover' affordance. Three options: (a) accept the new look as consistent with the wormhole_kills sidebar aesthetic; (b) define a new utility .b-hover-transparent with rest=transparent + hover=var(--surface) and switch intel.html to it; (c) define a global --hover token if there's a canonical hover color the design system wanted. Surfaced by round-2 code review of T-031 (commit 19f427d).",
+  "location": [
+    "app/templates/intel.html:57",
+    "app/templates/base.html:778-784"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-031"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "intel.html scan history row hover: rest-state visually darker after T-031 round 3"
+}

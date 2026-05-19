@@ -1,0 +1,24 @@
+{
+  "components": [
+    "backend",
+    "csp",
+    "telemetry"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-023",
+  "impact": "The CSP middleware currently emits Report-Only headers but has no report-uri / report-to directive — violations only surface in browser DevTools, never server-side. Adding a /csp-report endpoint that logs violations to a jsonl file would let us automate before/after diffs during T-031/T-032 migrations and catch regressions earlier. ~30 lines: FastAPI route accepting application/csp-report POSTs, appending to a rotating log under /data/logs/. Reference vigilant/app/middleware/csp_nonce.py for the existing header template.",
+  "location": [
+    "app/middleware/csp_nonce.py"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-031",
+    "T-032",
+    "T-033"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "CSP report endpoint for violation telemetry"
+}

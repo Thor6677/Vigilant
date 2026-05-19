@@ -1,0 +1,23 @@
+{
+  "components": [
+    "frontend",
+    "csp",
+    "dispatcher"
+  ],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-021",
+  "impact": "~113 arg-bearing onclick handlers across the app templates carry Jinja-interpolated args (e.g. onclick=\"loadFitting({{ f.id }}, this)\"). Migrating them requires a new dispatcher convention. Two designs to consider: (a) `data-click=\"fn\" data-arg=\"...\"` with the handler reading `this.dataset.arg` (1 arg only), (b) `data-click=\"fn\" data-args='[1,2,3]'` JSON-blob convention (any arg shape, but verbose). Recommend (a) for the 80%+ single-arg case and inline data-* attrs for the rest. After contract is defined, the 7 stopProp+arg sites (fitting_saved.html, partials/fitting_search_results.html, partials/mining_ledger_corp.html) can also migrate via `data-click data-arg data-stop`.",
+  "location": [
+    "static/js/actions.js"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-031",
+    "T-033"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "CSP T-031 follow-up: define data-click-arg dispatcher contract"
+}
