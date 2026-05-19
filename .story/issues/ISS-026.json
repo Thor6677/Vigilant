@@ -8,9 +8,9 @@
   "location": [],
   "phase": null,
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Duplicate. Auto-filed by the autonomous guide from a deferred code-review finding at the same time I manually filed the canonical version as ISS-025. Closing ISS-026 here so the issue list shows one entry for this concern; tracking continues under ISS-025.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "[ux] intel.html scan history rows shifted from transparent rest-state to var(--bg) re"
 }
