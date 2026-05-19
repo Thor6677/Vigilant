@@ -18,7 +18,8 @@
     <span style="font-size:11px;color:var(--accent);font-weight:bold;">{{ format_isk(corp_total_value) }} ISK</span>
     <span style="font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(corp_total_quantity) }} units</span>
     <span style="font-size:10px;color:var(--muted);">{{ corp_days }} days active</span>
-    <button onclick="viewLedger('{{ char_stats | map(attribute='character_id') | join(',') }}')"
+    <button data-click="viewLedger"
+            data-char-ids="{{ char_stats | map(attribute='character_id') | join(',') }}"
             class="b-btn" style="margin-left:auto;padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
         View Corp Ledger
     </button>
@@ -42,7 +43,9 @@
     <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(c.quantity) }} units</span>
     <span style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ c.days }}d</span>
     <span style="flex:0 0 40px;text-align:right;">
-        <button onclick="event.stopPropagation(); viewLedger('{{ c.character_id }}')"
+        <button data-click="viewLedger"
+                data-char-ids="{{ c.character_id }}"
+                data-stop
                 class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
             View
         </button>

@@ -15,9 +15,49 @@
  *   <img    onerror="this.style.display='none'">
  *                                →  <img    data-on-error="hide">
  *
- * Handlers that take args, reference `this`/`event`, contain multiple
- * statements, or interpolate `{{ }}` are NOT auto-converted — they need
- * the `data-click-arg` contract (deferred to a follow-up ticket).
+ * Handlers that take args, reference `this`/`event`, or contain multiple
+ * statements need the `data-*` arg convention defined below (ISS-021).
+ *
+ * ARG-PASSING CONVENTION (ISS-021):
+ *
+ * Instead of inline positional args, the handler reads from `this.dataset.*`:
+ *
+ *   <!-- before -->
+ *   <button onclick="loadFitting({{ f.id }}, this)">Load</button>
+ *
+ *   <!-- after -->
+ *   <button data-click="loadFitting" data-fitting-id="{{ f.id }}">Load</button>
+ *
+ *   window.loadFitting = function(e) {
+ *       // `this` is the matched element (dispatcher does fn.call(el, e))
+ *       var id = parseInt(this.dataset.fittingId, 10);
+ *       // ... existing logic
+ *   };
+ *
+ * Multi-arg sites use multiple data-* attrs, NOT a JSON blob:
+ *
+ *   <button data-click="addModule"
+ *           data-type-id="{{ r.type_id }}"
+ *           data-type-name="{{ r.type_name }}"
+ *           data-slot-type="{{ r.slot_type }}">Add</button>
+ *
+ *   window.addModule = function() {
+ *       var id   = parseInt(this.dataset.typeId, 10);
+ *       var name = this.dataset.typeName;
+ *       var slot = this.dataset.slotType;
+ *   };
+ *
+ * Rationale: multiple data-* attrs is idiomatic HTML5 and matches what
+ * `dataset` is for. A `data-args='[1,"foo"]'` JSON-blob convention was
+ * considered and rejected — Jinja quote-escaping inside JSON is fragile
+ * and the per-attr approach reads more like HTML.
+ *
+ * For sites that wrap their call in `event.stopPropagation();`, combine
+ * with `data-stop`:
+ *
+ *   <button data-click="viewLedger"
+ *           data-char-ids="{{ c.character_id }}"
+ *           data-stop>...</button>
  *
  * Special conventions added in T-031 round 3:
  *   data-on-error="hide"  — built-in shortcut for the broken-image

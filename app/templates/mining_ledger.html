@@ -224,7 +224,12 @@
         window.scrollTo({top: 0, behavior: 'smooth'});
     };
 
-    window.viewLedger = function(charIdsCsv) {
+    window.viewLedger = function() {
+        // ISS-021: reads char IDs from `this.dataset.charIds`. Call sites:
+        //   1. mining_ledger.html "View all" button (CSV of all char IDs).
+        //   2. partials/mining_ledger_corp.html per-character button.
+        var charIdsCsv = this.dataset.charIds;
+        if (!charIdsCsv) return;
         htmx.ajax('GET', '/industry/mining-ledger/view?char_ids=' + charIdsCsv, '#ledger-data');
         document.getElementById('chart-section').style.display = '';
         window.scrollTo({top: 0, behavior: 'smooth'});

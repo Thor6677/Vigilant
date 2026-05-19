@@ -15,9 +15,9 @@
     "T-031",
     "T-033"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Defined the dispatcher arg-passing convention in static/js/actions.js header docs, and migrated viewLedger as a proof-of-concept covering both the single-arg single-call case and the stopProp+arg case.\n\n**Convention (per-attr dataset, not JSON):**\n\n- Single arg: `data-click=\"fn\" data-foo=\"bar\"`; handler reads `this.dataset.foo`.\n- Multi arg: multiple `data-*` attrs (e.g. `data-type-id`, `data-type-name`, `data-slot-type`); handler reads `this.dataset.typeId`, etc.\n- StopProp+arg: combine with `data-stop`.\n\nPer-attr was chosen over a JSON blob (`data-args='[1,\"foo\"]'`) because Jinja-string quote-escaping inside JSON is fragile and per-attr is what HTML5 `dataset` is for.\n\n**Proof-of-concept migration (3 sites, 2 templates):**\n\n- `mining_ledger.html:227` — `window.viewLedger` reworked to read `this.dataset.charIds` (was a positional `charIdsCsv` arg).\n- `partials/mining_ledger_corp.html:21` — \"View Corp Ledger\" button: `onclick=\"viewLedger('{{ csv }}')\"` → `data-click=\"viewLedger\" data-char-ids=\"{{ csv }}\"`.\n- `partials/mining_ledger_corp.html:45` — per-character \"View\" button: `onclick=\"event.stopPropagation(); viewLedger('{{ id }}')\"` → `data-click=\"viewLedger\" data-char-ids=\"{{ id }}\" data-stop`.\n\nThe bulk sweep across ~113 arg-bearing onclick handlers + the remaining 6 stopProp+arg sites stays scoped to ISS-022 (per-template migration). This issue defined the contract and validated it works end-to-end on a representative pattern.\n\nCommit: pending deploy.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "CSP T-031 follow-up: define data-click-arg dispatcher contract"
 }
