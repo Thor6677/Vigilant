@@ -35,6 +35,7 @@ from app.routes.gatecheck import router as gatecheck_router
 from app.routes.intel_watch import router as intel_watch_router
 from app.routes.player_stats import router as player_stats_router
 from app.routes.admin import router as admin_router
+from app.routes.csp import router as csp_router
 from app.routes.skill_plans import router as skill_plans_router
 from app.routes.structure_timers import router as structure_timers_router
 from app.routes.starmap import router as starmap_router, start_map_poller
@@ -122,6 +123,7 @@ app.include_router(intel_watch_router)
 app.include_router(player_stats_router)
 app.include_router(dscan_router)
 app.include_router(admin_router)
+app.include_router(csp_router)
 app.include_router(skill_plans_router)
 app.include_router(structure_timers_router)
 app.include_router(starmap_router)

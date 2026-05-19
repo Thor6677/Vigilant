@@ -72,7 +72,10 @@ _CSP_TEMPLATE = (
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
-    "form-action 'self'"
+    "form-action 'self'; "
+    # ISS-023: server-side violation sink. Sink lives at app/routes/csp.py,
+    # appends to /data/logs/csp-violations.jsonl with size-capped rotation.
+    "report-uri /csp-report"
 )
 
 
