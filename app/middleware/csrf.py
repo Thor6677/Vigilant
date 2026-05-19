@@ -31,9 +31,12 @@ log = logging.getLogger(__name__)
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
-# Paths that are state-mutating but cannot use a CSRF token. None today —
-# OAuth callback is GET (state cookie covers it) and /healthz is GET.
-EXEMPT_PATHS: frozenset[str] = frozenset()
+# Paths that are state-mutating but cannot use a CSRF token.
+# - /csp-report: browser-initiated CSP violation report POSTs cannot carry a
+#   CSRF header. The endpoint is a write-only sink (returns 204 always, logs
+#   to a size-capped jsonl) — exempting it doesn't widen any surface a
+#   malicious page could exploit beyond logging spam.
+EXEMPT_PATHS: frozenset[str] = frozenset({"/csp-report"})
 
 # urlencoded bodies above this size are rejected before parsing — guards
 # against a memory-amplification attack via the CSRF middleware itself.
