@@ -8,9 +8,9 @@
   "location": [],
   "phase": null,
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Duplicate. Auto-filed by the autonomous guide from a deferred T-032 plan-review finding at the same time I manually filed the canonical version as ISS-028. Closing ISS-027; tracking continues under ISS-028.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "[scope] Top-5 repeated static inline-style patterns (~250 occurrences) are mechanically "
 }
