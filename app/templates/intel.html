@@ -54,7 +54,7 @@
                 </thead>
                 <tbody>
                 {% for scan in history %}
-                    <tr class="b-hover-row" style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;"
+                    <tr class="b-hover-transparent" style="border-bottom:1px solid var(--border);cursor:pointer;"
                         onclick="window.location='/intel/{{ scan.id }}'">
                         <td style="padding:0.4rem 0.5rem;">
                             {% if scan.scan_type == 'dscan' %}

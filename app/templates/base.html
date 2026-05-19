@@ -783,6 +783,12 @@
         .b-hover-surface:hover   { background: var(--surface); }
         .b-hover-row             { background: var(--bg); transition: background 0.15s; }
         .b-hover-row:hover       { background: var(--surface); }
+        /* Hover-only highlight that keeps a transparent rest state. Use on
+           rows inside a panel where the row should NOT carry its own
+           background at rest (otherwise it stands out from the panel
+           surface even when un-hovered). See ISS-025. */
+        .b-hover-transparent        { background: transparent; transition: background 0.15s; }
+        .b-hover-transparent:hover  { background: var(--surface); }
         .b-hover-underline       { text-decoration: none; }
         .b-hover-underline:hover { text-decoration: underline; }
     </style>

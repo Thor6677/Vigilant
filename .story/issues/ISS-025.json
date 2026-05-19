@@ -15,9 +15,9 @@
   "relatedTickets": [
     "T-031"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Picked option (b) from the issue's enumerated choices: added a new utility class .b-hover-transparent with transparent rest-state and var(--surface) hover-state, then switched intel.html:57 from b-hover-row to b-hover-transparent.\n\nEffect: scan-history rows now appear flush with the panel surface at rest (matching pre-T-031 behavior) and brighten on hover (canonical \"highlight on hover\" affordance). The b-hover-row class remains in place for sidebar items like wormhole_kills.html that intentionally carry a base var(--bg) at rest.\n\nAlso removed the now-redundant inline transition:background 0.15s from the tr's style attribute (the class declares it).\n\n- app/templates/base.html: new .b-hover-transparent rule.\n- app/templates/intel.html: class swap + inline-style cleanup.\n\nCommit: pending deploy.",
+  "resolvedDate": "2026-05-19",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "intel.html scan history row hover: rest-state visually darker after T-031 round 3"
 }
