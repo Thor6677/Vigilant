@@ -8,9 +8,9 @@
   "location": [],
   "phase": null,
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Documented data-stop bubble-matching semantics in the static/js/actions.js header doc, alongside the existing data-stop spec.\n\nKey clarification: data-stop is read from the SAME element matched by closest('[data-<event>]'). If a child has its own data-click without data-stop, that child handler runs and the event bubbles past without ever inspecting the parent's data-stop. To \"stop above\" from inside, the data-stop must live on the child's data-click element (typical pattern), OR wrap the children in an outer data-click=\"noop\" data-stop sink (the admin_users.html pattern from T-031).\n\nDoc-only change, no behavior change. Originally deferred to ISS-021 (data-click-arg contract) but pulled forward as a standalone fix since the semantics are confusing enough to deserve their own callout regardless of when data-click-arg lands.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "[documentation] data-stop bubble-matching semantics worth documenting. NOT addressed in this rou"
 }

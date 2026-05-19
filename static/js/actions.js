@@ -30,6 +30,19 @@
  *                           invoking the handler. Use to migrate sites
  *                           that wrap their call in event.stopPropagation();
  *
+ *                           IMPORTANT — bubble-matching semantics (ISS-024):
+ *                           data-stop is read from the SAME element the
+ *                           dispatcher matched via closest('[data-<event>]').
+ *                           If a child has its own data-click without
+ *                           data-stop, that child handler runs and the
+ *                           event bubbles up — the parent's data-stop is
+ *                           never inspected because closest() returns the
+ *                           innermost match. To "stop above" from inside,
+ *                           put data-stop on the CHILD's data-click element
+ *                           (typical pattern), or wrap the children in an
+ *                           outer data-click="noop" data-stop sink (the
+ *                           admin_users.html pattern).
+ *
  * The dispatched function must be globally reachable — either declared
  * at top-level in a template's <script> block (legacy convention used
  * throughout vigilant) or attached to `window.<name>` explicitly. The
