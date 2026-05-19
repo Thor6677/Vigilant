@@ -770,9 +770,12 @@
         /* T-031 round 3: CSS hover utilities to replace inline mouseover/out
            handlers. Avoid inline event handlers so CSP can drop unsafe-inline
            in T-033.
-           NOTE: Do NOT pair these classes with inline `background:` /
-           `text-decoration:` declarations — inline style has higher CSS
-           specificity than a `:hover` rule and will mask the effect.
+           NOTE: Do NOT pair any of these classes with an inline declaration
+           of the property they animate — inline style has higher CSS
+           specificity than a class `:hover` rule and silently masks the
+           effect. Affected pairings:
+             .b-hover-accent / .b-hover-surface / .b-hover-row — `background`
+             .b-hover-underline                                — `text-decoration`
            The `.b-hover-row` / `.b-hover-underline` rules below declare the
            non-hover state inside the class so the row-style and anchor-
            underline conventions stay self-contained. */
