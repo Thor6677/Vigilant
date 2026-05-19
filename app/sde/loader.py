@@ -1111,6 +1111,27 @@ async def download_and_import(db: AsyncSession):
     except KeyError:
         log.warning("typeBonus.jsonl not present in SDE zip — skipping")
 
+    # T-031 / ISS-019: regenerate K-space star-map JSONs from the same SDE
+    # zip we just imported. Writes to /data/map/{systems,edges,regions}.json
+    # — served at runtime by /api/map/kspace-data/*. Without this, the
+    # frontend's k-space map stays stale (it would otherwise only refresh
+    # on a frontend rebuild). Failure here is non-fatal — the SDE import
+    # itself already succeeded.
+    try:
+        import sys
+        from pathlib import Path
+        # scripts/ is at the repo root; in the container it lives at /app/scripts/.
+        repo_root = Path(__file__).resolve().parents[2]
+        scripts_dir = repo_root / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        from build_map_data import build_from_zip  # type: ignore[import-not-found]
+        map_out = Path("/data/map")
+        build_from_zip(zf, map_out)
+        log.info(f"Regenerated K-space map JSONs in {map_out}")
+    except Exception as e:
+        log.warning(f"Map-data regeneration failed (non-fatal): {e}")
+
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")

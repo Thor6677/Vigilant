@@ -20,12 +20,11 @@ export function useMapData(space: 'k' | 'w' = 'k') {
 
     async function load() {
       try {
-        const base = import.meta.env.BASE_URL;
-        // K-space: served as static Vite-built bundles under /map/data/.
-        // W-space: synthetic layout served at runtime by FastAPI under
-        // /api/map/wormholes-data/. No service-worker caching for W-space
-        // (the layout can change on deploy if SDE updates).
-        const v = '2';
+        // K-space and W-space both served at runtime by FastAPI now (ISS-019).
+        // K-space: /api/map/kspace-data/* reads /data/map/*.json (regenerated
+        //   after each SDE import) with the Vite static bundle as fallback.
+        // W-space: synthetic layout from app/intel/wormhole_layout.py.
+        // No service-worker caching — both can change on SDE update.
         const [systemsURL, edgesURL, regionsURL] = space === 'w'
           ? [
               `/api/map/wormholes-data/systems.json`,
@@ -33,9 +32,9 @@ export function useMapData(space: 'k' | 'w' = 'k') {
               `/api/map/wormholes-data/regions.json`,
             ]
           : [
-              `${base}data/systems.json?v=${v}`,
-              `${base}data/edges.json?v=${v}`,
-              `${base}data/regions.json?v=${v}`,
+              `/api/map/kspace-data/systems.json`,
+              `/api/map/kspace-data/edges.json`,
+              `/api/map/kspace-data/regions.json`,
             ];
         const [systemsRes, edgesRes, regionsRes] = await Promise.all([
           fetch(systemsURL, { signal: ac.signal }),

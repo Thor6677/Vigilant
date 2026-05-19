@@ -16,9 +16,9 @@
   ],
   "phase": null,
   "relatedTickets": [],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Wired map-JSON regeneration into the SDE update flow:\n\n1. **scripts/build_map_data.py** — factored out reusable `build_from_zip(zf, output_dir)` function so the same projection logic powers both the CLI and the runtime call from the SDE loader.\n2. **app/sde/loader.py** — after a successful SDE import, calls `build_from_zip` with the same in-memory zip, writing fresh systems.json/edges.json/regions.json to `/data/map/` (persistent app_data volume). Failure here is non-fatal — the SDE import itself still completes.\n3. **app/routes/starmap.py** — added `/api/map/kspace-data/{file}` endpoint serving from `/data/map/` with `Cache-Control: no-store`, falling back to the Vite static bundle at `frontend/dist/data/` when the runtime file isn't present yet (first boot before any SDE import).\n4. **frontend/src/components/StarMap/useMapData.ts** — switched K-space URLs from the static `${base}data/...` paths to `/api/map/kspace-data/...`, mirroring the runtime pattern already used for W-space.\n\nNet effect: future SDE force-updates from the admin panel will pick up new systems and gate connections (like the Yulai↔Manifest connection that surfaced this issue) without any manual `python scripts/build_map_data.py` run or frontend rebuild. The Vite-bundled JSONs remain as initial-boot seed.\n\nCommits: pending deploy.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "SDE force-update doesn't refresh k-space star map static JSONs"
 }

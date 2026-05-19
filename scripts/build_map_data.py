@@ -30,7 +30,10 @@ log = logging.getLogger(__name__)
 
 SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 CACHE_PATH = Path("scripts/.sde_cache.zip")
-OUTPUT_DIR = Path("frontend/public/data")
+# CLI default: write to the frontend's Vite static input dir (build-time seed).
+# Runtime callers (app/sde/loader.py post-import) pass `/data/map/` instead so
+# the running app can refresh K-space JSONs without a redeploy. See ISS-019.
+DEFAULT_OUTPUT_DIR = Path("frontend/public/data")
 
 # K-space system IDs are <= 30999999 (31xxxxxx = wormhole, 32xxxxxx = abyssal)
 MAX_KSPACE_ID = 30_999_999
@@ -64,9 +67,19 @@ def iter_jsonl(zf: zipfile.ZipFile, filename: str):
                 yield json.loads(line)
 
 
-def build(use_cache: bool):
+def build(use_cache: bool, output_dir: Path = DEFAULT_OUTPUT_DIR):
     zf = download_sde(use_cache)
+    build_from_zip(zf, output_dir)
 
+
+def build_from_zip(zf: zipfile.ZipFile, output_dir: Path):
+    """Project the SDE zip to K-space map JSON files in `output_dir`.
+
+    Reusable entry point for both the CLI and the runtime SDE-update flow.
+    Called from `app/sde/loader.py` after a successful import so the
+    K-space star map refreshes whenever the admin "Force Update SDE"
+    button runs. See ISS-019.
+    """
     # ── 1. Regions & Constellations ──────────────────────────────────────
     log.info("Parsing regions...")
     regions: dict[int, str] = {}
@@ -285,10 +298,10 @@ def build(use_cache: bool):
     regions_out.sort(key=lambda r: r["id"])
 
     # ── 7. Write output ─────────────────────────────────────────────────
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     def write_json(filename: str, data):
-        path = OUTPUT_DIR / filename
+        path = output_dir / filename
         with open(path, "w") as f:
             json.dump(data, f, separators=(",", ":"))
         size = path.stat().st_size

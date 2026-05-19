@@ -356,6 +356,34 @@ async def map_data(file_path: str):
     return HTMLResponse("Not found", status_code=404)
 
 
+# ── K-space runtime map data (ISS-019) ──────────────────────────────────
+# SDE force-update writes fresh systems.json/edges.json/regions.json to
+# /data/map/. These endpoints serve them with no-store so a force-update
+# is reflected on next page load. Falls back to the Vite-bundled static
+# files at frontend/dist/data/ when the runtime file isn't there yet
+# (first boot before any SDE import). Mirrors the /api/map/wormholes-data/
+# pattern so useMapData can hit a runtime URL for k-space the same way it
+# already does for w-space.
+
+_KSPACE_RUNTIME_DIR = Path("/data/map")
+_KSPACE_FILES = {"systems.json", "edges.json", "regions.json"}
+
+
+@router.get("/api/map/kspace-data/{file_name}")
+async def map_kspace_data(file_name: str):
+    if file_name not in _KSPACE_FILES:
+        return HTMLResponse("Not found", status_code=404)
+    headers = {"Cache-Control": "no-store, must-revalidate"}
+    runtime = _KSPACE_RUNTIME_DIR / file_name
+    if runtime.exists() and runtime.is_file():
+        return FileResponse(runtime, headers=headers)
+    # Fallback: Vite static bundle baked at frontend build time.
+    bundled = FRONTEND_DIST / "data" / file_name
+    if bundled.exists() and bundled.is_file():
+        return FileResponse(bundled, headers=headers)
+    return HTMLResponse("Not found", status_code=404)
+
+
 # ── API Endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/api/map/characters")
