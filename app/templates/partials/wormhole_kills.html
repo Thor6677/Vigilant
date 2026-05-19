@@ -29,8 +29,8 @@
     <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
         {% for corp in top_corps %}
         <a href="https://zkillboard.com/corporation/{{ corp['id'] }}/" target="_blank" rel="noopener"
-           class="b-hover-surface"
-           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;transition:background 0.15s;">
+           class="b-hover-row"
+           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);border-radius:2px;">
             <img src="https://images.evetech.net/corporations/{{ corp['id'] }}/logo?size=32"
                  alt="" width="16" height="16" style="border-radius:2px;flex-shrink:0;">
             <span style="flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ corp['name'] }}</span>
@@ -39,8 +39,8 @@
         {% endfor %}
         {% for ally in top_alliances %}
         <a href="https://zkillboard.com/alliance/{{ ally['id'] }}/" target="_blank" rel="noopener"
-           class="b-hover-surface"
-           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);background:var(--bg);border-radius:2px;transition:background 0.15s;">
+           class="b-hover-row"
+           style="display:flex;align-items:center;gap:0.4rem;padding:3px 6px;text-decoration:none;color:var(--text);border-radius:2px;">
             <img src="https://images.evetech.net/alliances/{{ ally['id'] }}/logo?size=32"
                  alt="" width="16" height="16" style="border-radius:2px;flex-shrink:0;">
             <span style="flex:1;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6688aa;">{{ ally['name'] }}</span>
@@ -121,8 +121,8 @@
     <div style="display:flex;flex-direction:column;gap:1px;">
         {% for kill in recent_kills %}
         <a href="https://zkillboard.com/kill/{{ kill['killmail_id'] }}/" target="_blank" rel="noopener"
-           class="b-hover-surface"
-           style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.4rem;text-decoration:none;color:var(--text);background:var(--bg);transition:background 0.15s;">
+           class="b-hover-row"
+           style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.4rem;text-decoration:none;color:var(--text);">
             {% if kill['ship_type_id'] %}
             <img src="https://images.evetech.net/types/{{ kill['ship_type_id'] }}/icon?size=32"
                  alt="" width="20" height="20" style="border-radius:2px;flex-shrink:0;">

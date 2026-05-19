@@ -81,6 +81,9 @@
     // to a named handler, use data-on-error="myHandler" instead.
     document.addEventListener('error', function (e) {
         var el = e.target;
+        // Guard against non-Element targets: 'error' also fires on window,
+        // XMLHttpRequest, etc. Those lack getAttribute. The guard is
+        // intentional — do not remove.
         if (!el || !el.getAttribute) return;
         var spec = el.getAttribute('data-on-error');
         if (!spec) return;
