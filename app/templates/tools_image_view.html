@@ -82,7 +82,7 @@
 <div class="b-section" style="display:flex;gap:0.5rem;">
     <a href="/tools/images" class="b-btn" style="flex:1;padding:0.5rem;border:1px solid var(--border);">Back to Image Host</a>
     <form method="POST" action="/tools/images/{{ img.id }}/delete" style="flex:1;margin:0;"
-          onsubmit="return confirm('Delete this image?');">
+          data-confirm="Delete this image?">
         <button type="submit" class="b-btn is-danger"
                 style="width:100%;padding:0.5rem;border:1px solid var(--danger);color:var(--danger);">Delete</button>
     </form>

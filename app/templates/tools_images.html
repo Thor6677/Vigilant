@@ -76,7 +76,7 @@
             </div>
             <a href="/i/{{ img.id }}" class="b-link" style="flex-shrink:0;">View</a>
             <form method="POST" action="/tools/images/{{ img.id }}/delete" style="flex-shrink:0;margin:0;"
-                  onsubmit="return confirm('Delete this image?');">
+                  data-confirm="Delete this image?">
                 <button type="submit" class="b-btn is-danger"
                         style="border:1px solid var(--border);padding:0.25rem 0.5rem;font-size:9px;">Delete</button>
             </form>

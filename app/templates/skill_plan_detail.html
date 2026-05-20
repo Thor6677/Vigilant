@@ -46,7 +46,7 @@
         {% endif %}
         {% if can_edit and entries %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/clear"
-              onsubmit="return confirm('Remove all skills from this plan?');">
+              data-confirm="Remove all skills from this plan?">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--warn);color:var(--warn);font-size:9px;">
                 Clear All
             </button>
@@ -54,7 +54,7 @@
         {% endif %}
         {% if can_admin %}
         <form method="POST" action="/skill-plans/{{ plan.id }}/delete"
-              onsubmit="return confirm('Delete this plan?');">
+              data-confirm="Delete this plan?">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;">
                 Delete
             </button>
@@ -92,7 +92,7 @@
             {% endif %}
         {% elif vis in ('corporation', 'alliance') %}
             <form method="POST" action="/skill-plans/{{ plan.id }}/demote" style="display:inline;"
-                  onsubmit="return confirm('Return this plan to personal scope? Other members will lose access.');">
+                  data-confirm="Return this plan to personal scope? Other members will lose access.">
                 <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--muted);color:var(--muted);font-size:9px;">← Back to Personal</button>
             </form>
         {% endif %}
@@ -156,7 +156,7 @@
                 </select>
             </form>
             <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
-                  onsubmit="return confirm('Remove {{ e.subject_name | e }} from the ACL?');">
+                  data-confirm="Remove {{ e.subject_name | e }} from the ACL?">
                 <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>

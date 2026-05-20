@@ -247,7 +247,7 @@
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
             <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
-            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }}?" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
 
@@ -311,7 +311,7 @@
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
             <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
-            <form method="POST" action="/auth/remove/{{ char.character_id }}" onsubmit="return confirm('Remove {{ char.character_name }}?')" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
+            <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }}?" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
 

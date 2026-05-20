@@ -146,7 +146,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/delete"
-                      onsubmit="return confirm('Delete this ACL group? Timers using it will become visible to everyone.');">
+                      data-confirm="Delete this ACL group? Timers using it will become visible to everyone.">
                     <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
@@ -185,7 +185,7 @@
                 </div>
                 <input type="hidden" id="acl-id-{{ group.id }}" value="">
                 <input type="hidden" id="acl-name-{{ group.id }}" value="">
-                <button class="b-btn" onclick="addACLEntry({{ group.id }})"
+                <button class="b-btn" data-click="addACLEntry" data-group-id="{{ group.id }}"
                         style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Add</button>
             </div>
         </div>
@@ -200,11 +200,11 @@
 {% if active_timers %}
 <div class="b-section" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
     <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Filter:</span>
-    <button class="range-btn is-active" onclick="filterTimers('all', this)">All</button>
-    <button class="range-btn" onclick="filterTimers('hostile', this)">Hostile</button>
-    <button class="range-btn" onclick="filterTimers('friendly', this)">Friendly</button>
+    <button class="range-btn is-active" data-click="filterTimers" data-filter="all">All</button>
+    <button class="range-btn" data-click="filterTimers" data-filter="hostile">Hostile</button>
+    <button class="range-btn" data-click="filterTimers" data-filter="friendly">Friendly</button>
     <span style="color:var(--border);">|</span>
-    <button class="range-btn" onclick="filterTimers('critical', this)">Critical</button>
+    <button class="range-btn" data-click="filterTimers" data-filter="critical">Critical</button>
 </div>
 {% endif %}
 
@@ -214,7 +214,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Active Timers</span>
-            <button onclick="copyAllTimers(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
+            <button data-click="copyAllTimers" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
         </div>
 
         {% for t in active_timers %}
@@ -269,10 +269,10 @@
             {# Actions — only for creator, admins, managers, or directors #}
             {% if is_privileged or t.created_by == user_id %}
             <div style="flex:0 0 auto;display:flex;gap:0.25rem;align-items:center;">
-                <button class="b-btn" onclick="editTimer({{ t.id }})"
+                <button class="b-btn" data-click="editTimer" data-timer-id="{{ t.id }}"
                         style="padding:0.15rem 0.35rem;border:1px solid var(--border);font-size:8px;color:var(--muted);">Edit</button>
                 <form method="POST" action="/structure-timers/{{ t.id }}/delete" style="display:inline;"
-                      onsubmit="return confirm('Delete this timer?');">
+                      data-confirm="Delete this timer?">
                     <button class="b-btn" style="padding:0.15rem 0.35rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
@@ -339,7 +339,7 @@
                 </div>
                 <div style="display:flex;gap:0.5rem;">
                     <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
-                    <button type="button" class="b-btn" onclick="editTimer({{ t.id }})" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
+                    <button type="button" class="b-btn" data-click="editTimer" data-timer-id="{{ t.id }}" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
                 </div>
             </form>
         </div>
@@ -471,6 +471,9 @@ var _origSearchACL = searchACL;
 searchACL = function(groupId) { _activeACLGroup = groupId; _origSearchACL(groupId); };
 
 function addACLEntry(groupId) {
+    if (this && this.dataset && this.dataset.groupId !== undefined) {
+        groupId = parseInt(this.dataset.groupId, 10);
+    }
     var eveId = document.getElementById('acl-id-' + groupId).value;
     var name = document.getElementById('acl-name-' + groupId).value;
     var entryType = document.getElementById('acl-type-' + groupId).value;
@@ -486,11 +489,16 @@ function addACLEntry(groupId) {
 }
 
 function editTimer(id) {
+    if (this && this.dataset && this.dataset.timerId !== undefined) {
+        id = parseInt(this.dataset.timerId, 10);
+    }
     var el = document.getElementById('edit-' + id);
     el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
 function copyAllTimers(btn) {
+    // Dispatcher invocation: `this` is the button. Legacy callers pass btn.
+    if (this && this.tagName === 'BUTTON') btn = this;
     var lines = [];
     document.querySelectorAll('.timer-row').forEach(function(row) {
         if (row.style.display === 'none') return;
@@ -528,6 +536,10 @@ function copyAllTimers(btn) {
 }
 
 function filterTimers(filter, btn) {
+    if (this && this.dataset && this.dataset.filter !== undefined) {
+        filter = this.dataset.filter;
+        btn = this;
+    }
     document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
     if (btn) btn.classList.add('is-active');
     document.querySelectorAll('.timer-row').forEach(function(row) {

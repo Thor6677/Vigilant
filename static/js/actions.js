@@ -142,6 +142,20 @@
         document.addEventListener(evt, dispatch.bind(null, evt));
     });
 
+    // data-confirm: a separate, simpler dispatch for the "confirm before
+    // submit" pattern (replaces onsubmit="return confirm('Delete?')"). Fires
+    // on the bubble path before the form's default submission. If the user
+    // declines, e.preventDefault() blocks the submit. Used by many templates
+    // for destructive actions. ISS-022.
+    document.addEventListener('submit', function (e) {
+        var el = e.target.closest && e.target.closest('[data-confirm]');
+        if (!el) return;
+        var msg = el.getAttribute('data-confirm');
+        if (msg && !window.confirm(msg)) {
+            e.preventDefault();
+        }
+    });
+
     // 'error' does not bubble — must use capture phase to catch it at the
     // document level. data-on-error="hide" is the only recognized value
     // (built-in shortcut for the broken-image fallback pattern). To dispatch
