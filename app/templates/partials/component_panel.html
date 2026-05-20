@@ -8,12 +8,12 @@
                  style="width:20px;height:20px;border:1px solid var(--border);"
                  data-on-error="hide">
             <span style="font-size:11px;font-weight:600;color:var(--accent);">{{ product_name }}</span>
-            <span style="font-size:10px;color:var(--muted);">× {{ "{:,}".format(needed) }}</span>
+            <span class="b-muted-sm">× {{ "{:,}".format(needed) }}</span>
         </div>
 
         {# ME slider #}
         <div style="display:flex;flex-direction:column;gap:2px;">
-            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">ME <span id="sub-me-val-{{ type_id }}" style="color:var(--text);">{{ me }}</span></label>
+            <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">ME <span id="sub-me-val-{{ type_id }}" class="b-text">{{ me }}</span></label>
             <input type="range" id="sub-me-{{ type_id }}" value="{{ me }}" min="0" max="10" step="1"
                    oninput="document.getElementById('sub-me-val-{{ type_id }}').textContent=this.value; recalcComponent({{ type_id }}, {{ needed }})"
                    style="width:90px;accent-color:var(--accent);">

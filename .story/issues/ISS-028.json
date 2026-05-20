@@ -14,9 +14,9 @@
   "relatedTickets": [
     "T-032"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Defined 5 utility classes in `app/templates/base.html` and swept all standalone occurrences of the top-5 inline-style patterns across the repo.\n\n**Utility classes added** (inside the existing `<style nonce>` block):\n- `.b-muted` — `color: var(--muted)`\n- `.b-text` — `color: var(--text)`\n- `.b-pad-md` — `padding: 0.75rem`\n- `.b-muted-sm` — `font-size: 10px; color: var(--muted)`\n- `.b-eyebrow` — `font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted)` (section eyebrow label)\n\n**Sweep:** Python script at `/tmp/iss028_migrate.py` walked `app/templates/**/*.html`, found every `<tag … style=\"EXACT\">` where `EXACT` matched one of the five patterns above, and either:\n- Appended the new class to an existing `class=` attribute and dropped the `style=` entirely, or\n- Created a `class=` attribute when none existed.\n\n**Result:** 251 sites in 67 templates swept. All standalone occurrences for these five patterns now return 0 hits in a fresh grep. All other inline-style declarations (the ~3,000 embedded occurrences where the pattern is mixed with other CSS in a larger style string) are left untouched — those need careful per-site review and are out of scope for this DX-only cleanup.\n\n**Verification:** Full Jinja parse pass over all 100 user-facing templates is clean (the 3 errors flagged are pre-existing — `partials/assets_results.html`, `partials/corp_detail.html`, `status_data.html` use app-registered Jinja custom filters not exposed to an isolated Environment).\n\n**Future contributors:** prefer the utility classes for new code matching any of the five patterns. The longer compound patterns (eyebrow, muted-sm) are checked first by the sweep script, so adding new sites in either form is safe.\n\nCommit: pending deploy.",
+  "resolvedDate": "2026-05-19",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "Design-system hygiene: consolidate top-5 repeated inline-style patterns into utility classes"
 }

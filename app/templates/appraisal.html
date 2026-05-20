@@ -15,10 +15,10 @@
             <span class="b-label">Appraise Items</span>
         </div>
         <form hx-post="/industry/appraisal/calculate" hx-target="#appraisal-results" hx-swap="innerHTML" hx-indicator="#appraisal-loading">
-            <div style="padding:0.75rem;">
+            <div class="b-pad-md">
                 <div style="display:flex;gap:1rem;align-items:flex-end;margin-bottom:0.75rem;">
                     <div style="display:flex;flex-direction:column;gap:3px;">
-                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Trade Hub</label>
+                        <label class="b-eyebrow">Trade Hub</label>
                         <select name="hub" id="inp-hub" data-change="saveHubPref"
                                 style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                             {% for key, hub in hubs.items() %}

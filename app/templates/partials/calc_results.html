@@ -3,7 +3,7 @@
 
     {% if modifiers %}
     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:0.5rem;">
-        <span style="font-size:10px;color:var(--muted);">Active bonuses:</span>
+        <span class="b-muted-sm">Active bonuses:</span>
         {% for m in modifiers %}
         <span style="font-size:10px;letter-spacing:0.06em;color:var(--success);border:1px solid var(--border);padding:1px 6px;">{{ m }}</span>
         {% endfor %}
@@ -41,7 +41,7 @@
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">{{ bp_name }}</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
-                <span style="font-size:10px;color:var(--muted);">{{ runs }} run{{ 's' if runs != 1 else '' }}</span>
+                <span class="b-muted-sm">{{ runs }} run{{ 's' if runs != 1 else '' }}</span>
                 {% set buildable_rows = rows | selectattr('buildable') | list %}
                 {% if buildable_rows %}
                 <button id="build-all-btn" data-click="toggleBuildAll"

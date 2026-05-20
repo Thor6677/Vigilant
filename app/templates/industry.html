@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <div class="b-panel-head">
             <span class="b-label">Blueprint Search</span>
         </div>
-        <div style="padding:0.75rem;">
+        <div class="b-pad-md">
             <input type="text" id="bp-search" placeholder="Search blueprints (e.g. Drake, Rifter, Cerberus, Thanatos)..."
                    hx-get="/industry/search"
                    hx-trigger="input changed delay:300ms"
@@ -97,28 +97,28 @@ document.addEventListener('DOMContentLoaded', function() {
         <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Runs</label>
+                <label class="b-eyebrow">Runs</label>
                 <input type="number" id="inp-runs" value="1" min="1" max="1000"
                        data-change="recalculate"
                        style="width:70px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;text-align:center;">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">ME <span id="me-val" style="color:var(--text);">0</span></label>
+                <label class="b-eyebrow">ME <span id="me-val" class="b-text">0</span></label>
                 <input type="range" id="inp-me" value="0" min="0" max="10" step="1"
                        oninput="document.getElementById('me-val').textContent=this.value; recalculate()"
                        style="width:120px;accent-color:var(--accent);">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">TE <span id="te-val" style="color:var(--text);">0</span></label>
+                <label class="b-eyebrow">TE <span id="te-val" class="b-text">0</span></label>
                 <input type="range" id="inp-te" value="0" min="0" max="20" step="2"
                        oninput="document.getElementById('te-val').textContent=this.value; recalculate()"
                        style="width:120px;accent-color:var(--accent);">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Structure</label>
+                <label class="b-eyebrow">Structure</label>
                 <select id="inp-structure" data-change="recalculate"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, s in structures.items() %}
@@ -128,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rig</label>
+                <label class="b-eyebrow">Rig</label>
                 <select id="inp-rig" data-change="recalculate"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, r in rigs.items() %}
@@ -138,7 +138,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Security</label>
+                <label class="b-eyebrow">Security</label>
                 <select id="inp-security" data-change="recalculate"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, s in sec_statuses.items() %}

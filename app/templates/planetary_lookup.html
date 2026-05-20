@@ -73,7 +73,7 @@
                         return '<div class="sys-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
                             + ' onmousedown="piSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
                             + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
-                            + '<span style="color:var(--text);">' + s.system_name + '</span>'
+                            + '<span class="b-text">' + s.system_name + '</span>'
                             + '</div>';
                     }).join('');
                     dd.style.display = 'block';
@@ -108,7 +108,7 @@
         fetch('/industry/planetary/lookup/system?name=' + encodeURIComponent(name))
             .then(function(r){ return r.text(); })
             .then(function(html){ injectHtml(el, html); })
-            .catch(function(){ el.innerHTML = '<div class="b-empty" style="padding:0.75rem;">Lookup failed.</div>'; });
+            .catch(function(){ el.innerHTML = '<div class="b-empty b-pad-md">Lookup failed.</div>'; });
     };
     document.addEventListener('click', function(e) {
         if (e.target.id !== 'sys-input') {

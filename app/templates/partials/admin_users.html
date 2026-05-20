@@ -2,7 +2,7 @@
 <div class="b-section" style="margin-bottom:1.5rem;">
     <div class="b-section-head">
         <span class="b-label">Users & Characters</span>
-        <span class="b-label" style="color:var(--muted);">{{ users|length }} user{{ 's' if users|length != 1 else '' }}</span>
+        <span class="b-label b-muted">{{ users|length }} user{{ 's' if users|length != 1 else '' }}</span>
     </div>
 
     {% for u in users %}
@@ -84,7 +84,7 @@
 <div class="b-section">
     <div class="b-section-head">
         <span class="b-label">Registration Allowlist</span>
-        <span style="font-size:10px;color:var(--muted);">
+        <span class="b-muted-sm">
             {% if allowlist_enabled %}Active — only listed entries can register{% else %}Inactive — anyone can register{% endif %}
         </span>
     </div>

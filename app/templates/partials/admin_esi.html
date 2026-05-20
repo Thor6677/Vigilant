@@ -98,7 +98,7 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Legacy Error Limit</span>
-        <span style="font-size:10px;color:var(--muted);">resets in {{ legacy.reset_in_seconds }}s</span>
+        <span class="b-muted-sm">resets in {{ legacy.reset_in_seconds }}s</span>
     </div>
     <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
         CCP's legacy error budget. Each failed request (4xx/5xx) costs 1 point. At 0 remaining, all requests are blocked until the window resets.
@@ -139,7 +139,7 @@
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Recent Requests</span>
-        <span style="font-size:10px;color:var(--muted);">{{ request_log | length }} entries</span>
+        <span class="b-muted-sm">{{ request_log | length }} entries</span>
     </div>
     <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);">
         Live log of ESI API calls. <span style="color:var(--success);">Green</span> = success,
@@ -175,7 +175,7 @@
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Rate Limit Events</span>
         <span style="display:flex;align-items:center;gap:0.6rem;">
-            <span style="font-size:10px;color:var(--muted);">{{ recent_events | length }} active</span>
+            <span class="b-muted-sm">{{ recent_events | length }} active</span>
             {% if recent_events %}
             <button type="button"
                     hx-post="/admin/esi/events/dismiss-all"
@@ -242,7 +242,7 @@
                 <span class="b-archive-chevron" style="display:inline-block;width:10px;font-size:9px;color:var(--muted);transition:transform 0.15s;">▸</span>
                 Archived Rate Limit Events
             </span>
-            <span style="font-size:10px;color:var(--muted);">{{ archived_events | length }} archived · auto-delete after 30d</span>
+            <span class="b-muted-sm">{{ archived_events | length }} archived · auto-delete after 30d</span>
         </div>
     </summary>
     <div style="max-height:250px;overflow-y:auto;">

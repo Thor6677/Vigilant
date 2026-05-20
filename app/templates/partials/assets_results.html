@@ -32,7 +32,7 @@
 {# ── Account group header ──────────────────────────────────────────────────── #}
 <div class="b-section-head" style="margin-top:{% if loop.first %}0{% else %}2rem{% endif %};">
     <span class="b-label">{{ group_name }}</span>
-    <span class="b-label" style="color:var(--muted);">
+    <span class="b-label b-muted">
         {% set total = namespace(n=0) %}
         {% for cid, cdata in group_chars.items() %}
             {% set total.n = total.n + cdata.assets|length %}
@@ -56,7 +56,7 @@
                 {{ char.character_name }}
             </span>
         </div>
-        <span class="b-label" style="color:var(--muted);">{{ assets|length }} result{{ "s" if assets|length != 1 else "" }}</span>
+        <span class="b-label b-muted">{{ assets|length }} result{{ "s" if assets|length != 1 else "" }}</span>
     </div>
 
     {# ── Header row ──────────────────────────────────────────────────────────── #}
@@ -91,12 +91,12 @@
         {# Location name + region #}
         <span style="flex:3;min-width:160px;padding-left:0.6rem;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {% if asset.location_name %}
-                <span style="color:var(--text);">{{ asset.location_name }}</span>
+                <span class="b-text">{{ asset.location_name }}</span>
                 {% if asset.region %}
-                    <span style="color:var(--muted);"> · {{ asset.region }}</span>
+                    <span class="b-muted"> · {{ asset.region }}</span>
                 {% endif %}
             {% else %}
-                <span style="color:var(--muted);">Unknown</span>
+                <span class="b-muted">Unknown</span>
             {% endif %}
         </span>
 

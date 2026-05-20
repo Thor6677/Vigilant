@@ -40,7 +40,7 @@
             {% set raw_url   = scheme + '://' + request.url.netloc + '/i/' + img.id + '.jpg' %}
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Share URL</label>
+                <label class="b-eyebrow">Share URL</label>
                 <div style="display:flex;gap:0.4rem;">
                     <input type="text" id="share-url" value="{{ share_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
@@ -50,7 +50,7 @@
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Direct image URL</label>
+                <label class="b-eyebrow">Direct image URL</label>
                 <div style="display:flex;gap:0.4rem;">
                     <input type="text" id="raw-url" value="{{ raw_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">

@@ -128,7 +128,7 @@
 <details class="b-section">
     <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
         <span style="color:var(--muted);font-size:12px;">&#9881;</span>
-        <span class="b-label" style="color:var(--muted);">Access Control Groups</span>
+        <span class="b-label b-muted">Access Control Groups</span>
     </summary>
     <div class="b-panel" style="border-top:1px solid var(--border);">
         {# Create new group #}
@@ -355,7 +355,7 @@
 {% if archived_timers %}
 <details class="b-section">
     <summary class="b-panel-head" style="cursor:pointer;list-style:none;">
-        <span class="b-label" style="color:var(--muted);">Archived Timers ({{ archived_timers | length }})</span>
+        <span class="b-label b-muted">Archived Timers ({{ archived_timers | length }})</span>
     </summary>
     <div class="b-panel" style="border-top:1px solid var(--border);">
         {% for t in archived_timers %}

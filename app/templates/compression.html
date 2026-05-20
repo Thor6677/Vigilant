@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Character #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Character (skills)</label>
+                <label class="b-eyebrow">Character (skills)</label>
                 <select id="inp-character"
                         onchange="if(this.value){htmx.ajax('GET','/industry/compression/skills/'+this.value,'#skill-display')}"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Trade Hub #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Trade Hub</label>
+                <label class="b-eyebrow">Trade Hub</label>
                 <select name="trade_hub" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, hub in trade_hubs.items() %}
                     <option value="{{ key }}" {% if key == 'jita' %}selected{% endif %}>{{ hub.label }}</option>
@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Structure #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Structure</label>
+                <label class="b-eyebrow">Structure</label>
                 <select name="structure" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, s in structures.items() %}
                     <option value="{{ key }}">{{ s.label }}</option>
@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Rig #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rig</label>
+                <label class="b-eyebrow">Rig</label>
                 <select name="rig" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, r in rigs.items() %}
                     <option value="{{ key }}">{{ r.label }}</option>
@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Security #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Security</label>
+                <label class="b-eyebrow">Security</label>
                 <select name="security" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, s in security.items() %}
                     <option value="{{ key }}">{{ s.label }} ({{ "%.1f"|format(s.mult) }}x)</option>
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Implant #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Implant</label>
+                <label class="b-eyebrow">Implant</label>
                 <select name="implant" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, imp in implants.items() %}
                     <option value="{{ key }}">{{ imp.label }}</option>
@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
 
             {# Optimize by #}
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Optimize</label>
+                <label class="b-eyebrow">Optimize</label>
                 <select name="mode" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="isk">Lowest ISK</option>
                     <option value="volume">Lowest Volume</option>
@@ -151,12 +151,12 @@ document.addEventListener('DOMContentLoaded', restoreCompState);
         <div id="skill-display" style="padding:0 0.75rem 0.5rem;">
             <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;">
                 <div style="display:flex;flex-direction:column;gap:3px;">
-                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Reprocessing</label>
+                    <label class="b-eyebrow">Reprocessing</label>
                     <input type="number" name="repro_level" id="skill-repro" value="0" min="0" max="5"
                            style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
                 </div>
                 <div style="display:flex;flex-direction:column;gap:3px;">
-                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label>
+                    <label class="b-eyebrow">Efficiency</label>
                     <input type="number" name="eff_level" id="skill-eff" value="0" min="0" max="5"
                            style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
                 </div>

@@ -1,5 +1,5 @@
 {# htmx partial — detail card for one PI commodity. #}
-<div style="padding:0.75rem;">
+<div class="b-pad-md">
     <div style="display:flex;gap:0.5rem;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;">
         <h3 style="margin:0;font-size:14px;color:var(--text);">{{ name }}</h3>
         <span style="font-size:10px;color:var(--muted);padding:0.1rem 0.4rem;background:var(--bg);border:1px solid var(--border);">
@@ -16,28 +16,28 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:11px;margin-bottom:0.75rem;padding-bottom:0.75rem;border-bottom:1px solid var(--border);">
         <div>
             <div style="color:var(--muted);font-size:10px;">Price (ESI avg)</div>
-            <div style="color:var(--text);">{{ '{:,.2f}'.format(price) }} ISK</div>
+            <div class="b-text">{{ '{:,.2f}'.format(price) }} ISK</div>
         </div>
         {% if cycle_time %}
         <div>
             <div style="color:var(--muted);font-size:10px;">Cycle time</div>
-            <div style="color:var(--text);">{{ cycle_time // 60 }} min</div>
+            <div class="b-text">{{ cycle_time // 60 }} min</div>
         </div>
         {% endif %}
         {% if output_qty %}
         <div>
             <div style="color:var(--muted);font-size:10px;">Output / cycle</div>
-            <div style="color:var(--text);">{{ output_qty }}</div>
+            <div class="b-text">{{ output_qty }}</div>
         </div>
         <div>
             <div style="color:var(--muted);font-size:10px;">Revenue / cycle</div>
-            <div style="color:var(--text);">{{ '{:,.0f}'.format(revenue_per_cycle) }} ISK</div>
+            <div class="b-text">{{ '{:,.0f}'.format(revenue_per_cycle) }} ISK</div>
         </div>
         {% endif %}
         {% if inputs %}
         <div>
             <div style="color:var(--muted);font-size:10px;">Input cost / cycle</div>
-            <div style="color:var(--text);">{{ '{:,.0f}'.format(input_cost) }} ISK</div>
+            <div class="b-text">{{ '{:,.0f}'.format(input_cost) }} ISK</div>
         </div>
         <div>
             <div style="color:var(--muted);font-size:10px;">Margin / cycle</div>
@@ -77,12 +77,12 @@
         <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Recipe inputs per cycle</div>
         {% for inp in inputs %}
         <div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:11px;border-bottom:1px dashed var(--border);">
-            <span style="color:var(--text);">
+            <span class="b-text">
                 <a href="#" onclick="piLoadNode({{ inp.type_id }});return false;" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
                     {{ inp.name }}
                 </a>
             </span>
-            <span style="color:var(--muted);">× {{ inp.quantity }}</span>
+            <span class="b-muted">× {{ inp.quantity }}</span>
         </div>
         {% endfor %}
     </div>

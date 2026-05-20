@@ -6,7 +6,7 @@
     </div>
     {% if sender_name %}
     <div style="padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);">
-        From: <span style="color:var(--text);">{{ sender_name }}</span>
+        From: <span class="b-text">{{ sender_name }}</span>
         {% if recipients %}· To: {{ recipients|join(', ') }}{% endif %}
     </div>
     {% endif %}

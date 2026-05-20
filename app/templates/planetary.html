@@ -52,21 +52,21 @@
 
 <div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
     <form method="get" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">
-        <label style="font-size:10px;color:var(--muted);">Sort</label>
+        <label class="b-muted-sm">Sort</label>
         <select name="sort" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="expiry" {% if sort == 'expiry' %}selected{% endif %}>Expiry (soonest)</option>
             <option value="character" {% if sort == 'character' %}selected{% endif %}>Character</option>
             <option value="system" {% if sort == 'system' %}selected{% endif %}>System</option>
             <option value="type" {% if sort == 'type' %}selected{% endif %}>Planet type</option>
         </select>
-        <label style="font-size:10px;color:var(--muted);">Type</label>
+        <label class="b-muted-sm">Type</label>
         <select name="filter_type" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
             {% for t in all_types %}
             <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ t | capitalize }}</option>
             {% endfor %}
         </select>
-        <label style="font-size:10px;color:var(--muted);">Expiry</label>
+        <label class="b-muted-sm">Expiry</label>
         <select name="filter_warn" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
             <option value="expiring" {% if filter_warn == 'expiring' %}selected{% endif %}>Expiring / &lt; 24h</option>
@@ -107,7 +107,7 @@
             <span style="font-size:11px;text-align:right;{% if planet.expiry_warning == 'expired' %}color:var(--danger);{% elif planet.expiry_warning == 'critical' %}color:var(--danger);{% elif planet.expiry_warning == 'warning' %}color:var(--warn);{% else %}color:var(--muted);{% endif %}">
                 {% if planet.expiry_time_str %}{{ planet.expiry_time_str }}{% else %}no extractor{% endif %}
             </span>
-            <span style="font-size:10px;color:var(--muted);" class="pi-arrow">▸</span>
+            <span class="pi-arrow b-muted-sm">▸</span>
         </div>
         <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail" style="display:none;"></div>
     </div>

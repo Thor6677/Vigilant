@@ -67,7 +67,7 @@
 {% if can_admin %}
 <div class="b-section">
     <div class="b-panel" style="padding:0.4rem 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-        <span style="font-size:10px;color:var(--muted);">Scope:</span>
+        <span class="b-muted-sm">Scope:</span>
         {% if vis == 'personal' %}
             {% if eligible_corps %}
             <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
@@ -189,9 +189,9 @@
         </form>
         <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
             Names are resolved via EVE ESI so they must match exactly. Permissions:
-            <span style="color:var(--text);">View</span> = read-only,
-            <span style="color:var(--text);">Edit</span> = can modify skills,
-            <span style="color:var(--text);">Admin</span> = edit + manage this ACL + delete the plan.
+            <span class="b-text">View</span> = read-only,
+            <span class="b-text">Edit</span> = can modify skills,
+            <span class="b-text">Admin</span> = edit + manage this ACL + delete the plan.
         </div>
     </div>
 </div>
@@ -231,7 +231,7 @@
                 <a href="#" onclick="exportPlan(event)" style="color:var(--accent);text-decoration:none;">Export</a>
                 {% if can_edit and entries | length > 1 %}
                 <span style="color:var(--border);">|</span>
-                <span style="color:var(--muted);">Sort:</span>
+                <span class="b-muted">Sort:</span>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="name">
                     <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>

@@ -63,7 +63,7 @@
         </div>
     </div>
 
-    <div style="padding:0.75rem;">
+    <div class="b-pad-md">
 
         <div class="ta-stats" style="grid-template-columns:repeat(4,1fr);">
             <div class="ta-stat">
@@ -115,7 +115,7 @@
 {% if daily_kills_counts and daily_kills_counts|sum > 0 %}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">Daily kills · trailing 30 days</span></div>
-    <div style="padding:0.75rem;">
+    <div class="b-pad-md">
         <div style="position:relative;height:220px;">
             <canvas id="daily-kills-chart"></canvas>
         </div>
@@ -261,7 +261,7 @@
 {% if has_heatmap_data %}
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head"><span class="b-label">When is EVE busiest? · trailing 90 days · UTC</span></div>
-    <div style="padding:0.75rem;">
+    <div class="b-pad-md">
         <div class="ta-heatmap-col-labels">
             <div></div>
             {% for h in range(24) %}<div>{{ "%02d"|format(h) }}</div>{% endfor %}
@@ -359,7 +359,7 @@
         archive once at first startup, then goes silent — live data going
         forward comes directly from
         <a href="https://esi.evetech.net/latest/status/" target="_blank"
-           rel="noopener" style="color:var(--text);">CCP's ESI /status/</a>
+           rel="noopener" class="b-text">CCP's ESI /status/</a>
         endpoint and the killmail.stream consumer. If you find this view
         useful, consider visiting their sites directly — community-run
         infrastructure runs on goodwill.

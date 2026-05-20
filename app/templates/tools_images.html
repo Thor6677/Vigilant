@@ -19,20 +19,20 @@
             <div style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
 
                 <div style="display:flex;flex-direction:column;gap:3px;">
-                    <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">File (max {{ max_mb }} MB — converted to JPEG)</label>
+                    <label class="b-eyebrow">File (max {{ max_mb }} MB — converted to JPEG)</label>
                     <input type="file" name="file" accept="image/*" required
                            style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                 </div>
 
                 <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
                     <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:200px;">
-                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Label (optional)</label>
+                        <label class="b-eyebrow">Label (optional)</label>
                         <input type="text" name="label" maxlength="128" placeholder="e.g. Tristan fit screenshot"
                                style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     </div>
 
                     <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
-                        <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Expires</label>
+                        <label class="b-eyebrow">Expires</label>
                         <select name="expiry"
                                 style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                             {% for key, label in expiry_options.items() %}
@@ -55,7 +55,7 @@
 <div class="b-section">
     <div class="b-section-head">
         <span class="b-label">Your Uploads</span>
-        <span class="b-label" style="color:var(--muted);">{{ images|length }}</span>
+        <span class="b-label b-muted">{{ images|length }}</span>
     </div>
     <div class="b-panel">
         {% for img in images %}

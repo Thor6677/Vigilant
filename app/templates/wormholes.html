@@ -86,7 +86,7 @@
     <div class="wf-row">
         <span class="wf-label">Require effect:</span>
         <div class="wf-toggles" id="filter-effect">
-            <button class="wf-btn is-on" data-filter="effect" data-val="" onclick="setExclusive(this,'effect')" style="color:var(--text);">Unfiltered</button>
+            <button class="wf-btn is-on b-text" data-filter="effect" data-val="" onclick="setExclusive(this,'effect')">Unfiltered</button>
             <button class="wf-btn" data-filter="effect" data-val="none" onclick="setExclusive(this,'effect')">No Effect</button>
             {% for key in effects_list %}
             <button class="wf-btn" data-filter="effect" data-val="{{ key }}" onclick="setExclusive(this,'effect')" style="color:{{ effect_colors.get(key, 'var(--text)') }};">{{ effects_labels[key] }}</button>
@@ -95,7 +95,7 @@
     </div>
 </div>
 
-<span id="wh-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading...</span>
+<span id="wh-loading" class="htmx-indicator b-muted-sm">Loading...</span>
 
 <div id="wh-results">
     <div class="b-empty">Select filters above to find wormhole systems.</div>

@@ -19,7 +19,7 @@
                 hx-indicator="#check-loader">
             Refresh
         </button>
-        <span id="check-loader" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Checking...</span>
+        <span id="check-loader" class="htmx-indicator b-muted-sm">Checking...</span>
     </div>
 </div>
 
@@ -27,7 +27,7 @@
 <div class="b-section">
     <div class="b-section-head">
         <span class="b-label">Tracked Items</span>
-        <span class="b-label" style="color:var(--muted);">{{ thresholds|length }} item{{ 's' if thresholds|length != 1 else '' }}</span>
+        <span class="b-label b-muted">{{ thresholds|length }} item{{ 's' if thresholds|length != 1 else '' }}</span>
     </div>
     <div id="inventory-items">
         {% include "partials/corp_inventory_items.html" %}

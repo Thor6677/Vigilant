@@ -9,7 +9,7 @@
         <div style="display:flex;gap:1rem;font-size:10px;">
             <span style="color:var(--success);">{{ completed }}/{{ total }} complete</span>
             {% if total_sp > 0 %}
-            <span style="color:var(--muted);">{{ "{:,.0f}".format(total_sp) }} SP needed</span>
+            <span class="b-muted">{{ "{:,.0f}".format(total_sp) }} SP needed</span>
             <span style="color:var(--accent);">{{ total_time }}</span>
             {% endif %}
         </div>
@@ -46,7 +46,7 @@
                 <span><span style="color:var(--accent);font-weight:500;">{{ opt['large'] }}</span> Large</span>
                 {% endif %}
                 {% if opt['large'] > 0 and opt['small'] > 0 %}
-                <span style="color:var(--muted);">+</span>
+                <span class="b-muted">+</span>
                 {% endif %}
                 {% if opt['small'] > 0 %}
                 <span><span style="color:var(--accent);font-weight:500;">{{ opt['small'] }}</span> Small</span>
@@ -60,8 +60,8 @@
         <div style="display:flex;gap:1rem;color:var(--muted);font-size:9px;">
             {% if lo['cost'] > 0 %}
             <span>
-                <span style="color:var(--text);">{{ lo['large'] }}</span> Large only:
-                <span style="color:var(--text);">{{ "{:,.0f}".format(lo['cost']) }} ISK</span>
+                <span class="b-text">{{ lo['large'] }}</span> Large only:
+                <span class="b-text">{{ "{:,.0f}".format(lo['cost']) }} ISK</span>
                 {% if injectors['large_price'] > 0 %}
                 <span style="font-size:8px;">@ {{ "{:,.0f}".format(injectors['large_price']) }}/ea</span>
                 {% endif %}
@@ -69,8 +69,8 @@
             {% endif %}
             {% if so['cost'] > 0 %}
             <span>
-                <span style="color:var(--text);">{{ so['small'] }}</span> Small only:
-                <span style="color:var(--text);">{{ "{:,.0f}".format(so['cost']) }} ISK</span>
+                <span class="b-text">{{ so['small'] }}</span> Small only:
+                <span class="b-text">{{ "{:,.0f}".format(so['cost']) }} ISK</span>
                 {% if injectors['small_price'] > 0 %}
                 <span style="font-size:8px;">@ {{ "{:,.0f}".format(injectors['small_price']) }}/ea</span>
                 {% endif %}

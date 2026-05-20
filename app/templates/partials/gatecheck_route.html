@@ -72,11 +72,11 @@
                 <span style="color:var(--muted);min-width:55px;">{{ k.time_str }}</span>
                 <a href="https://zkillboard.com/kill/{{ k.killmail_id }}/" target="_blank" rel="noopener"
                    class="b-hover-underline" style="color:var(--danger);">{{ k.victim_ship }}</a>
-                <span style="color:var(--muted);">killed by {{ k.attacker_count }}</span>
+                <span class="b-muted">killed by {{ k.attacker_count }}</span>
                 <span style="color:var(--accent);">{{ k.value_str }} ISK</span>
                 {% if k.attacker_ships %}
-                <span style="color:var(--muted);">·
-                    {% for ship in k.attacker_ships %}<a href="https://zkillboard.com/ship/{{ ship.type_id }}/" target="_blank" rel="noopener" class="b-hover-underline" style="color:var(--muted);">{{ ship.name }}{% if ship.count > 1 %}&nbsp;×{{ ship.count }}{% endif %}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+                <span class="b-muted">·
+                    {% for ship in k.attacker_ships %}<a href="https://zkillboard.com/ship/{{ ship.type_id }}/" target="_blank" rel="noopener" class="b-hover-underline b-muted">{{ ship.name }}{% if ship.count > 1 %}&nbsp;×{{ ship.count }}{% endif %}</a>{% if not loop.last %}, {% endif %}{% endfor %}
                 </span>
                 {% endif %}
             </div>

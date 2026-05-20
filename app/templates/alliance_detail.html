@@ -39,7 +39,7 @@
         <span class="b-label">Recent Changes · 7d</span>
     </div>
     <div id="changes-list" style="padding:0.5rem 0.75rem;font-size:11px;max-height:500px;overflow-y:auto;">
-        <div style="color:var(--muted);">Loading…</div>
+        <div class="b-muted">Loading…</div>
     </div>
 </div>
 
@@ -106,7 +106,7 @@
 
     const cl = document.getElementById('changes-list');
     if (!detail.recent_changes || !detail.recent_changes.length) {
-        cl.innerHTML = '<div style="color:var(--muted);">No sovereignty changes in the last 7 days.</div>';
+        cl.innerHTML = '<div class="b-muted">No sovereignty changes in the last 7 days.</div>';
     } else {
         cl.innerHTML = detail.recent_changes.map(c => {
             const sys = systemMap.get(c.system_id);
@@ -124,7 +124,7 @@
                     </span>
                     <span style="color:var(--muted);font-size:10px;">
                         ${c.direction === 'gain' ? 'from' : 'to'}
-                        ${other ? `<a style="color:var(--text);" href="/alliance/${other}">${otherName}</a>` : otherName}
+                        ${other ? `<a class="b-text" href="/alliance/${other}">${otherName}</a>` : otherName}
                     </span>
                     <span style="color:var(--muted);font-size:9px;">${when}</span>
                 </div>

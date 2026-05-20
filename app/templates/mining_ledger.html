@@ -104,7 +104,7 @@
 <div class="b-section">
     <div class="b-panel-head" style="margin-bottom:0.5rem;">
         <span class="b-label">Corporations</span>
-        <span style="font-size:10px;color:var(--muted);">Click to expand · Check characters to combine</span>
+        <span class="b-muted-sm">Click to expand · Check characters to combine</span>
     </div>
 
     {% if not corps %}
@@ -136,7 +136,7 @@
                         {% endif %}
                     </div>
                 </div>
-                <span style="font-size:10px;color:var(--muted);" class="fit-arrow">▸</span>
+                <span class="fit-arrow b-muted-sm">▸</span>
             </div>
             <div id="corp-chars-{{ corp.corp_id }}">
                 <div id="corp-loader-{{ corp.corp_id }}" class="htmx-indicator" style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);letter-spacing:0.14em;text-transform:uppercase;">

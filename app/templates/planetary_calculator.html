@@ -168,7 +168,7 @@
 <div class="b-panel b-section">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;">
         <span class="b-label">P0 raw materials needed</span>
-        <span style="font-size:10px;color:var(--muted);">
+        <span class="b-muted-sm">
             {{ bom.p0_totals | length }} distinct · total ≈ {{ '{:,}'.format(bom.total_p0_volume) }} units
         </span>
     </div>
@@ -215,7 +215,7 @@
 <div class="b-panel b-section">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Per-character colony plan</span>
-        <span style="font-size:10px;color:var(--muted);">
+        <span class="b-muted-sm">
             {{ character_plan.total_characters }} character{{ 's' if character_plan.total_characters != 1 else '' }}
             {% if character_plan.is_capped %}
             <span style="color:var(--warn);"> (optimal: {{ character_plan.optimal_chars }})</span>
@@ -238,7 +238,7 @@
         <div style="color:var(--text);font-weight:600;margin-bottom:0.25rem;">⚠ Plan running below optimal rate</div>
         <div style="color:var(--muted);font-size:10px;line-height:1.5;">
             A full-rate plan for {{ cycles }} cycle{{ 's' if cycles != 1 else '' }} of {{ bom.target.name }} would use
-            <strong style="color:var(--text);">{{ character_plan.optimal_chars }}</strong> character{{ 's' if character_plan.optimal_chars != 1 else '' }}
+            <strong class="b-text">{{ character_plan.optimal_chars }}</strong> character{{ 's' if character_plan.optimal_chars != 1 else '' }}
             at IPC {{ ['0','I','II','III','IV','V'][ipc] }} ({{ character_plan.planets_per_char }} planets each).
             You've capped at
             <strong style="color:var(--warn);">{{ character_plan.effective_chars }}</strong> character{{ 's' if character_plan.effective_chars != 1 else '' }},
@@ -246,7 +246,7 @@
             {{ 'were' if character_plan.dropped_count != 1 else 'was' }} trimmed. The plan still produces every item —
             just slower than the full-rate target.
             {% if character_plan.achievable_ratio %}
-            Effective throughput: <strong style="color:var(--text);">~{{ (character_plan.achievable_ratio * 100) | round | int }}%</strong> of the full rate.
+            Effective throughput: <strong class="b-text">~{{ (character_plan.achievable_ratio * 100) | round | int }}%</strong> of the full rate.
             {% endif %}
         </div>
         {% if character_plan.shortfalls %}
@@ -255,7 +255,7 @@
             <div style="display:flex;flex-wrap:wrap;gap:0.3rem;">
                 {% for s in character_plan.shortfalls %}
                 <span style="font-size:10px;padding:0.15rem 0.4rem;background:rgba(200,169,81,0.10);border:1px solid rgba(200,169,81,0.32);color:var(--warn);" title="{{ s.p1_name }}: {{ s.dropped_factories }} factor{{ 'ies' if s.dropped_factories != 1 else 'y' }} fewer than the full-rate plan. Still produced, just at a lower rate.">
-                    {{ s.p1_name }}{% if s.p0_name %} <span style="color:var(--muted);">({{ s.p0_name }})</span>{% endif %}
+                    {{ s.p1_name }}{% if s.p0_name %} <span class="b-muted">({{ s.p0_name }})</span>{% endif %}
                     <span style="color:var(--warn);font-weight:600;"> −{{ s.dropped_factories }} fact{{ 'ories' if s.dropped_factories != 1 else 'ory' }}</span>
                 </span>
                 {% endfor %}
@@ -318,17 +318,17 @@
                 {% if slot.role == 'miner_p1' %}
                     <span style="color:var(--accent);">Extract:</span>
                     {% for s in slot.slots %}{{ s.p0_name }}{% if not loop.last %}, {% endif %}{% endfor %}
-                    <span style="color:var(--muted);"> → </span>
-                    <span style="color:var(--text);">
+                    <span class="b-muted"> → </span>
+                    <span class="b-text">
                     {% for s in slot.slots %}{{ s.p1_name }}{% if not loop.last %}, {% endif %}{% endfor %}
                     </span>
-                    <span style="color:var(--muted);"> (P1 factory)</span>
+                    <span class="b-muted"> (P1 factory)</span>
                 {% elif slot.role == 'p2_p3_factory' %}
                     <span style="color:var(--accent);">P2/P3 hub:</span>
-                    <span style="color:var(--text);">{{ slot.factory_count }} × Advanced Industrial Facility</span>
+                    <span class="b-text">{{ slot.factory_count }} × Advanced Industrial Facility</span>
                 {% elif slot.role == 'p4_factory' %}
                     <span style="color:var(--accent);">P4 assembly:</span>
-                    <span style="color:var(--text);">{{ slot.factory_count }} × High-Tech Production Plant</span>
+                    <span class="b-text">{{ slot.factory_count }} × High-Tech Production Plant</span>
                 {% endif %}
             </span>
         </div>
@@ -337,7 +337,7 @@
     {% endfor %}
 
     <div style="padding:0.45rem 0.75rem;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
-        Each character has up to 6 planets, densely packed with extraction + factory work. The character holding the target's final factory is labeled <strong style="color:var(--text);">Final assembly</strong>. <strong style="color:var(--text);">CCU V</strong> assumed. <span style="color:var(--warn);">fallback</span> = preferred planet type exhausted in this system, using an alternate. <span style="color:#7ec6ff;">shared</span> = another character also has a colony on this planet (pick a different resource patch in-game; the ECU spots don't conflict).
+        Each character has up to 6 planets, densely packed with extraction + factory work. The character holding the target's final factory is labeled <strong class="b-text">Final assembly</strong>. <strong class="b-text">CCU V</strong> assumed. <span style="color:var(--warn);">fallback</span> = preferred planet type exhausted in this system, using an alternate. <span style="color:#7ec6ff;">shared</span> = another character also has a colony on this planet (pick a different resource patch in-game; the ECU spots don't conflict).
     </div>
 </div>
 {% endif %}
@@ -349,13 +349,13 @@
 <div class="b-panel b-section">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Production flow chart</span>
-        <span style="font-size:10px;color:var(--muted);">
+        <span class="b-muted-sm">
             {% set cross_count = 0 %}{% for e in character_plan.flow.edges %}{% if not e.intra %}{% set cross_count = cross_count + 1 %}{% endif %}{% endfor %}
             {{ cross_count }} cross-character handoff{{ 's' if cross_count != 1 else '' }}
             · <span style="color:var(--success);">green</span> = P1→P2,
             <span style="color:var(--accent);">gold</span> = P2→P3,
             <span style="color:#7ec6ff;">cyan</span> = P3→P4,
-            <span style="color:var(--muted);">dim</span> = intra-character
+            <span class="b-muted">dim</span> = intra-character
             · hover to trace
         </span>
     </div>
@@ -402,8 +402,8 @@
                      title="{{ node.name }} × {{ node.count }} on {{ (node.planets or []) | join(', ') }}{% if node.surplus %} — no downstream consumer (surplus){% endif %}"
                      style="font-size:10px;padding:0.2rem 0.4rem;border:1px solid var(--border);background:var(--bg);line-height:1.25;cursor:default;">
                     <div>
-                        <span style="color:var(--text);">{{ node.name }}</span>
-                        <span style="color:var(--muted);"> × {{ node.count }}</span>
+                        <span class="b-text">{{ node.name }}</span>
+                        <span class="b-muted"> × {{ node.count }}</span>
                         {% if node.surplus %}<span style="color:var(--muted);font-size:9px;margin-left:0.2rem;" title="Not consumed by any factory in this plan">(surplus)</span>{% endif %}
                     </div>
                     {% if node.planets_short %}
@@ -426,8 +426,8 @@
         {% set cidx = loop.index0 %}
         {% if character_plan.flow.exports[cidx] %}
         <div style="margin-bottom:0.2rem;line-height:1.5;">
-            <span style="color:var(--text);">{{ char.label }}</span> ships
-            {% for ex in character_plan.flow.exports[cidx] %}<span style="color:var(--accent);">{{ ex.name }}</span> → <span style="color:var(--text);">Char {{ ex.counterparts | join(', Char ') }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+            <span class="b-text">{{ char.label }}</span> ships
+            {% for ex in character_plan.flow.exports[cidx] %}<span style="color:var(--accent);">{{ ex.name }}</span> → <span class="b-text">Char {{ ex.counterparts | join(', Char ') }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
         </div>
         {% endif %}
         {% endfor %}
@@ -694,7 +694,7 @@
             <span style="font-size:11px;color:var(--text);font-weight:600;">
                 {{ tier_names.get(tier, 'P' ~ tier) }}
             </span>
-            <span style="font-size:10px;color:var(--muted);">{{ rows | length }} product{{ 's' if rows|length != 1 else '' }}</span>
+            <span class="b-muted-sm">{{ rows | length }} product{{ 's' if rows|length != 1 else '' }}</span>
         </div>
         <div style="display:grid;grid-template-columns:minmax(160px,2fr) 90px 90px 90px minmax(220px,2fr);gap:0.4rem;padding:0.3rem 0.75rem;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid var(--border);">
             <span>Product</span>
@@ -719,10 +719,10 @@
             <span style="text-align:right;color:var(--text);">{{ row.factories }}</span>
             <span style="color:var(--muted);font-size:10px;">
                 {% for inp in row.direct_inputs %}
-                {{ inp.per_cycle }}× <span style="color:var(--text);">{{ inp.name }}</span>{% if not loop.last %} + {% endif %}
+                {{ inp.per_cycle }}× <span class="b-text">{{ inp.name }}</span>{% if not loop.last %} + {% endif %}
                 {% endfor %}
                 {% if row.cycle_time and row.output_qty %}
-                <span style="color:var(--muted);"> → {{ row.output_qty }} per {{ row.cycle_time // 60 }}m</span>
+                <span class="b-muted"> → {{ row.output_qty }} per {{ row.cycle_time // 60 }}m</span>
                 {% endif %}
             </span>
         </div>
@@ -789,7 +789,7 @@
                         return '<div class="calc-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
                             + ' onmousedown="calcSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
                             + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
-                            + '<span style="color:var(--text);">' + s.system_name + '</span>'
+                            + '<span class="b-text">' + s.system_name + '</span>'
                             + '</div>';
                     }).join('');
                     dd.style.display = 'block';

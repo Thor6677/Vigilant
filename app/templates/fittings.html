@@ -53,7 +53,7 @@
              data-on-error="hide">
         {% endif %}
         <span class="b-label">{{ ship_name }}</span>
-        <span style="font-size:10px;color:var(--muted);">{{ fits | length }} fit{{ 's' if fits | length != 1 else '' }}</span>
+        <span class="b-muted-sm">{{ fits | length }} fit{{ 's' if fits | length != 1 else '' }}</span>
     </div>
 
     {% for fit in fits %}
@@ -63,9 +63,9 @@
              onclick="toggleFit('fit-{{ fit.fitting_id }}', this)">
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ fit.name }}</span>
-                <span style="font-size:10px;color:var(--muted);">{{ fit.total_modules }} modules</span>
+                <span class="b-muted-sm">{{ fit.total_modules }} modules</span>
             </div>
-            <span class="fit-arrow" style="font-size:10px;color:var(--muted);">▸</span>
+            <span class="fit-arrow b-muted-sm">▸</span>
         </div>
 
         {# Fitting detail (collapsed by default) #}
@@ -98,7 +98,7 @@
                          data-on-error="hide">
                     <span style="flex:1;font-size:11px;color:var(--text);">{{ item.name }}</span>
                     {% if item.quantity > 1 %}
-                    <span style="font-size:10px;color:var(--muted);">x{{ item.quantity }}</span>
+                    <span class="b-muted-sm">x{{ item.quantity }}</span>
                     {% endif %}
                 </div>
                 {% endfor %}

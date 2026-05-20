@@ -64,7 +64,7 @@
 {# ── Corp character list ──────────────────────────────────────────────────── #}
 {% if is_corp and characters %}
 <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:1rem;">
-    <span style="font-size:10px;color:var(--muted);">Includes:</span>
+    <span class="b-muted-sm">Includes:</span>
     {% for name in characters %}
     <span style="font-size:10px;letter-spacing:0.06em;color:var(--text);border:1px solid var(--border);padding:1px 6px;">{{ name }}</span>
     {% endfor %}
@@ -143,7 +143,7 @@
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">Daily Summary</span>
-            <span style="font-size:10px;color:var(--muted);">All time</span>
+            <span class="b-muted-sm">All time</span>
         </div>
 
         <div class="b-table-row" style="border-bottom:2px solid var(--border);">
@@ -175,8 +175,8 @@
         <div class="b-panel-head" style="cursor:pointer;" onclick="document.getElementById('detail-table').style.display = document.getElementById('detail-table').style.display === 'none' ? '' : 'none'; this.querySelector('.fit-arrow').textContent = document.getElementById('detail-table').style.display === 'none' ? '▸' : '▾';">
             <span class="b-label">Full Detail</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
-                <span style="font-size:10px;color:var(--muted);">{{ data.entries | length }} entries</span>
-                <span class="fit-arrow" style="font-size:10px;color:var(--muted);">▸</span>
+                <span class="b-muted-sm">{{ data.entries | length }} entries</span>
+                <span class="fit-arrow b-muted-sm">▸</span>
             </div>
         </div>
 

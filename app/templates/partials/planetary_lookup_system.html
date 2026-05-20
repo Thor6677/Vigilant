@@ -5,7 +5,7 @@
     Planet SDE tables not yet loaded — the lookup will populate after the next SDE import.
 </div>
 {% elif not planets %}
-<div class="b-empty" style="padding:0.75rem;">No planets in this system.</div>
+<div class="b-empty b-pad-md">No planets in this system.</div>
 {% else %}
 
 {# ── System header ──────────────────────────────────────────────────────── #}
@@ -30,7 +30,7 @@
     <span style="font-size:10px;padding:0.1rem 0.4rem;background:rgba(51,170,85,0.15);color:var(--success);border:1px solid rgba(51,170,85,0.35);">HIGHSEC</span>
     {% endif %}
     {% if system.region %}
-    <span style="font-size:10px;color:var(--muted);">{{ system.constellation or '' }} · {{ system.region }}</span>
+    <span class="b-muted-sm">{{ system.constellation or '' }} · {{ system.region }}</span>
     {% endif %}
     <span style="margin-left:auto;font-size:10px;color:var(--muted);">{{ planets | length }} planet{{ 's' if planets|length != 1 else '' }}</span>
 </div>
@@ -44,7 +44,7 @@
 </div>
 {% elif space_type == 'highsec' or space_type == 'lowsec' %}
 <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);">
-    <strong style="color:var(--text);">{{ space_type | capitalize }}:</strong>
+    <strong class="b-text">{{ space_type | capitalize }}:</strong>
     classic PI available. Orbital Skyhooks (Power / Workforce / Reagents) are
     <strong>null-sec only</strong>.
 </div>
@@ -59,7 +59,7 @@
 <div style="border-bottom:1px solid var(--border);">
     {% for p in planets %}
     <div style="padding:0.35rem 0.75rem;display:grid;grid-template-columns:minmax(120px,160px) minmax(70px,90px) 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
-        <span style="color:var(--text);">{{ p.planet_name }}</span>
+        <span class="b-text">{{ p.planet_name }}</span>
         <span style="color:var(--muted);text-transform:capitalize;">{{ p.planet_type }}</span>
         <span style="color:var(--muted);font-size:10px;">{{ p.p0_materials | join(' · ') }}</span>
     </div>
@@ -67,11 +67,11 @@
 </div>
 
 {# ── Tier grid — 5 columns with chain hover lines + highlighting ────────── #}
-<div style="padding:0.75rem;">
+<div class="b-pad-md">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Producible commodities</span>
-        <span style="font-size:10px;color:var(--muted);">
-            <span style="color:var(--text);">●</span> producible &nbsp;
+        <span class="b-muted-sm">
+            <span class="b-text">●</span> producible &nbsp;
             <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; · &nbsp;
             hover to trace recipe
         </span>

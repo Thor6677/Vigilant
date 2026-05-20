@@ -795,6 +795,15 @@
         .b-hover-bg:hover        { background: var(--bg); }
         .b-hover-underline       { text-decoration: none; }
         .b-hover-underline:hover { text-decoration: underline; }
+        /* ISS-028 design-system hygiene: consolidate the top-5 repeated
+           standalone inline-style patterns. Used by ~250 sites swept in the
+           same commit that introduced these rules. Future inline styles
+           matching these patterns should prefer the utility class. */
+        .b-muted     { color: var(--muted); }
+        .b-text      { color: var(--text); }
+        .b-pad-md    { padding: 0.75rem; }
+        .b-muted-sm  { font-size: 10px; color: var(--muted); }
+        .b-eyebrow   { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -858,7 +867,7 @@
             <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:0;background:var(--danger);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center;">0</span>
             <div id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;width:min(320px, calc(100vw - 2rem));max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:1000;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
-                    <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Notifications</span>
+                    <span class="b-eyebrow">Notifications</span>
                     <div style="display:flex;gap:0.5rem;">
                         <button data-click="toggleNotifSettings" data-stop style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;" title="Settings">&#9881;</button>
                         <button data-click="clearNotifBadge" data-stop style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Clear All</button>

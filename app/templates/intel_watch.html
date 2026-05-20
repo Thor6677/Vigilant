@@ -141,7 +141,7 @@
                     {{ 'SYSTEM' if a.kind == 'system_watch' else 'HUNTER' }}
                 </span>
                 {{ a.system_name }}
-                {% if a.matched_label %} · <span style="color:var(--muted);">{{ a.matched_label }}</span>{% endif %}
+                {% if a.matched_label %} · <span class="b-muted">{{ a.matched_label }}</span>{% endif %}
             </div>
             <div style="color:var(--muted);font-size:10px;">
                 {{ a.triggered_at.strftime('%Y-%m-%d %H:%M') }} UTC

@@ -61,7 +61,7 @@
 
 {# ── Expiry / Extend ──────────────────────────────────────────────────────── #}
 <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding:0.5rem 0;">
-    <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Keep for:</span>
+    <span class="b-eyebrow">Keep for:</span>
     {% for key, delta in expiry_options.items() %}
     <form method="POST" action="/dscan/{{ scan_id }}/extend" style="display:inline;">
         <input type="hidden" name="duration" value="{{ key }}">
@@ -76,8 +76,8 @@
 {% if non_ship_items %}
 <details style="margin-top:0.5rem;">
     <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
-        <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Other on Scan ({{ non_ship_items | length }})</span>
-        <span style="font-size:10px;color:var(--muted);">▼</span>
+        <span class="b-eyebrow">Other on Scan ({{ non_ship_items | length }})</span>
+        <span class="b-muted-sm">▼</span>
     </summary>
     <div class="b-panel" style="margin-top:0.25rem;">
         {% for item in non_ship_items %}

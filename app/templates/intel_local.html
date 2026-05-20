@@ -57,7 +57,7 @@
     </div>
     {% if summary.unresolved_count > 0 %}
     <div class="b-stat">
-        <div class="b-stat-val" style="color:var(--muted);">{{ summary.unresolved_count }}</div>
+        <div class="b-stat-val b-muted">{{ summary.unresolved_count }}</div>
         <div class="b-stat-label">Unresolved</div>
     </div>
     {% endif %}
@@ -116,7 +116,7 @@
 
 {# ── Expiry / Extend ──────────────────────────────────────────────────────── #}
 <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding:0.5rem 0;">
-    <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Keep for:</span>
+    <span class="b-eyebrow">Keep for:</span>
     {% for key, delta in expiry_options.items() %}
     <form method="POST" action="/intel/{{ scan_id }}/extend" style="display:inline;">
         <input type="hidden" name="duration" value="{{ key }}">
@@ -130,9 +130,9 @@
 {# ── Pilot List (collapsed) ────────────────────────────────────────────────── #}
 <details style="margin-top:0.5rem;" id="pilot-details">
     <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
-        <span style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">All Pilots</span>
-        <span style="font-size:10px;color:var(--muted);" id="pilot-count">{{ items | length }}</span>
-        <span style="font-size:10px;color:var(--muted);">▼</span>
+        <span class="b-eyebrow">All Pilots</span>
+        <span class="b-muted-sm" id="pilot-count">{{ items | length }}</span>
+        <span class="b-muted-sm">▼</span>
     </summary>
     <div class="b-panel" style="margin-top:0.25rem;">
         <div class="b-table-row" style="border-bottom:2px solid var(--border);">

@@ -83,7 +83,7 @@
 <div class="b-section">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Player Corporations</span>
-        <span class="b-label" style="color:var(--muted);">{{ corps | length }}</span>
+        <span class="b-label b-muted">{{ corps | length }}</span>
     </div>
     <div id="player-corps" class="corp-sortable">
     {% for corp in corps %}
@@ -138,8 +138,8 @@
 {% if npc_corps %}
 <div class="b-section" style="margin-top:2rem;">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
-        <span class="b-label" style="color:var(--muted);">NPC Corporations</span>
-        <span class="b-label" style="color:var(--muted);">{{ npc_corps | length }}</span>
+        <span class="b-label b-muted">NPC Corporations</span>
+        <span class="b-label b-muted">{{ npc_corps | length }}</span>
     </div>
     <div id="npc-corps">
     {% for corp in npc_corps %}

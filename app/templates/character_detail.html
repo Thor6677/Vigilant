@@ -537,7 +537,7 @@
                     {% endfor %}
                     {% endif %}
                 {% else %}
-                    <div class="asset-item"><span style="color:var(--muted);">Empty clone</span></div>
+                    <div class="asset-item"><span class="b-muted">Empty clone</span></div>
                 {% endif %}
             </div>
         </div>
@@ -556,7 +556,7 @@
         <div hx-get="/character/{{ char.character_id }}/mail-partial"
              hx-trigger="load"
              hx-swap="innerHTML">
-            <div class="b-empty" style="color:var(--muted);">Loading mail...</div>
+            <div class="b-empty b-muted">Loading mail...</div>
         </div>
     </div>
 
@@ -567,7 +567,7 @@
         <div hx-get="/character/{{ char.character_id }}/notifications-partial"
              hx-trigger="load"
              hx-swap="innerHTML">
-            <div class="b-empty" style="color:var(--muted);">Loading notifications...</div>
+            <div class="b-empty b-muted">Loading notifications...</div>
         </div>
     </div>
 </div>

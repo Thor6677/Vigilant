@@ -163,7 +163,7 @@
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
     <div class="b-section-head">
         <span class="b-label">{{ slot_label }}</span>
-        <span id="count-{{ slot_key }}" style="font-size:10px;color:var(--muted);"></span>
+        <span id="count-{{ slot_key }}" class="b-muted-sm"></span>
     </div>
     <div id="slots-{{ slot_key }}"></div>
     <div style="padding:0.25rem 0;">
@@ -204,7 +204,7 @@
 <div class="b-section" id="section-drone">
     <div class="b-section-head">
         <span class="b-label">Drones</span>
-        <span id="drone-summary" style="font-size:10px;color:var(--muted);"></span>
+        <span id="drone-summary" class="b-muted-sm"></span>
     </div>
     <div id="slots-drone"></div>
     <div style="padding:0.25rem 0;">
@@ -697,7 +697,7 @@ function renderImplantSlots() {
     for (var s = 1; s <= 10; s++) {
         var rec = (state.implants || {})[String(s)];
         var nameCell = rec
-            ? '<span style="color:var(--text);">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' +
+            ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' +
               '<button data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
             : '<span style="color:var(--muted);font-style:italic;">empty</span>';
         html +=
@@ -732,7 +732,7 @@ function searchImplant(q) {
                 resultsEl.innerHTML = rows.map(function(r) {
                     return '<div class="b-hover-bg" data-click="addImplant" data-type-id="' + r.type_id + '" data-slot="' + r.slot + '" data-implant-name="' + escapeHtml(r.name) + '" ' +
                            'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);">' +
-                           '<span style="color:var(--muted);">#' + r.slot + '</span> ' + escapeHtml(r.name) +
+                           '<span class="b-muted">#' + r.slot + '</span> ' + escapeHtml(r.name) +
                            '</div>';
                 }).join('');
                 resultsEl.style.display = '';
@@ -1537,7 +1537,7 @@ function updateBreadcrumbsAsync(groupId) {
                 if (i < path.length - 1) {
                     html += '<span style="cursor:pointer;color:var(--accent);" data-click="browseToPathIndex" data-path-idx="' + i + '" data-group-id="' + path[i].market_group_id + '">' + escapeHtml(path[i].market_group_name) + '</span>';
                 } else {
-                    html += '<span style="color:var(--text);">' + escapeHtml(path[i].market_group_name) + '</span>';
+                    html += '<span class="b-text">' + escapeHtml(path[i].market_group_name) + '</span>';
                 }
             }
             document.getElementById('browse-breadcrumbs').innerHTML = html;

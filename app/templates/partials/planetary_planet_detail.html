@@ -2,10 +2,10 @@
 <div style="padding:0.5rem 0.75rem;border-top:1px solid var(--border);background:rgba(0,0,0,0.12);">
     <div style="display:flex;gap:1rem;flex-wrap:wrap;font-size:10px;color:var(--muted);margin-bottom:0.5rem;">
         {% if planet.upgrade_level is not none %}
-        <span>CC level: <span style="color:var(--text);">{{ planet.upgrade_level }}</span></span>
+        <span>CC level: <span class="b-text">{{ planet.upgrade_level }}</span></span>
         {% endif %}
         {% if planet.last_update %}
-        <span>Last touched: <span style="color:var(--text);">{{ planet.last_update[:16].replace('T', ' ') }}</span></span>
+        <span>Last touched: <span class="b-text">{{ planet.last_update[:16].replace('T', ' ') }}</span></span>
         {% endif %}
         <span style="margin-left:auto;">{{ pins | length }} pin{{ 's' if pins|length != 1 else '' }}</span>
     </div>
@@ -39,12 +39,12 @@
             {% if pin._kind == 'extractor' and pin._product_name %}
                 → {{ pin._product_name }}
                 {% if pin.extractor_qty_per_cycle %}
-                <span style="color:var(--text);"> · {{ pin.extractor_qty_per_cycle }}/cycle</span>
+                <span class="b-text"> · {{ pin.extractor_qty_per_cycle }}/cycle</span>
                 {% endif %}
             {% elif pin._schematic_name %}
                 {{ pin._schematic_name }}
                 {% if pin._schematic_output %}
-                <span style="color:var(--muted);"> → {{ pin._schematic_output }}
+                <span class="b-muted"> → {{ pin._schematic_output }}
                     {% if pin._schematic_output_qty %}×{{ pin._schematic_output_qty }}{% endif %}
                 </span>
                 {% endif %}
@@ -58,7 +58,7 @@
         <span style="font-size:11px;color:var(--muted);">
             {% if pin.contents %}
                 <details style="cursor:pointer;">
-                    <summary style="color:var(--text);">{{ pin.contents | length }} item{{ 's' if pin.contents|length != 1 else '' }}</summary>
+                    <summary class="b-text">{{ pin.contents | length }} item{{ 's' if pin.contents|length != 1 else '' }}</summary>
                     <div style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;overflow-y:auto;">
                         {% for c in pin.contents %}
                         <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:10px;">

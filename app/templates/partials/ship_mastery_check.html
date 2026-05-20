@@ -79,7 +79,7 @@
             <div style="display:flex;align-items:center;gap:0.3rem;padding:0.1rem 0;font-size:9px;">
                 <span style="color:var(--danger);">&#9679;</span>
                 <span style="flex:1;color:var(--text);">{{ s.skill_name }}</span>
-                <span style="color:var(--muted);">{{ s.current }} &rarr; {{ s.target }}</span>
+                <span class="b-muted">{{ s.current }} &rarr; {{ s.target }}</span>
             </div>
             {% endfor %}
             {% if m.missing > m.missing_skills | length %}

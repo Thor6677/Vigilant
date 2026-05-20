@@ -10,7 +10,7 @@
             {% if meta_level is not none %} &middot; Meta {{ meta_level|int }}{% endif %}
         </div>
         {% if volume %}
-        <div style="font-size:10px;color:var(--muted);">Volume: {{ "{:,.1f}".format(volume) }} m&sup3;</div>
+        <div class="b-muted-sm">Volume: {{ "{:,.1f}".format(volume) }} m&sup3;</div>
         {% endif %}
     </div>
 </div>

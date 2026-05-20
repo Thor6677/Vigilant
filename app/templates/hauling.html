@@ -26,7 +26,7 @@
     <div class="b-section">
         <div class="b-panel">
             <div class="b-panel-head"><span class="b-label">Trip Calculation</span></div>
-            <div style="padding:0.75rem;">
+            <div class="b-pad-md">
                 <div class="b-stats" style="margin-bottom:0.75rem;">
                     <div class="b-stat">
                         <div class="b-stat-val" id="result-trips" style="font-size:28px;">—</div>
@@ -59,9 +59,9 @@
         </div>
 
         {# Manual input #}
-        <div id="panel-manual" style="padding:0.75rem;">
+        <div id="panel-manual" class="b-pad-md">
             <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Total Volume to Haul (m³)</label>
+                <label class="b-eyebrow">Total Volume to Haul (m³)</label>
                 <input type="text" id="vol-total" value="0" data-input="recalcTrips"
                        style="padding:0.5rem;background:var(--bg);border:1px solid var(--accent);color:var(--text);font-family:inherit;font-size:14px;text-align:right;max-width:250px;">
             </div>
@@ -86,12 +86,12 @@
     <div class="ship-entry" style="padding:0.75rem;border-bottom:1px solid var(--border);">
         <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
             <div style="display:flex;flex-direction:column;gap:3px;min-width:50px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Qty</label>
+                <label class="b-eyebrow">Qty</label>
                 <input type="number" data-field="qty" value="1" min="1" max="50" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:160px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Ship</label>
+                <label class="b-eyebrow">Ship</label>
                 <select data-field="ship" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="">Select a ship…</option>
                     {% for group_name, ships in ships_by_group.items() %}
@@ -104,7 +104,7 @@
                 </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Expander</label>
+                <label class="b-eyebrow">Cargo Expander</label>
                 <select data-field="mod" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, mod in cargo_modules.items() %}
                     <option value="{{ key }}">{{ mod.label }}{% if mod.bonus > 0 %} (+{{ "%.1f"|format(mod.bonus * 100) }}%){% endif %}</option>
@@ -112,12 +112,12 @@
                 </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Mods</label>
+                <label class="b-eyebrow">Mods</label>
                 <input type="number" data-field="modCount" value="0" min="0" max="8" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Cargo Rig</label>
+                <label class="b-eyebrow">Cargo Rig</label>
                 <select data-field="rig" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     {% for key, rig in cargo_rigs.items() %}
                     <option value="{{ key }}">{{ rig.label }}{% if rig.bonus > 0 %} (+{{ "%.1f"|format(rig.bonus * 100) }}%){% endif %}</option>
@@ -125,19 +125,19 @@
                 </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Rigs</label>
+                <label class="b-eyebrow">Rigs</label>
                 <input type="number" data-field="rigCount" value="0" min="0" max="3" data-change="recalcAll"
                        style="width:50px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;">
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Skill</label>
+                <label class="b-eyebrow">Skill</label>
                 <select data-field="skill" data-change="recalcAll" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="0">0</option><option value="1">1</option><option value="2">2</option>
                     <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
                 </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
-                <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">&nbsp;</label>
+                <label class="b-eyebrow">&nbsp;</label>
                 <button onclick="removeShipEntry(this)" class="b-btn" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
             </div>
         </div>

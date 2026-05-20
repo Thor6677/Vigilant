@@ -124,7 +124,7 @@
                         <span class="sf-ship-name">{{ r.ship_name }}</span>
                     </div>
                 </td>
-                <td><span style="color:var(--text);">{{ r.name }}</span></td>
+                <td><span class="b-text">{{ r.name }}</span></td>
                 <td><span class="sf-folder">{{ r.folder_path or '—' }}</span></td>
                 <td class="sf-dps">{% if r.dps is none %}<span class="sf-dps-loading" style="color:var(--muted);font-weight:normal;">…</span>{% else %}{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}{% endif %}</td>
                 <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>

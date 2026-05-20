@@ -1,7 +1,7 @@
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-    <span style="font-size:10px;color:var(--muted);">{{ total }} system{{ 's' if total != 1 }} found</span>
+    <span class="b-muted-sm">{{ total }} system{{ 's' if total != 1 }} found</span>
     {% if total_pages > 1 %}
-    <span style="font-size:10px;color:var(--muted);">Page {{ page }} of {{ total_pages }}</span>
+    <span class="b-muted-sm">Page {{ page }} of {{ total_pages }}</span>
     {% endif %}
 </div>
 
@@ -24,7 +24,7 @@
             {% for s in sys['statics'] %}
             <span style="color:{{ class_color(wh_data.get('wormhole_meta', {}).get(s, {}).get('target_class')) }};">{{ s }}</span>{% if not loop.last %}, {% endif %}
             {% endfor %}
-            {% if not sys['statics'] %}<span style="color:var(--muted);">—</span>{% endif %}
+            {% if not sys['statics'] %}<span class="b-muted">—</span>{% endif %}
         </span>
     </a>
     {% endfor %}

@@ -124,14 +124,14 @@
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">What-If Remap</span>
-            <span id="remap-points" style="font-size:10px;color:var(--muted);">Points: 99/99</span>
+            <span id="remap-points" class="b-muted-sm">Points: 99/99</span>
         </div>
         <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1.25rem;align-items:flex-end;">
             {% for i in range(5) %}
             <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:100px;">
                 <label style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">
                     {{ attr_names[i] }}
-                    <span id="remap-val-{{ i }}" style="color:var(--text);">{{ attributes[i] }}</span>
+                    <span id="remap-val-{{ i }}" class="b-text">{{ attributes[i] }}</span>
                 </label>
                 <input type="range" id="remap-{{ i }}" value="{{ attributes[i] }}" min="17" max="27" step="1"
                        class="remap-slider"
@@ -161,7 +161,7 @@
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">Skill Queue</span>
-            <span style="font-size:10px;color:var(--muted);">{{ current_time_str }} total</span>
+            <span class="b-muted-sm">{{ current_time_str }} total</span>
         </div>
 
         <div class="b-table-row" style="border-bottom:2px solid var(--border);">

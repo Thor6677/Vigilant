@@ -2,11 +2,11 @@
 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
     <div style="display:flex;gap:1rem;font-size:10px;">
         {% if stats.total_dps > 0 %}
-        <span><span style="color:var(--muted);">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %}<span style="color:var(--muted);font-weight:400;"> / </span>{{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}</span></span>
+        <span><span class="b-muted">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %}<span style="color:var(--muted);font-weight:400;"> / </span>{{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}</span></span>
         {% endif %}
-        <span><span style="color:var(--muted);">EHP</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</span></span>
+        <span><span class="b-muted">EHP</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</span></span>
         {% if stats.cap_drain_rate > 0 %}
-        <span><span style="color:var(--muted);">Cap</span>
+        <span><span class="b-muted">Cap</span>
             {% if stats.cap_stable %}
             <span style="color:var(--success);font-weight:600;">{{ stats.cap_stable_pct }}%</span>
             {% else %}
@@ -26,7 +26,7 @@
 {% set over = used > total %}
 <div style="margin-bottom:0.5rem;">
     <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;">
-        <span style="color:var(--muted);">{{ label }}</span>
+        <span class="b-muted">{{ label }}</span>
         <span class="fr-val" style="color:{{ 'var(--danger)' if over else 'var(--text)' }};"
               data-val="{{ ('{:,.%df}' % value_pad).format(used) }} / {{ ('{:,.%df}' % value_pad).format(total) }}{% if unit %} {{ unit }}{% endif %}"
               data-pct="{{ '{:.1f}'.format(pct) }}%">{{ ('{:,.%df}' % value_pad).format(used) }} / {{ ('{:,.%df}' % value_pad).format(total) }}{% if unit %} {{ unit }}{% endif %}</span>
@@ -51,8 +51,8 @@
 
         {# Hardpoints #}
         <div style="display:flex;gap:1.5rem;font-size:10px;color:var(--text);">
-            <span><span style="color:var(--muted);">Turrets:</span> {{ stats.turrets_used }}/{{ stats.turrets_total }}</span>
-            <span><span style="color:var(--muted);">Launchers:</span> {{ stats.launchers_used }}/{{ stats.launchers_total }}</span>
+            <span><span class="b-muted">Turrets:</span> {{ stats.turrets_used }}/{{ stats.turrets_total }}</span>
+            <span><span class="b-muted">Launchers:</span> {{ stats.launchers_used }}/{{ stats.launchers_total }}</span>
         </div>
     </div>
 </div>

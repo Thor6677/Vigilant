@@ -15,10 +15,10 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;">
             <span class="b-label">Systems Gained · 7d</span>
-            <span id="sov-total-gained" style="font-size:10px;color:var(--muted);"></span>
+            <span id="sov-total-gained" class="b-muted-sm"></span>
         </div>
         <div id="sov-gained" style="padding:0.5rem 0.75rem;font-size:11px;">
-            <div style="color:var(--muted);">Loading…</div>
+            <div class="b-muted">Loading…</div>
         </div>
     </div>
 
@@ -28,7 +28,7 @@
             <span class="b-label">Systems Lost · 7d</span>
         </div>
         <div id="sov-lost" style="padding:0.5rem 0.75rem;font-size:11px;">
-            <div style="color:var(--muted);">Loading…</div>
+            <div class="b-muted">Loading…</div>
         </div>
     </div>
 
@@ -38,7 +38,7 @@
             <span class="b-label">Most Violent Systems · 3h</span>
         </div>
         <div id="violent-list" style="padding:0.5rem 0.75rem;font-size:11px;">
-            <div style="color:var(--muted);">Loading…</div>
+            <div class="b-muted">Loading…</div>
         </div>
     </div>
 
@@ -98,7 +98,7 @@
 
     function renderAlliance(container, rows, neg) {
         if (!rows || !rows.length) {
-            container.innerHTML = '<div style="color:var(--muted);">No activity in the last 7 days.</div>';
+            container.innerHTML = '<div class="b-muted">No activity in the last 7 days.</div>';
             return;
         }
         container.innerHTML = rows.slice(0, 15).map(([aid, count], i) => `
@@ -126,7 +126,7 @@
     if (violentResp) {
         const vc = $('violent-list');
         if (!violentResp.systems || !violentResp.systems.length) {
-            vc.innerHTML = '<div style="color:var(--muted);">No ship destruction reported in the last 3 hours.</div>';
+            vc.innerHTML = '<div class="b-muted">No ship destruction reported in the last 3 hours.</div>';
         } else {
             vc.innerHTML = violentResp.systems.map((s, i) => {
                 const sys = systemMap.get(s.system_id);

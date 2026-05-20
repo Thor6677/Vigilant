@@ -13,7 +13,7 @@
             <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m.is_read %}font-weight:600;{% endif %}">
                 {{ m.subject }}
             </div>
-            <div style="font-size:10px;color:var(--muted);">
+            <div class="b-muted-sm">
                 {% if m.timestamp %}{{ m.timestamp[:16].replace('T', ' ') }}{% endif %}
             </div>
         </div>
