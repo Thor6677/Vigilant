@@ -45,6 +45,10 @@
 </div>
 
 <style nonce="{{ request.state.csp_nonce }}">
+/* Selected-row tint for the charge selector. Paired with .b-hover-accent on
+   the same element so :hover overlays correctly (specificity 0,1,0 base vs
+   0,1,1 hover). See ISS-020. */
+.charge-selected { background: rgba(200,169,81,0.1); }
 .fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
 .fit-stats-sticky { position:sticky; top:80px; }
 .skill-warn {
@@ -236,7 +240,7 @@
 </datalist>
 
 {# ── Module Info Modal ───────────────────────────────────────────────────── #}
-<div id="info-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;" onclick="if(event.target===this)hideInfoModal()">
+<div id="info-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideInfoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:520px;width:90%;margin:auto;position:relative;top:12%;max-height:80vh;overflow-y:auto;">
         <button data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div id="info-modal-body">
@@ -246,7 +250,7 @@
 </div>
 
 {# ── Character Fittings Import Modal ─────────────────────────────────────── #}
-<div id="charimport-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;" onclick="if(event.target===this)hideCharImportModal()">
+<div id="charimport-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideCharImportModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:560px;width:92%;margin:auto;position:relative;top:10%;max-height:82vh;overflow-y:auto;">
         <button data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import from Character</div>
@@ -548,6 +552,10 @@ function addDrone(typeId, typeName) {
 }
 
 function removeItem(index) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
     var removed = state.items[index];
     state.items.splice(index, 1);
     saveState();
@@ -560,6 +568,9 @@ function removeItem(index) {
 }
 
 function toggleOnline(index) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
     var item = state.items[index];
     if (!item) return;
     var canOH = overheatCache[item.type_id] === true;
@@ -581,6 +592,10 @@ function toggleOnline(index) {
 }
 
 function changeDroneQty(index, delta) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+        delta = parseInt(this.dataset.delta, 10);
+    }
     state.items[index].quantity += delta;
     if (state.items[index].quantity <= 0) {
         state.items.splice(index, 1);
@@ -611,25 +626,25 @@ function renderSlots() {
             var opacity = isOnline ? '1' : '0.4';
             var chargeInfo = '';
             if (item.charge_type_id) {
-                chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" onclick="openChargeSelector(' + globalIdx + ')" title="Change charge">' + (item.charge_name || 'loaded') + '</span>';
+                chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" title="Change charge">' + escapeHtml(item.charge_name || 'loaded') + '</span>';
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
-                '<button onclick="openChargeSelector(' + globalIdx + ')" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
+                '<button data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
             // State toggle: green=online, red=overheated, grey=offline
             var canOH = overheatCache[item.type_id] === true;
             var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
             var stateTitle = isOverheated ? 'Overheated (click: offline)' :
                 (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
             var onlineBtn = slot !== 'rig' ?
-                '<button onclick="toggleOnline(' + globalIdx + ')" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
-                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
-                '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + chargeInfo + '</span>' +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + chargeInfo + '</span>' +
                 '<span class="skill-warn" title="">&#9888;</span>' +
-                '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+                '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
                 chargeBtn +
-                '<button onclick="removeItem(' + globalIdx + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+                '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
                 '</div>';
         });
 
@@ -650,16 +665,16 @@ function renderSlots() {
     droneItems.forEach(function(item) {
         var globalIdx = state.items.indexOf(item);
         droneContainer.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
-            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" onclick="showModuleInfo(' + item.type_id + ')" title="Show info" onerror="this.style.display=\'none\'">' +
-            '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + '</span>' +
+            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+            '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + '</span>' +
             '<span class="skill-warn" title="">&#9888;</span>' +
-            '<button onclick="showModuleInfo(' + item.type_id + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+            '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
             '<div style="display:flex;align-items:center;gap:0.25rem;">' +
-            '<button onclick="changeDroneQty(' + globalIdx + ', -1)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
+            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="-1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
             '<span style="font-size:10px;color:var(--accent);min-width:16px;text-align:center;">' + item.quantity + '</span>' +
-            '<button onclick="changeDroneQty(' + globalIdx + ', 1)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
+            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
             '</div>' +
-            '<button onclick="removeItem(' + globalIdx + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+            '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
             '</div>';
     });
 }
@@ -683,7 +698,7 @@ function renderImplantSlots() {
         var rec = (state.implants || {})[String(s)];
         var nameCell = rec
             ? '<span style="color:var(--text);">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' +
-              '<button onclick="removeImplant(' + s + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
+              '<button data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
             : '<span style="color:var(--muted);font-style:italic;">empty</span>';
         html +=
             '<div style="display:flex;align-items:center;gap:0.5rem;font-size:10px;padding:2px 0.5rem;border-bottom:1px solid var(--border);">' +
@@ -715,9 +730,8 @@ function searchImplant(q) {
                     return;
                 }
                 resultsEl.innerHTML = rows.map(function(r) {
-                    return '<div onclick="addImplant(' + r.type_id + ',' + r.slot + ',' + JSON.stringify(r.name).replace(/"/g, '&quot;') + ')" ' +
-                           'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);" ' +
-                           'onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'\'">' +
+                    return '<div class="b-hover-bg" data-click="addImplant" data-type-id="' + r.type_id + '" data-slot="' + r.slot + '" data-implant-name="' + escapeHtml(r.name) + '" ' +
+                           'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);">' +
                            '<span style="color:var(--muted);">#' + r.slot + '</span> ' + escapeHtml(r.name) +
                            '</div>';
                 }).join('');
@@ -727,6 +741,11 @@ function searchImplant(q) {
 }
 
 function addImplant(typeId, slot, name) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        slot = parseInt(this.dataset.slot, 10);
+        name = this.dataset.implantName;
+    }
     if (!state.implants) state.implants = {};
     state.implants[String(slot)] = {type_id: typeId, name: name};
     saveState();
@@ -737,6 +756,9 @@ function addImplant(typeId, slot, name) {
 }
 
 function removeImplant(slot) {
+    if (this && this.dataset && this.dataset.slot !== undefined) {
+        slot = parseInt(this.dataset.slot, 10);
+    }
     if (state.implants) delete state.implants[String(slot)];
     saveState();
     renderImplantSlots();
@@ -959,9 +981,9 @@ function showCharImportModal() {
             }
             var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">Pick a character:</div>';
             data.characters.forEach(function(c) {
-                html += '<button onclick="loadCharFittings(' + c.id + ', this)" class="b-btn" style="display:block;width:100%;padding:6px 12px;margin-bottom:4px;font-size:11px;text-align:left;background:var(--bg);border:1px solid var(--border);color:var(--text);cursor:pointer;">' +
+                html += '<button data-click="loadCharFittings" data-char-id="' + c.id + '" class="b-btn" style="display:block;width:100%;padding:6px 12px;margin-bottom:4px;font-size:11px;text-align:left;background:var(--bg);border:1px solid var(--border);color:var(--text);cursor:pointer;">' +
                     '<img src="https://images.evetech.net/characters/' + c.id + '/portrait?size=32" style="width:20px;height:20px;vertical-align:middle;margin-right:0.5rem;border:1px solid var(--border);">' +
-                    c.name.replace(/</g, '&lt;') +
+                    escapeHtml(c.name) +
                     '</button>';
             });
             body.innerHTML = html;
@@ -976,6 +998,9 @@ function hideCharImportModal() {
 }
 
 function loadCharFittings(charId, btnEl) {
+    if (this && this.dataset && this.dataset.charId !== undefined) {
+        charId = parseInt(this.dataset.charId, 10);
+    }
     var body = document.getElementById('charimport-body');
     body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading fittings...</div>';
     fetch('/tools/fitting/import-character/' + charId + '/fittings')
@@ -994,16 +1019,16 @@ function loadCharFittings(charId, btnEl) {
             window._charFittings = {};
             data.fittings.forEach(function(f, i) {
                 window._charFittings[i] = f;
-                var safeName = (f.name || 'Unnamed').replace(/</g, '&lt;');
-                var safeShip = (f.ship_name || '').replace(/</g, '&lt;');
+                var safeName = escapeHtml(f.name || 'Unnamed');
+                var safeShip = escapeHtml(f.ship_name || '');
                 html += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);">' +
-                    '<img src="https://images.evetech.net/types/' + f.ship_type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
+                    '<img src="https://images.evetech.net/types/' + f.ship_type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" data-on-error="hide">' +
                     '<div style="flex:1;min-width:0;">' +
                       '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + safeName + '</div>' +
                       '<div style="font-size:9px;color:var(--muted);">' + safeShip + '</div>' +
                     '</div>' +
-                    '<button onclick="charImportLoad(' + i + ')" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Load</button>' +
-                    '<button onclick="charImportSave(' + i + ')" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);">Import</button>' +
+                    '<button data-click="charImportLoad" data-fit-idx="' + i + '" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Load</button>' +
+                    '<button data-click="charImportSave" data-fit-idx="' + i + '" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);">Import</button>' +
                 '</div>';
             });
             body.innerHTML = html;
@@ -1029,6 +1054,9 @@ function _parseEftForCharImport(idx, cb) {
 }
 
 function charImportLoad(idx) {
+    if (this && this.dataset && this.dataset.fitIdx !== undefined) {
+        idx = parseInt(this.dataset.fitIdx, 10);
+    }
     _parseEftForCharImport(idx, function(f, data) {
         state.shipTypeId = data.ship_type_id;
         state.shipName = data.ship_name;
@@ -1042,6 +1070,9 @@ function charImportLoad(idx) {
 }
 
 function charImportSave(idx) {
+    if (this && this.dataset && this.dataset.fitIdx !== undefined) {
+        idx = parseInt(this.dataset.fitIdx, 10);
+    }
     var dl = document.getElementById('fit-folder-options');
     var folderId = null;
     if (dl && dl.querySelectorAll('option').length > 0) {
@@ -1272,6 +1303,9 @@ document.getElementById('ship-name').addEventListener('click', function() {
 var chargeModal = null;
 
 function openChargeSelector(itemIndex) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+    }
     var item = state.items[itemIndex];
     if (!item) return;
     fetch('/tools/fitting/charges/' + item.type_id)
@@ -1295,17 +1329,19 @@ function showChargeDropdown(itemIndex, charges) {
 
     var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +
         '<span style="font-size:11px;font-weight:600;color:var(--text);">Select Charge</span>' +
-        '<button onclick="clearCharge(' + itemIndex + ')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:9px;">Clear</button></div>';
+        '<button data-click="clearCharge" data-item-idx="' + itemIndex + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:9px;">Clear</button></div>';
 
     var list = '<div style="overflow-y:auto;flex:1;">';
     for (var i = 0; i < charges.length; i++) {
         var c = charges[i];
-        var selected = item.charge_type_id === c.type_id ? 'background:rgba(200,169,81,0.1);' : '';
-        list += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);' + selected + '" ' +
-            'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'' + (selected ? 'rgba(200,169,81,0.1)' : '') + '\'" ' +
-            'onclick="selectCharge(' + itemIndex + ',' + c.type_id + ',\'' + c.type_name.replace(/'/g, "\\'") + '\')">' +
-            '<img src="https://images.evetech.net/types/' + c.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
-            '<span style="font-size:11px;color:var(--text);">' + c.type_name + '</span></div>';
+        var isSelected = item.charge_type_id === c.type_id;
+        var rowClass = 'b-hover-accent' + (isSelected ? ' charge-selected' : '');
+        // ISS-020: dropped inline background:rgba(...) so :hover from .b-hover-accent
+        // overlays correctly. Selected state lives in the class (.charge-selected).
+        list += '<div class="' + rowClass + '" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);" ' +
+            'data-click="selectCharge" data-item-idx="' + itemIndex + '" data-type-id="' + c.type_id + '" data-type-name="' + escapeHtml(c.type_name) + '">' +
+            '<img src="https://images.evetech.net/types/' + c.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" data-on-error="hide">' +
+            '<span style="font-size:11px;color:var(--text);">' + escapeHtml(c.type_name) + '</span></div>';
     }
     list += '</div>';
 
@@ -1322,6 +1358,11 @@ function closeChargeDropdown() {
 }
 
 function selectCharge(itemIndex, chargeTypeId, chargeName) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+        chargeTypeId = parseInt(this.dataset.typeId, 10);
+        chargeName = this.dataset.typeName;
+    }
     state.items[itemIndex].charge_type_id = chargeTypeId;
     state.items[itemIndex].charge_name = chargeName;
     saveState();
@@ -1331,6 +1372,9 @@ function selectCharge(itemIndex, chargeTypeId, chargeName) {
 }
 
 function clearCharge(itemIndex) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+    }
     delete state.items[itemIndex].charge_type_id;
     delete state.items[itemIndex].charge_name;
     saveState();
@@ -1364,6 +1408,10 @@ function loadBrowseGroups(parentId) {
 }
 
 function browseIntoGroup(groupId, groupName) {
+    if (this && this.dataset && this.dataset.groupId !== undefined) {
+        groupId = parseInt(this.dataset.groupId, 10);
+        groupName = this.dataset.groupName;
+    }
     browseHistory.push({groupId: currentBrowseGroup, groupName: ''});
     currentBrowseGroup = groupId;
     var url = '/tools/fitting/browse/groups?parent=' + groupId;
@@ -1403,18 +1451,16 @@ function renderBrowseTree(groups, parentId) {
     var tree = document.getElementById('browse-tree');
     var html = '';
     if (parentId !== null) {
-        html += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
-                'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
+        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
                 'data-click="browseBack">' +
                 '<span style="font-size:11px;color:var(--accent);">\u2190 Back</span></div>';
     }
     for (var i = 0; i < groups.length; i++) {
         var g = groups[i];
         var arrow = g.has_children ? '<span style="color:var(--muted);font-size:9px;">&#9656;</span>' : '';
-        html += '<div style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
-                'onmouseover="this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
-                'onclick="browseIntoGroup(' + g.market_group_id + ', \'' + g.market_group_name.replace(/'/g, "\\'") + '\')">' +
-                '<span style="font-size:11px;color:var(--text);">' + g.market_group_name + '</span>' +
+        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+                'data-click="browseIntoGroup" data-group-id="' + g.market_group_id + '" data-group-name="' + escapeHtml(g.market_group_name) + '">' +
+                '<span style="font-size:11px;color:var(--text);">' + escapeHtml(g.market_group_name) + '</span>' +
                 arrow + '</div>';
     }
     if (groups.length === 0 && parentId !== null) {
@@ -1447,20 +1493,27 @@ function renderBrowseItems(items) {
             ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + item.slot_type + '</span>'
             : '';
         var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span>' : '';
-        var clickFn = canFit
-            ? 'addModuleFromBrowser(' + item.type_id + ',\'' + item.type_name.replace(/'/g, "\\'") + '\',\'' + (item.slot_type || 'cargo') + '\')'
+        // ISS-020: conditional hover collapses cleanly \u2014 only add the hover
+        // class when canFit. Click handler via data-* only when canFit.
+        var rowClass = canFit ? 'b-hover-accent' : '';
+        var clickAttrs = canFit
+            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '"'
             : '';
-        html += '<div style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';" ' +
-                'onmouseover="if(' + canFit + ')this.style.background=\'rgba(200,169,81,0.07)\'" onmouseout="this.style.background=\'\'" ' +
-                (clickFn ? 'onclick="' + clickFn + '"' : '') + '>' +
-                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">' +
-                '<span style="flex:1;font-size:11px;color:var(--text);">' + item.type_name + restrictLabel + '</span>' +
+        html += '<div class="' + rowClass + '" style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';"' +
+                clickAttrs + '>' +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" data-on-error="hide">' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + restrictLabel + '</span>' +
                 slotBadge + '</div>';
     }
     container.innerHTML = html;
 }
 
 function addModuleFromBrowser(typeId, typeName, slotType) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        slotType = this.dataset.slotType;
+    }
     if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) return;
     // Browser already checked fit restrictions, skip the wrapper
     if (slotType === 'drone') {
@@ -1482,9 +1535,9 @@ function updateBreadcrumbsAsync(groupId) {
             for (var i = 0; i < path.length; i++) {
                 if (i > 0) html += '<span style="color:var(--border);margin:0 2px;">/</span>';
                 if (i < path.length - 1) {
-                    html += '<span style="cursor:pointer;color:var(--accent);" onclick="browseToPathIndex(' + i + ',' + path[i].market_group_id + ')">' + path[i].market_group_name + '</span>';
+                    html += '<span style="cursor:pointer;color:var(--accent);" data-click="browseToPathIndex" data-path-idx="' + i + '" data-group-id="' + path[i].market_group_id + '">' + escapeHtml(path[i].market_group_name) + '</span>';
                 } else {
-                    html += '<span style="color:var(--text);">' + path[i].market_group_name + '</span>';
+                    html += '<span style="color:var(--text);">' + escapeHtml(path[i].market_group_name) + '</span>';
                 }
             }
             document.getElementById('browse-breadcrumbs').innerHTML = html;
@@ -1492,6 +1545,10 @@ function updateBreadcrumbsAsync(groupId) {
 }
 
 function browseToPathIndex(idx, groupId) {
+    if (this && this.dataset && this.dataset.pathIdx !== undefined) {
+        idx = parseInt(this.dataset.pathIdx, 10);
+        groupId = parseInt(this.dataset.groupId, 10);
+    }
     browseHistory = browseHistory.slice(0, idx + 1);
     currentBrowseGroup = groupId;
     fetch('/tools/fitting/browse/groups?parent=' + groupId)

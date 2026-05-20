@@ -97,6 +97,20 @@
     // to swallow a click without doing anything else). Pair with data-stop.
     window.noop = window.noop || function () {};
 
+    // Modal-backdrop close helper. Use on the outer modal element:
+    //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
+    // Reads the closer function name from data-modal-closer and invokes it
+    // only when the click landed on the backdrop itself (e.target === this).
+    // Clicks inside the modal content bubble up but e.target points to the
+    // inner child, so the guard returns false and the modal stays open.
+    window.closeModalOnBackdrop = window.closeModalOnBackdrop || function (e) {
+        if (e.target !== this) return;
+        var name = this.dataset && this.dataset.modalCloser;
+        if (!name) return;
+        var fn = window[name];
+        if (typeof fn === 'function') fn();
+    };
+
     // Bubbling events — single document-level listener catches via bubble phase.
     var BUBBLE_EVENTS = ['click', 'change', 'input', 'submit'];
 

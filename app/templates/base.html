@@ -789,6 +789,10 @@
            surface even when un-hovered). See ISS-025. */
         .b-hover-transparent        { background: transparent; transition: background 0.15s; }
         .b-hover-transparent:hover  { background: var(--surface); }
+        /* Hover to var(--bg) — used by the fitting-tool implant search
+           dropdown where the panel surface is var(--surface) and rows want
+           to deepen on hover rather than lighten. ISS-020. */
+        .b-hover-bg:hover        { background: var(--bg); }
         .b-hover-underline       { text-decoration: none; }
         .b-hover-underline:hover { text-decoration: underline; }
     </style>
