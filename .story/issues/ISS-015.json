@@ -12,9 +12,9 @@
   "relatedTickets": [
     "T-023"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Landed the override-table integration framework. Populating actual per-ship overrides requires verified EVE-domain knowledge and is tracked under ISS-029.\n\n**What landed in `app/fitting/engine.py`:**\n\n1. **`_SHIP_MODIFIER_OVERRIDES` dict** — module-level constant, schema `{ship_type_id: {(effect_id, modifying_attribute_id): override}}` where `override` is `{'filter_type'?, 'filter_value'?}`. Empty by default; behavior unchanged until populated.\n\n2. **`_modifier_filter(ship_type_id, mod)` helper** — returns the `(filter_type, filter_value)` tuple to use during modifier evaluation, applying overrides where registered and falling through to `mod.filter_type` / `mod.filter_value` otherwise. Identity function when the table is empty.\n\n3. **Hook in `_apply_all_v_skill_bonuses`** — the modifier-matching loop now calls `_modifier_filter(ship_type_id, mod)` before the `LocationGroupModifier` / `LocationRequiredSkillModifier` / `OwnerRequiredSkillModifier` branches, using the (possibly-overridden) filter values for matching.\n\n**Why \"framework only\":** The Sacrilege (type_id 12019) case the issue documents requires verifying the correct skill ID against the actual in-game ship description or against Pyfa's effects.py — a domain check I can't perform safely without that primary source. Adding an unverified override could silently produce wrong bonuses for users. The framework lets a future contributor (or me in a follow-up session with verified data) populate the table one entry at a time without re-touching the engine code.\n\n**Verification:** ast parse clean. With an empty override table the framework is a strict no-op for every ship — every existing fitting computes the same DPS/tank values as before.\n\nFollow-up: ISS-029 carries the actual per-ship override population work.\n\nCommit: pending deploy.",
+  "resolvedDate": "2026-05-19",
   "severity": "medium",
-  "status": "open",
+  "status": "resolved",
   "title": "Sacrilege-class SDE modifierInfo mistargets — needs Pyfa-style effect handler override"
 }

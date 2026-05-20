@@ -134,6 +134,52 @@ PASSIVE_EFFECT_CATS = {EFFECT_CAT_PASSIVE, EFFECT_CAT_ONLINE}
 STACKING_CONSTANT = 7.1289
 
 
+# ── ISS-015: per-ship modifier overrides ────────────────────────────────
+# Some ships have SDE modifierInfo that targets the wrong filter — the
+# documented case is Sacrilege (type_id 12019) whose hull bonus rows
+# target skill 3306 (Medium Energy Turret) but should target a missile
+# skill, because CCP redirected the in-game bonus without updating
+# modifierInfo. Pyfa works around this with ~5000 hand-coded effect
+# handlers in `effects.py`.
+#
+# This table is the integration point: when populated, it overrides the
+# SDE modifier row's filter_type / filter_value at evaluation time.
+# Empty entries are a silent no-op preserving current behavior.
+#
+# Schema:
+#   { ship_type_id: { (effect_id, modifying_attribute_id): override } }
+# where `override` is a dict with optional keys 'filter_type', 'filter_value'.
+# Any key not present falls back to the SDE row's value, so partial
+# overrides are fine (e.g. just changing the skill ID while keeping
+# filter_type='skill').
+#
+# Populating overrides requires verified EVE-domain knowledge per ship.
+# Reference: github.com/pyfa-org/Pyfa, eos/effects/ — Pyfa's per-effect
+# Python handlers encode the correct targeting.
+_SHIP_MODIFIER_OVERRIDES: dict[int, dict[tuple[int, int], dict]] = {
+    # TODO(ISS-015): populate. Example shape, NOT verified:
+    # 12019: {  # Sacrilege
+    #     (EFFECT_ID, MODIFYING_ATTR_ID): {'filter_value': 25719},  # Heavy Assault Missiles
+    # },
+}
+
+
+def _modifier_filter(ship_type_id: int, mod) -> tuple[str | None, int | None]:
+    """Returns (filter_type, filter_value) for the modifier, applying
+    per-ship overrides from ``_SHIP_MODIFIER_OVERRIDES`` where present.
+    Identity function when no override is registered. See ISS-015.
+    """
+    override = _SHIP_MODIFIER_OVERRIDES.get(ship_type_id, {}).get(
+        (mod.effect_id, mod.modifying_attribute_id)
+    )
+    if not override:
+        return mod.filter_type, mod.filter_value
+    return (
+        override.get("filter_type", mod.filter_type),
+        override.get("filter_value", mod.filter_value),
+    )
+
+
 def stacking_penalty(n: int) -> float:
     """Stacking penalty multiplier for the nth module (0-indexed)."""
     return math.exp(-(n ** 2) / STACKING_CONSTANT)
@@ -391,24 +437,27 @@ async def _apply_ship_hull_bonuses(
             _apply_modifier(ship_attrs, target_attr, mod.operator, effective_val)
             continue
 
-        # Determine matching type IDs based on func type
+        # Determine matching type IDs based on func type. ISS-015:
+        # apply per-ship overrides where registered (no-op for ships
+        # without an override entry).
+        filter_type, filter_value = _modifier_filter(ship_type_id, mod)
         matching_type_ids = set()
         matching_charge_ids = set()
 
-        if mod.func == "LocationGroupModifier" and mod.filter_type == "group":
+        if mod.func == "LocationGroupModifier" and filter_type == "group":
             for tid, gid in group_ids.items():
-                if gid == mod.filter_value and tid not in charge_tid_set:
+                if gid == filter_value and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
 
-        elif mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
+        elif mod.func == "LocationRequiredSkillModifier" and filter_type == "skill":
             for tid, skills in skill_reqs.items():
-                if mod.filter_value in skills and tid not in charge_tid_set:
+                if filter_value in skills and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
 
-        elif mod.func == "OwnerRequiredSkillModifier" and mod.filter_type == "skill":
+        elif mod.func == "OwnerRequiredSkillModifier" and filter_type == "skill":
             # Matches ALL items (modules, drones, charges) requiring the skill
             for tid, skills in skill_reqs.items():
-                if mod.filter_value in skills:
+                if filter_value in skills:
                     if tid in charge_tid_set:
                         matching_charge_ids.add(tid)
                     else:

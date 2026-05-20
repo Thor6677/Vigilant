@@ -1,0 +1,18 @@
+{
+  "components": [],
+  "discoveredDate": "2026-05-19",
+  "id": "ISS-029",
+  "impact": "ISS-015 landed the integration framework (app/fitting/engine.py:_SHIP_MODIFIER_OVERRIDES dict + _modifier_filter() lookup) — the table is empty so behavior is unchanged. Populating it requires verified EVE-domain knowledge per ship:\n\n1. For each suspected ship (start with Sacrilege type_id 12019), inspect the SDE modifier rows: SELECT * FROM sde_modifiers WHERE effect_id IN (SELECT effect_id FROM sde_type_effects WHERE type_id = 12019) AND domain IN ('shipID', 'charID');\n2. Compare against the in-game hull-bonus description (right-click ship → Info → Description) or against Pyfa's effects.py override for that ship.\n3. Add an entry: `12019: { (effect_id, modifying_attribute_id): {'filter_value': <correct_skill_id>} }`.\n4. Verify by re-fitting the ship in vigilant and comparing the DPS/tank numbers against Pyfa.\n\nScope: ~200 ships per the original ISS-015 estimate, based on Pyfa's coverage of broken modifierInfo entries. Realistic pace is 5-10 ships per session with verification. Ranked by impact: Amarr Recon → Force Recon → ships where CCP renamed/redirected hull bonuses without updating modifierInfo.\n\nReference: github.com/pyfa-org/Pyfa, eos/effects/ — Pyfa's per-effect Python handlers encode the correct targeting.</impact>\n<parameter name=\"components\">[\"fitting\", \"domain\"]",
+  "location": [
+    "app/fitting/engine.py:131-180"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-023"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "ISS-015 follow-up: populate Sacrilege + per-ship modifier overrides"
+}
