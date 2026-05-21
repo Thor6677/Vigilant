@@ -2590,7 +2590,7 @@ async def structure_alert_banners(request: Request, db: AsyncSession = Depends(g
 
 @router.get("/alerts/inventory-banners", response_class=HTMLResponse)
 async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
-    """Persistent banners for critical inventory levels."""
+    """Persistent banners for low and critical inventory levels."""
     _empty = '<div id="inventory-alerts" hx-get="/alerts/inventory-banners" hx-trigger="every 60s" hx-swap="outerHTML"></div>'
     user_id = request.session.get("user_id")
     if not user_id:
@@ -2600,13 +2600,17 @@ async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(g
     result = await db.execute(
         select(CorpInventoryThreshold).where(
             CorpInventoryThreshold.user_id == user_id,
-            CorpInventoryThreshold.alert_state == "critical",
+            CorpInventoryThreshold.alert_state.in_(["critical", "low"]),
         )
     )
-    critical_items = result.scalars().all()
+    alert_items = result.scalars().all()
 
-    if not critical_items:
+    if not alert_items:
         return HTMLResponse(_empty)
+
+    # Sort critical first within the list — same row order as the
+    # contract banners so users learn one mental model.
+    alert_items.sort(key=lambda t: (0 if t.alert_state == "critical" else 1, t.type_name or ""))
 
     alerts = [{
         "id": t.id,
@@ -2614,9 +2618,11 @@ async def inventory_alert_banners(request: Request, db: AsyncSession = Depends(g
         "type_name": t.type_name or f"Type {t.type_id}",
         "location_name": t.location_name or f"Location {t.location_id}",
         "current_quantity": t.current_quantity or 0,
+        "threshold_low": t.threshold_low,
         "threshold_critical": t.threshold_critical,
+        "alert_state": t.alert_state,
         "corp_id": t.corp_id,
-    } for t in critical_items]
+    } for t in alert_items]
 
     return templates.TemplateResponse(request, "partials/inventory_alert_banners.html", {"alerts": alerts})
 

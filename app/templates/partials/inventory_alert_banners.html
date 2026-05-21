@@ -1,19 +1,19 @@
 <div id="inventory-alerts" hx-get="/alerts/inventory-banners" hx-trigger="every 60s" hx-swap="outerHTML">
 {% for alert in alerts %}
-<div class="structure-alert-banner is-danger"
-     data-alert-id="inv-{{ alert.id }}" style="display:none;">
+<div class="structure-alert-banner {{ 'is-danger' if alert.alert_state == 'critical' else 'is-warn' }}"
+     data-alert-id="inv-{{ alert.id }}-{{ alert.alert_state }}" style="display:none;">
     <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
         <img src="https://images.evetech.net/types/{{ alert.type_id }}/icon?size=32"
              style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
              data-on-error="hide">
         <span class="alert-text">
-            <strong>Inventory Critical</strong> &mdash; {{ alert.type_name }}
+            <strong>Inventory {{ 'Critical' if alert.alert_state == 'critical' else 'Low' }}</strong> &mdash; {{ alert.type_name }}
             at <strong>{{ alert.location_name }}</strong>
-            <span style="color:var(--text);font-size:10px;">({{ alert.current_quantity }}/{{ alert.threshold_critical }})</span>
+            <span class="b-text" style="font-size:10px;">({{ alert.current_quantity }}/{{ alert.threshold_critical if alert.alert_state == 'critical' else alert.threshold_low }})</span>
         </span>
     </div>
-    <a href="/corporations/{{ alert.corp_id }}/inventory" style="font-size:9px;color:var(--muted);text-decoration:none;flex-shrink:0;margin-right:0.5rem;">View</a>
-    <button class="alert-dismiss" onclick="dismissStructureAlert('inv-{{ alert.id }}')" title="Dismiss">&times;</button>
+    <a href="/corporations/{{ alert.corp_id }}/inventory" class="b-muted" style="font-size:9px;text-decoration:none;flex-shrink:0;margin-right:0.5rem;">View</a>
+    <button class="alert-dismiss" onclick="dismissStructureAlert('inv-{{ alert.id }}-{{ alert.alert_state }}')" title="Dismiss">&times;</button>
 </div>
 {% endfor %}
 <script nonce="{{ request.state.csp_nonce }}">

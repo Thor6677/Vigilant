@@ -57,10 +57,14 @@ def _ttl_for_path(path: str) -> int:
     import re as _re
     if _re.match(r'^/characters/\d+/?$', path):
         return TTL["character_public"]
+    # Specific-subpath checks come BEFORE the generic /corporations/ and
+    # /alliances/ catches — otherwise paths like /corporations/{id}/assets/
+    # match the broad corp-info TTL (24h) before the assets-specific
+    # 5-min TTL gets a chance. Affected before the reorder: corp assets,
+    # corp wallet, corp industry jobs, corp blueprints, corp contracts —
+    # all silently cached for 24 hours, breaking refresh and alerts.
     if "/contracts/" in path and "/items" in path: return TTL["contract_items"]
     if "/contracts/" in path:            return TTL["corp_contracts"]
-    if "/corporations/" in path:         return TTL["corporation"]
-    if "/alliances/" in path:            return TTL["alliance"]
     if "/killmails/" in path:            return TTL["killmail"]
     if "/route/" in path:                return TTL["route"]
     if "/markets/" in path and "/orders" in path: return TTL["market_orders"]
@@ -71,6 +75,10 @@ def _ttl_for_path(path: str) -> int:
     if "/wallet" in path:                return TTL["character_wallet"]
     if "/location/" in path:             return TTL["character_location"]
     if "/search/" in path:               return TTL["search"]
+    # Generic corp/alliance info catches — these are LAST so they only
+    # match the bare /corporations/{id}/ and /alliances/{id}/ endpoints.
+    if "/corporations/" in path:         return TTL["corporation"]
+    if "/alliances/" in path:            return TTL["alliance"]
     return 300  # default 5 min
 
 
