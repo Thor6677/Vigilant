@@ -137,11 +137,8 @@ async def _compute_top_context(db: AsyncSession) -> dict:
             return "unknown"
         if sid >= 31000000:
             return "wh"
-        if sys["security"] >= 0.5:
-            return "hs"
-        if sys["security"] > 0.0:
-            return "ls"
-        return "ns"
+        from app.intel.recent_battles import sec_band
+        return _BAND_NORMALIZE.get(sec_band(sys["security"]), "unknown")
 
     def _card(k: Killmail) -> dict:
         return {
