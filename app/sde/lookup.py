@@ -769,7 +769,7 @@ async def get_wormhole_systems(
     class_filter: list[int] | None = None,
     include_drifter: bool = False,
     include_uncatalogued: bool = False,
-    include_shattered: bool = False,
+    require_shattered: bool = False,
     effect_filter: str | None = None,
     static_dest_filter: list[int] | None = None,
     planet_filter: list[str] | None = None,
@@ -792,8 +792,8 @@ async def get_wormhole_systems(
     if planet_filter or perfect_pi:
         await _ensure_planet_types_cache(db)
 
-    # Load shattered cache if the shattered filter is active
-    if include_shattered:
+    # Load shattered cache if the shattered modifier is active
+    if require_shattered:
         await _ensure_shattered_cache(db)
     shattered_ids = _shattered_systems_cache or set()
 
@@ -839,14 +839,16 @@ async def get_wormhole_systems(
     # Two modes for class selection:
     #   1. No class buttons pressed → implicit default allowlist of
     #      C1-C6+C13. wh_class=None and drifter classes filtered out.
-    #   2. ANY class button pressed (int / drifter / uncatalogued /
-    #      shattered) → exclusive mode: a system passes only if it
-    #      matches one of the explicitly selected sets. ORed together
-    #      when multiple are selected.
+    #   2. ANY class button pressed (int / drifter / uncatalogued) →
+    #      exclusive mode: a system passes only if it matches one of
+    #      the explicitly selected sets. ORed together when multiple
+    #      are selected.
+    # `require_shattered` is a separate modifier that ANDs with whatever
+    # class set is active (default allowlist OR explicit selection).
     DEFAULT_ALLOWED = {1, 2, 3, 4, 5, 6, 13}
     DRIFTER_CLASSES = {14, 15, 16, 17, 18}
     has_class_filter = bool(
-        class_filter or include_drifter or include_uncatalogued or include_shattered
+        class_filter or include_drifter or include_uncatalogued
     )
 
     filtered = []
@@ -872,24 +874,21 @@ async def get_wormhole_systems(
         )
 
         # Apply class filter — exclusive when any class button is pressed,
-        # else the implicit default allowlist. Shattered overlaps with the
-        # 5 drifter complexes (they have all-shattered planets too) but
-        # they belong in the Drifter bucket — exclude them from Shattered
-        # to avoid double-coverage.
+        # else the implicit default allowlist.
         if has_class_filter:
             in_int = class_filter and wh_class in class_filter
             in_drift = include_drifter and wh_class in DRIFTER_CLASSES
             in_uncat = include_uncatalogued and is_uncatalogued
-            in_shat = (
-                include_shattered
-                and sys.system_id in shattered_ids
-                and wh_class not in DRIFTER_CLASSES
-            )
-            if not (in_int or in_drift or in_uncat or in_shat):
+            if not (in_int or in_drift or in_uncat):
                 continue
         else:
             if wh_class is None or wh_class not in DEFAULT_ALLOWED:
                 continue
+
+        # Shattered modifier — ANDs with whatever class set just passed.
+        # Pathfinder's algorithm: every planet is the shattered type.
+        if require_shattered and sys.system_id not in shattered_ids:
+            continue
 
         effect = system_effects.get(sys.system_name)
         statics = system_statics.get(sys.system_name, [])

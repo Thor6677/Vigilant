@@ -60,13 +60,18 @@
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
             <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
             {% endfor %}
-            {# ISS-014 follow-up: three orthogonal special-system filters.
-               Shattered uses SDE detection (all-planets-shattered) and matches
-               anoikis.info's curated set. Drifter = 5 named complexes. Uncatalogued
-               = absent from the community static-data map. #}
-            <button class="wf-btn" data-filter="class" data-val="shattered" style="color:{{ class_colors['13'] }};" onclick="toggleFilter(this)" title="100 systems where every planet is shattered: 25 C13 (small/frigate-only) + 75 shattered C1-C6. Detected from SDE; matches Pathfinder/anoikis.">Shattered</button>
+            {# ISS-014 follow-up: Drifter and Uncatalogued are class sets — they
+               OR with the standard C1-C13 buttons. Shattered is a property
+               (modifier) and lives in its own row below so it ANDs with class. #}
             <button class="wf-btn" data-filter="class" data-val="drifter" style="color:{{ class_colors['14'] }};" onclick="toggleFilter(this)" title="Sentinel MZ, Liberated Barbican, Sanctified Vidette, Conflux Eyrie, Azdaja Redoubt (classes 14-18)">Drifter</button>
-            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems missing from community static-data — most are also Shattered, but this catches the gap directly">Uncatalogued</button>
+            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems missing from community static-data">Uncatalogued</button>
+        </div>
+    </div>
+
+    <div class="wf-row">
+        <span class="wf-label">Modifiers:</span>
+        <div class="wf-toggles" id="filter-modifiers">
+            <button class="wf-btn" data-filter="shattered" data-val="1" style="color:{{ class_colors['13'] }};" onclick="toggleFilter(this)" title="System is shattered (every planet is the Shattered type). 100 systems total. ANDs with the class filter above — e.g. C6 + Shattered returns the 5 shattered C6 systems.">Shattered</button>
         </div>
     </div>
 
@@ -154,8 +159,9 @@ function doSearch() {
     var planets = getFilterValues('planet');
     var effect = getFilterValues('effect');
     var perfectPi = getFilterValues('perfect_pi');
+    var shattered = getFilterValues('shattered');
 
-    var hasFilter = classes || statics || planets || effect || perfectPi;
+    var hasFilter = classes || statics || planets || effect || perfectPi || shattered;
     if (!hasFilter && q.length < 4) {
         document.getElementById('wh-results').innerHTML = '<div class="b-empty">Select filters above or type at least 4 characters to search.</div>';
         return;
@@ -167,6 +173,7 @@ function doSearch() {
     if (statics) params.set('static_dest', statics);
     if (planets) params.set('planets', planets);
     if (effect) params.set('effect', effect);
+    if (shattered) params.set('shattered', shattered);
     if (perfectPi) params.set('perfect_pi', '1');
 
     htmx.ajax('GET', '/wormholes/search?' + params.toString(), {
