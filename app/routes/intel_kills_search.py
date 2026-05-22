@@ -564,6 +564,11 @@ def _compile_flag_clauses(flags: set[str], joins: set[str]) -> list:
             .where(KillmailAttacker.killmail_id == Killmail.killmail_id)
             .scalar_subquery()
         )
+        # NULL safety: if max_dmg_subq is NULL (impossible here because the
+        # has_damage_data guard below requires at least one row, but defensive),
+        # `damage_done < NULL` evaluates to NULL, treated as false in WHERE, so
+        # COUNT = 0 and the ratio fails the >= 0.5 check. SQLite-specific but
+        # standard SQL three-valued logic.
         low_count_subq = (
             select(func.count())
             .select_from(KillmailAttacker)
