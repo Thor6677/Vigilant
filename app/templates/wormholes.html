@@ -57,14 +57,16 @@
     <div class="wf-row">
         <span class="wf-label">Show systems of class:</span>
         <div class="wf-toggles" id="filter-class">
-            {% for cls, label, tip in [("1","C1",""),("2","C2",""),("3","C3",""),("4","C4",""),("5","C5",""),("6","C6",""),("13","Shattered","C13 — small shattered systems (frigate-sized wormholes only)")] %}
-            <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)"{% if tip %} title="{{ tip }}"{% endif %}>{{ label }}</button>
+            {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
+            <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
             {% endfor %}
-            {# ISS-014 follow-up: 5 named drifter complexes (Sentinel MZ etc.) and
-               the 32 J-numbered uncatalogued systems are filterable separately,
-               since they don't have community static data. #}
+            {# ISS-014 follow-up: three orthogonal special-system filters.
+               Shattered uses SDE detection (all-planets-shattered) and matches
+               anoikis.info's curated set. Drifter = 5 named complexes. Uncatalogued
+               = absent from the community static-data map. #}
+            <button class="wf-btn" data-filter="class" data-val="shattered" style="color:{{ class_colors['13'] }};" onclick="toggleFilter(this)" title="100 systems where every planet is shattered: 25 C13 (small/frigate-only) + 75 shattered C1-C6. Detected from SDE; matches Pathfinder/anoikis.">Shattered</button>
             <button class="wf-btn" data-filter="class" data-val="drifter" style="color:{{ class_colors['14'] }};" onclick="toggleFilter(this)" title="Sentinel MZ, Liberated Barbican, Sanctified Vidette, Conflux Eyrie, Azdaja Redoubt (classes 14-18)">Drifter</button>
-            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems with no SDE class — shattered/special systems with only wandering connections">Uncatalogued</button>
+            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems missing from community static-data — most are also Shattered, but this catches the gap directly">Uncatalogued</button>
         </div>
     </div>
 

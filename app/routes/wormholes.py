@@ -134,14 +134,17 @@ async def wormhole_systems_search(
     effect_val = effect.strip() if effect.strip() else None
 
     # Parse multi-select class filter (comma-separated). Supports integer
-    # class IDs (1-13) plus two ISS-014 follow-up sentinels: "drifter"
-    # expands to classes 14-18 (the 5 named drifter complexes), and
-    # "uncatalogued" enables wh_class=None systems (the 32 J-numbered
-    # shattered/special systems missing a class in the SDE).
+    # class IDs (1-13) plus three ISS-014 follow-up sentinels:
+    #   "drifter"      → classes 14-18 (the 5 named drifter complexes).
+    #   "uncatalogued" → systems missing from system_statics map.
+    #   "shattered"    → SDE-detected: every planet is shattered type
+    #                    (Pathfinder's algorithm). Covers all C13 plus
+    #                    the 75 shattered C1-C6 systems anoikis tracks.
     raw_class_tokens = [c.strip() for c in wh_class.split(",") if c.strip()] if wh_class.strip() else []
     class_list = [int(c) for c in raw_class_tokens if c.isdigit()]
     include_drifter = "drifter" in raw_class_tokens
     include_uncatalogued = "uncatalogued" in raw_class_tokens
+    include_shattered = "shattered" in raw_class_tokens
 
     # Parse static destination filter (comma-separated class IDs)
     static_dest_list = [int(c) for c in static_dest.split(",") if c.strip().isdigit()] if static_dest.strip() else []
@@ -152,7 +155,7 @@ async def wormhole_systems_search(
     perfect_pi_on = perfect_pi.strip() == "1"
 
     # Require at least one filter or 4+ char search
-    has_filter = class_list or include_drifter or include_uncatalogued or effect_val or static_dest_list or planet_list or perfect_pi_on
+    has_filter = class_list or include_drifter or include_uncatalogued or include_shattered or effect_val or static_dest_list or planet_list or perfect_pi_on
     if not has_filter and len(search_q) < 4:
         return HTMLResponse(
             '<div class="b-empty">Select filters above or type at least 4 characters to search.</div>'
@@ -163,6 +166,7 @@ async def wormhole_systems_search(
         class_filter=class_list or None,
         include_drifter=include_drifter,
         include_uncatalogued=include_uncatalogued,
+        include_shattered=include_shattered,
         effect_filter=effect_val,
         static_dest_filter=static_dest_list or None,
         planet_filter=planet_list or None,

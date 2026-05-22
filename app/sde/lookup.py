@@ -658,6 +658,34 @@ async def search_skills(db: AsyncSession, query: str, limit: int = 15) -> list[d
 _wh_class_cache: dict[int, int] | None = None
 _wh_class_cache_ts: datetime | None = None
 
+# Cached set of shattered W-space system IDs. A system is "shattered" iff
+# every planet in it is the Shattered planet type (type_id 30889). Matches
+# Pathfinder's detection logic. Computed once from SDE planet data, refreshed
+# alongside other SDE caches. ISS-014 follow-up.
+SHATTERED_PLANET_TYPE_ID = 30889
+_shattered_systems_cache: set[int] | None = None
+_shattered_systems_cache_ts: datetime | None = None
+
+
+async def _ensure_shattered_cache(db: AsyncSession):
+    global _shattered_systems_cache, _shattered_systems_cache_ts
+    now = datetime.now(timezone.utc)
+    if _shattered_systems_cache is not None and _shattered_systems_cache_ts \
+       and (now - _shattered_systems_cache_ts).total_seconds() < 3600:
+        return
+    # System IDs in W-space (31000000..) where every planet is the shattered type.
+    from sqlalchemy import text as _text
+    result = await db.execute(_text(
+        "SELECT s.system_id FROM sde_systems s "
+        "JOIN sde_planets p ON p.system_id = s.system_id "
+        "WHERE s.system_id BETWEEN 31000000 AND 31999999 "
+        "GROUP BY s.system_id "
+        "HAVING COUNT(DISTINCT p.planet_type_id) = 1 "
+        "AND MAX(p.planet_type_id) = :ptid"
+    ), {"ptid": SHATTERED_PLANET_TYPE_ID})
+    _shattered_systems_cache = {r[0] for r in result.fetchall()}
+    _shattered_systems_cache_ts = now
+
 
 async def _ensure_wh_class_cache(db: AsyncSession):
     """Load wormhole class mappings into memory."""
@@ -741,6 +769,7 @@ async def get_wormhole_systems(
     class_filter: list[int] | None = None,
     include_drifter: bool = False,
     include_uncatalogued: bool = False,
+    include_shattered: bool = False,
     effect_filter: str | None = None,
     static_dest_filter: list[int] | None = None,
     planet_filter: list[str] | None = None,
@@ -762,6 +791,11 @@ async def get_wormhole_systems(
     # Load planet cache if planet filters are active
     if planet_filter or perfect_pi:
         await _ensure_planet_types_cache(db)
+
+    # Load shattered cache if the shattered filter is active
+    if include_shattered:
+        await _ensure_shattered_cache(db)
+    shattered_ids = _shattered_systems_cache or set()
 
     # Get all J-space systems. Without the drifter filter active we restrict
     # to "J" + 6 digits names — that's 2,568 of 2,604 SDE J-systems. When
@@ -805,12 +839,15 @@ async def get_wormhole_systems(
     # Two modes for class selection:
     #   1. No class buttons pressed → implicit default allowlist of
     #      C1-C6+C13. wh_class=None and drifter classes filtered out.
-    #   2. ANY class button pressed (int / drifter / uncatalogued) →
-    #      exclusive mode: a system passes only if it matches one of
-    #      the explicitly selected sets. ORed together when multiple.
+    #   2. ANY class button pressed (int / drifter / uncatalogued /
+    #      shattered) → exclusive mode: a system passes only if it
+    #      matches one of the explicitly selected sets. ORed together
+    #      when multiple are selected.
     DEFAULT_ALLOWED = {1, 2, 3, 4, 5, 6, 13}
     DRIFTER_CLASSES = {14, 15, 16, 17, 18}
-    has_class_filter = bool(class_filter or include_drifter or include_uncatalogued)
+    has_class_filter = bool(
+        class_filter or include_drifter or include_uncatalogued or include_shattered
+    )
 
     filtered = []
     for sys in all_systems:
@@ -835,12 +872,20 @@ async def get_wormhole_systems(
         )
 
         # Apply class filter — exclusive when any class button is pressed,
-        # else the implicit default allowlist.
+        # else the implicit default allowlist. Shattered overlaps with the
+        # 5 drifter complexes (they have all-shattered planets too) but
+        # they belong in the Drifter bucket — exclude them from Shattered
+        # to avoid double-coverage.
         if has_class_filter:
             in_int = class_filter and wh_class in class_filter
             in_drift = include_drifter and wh_class in DRIFTER_CLASSES
             in_uncat = include_uncatalogued and is_uncatalogued
-            if not (in_int or in_drift or in_uncat):
+            in_shat = (
+                include_shattered
+                and sys.system_id in shattered_ids
+                and wh_class not in DRIFTER_CLASSES
+            )
+            if not (in_int or in_drift or in_uncat or in_shat):
                 continue
         else:
             if wh_class is None or wh_class not in DEFAULT_ALLOWED:
