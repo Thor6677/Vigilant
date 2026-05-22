@@ -457,11 +457,13 @@
     // ── refetchResults: fires the /search/results fetch call ────
     var currentOldestCursor = '';
     var currentNewestCursor = '';
+    var fetchGeneration = 0;
     function refetchResults() {
       var feed = document.getElementById('kfs-results');
       if (feed) feed.innerHTML = '';
       currentOldestCursor = '';
       currentNewestCursor = '';
+      var myGen = ++fetchGeneration;
       var loading = document.getElementById('kfs-loading');
       if (loading) { loading.style.display = ''; loading.textContent = 'Loading…'; }
       var showMore = document.getElementById('kfs-show-more-wrap');
@@ -470,6 +472,7 @@
       fetch('/intel/kills/search/results' + buildQS())
         .then(function(r) { return r.text(); })
         .then(function(html) {
+          if (myGen !== fetchGeneration) return;  // newer fetch in flight — bail
           if (loading) loading.style.display = 'none';
           if (feed) {
             feed.innerHTML = html;
@@ -479,6 +482,7 @@
           }
         })
         .catch(function(err) {
+          if (myGen !== fetchGeneration) return;  // newer in flight — don't show stale error
           if (loading) loading.textContent = 'Error loading results.';
           console.error(err);
         });
@@ -530,11 +534,18 @@
       var qs = buildQS();
       var sep = qs ? '&' : '?';
       var btn = this;
+      var myGen = fetchGeneration;  // snapshot, don't increment
       btn.disabled = true;
       btn.textContent = 'Loading…';
       fetch('/intel/kills/search/results' + qs + sep + 'cursor=' + encodeURIComponent(currentOldestCursor))
         .then(function(r) { return r.text(); })
         .then(function(html) {
+          if (myGen !== fetchGeneration) {
+            // A refetch happened while Show More was in flight — discard.
+            btn.disabled = false;
+            btn.textContent = '↓ Show more (next 100)';
+            return;
+          }
           var feed = document.getElementById('kfs-results');
           if (!feed) return;
           var tmp = document.createElement('div');
@@ -558,6 +569,11 @@
           var wrap = document.getElementById('kfs-show-more-wrap');
           if (wrap) wrap.style.display = (currentOldestCursor && tmp.querySelectorAll('.kf-row').length >= 0) ? 'block' : 'none';
           if (rowCount < 100 || !currentOldestCursor) wrap.style.display = 'none';
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+          btn.textContent = '↓ Show more (next 100)';
+          console.error('Show more failed:', err);
         });
     });
 
