@@ -94,6 +94,10 @@
        hx-get="/intel/kills/feed"
        hx-trigger="load, every 15s"
        hx-swap="afterbegin"></div>
+  <div id="kf-load-older" style="display:none;text-align:center;padding:12px;margin-top:8px;">
+    <button class="kf-chip" id="kf-load-older-btn" type="button">&darr; Load older kills (last 6h)</button>
+    <button class="kf-chip" id="kf-back-to-live-btn" type="button" style="display:none;">&larr; Back to live</button>
+  </div>
 </div>
 <script nonce="{{ request.state.csp_nonce }}">
   function refreshAgo() {
@@ -292,6 +296,88 @@
     // labeled chips for personal-use persistence.
     var feed = document.getElementById('kf-feed');
     if (feed) feed.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
+
+    // ------ Task 9: Load older / Back to live ------
+    var olderContainer = document.getElementById('kf-load-older');
+    var olderBtn = document.getElementById('kf-load-older-btn');
+    var liveBtn = document.getElementById('kf-back-to-live-btn');
+    var olderMode = false;
+
+    function pauseLive() {
+      var f = document.getElementById('kf-feed');
+      if (f) f.setAttribute('hx-trigger', 'never');
+    }
+
+    function resumeLive() {
+      olderMode = false;
+      if (liveBtn) liveBtn.style.display = 'none';
+      if (olderBtn) olderBtn.style.display = '';
+      var f = document.getElementById('kf-feed');
+      if (f) {
+        f.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
+        f.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
+        f.setAttribute('hx-trigger', 'load, every 15s');
+        f.setAttribute('hx-swap', 'afterbegin');
+        if (window.htmx) {
+          htmx.process(f);
+          htmx.trigger(f, 'load');
+        }
+      }
+    }
+
+    function fetchOlderChunk(beforeTs, windowHours) {
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      var url = '/intel/kills/older' + qs + sep
+        + 'before=' + encodeURIComponent(beforeTs)
+        + '&window_hours=' + windowHours;
+      return fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+        var f = document.getElementById('kf-feed');
+        if (!f) return;
+        f.insertAdjacentHTML('beforeend', html);
+        // Refresh "ago" labels on newly inserted rows
+        if (typeof refreshAgo === 'function') refreshAgo();
+        // Wire up "Load 24h?" expand link if the empty-fallback was injected
+        var empties = f.querySelectorAll('.kf-empty [data-expand]');
+        empties.forEach(function(expand) {
+          if (expand.dataset.wired) return;
+          expand.dataset.wired = '1';
+          expand.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            var emptyEl = expand.closest('.kf-empty');
+            if (emptyEl) emptyEl.remove();
+            fetchOlderChunk(beforeTs, 24);
+          });
+        });
+      });
+    }
+
+    function getOldestRowTs() {
+      var rows = document.querySelectorAll('#kf-feed .kf-row');
+      if (!rows.length) return new Date().toISOString();
+      var lastRow = rows[rows.length - 1];
+      var ago = lastRow.querySelector('.kf-ago[data-time]');
+      if (!ago) return new Date().toISOString();
+      // killmail_time is ISO without timezone — server expects that format back
+      return ago.getAttribute('data-time');
+    }
+
+    if (olderBtn) {
+      olderBtn.addEventListener('click', function() {
+        olderMode = true;
+        if (liveBtn) liveBtn.style.display = '';
+        pauseLive();
+        fetchOlderChunk(getOldestRowTs(), 6);
+      });
+    }
+    if (liveBtn) liveBtn.addEventListener('click', resumeLive);
+
+    // Reveal Load Older button after initial live feed renders
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (e.target && e.target.id === 'kf-feed' && !olderMode && olderContainer) {
+        olderContainer.style.display = 'block';
+      }
+    });
   })();
 </script>
 {% endblock %}

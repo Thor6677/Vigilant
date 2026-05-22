@@ -10,15 +10,18 @@ Click a row to expand the detail panel (victim + fitting + ISK + attackers).
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.cache import cache_get, cache_set
-from app.db.models import get_db
+from app.db.models import Killmail, KillmailAttacker, get_db
+from app.db.sde_models import SDESystem
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
 from app.intel.recent_battles import resolve_entity_names
 from app.sde.lookup import search_ship_types, type_ids_to_names
@@ -200,6 +203,179 @@ async def intel_kills_feed(
             "kills": enriched,
             "total_in_buffer": total_in_buffer,
             "newest_id": enriched[0]["killmail_id"] if enriched else (since or 0),
+        },
+    )
+
+
+@router.get("/intel/kills/older", response_class=HTMLResponse)
+async def intel_kills_older(
+    request: Request,
+    before: str,
+    window_hours: int = 6,
+    space: str = "",
+    wh_class: str = "",  # accepted for parity but NOT enforced server-side in v1
+    shattered: int = 0,  # same
+    ship_id: str = "",
+    attacker_char: str = "",
+    attacker_corp: str = "",
+    attacker_alli: str = "",
+    victim_char: str = "",
+    victim_corp: str = "",
+    victim_alli: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginate historical kills from the killmails table.
+
+    Returns up to 100 rows in a 6h window strictly older than `before`,
+    matching the same broad filter set as the live feed: space band
+    (HS/LS/NS/WH), victim ship, attacker entity, victim entity.
+
+    WH sub-class chips + Shattered modifier are deliberately NOT enforced
+    server-side here (would require walking constellation → region from
+    the SDE on every kill); they apply only to the live in-memory feed
+    where `_sys_meta_cache` is pre-resolved.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    try:
+        before_dt = datetime.fromisoformat(before.replace("Z", ""))
+    except (ValueError, AttributeError):
+        return HTMLResponse("<p>Invalid timestamp</p>", status_code=400)
+    after_dt = before_dt - timedelta(hours=window_hours)
+
+    stmt = select(Killmail).where(
+        Killmail.killmail_time < before_dt,
+        Killmail.killmail_time >= after_dt,
+    )
+
+    # Victim ship filter
+    ship_ids = {int(s) for s in ship_id.split(",") if s.strip().isdigit()}
+    if ship_ids:
+        stmt = stmt.where(Killmail.victim_ship_type_id.in_(ship_ids))
+
+    # Victim entity filter (OR within category)
+    v_chars = {int(s) for s in victim_char.split(",") if s.strip().isdigit()}
+    v_corps = {int(s) for s in victim_corp.split(",") if s.strip().isdigit()}
+    v_allis = {int(s) for s in victim_alli.split(",") if s.strip().isdigit()}
+    victim_conds = []
+    if v_chars:
+        victim_conds.append(Killmail.victim_character_id.in_(v_chars))
+    if v_corps:
+        victim_conds.append(Killmail.victim_corporation_id.in_(v_corps))
+    if v_allis:
+        victim_conds.append(Killmail.victim_alliance_id.in_(v_allis))
+    if victim_conds:
+        stmt = stmt.where(or_(*victim_conds))
+
+    # Attacker entity filter — EXISTS subquery
+    a_chars = {int(s) for s in attacker_char.split(",") if s.strip().isdigit()}
+    a_corps = {int(s) for s in attacker_corp.split(",") if s.strip().isdigit()}
+    a_allis = {int(s) for s in attacker_alli.split(",") if s.strip().isdigit()}
+    if a_chars or a_corps or a_allis:
+        att_conds = []
+        if a_chars:
+            att_conds.append(KillmailAttacker.character_id.in_(a_chars))
+        if a_corps:
+            att_conds.append(KillmailAttacker.corporation_id.in_(a_corps))
+        if a_allis:
+            att_conds.append(KillmailAttacker.alliance_id.in_(a_allis))
+        att_subq = select(KillmailAttacker.killmail_id).where(
+            KillmailAttacker.killmail_id == Killmail.killmail_id,
+            or_(*att_conds),
+        )
+        stmt = stmt.where(exists(att_subq))
+
+    # Space band filter (HS/LS/NS/WH only — WH sub-class deferred to v2)
+    spaces = {s.strip() for s in space.split(",") if s.strip()}
+    # If all four bands are selected, that's the identity filter — skip.
+    if spaces and not ({"hs", "ls", "ns", "wh"} <= spaces):
+        sec_conds = []
+        if "hs" in spaces:
+            sec_conds.append(SDESystem.security >= 0.5)
+        if "ls" in spaces:
+            sec_conds.append(and_(SDESystem.security > 0.0, SDESystem.security < 0.5))
+        if "ns" in spaces:
+            sec_conds.append(
+                and_(SDESystem.security <= 0.0, SDESystem.system_id < 31000000)
+            )
+        if "wh" in spaces:
+            sec_conds.append(SDESystem.system_id >= 31000000)
+        if sec_conds:
+            sys_subq = select(SDESystem.system_id).where(or_(*sec_conds))
+            stmt = stmt.where(Killmail.solar_system_id.in_(sys_subq))
+
+    stmt = stmt.order_by(Killmail.killmail_time.desc()).limit(100)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    if not rows:
+        return HTMLResponse(
+            f'<div class="kf-empty" data-window="{window_hours}" '
+            f'style="text-align:center;color:var(--muted);'
+            f'font-size:11px;padding:14px;">'
+            f"No older kills in last {window_hours}h matching filters. "
+            f'<a href="#" data-expand style="color:var(--accent);">'
+            f"Load 24h?</a></div>"
+        )
+
+    # Batch-load attackers for all rows to avoid N+1
+    kid_list = [r.killmail_id for r in rows]
+    att_rows = (
+        await db.execute(
+            select(
+                KillmailAttacker.killmail_id,
+                KillmailAttacker.character_id,
+                KillmailAttacker.corporation_id,
+                KillmailAttacker.alliance_id,
+                KillmailAttacker.ship_type_id,
+                KillmailAttacker.final_blow,
+            ).where(KillmailAttacker.killmail_id.in_(kid_list))
+        )
+    ).all()
+
+    attackers_by_kid: dict[int, list[dict]] = {}
+    for kid, char_id, corp_id, alli_id, ship_id_, fb in att_rows:
+        attackers_by_kid.setdefault(kid, []).append(
+            {
+                "character_id": char_id,
+                "corporation_id": corp_id,
+                "alliance_id": alli_id,
+                "ship_type_id": ship_id_,
+                "final_blow": bool(fb),
+            }
+        )
+
+    # Reshape to the in-memory dict shape that _enrich_kills consumes
+    fake_kills = []
+    for r in rows:
+        fake_kills.append(
+            {
+                "killmail_id": r.killmail_id,
+                "killmail_time": r.killmail_time.isoformat()
+                if r.killmail_time
+                else None,
+                "solar_system_id": r.solar_system_id,
+                "victim": {
+                    "character_id": r.victim_character_id,
+                    "corporation_id": r.victim_corporation_id,
+                    "alliance_id": r.victim_alliance_id,
+                    "ship_type_id": r.victim_ship_type_id,
+                },
+                "attackers": attackers_by_kid.get(r.killmail_id, []),
+                "zkb": {"totalValue": r.total_value or 0},
+            }
+        )
+
+    enriched = await _enrich_kills(fake_kills, db)
+    return templates.TemplateResponse(
+        "partials/intel_kills_feed.html",
+        {
+            "request": request,
+            "kills": enriched,
+            "total_in_buffer": len(get_recent_kills()),
+            "newest_id": 0,
+            "older_mode": True,
         },
     )
 

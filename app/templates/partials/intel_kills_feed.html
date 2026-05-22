@@ -1,3 +1,4 @@
+{% if not older_mode %}
 <script nonce="{{ request.state.csp_nonce }}">
   (function() {
     var status = document.getElementById('kf-status');
@@ -17,6 +18,7 @@
     if (loading) loading.remove();
   })();
 </script>
+{% endif %}
 {% for k in kills %}
 <div class="kf-row" data-kid="{{ k['killmail_id'] }}">
   <img class="kf-ship-thumb" loading="lazy"
