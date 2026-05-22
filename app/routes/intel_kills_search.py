@@ -55,7 +55,6 @@ RORQUAL_TYPE_ID = 28352  # Industrial Command Ship group 941 also contains Porpo
 #   11938 Armageddon Imperial Issue (Battleship, group 27)
 #   11940 Gold Magnate             (Amarr Frigate, group 25) — legendary AT1 prize
 #   11942 Silver Magnate           (Amarr Frigate, group 25) — legendary AT1 prize
-#   12044 Enyo                     (Assault Frigate, group 324)
 #   13202 Megathron Federate Issue (Battleship, group 27)
 #   26840 Raven State Issue        (Battleship, group 27)
 #   26842 Tempest Tribal Issue     (Battleship, group 27)
@@ -90,10 +89,14 @@ RORQUAL_TYPE_ID = 28352  # Industrial Command Ship group 941 also contains Porpo
 # - 33397 Chremoas (Covert Ops) — excluded per user; same rationale.
 # - 49713 Zarmazd (Logistics) — excluded per user; same rationale.
 # - 3532  Echelon — excluded; Sansha incursion-event prize, not AT.
+# - 12044 Enyo — initially included from user list 2026-05-22 but removed same
+#   day after kill-distribution showed 804 Enyo deaths (the standard published
+#   Gallente Assault Frigate; not an AT-prize variant — SDE has no separate
+#   AT-Enyo type_id). User confirmed the chip should track rare AT prizes only.
 # - Re-confirm with user if SDE updates introduce new AT variants.
 AT_SHIP_TYPE_IDS = {
     2834, 2836, 3516, 3518,
-    11011, 11936, 11938, 11940, 11942, 12044,
+    11011, 11936, 11938, 11940, 11942,
     13202,
     26840, 26842,
     32207, 32209, 32788, 32790,
