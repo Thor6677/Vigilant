@@ -38,9 +38,29 @@
   .kf-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
   .kf-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
   .kf-chip-removable .x { font-weight:700; }
-  .kf-detail { padding:14px; background:rgba(94,177,255,0.04); border-bottom:2px solid var(--accent); }
+  /* Expand/collapse animation: max-height 0 → grown, with opacity + padding eased. */
+  .kf-detail {
+    background:rgba(94,177,255,0.04);
+    border-bottom:2px solid var(--accent);
+    max-height:0;
+    opacity:0;
+    overflow:hidden;
+    padding:0 14px;
+    transition: max-height 0.4s ease-out, opacity 0.3s ease-out 0.05s, padding 0.3s ease-out;
+  }
+  .kf-detail.shown {
+    max-height:2400px;
+    opacity:1;
+    padding:14px;
+  }
   .kf-detail h4 { margin:0 0 6px; font-size:10px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase; }
-  .kf-detail-top { display:grid; grid-template-columns:240px 1fr 220px; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border); margin-bottom:14px; }
+  /* 3 columns: Victim+ISK | Fitting | Attackers — uses the previously-empty right space */
+  .kf-detail-grid { display:grid; grid-template-columns:240px minmax(0,1fr) 320px; gap:16px; align-items:start; }
+  .kf-detail-left, .kf-detail-middle, .kf-detail-right { min-width:0; }
+  .kf-detail-right { max-height:560px; overflow-y:auto; padding-right:4px; }
+  .kf-isk-block { margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .kf-isk-value { font-size:18px; color:#facc15; font-weight:600; margin:4px 0 10px; font-family:"SF Mono",Menlo,monospace; }
+  .kf-zkb-link { font-size:10px; color:var(--accent); text-decoration:none; border:1px solid var(--accent); padding:4px 8px; display:inline-block; border-radius:3px; }
   .kf-victim-card { display:flex; gap:12px; align-items:flex-start; font-size:11px; line-height:1.6; }
   .kf-slot-group { margin-bottom:6px; }
   .kf-slot-label { font-size:9px; color:var(--muted); letter-spacing:0.12em; margin-bottom:2px; text-transform:uppercase; }
@@ -51,17 +71,31 @@
   .kf-slot-dot { width:6px; height:6px; border-radius:50%; }
   .kf-slot-dot.d { background:#ef4444; }
   .kf-slot-dot.k { background:#4ade80; }
-  .kf-summary { background:var(--surface); padding:10px; border-radius:3px; font-size:11px; }
-  .kf-summary-row { display:flex; justify-content:space-between; padding:3px 0; color:var(--text); }
-  .kf-summary-label { color:var(--muted); font-size:10px; }
-  .kf-attacker { display:grid; grid-template-columns:28px 1fr 100px 100px 110px 50px; gap:8px; padding:5px 0; border-bottom:1px dotted var(--border); align-items:center; font-size:11px; }
-  .kf-attacker.fb { background:rgba(239,68,68,0.05); }
+  /* Compact attacker rows for the right column (zKB-style). */
+  .kf-attacker-compact { display:grid; grid-template-columns:28px 1fr; gap:8px; padding:6px 0; border-bottom:1px dotted var(--border); align-items:start; font-size:11px; }
+  .kf-attacker-compact.fb { background:rgba(239,68,68,0.05); margin:0 -4px; padding-left:4px; padding-right:4px; }
+  .kf-attacker-compact .info { min-width:0; }
+  .kf-attacker-compact .line1 { color:var(--text); }
+  .kf-attacker-compact .line1 a { color:var(--text); font-weight:600; text-decoration:none; }
+  .kf-attacker-compact .line2 { color:var(--muted); font-size:10px; margin-top:1px; }
+  .kf-attacker-compact .line2 .ship { color:var(--accent); }
+  .kf-attacker-compact .line3 { font-size:10px; margin-top:3px; color:#facc15; display:flex; align-items:center; gap:6px; }
+  .kf-attacker-compact .line3 .dmg-none { color:var(--muted); }
+  .kf-attacker-compact .line3 .pct { color:var(--muted); font-size:9px; }
+  .kf-attacker-compact .kf-dmg-bar { flex:1; min-width:30px; margin-top:0; }
   .kf-fb-badge { display:inline-block; background:#ef4444; color:#0a0c0f; padding:1px 5px; font-size:8px; font-weight:700; letter-spacing:0.08em; border-radius:2px; margin-left:4px; vertical-align:middle; }
   .kf-dmg-bar { height:4px; background:var(--surface); border-radius:2px; margin-top:3px; overflow:hidden; }
   .kf-dmg-bar .fill { height:100%; background:linear-gradient(90deg,#facc15,#ef4444); }
-  .kf-row { cursor:pointer; }
+  /* Row hover/open + live-prepend fade-in animation. */
+  .kf-row { cursor:pointer; transition: background-color 0.2s ease; }
   .kf-row:hover { background:rgba(94,177,255,0.04); }
   .kf-row.open { background:rgba(94,177,255,0.08); border-bottom:1px solid var(--accent); }
+  @keyframes kf-row-in {
+    0%   { opacity:0; transform:translateY(-8px); background-color:rgba(94,177,255,0.18); }
+    60%  { opacity:1; transform:translateY(0); background-color:rgba(94,177,255,0.10); }
+    100% { background-color:transparent; }
+  }
+  .kf-row.kf-new { animation: kf-row-in 0.55s ease-out; }
 </style>
 {% endblock %}
 
@@ -403,7 +437,22 @@
       }
     });
 
-    // ------ Task 10: Click-to-expand detail panel ------
+    // ------ Click-to-expand detail panel + polling pause + animations ------
+
+    // Pause live polling whenever any detail panel is open so the expanded
+    // ship doesn't get pushed around (or visually "go away") when new kills
+    // prepend. Resume only when all panels closed AND not in older-mode.
+    function updatePollingState() {
+      var f = document.getElementById('kf-feed');
+      if (!f) return;
+      var hasOpen = document.querySelector('.kf-detail') !== null;
+      if (hasOpen || olderMode) {
+        f.setAttribute('hx-trigger', 'never');
+      } else {
+        f.setAttribute('hx-trigger', 'load, every 15s');
+      }
+    }
+
     function bindRowClicks() {
       document.querySelectorAll('#kf-feed .kf-row').forEach(function(row) {
         if (row.dataset.bound === '1') return;
@@ -412,8 +461,13 @@
           var kid = row.dataset.kid;
           var existing = document.querySelector('.kf-detail[data-kid="' + kid + '"]');
           if (existing) {
-            existing.remove();
+            // Animated collapse: drop .shown, remove after transition.
+            existing.classList.remove('shown');
             row.classList.remove('open');
+            setTimeout(function() {
+              if (existing.parentNode) existing.parentNode.removeChild(existing);
+              updatePollingState();
+            }, 320);
             return;
           }
           row.classList.add('open');
@@ -421,12 +475,43 @@
             .then(function(r) { return r.text(); })
             .then(function(html) {
               row.insertAdjacentHTML('afterend', html);
-            });
+              var panel = row.nextElementSibling;
+              if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                // Force reflow so the transition fires from the collapsed state.
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+              updatePollingState();
+            })
+            .catch(function() { row.classList.remove('open'); });
         });
       });
     }
-    document.addEventListener('htmx:afterSwap', bindRowClicks);
+
+    // Track whether the very first feed swap has happened so we only animate
+    // prepends for genuinely-new live rows, not the initial batch of 100.
+    var kfInitialSwapDone = false;
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      if (kfInitialSwapDone) {
+        // Any row not yet bound is a freshly-prepended live row.
+        document.querySelectorAll('#kf-feed .kf-row:not([data-bound])').forEach(function(row) {
+          row.classList.add('kf-new');
+          setTimeout(function() { row.classList.remove('kf-new'); }, 650);
+        });
+      }
+      kfInitialSwapDone = true;
+      bindRowClicks();
+    });
     bindRowClicks();
+
+    // Older-mode rows come in via raw fetch (not htmx), so wire them here too.
+    var _fetchOlderChunk = fetchOlderChunk;
+    fetchOlderChunk = function(beforeTs, windowHours) {
+      return _fetchOlderChunk(beforeTs, windowHours).then(function() {
+        bindRowClicks();
+      });
+    };
   })();
 </script>
 {% endblock %}
