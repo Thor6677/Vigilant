@@ -17,6 +17,17 @@
   .kf-chip.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
   .kf-chip.mod { border-style:dashed; }
   .kf-chip.mod.on { background:rgba(167,139,250,0.15); color:#a78bfa; border-color:#a78bfa; }
+  .kf-row { display:grid; grid-template-columns:36px 1fr 90px; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); align-items:center; font-size:11px; color:var(--text); }
+  .kf-ship-thumb { width:36px; height:36px; border-radius:3px; background:var(--surface); }
+  .kf-meta-top { color:var(--text); }
+  .kf-meta-bot { color:var(--muted); font-size:10px; }
+  .kf-isk { text-align:right; color:#facc15; font-weight:600; }
+  .kf-ago { display:block; color:var(--muted); font-size:9px; font-weight:400; }
+  .kf-sys-hs { color:#4ade80; }
+  .kf-sys-ls { color:#facc15; }
+  .kf-sys-ns { color:#ef4444; }
+  .kf-sys-wh { color:#a78bfa; }
+  .kf-sys-unknown { color:var(--muted); }
 </style>
 {% endblock %}
 
@@ -44,11 +55,25 @@
     </div>
   </div>
 
+  <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
   <div id="kf-feed"
        hx-get="/intel/kills/feed"
-       hx-trigger="load"
-       hx-swap="innerHTML">
-    <p style="color:var(--muted);font-size:11px;">Loading…</p>
-  </div>
+       hx-trigger="load, every 15s"
+       hx-swap="afterbegin"></div>
 </div>
+<script nonce="{{ request.state.csp_nonce }}">
+  function refreshAgo() {
+    var now = Date.now();
+    document.querySelectorAll('.kf-ago[data-time]').forEach(function(el) {
+      var t = new Date(el.getAttribute('data-time') + 'Z').getTime();
+      var s = Math.max(0, Math.floor((now - t) / 1000));
+      if (s < 60) el.textContent = s + 's ago';
+      else if (s < 3600) el.textContent = Math.floor(s/60) + 'm ago';
+      else el.textContent = Math.floor(s/3600) + 'h ago';
+    });
+  }
+  setInterval(refreshAgo, 15000);
+  document.addEventListener('htmx:afterSwap', refreshAgo);
+  refreshAgo();
+</script>
 {% endblock %}
