@@ -814,19 +814,32 @@ async def get_wormhole_systems(
 
     filtered = []
     for sys in all_systems:
-        # Determine class
+        # Determine class. The SDE marks class at system, constellation,
+        # OR region level — fall back through all three.
         wh_class = _wh_class_cache.get(sys.system_id)
         if wh_class is None and sys.constellation_id:
             wh_class = _wh_class_cache.get(sys.constellation_id)
         if wh_class is None and sys.region_id:
             wh_class = _wh_class_cache.get(sys.region_id)
 
+        # "Uncatalogued" = system not present in the community-curated
+        # system_statics map. For the 32 J-numbered cases this is more
+        # reliable than wh_class=None: those systems resolve to a real
+        # class via constellation/region fallback even though no static
+        # data was ever curated for them. Drifter complexes (Sentinel MZ
+        # et al.) are also absent from system_statics but their class
+        # 14-18 puts them in the Drifter bucket instead.
+        is_uncatalogued = (
+            sys.system_name not in system_statics
+            and wh_class not in DRIFTER_CLASSES
+        )
+
         # Apply class filter — exclusive when any class button is pressed,
         # else the implicit default allowlist.
         if has_class_filter:
             in_int = class_filter and wh_class in class_filter
             in_drift = include_drifter and wh_class in DRIFTER_CLASSES
-            in_uncat = include_uncatalogued and wh_class is None
+            in_uncat = include_uncatalogued and is_uncatalogued
             if not (in_int or in_drift or in_uncat):
                 continue
         else:
