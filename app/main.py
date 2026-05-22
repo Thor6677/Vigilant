@@ -32,6 +32,7 @@ from app.routes.mining import router as mining_router
 from app.routes.mining_ledger import router as mining_ledger_router
 from app.routes.dscan import router as dscan_router
 from app.routes.gatecheck import router as gatecheck_router
+from app.routes.intel_kills import router as intel_kills_router
 from app.routes.intel_watch import router as intel_watch_router
 from app.routes.player_stats import router as player_stats_router
 from app.routes.admin import router as admin_router
@@ -120,6 +121,7 @@ app.include_router(mining_router)
 app.include_router(mining_ledger_router)
 app.include_router(gatecheck_router)
 app.include_router(intel_watch_router)
+app.include_router(intel_kills_router)
 app.include_router(player_stats_router)
 app.include_router(dscan_router)
 app.include_router(admin_router)

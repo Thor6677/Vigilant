@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Kill Feed — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Kill Feed</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+  .kf-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
+  .kf-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; }
+  .kf-live { font-size:9px; color:var(--accent); letter-spacing:0.18em; }
+  .kf-live::before { content:"● "; color:#4ade80; }
+  .kf-filters { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .kf-filter-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kf-glabel { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.12em; margin-right:4px; min-width:60px; }
+  .kf-chip { background:var(--surface); color:var(--text); padding:3px 9px; border:1px solid var(--border); font-size:10px; cursor:pointer; border-radius:3px; user-select:none; }
+  .kf-chip.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kf-chip.mod { border-style:dashed; }
+  .kf-chip.mod.on { background:rgba(167,139,250,0.15); color:#a78bfa; border-color:#a78bfa; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-section">
+  <div class="b-section-head kf-head">
+    <span class="kf-title">KILL FEED</span>
+    <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
+  </div>
+
+  <div class="kf-filters">
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Space</span>
+      <span class="kf-chip" data-space="hs">HS</span>
+      <span class="kf-chip" data-space="ls">LS</span>
+      <span class="kf-chip" data-space="ns">NS</span>
+      <span class="kf-chip" data-space="wh">WH</span>
+    </div>
+    <div class="kf-filter-row" id="kf-wh-subclasses" style="display:none;">
+      <span class="kf-glabel">WH class</span>
+      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter','Pochven'] %}
+      <span class="kf-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
+      {% endfor %}
+      <span class="kf-chip mod" data-mod="shattered">Shattered only</span>
+    </div>
+  </div>
+
+  <div id="kf-feed"
+       hx-get="/intel/kills/feed"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p style="color:var(--muted);font-size:11px;">Loading…</p>
+  </div>
+</div>
+{% endblock %}
