@@ -41,6 +41,49 @@ PAGE_SIZE = 100
 # Hardcoded EVE-meta constants for the compiler.
 CAPITAL_GROUP_IDS = {547, 485, 30, 659, 513, 902, 1538}  # Carrier, Dread, Titan, Super, Freighter, JF, FAX
 RORQUAL_TYPE_ID = 28352  # Industrial Command Ship group 941 also contains Porpoise+Orca which are NOT capitals.
+
+# AT Tournament prize ships. Curated; extend when new AT prizes are released.
+# Source: SDE query 2026-05-22 + Phase 1 spec line 379-387. Confirmed type_ids:
+#   2834  Utu          (Assault Frigate, group 324)
+#   2836  Adrestia     (Heavy Assault Cruiser, group 358)
+#   3516  Malice       (Assault Frigate, group 324)
+#   3518  Vangel       (Heavy Assault Cruiser, group 358)
+#   11940 Gold Magnate (Amarr Frigate, group 25) — legendary AT1 prize
+#   11942 Silver Magnate (Amarr Frigate, group 25) — legendary AT1 prize
+#   29266 Apotheosis   (Shuttle, group 31) — AT XIII-era prize
+#   32207 Freki        (Assault Frigate, group 324)
+#   32209 Mimir        (Heavy Assault Cruiser, group 358)
+#   32788 Cambion      (Assault Frigate, group 324)
+#   32790 Etana        (Logistics, group 832)
+#   33395 Moracha      (Force Recon, group 833)
+#   33397 Chremoas     (Covert Ops, group 830)
+#   33673 Whiptail     (Interceptor, group 831)
+#   33675 Chameleon    (Force Recon, group 833)
+#   35779 Imp          (Interceptor, group 831)
+#   35781 Fiend        (HIC, group 894)
+#   42245 Rabisu       (Logistics, group 832) — AT XIV
+#   42246 Caedes       (Covert Ops, group 830) — AT XIV
+#   45531 Victor       (Force Recon, group 833) — AT XV
+#   48635 Tiamat       (Force Recon, group 833) — AT XVI
+#   48636 Hydra        (Covert Ops, group 830) — AT XVI
+#   49713 Zarmazd      (Logistics, group 832) — AT XVI
+#   60764 Laelaps      (HIC, group 894) — AT XVII
+#   85229 Cobra        (Force Recon, group 833) — recent AT
+#   85062 Sidewinder   (Covert Ops, group 830) — recent AT
+AT_SHIP_TYPE_IDS = {
+    2834, 2836, 3516, 3518,
+    11940, 11942,
+    29266,
+    32207, 32209, 32788, 32790,
+    33395, 33397, 33673, 33675,
+    35779, 35781,
+    42245, 42246,
+    45531,
+    48635, 48636,
+    49713,
+    60764,
+    85062, 85229,
+}
 ABYSSAL_SYSTEM_MIN = 32000001
 ABYSSAL_SYSTEM_MAX = 32000200
 WH_SYSTEM_MIN = 31000000
@@ -223,7 +266,7 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         # follow-up if precision matters.
         pass  # Documented limitation; revisit if user reports it.
 
-    # ── Category (Ship / Structure / Capital) ─────────────────────────
+    # ── Category (Ship / Structure / Capital / AT Ships) ─────────────
     category = params.get("category") or set()
     if category:
         joins.add("sde_types")
@@ -237,6 +280,12 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
                 SDEType.group_id.in_(CAPITAL_GROUP_IDS),
                 Killmail.victim_ship_type_id == RORQUAL_TYPE_ID,
             ))
+        if "at" in category:
+            # AT-prize ships: victim-only match, consistent with Capital chip.
+            # Spec said "victim OR any attacker" but an EXISTS join on
+            # killmail_attackers changes the perf profile. Victim-only is the
+            # right default; revisit if user surfaces the broader request.
+            cat_conds.append(Killmail.victim_ship_type_id.in_(AT_SHIP_TYPE_IDS))
         if cat_conds:
             where.append(or_(*cat_conds))
 
