@@ -106,6 +106,29 @@
     width:fit-content; max-width:max-content;
   }
   #kf-new-pill:hover { background:#3a90df; }
+
+  /* ── Most Valuable last-7-days strip ──────────────────────────────── */
+  #kf-top-strip-wrap { margin-bottom:10px; }
+  .kf-top-header { padding:10px 0 6px; }
+  .kf-top-toggle { background:none; border:none; color:var(--text); font-size:13px; letter-spacing:0.16em; font-weight:600; padding:0; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .kf-top-toggle .kf-top-chev { display:inline-block; transition:transform 0.2s; }
+  .kf-top-toggle[aria-expanded="false"] .kf-top-chev { transform:rotate(-90deg); }
+  #kf-top-body { padding-bottom:10px; border-bottom:1px solid var(--border); }
+  #kf-top-body.collapsed { display:none; }
+  .kf-top-section { margin-bottom:10px; }
+  .kf-top-section-label { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.14em; margin-bottom:6px; }
+  .kf-top-grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
+  @media (max-width: 900px) { .kf-top-grid { grid-template-columns:repeat(3, 1fr); } }
+  .kf-top-card { background:var(--surface); border:1px solid var(--border); padding:8px; text-align:center; cursor:pointer; transition:background-color 0.2s, border-color 0.2s; border-radius:3px; min-width:0; }
+  .kf-top-card:hover { background:rgba(94,177,255,0.06); border-color:var(--accent); }
+  .kf-top-card.open { background:rgba(94,177,255,0.08); border-color:var(--accent); }
+  .kf-top-img { width:96px; height:96px; object-fit:contain; }
+  .kf-top-type { font-size:10px; color:var(--accent); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .kf-top-isk { font-size:13px; color:#facc15; font-weight:600; margin:4px 0 2px; font-family:"SF Mono",Menlo,monospace; }
+  .kf-top-meta { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .kf-top-corp { font-size:9px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .kf-top-empty { color:var(--muted); font-size:11px; padding:8px 0; text-align:center; }
+  #kf-top-detail-slot { margin-bottom:10px; }
 </style>
 {% endblock %}
 
@@ -115,6 +138,11 @@
     <span class="kf-title">KILL FEED</span>
     <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
   </div>
+
+  <div id="kf-top-strip-wrap"
+       hx-get="/intel/kills/top"
+       hx-trigger="load"
+       hx-swap="innerHTML"></div>
 
   <div class="kf-filters">
     <div class="kf-filter-row">
@@ -661,6 +689,89 @@
         bindRowClicks();
       });
     };
+  })();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var TOP_KEY = 'vigilant:kf:topstrip';
+
+    function applyTopState() {
+      var collapsed = false;
+      try { collapsed = localStorage.getItem(TOP_KEY) === 'collapsed'; } catch (e) {}
+      var body = document.getElementById('kf-top-body');
+      var toggle = document.getElementById('kf-top-toggle');
+      if (body) body.classList.toggle('collapsed', collapsed);
+      if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+
+    function bindTopToggle() {
+      var toggle = document.getElementById('kf-top-toggle');
+      if (!toggle || toggle.dataset.bound === '1') return;
+      toggle.dataset.bound = '1';
+      toggle.addEventListener('click', function() {
+        var body = document.getElementById('kf-top-body');
+        if (!body) return;
+        var collapsed = body.classList.toggle('collapsed');
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        try { localStorage.setItem(TOP_KEY, collapsed ? 'collapsed' : 'expanded'); } catch (e) {}
+      });
+    }
+
+    function bindTopCards() {
+      var cards = document.querySelectorAll('#kf-top-strip-wrap .kf-top-card');
+      cards.forEach(function(card) {
+        if (card.dataset.bound === '1') return;
+        card.dataset.bound = '1';
+        card.addEventListener('click', function() {
+          var kid = card.dataset.kid;
+          var slot = document.getElementById('kf-top-detail-slot');
+          if (!slot) return;
+
+          if (card.classList.contains('open')) {
+            var openPanel = slot.querySelector('.kf-detail');
+            card.classList.remove('open');
+            if (openPanel) {
+              openPanel.classList.remove('shown');
+              setTimeout(function() { slot.innerHTML = ''; }, 320);
+            } else {
+              slot.innerHTML = '';
+            }
+            return;
+          }
+
+          document.querySelectorAll('#kf-top-strip-wrap .kf-top-card.open').forEach(function(c) {
+            c.classList.remove('open');
+          });
+          card.classList.add('open');
+
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              slot.innerHTML = html;
+              var panel = slot.querySelector('.kf-detail');
+              if (panel) {
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+            })
+            .catch(function() { card.classList.remove('open'); });
+        });
+      });
+    }
+
+    function refreshTopWiring() {
+      applyTopState();
+      bindTopToggle();
+      bindTopCards();
+    }
+
+    refreshTopWiring();
+
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (e.target && e.target.id === 'kf-top-strip-wrap') {
+        refreshTopWiring();
+      }
+    });
   })();
 </script>
 {% endblock %}
