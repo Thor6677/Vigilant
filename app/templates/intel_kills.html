@@ -247,6 +247,9 @@
       if (feed) {
         feed.setAttribute('hx-get', '/intel/kills/feed' + newQS);
         feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
+        // Reset the cursor: a fresh filter wants the full top-100, not just
+        // kills newer than what the previous filter had seen.
+        kfSinceCursor = null;
         if (window.htmx) htmx.trigger(feed, 'load');
       }
     }
@@ -384,6 +387,9 @@
         f.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
         f.setAttribute('hx-trigger', 'load, every 15s');
         f.setAttribute('hx-swap', 'afterbegin');
+        // Reset the cursor so the next fetch reloads the current top-N, not
+        // just whatever has come in since we entered older-mode.
+        kfSinceCursor = null;
         if (window.htmx) {
           htmx.process(f);
           htmx.trigger(f, 'load');
@@ -494,18 +500,52 @@
       });
     }
 
-    // Track whether the very first feed swap has happened so we only animate
-    // prepends for genuinely-new live rows, not the initial batch of 100.
+    // ── Cursor management for incremental /feed polls ──────────────────
+    // We hold the `since` cursor in a JS variable and inject it on every
+    // outgoing request via htmx:configRequest. This is robust against any
+    // setAttribute('hx-get', ...) timing issues with htmx's polling timer.
+    var kfSinceCursor = null;
+    document.addEventListener('htmx:configRequest', function(e) {
+      if (!e.detail || !e.detail.elt || e.detail.elt.id !== 'kf-feed') return;
+      // Only inject `since` for live feed polls — never for older-mode fetches
+      // (those use raw fetch() anyway, not htmx).
+      if (kfSinceCursor) e.detail.parameters.since = kfSinceCursor;
+    });
+
+    // ── Pre-swap dedupe so rows already in the DOM don't visibly flicker ─
+    // Parse the response HTML, drop any row whose data-kid is already in the
+    // feed, and rebuild the swap content. This way the user only ever sees
+    // genuinely-new rows arrive at the top.
+    document.addEventListener('htmx:beforeSwap', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      var xhr = e.detail && e.detail.xhr;
+      if (!xhr || !xhr.responseText) return;
+      var existing = {};
+      e.target.querySelectorAll('.kf-row').forEach(function(row) {
+        if (row.dataset.kid) existing[row.dataset.kid] = true;
+      });
+      // Parse the response in a detached container so we can prune.
+      var tmp = document.createElement('div');
+      tmp.innerHTML = xhr.responseText;
+      var removed = 0;
+      tmp.querySelectorAll('.kf-row').forEach(function(row) {
+        if (row.dataset.kid && existing[row.dataset.kid]) {
+          row.remove();
+          removed++;
+        }
+      });
+      if (removed > 0) {
+        // Replace the response body with the pruned HTML.
+        e.detail.serverResponse = tmp.innerHTML;
+      }
+    });
+
     var kfInitialSwapDone = false;
     document.addEventListener('htmx:afterSwap', function(e) {
       if (!e.target || e.target.id !== 'kf-feed') return;
       var feed = e.target;
 
-      // Consume the partial's marker (set by intel_kills_feed.html) to update
-      // both the live counter and the ?since=... cursor. We do this in the
-      // page-level JS rather than in an inline <script> inside the partial,
-      // because htmx-swapped script tags don't always execute under
-      // hx-swap="afterbegin" (CSP nonce mismatch + some browsers).
+      // Consume the partial's marker to update the cursor + counter.
       var markers = feed.querySelectorAll('[data-kf-marker]');
       markers.forEach(function(marker) {
         var newest = marker.getAttribute('data-kf-newest');
@@ -515,31 +555,21 @@
           if (status) status.textContent = 'LIVE · 1h · ' + total + ' kills';
         }
         if (newest && newest !== '0') {
-          var current = feed.getAttribute('hx-get') || '/intel/kills/feed';
-          var qsIdx = current.indexOf('?');
-          var base = qsIdx === -1 ? current : current.substring(0, qsIdx);
-          var qs = qsIdx === -1 ? '' : current.substring(qsIdx + 1);
-          var parts = qs.split('&').filter(function(p) {
-            return p && p.indexOf('since=') !== 0;
-          });
-          parts.push('since=' + newest);
-          feed.setAttribute('hx-get', base + '?' + parts.join('&'));
+          var asInt = parseInt(newest, 10);
+          if (!isNaN(asInt) && (!kfSinceCursor || asInt > kfSinceCursor)) {
+            kfSinceCursor = asInt;
+          }
         }
         marker.remove();
       });
 
-      // Defensive dedupe: if the same killmail_id ever ends up in the feed
-      // twice (e.g. raced swap, cursor reset, transient stale state), keep
-      // only the first (top) occurrence.
+      // Belt-and-suspenders dedupe (in case beforeSwap missed anything).
       var seenKids = {};
       feed.querySelectorAll('.kf-row').forEach(function(row) {
         var kid = row.dataset.kid;
         if (!kid) return;
-        if (seenKids[kid]) {
-          row.remove();
-        } else {
-          seenKids[kid] = true;
-        }
+        if (seenKids[kid]) row.remove();
+        else seenKids[kid] = true;
       });
 
       // Remove the initial-load "Loading…" placeholder.
