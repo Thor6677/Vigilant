@@ -68,8 +68,13 @@ RORQUAL_TYPE_ID = 28352  # Industrial Command Ship group 941 also contains Porpo
 #   48636 Hydra        (Covert Ops, group 830) — AT XVI
 #   49713 Zarmazd      (Logistics, group 832) — AT XVI
 #   60764 Laelaps      (HIC, group 894) — AT XVII
-#   85229 Cobra        (Force Recon, group 833) — recent AT
 #   85062 Sidewinder   (Covert Ops, group 830) — recent AT
+#   85229 Cobra        (Force Recon, group 833) — recent AT
+# Spec line 384 also mentioned Echelon and Reagent as candidates. SDE query
+# 2026-05-22 results: Echelon (3532) exists but is a Sansha incursion-event
+# prize, not AT — deliberately excluded. Reagent has no matches in SDE — likely
+# spec author misremembering a name. Re-check both if SDE updates introduce
+# new variants.
 AT_SHIP_TYPE_IDS = {
     2834, 2836, 3516, 3518,
     11940, 11942,
