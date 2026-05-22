@@ -680,6 +680,8 @@ class Killmail(Base):
 
     __table_args__ = (
         Index("ix_killmail_system_time", "solar_system_id", "killmail_time"),
+        Index("ix_killmails_total_value_kid", "total_value", "killmail_id"),
+        Index("ix_killmails_attacker_count_kid", "attacker_count", "killmail_id"),
     )
 
 
