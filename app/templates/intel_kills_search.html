@@ -185,6 +185,10 @@
       <span class="kfs-chip" data-primetime="usw" title="02:00–10:00 UTC">USW (02–10 UTC)</span>
     </div>
     <div class="kfs-filter-row">
+      <span class="kfs-glabel">Flags</span>
+      <span class="kfs-chip" data-flag="awox" title="Victim killed by ≥1 attacker in their own corp">Awox</span>
+    </div>
+    <div class="kfs-filter-row">
       <span class="kfs-glabel">Ship</span>
       <div class="kfs-ac">
         <input type="text" id="kfs-ship-input" class="kfs-ac-input" placeholder="Vargur, Loki…" autocomplete="off">
@@ -273,6 +277,7 @@
         count: [],
         isk: '',                   // string single-select
         primetime: [],
+        flags: [],                 // multi-select OR within the row
         ship_ids: [],              // [{id, name}]
         attacker_mode: 'or',
         attacker_items: [],        // [{id, name, kind}]   kind ∈ {character,corporation,alliance,ship}
@@ -317,6 +322,7 @@
       if (state.count.length) qs.push('count=' + encList(state.count));
       if (state.isk) qs.push('isk=' + encodeURIComponent(state.isk));
       if (state.primetime.length) qs.push('primetime=' + encList(state.primetime));
+      if (state.flags.length) qs.push('flags=' + encList(state.flags));
       if (state.ship_ids.length) qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
       [['attacker_items','attacker'],['either_items','either'],['victim_items','victim']].forEach(function(pair) {
         var items = state[pair[0]];
@@ -355,7 +361,7 @@
       });
       // Multi-select rows
       [['space','space'],['wh_class','whclass'],['category','category'],
-       ['count','count'],['primetime','primetime']].forEach(function(pair) {
+       ['count','count'],['primetime','primetime'],['flags','flag']].forEach(function(pair) {
         document.querySelectorAll('.kfs-chip[data-' + pair[1] + ']').forEach(function(el) {
           el.classList.toggle('on', state[pair[0]].indexOf(el.dataset[pair[1]]) !== -1);
         });
@@ -426,6 +432,8 @@
             state.isk = (state.isk === el.dataset.isk) ? '' : el.dataset.isk;
           } else if (el.dataset.primetime !== undefined) {
             toggleListMember(state.primetime, el.dataset.primetime);
+          } else if (el.dataset.flag !== undefined) {
+            toggleListMember(state.flags, el.dataset.flag);
           } else if (el.dataset.sort !== undefined) {
             state.sort = el.dataset.sort;
           } else if (el.dataset.dir !== undefined) {

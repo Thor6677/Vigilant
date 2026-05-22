@@ -351,6 +351,9 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         params.get("either_ships", []),
     ))
 
+    # ── Flags (Awox / HighSec Gank / Padding) ────────────────────────
+    where.extend(_compile_flag_clauses(params.get("flags") or set(), joins))
+
     # NULL guard for ISK sort: NULL total_value rows can't be sensibly
     # ordered or paginated by ISK (the cursor tuple `total_value < val`
     # excludes NULLs on page 2+). Drop them at the source so the sort
@@ -501,6 +504,46 @@ def _compile_either_clauses(mode: str, chars: list[int], corps: list[int],
     return a_clauses or v_clauses
 
 
+def _compile_flag_clauses(flags: set[str], joins: set[str]) -> list:
+    """Compile heuristic flag predicates (Awox / HighSec Gank / Padding).
+
+    Multi-select OR semantics: selecting multiple flags returns the union
+    (matches the Space/WH/Category chip pattern).
+
+    Mutates ``joins`` if a flag requires an additional table join (e.g. HighSec
+    Gank requires sde_systems).
+
+    Returns a list with at most one ColumnElement (the OR of all selected flags),
+    so callers can extend ``where`` with the result directly.
+    """
+    if not flags:
+        return []
+    a = KillmailAttacker
+    flag_conds: list = []
+
+    if "awox" in flags:
+        # Awox = real-player victim destroyed by >=1 attacker in the same corp,
+        # excluding the victim themselves (so a player in the same corp doesn't
+        # get tagged just for being on the mail as the victim).
+        flag_conds.append(and_(
+            Killmail.victim_character_id.isnot(None),
+            Killmail.victim_corporation_id.isnot(None),
+            exists().where(
+                a.killmail_id == Killmail.killmail_id,
+                a.corporation_id == Killmail.victim_corporation_id,
+                a.character_id.isnot(None),
+                a.character_id != Killmail.victim_character_id,
+            ),
+        ))
+
+    # Task 3 will add 'gank'. Task 4 will add 'padding'. Stub the slot so the
+    # endpoint can accept unknown flag strings without crashing.
+
+    if not flag_conds:
+        return []
+    return [or_(*flag_conds)]
+
+
 def _resolve_sort_and_cursor(sort: str, direction: str, cursor: str | None) -> tuple:
     """Return (sort_column_expression, cursor_where_clause).
 
@@ -556,6 +599,7 @@ async def intel_kills_search_results(
     count: str = "",
     isk: str = "",
     primetime: str = "",
+    flags: str = "",
     # — Ship + entity searches
     ship_id: str = "",
     attacker_mode: str = "or",
@@ -597,6 +641,7 @@ async def intel_kills_search_results(
         "count": _split_set(count),
         "isk": isk if isk in ISK_MIN_MAP else None,
         "primetime": _split_set(primetime),
+        "flags": {x for x in _split_set(flags) if x in {"awox", "gank", "padding"}},
         "ship_ids": _split_ids(ship_id),
         "attacker_mode": attacker_mode if attacker_mode in ("and", "in", "or") else "or",
         "attacker_chars": _split_ids(attacker_chars),
