@@ -9,8 +9,9 @@ Click a row to expand the detail panel (victim + fitting + ISK + attackers).
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,8 +21,15 @@ from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.cache import cache_get, cache_set
-from app.db.models import Character, Killmail, KillmailAttacker, KillmailItem, get_db
-from app.db.sde_models import SDESystem
+from app.db.models import (
+    AsyncSessionLocal,
+    Character,
+    Killmail,
+    KillmailAttacker,
+    KillmailItem,
+    get_db,
+)
+from app.db.sde_models import SDESystem, SDEType
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
 from app.intel.recent_battles import resolve_entity_names
 from app.sde.lookup import search_ship_types, type_ids_to_names
@@ -42,6 +50,175 @@ _BAND_NORMALIZE = {
     "Unknown": "unknown",
     "w-space": "wh",
 }
+
+# ── Most Valuable last-7-days strip — SWR cache state ──────────────────
+# Universe-wide, identical for every authenticated viewer → single global key.
+# 5-min TTL matches the dashboard kill-pulse / corp-stats panels
+# (feedback_swr_panel_caching). Cache the context dict, not the rendered HTML,
+# so CSP nonce rotation doesn't ghost the cached page.
+_top_cache: dict[str, dict] = {}
+_top_revalidating: set[str] = set()
+_TOP_TTL = 300  # seconds
+
+
+def _fmt_top_isk(v: float | None) -> str:
+    """Format ISK for the Most Valuable cards — two decimals, suffixed unit.
+    Matches zKillboard's '33.44b' style but with uppercase B / T / M for
+    consistency with the existing kill feed's `kf-isk` output.
+    """
+    v = float(v or 0)
+    if v >= 1e12:
+        return f"{v/1e12:.2f}T"
+    if v >= 1e9:
+        return f"{v/1e9:.2f}B"
+    if v >= 1e6:
+        return f"{v/1e6:.2f}M"
+    return f"{v:,.0f}"
+
+
+async def _compute_top_context(db: AsyncSession) -> dict:
+    """Query last-7-days top-6 structures (category_id=65) + top-6 ships
+    (category_id=6) by total_value. Resolve type / corp / alliance / system
+    names. Return template context dict.
+
+    Two SELECTs run **sequentially** on a single AsyncSession — concurrent
+    statements on one session are unsafe (CLAUDE.md async-session gotcha)
+    and these queries are cheap enough that sequential is fine.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=7)
+
+    async def _query_for_category(category_id: int) -> list[Killmail]:
+        stmt = (
+            select(Killmail)
+            .join(SDEType, SDEType.type_id == Killmail.victim_ship_type_id)
+            .where(SDEType.category_id == category_id)
+            .where(Killmail.killmail_time >= cutoff)
+            .where(Killmail.total_value.is_not(None))
+            .order_by(Killmail.total_value.desc())
+            .limit(6)
+        )
+        return list((await db.execute(stmt)).scalars().all())
+
+    structures = await _query_for_category(65)
+    ships = await _query_for_category(6)
+
+    all_kills = structures + ships
+    if not all_kills:
+        return {"structures": [], "ships": []}
+
+    type_ids: set[int] = {k.victim_ship_type_id for k in all_kills if k.victim_ship_type_id}
+    entity_ids: set[int] = set()
+    system_ids: set[int] = set()
+    for k in all_kills:
+        if k.victim_corporation_id:
+            entity_ids.add(k.victim_corporation_id)
+        if k.victim_alliance_id:
+            entity_ids.add(k.victim_alliance_id)
+        if k.solar_system_id:
+            system_ids.add(k.solar_system_id)
+
+    type_names = await type_ids_to_names(db, list(type_ids)) if type_ids else {}
+    entity_names = await resolve_entity_names(list(entity_ids)) if entity_ids else {}
+
+    sys_map: dict[int, dict] = {}
+    if system_ids:
+        sys_q = select(
+            SDESystem.system_id, SDESystem.system_name, SDESystem.security
+        ).where(SDESystem.system_id.in_(system_ids))
+        for sid, name, sec in (await db.execute(sys_q)).all():
+            sys_map[sid] = {"name": name, "security": sec}
+
+    def _band(sid: int) -> str:
+        meta = _sys_meta_cache.get(sid)
+        if meta:
+            return _BAND_NORMALIZE.get(meta.get("band") or "Unknown", "unknown")
+        sys = sys_map.get(sid)
+        if not sys or sys["security"] is None:
+            return "unknown"
+        if sid >= 31000000:
+            return "wh"
+        if sys["security"] >= 0.5:
+            return "hs"
+        if sys["security"] > 0.0:
+            return "ls"
+        return "ns"
+
+    def _card(k: Killmail) -> dict:
+        return {
+            "killmail_id": k.killmail_id,
+            "type_id": k.victim_ship_type_id,
+            "type_name": type_names.get(k.victim_ship_type_id, f"#{k.victim_ship_type_id}"),
+            "isk_fmt": _fmt_top_isk(k.total_value),
+            "victim_corp": (
+                entity_names.get(k.victim_corporation_id, "")
+                if k.victim_corporation_id else ""
+            ),
+            "victim_alliance": (
+                entity_names.get(k.victim_alliance_id, "")
+                if k.victim_alliance_id else ""
+            ),
+            "system_id": k.solar_system_id,
+            "system_name": (sys_map.get(k.solar_system_id) or {}).get(
+                "name", f"#{k.solar_system_id}"
+            ),
+            "system_band": _band(k.solar_system_id),
+        }
+
+    return {
+        "structures": [_card(k) for k in structures],
+        "ships": [_card(k) for k in ships],
+    }
+
+
+async def _refresh_top_background() -> None:
+    """SWR background refresh — own session per feedback_swr_panel_caching."""
+    key = "v1"
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            ctx = await _compute_top_context(bg_db)
+        _top_cache[key] = {
+            "context": ctx,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_TOP_TTL),
+        }
+    except Exception as e:
+        log.info("kill-top SWR refresh failed: %s", e)
+    finally:
+        _top_revalidating.discard(key)
+
+
+@router.get("/intel/kills/top", response_class=HTMLResponse)
+async def intel_kills_top(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Most Valuable last 7 days — Structures + Ships strip.
+
+    Universe-wide aggregation. Stale-while-revalidate cached server-side:
+    return cached dict instantly, refresh in background after TTL.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    key = "v1"
+    now = datetime.now(timezone.utc)
+    cached = _top_cache.get(key)
+    if cached:
+        if cached["expires_at"] <= now and key not in _top_revalidating:
+            _top_revalidating.add(key)
+            asyncio.create_task(_refresh_top_background())
+        ctx = cached["context"]
+    else:
+        ctx = await _compute_top_context(db)
+        _top_cache[key] = {
+            "context": ctx,
+            "expires_at": now + timedelta(seconds=_TOP_TTL),
+        }
+
+    return templates.TemplateResponse(
+        "partials/intel_kills_top.html",
+        {"request": request, **ctx},
+    )
 
 
 @router.get("/intel/kills", response_class=HTMLResponse)

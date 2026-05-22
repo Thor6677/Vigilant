@@ -1,0 +1,53 @@
+<div class="kf-top-header">
+  <button type="button" id="kf-top-toggle" class="kf-top-toggle" aria-expanded="true">
+    <span class="kf-top-chev">&#9660;</span> MOST VALUABLE &middot; LAST 7 DAYS
+  </button>
+</div>
+
+<div id="kf-top-body">
+  <section class="kf-top-section">
+    <div class="kf-top-section-label">Structures</div>
+    {% if structures %}
+    <div class="kf-top-grid">
+      {% for c in structures %}
+      <div class="kf-top-card" data-kid="{{ c['killmail_id'] }}">
+        <img class="kf-top-img" loading="lazy"
+             src="https://images.evetech.net/types/{{ c['type_id'] }}/render?size=128"
+             width="96" height="96" alt="{{ c['type_name'] }}"
+             data-on-error="hide">
+        <div class="kf-top-type">{{ c['type_name'] }}</div>
+        <div class="kf-top-isk">{{ c['isk_fmt'] }}</div>
+        <div class="kf-top-meta kf-sys-{{ c['system_band'] }}">{{ c['system_name'] }}</div>
+        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '&mdash;' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="kf-top-empty">No structure kills in the last 7 days.</div>
+    {% endif %}
+  </section>
+
+  <section class="kf-top-section">
+    <div class="kf-top-section-label">Ships</div>
+    {% if ships %}
+    <div class="kf-top-grid">
+      {% for c in ships %}
+      <div class="kf-top-card" data-kid="{{ c['killmail_id'] }}">
+        <img class="kf-top-img" loading="lazy"
+             src="https://images.evetech.net/types/{{ c['type_id'] }}/render?size=128"
+             width="96" height="96" alt="{{ c['type_name'] }}"
+             data-on-error="hide">
+        <div class="kf-top-type">{{ c['type_name'] }}</div>
+        <div class="kf-top-isk">{{ c['isk_fmt'] }}</div>
+        <div class="kf-top-meta kf-sys-{{ c['system_band'] }}">{{ c['system_name'] }}</div>
+        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '&mdash;' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="kf-top-empty">No ship kills in the last 7 days.</div>
+    {% endif %}
+  </section>
+</div>
+
+<div id="kf-top-detail-slot"></div>
