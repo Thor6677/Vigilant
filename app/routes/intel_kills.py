@@ -31,7 +31,7 @@ from app.db.models import (
 )
 from app.db.sde_models import SDESystem, SDEType
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
-from app.intel.recent_battles import resolve_entity_names
+from app.intel.recent_battles import resolve_entity_names, sec_band
 from app.sde.lookup import search_ship_types, type_ids_to_names
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ _BAND_NORMALIZE = {
 _top_cache: dict[str, dict] = {}
 _top_revalidating: set[str] = set()
 _TOP_TTL = 300  # seconds
+_top_fill_lock = asyncio.Lock()
 
 
 def _fmt_top_isk(v: float | None) -> str:
@@ -85,6 +86,7 @@ async def _compute_top_context(db: AsyncSession) -> dict:
     statements on one session are unsafe (CLAUDE.md async-session gotcha)
     and these queries are cheap enough that sequential is fine.
     """
+    # naive UTC — Killmail.killmail_time is stored as naive UTC, must compare naive
     cutoff = datetime.utcnow() - timedelta(days=7)
 
     async def _query_for_category(category_id: int) -> list[Killmail]:
@@ -137,7 +139,6 @@ async def _compute_top_context(db: AsyncSession) -> dict:
             return "unknown"
         if sid >= 31000000:
             return "wh"
-        from app.intel.recent_battles import sec_band
         return _BAND_NORMALIZE.get(sec_band(sys["security"]), "unknown")
 
     def _card(k: Killmail) -> dict:
@@ -206,11 +207,18 @@ async def intel_kills_top(
             asyncio.create_task(_refresh_top_background())
         ctx = cached["context"]
     else:
-        ctx = await _compute_top_context(db)
-        _top_cache[key] = {
-            "context": ctx,
-            "expires_at": now + timedelta(seconds=_TOP_TTL),
-        }
+        # Single-flight the cold-fill — concurrent first-time requests
+        # would otherwise each pay the ESI /universe/names round-trip.
+        async with _top_fill_lock:
+            cached = _top_cache.get(key)
+            if cached:
+                ctx = cached["context"]
+            else:
+                ctx = await _compute_top_context(db)
+                _top_cache[key] = {
+                    "context": ctx,
+                    "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_TOP_TTL),
+                }
 
     return templates.TemplateResponse(
         "partials/intel_kills_top.html",
