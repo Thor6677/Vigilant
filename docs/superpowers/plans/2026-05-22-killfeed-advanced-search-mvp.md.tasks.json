@@ -4,51 +4,51 @@
     {
       "id": 1,
       "subject": "Task 1: Page shell + filter card HTML/CSS + link from /intel/kills",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A working `/intel/kills/search` route that renders the full filter card markup (chip rows + autocomplete inputs + mode buttons), with no JS interactivity yet. Link added from `/intel/kills`.\n\n**Files:**\n- Create: `app/routes/intel_kills_search.py` (page route stub)\n- Create: `app/templates/intel_kills_search.html` (filter card + empty results container + CSS)\n- Modify: `app/main.py` — register router\n- Modify: `app/templates/intel_kills.html` — add `advanced search ↗` link to the section head\n\n**Verify:** Python syntax + Jinja2 compile pass; deploy succeeds; browser sees the filter card with all chip rows on `/intel/kills/search`.\n\n**Steps:** See plan Task 1 Steps 1-5.\n\n```json:metadata\n{\"files\": [\"app/routes/intel_kills_search.py\", \"app/templates/intel_kills_search.html\", \"app/main.py\", \"app/templates/intel_kills.html\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('app/routes/intel_kills_search.py').read()); ast.parse(open('app/main.py').read())\\\" && python3 -c \\\"from jinja2 import Environment, FileSystemLoader, select_autoescape; e = Environment(loader=FileSystemLoader('app/templates'), autoescape=select_autoescape(['html'])); e.get_template('intel_kills_search.html'); e.get_template('intel_kills.html')\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"GET /intel/kills/search returns the page when authenticated; 302 to / when not\", \"All filter chip rows render (Time/Space/WH-class hidden initially/Category/Count/ISK/Primetime/Ship/Attackers/Either/Victim/Sort/Live)\", \"Chips are inert (no JS yet)\", \"Link from /intel/kills section head to the new page\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Server-side filter compiler + results endpoint",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Working `GET /intel/kills/search/results` endpoint that accepts all filter params via querystring, compiles them to SQLAlchemy WHERE clauses (with And/In/Or for entity sides), cursor pagination, name resolution, returns rendered results partial.\n\n**Files:**\n- Modify: `app/routes/intel_kills_search.py` — add filter compiler + results route\n- Create: `app/templates/partials/intel_kills_search_results.html` — rows + cursor markers\n\n**Verify:** Endpoint returns correct results for default + filter combinations; cursor round-trip works.\n\n**Steps:** See plan Task 2 Steps 1-8.\n\n```json:metadata\n{\"files\": [\"app/routes/intel_kills_search.py\", \"app/templates/partials/intel_kills_search_results.html\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('app/routes/intel_kills_search.py').read())\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"Default query (no params) returns 100 most recent kills, Date Desc\", \"Each filter dimension works in isolation when supplied via querystring\", \"And/In/Or modes compile to correct SQL per the spec semantics table\", \"Sort + cursor round-trips correctly\", \"Total count + sum-ISK computed for the filter set\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: NPC badge — shared row partial",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** Render `[NPC]` badge on rows where `is_npc=true`. Surface `is_npc` from Feature A's _enrich_kills + older-mode fake_kills. Replace the cloned row markup in search_results partial with `{% include 'partials/intel_kills_feed.html' %}`.\n\n**Files:**\n- Modify: `app/templates/partials/intel_kills_feed.html` (add badge)\n- Modify: `app/routes/intel_kills.py` (surface is_npc in _enrich_kills + older-mode reshape)\n- Modify: `app/templates/intel_kills.html` (add `.kf-npc-badge` CSS)\n- Modify: `app/templates/partials/intel_kills_search_results.html` (use {% include %} instead of clone)\n\n**Verify:** Live feed at `/intel/kills` shows badge on NPC kills; search results render the same row partial.\n\n**Steps:** See plan Task 3 Steps 1-6.\n\n```json:metadata\n{\"files\": [\"app/templates/partials/intel_kills_feed.html\", \"app/routes/intel_kills.py\", \"app/templates/intel_kills.html\", \"app/templates/partials/intel_kills_search_results.html\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('app/routes/intel_kills.py').read())\\\" && python3 -c \\\"from jinja2 import Environment, FileSystemLoader, select_autoescape; e = Environment(loader=FileSystemLoader('app/templates'), autoescape=select_autoescape(['html'])); e.get_template('partials/intel_kills_feed.html'); e.get_template('partials/intel_kills_search_results.html'); e.get_template('intel_kills.html')\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"NPC badge renders on /intel/kills for kills with is_npc=true\", \"Search results render same row markup via {% include %}\", \"No visual regression on non-NPC rows\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Frontend — chip toggles + state + show more + detail panel",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "**Goal:** Page becomes interactive — clicking chip filters fires the search, results render, Show More loads the next page, clicking a row expands detail panel. State persists in localStorage + URL.\n\n**Files:**\n- Modify: `app/templates/intel_kills_search.html` — add the main IIFE with chip click handlers, localStorage sync, fetch wiring, Show More, detail panel.\n\n**Verify:** Browser smoke test of every chip + reset + show more + detail.\n\n**Steps:** See plan Task 4 Steps 1-3.\n\n```json:metadata\n{\"files\": [\"app/templates/intel_kills_search.html\"], \"verifyCommand\": \"python3 -c \\\"from jinja2 import Environment, FileSystemLoader, select_autoescape; e = Environment(loader=FileSystemLoader('app/templates'), autoescape=select_autoescape(['html'])); e.get_template('intel_kills_search.html')\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"Every chip row clicks fire a search\", \"Stats header updates with count + ISK\", \"Show more appends next 100\", \"State persists in localStorage + URL across reloads\", \"Reset clears state + reloads default\", \"Row click expands detail panel\", \"WH-sub-class row visibility tied to WH chip\", \"Date-range inputs debounced; trigger re-query\", \"Sort + direction chips work\", \"Empty results show a friendly message\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: Combined entity+ship autocomplete + And/In/Or mode toggles",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4],
       "description": "**Goal:** Ship + Attackers/Either/Victim autocompletes work. Combined autocomplete merges /resolve?kind=ship + /resolve?kind=entity results in one dropdown. Mode buttons toggle And/In/Or.\n\n**Files:**\n- Modify: `app/templates/intel_kills_search.html` — extend IIFE with autocomplete + mode bindings.\n\n**Verify:** Browser smoke: type → dropdown → click → chip added; mode toggle re-fires query.\n\n**Steps:** See plan Task 5 Steps 1-2.\n\n```json:metadata\n{\"files\": [\"app/templates/intel_kills_search.html\"], \"verifyCommand\": \"python3 -c \\\"from jinja2 import Environment, FileSystemLoader, select_autoescape; e = Environment(loader=FileSystemLoader('app/templates'), autoescape=select_autoescape(['html'])); e.get_template('intel_kills_search.html')\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"Typing in autocompletes fires both endpoints in parallel\", \"Dropdown shows kind labels ([ship]/[character]/[corporation]/[alliance])\", \"Selecting a result adds chip with × remove\", \"And/In/Or buttons toggle mode + re-fire query\", \"Ship-row autocomplete uses ship-only\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: Live polling toggle",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [5],
       "description": "**Goal:** Live toggle becomes enabled when sort=Date Desc + no time end-date. Clicking on starts 15s polling that prepends new rows (data-kid dedupe + flash animation).\n\n**Files:**\n- Modify: `app/templates/intel_kills_search.html` — add live-polling logic to the IIFE.\n\n**Verify:** Browser smoke — toggle on, new rows prepend; change sort → toggle greys out + polling stops.\n\n**Steps:** See plan Task 6 Steps 1-2.\n\n```json:metadata\n{\"files\": [\"app/templates/intel_kills_search.html\"], \"verifyCommand\": \"python3 -c \\\"from jinja2 import Environment, FileSystemLoader, select_autoescape; e = Environment(loader=FileSystemLoader('app/templates'), autoescape=select_autoescape(['html'])); e.get_template('intel_kills_search.html')\\\" && ssh ijohnson@146.190.140.112 \\\"/opt/vigilant/scripts/deploy.sh\\\"\", \"acceptanceCriteria\": [\"Live toggle disabled unless sort=Date Desc + no end-date\", \"Toggle on starts 15s poll\", \"New rows prepend with kf-new flash + dedupe\", \"Toggle off stops polling\", \"Filter changes restart polling on new cursor\"]}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Post-deploy EXPLAIN + optional indexes",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6],
       "description": "**Goal:** Confirm common search queries are index-served. Add indexes for ISK sort and Involved sort only if EXPLAIN shows full scans. Mirror in models.py.\n\n**Files (conditional):**\n- VPS DB: `CREATE INDEX IF NOT EXISTS` for any new indexes\n- `app/db/models.py` — mirror declarations in `Killmail.__table_args__`\n\n**Verify:** EXPLAIN output capture; perf.log samples.\n\n**Steps:** See plan Task 7 Steps 1-4.\n\n```json:metadata\n{\"files\": [\"app/db/models.py\"], \"verifyCommand\": \"ssh ijohnson@146.190.140.112 \\\"docker exec vigilant-app-1 python3 -c \\\\\\\"import sqlite3; c=sqlite3.connect('file:/data/vigilant.db?mode=ro&immutable=1', uri=True); print(list(c.execute('EXPLAIN QUERY PLAN SELECT * FROM killmails ORDER BY killmail_id DESC LIMIT 100')))\\\\\\\"\\\"\", \"acceptanceCriteria\": [\"EXPLAIN on default + filter combos shows index usage\", \"Warm-cache perf <1s for typical filters\", \"Indexes added (if needed) deployed + mirrored in models.py\", \"Browser walk-through of full UX passes\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-22T14:30:00Z"
+  "lastUpdated": "2026-05-22T16:50:00Z"
 }
