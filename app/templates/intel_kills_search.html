@@ -732,6 +732,79 @@
       });
     }
 
+    // ── Live polling ───────────────────────────────────────────
+    var livePollTimer = null;
+
+    function liveEnabledCheck() {
+      return state.sort === 'date' && state.direction === 'desc' && !state.time_end;
+    }
+
+    function startLivePoll() {
+      if (livePollTimer) return;
+      livePollTimer = setInterval(livePoll, 15000);
+    }
+
+    function stopLivePoll() {
+      if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+    }
+
+    function livePoll() {
+      if (!state.live || !liveEnabledCheck() || !currentNewestCursor) return;
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      fetch('/intel/kills/search/results' + qs + sep + 'live=1&since=' + encodeURIComponent(currentNewestCursor))
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          var feed = document.getElementById('kfs-results');
+          if (!feed) return;
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          var marker = tmp.querySelector('[data-kfs-marker]');
+          var newNewest = marker ? (marker.getAttribute('data-newest-cursor') || '') : '';
+          if (marker) marker.remove();
+          var existing = {};
+          feed.querySelectorAll('.kf-row').forEach(function(r) { if (r.dataset.kid) existing[r.dataset.kid] = true; });
+          var newRows = [];
+          tmp.querySelectorAll('.kf-row').forEach(function(r) {
+            if (r.dataset.kid && !existing[r.dataset.kid]) newRows.push(r);
+          });
+          if (newRows.length) {
+            newRows.reverse().forEach(function(r) {
+              r.classList.add('kf-new');
+              feed.insertBefore(r, feed.firstChild);
+              setTimeout(function() { r.classList.remove('kf-new'); }, 650);
+            });
+            if (newNewest) currentNewestCursor = newNewest;
+            var rowCount = feed.querySelectorAll('.kf-row').length;
+            document.getElementById('kfs-stats-showing').textContent = '1-' + rowCount;
+            var totalAttr = marker ? marker.getAttribute('data-total-count') : '';
+            if (totalAttr) document.getElementById('kfs-stats-total').textContent = totalAttr;
+            bindRowClicks();
+            if (typeof refreshAgo === 'function') refreshAgo();
+          }
+        })
+        .catch(function() { /* swallow — next poll will retry */ });
+    }
+
+    // Live toggle button handler
+    document.getElementById('kfs-live-toggle').addEventListener('click', function() {
+      if (!liveEnabledCheck()) return;
+      state.live = !state.live;
+      applyChipsToDom();
+      persist();
+      if (state.live) startLivePoll(); else stopLivePoll();
+    });
+
+    // Wrap refetchResults so live polling pauses + restarts on filter change.
+    var _prev_refetchResults = refetchResults;
+    refetchResults = function() {
+      stopLivePoll();
+      _prev_refetchResults();
+      if (state.live && liveEnabledCheck()) {
+        setTimeout(startLivePoll, 100);
+      }
+    };
+
     // ── init ───────────────────────────────────────────────────
     applyChipsToDom();
     bindChipClicks();
