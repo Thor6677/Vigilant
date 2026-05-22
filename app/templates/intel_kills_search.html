@@ -199,7 +199,7 @@
         <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
       </div>
       <div class="kfs-ac">
-        <input type="text" id="kfs-attacker-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <input type="text" id="kfs-attacker-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
         <div id="kfs-attacker-results" class="kfs-ac-results"></div>
       </div>
       <div id="kfs-attacker-chips" class="kfs-chips"></div>
@@ -212,7 +212,7 @@
         <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
       </div>
       <div class="kfs-ac">
-        <input type="text" id="kfs-either-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <input type="text" id="kfs-either-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
         <div id="kfs-either-results" class="kfs-ac-results"></div>
       </div>
       <div id="kfs-either-chips" class="kfs-chips"></div>
@@ -225,7 +225,7 @@
         <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
       </div>
       <div class="kfs-ac">
-        <input type="text" id="kfs-victim-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <input type="text" id="kfs-victim-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
         <div id="kfs-victim-results" class="kfs-ac-results"></div>
       </div>
       <div id="kfs-victim-chips" class="kfs-chips"></div>
@@ -690,6 +690,13 @@
       if (!input || !results || !chips) return;
       var debounce;
 
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var first = results.querySelector('.kfs-ac-result[data-id]');
+          if (first) first.click();
+        }
+      });
       input.addEventListener('input', function() {
         clearTimeout(debounce);
         var q = input.value.trim();
@@ -705,12 +712,17 @@
             var items = [];
             (arr[0] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: 'ship' }); });
             if (arr[1]) (arr[1] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: it.kind }); });
+            if (items.length === 0) {
+              results.innerHTML = '<div class="kfs-ac-result kfs-ac-empty" style="color:var(--muted);cursor:default;">No matches — type an exact character / corp / alliance / ship name.</div>';
+              results.classList.add('show');
+              return;
+            }
             results.innerHTML = items.slice(0, 16).map(function(it) {
               return '<div class="kfs-ac-result" data-id="' + it.id + '" data-kind="' + escAttr(it.kind) + '" data-name="' + escAttr(it.name) + '">'
                 + escAttr(it.name) + '<span class="kind">[' + escAttr(it.kind) + ']</span></div>';
             }).join('');
-            results.classList.toggle('show', items.length > 0);
-            results.querySelectorAll('.kfs-ac-result').forEach(function(el) {
+            results.classList.add('show');
+            results.querySelectorAll('.kfs-ac-result[data-id]').forEach(function(el) {
               el.addEventListener('click', function() {
                 var entry = {
                   id: parseInt(el.dataset.id, 10),

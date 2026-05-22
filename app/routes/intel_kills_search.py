@@ -177,7 +177,14 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         if "ls" in space:
             space_conds.append(and_(SDESystem.security > 0.0, SDESystem.security < 0.5))
         if "ns" in space:
-            space_conds.append(and_(SDESystem.security <= 0.0, SDESystem.system_id < WH_SYSTEM_MIN))
+            # Pochven systems have K-space IDs (<31M) and security <= 0.0, so they
+            # match the naive NS predicate. Exclude by region_id (Pochven region
+            # is 10000070) — Pochven gets its own top-level Space chip.
+            space_conds.append(and_(
+                SDESystem.security <= 0.0,
+                SDESystem.system_id < WH_SYSTEM_MIN,
+                SDESystem.region_id != 10000070,
+            ))
         if "wh" in space:
             space_conds.append(and_(SDESystem.system_id >= WH_SYSTEM_MIN, SDESystem.system_id <= WH_SYSTEM_MAX))
         if "abyssal" in space:
