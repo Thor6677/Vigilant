@@ -161,7 +161,12 @@
   function refreshAgo() {
     var now = Date.now();
     document.querySelectorAll('.kf-ago[data-time]').forEach(function(el) {
-      var t = new Date(el.getAttribute('data-time') + 'Z').getTime();
+      var raw = el.getAttribute('data-time') || '';
+      // killmail.stream payloads already include the trailing Z; older-mode
+      // rows pass isoformat() with no offset. Normalize before parsing.
+      if (!/Z$/.test(raw)) raw += 'Z';
+      var t = new Date(raw).getTime();
+      if (isNaN(t)) { el.textContent = ''; return; }
       var s = Math.max(0, Math.floor((now - t) / 1000));
       if (s < 60) el.textContent = s + 's ago';
       else if (s < 3600) el.textContent = Math.floor(s/60) + 'm ago';
@@ -362,8 +367,11 @@
     var olderMode = false;
 
     function pauseLive() {
-      var f = document.getElementById('kf-feed');
-      if (f) f.setAttribute('hx-trigger', 'never');
+      // htmx parses hx-trigger once at process time, so mutating the
+      // attribute is a no-op for an already-armed interval. We block the
+      // request itself via the htmx:beforeRequest filter installed below
+      // (gated by olderMode + an open .kf-detail panel). Keep this function
+      // as a no-op shim so older-mode callers still read clearly.
     }
 
     function resumeLive() {
@@ -439,19 +447,17 @@
 
     // ------ Click-to-expand detail panel + polling pause + animations ------
 
-    // Pause live polling whenever any detail panel is open so the expanded
-    // ship doesn't get pushed around (or visually "go away") when new kills
-    // prepend. Resume only when all panels closed AND not in older-mode.
-    function updatePollingState() {
-      var f = document.getElementById('kf-feed');
-      if (!f) return;
-      var hasOpen = document.querySelector('.kf-detail') !== null;
-      if (hasOpen || olderMode) {
-        f.setAttribute('hx-trigger', 'never');
-      } else {
-        f.setAttribute('hx-trigger', 'load, every 15s');
-      }
-    }
+    // Suppress the every-15s live-poll fetch whenever any detail panel is
+    // open OR older-mode is active. htmx parses hx-trigger only at process
+    // time, so toggling the attribute later does nothing — instead we cancel
+    // the request at fire time. The polling interval keeps ticking but the
+    // request is preventDefault'd, which is exactly what we want.
+    document.addEventListener('htmx:beforeRequest', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      if (olderMode) { e.preventDefault(); return; }
+      if (document.querySelector('.kf-detail')) { e.preventDefault(); return; }
+    });
+    function updatePollingState() { /* no-op kept for call sites */ }
 
     function bindRowClicks() {
       document.querySelectorAll('#kf-feed .kf-row').forEach(function(row) {
