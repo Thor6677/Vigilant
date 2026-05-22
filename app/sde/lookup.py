@@ -802,12 +802,15 @@ async def get_wormhole_systems(
             if r.target_class:
                 wh_type_dest[short] = int(r.target_class)
 
-    # Allowed wh_class set: standard C1-C6+C13 always; drifter (14-18)
-    # only when explicitly requested. Uncatalogued (wh_class=None) is
-    # handled by a separate flag below since None isn't a number.
-    allowed_classes = {1, 2, 3, 4, 5, 6, 13}
-    if include_drifter:
-        allowed_classes |= {14, 15, 16, 17, 18}
+    # Two modes for class selection:
+    #   1. No class buttons pressed → implicit default allowlist of
+    #      C1-C6+C13. wh_class=None and drifter classes filtered out.
+    #   2. ANY class button pressed (int / drifter / uncatalogued) →
+    #      exclusive mode: a system passes only if it matches one of
+    #      the explicitly selected sets. ORed together when multiple.
+    DEFAULT_ALLOWED = {1, 2, 3, 4, 5, 6, 13}
+    DRIFTER_CLASSES = {14, 15, 16, 17, 18}
+    has_class_filter = bool(class_filter or include_drifter or include_uncatalogued)
 
     filtered = []
     for sys in all_systems:
@@ -817,26 +820,21 @@ async def get_wormhole_systems(
             wh_class = _wh_class_cache.get(sys.constellation_id)
         if wh_class is None and sys.region_id:
             wh_class = _wh_class_cache.get(sys.region_id)
-        if wh_class is None:
-            # Uncatalogued systems pass only when explicitly opted in.
-            if not include_uncatalogued:
+
+        # Apply class filter — exclusive when any class button is pressed,
+        # else the implicit default allowlist.
+        if has_class_filter:
+            in_int = class_filter and wh_class in class_filter
+            in_drift = include_drifter and wh_class in DRIFTER_CLASSES
+            in_uncat = include_uncatalogued and wh_class is None
+            if not (in_int or in_drift or in_uncat):
                 continue
-        elif wh_class not in allowed_classes:
-            continue
+        else:
+            if wh_class is None or wh_class not in DEFAULT_ALLOWED:
+                continue
 
         effect = system_effects.get(sys.system_name)
         statics = system_statics.get(sys.system_name, [])
-
-        # Class filter (multi-select). For drifter/uncatalogued tokens, the
-        # class_filter (int list) is empty — the include_* flags above already
-        # gated membership. If user picked specific int classes AND drifter,
-        # accept systems matching either set.
-        if class_filter:
-            in_int_filter = wh_class in class_filter
-            in_drifter = include_drifter and wh_class in (14, 15, 16, 17, 18)
-            in_uncat = include_uncatalogued and wh_class is None
-            if not (in_int_filter or in_drifter or in_uncat):
-                continue
 
         # Effect filter
         if effect_filter == "none" and effect is not None:
