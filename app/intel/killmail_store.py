@@ -24,6 +24,7 @@ from app.db.models import (
     Character,
     Killmail,
     KillmailAttacker,
+    KillmailItem,
 )
 from app.esi.client import ESIClient
 
@@ -103,6 +104,36 @@ async def killmail_exists(killmail_id: int, db: AsyncSession) -> bool:
     return row.first() is not None
 
 
+async def _write_items(
+    db: AsyncSession,
+    killmail_id: int,
+    items: list[dict],
+    parent_id: int | None,
+) -> None:
+    """Recursively write killmail_items rows for one kill. Handles nested
+    items inside containers via parent_item_id."""
+    for it in items or []:
+        type_id = it.get("item_type_id")
+        flag = it.get("flag")
+        if type_id is None or flag is None:
+            continue
+        row = KillmailItem(
+            killmail_id=killmail_id,
+            item_type_id=type_id,
+            quantity_destroyed=int(it.get("quantity_destroyed") or 0),
+            quantity_dropped=int(it.get("quantity_dropped") or 0),
+            singleton=bool(it.get("singleton", False)),
+            flag=int(flag),
+            parent_item_id=parent_id,
+        )
+        db.add(row)
+        # Flush so row.id is populated for the nested items
+        nested = it.get("items") or []
+        if nested:
+            await db.flush()
+            await _write_items(db, killmail_id, nested, parent_id=row.id)
+
+
 async def store_killmail(
     full: dict,
     zkb_stub: dict,
@@ -175,6 +206,17 @@ async def store_killmail(
                 weapon_type_id=att.get("weapon_type_id"),
                 final_blow=bool(att.get("final_blow", False)),
             ))
+
+        # Persist victim.items[] from the killmail.stream payload. Killmails
+        # are immutable, so once a kill has any item rows we skip re-writing
+        # to avoid duplicates under stream replay. Nested items (containers)
+        # flatten into additional rows with parent_item_id set.
+        existing_items = (await db.execute(
+            select(KillmailItem.id).where(KillmailItem.killmail_id == kid).limit(1)
+        )).first()
+        if existing_items is None:
+            items = victim.get("items") or []
+            await _write_items(db, kid, items, parent_id=None)
 
         try:
             await db.commit()
