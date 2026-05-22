@@ -118,7 +118,7 @@
   .kf-top-section { margin-bottom:10px; }
   .kf-top-section-label { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.14em; margin-bottom:6px; }
   .kf-top-grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
-  @media (max-width: 900px) { .kf-top-grid { grid-template-columns:repeat(3, 1fr); } }
+  @media (max-width: 1000px) { .kf-top-grid { grid-template-columns:repeat(3, 1fr); } }
   .kf-top-card { background:var(--surface); border:1px solid var(--border); padding:8px; text-align:center; cursor:pointer; transition:background-color 0.2s, border-color 0.2s; border-radius:3px; min-width:0; }
   .kf-top-card:hover { background:rgba(94,177,255,0.06); border-color:var(--accent); }
   .kf-top-card.open { background:rgba(94,177,255,0.08); border-color:var(--accent); }
@@ -510,7 +510,7 @@
         row.dataset.bound = '1';
         row.addEventListener('click', function() {
           var kid = row.dataset.kid;
-          var existing = document.querySelector('.kf-detail[data-kid="' + kid + '"]');
+          var existing = document.querySelector('#kf-feed .kf-detail[data-kid="' + kid + '"]');
           if (existing) {
             // Animated collapse: drop .shown, remove after transition.
             existing.classList.remove('shown');
@@ -694,6 +694,7 @@
 <script nonce="{{ request.state.csp_nonce }}">
   (function() {
     var TOP_KEY = 'vigilant:kf:topstrip';
+    var pendingSlotClear = null;
 
     function applyTopState() {
       var collapsed = false;
@@ -732,7 +733,11 @@
             card.classList.remove('open');
             if (openPanel) {
               openPanel.classList.remove('shown');
-              setTimeout(function() { slot.innerHTML = ''; }, 320);
+              if (pendingSlotClear) clearTimeout(pendingSlotClear);
+              pendingSlotClear = setTimeout(function() {
+                slot.innerHTML = '';
+                pendingSlotClear = null;
+              }, 320);
             } else {
               slot.innerHTML = '';
             }
@@ -747,6 +752,7 @@
           fetch('/intel/kills/' + kid + '/detail')
             .then(function(r) { return r.text(); })
             .then(function(html) {
+              if (pendingSlotClear) { clearTimeout(pendingSlotClear); pendingSlotClear = null; }
               slot.innerHTML = html;
               var panel = slot.querySelector('.kf-detail');
               if (panel) {
