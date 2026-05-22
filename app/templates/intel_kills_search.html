@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Advanced Kill Search — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><a href="/intel/kills">Kill Feed</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Advanced Search</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+  /* ── filter card ──────────────────────────────────────────────── */
+  .kfs-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
+  .kfs-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; }
+  .kfs-head-actions { display:flex; gap:6px; }
+  .kfs-btn { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:4px 10px; font-size:10px; cursor:pointer; border-radius:3px; }
+  .kfs-btn:hover { border-color:var(--accent); }
+  .kfs-btn.primary { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kfs-filters { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .kfs-filter-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kfs-glabel { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.12em; margin-right:4px; min-width:80px; }
+  .kfs-chip { background:var(--surface); color:var(--text); padding:3px 9px; border:1px solid var(--border); font-size:10px; cursor:pointer; border-radius:3px; user-select:none; }
+  .kfs-chip.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kfs-chip.mod { border-style:dashed; }
+  .kfs-chip.mod.on { background:rgba(167,139,250,0.15); color:#a78bfa; border-color:#a78bfa; }
+  .kfs-chip.disabled { opacity:0.4; cursor:not-allowed; }
+  .kfs-date-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:130px; font-family:"SF Mono",Menlo,monospace; }
+  .kfs-date-input::placeholder { color:var(--muted); }
+  /* autocomplete reuses Feature A's pattern */
+  .kfs-ac { position:relative; }
+  .kfs-ac-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:180px; }
+  .kfs-ac-input:focus { outline:none; border-color:var(--accent); }
+  .kfs-ac-results { position:absolute; top:100%; left:0; background:var(--surface); border:1px solid var(--border); margin-top:2px; min-width:240px; max-height:240px; overflow:auto; z-index:50; display:none; }
+  .kfs-ac-results.show { display:block; }
+  .kfs-ac-result { padding:4px 8px; font-size:10px; cursor:pointer; color:var(--text); }
+  .kfs-ac-result:hover { background:rgba(94,177,255,0.1); }
+  .kfs-ac-result .kind { color:var(--muted); font-size:9px; margin-left:4px; }
+  .kfs-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
+  .kfs-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+  .kfs-chip-removable .x { font-weight:700; }
+  .kfs-modes { display:inline-flex; gap:2px; }
+  .kfs-mode-btn { background:var(--surface); color:var(--muted); padding:2px 6px; border:1px solid var(--border); font-size:9px; cursor:pointer; text-transform:uppercase; letter-spacing:0.06em; }
+  .kfs-mode-btn.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  /* stats + results */
+  .kfs-stats { display:flex; justify-content:space-between; padding:6px 0; font-size:11px; color:var(--muted); border-bottom:1px solid var(--border); margin-bottom:6px; }
+  .kfs-stats strong { color:var(--text); }
+  .kfs-loading { color:var(--muted); font-size:11px; padding:10px 0; text-align:center; }
+  .kfs-show-more-wrap { text-align:center; padding:14px 0; }
+  /* NPC badge — shared with live feed, defined here for the search page CSS scope */
+  .kf-npc-badge { display:inline-block; background:var(--surface); color:var(--muted); padding:0 4px; font-size:8px; font-weight:600; letter-spacing:0.08em; border-radius:2px; border:1px solid var(--border); margin-left:4px; vertical-align:middle; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-section">
+  <div class="b-section-head kfs-head">
+    <span class="kfs-title">ADVANCED KILL SEARCH</span>
+    <div class="kfs-head-actions">
+      <button type="button" class="kfs-btn" id="kfs-reset">Reset</button>
+      <a class="kfs-btn" href="/intel/kills" style="text-decoration:none;">← Back to live feed</a>
+    </div>
+  </div>
+
+  <div class="kfs-filters">
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Time</span>
+      <span class="kfs-chip" data-time="24h">24h</span>
+      <span class="kfs-chip" data-time="7d">7d</span>
+      <span class="kfs-chip" data-time="30d">30d</span>
+      <span class="kfs-chip" data-time="90d">90d</span>
+      <span style="color:var(--muted);font-size:10px;margin:0 6px;">or range:</span>
+      <input type="text" class="kfs-date-input" id="kfs-time-start" placeholder="YYYY-MM-DD HH:MM" autocomplete="off">
+      <input type="text" class="kfs-date-input" id="kfs-time-end" placeholder="YYYY-MM-DD HH:MM" autocomplete="off">
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Space</span>
+      <span class="kfs-chip" data-space="hs">HS</span>
+      <span class="kfs-chip" data-space="ls">LS</span>
+      <span class="kfs-chip" data-space="ns">NS</span>
+      <span class="kfs-chip" data-space="wh">WH</span>
+      <span class="kfs-chip" data-space="abyssal">Abyssal</span>
+    </div>
+    <div class="kfs-filter-row" id="kfs-wh-subclasses" style="display:none;">
+      <span class="kfs-glabel">WH class</span>
+      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter','Pochven'] %}
+      <span class="kfs-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
+      {% endfor %}
+      <span class="kfs-chip mod" data-mod="shattered">Shattered only</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Category</span>
+      <span class="kfs-chip" data-category="ship">Ship</span>
+      <span class="kfs-chip" data-category="structure">Structure</span>
+      <span class="kfs-chip" data-category="capital">Capital</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Count</span>
+      <span class="kfs-chip" data-count="solo">Solo</span>
+      <span class="kfs-chip" data-count="2-5">2-5</span>
+      <span class="kfs-chip" data-count="6-10">6-10</span>
+      <span class="kfs-chip" data-count="11-25">11-25</span>
+      <span class="kfs-chip" data-count="26-50">26-50</span>
+      <span class="kfs-chip" data-count="51-100">51-100</span>
+      <span class="kfs-chip" data-count="100+">100+</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">ISK</span>
+      <span class="kfs-chip" data-isk="100m">100m+</span>
+      <span class="kfs-chip" data-isk="1b">1b+</span>
+      <span class="kfs-chip" data-isk="5b">5b+</span>
+      <span class="kfs-chip" data-isk="10b">10b+</span>
+      <span class="kfs-chip" data-isk="100b">100b+</span>
+      <span class="kfs-chip" data-isk="1t">1t+</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Primetime</span>
+      <span class="kfs-chip" data-primetime="aus">Aus/CN</span>
+      <span class="kfs-chip" data-primetime="eu">EU</span>
+      <span class="kfs-chip" data-primetime="ru">RU</span>
+      <span class="kfs-chip" data-primetime="use">USE</span>
+      <span class="kfs-chip" data-primetime="usw">USW</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Ship</span>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-ship-input" class="kfs-ac-input" placeholder="Vargur, Loki…" autocomplete="off">
+        <div id="kfs-ship-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-ship-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Attackers</span>
+      <div class="kfs-modes" data-side="attacker">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-attacker-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <div id="kfs-attacker-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-attacker-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Either</span>
+      <div class="kfs-modes" data-side="either">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-either-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <div id="kfs-either-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-either-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Victim</span>
+      <div class="kfs-modes" data-side="victim">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-victim-input" class="kfs-ac-input" placeholder="char/corp/alli/ship" autocomplete="off">
+        <div id="kfs-victim-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-victim-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Sort</span>
+      <span class="kfs-chip on" data-sort="date">Date</span>
+      <span class="kfs-chip" data-sort="isk">ISK</span>
+      <span class="kfs-chip" data-sort="involved">Involved</span>
+      <span style="margin-left:8px;"></span>
+      <span class="kfs-chip on" data-dir="desc">Desc</span>
+      <span class="kfs-chip" data-dir="asc">Asc</span>
+      <span style="margin-left:12px;"></span>
+      <button type="button" class="kfs-btn" id="kfs-live-toggle" title="Live polling — requires sort=Date Desc and open-ended time">☐ Live</button>
+    </div>
+  </div>
+
+  <div class="kfs-stats" id="kfs-stats">
+    <span><strong id="kfs-stats-showing">—</strong> of <strong id="kfs-stats-total">—</strong> kills</span>
+    <span>Total destroyed: <strong id="kfs-stats-isk">—</strong> ISK</span>
+  </div>
+
+  <p class="kfs-loading" id="kfs-loading">Loading…</p>
+  <div id="kfs-results"></div>
+  <div class="kfs-show-more-wrap" id="kfs-show-more-wrap" style="display:none;">
+    <button type="button" class="kfs-btn primary" id="kfs-show-more">↓ Show more (next 100)</button>
+  </div>
+</div>
+{% endblock %}
