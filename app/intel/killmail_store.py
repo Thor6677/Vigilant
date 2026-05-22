@@ -197,6 +197,7 @@ async def store_killmail(
         # rows are needed for unique-pilot counting in recent_battles, and
         # gc_discovery_killmails now cascades the delete to keep growth bounded.
         for att in attackers:
+            sec = att.get("security_status")
             db.add(KillmailAttacker(
                 killmail_id=kid,
                 character_id=att.get("character_id"),
@@ -205,6 +206,8 @@ async def store_killmail(
                 ship_type_id=att.get("ship_type_id"),
                 weapon_type_id=att.get("weapon_type_id"),
                 final_blow=bool(att.get("final_blow", False)),
+                damage_done=int(att.get("damage_done") or 0),
+                security_status=float(sec) if sec is not None else None,
             ))
 
         # Persist victim.items[] from the killmail.stream payload. Killmails
