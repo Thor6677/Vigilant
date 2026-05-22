@@ -546,6 +546,7 @@ async def intel_kills_older(
                 },
                 "attackers": attackers_by_kid.get(r.killmail_id, []),
                 "zkb": {"totalValue": r.total_value or 0},
+                "is_npc": bool(r.is_npc),
             }
         )
 
@@ -634,6 +635,7 @@ async def _enrich_kills(kills: list[dict], db: AsyncSession) -> list[dict]:
             "top_attacker_corp": name_map.get(top.get("corporation_id"), ""),
             "gang_size": len(attackers),
             "isk": float((k.get("zkb") or {}).get("totalValue") or 0),
+            "is_npc": bool(k.get("is_npc", False)),
         })
     return out
 

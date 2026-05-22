@@ -1,32 +1,11 @@
-{# Marker div for client JS to read cursors + stats #}
+{# Marker div for client JS — cursors + stats #}
 <div hidden data-kfs-marker
      data-total-count="{{ total_count if total_count is not none else '' }}"
      data-total-isk="{{ '%.0f'|format(total_isk) if total_isk is not none else '' }}"
      data-newest-cursor="{{ newest_cursor }}"
      data-oldest-cursor="{{ oldest_cursor }}"
      data-live="{{ 1 if live else 0 }}"></div>
-{% for k in kills %}
-<div class="kf-row" data-kid="{{ k['killmail_id'] }}">
-  <img class="kf-ship-thumb" loading="lazy"
-       src="https://images.evetech.net/types/{{ k['victim_ship_type_id'] }}/icon?size=64"
-       alt="{{ k['victim_ship'] }}">
-  <div class="kf-meta">
-    <div class="kf-meta-top">
-      <strong>{{ k['victim_pilot'] }}</strong>
-      {% if k['victim_corp'] %}[{{ k['victim_corp'] }}]{% endif %}
-      · {{ k['victim_ship'] }}
-      {% if k['is_npc'] %}<span class="kf-npc-badge">NPC</span>{% endif %}
-    </div>
-    <div class="kf-meta-bot">
-      <span class="kf-sys-{{ k['system_band'] }}">{{ k['system_name'] }}</span>
-      · killed by <strong>{{ k['top_attacker_pilot'] }}</strong>
-      {% if k['top_attacker_corp'] %}[{{ k['top_attacker_corp'] }}]{% endif %}
-      · {% if k['gang_size'] == 1 %}solo{% else %}gang of {{ k['gang_size'] }}{% endif %}
-    </div>
-  </div>
-  <div class="kf-isk">
-    {{ "%.1f"|format(k['isk']/1e9) }}B
-    <span class="kf-ago" data-time="{{ k['killmail_time'] }}">just now</span>
-  </div>
-</div>
-{% endfor %}
+{# Reuse the live-feed row markup — _enrich_for_search emits the same dict shape #}
+{% with older_mode=true %}
+  {% include 'partials/intel_kills_feed.html' %}
+{% endwith %}
