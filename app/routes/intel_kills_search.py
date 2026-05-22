@@ -239,6 +239,13 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         params.get("either_ships", []),
     ))
 
+    # NULL guard for ISK sort: NULL total_value rows can't be sensibly
+    # ordered or paginated by ISK (the cursor tuple `total_value < val`
+    # excludes NULLs on page 2+). Drop them at the source so the sort
+    # is internally consistent.
+    if params.get("sort") == "isk":
+        where.append(Killmail.total_value.isnot(None))
+
     # ── Sort + cursor ─────────────────────────────────────────────────
     sort = params.get("sort", "date")
     direction = params.get("direction", "desc")
