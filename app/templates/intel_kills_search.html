@@ -624,10 +624,123 @@
     }
     setInterval(refreshAgo, 30000);
 
+    // ── chip rendering for entity/ship multi-select chips ──────
+    function renderItemChips(sideKey, containerId) {
+      var c = document.getElementById(containerId);
+      if (!c) return;
+      var items = state[sideKey] || [];
+      c.innerHTML = items.map(function(e) {
+        var label = e.kind && e.kind !== 'ship'
+          ? escAttr(e.name) + ' (' + escAttr(e.kind) + ')'
+          : escAttr(e.name);
+        return '<span class="kfs-chip-removable" data-rm-key="' + escAttr((e.kind || 'ship') + ':' + e.id) + '">' + label + ' <span class="x">×</span></span>';
+      }).join('');
+      c.querySelectorAll('[data-rm-key]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var key = el.dataset.rmKey;
+          state[sideKey] = (state[sideKey] || []).filter(function(e) { return ((e.kind || 'ship') + ':' + e.id) !== key; });
+          renderItemChips(sideKey, containerId);
+          persist();
+          refetchResults();
+        });
+      });
+    }
+
+    // ── autocomplete (combined entity + ship, or ship-only) ────
+    function bindAutocomplete(rowId, inputId, resultsId, chipsId, sideStateKey, kindMode) {
+      // kindMode: 'ship' (ship only) or 'combined' (ship + entity).
+      var input = document.getElementById(inputId);
+      var results = document.getElementById(resultsId);
+      var chips = document.getElementById(chipsId);
+      if (!input || !results || !chips) return;
+      var debounce;
+
+      input.addEventListener('input', function() {
+        clearTimeout(debounce);
+        var q = input.value.trim();
+        if (q.length < 2) { results.classList.remove('show'); results.innerHTML = ''; return; }
+        debounce = setTimeout(function() {
+          var queries = [
+            fetch('/intel/kills/resolve?kind=ship&q=' + encodeURIComponent(q)).then(function(r) { return r.json(); }),
+          ];
+          if (kindMode === 'combined') {
+            queries.push(fetch('/intel/kills/resolve?kind=entity&q=' + encodeURIComponent(q)).then(function(r) { return r.json(); }));
+          }
+          Promise.all(queries).then(function(arr) {
+            var items = [];
+            (arr[0] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: 'ship' }); });
+            if (arr[1]) (arr[1] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: it.kind }); });
+            results.innerHTML = items.slice(0, 16).map(function(it) {
+              return '<div class="kfs-ac-result" data-id="' + it.id + '" data-kind="' + escAttr(it.kind) + '" data-name="' + escAttr(it.name) + '">'
+                + escAttr(it.name) + '<span class="kind">[' + escAttr(it.kind) + ']</span></div>';
+            }).join('');
+            results.classList.toggle('show', items.length > 0);
+            results.querySelectorAll('.kfs-ac-result').forEach(function(el) {
+              el.addEventListener('click', function() {
+                var entry = {
+                  id: parseInt(el.dataset.id, 10),
+                  name: el.dataset.name,
+                  kind: el.dataset.kind || 'ship',
+                };
+                var key = entry.kind + ':' + entry.id;
+                if (!Array.isArray(state[sideStateKey])) state[sideStateKey] = [];
+                if (!state[sideStateKey].some(function(e) { return (e.kind + ':' + e.id) === key; })) {
+                  state[sideStateKey].push(entry);
+                }
+                input.value = '';
+                results.classList.remove('show');
+                results.innerHTML = '';
+                renderItemChips(sideStateKey, chipsId);
+                persist();
+                refetchResults();
+              });
+            });
+          });
+        }, 250);
+      });
+      document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !results.contains(e.target)) {
+          results.classList.remove('show');
+        }
+      });
+      renderItemChips(sideStateKey, chipsId);
+    }
+
+    // ── mode buttons (And/In/Or per side) ──────────────────────
+    function bindModeButtons() {
+      document.querySelectorAll('.kfs-modes').forEach(function(group) {
+        var side = group.dataset.side;
+        if (!side) return;
+        // side ∈ {attacker, either, victim}; state key is <side>_mode
+        var stateKey = side + '_mode';
+        // Reflect current state
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          btn.classList.toggle('on', btn.dataset.mode === state[stateKey]);
+        });
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          if (btn.dataset.bound === '1') return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function() {
+            state[stateKey] = btn.dataset.mode;
+            group.querySelectorAll('.kfs-mode-btn').forEach(function(b) {
+              b.classList.toggle('on', b.dataset.mode === state[stateKey]);
+            });
+            persist();
+            refetchResults();
+          });
+        });
+      });
+    }
+
     // ── init ───────────────────────────────────────────────────
     applyChipsToDom();
     bindChipClicks();
     bindDateRangeInputs();
+    bindModeButtons();
+    bindAutocomplete('ship-row',      'kfs-ship-input',     'kfs-ship-results',     'kfs-ship-chips',     'ship_ids',       'ship');
+    bindAutocomplete('attacker-row',  'kfs-attacker-input', 'kfs-attacker-results', 'kfs-attacker-chips', 'attacker_items', 'combined');
+    bindAutocomplete('either-row',    'kfs-either-input',   'kfs-either-results',   'kfs-either-chips',   'either_items',   'combined');
+    bindAutocomplete('victim-row',    'kfs-victim-input',   'kfs-victim-results',   'kfs-victim-chips',   'victim_items',   'combined');
     refetchResults();
   })();
 </script>
