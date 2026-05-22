@@ -131,6 +131,26 @@ async def search_types(db: AsyncSession, query: str, limit: int = 10) -> list[di
     return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.fetchall()]
 
 
+async def search_ship_types(db: AsyncSession, q: str, limit: int = 8) -> list[dict]:
+    """Substring-match published ships from SDE (categoryID=6) for autocomplete.
+
+    Used by /intel/kills/resolve?kind=ship to populate the kill-feed ship
+    filter. Returns up to `limit` rows sorted by name length then name so
+    short canonical matches (e.g. "Loki") rank above longer hull variants.
+    """
+    if not q or len(q) < 2:
+        return []
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name)
+        .where(SDEType.category_id == 6)
+        .where(SDEType.published == True)
+        .where(func.lower(SDEType.type_name).contains(q.lower()))
+        .order_by(func.length(SDEType.type_name), SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"id": r.type_id, "name": r.type_name, "kind": "ship"} for r in result.fetchall()]
+
+
 async def search_systems(db: AsyncSession, query: str, limit: int = 8) -> list[dict]:
     """Search solar systems by partial name for autocomplete."""
     result = await db.execute(

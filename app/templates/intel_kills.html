@@ -28,6 +28,16 @@
   .kf-sys-ns { color:#ef4444; }
   .kf-sys-wh { color:#a78bfa; }
   .kf-sys-unknown { color:var(--muted); }
+  .kf-ac { position:relative; }
+  .kf-ac-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:160px; }
+  .kf-ac-input:focus { outline:none; border-color:var(--accent); }
+  .kf-ac-results { position:absolute; top:100%; left:0; background:var(--surface); border:1px solid var(--border); margin-top:2px; min-width:200px; max-height:240px; overflow:auto; z-index:50; display:none; }
+  .kf-ac-results.show { display:block; }
+  .kf-ac-result { padding:4px 8px; font-size:10px; cursor:pointer; color:var(--text); }
+  .kf-ac-result:hover { background:rgba(94,177,255,0.1); }
+  .kf-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
+  .kf-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+  .kf-chip-removable .x { font-weight:700; }
 </style>
 {% endblock %}
 
@@ -52,6 +62,14 @@
       <span class="kf-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
       {% endfor %}
       <span class="kf-chip mod" data-mod="shattered">Shattered only</span>
+    </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Ship</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-ship-input" class="kf-ac-input" placeholder="Vargur, Loki…" autocomplete="off">
+        <div id="kf-ship-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-ship-chips" class="kf-chips"></div>
     </div>
   </div>
 
@@ -81,12 +99,13 @@
     var STORAGE_KEY = 'vigilant:kf:filters';
     var state;
     try {
-      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false}');
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false,"ship_ids":[]}');
     } catch (e) {
-      state = {space: [], wh_class: [], shattered: false};
+      state = {space: [], wh_class: [], shattered: false, ship_ids: []};
     }
     if (!Array.isArray(state.space)) state.space = [];
     if (!Array.isArray(state.wh_class)) state.wh_class = [];
+    if (!Array.isArray(state.ship_ids)) state.ship_ids = [];
     state.shattered = !!state.shattered;
 
     function applyToChips() {
@@ -108,7 +127,69 @@
       if (state.space.length) qs.push('space=' + state.space.join(','));
       if (state.wh_class.length) qs.push('wh_class=' + state.wh_class.join(','));
       if (state.shattered) qs.push('shattered=1');
+      if (state.ship_ids && state.ship_ids.length) {
+        qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
+      }
       return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    function renderShipChips() {
+      var container = document.getElementById('kf-ship-chips');
+      if (!container) return;
+      container.innerHTML = state.ship_ids.map(function(s) {
+        return '<span class="kf-chip-removable" data-rm-ship="' + s.id + '">' +
+               (s.name || ('#' + s.id)) + '<span class="x">×</span></span>';
+      }).join('');
+      container.querySelectorAll('[data-rm-ship]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var id = parseInt(el.dataset.rmShip, 10);
+          state.ship_ids = state.ship_ids.filter(function(s) { return s.id !== id; });
+          renderShipChips();
+          persist();
+        });
+      });
+    }
+
+    function bindShipAutocomplete() {
+      var shipInput = document.getElementById('kf-ship-input');
+      var shipResults = document.getElementById('kf-ship-results');
+      if (!shipInput || !shipResults) return;
+      var shipDebounce;
+      shipInput.addEventListener('input', function() {
+        clearTimeout(shipDebounce);
+        var q = shipInput.value.trim();
+        if (q.length < 2) { shipResults.classList.remove('show'); shipResults.innerHTML = ''; return; }
+        shipDebounce = setTimeout(function() {
+          fetch('/intel/kills/resolve?kind=ship&q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(items) {
+              shipResults.innerHTML = items.map(function(it) {
+                var name = (it.name || '').replace(/"/g, '&quot;');
+                return '<div class="kf-ac-result" data-id="' + it.id + '" data-name="' + name + '">' + name + '</div>';
+              }).join('');
+              shipResults.classList.toggle('show', items.length > 0);
+              shipResults.querySelectorAll('.kf-ac-result').forEach(function(el) {
+                el.addEventListener('click', function() {
+                  var id = parseInt(el.dataset.id, 10);
+                  if (!state.ship_ids.some(function(s) { return s.id === id; })) {
+                    state.ship_ids.push({id: id, name: el.dataset.name});
+                  }
+                  shipInput.value = '';
+                  shipResults.classList.remove('show');
+                  shipResults.innerHTML = '';
+                  renderShipChips();
+                  persist();
+                });
+              });
+            })
+            .catch(function() { shipResults.classList.remove('show'); });
+        }, 250);
+      });
+      document.addEventListener('click', function(e) {
+        if (!shipInput.contains(e.target) && !shipResults.contains(e.target)) {
+          shipResults.classList.remove('show');
+        }
+      });
     }
 
     function persist() {
@@ -149,8 +230,14 @@
       state.shattered = !!qsShat && qsShat !== '0';
     }
     applyToChips();
+    renderShipChips();
+    bindShipAutocomplete();
     // Override Task 5's hardcoded hx-get URL with any restored filter QS before
     // htmx fires the initial `load` trigger.
+    // Note: ship_id from URL is intentionally not restored (no cheap name
+    // resolve by raw id); localStorage handles personal-use persistence.
+    // Shared URLs still filter server-side because buildQS includes ship_id
+    // from any state we have — empty if only URL had it.
     var feed = document.getElementById('kf-feed');
     if (feed) feed.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
   })();

@@ -12,14 +12,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import get_db
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
 from app.intel.recent_battles import resolve_entity_names
-from app.sde.lookup import type_ids_to_names
+from app.sde.lookup import search_ship_types, type_ids_to_names
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -104,6 +104,7 @@ async def intel_kills_feed(
     space: str = "",
     wh_class: str = "",
     shattered: int = 0,
+    ship_id: str = "",
     db: AsyncSession = Depends(get_db),
 ):
     """Live tail — reads _recent_kills in memory, renders the row partial.
@@ -112,6 +113,8 @@ async def intel_kills_feed(
     incremental htmx prepends). Otherwise return up to MAX_ROWS_INITIAL.
     `space`/`wh_class`: comma-separated short codes (e.g. "hs,ns" or
     "c5,c6"). `shattered=1` to require shattered systems only.
+    `ship_id`: comma-separated SDE type IDs — OR-multiselect over
+    victim.ship_type_id.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -120,6 +123,7 @@ async def intel_kills_feed(
     spaces = {s.strip() for s in space.split(",") if s.strip()}
     wh_classes = {c.strip() for c in wh_class.split(",") if c.strip()}
     shattered_only = bool(shattered)
+    ship_ids = {int(s) for s in ship_id.split(",") if s.strip().isdigit()}
 
     kills = get_recent_kills()
     kills = sorted(kills, key=lambda k: k.get("killmail_id") or 0, reverse=True)
@@ -128,6 +132,12 @@ async def intel_kills_feed(
         kills = [k for k in kills if (k.get("killmail_id") or 0) > since]
 
     kills = _apply_space_filter(kills, spaces, wh_classes, shattered_only)
+
+    if ship_ids:
+        kills = [
+            k for k in kills
+            if ((k.get("victim") or {}).get("ship_type_id") in ship_ids)
+        ]
 
     if not since:
         kills = kills[:MAX_ROWS_INITIAL]
@@ -225,3 +235,30 @@ async def _enrich_kills(kills: list[dict], db: AsyncSession) -> list[dict]:
             "isk": float((k.get("zkb") or {}).get("totalValue") or 0),
         })
     return out
+
+
+@router.get("/intel/kills/resolve")
+async def intel_kills_resolve(
+    request: Request,
+    q: str = "",
+    kind: str = "ship",
+    db: AsyncSession = Depends(get_db),
+):
+    """Autocomplete proxy for kill-feed filters.
+
+    - `kind=ship`: local SDE substring match against published ships
+      (categoryID=6). Returns up to 8 `{id, name, kind}` rows.
+    - `kind=entity`: ESI /universe/ids autocomplete (Task 8 — not yet
+      implemented; returns empty list).
+
+    Requires auth; returns [] for unknown kinds.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse([], status_code=401)
+    q = (q or "").strip()
+    if not q or len(q) < 2:
+        return JSONResponse([])
+    if kind == "ship":
+        return JSONResponse(await search_ship_types(db, q))
+    return JSONResponse([])
