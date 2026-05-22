@@ -109,11 +109,13 @@ async def _ensure_wh_system_class_map(db: AsyncSession) -> dict[int, int]:
     await _ensure_wh_class_cache(db)
     raw_cache = sde_lookup._wh_class_cache or {}
 
-    # Pull every WH/Pochven system + its constellation_id + region_id.
-    # WH range 31000000-31999999 AND Pochven systems (~30002000 K-space IDs).
+    # Pull ALL systems + constellation_id + region_id.
+    # Pochven systems retain K-space IDs (~30002000) so filtering to
+    # system_id >= WH_SYSTEM_MIN (31000000) would silently exclude them.
+    # The cache-lookup loop below discards non-WH/non-Pochven systems naturally
+    # (they won't match any raw_cache entry), so the full scan is safe.
     result = await db.execute(
         select(SDESystem.system_id, SDESystem.constellation_id, SDESystem.region_id)
-        .where(SDESystem.system_id >= WH_SYSTEM_MIN)
     )
     fwd: dict[int, int] = {}
     for sid, cid, rid in result.all():
