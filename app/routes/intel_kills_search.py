@@ -536,8 +536,20 @@ def _compile_flag_clauses(flags: set[str], joins: set[str]) -> list:
             ),
         ))
 
-    # Task 3 will add 'gank'. Task 4 will add 'padding'. Stub the slot so the
-    # endpoint can accept unknown flag strings without crashing.
+    if "gank" in flags:
+        # HighSec gank = kill in HS (security >= 0.5) with at least one attacker
+        # whose security_status < 0. The HS half requires a join to sde_systems
+        # — register it so the SELECT caller adds the JOIN.
+        joins.add("sde_systems")
+        flag_conds.append(and_(
+            SDESystem.security >= 0.5,
+            exists().where(
+                a.killmail_id == Killmail.killmail_id,
+                a.security_status < 0,
+            ),
+        ))
+
+    # Task 4 will add 'padding'. Stub stays.
 
     if not flag_conds:
         return []
