@@ -42,52 +42,71 @@ PAGE_SIZE = 100
 CAPITAL_GROUP_IDS = {547, 485, 30, 659, 513, 902, 1538}  # Carrier, Dread, Titan, Super, Freighter, JF, FAX
 RORQUAL_TYPE_ID = 28352  # Industrial Command Ship group 941 also contains Porpoise+Orca which are NOT capitals.
 
-# AT Tournament prize ships. Curated; extend when new AT prizes are released.
-# Source: SDE query 2026-05-22 + Phase 1 spec line 379-387. Confirmed type_ids:
-#   2834  Utu          (Assault Frigate, group 324)
-#   2836  Adrestia     (Heavy Assault Cruiser, group 358)
-#   3516  Malice       (Assault Frigate, group 324)
-#   3518  Vangel       (Heavy Assault Cruiser, group 358)
-#   11940 Gold Magnate (Amarr Frigate, group 25) — legendary AT1 prize
-#   11942 Silver Magnate (Amarr Frigate, group 25) — legendary AT1 prize
-#   29266 Apotheosis   (Shuttle, group 31) — AT XIII-era prize
-#   32207 Freki        (Assault Frigate, group 324)
-#   32209 Mimir        (Heavy Assault Cruiser, group 358)
-#   32788 Cambion      (Assault Frigate, group 324)
-#   32790 Etana        (Logistics, group 832)
-#   33395 Moracha      (Force Recon, group 833)
-#   33397 Chremoas     (Covert Ops, group 830)
-#   33673 Whiptail     (Interceptor, group 831)
-#   33675 Chameleon    (Force Recon, group 833)
-#   35779 Imp          (Interceptor, group 831)
-#   35781 Fiend        (HIC, group 894)
-#   42245 Rabisu       (Logistics, group 832) — AT XIV
-#   42246 Caedes       (Covert Ops, group 830) — AT XIV
-#   45531 Victor       (Force Recon, group 833) — AT XV
-#   48635 Tiamat       (Force Recon, group 833) — AT XVI
-#   48636 Hydra        (Covert Ops, group 830) — AT XVI
-#   49713 Zarmazd      (Logistics, group 832) — AT XVI
-#   60764 Laelaps      (HIC, group 894) — AT XVII
-#   85062 Sidewinder   (Covert Ops, group 830) — recent AT
-#   85229 Cobra        (Force Recon, group 833) — recent AT
-# Spec line 384 also mentioned Echelon and Reagent as candidates. SDE query
-# 2026-05-22 results: Echelon (3532) exists but is a Sansha incursion-event
-# prize, not AT — deliberately excluded. Reagent has no matches in SDE — likely
-# spec author misremembering a name. Re-check both if SDE updates introduce
-# new variants.
+# AT Tournament prize ships. Curated from user's authoritative list 2026-05-22.
+# Source of truth: user-supplied roster (not Phase 1 spec, which had inaccuracies
+# — e.g. spec included Apotheosis/Chremoas/Zarmazd, user excluded them).
+# Names + type_ids verified via SDE exact-name match on the VPS:
+#   2834  Utu                      (Assault Frigate, group 324)
+#   2836  Adrestia                 (Heavy Assault Cruiser, group 358)
+#   3516  Malice                   (Assault Frigate, group 324)
+#   3518  Vangel                   (Heavy Assault Cruiser, group 358)
+#   11011 Guardian-Vexor           (Cruiser, group 26)
+#   11936 Apocalypse Imperial Issue (Battleship, group 27)
+#   11938 Armageddon Imperial Issue (Battleship, group 27)
+#   11940 Gold Magnate             (Amarr Frigate, group 25) — legendary AT1 prize
+#   11942 Silver Magnate           (Amarr Frigate, group 25) — legendary AT1 prize
+#   12044 Enyo                     (Assault Frigate, group 324)
+#   13202 Megathron Federate Issue (Battleship, group 27)
+#   26840 Raven State Issue        (Battleship, group 27)
+#   26842 Tempest Tribal Issue     (Battleship, group 27)
+#   32207 Freki                    (Assault Frigate, group 324)
+#   32209 Mimir                    (Heavy Assault Cruiser, group 358)
+#   32788 Cambion                  (Assault Frigate, group 324)
+#   32790 Etana                    (Logistics, group 832)
+#   33395 Moracha                  (Force Recon, group 833)
+#   33673 Whiptail                 (Interceptor, group 831)
+#   33675 Chameleon                (Force Recon, group 833)
+#   35779 Imp                      (Interceptor, group 831)
+#   35781 Fiend                    (HIC, group 894)
+#   42245 Rabisu                   (Logistics, group 832)
+#   42246 Caedes                   (Covert Ops, group 830)
+#   45531 Victor                   (Force Recon, group 833)
+#   48635 Tiamat                   (Force Recon, group 833)
+#   48636 Hydra                    (Covert Ops, group 830)
+#   60764 Laelaps                  (HIC, group 894)
+#   60765 Raiju                    (group 893)
+#   74141 Geri                     (Assault Frigate, group 324)
+#   74316 Bestla                   (Heavy Assault Cruiser, group 358)
+#   77726 Cybele                   (Heavy Assault Cruiser, group 358)
+#   78414 Shapash                  (Assault Frigate, group 324)
+#   85062 Sidewinder               (Covert Ops, group 830)
+#   85229 Cobra                    (Force Recon, group 833)
+#   85236 Python                   (group 898)
+#   89807 Anhinga                  (group 1201)
+#   89808 Skua                     (group 1305)
+# Notes:
+# - 29266 Apotheosis (Shuttle) — excluded per user (spec included it but it's a
+#   gift/event prize, not an AT prize proper).
+# - 33397 Chremoas (Covert Ops) — excluded per user; same rationale.
+# - 49713 Zarmazd (Logistics) — excluded per user; same rationale.
+# - 3532  Echelon — excluded; Sansha incursion-event prize, not AT.
+# - Re-confirm with user if SDE updates introduce new AT variants.
 AT_SHIP_TYPE_IDS = {
     2834, 2836, 3516, 3518,
-    11940, 11942,
-    29266,
+    11011, 11936, 11938, 11940, 11942, 12044,
+    13202,
+    26840, 26842,
     32207, 32209, 32788, 32790,
-    33395, 33397, 33673, 33675,
+    33395, 33673, 33675,
     35779, 35781,
     42245, 42246,
     45531,
     48635, 48636,
-    49713,
-    60764,
-    85062, 85229,
+    60764, 60765,
+    74141, 74316,
+    77726, 78414,
+    85062, 85229, 85236,
+    89807, 89808,
 }
 ABYSSAL_SYSTEM_MIN = 32000001
 ABYSSAL_SYSTEM_MAX = 32000200
@@ -559,8 +578,13 @@ def _compile_flag_clauses(flags: set[str], joins: set[str]) -> list:
         # Conditions 2 and 3 are correlated subqueries on killmail_attackers.
         # Perf: covered in Task 5 EXPLAIN. If full scans appear, Task 5 adds
         # ix_killmail_attackers_kid_dmg.
+        # `.select_from(KillmailAttacker)` is REQUIRED — without it SQLAlchemy
+        # picks up `killmails` as the FROM because the WHERE clause references
+        # both tables, producing the bogus SQL `SELECT max(...) FROM killmails`
+        # which SQLite rejects with "misuse of aggregate: max()".
         max_dmg_subq = (
             select(func.max(KillmailAttacker.damage_done))
+            .select_from(KillmailAttacker)
             .where(KillmailAttacker.killmail_id == Killmail.killmail_id)
             .scalar_subquery()
         )
