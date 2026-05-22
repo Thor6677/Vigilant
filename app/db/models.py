@@ -694,6 +694,28 @@ class KillmailAttacker(Base):
     ship_type_id = Column(Integer, nullable=True, index=True)
     weapon_type_id = Column(Integer, nullable=True, index=True)
     final_blow = Column(Boolean, nullable=False, default=False)
+    damage_done = Column(Integer, nullable=False, default=0)
+    security_status = Column(Float, nullable=True)
+
+
+class KillmailItem(Base):
+    """Items destroyed/dropped on a kill. Populated at ingestion from
+    killmail.stream's full victim.items[] payload — no ESI round-trip needed.
+
+    Nested items (e.g. items inside a destroyed container) are flattened into
+    additional rows with parent_item_id pointing at the parent row. Most kills
+    have no nested items.
+    """
+    __tablename__ = "killmail_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    killmail_id = Column(Integer, ForeignKey("killmails.killmail_id"), nullable=False, index=True)
+    item_type_id = Column(Integer, nullable=False)
+    quantity_destroyed = Column(Integer, nullable=False, default=0)
+    quantity_dropped = Column(Integer, nullable=False, default=0)
+    singleton = Column(Boolean, nullable=False, default=False)
+    flag = Column(Integer, nullable=False)  # SDE inv_flags — slot location
+    parent_item_id = Column(Integer, ForeignKey("killmail_items.id"), nullable=True)
 
 
 class CharacterKillIngest(Base):

@@ -200,6 +200,11 @@ async def startup():
             # Indexes added in 2026-04 review-followup batch — create_all
             # skips existing tables, so these need explicit DDL.
             "CREATE INDEX IF NOT EXISTS ix_killmail_system_time ON killmails(solar_system_id, killmail_time)",
+            "CREATE INDEX IF NOT EXISTS ix_kma_corp_time ON killmail_attackers(corporation_id, killmail_id)",
+            "CREATE INDEX IF NOT EXISTS ix_kma_alli_time ON killmail_attackers(alliance_id, killmail_id)",
+            "CREATE INDEX IF NOT EXISTS ix_km_victim_corp_time ON killmails(victim_corporation_id, killmail_time DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_km_victim_alli_time ON killmails(victim_alliance_id, killmail_time DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_km_victim_ship_time ON killmails(victim_ship_type_id, killmail_time DESC)",
             "CREATE INDEX IF NOT EXISTS ix_esi_cache_expires_at ON esi_cache(expires_at)",
             # Top combatant alliance for major-battles widget
             "ALTER TABLE detected_battles ADD COLUMN top_attacker_alliance_id INTEGER",
@@ -215,6 +220,16 @@ async def startup():
                 exc_str = str(migration_exc).lower()
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
+
+    # ── Add killmail_attackers columns introduced for /intel/kills ─────
+    # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via PRAGMA check.
+    async with AsyncSessionLocal() as db:
+        cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(killmail_attackers)"))).fetchall()}
+        if "damage_done" not in cols:
+            await db.execute(text("ALTER TABLE killmail_attackers ADD COLUMN damage_done INTEGER NOT NULL DEFAULT 0"))
+        if "security_status" not in cols:
+            await db.execute(text("ALTER TABLE killmail_attackers ADD COLUMN security_status REAL"))
+        await db.commit()
 
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if
