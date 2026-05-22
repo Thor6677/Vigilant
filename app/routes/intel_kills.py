@@ -13,14 +13,14 @@ import logging
 from datetime import datetime, timedelta
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.cache import cache_get, cache_set
-from app.db.models import Killmail, KillmailAttacker, get_db
+from app.db.models import Character, Killmail, KillmailAttacker, KillmailItem, get_db
 from app.db.sde_models import SDESystem
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
 from app.intel.recent_battles import resolve_entity_names
@@ -524,3 +524,165 @@ async def _resolve_entity(q: str) -> list[dict]:
 
     await cache_set(None, cache_path, out)
     return out
+
+
+def _slot_label(flag: int) -> str:
+    if 11 <= flag <= 18:
+        return "Low slots"
+    if 19 <= flag <= 26:
+        return "Mid slots"
+    if 27 <= flag <= 34:
+        return "High slots"
+    if 92 <= flag <= 98:
+        return "Rigs"
+    if 125 <= flag <= 132:
+        return "Subsystems"
+    if flag == 5:
+        return "Cargo"
+    if flag == 87:
+        return "Drone bay"
+    if flag == 89:
+        return "Implants"
+    if flag == 90:
+        return "Booster bay"
+    return "Other"
+
+
+_SLOT_ORDER = [
+    "High slots", "Mid slots", "Low slots", "Rigs", "Subsystems",
+    "Drone bay", "Cargo", "Implants", "Booster bay",
+]
+
+
+@router.get("/intel/kills/{killmail_id}/detail", response_class=HTMLResponse)
+async def intel_kills_detail(
+    killmail_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Inline detail panel: victim card + fitting + ISK + attackers.
+
+    Cached aggressively (immutable) — killmails are write-once.
+    Items-less old kills degrade to a "view on zKB" link.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    km = (await db.execute(
+        select(Killmail).where(Killmail.killmail_id == killmail_id)
+    )).scalars().first()
+    if not km:
+        raise HTTPException(404)
+
+    items = (await db.execute(
+        select(KillmailItem).where(KillmailItem.killmail_id == killmail_id)
+    )).scalars().all()
+    attackers = (await db.execute(
+        select(KillmailAttacker).where(KillmailAttacker.killmail_id == killmail_id)
+    )).scalars().all()
+
+    # Collect IDs for name resolution
+    type_ids: set[int] = set()
+    entity_ids: set[int] = set()
+    if km.victim_ship_type_id:
+        type_ids.add(km.victim_ship_type_id)
+    for x in (km.victim_character_id, km.victim_corporation_id, km.victim_alliance_id):
+        if x:
+            entity_ids.add(x)
+    for a in attackers:
+        if a.ship_type_id:
+            type_ids.add(a.ship_type_id)
+        if a.weapon_type_id:
+            type_ids.add(a.weapon_type_id)
+        for x in (a.character_id, a.corporation_id, a.alliance_id):
+            if x:
+                entity_ids.add(x)
+    for it in items:
+        type_ids.add(it.item_type_id)
+
+    type_name_map = await type_ids_to_names(db, list(type_ids)) if type_ids else {}
+    entity_name_map = await resolve_entity_names(list(entity_ids)) if entity_ids else {}
+    name_map = {**type_name_map, **entity_name_map}
+
+    system_name = f"#{km.solar_system_id}"
+    if km.solar_system_id:
+        row = (await db.execute(
+            select(SDESystem.system_name).where(SDESystem.system_id == km.solar_system_id)
+        )).first()
+        if row:
+            system_name = row[0]
+
+    # Group items by slot
+    slots_dict: dict[str, list[dict]] = {}
+    for it in items:
+        label = _slot_label(it.flag)
+        if label == "Other":
+            continue
+        slots_dict.setdefault(label, []).append({
+            "type_id": it.item_type_id,
+            "name": name_map.get(it.item_type_id, f"#{it.item_type_id}"),
+            "qty_destroyed": it.quantity_destroyed or 0,
+            "qty_dropped": it.quantity_dropped or 0,
+            "destroyed": (it.quantity_destroyed or 0) > 0,
+            "dropped": (it.quantity_dropped or 0) > 0,
+        })
+    slots_ordered = [
+        {"label": lbl, "items": slots_dict[lbl]}
+        for lbl in _SLOT_ORDER if lbl in slots_dict
+    ]
+
+    # Sort attackers: final blow first, then damage_done DESC
+    attackers_sorted = sorted(
+        attackers,
+        key=lambda a: (not a.final_blow, -(a.damage_done or 0)),
+    )
+    max_damage = max((a.damage_done or 0) for a in attackers) if attackers else 0
+    total_damage = sum(a.damage_done or 0 for a in attackers)
+
+    our_char_ids: set[int] = set()
+    att_char_ids = [a.character_id for a in attackers if a.character_id]
+    if att_char_ids:
+        rows = await db.execute(
+            select(Character.character_id).where(Character.character_id.in_(att_char_ids))
+        )
+        our_char_ids = {r[0] for r in rows.all()}
+
+    attackers_view = []
+    for a in attackers_sorted:
+        dmg = a.damage_done or 0
+        attackers_view.append({
+            "pilot_id": a.character_id,
+            "pilot": name_map.get(a.character_id, "?") if a.character_id else "NPC",
+            "corp": name_map.get(a.corporation_id, "") if a.corporation_id else "",
+            "ship_id": a.ship_type_id,
+            "ship": name_map.get(a.ship_type_id, "?") if a.ship_type_id else "—",
+            "weapon": name_map.get(a.weapon_type_id, "—") if a.weapon_type_id else "—",
+            "damage": dmg,
+            "damage_pct": int(100 * dmg / max_damage) if max_damage else 0,
+            "share_pct": round(100 * dmg / total_damage, 1) if total_damage else 0,
+            "final_blow": bool(a.final_blow),
+            "internal_link": (a.character_id in our_char_ids) if a.character_id else False,
+            "has_damage": dmg > 0,
+        })
+
+    response = templates.TemplateResponse(
+        "partials/intel_kills_detail.html",
+        {
+            "request": request,
+            "kid": killmail_id,
+            "km": km,
+            "victim_pilot": name_map.get(km.victim_character_id, "?") if km.victim_character_id else "NPC",
+            "victim_corp": name_map.get(km.victim_corporation_id, "") if km.victim_corporation_id else "",
+            "victim_ship": name_map.get(km.victim_ship_type_id, "?") if km.victim_ship_type_id else "?",
+            "system_name": system_name,
+            "slots": slots_ordered,
+            "items_present": bool(items),
+            "attackers": attackers_view,
+            "attacker_count": len(attackers),
+            "total_damage": total_damage,
+            "total_destroyed": km.total_value or 0,
+        },
+    )
+    response.headers["Cache-Control"] = "max-age=86400, immutable"
+    return response

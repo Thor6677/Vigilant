@@ -38,6 +38,30 @@
   .kf-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
   .kf-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
   .kf-chip-removable .x { font-weight:700; }
+  .kf-detail { padding:14px; background:rgba(94,177,255,0.04); border-bottom:2px solid var(--accent); }
+  .kf-detail h4 { margin:0 0 6px; font-size:10px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase; }
+  .kf-detail-top { display:grid; grid-template-columns:240px 1fr 220px; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border); margin-bottom:14px; }
+  .kf-victim-card { display:flex; gap:12px; align-items:flex-start; font-size:11px; line-height:1.6; }
+  .kf-slot-group { margin-bottom:6px; }
+  .kf-slot-label { font-size:9px; color:var(--muted); letter-spacing:0.12em; margin-bottom:2px; text-transform:uppercase; }
+  .kf-slot { display:grid; grid-template-columns:18px 1fr 14px; gap:6px; padding:2px 0; align-items:center; font-size:10px; }
+  .kf-slot-name { color:var(--text); }
+  .kf-slot-name.dropped { color:#4ade80; }
+  .kf-slot-name.destroyed { color:#ef4444; opacity:0.85; }
+  .kf-slot-dot { width:6px; height:6px; border-radius:50%; }
+  .kf-slot-dot.d { background:#ef4444; }
+  .kf-slot-dot.k { background:#4ade80; }
+  .kf-summary { background:var(--surface); padding:10px; border-radius:3px; font-size:11px; }
+  .kf-summary-row { display:flex; justify-content:space-between; padding:3px 0; color:var(--text); }
+  .kf-summary-label { color:var(--muted); font-size:10px; }
+  .kf-attacker { display:grid; grid-template-columns:28px 1fr 100px 100px 110px 50px; gap:8px; padding:5px 0; border-bottom:1px dotted var(--border); align-items:center; font-size:11px; }
+  .kf-attacker.fb { background:rgba(239,68,68,0.05); }
+  .kf-fb-badge { display:inline-block; background:#ef4444; color:#0a0c0f; padding:1px 5px; font-size:8px; font-weight:700; letter-spacing:0.08em; border-radius:2px; margin-left:4px; vertical-align:middle; }
+  .kf-dmg-bar { height:4px; background:var(--surface); border-radius:2px; margin-top:3px; overflow:hidden; }
+  .kf-dmg-bar .fill { height:100%; background:linear-gradient(90deg,#facc15,#ef4444); }
+  .kf-row { cursor:pointer; }
+  .kf-row:hover { background:rgba(94,177,255,0.04); }
+  .kf-row.open { background:rgba(94,177,255,0.08); border-bottom:1px solid var(--accent); }
 </style>
 {% endblock %}
 
@@ -378,6 +402,31 @@
         olderContainer.style.display = 'block';
       }
     });
+
+    // ------ Task 10: Click-to-expand detail panel ------
+    function bindRowClicks() {
+      document.querySelectorAll('#kf-feed .kf-row').forEach(function(row) {
+        if (row.dataset.bound === '1') return;
+        row.dataset.bound = '1';
+        row.addEventListener('click', function() {
+          var kid = row.dataset.kid;
+          var existing = document.querySelector('.kf-detail[data-kid="' + kid + '"]');
+          if (existing) {
+            existing.remove();
+            row.classList.remove('open');
+            return;
+          }
+          row.classList.add('open');
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              row.insertAdjacentHTML('afterend', html);
+            });
+        });
+      });
+    }
+    document.addEventListener('htmx:afterSwap', bindRowClicks);
+    bindRowClicks();
   })();
 </script>
 {% endblock %}
