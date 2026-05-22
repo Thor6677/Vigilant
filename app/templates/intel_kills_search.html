@@ -750,11 +750,13 @@
 
     function livePoll() {
       if (!state.live || !liveEnabledCheck() || !currentNewestCursor) return;
+      var myGen = fetchGeneration;  // snapshot, don't increment
       var qs = buildQS();
       var sep = qs ? '&' : '?';
       fetch('/intel/kills/search/results' + qs + sep + 'live=1&since=' + encodeURIComponent(currentNewestCursor))
         .then(function(r) { return r.text(); })
         .then(function(html) {
+          if (myGen !== fetchGeneration) return;  // filter changed mid-flight — discard
           var feed = document.getElementById('kfs-results');
           if (!feed) return;
           var tmp = document.createElement('div');

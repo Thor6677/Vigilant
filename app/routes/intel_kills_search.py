@@ -84,6 +84,50 @@ def _split_set(s: str) -> set[str]:
     return {p.strip() for p in (s or "").split(",") if p.strip()}
 
 
+# Forward index: system_id → effective wormhole_class_id (3-tier fallback).
+# Built lazily at module-level on first WH-class filter; refreshed at the
+# same 1h cadence as the underlying _wh_class_cache.
+_wh_system_class_map: dict[int, int] | None = None
+_wh_system_class_map_ts: datetime | None = None
+_WH_FWD_TTL = 3600  # seconds
+
+
+async def _ensure_wh_system_class_map(db: AsyncSession) -> dict[int, int]:
+    """Build system_id → wormhole_class_id forward map with system → constellation
+    → region fallback. Mirrors the resolution logic in
+    app/sde/lookup.py:get_system_wh_class.
+    """
+    global _wh_system_class_map, _wh_system_class_map_ts
+    now = datetime.utcnow()
+    if (
+        _wh_system_class_map is not None
+        and _wh_system_class_map_ts is not None
+        and (now - _wh_system_class_map_ts).total_seconds() < _WH_FWD_TTL
+    ):
+        return _wh_system_class_map
+
+    await _ensure_wh_class_cache(db)
+    raw_cache = sde_lookup._wh_class_cache or {}
+
+    # Pull every WH/Pochven system + its constellation_id + region_id.
+    # WH range 31000000-31999999 AND Pochven systems (~30002000 K-space IDs).
+    result = await db.execute(
+        select(SDESystem.system_id, SDESystem.constellation_id, SDESystem.region_id)
+        .where(SDESystem.system_id >= WH_SYSTEM_MIN)
+    )
+    fwd: dict[int, int] = {}
+    for sid, cid, rid in result.all():
+        if sid in raw_cache:
+            fwd[sid] = raw_cache[sid]
+        elif cid and cid in raw_cache:
+            fwd[sid] = raw_cache[cid]
+        elif rid and rid in raw_cache:
+            fwd[sid] = raw_cache[rid]
+    _wh_system_class_map = fwd
+    _wh_system_class_map_ts = now
+    return fwd
+
+
 @router.get("/intel/kills/search", response_class=HTMLResponse)
 async def intel_kills_search_page(
     request: Request,
@@ -133,22 +177,26 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         if "ns" in space:
             space_conds.append(and_(SDESystem.security <= 0.0, SDESystem.system_id < WH_SYSTEM_MIN))
         if "wh" in space:
-            space_conds.append(and_(SDESystem.system_id >= WH_SYSTEM_MIN, SDESystem.system_id <= WH_SYSTEM_MAX))
+            wh_classes = params.get("wh_class") or set()
+            if "pochven" in wh_classes:
+                # Don't add a space-side WH restriction — the wh_class IN-filter
+                # below will narrow to exactly the Pochven systems. (Pochven
+                # retains K-space IDs, so the WH range predicate would exclude
+                # them.)
+                pass
+            else:
+                space_conds.append(and_(SDESystem.system_id >= WH_SYSTEM_MIN, SDESystem.system_id <= WH_SYSTEM_MAX))
         if "abyssal" in space:
             space_conds.append(and_(SDESystem.system_id >= ABYSSAL_SYSTEM_MIN, SDESystem.system_id <= ABYSSAL_SYSTEM_MAX))
         if space_conds:
             where.append(or_(*space_conds))
 
-    # ── WH sub-class (only meaningful when WH selected) ───────────────
+    # ── WH sub-class (only meaningful when WH selected; Pochven special-cased below) ──
     wh_class = params.get("wh_class") or set()
-    if wh_class and "wh" in space:
-        # Pre-resolve system_ids matching the requested classes from the SDE cache.
-        await _ensure_wh_class_cache(db)
-        wh_cache = sde_lookup._wh_class_cache or {}
+    if wh_class and ("wh" in space or "pochven" in wh_class):
+        fwd = await _ensure_wh_system_class_map(db)
         wanted_ids = {WH_CLASS_ID_MAP[c] for c in wh_class if c in WH_CLASS_ID_MAP}
-        matching_systems = {sid for sid, cid in wh_cache.items() if cid in wanted_ids}
-        # Filter to system-level matches only (cache also stores constellation/region IDs;
-        # filter against the actual sde_systems rows to drop the non-system keys).
+        matching_systems = {sid for sid, cid in fwd.items() if cid in wanted_ids}
         if matching_systems:
             where.append(Killmail.solar_system_id.in_(matching_systems))
         else:
