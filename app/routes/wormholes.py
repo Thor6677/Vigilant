@@ -196,7 +196,16 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
 
     # Community data
     system_name = sys_detail["system_name"]
-    statics = _wh_data.get("system_statics", {}).get(system_name, [])
+    # ISS-014: 37 J-systems are absent from the community-sourced
+    # system_statics map (5 named drifter complexes + 32 shattered
+    # class-13 J-numbered). The key being missing vs being present-
+    # but-empty is the difference between "data not curated" and
+    # "system has no statics" — surface that to the template so the
+    # UI can render an explicit note instead of silently omitting
+    # the section.
+    statics_map = _wh_data.get("system_statics", {})
+    statics = statics_map.get(system_name, [])
+    statics_known = system_name in statics_map
     effect_key = _wh_data.get("system_effects", {}).get(system_name)
     effect_info = None
     if effect_key:
@@ -244,6 +253,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
     return templates.TemplateResponse(request, "wormhole_system.html", {"system": sys_detail,
         "celestials": celestials,
         "statics": static_details,
+        "statics_known": statics_known,
         "wandering": wandering,
         "effect": effect_info,
         "wh_class": wh_class,

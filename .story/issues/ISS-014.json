@@ -15,9 +15,9 @@
   "relatedTickets": [
     "T-017"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Closed as **UX-improvement-with-documentation-of-the-gap**. The data gap itself remains — there is no community source that covers these 37 systems and they aren't fillable from the SDE — but the UI now surfaces the absence explicitly instead of silently omitting the section.\n\n**Verification of the gap (2026-05-21):** Diffed live SDE J-systems (2,604) vs `app/data/wormholes.json:system_statics` (2,568). Missing exactly 37 systems matching the original ISS-014 finding:\n- 5 named drifter complexes: Azdaja Redoubt (class 18), Conflux Eyrie (17), Liberated Barbican (15), Sanctified Vidette (16), Sentinel MZ (14).\n- 32 J-numbered systems with `wormhole_class_id = NULL` in the SDE (shattered/uncatalogued).\n\n**What changed:**\n\n- `app/routes/wormholes.py:wormhole_system` — added a `statics_known` boolean to the response context: true when the system name is present as a key in `system_statics` (even with an empty list), false when the key is absent. Distinguishes \"data not curated for this system\" from \"system has no statics\".\n- `app/templates/wormhole_system.html` — when `statics` is empty AND `statics_known` is false, render an italicised note in the Statics row: *\"Not catalogued — community data does not cover this system\"*. When `statics_known` is true with an empty list (would be an unusual case — none today), the section stays hidden, matching prior behavior.\n\n**What was rejected and why:**\n\n- Filling the 37 entries with explicit empty-list values in wormholes.json — same runtime behavior as the current `.get(name, [])` fallback, no signal gained.\n- Pulling fresher community data (anoikis.info / WHDBX successor) — those datasets are derived from WHDBX and explicitly don't track these systems, so a pull wouldn't close the gap. Documented in the original ISS-014 finding.\n\n**Net effect:** A user landing on `/wormholes/system/Sentinel%20MZ` (or any of the 36 others) now sees an explicit \"Not catalogued\" note rather than wondering why the page is missing a Statics row. Same content for the 2,568 systems that ARE in the map.\n\nCommit: pending deploy.",
+  "resolvedDate": "2026-05-21",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "37 J-systems known to SDE but absent from wormholes.json:system_statics"
 }

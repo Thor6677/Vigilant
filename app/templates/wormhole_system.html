@@ -67,6 +67,14 @@
             </span>
             {% endfor %}
         </div>
+        {% elif not statics_known %}
+        {# ISS-014: 37 J-systems (5 drifter complexes + 32 shattered c13 J-numbered) are
+           absent from the community-sourced static map. Show an explicit note rather
+           than a silently-empty section so users can tell uncatalogued from "no statics". #}
+        <div style="margin-bottom:0.4rem;">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Statics</span>
+            <span class="b-muted-sm" style="font-style:italic;">Not catalogued — community data does not cover this system</span>
+        </div>
         {% endif %}
         {% if wandering %}
         <div>
