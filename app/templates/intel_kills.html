@@ -453,15 +453,15 @@
 
     // ------ Click-to-expand detail panel + polling pause + animations ------
 
-    // Suppress the every-15s live-poll fetch whenever any detail panel is
-    // open OR older-mode is active. htmx parses hx-trigger only at process
-    // time, so toggling the attribute later does nothing — instead we cancel
-    // the request at fire time. The polling interval keeps ticking but the
-    // request is preventDefault'd, which is exactly what we want.
+    // Suppress the every-15s live-poll fetch only when older-mode is active
+    // (the user explicitly paused to browse history). Detail panels stay
+    // open during live polls — new kills prepend at the top, and the browser
+    // keeps existing content (including any open detail panel) anchored at
+    // its current scroll position. User scrolls up if they want to see the
+    // new arrivals.
     document.addEventListener('htmx:beforeRequest', function(e) {
       if (!e.target || e.target.id !== 'kf-feed') return;
-      if (olderMode) { e.preventDefault(); return; }
-      if (document.querySelector('.kf-detail')) { e.preventDefault(); return; }
+      if (olderMode) e.preventDefault();
     });
     function updatePollingState() { /* no-op kept for call sites */ }
 
