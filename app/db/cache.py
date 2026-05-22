@@ -27,6 +27,7 @@ TTL = {
     "search":           300,          # search results — 5 min
     "corp_contracts":   300,          # corp contracts list — 5 min
     "contract_items":   14400,        # contract items (stable while outstanding) — 4h
+    "intel_kills_resolve_entity": 86400,  # autocomplete name resolves — 24h
 }
 
 
@@ -53,6 +54,7 @@ def _ttl_for_path(path: str) -> int:
     if "/universe/constellations/" in path: return TTL["universe_const"]
     if "/universe/regions/" in path:     return TTL["universe_const"]
     if "/universe/names" in path:        return TTL["universe_names"]
+    if "/intel_kills/resolve_entity" in path: return TTL["intel_kills_resolve_entity"]
     # Public character info: /characters/12345/ (no sub-path beyond the ID)
     import re as _re
     if _re.match(r'^/characters/\d+/?$', path):

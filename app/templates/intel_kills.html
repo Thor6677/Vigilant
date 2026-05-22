@@ -71,6 +71,22 @@
       </div>
       <div id="kf-ship-chips" class="kf-chips"></div>
     </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Attacker</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-attacker-input" class="kf-ac-input" placeholder="char / corp / alli" autocomplete="off">
+        <div id="kf-attacker-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-attacker-chips" class="kf-chips"></div>
+    </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Victim</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-victim-input" class="kf-ac-input" placeholder="char / corp / alli" autocomplete="off">
+        <div id="kf-victim-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-victim-chips" class="kf-chips"></div>
+    </div>
   </div>
 
   <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
@@ -99,14 +115,23 @@
     var STORAGE_KEY = 'vigilant:kf:filters';
     var state;
     try {
-      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false,"ship_ids":[]}');
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false,"ship_ids":[],"attacker_ids":[],"victim_ids":[]}');
     } catch (e) {
-      state = {space: [], wh_class: [], shattered: false, ship_ids: []};
+      state = {space: [], wh_class: [], shattered: false, ship_ids: [], attacker_ids: [], victim_ids: []};
     }
     if (!Array.isArray(state.space)) state.space = [];
     if (!Array.isArray(state.wh_class)) state.wh_class = [];
     if (!Array.isArray(state.ship_ids)) state.ship_ids = [];
+    if (!Array.isArray(state.attacker_ids)) state.attacker_ids = [];
+    if (!Array.isArray(state.victim_ids)) state.victim_ids = [];
     state.shattered = !!state.shattered;
+
+    // Migrate Task 7's ship_ids ({id, name}) → ({id, name, kind:'ship', key:'ship:ID'})
+    // so the generic bindAutocomplete chip-removal works without special cases.
+    state.ship_ids.forEach(function(s) {
+      if (!s.kind) s.kind = 'ship';
+      if (!s.key) s.key = 'ship:' + s.id;
+    });
 
     function applyToChips() {
       document.querySelectorAll('.kf-chip[data-space]').forEach(function(el) {
@@ -122,6 +147,12 @@
       if (whRow) whRow.style.display = (state.space.indexOf('wh') !== -1) ? 'flex' : 'none';
     }
 
+    function entitySplit(arr) {
+      var by = {character: [], corporation: [], alliance: []};
+      (arr || []).forEach(function(e) { if (by[e.kind]) by[e.kind].push(e.id); });
+      return by;
+    }
+
     function buildQS() {
       var qs = [];
       if (state.space.length) qs.push('space=' + state.space.join(','));
@@ -130,66 +161,15 @@
       if (state.ship_ids && state.ship_ids.length) {
         qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
       }
+      var aSplit = entitySplit(state.attacker_ids);
+      if (aSplit.character.length) qs.push('attacker_char=' + aSplit.character.join(','));
+      if (aSplit.corporation.length) qs.push('attacker_corp=' + aSplit.corporation.join(','));
+      if (aSplit.alliance.length) qs.push('attacker_alli=' + aSplit.alliance.join(','));
+      var vSplit = entitySplit(state.victim_ids);
+      if (vSplit.character.length) qs.push('victim_char=' + vSplit.character.join(','));
+      if (vSplit.corporation.length) qs.push('victim_corp=' + vSplit.corporation.join(','));
+      if (vSplit.alliance.length) qs.push('victim_alli=' + vSplit.alliance.join(','));
       return qs.length ? '?' + qs.join('&') : '';
-    }
-
-    function renderShipChips() {
-      var container = document.getElementById('kf-ship-chips');
-      if (!container) return;
-      container.innerHTML = state.ship_ids.map(function(s) {
-        return '<span class="kf-chip-removable" data-rm-ship="' + s.id + '">' +
-               (s.name || ('#' + s.id)) + '<span class="x">×</span></span>';
-      }).join('');
-      container.querySelectorAll('[data-rm-ship]').forEach(function(el) {
-        el.addEventListener('click', function() {
-          var id = parseInt(el.dataset.rmShip, 10);
-          state.ship_ids = state.ship_ids.filter(function(s) { return s.id !== id; });
-          renderShipChips();
-          persist();
-        });
-      });
-    }
-
-    function bindShipAutocomplete() {
-      var shipInput = document.getElementById('kf-ship-input');
-      var shipResults = document.getElementById('kf-ship-results');
-      if (!shipInput || !shipResults) return;
-      var shipDebounce;
-      shipInput.addEventListener('input', function() {
-        clearTimeout(shipDebounce);
-        var q = shipInput.value.trim();
-        if (q.length < 2) { shipResults.classList.remove('show'); shipResults.innerHTML = ''; return; }
-        shipDebounce = setTimeout(function() {
-          fetch('/intel/kills/resolve?kind=ship&q=' + encodeURIComponent(q))
-            .then(function(r) { return r.json(); })
-            .then(function(items) {
-              shipResults.innerHTML = items.map(function(it) {
-                var name = (it.name || '').replace(/"/g, '&quot;');
-                return '<div class="kf-ac-result" data-id="' + it.id + '" data-name="' + name + '">' + name + '</div>';
-              }).join('');
-              shipResults.classList.toggle('show', items.length > 0);
-              shipResults.querySelectorAll('.kf-ac-result').forEach(function(el) {
-                el.addEventListener('click', function() {
-                  var id = parseInt(el.dataset.id, 10);
-                  if (!state.ship_ids.some(function(s) { return s.id === id; })) {
-                    state.ship_ids.push({id: id, name: el.dataset.name});
-                  }
-                  shipInput.value = '';
-                  shipResults.classList.remove('show');
-                  shipResults.innerHTML = '';
-                  renderShipChips();
-                  persist();
-                });
-              });
-            })
-            .catch(function() { shipResults.classList.remove('show'); });
-        }, 250);
-      });
-      document.addEventListener('click', function(e) {
-        if (!shipInput.contains(e.target) && !shipResults.contains(e.target)) {
-          shipResults.classList.remove('show');
-        }
-      });
     }
 
     function persist() {
@@ -202,6 +182,78 @@
         feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
         if (window.htmx) htmx.trigger(feed, 'load');
       }
+    }
+
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function bindAutocomplete(inputId, resultsId, chipsId, stateKey, kind) {
+      var input = document.getElementById(inputId);
+      var results = document.getElementById(resultsId);
+      var chips = document.getElementById(chipsId);
+      if (!input || !results || !chips) return;
+      var debounce;
+
+      function render() {
+        var items = (state[stateKey] || []);
+        chips.innerHTML = items.map(function(e) {
+          var label = e.kind && e.kind !== 'ship' ? (escAttr(e.name) + ' (' + escAttr(e.kind) + ')') : escAttr(e.name);
+          return '<span class="kf-chip-removable" data-rm-key="' + escAttr(e.key) + '">' + label + '<span class="x">×</span></span>';
+        }).join('');
+        chips.querySelectorAll('[data-rm-key]').forEach(function(el) {
+          el.addEventListener('click', function() {
+            state[stateKey] = (state[stateKey] || []).filter(function(e) { return e.key !== el.dataset.rmKey; });
+            render();
+            persist();
+          });
+        });
+      }
+
+      input.addEventListener('input', function() {
+        clearTimeout(debounce);
+        var q = input.value.trim();
+        if (q.length < 2) { results.classList.remove('show'); results.innerHTML = ''; return; }
+        debounce = setTimeout(function() {
+          fetch('/intel/kills/resolve?kind=' + encodeURIComponent(kind) + '&q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(items) {
+              results.innerHTML = items.map(function(it) {
+                var name = escAttr(it.name || '');
+                var k = escAttr(it.kind || '');
+                var label = it.kind && it.kind !== 'ship' ? (name + ' <span style="color:var(--muted);">(' + k + ')</span>') : name;
+                return '<div class="kf-ac-result" data-id="' + it.id + '" data-kind="' + k + '" data-name="' + name + '">' + label + '</div>';
+              }).join('');
+              results.classList.toggle('show', items.length > 0);
+              results.querySelectorAll('.kf-ac-result').forEach(function(el) {
+                el.addEventListener('click', function() {
+                  var entry = {
+                    id: parseInt(el.dataset.id, 10),
+                    kind: el.dataset.kind || 'ship',
+                    name: el.dataset.name,
+                  };
+                  entry.key = entry.kind + ':' + entry.id;
+                  if (!Array.isArray(state[stateKey])) state[stateKey] = [];
+                  if (!state[stateKey].some(function(e) { return e.key === entry.key; })) {
+                    state[stateKey].push(entry);
+                  }
+                  input.value = '';
+                  results.classList.remove('show');
+                  results.innerHTML = '';
+                  render();
+                  persist();
+                });
+              });
+            })
+            .catch(function() { results.classList.remove('show'); });
+        }, 250);
+      });
+      document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !results.contains(e.target)) {
+          results.classList.remove('show');
+        }
+      });
+      render();
     }
 
     function toggle(arr, v) {
@@ -230,14 +282,14 @@
       state.shattered = !!qsShat && qsShat !== '0';
     }
     applyToChips();
-    renderShipChips();
-    bindShipAutocomplete();
+    bindAutocomplete('kf-ship-input',     'kf-ship-results',     'kf-ship-chips',     'ship_ids',     'ship');
+    bindAutocomplete('kf-attacker-input', 'kf-attacker-results', 'kf-attacker-chips', 'attacker_ids', 'entity');
+    bindAutocomplete('kf-victim-input',   'kf-victim-results',   'kf-victim-chips',   'victim_ids',   'entity');
     // Override Task 5's hardcoded hx-get URL with any restored filter QS before
     // htmx fires the initial `load` trigger.
-    // Note: ship_id from URL is intentionally not restored (no cheap name
-    // resolve by raw id); localStorage handles personal-use persistence.
-    // Shared URLs still filter server-side because buildQS includes ship_id
-    // from any state we have — empty if only URL had it.
+    // Note: ship_id / attacker_* / victim_* from URL are intentionally not
+    // hydrated (no cheap name resolve by raw id); localStorage carries the
+    // labeled chips for personal-use persistence.
     var feed = document.getElementById('kf-feed');
     if (feed) feed.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
   })();

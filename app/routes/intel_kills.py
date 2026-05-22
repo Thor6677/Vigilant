@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.cache import cache_get, cache_set
 from app.db.models import get_db
 from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
 from app.intel.recent_battles import resolve_entity_names
@@ -105,6 +107,12 @@ async def intel_kills_feed(
     wh_class: str = "",
     shattered: int = 0,
     ship_id: str = "",
+    attacker_char: str = "",
+    attacker_corp: str = "",
+    attacker_alli: str = "",
+    victim_char: str = "",
+    victim_corp: str = "",
+    victim_alli: str = "",
     db: AsyncSession = Depends(get_db),
 ):
     """Live tail — reads _recent_kills in memory, renders the row partial.
@@ -115,6 +123,12 @@ async def intel_kills_feed(
     "c5,c6"). `shattered=1` to require shattered systems only.
     `ship_id`: comma-separated SDE type IDs — OR-multiselect over
     victim.ship_type_id.
+    `attacker_char`/`attacker_corp`/`attacker_alli`: comma-separated entity
+    IDs — OR within group; AND across the three (any attacker on the kill
+    must match at least one of the three groups). Cross-category with
+    victim_* / ship_id / space is AND.
+    `victim_char`/`victim_corp`/`victim_alli`: same shape, matched against
+    the kill's victim.character_id/corporation_id/alliance_id.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -124,6 +138,16 @@ async def intel_kills_feed(
     wh_classes = {c.strip() for c in wh_class.split(",") if c.strip()}
     shattered_only = bool(shattered)
     ship_ids = {int(s) for s in ship_id.split(",") if s.strip().isdigit()}
+
+    def _ids(s: str) -> set[int]:
+        return {int(x) for x in s.split(",") if x.strip().isdigit()}
+
+    a_chars = _ids(attacker_char)
+    a_corps = _ids(attacker_corp)
+    a_allis = _ids(attacker_alli)
+    v_chars = _ids(victim_char)
+    v_corps = _ids(victim_corp)
+    v_allis = _ids(victim_alli)
 
     kills = get_recent_kills()
     kills = sorted(kills, key=lambda k: k.get("killmail_id") or 0, reverse=True)
@@ -137,6 +161,25 @@ async def intel_kills_feed(
         kills = [
             k for k in kills
             if ((k.get("victim") or {}).get("ship_type_id") in ship_ids)
+        ]
+
+    if a_chars or a_corps or a_allis:
+        kills = [
+            k for k in kills
+            if any(
+                (a.get("character_id") in a_chars)
+                or (a.get("corporation_id") in a_corps)
+                or (a.get("alliance_id") in a_allis)
+                for a in (k.get("attackers") or [])
+            )
+        ]
+
+    if v_chars or v_corps or v_allis:
+        kills = [
+            k for k in kills
+            if ((k.get("victim") or {}).get("character_id") in v_chars)
+            or ((k.get("victim") or {}).get("corporation_id") in v_corps)
+            or ((k.get("victim") or {}).get("alliance_id") in v_allis)
         ]
 
     if not since:
@@ -248,8 +291,10 @@ async def intel_kills_resolve(
 
     - `kind=ship`: local SDE substring match against published ships
       (categoryID=6). Returns up to 8 `{id, name, kind}` rows.
-    - `kind=entity`: ESI /universe/ids autocomplete (Task 8 — not yet
-      implemented; returns empty list).
+    - `kind=entity`: ESI /universe/ids autocomplete. Returns up to 5 of
+      each kind (character / corporation / alliance) labeled `kind`.
+      Cached 24h via the shared ESI cache (TTL keyed on
+      `/intel_kills/resolve_entity` in `_ttl_for_path`).
 
     Requires auth; returns [] for unknown kinds.
     """
@@ -261,4 +306,45 @@ async def intel_kills_resolve(
         return JSONResponse([])
     if kind == "ship":
         return JSONResponse(await search_ship_types(db, q))
+    if kind == "entity":
+        return JSONResponse(await _resolve_entity(q))
     return JSONResponse([])
+
+
+async def _resolve_entity(q: str) -> list[dict]:
+    """ESI `/universe/ids/` autocomplete, cached 24h.
+
+    Returns up to 5 entries from each of {character, corporation, alliance}
+    with a `kind` label so the client can disambiguate same-numeric IDs
+    across kinds.
+    """
+    cache_path = f"/intel_kills/resolve_entity/{q.lower()}"
+    cached = await cache_get(None, cache_path)
+    if cached is not None:
+        return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                "https://esi.evetech.net/latest/universe/ids/",
+                json=[q],
+                headers={"User-Agent": "Vigilant/1.0 (happyfun.fatman@gmail.com)"},
+            )
+            r.raise_for_status()
+            data = r.json() if r.content else {}
+    except Exception as e:
+        log.warning("intel_kills: resolve entity failed for %r: %s", q, e)
+        return []
+
+    out: list[dict] = []
+    for kind_key, list_key in (
+        ("character", "characters"),
+        ("corporation", "corporations"),
+        ("alliance", "alliances"),
+    ):
+        for item in (data.get(list_key) or [])[:5]:
+            if item.get("id") and item.get("name"):
+                out.append({"id": item["id"], "name": item["name"], "kind": kind_key})
+
+    await cache_set(None, cache_path, out)
+    return out
