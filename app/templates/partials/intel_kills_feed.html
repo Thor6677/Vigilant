@@ -1,23 +1,5 @@
 {% if not older_mode %}
-<script nonce="{{ request.state.csp_nonce }}">
-  (function() {
-    var status = document.getElementById('kf-status');
-    if (status) status.textContent = 'LIVE · 1h · {{ total_in_buffer }} kills';
-    var feed = document.getElementById('kf-feed');
-    if (feed) {
-      // Preserve existing filter querystring; only refresh the `since` cursor.
-      var current = feed.getAttribute('hx-get') || '/intel/kills/feed';
-      var qsIdx = current.indexOf('?');
-      var base = qsIdx === -1 ? current : current.substring(0, qsIdx);
-      var qs = qsIdx === -1 ? '' : current.substring(qsIdx + 1);
-      var parts = qs.split('&').filter(function(p) { return p && p.indexOf('since=') !== 0; });
-      parts.push('since={{ newest_id }}');
-      feed.setAttribute('hx-get', base + '?' + parts.join('&'));
-    }
-    var loading = document.getElementById('kf-loading');
-    if (loading) loading.remove();
-  })();
-</script>
+<div hidden data-kf-marker data-kf-newest="{{ newest_id }}" data-kf-total="{{ total_in_buffer }}"></div>
 {% endif %}
 {% for k in kills %}
 <div class="kf-row" data-kid="{{ k['killmail_id'] }}">

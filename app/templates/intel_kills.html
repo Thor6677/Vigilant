@@ -499,9 +499,56 @@
     var kfInitialSwapDone = false;
     document.addEventListener('htmx:afterSwap', function(e) {
       if (!e.target || e.target.id !== 'kf-feed') return;
+      var feed = e.target;
+
+      // Consume the partial's marker (set by intel_kills_feed.html) to update
+      // both the live counter and the ?since=... cursor. We do this in the
+      // page-level JS rather than in an inline <script> inside the partial,
+      // because htmx-swapped script tags don't always execute under
+      // hx-swap="afterbegin" (CSP nonce mismatch + some browsers).
+      var markers = feed.querySelectorAll('[data-kf-marker]');
+      markers.forEach(function(marker) {
+        var newest = marker.getAttribute('data-kf-newest');
+        var total = marker.getAttribute('data-kf-total');
+        if (total) {
+          var status = document.getElementById('kf-status');
+          if (status) status.textContent = 'LIVE · 1h · ' + total + ' kills';
+        }
+        if (newest && newest !== '0') {
+          var current = feed.getAttribute('hx-get') || '/intel/kills/feed';
+          var qsIdx = current.indexOf('?');
+          var base = qsIdx === -1 ? current : current.substring(0, qsIdx);
+          var qs = qsIdx === -1 ? '' : current.substring(qsIdx + 1);
+          var parts = qs.split('&').filter(function(p) {
+            return p && p.indexOf('since=') !== 0;
+          });
+          parts.push('since=' + newest);
+          feed.setAttribute('hx-get', base + '?' + parts.join('&'));
+        }
+        marker.remove();
+      });
+
+      // Defensive dedupe: if the same killmail_id ever ends up in the feed
+      // twice (e.g. raced swap, cursor reset, transient stale state), keep
+      // only the first (top) occurrence.
+      var seenKids = {};
+      feed.querySelectorAll('.kf-row').forEach(function(row) {
+        var kid = row.dataset.kid;
+        if (!kid) return;
+        if (seenKids[kid]) {
+          row.remove();
+        } else {
+          seenKids[kid] = true;
+        }
+      });
+
+      // Remove the initial-load "Loading…" placeholder.
+      var loading = document.getElementById('kf-loading');
+      if (loading) loading.remove();
+
       if (kfInitialSwapDone) {
         // Any row not yet bound is a freshly-prepended live row.
-        document.querySelectorAll('#kf-feed .kf-row:not([data-bound])').forEach(function(row) {
+        feed.querySelectorAll('.kf-row:not([data-bound])').forEach(function(row) {
           row.classList.add('kf-new');
           setTimeout(function() { row.classList.remove('kf-new'); }, 650);
         });
