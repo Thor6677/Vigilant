@@ -72,7 +72,7 @@ PRIMETIME_BANDS = {
 WH_CLASS_ID_MAP = {
     "c1": 1, "c2": 2, "c3": 3, "c4": 4, "c5": 5, "c6": 6,
     "thera": 12, "drifter": 14,  # Drifter wormholes use class 14
-    "pochven": 25,  # Pochven systems have wh_class_id = 25
+    # pochven removed — now a top-level Space chip, not a WH sub-class
 }
 
 
@@ -179,23 +179,24 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         if "ns" in space:
             space_conds.append(and_(SDESystem.security <= 0.0, SDESystem.system_id < WH_SYSTEM_MIN))
         if "wh" in space:
-            wh_classes = params.get("wh_class") or set()
-            if "pochven" in wh_classes:
-                # Don't add a space-side WH restriction — the wh_class IN-filter
-                # below will narrow to exactly the Pochven systems. (Pochven
-                # retains K-space IDs, so the WH range predicate would exclude
-                # them.)
-                pass
-            else:
-                space_conds.append(and_(SDESystem.system_id >= WH_SYSTEM_MIN, SDESystem.system_id <= WH_SYSTEM_MAX))
+            space_conds.append(and_(SDESystem.system_id >= WH_SYSTEM_MIN, SDESystem.system_id <= WH_SYSTEM_MAX))
         if "abyssal" in space:
             space_conds.append(and_(SDESystem.system_id >= ABYSSAL_SYSTEM_MIN, SDESystem.system_id <= ABYSSAL_SYSTEM_MAX))
+        if "pochven" in space:
+            # Pochven systems retain K-space IDs (~30002xxx). Resolve via the
+            # wormhole-class forward map (class=25) populated lazily.
+            fwd = await _ensure_wh_system_class_map(db)
+            pochven_sids = {sid for sid, cid in fwd.items() if cid == 25}
+            if pochven_sids:
+                space_conds.append(Killmail.solar_system_id.in_(pochven_sids))
+            else:
+                space_conds.append(Killmail.killmail_id == -1)  # impossible — empty result
         if space_conds:
             where.append(or_(*space_conds))
 
     # ── WH sub-class (only meaningful when WH selected; Pochven special-cased below) ──
     wh_class = params.get("wh_class") or set()
-    if wh_class and ("wh" in space or "pochven" in wh_class):
+    if wh_class and "wh" in space:
         fwd = await _ensure_wh_system_class_map(db)
         wanted_ids = {WH_CLASS_ID_MAP[c] for c in wh_class if c in WH_CLASS_ID_MAP}
         matching_systems = {sid for sid, cid in fwd.items() if cid in wanted_ids}

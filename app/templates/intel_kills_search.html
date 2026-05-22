@@ -142,10 +142,11 @@
       <span class="kfs-chip" data-space="ns">NS</span>
       <span class="kfs-chip" data-space="wh">WH</span>
       <span class="kfs-chip" data-space="abyssal">Abyssal</span>
+      <span class="kfs-chip" data-space="pochven">Pochven</span>
     </div>
     <div class="kfs-filter-row" id="kfs-wh-subclasses" style="display:none;">
       <span class="kfs-glabel">WH class</span>
-      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter','Pochven'] %}
+      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter'] %}
       <span class="kfs-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
       {% endfor %}
     </div>
@@ -176,11 +177,11 @@
     </div>
     <div class="kfs-filter-row">
       <span class="kfs-glabel">Primetime</span>
-      <span class="kfs-chip" data-primetime="aus">Aus/CN</span>
-      <span class="kfs-chip" data-primetime="eu">EU</span>
-      <span class="kfs-chip" data-primetime="ru">RU</span>
-      <span class="kfs-chip" data-primetime="use">USE</span>
-      <span class="kfs-chip" data-primetime="usw">USW</span>
+      <span class="kfs-chip" data-primetime="aus" title="10:00–18:00 UTC">Aus/CN (10–18 UTC)</span>
+      <span class="kfs-chip" data-primetime="eu" title="18:00–02:00 UTC">EU (18–02 UTC)</span>
+      <span class="kfs-chip" data-primetime="ru" title="14:00–22:00 UTC">RU (14–22 UTC)</span>
+      <span class="kfs-chip" data-primetime="use" title="23:00–07:00 UTC">USE (23–07 UTC)</span>
+      <span class="kfs-chip" data-primetime="usw" title="02:00–10:00 UTC">USW (02–10 UTC)</span>
     </div>
     <div class="kfs-filter-row">
       <span class="kfs-glabel">Ship</span>
@@ -303,17 +304,18 @@
     }
 
     function buildQS() {
+      function encList(arr) { return arr.map(encodeURIComponent).join(','); }
       var qs = [];
       if (state.time) qs.push('time=' + state.time);
       if (state.time_start) qs.push('time_start=' + encodeURIComponent(state.time_start));
       if (state.time_end) qs.push('time_end=' + encodeURIComponent(state.time_end));
-      if (state.space.length) qs.push('space=' + state.space.join(','));
-      if (state.wh_class.length) qs.push('wh_class=' + state.wh_class.join(','));
+      if (state.space.length) qs.push('space=' + encList(state.space));
+      if (state.wh_class.length) qs.push('wh_class=' + encList(state.wh_class));
       if (state.shattered) qs.push('shattered=1');
-      if (state.category.length) qs.push('category=' + state.category.join(','));
-      if (state.count.length) qs.push('count=' + state.count.join(','));
-      if (state.isk) qs.push('isk=' + state.isk);
-      if (state.primetime.length) qs.push('primetime=' + state.primetime.join(','));
+      if (state.category.length) qs.push('category=' + encList(state.category));
+      if (state.count.length) qs.push('count=' + encList(state.count));
+      if (state.isk) qs.push('isk=' + encodeURIComponent(state.isk));
+      if (state.primetime.length) qs.push('primetime=' + encList(state.primetime));
       if (state.ship_ids.length) qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
       [['attacker_items','attacker'],['either_items','either'],['victim_items','victim']].forEach(function(pair) {
         var items = state[pair[0]];
@@ -360,6 +362,15 @@
       // Shattered modifier
       var sh = document.querySelector('.kfs-chip[data-mod="shattered"]');
       if (sh) sh.classList.toggle('on', !!state.shattered);
+      // And/In/Or mode buttons for the three entity sides
+      ['attacker', 'either', 'victim'].forEach(function(side) {
+        var stateKey = side + '_mode';
+        var group = document.querySelector('.kfs-modes[data-side="' + side + '"]');
+        if (!group) return;
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          btn.classList.toggle('on', btn.dataset.mode === state[stateKey]);
+        });
+      });
       // WH class row visibility
       var whRow = document.getElementById('kfs-wh-subclasses');
       if (whRow) whRow.style.display = state.space.indexOf('wh') !== -1 ? 'flex' : 'none';
@@ -395,7 +406,12 @@
             state.time_start = '';
             state.time_end = '';
           } else if (el.dataset.space !== undefined) {
-            toggleListMember(state.space, el.dataset.space);
+            // Single-select: clicking the active chip clears, clicking another swaps.
+            if (state.space.length === 1 && state.space[0] === el.dataset.space) {
+              state.space = [];
+            } else {
+              state.space = [el.dataset.space];
+            }
             if (state.space.indexOf('wh') === -1) { state.wh_class = []; state.shattered = false; }
           } else if (el.dataset.whclass !== undefined) {
             toggleListMember(state.wh_class, el.dataset.whclass);
@@ -495,6 +511,11 @@
       var totalIsk = marker.getAttribute('data-total-isk');
       currentOldestCursor = marker.getAttribute('data-oldest-cursor') || '';
       currentNewestCursor = marker.getAttribute('data-newest-cursor') || '';
+      // Restart live polling now that we have a fresh newest cursor.
+      if (state.live && liveEnabledCheck()) {
+        stopLivePoll();
+        startLivePoll();
+      }
       var rowCount = container.querySelectorAll('.kf-row').length;
 
       var showingEl = document.getElementById('kfs-stats-showing');
@@ -576,6 +597,20 @@
           console.error('Show more failed:', err);
         });
     });
+
+    // Auto-trigger Show More when user scrolls within ~400px of the button.
+    var showMoreObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          var btn = document.getElementById('kfs-show-more');
+          if (btn && !btn.disabled && currentOldestCursor) {
+            btn.click();
+          }
+        }
+      });
+    }, { rootMargin: '400px' });
+    var showMoreBtn = document.getElementById('kfs-show-more');
+    if (showMoreBtn) showMoreObserver.observe(showMoreBtn);
 
     // ── row click → detail panel (reuses Feature A pattern) ────
     function bindRowClicks() {
@@ -797,14 +832,12 @@
       if (state.live) startLivePoll(); else stopLivePoll();
     });
 
-    // Wrap refetchResults so live polling pauses + restarts on filter change.
+    // Wrap refetchResults so live polling pauses on filter change.
+    // Polling restarts inside consumeMarker once currentNewestCursor populates.
     var _prev_refetchResults = refetchResults;
     refetchResults = function() {
       stopLivePoll();
       _prev_refetchResults();
-      if (state.live && liveEnabledCheck()) {
-        setTimeout(startLivePoll, 100);
-      }
     };
 
     // ── init ───────────────────────────────────────────────────
