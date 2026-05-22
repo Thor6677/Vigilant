@@ -60,6 +60,11 @@
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
             <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
             {% endfor %}
+            {# ISS-014 follow-up: 5 named drifter complexes (Sentinel MZ etc.) and
+               the 32 J-numbered uncatalogued systems are filterable separately,
+               since they don't have community static data. #}
+            <button class="wf-btn" data-filter="class" data-val="drifter" style="color:{{ class_colors['14'] }};" onclick="toggleFilter(this)" title="Sentinel MZ, Liberated Barbican, Sanctified Vidette, Conflux Eyrie, Azdaja Redoubt (classes 14-18)">Drifter</button>
+            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems with no SDE class — shattered/special systems with only wandering connections">Uncatalogued</button>
         </div>
     </div>
 

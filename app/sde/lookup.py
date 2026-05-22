@@ -739,6 +739,8 @@ async def _ensure_planet_types_cache(db: AsyncSession):
 async def get_wormhole_systems(
     db: AsyncSession,
     class_filter: list[int] | None = None,
+    include_drifter: bool = False,
+    include_uncatalogued: bool = False,
     effect_filter: str | None = None,
     static_dest_filter: list[int] | None = None,
     planet_filter: list[str] | None = None,
@@ -761,13 +763,25 @@ async def get_wormhole_systems(
     if planet_filter or perfect_pi:
         await _ensure_planet_types_cache(db)
 
-    # Get all J-space systems
+    # Get all J-space systems. Without the drifter filter active we restrict
+    # to "J" + 6 digits names — that's 2,568 of 2,604 SDE J-systems. When
+    # drifter is active we widen to the full W-space ID range (31000000..)
+    # so the 5 named complexes (Sentinel MZ, Liberated Barbican, etc.)
+    # become matchable.
     query = (
         select(SDESystem.system_id, SDESystem.system_name,
                SDESystem.constellation_id, SDESystem.region_id)
-        .where(SDESystem.system_name.like("J%"))
-        .where(func.length(SDESystem.system_name) == 7)
     )
+    if include_drifter:
+        query = query.where(
+            SDESystem.system_id >= 31_000_000,
+            SDESystem.system_id < 32_000_000,
+        )
+    else:
+        query = query.where(
+            SDESystem.system_name.like("J%"),
+            func.length(SDESystem.system_name) == 7,
+        )
     if search:
         query = query.where(func.lower(SDESystem.system_name).contains(search.lower()))
     query = query.order_by(SDESystem.system_name)
@@ -788,6 +802,13 @@ async def get_wormhole_systems(
             if r.target_class:
                 wh_type_dest[short] = int(r.target_class)
 
+    # Allowed wh_class set: standard C1-C6+C13 always; drifter (14-18)
+    # only when explicitly requested. Uncatalogued (wh_class=None) is
+    # handled by a separate flag below since None isn't a number.
+    allowed_classes = {1, 2, 3, 4, 5, 6, 13}
+    if include_drifter:
+        allowed_classes |= {14, 15, 16, 17, 18}
+
     filtered = []
     for sys in all_systems:
         # Determine class
@@ -797,17 +818,25 @@ async def get_wormhole_systems(
         if wh_class is None and sys.region_id:
             wh_class = _wh_class_cache.get(sys.region_id)
         if wh_class is None:
-            continue
-
-        if wh_class not in (1, 2, 3, 4, 5, 6, 13):
+            # Uncatalogued systems pass only when explicitly opted in.
+            if not include_uncatalogued:
+                continue
+        elif wh_class not in allowed_classes:
             continue
 
         effect = system_effects.get(sys.system_name)
         statics = system_statics.get(sys.system_name, [])
 
-        # Class filter (multi-select)
-        if class_filter and wh_class not in class_filter:
-            continue
+        # Class filter (multi-select). For drifter/uncatalogued tokens, the
+        # class_filter (int list) is empty — the include_* flags above already
+        # gated membership. If user picked specific int classes AND drifter,
+        # accept systems matching either set.
+        if class_filter:
+            in_int_filter = wh_class in class_filter
+            in_drifter = include_drifter and wh_class in (14, 15, 16, 17, 18)
+            in_uncat = include_uncatalogued and wh_class is None
+            if not (in_int_filter or in_drifter or in_uncat):
+                continue
 
         # Effect filter
         if effect_filter == "none" and effect is not None:
