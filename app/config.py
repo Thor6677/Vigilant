@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     killmail_dashboard_enabled: bool = False
     killmail_battles_enabled: bool = False
     killmail_stream_enabled: bool = False  # killmail.stream live consumer for big-battle banner
+    killmail_gc_enabled: bool = False  # off by default so /intel/kills has full history
 
     class Config:
         env_file = ".env"

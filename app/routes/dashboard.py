@@ -1515,9 +1515,13 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("Killmail daily rollup error: %s", e)
 
-                # Daily GC of discovery-scope killmails (>30d, not-our-char)
-                if not hasattr(_background_scheduler, '_last_killmail_gc') or \
-                   (now - _background_scheduler._last_killmail_gc).total_seconds() >= 86400:
+                # Daily GC of discovery-scope killmails (>30d, not-our-char).
+                # Gated by KILLMAIL_GC_ENABLED — default off so /intel/kills
+                # has full history available.
+                if _km_settings.killmail_gc_enabled and (
+                    not hasattr(_background_scheduler, '_last_killmail_gc') or
+                    (now - _background_scheduler._last_killmail_gc).total_seconds() >= 86400
+                ):
                     try:
                         from app.intel.killmail_store import gc_discovery_killmails
                         removed = await gc_discovery_killmails(retention_days=30)

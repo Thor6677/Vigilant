@@ -189,7 +189,13 @@ async def gc_discovery_killmails(retention_days: int = 30) -> int:
     """Delete discovery-scope killmails older than retention_days. Our-char
     rows are preserved forever. Cascades to killmail_attackers for the deleted
     rows (SQLite has no FK cascade, so we delete explicitly). Returns killmail
-    row count deleted."""
+    row count deleted.
+
+    Gated by the KILLMAIL_GC_ENABLED config flag — disabled by default since
+    /intel/kills needs full kill history. Set the env var to opt-in."""
+    from app.config import get_settings
+    if not get_settings().killmail_gc_enabled:
+        return 0
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
     async with AsyncSessionLocal() as db:
