@@ -23,7 +23,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Integer, and_, cast, exists, func, or_, select
+from sqlalchemy import Float, Integer, and_, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Killmail, KillmailAttacker, get_db
@@ -549,7 +549,39 @@ def _compile_flag_clauses(flags: set[str], joins: set[str]) -> list:
             ),
         ))
 
-    # Task 4 will add 'padding'. Stub stays.
+    if "padding" in flags:
+        # Padding v1 heuristic. Three conditions:
+        #   1. attacker_count >= 5 (cheap; uses ix_killmails_attacker_count_kid)
+        #   2. at least one attacker has damage_done > 0 (otherwise the heuristic
+        #      can't be computed and we exclude — spec line 376-378)
+        #   3. (count of attackers with damage_done < max_damage * 1%) / attacker_count >= 0.5
+        #
+        # Conditions 2 and 3 are correlated subqueries on killmail_attackers.
+        # Perf: covered in Task 5 EXPLAIN. If full scans appear, Task 5 adds
+        # ix_killmail_attackers_kid_dmg.
+        max_dmg_subq = (
+            select(func.max(KillmailAttacker.damage_done))
+            .where(KillmailAttacker.killmail_id == Killmail.killmail_id)
+            .scalar_subquery()
+        )
+        low_count_subq = (
+            select(func.count())
+            .select_from(KillmailAttacker)
+            .where(
+                KillmailAttacker.killmail_id == Killmail.killmail_id,
+                KillmailAttacker.damage_done < (max_dmg_subq * 0.01),
+            )
+            .scalar_subquery()
+        )
+        has_damage_data = exists().where(
+            a.killmail_id == Killmail.killmail_id,
+            a.damage_done > 0,
+        )
+        flag_conds.append(and_(
+            Killmail.attacker_count >= 5,
+            has_damage_data,
+            (cast(low_count_subq, Float) / Killmail.attacker_count) >= 0.5,
+        ))
 
     if not flag_conds:
         return []
