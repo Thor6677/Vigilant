@@ -51,33 +51,93 @@ async def intel_kills_page(request: Request, db: AsyncSession = Depends(get_db))
     )
 
 
+def _apply_space_filter(
+    kills: list[dict],
+    spaces: set[str],
+    wh_classes: set[str],
+    shattered_only: bool,
+) -> list[dict]:
+    """Filter kills by space-class chips.
+
+    `spaces`: short codes {hs, ls, ns, wh} — OR within set.
+    `wh_classes`: {c1..c6, thera, drifter, pochven} — OR within set; AND'd
+        with being in WH band.
+    `shattered_only`: AND'd on top — requires the system's group_label to
+        contain "shattered".
+    All-empty = no constraint.
+
+    Within-category OR / cross-category AND: e.g. {hs} + {c5} means
+    "(band==hs) AND (band==wh AND first_token==c5)" — impossible, so empty.
+
+    To disambiguate C1 vs C13: split group_label on whitespace and compare
+    the first token equality (so "C13 (Shattered)" → "c13", not matched by
+    substring "c1").
+    """
+    if not spaces and not wh_classes and not shattered_only:
+        return kills
+    out = []
+    for k in kills:
+        sid = k.get("solar_system_id") or 0
+        meta = _sys_meta_cache.get(sid) or {}
+        raw_band = meta.get("band") or "Unknown"
+        band_norm = _BAND_NORMALIZE.get(raw_band, "unknown")
+        group_label = meta.get("group_label") or ""
+        first_token = group_label.split(" ")[0].lower() if group_label else ""
+        is_wh = band_norm == "wh"
+
+        ok = True
+        if spaces:
+            ok = ok and (band_norm in spaces)
+        if wh_classes:
+            ok = ok and is_wh and (first_token in wh_classes)
+        if shattered_only:
+            ok = ok and ("shattered" in group_label.lower())
+        if ok:
+            out.append(k)
+    return out
+
+
 @router.get("/intel/kills/feed", response_class=HTMLResponse)
 async def intel_kills_feed(
     request: Request,
     since: int | None = None,
+    space: str = "",
+    wh_class: str = "",
+    shattered: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
     """Live tail — reads _recent_kills in memory, renders the row partial.
 
     `since`: if provided, return only kills with killmail_id > since (for
     incremental htmx prepends). Otherwise return up to MAX_ROWS_INITIAL.
+    `space`/`wh_class`: comma-separated short codes (e.g. "hs,ns" or
+    "c5,c6"). `shattered=1` to require shattered systems only.
     """
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
+
+    spaces = {s.strip() for s in space.split(",") if s.strip()}
+    wh_classes = {c.strip() for c in wh_class.split(",") if c.strip()}
+    shattered_only = bool(shattered)
 
     kills = get_recent_kills()
     kills = sorted(kills, key=lambda k: k.get("killmail_id") or 0, reverse=True)
 
     if since:
         kills = [k for k in kills if (k.get("killmail_id") or 0) > since]
-    else:
+
+    kills = _apply_space_filter(kills, spaces, wh_classes, shattered_only)
+
+    if not since:
         kills = kills[:MAX_ROWS_INITIAL]
 
     if not kills:
         return HTMLResponse("")
 
     enriched = await _enrich_kills(kills, db)
+    # total_in_buffer reflects the raw count (unfiltered) so the user sees
+    # how much is being hidden by the active filter.
     total_in_buffer = len(get_recent_kills())
 
     return templates.TemplateResponse(

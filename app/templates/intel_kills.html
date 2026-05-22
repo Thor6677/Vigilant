@@ -76,4 +76,83 @@
   document.addEventListener('htmx:afterSwap', refreshAgo);
   refreshAgo();
 </script>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var STORAGE_KEY = 'vigilant:kf:filters';
+    var state;
+    try {
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false}');
+    } catch (e) {
+      state = {space: [], wh_class: [], shattered: false};
+    }
+    if (!Array.isArray(state.space)) state.space = [];
+    if (!Array.isArray(state.wh_class)) state.wh_class = [];
+    state.shattered = !!state.shattered;
+
+    function applyToChips() {
+      document.querySelectorAll('.kf-chip[data-space]').forEach(function(el) {
+        el.classList.toggle('on', state.space.indexOf(el.dataset.space) !== -1);
+      });
+      document.querySelectorAll('.kf-chip[data-whclass]').forEach(function(el) {
+        el.classList.toggle('on', state.wh_class.indexOf(el.dataset.whclass) !== -1);
+      });
+      document.querySelectorAll('.kf-chip[data-mod="shattered"]').forEach(function(el) {
+        el.classList.toggle('on', !!state.shattered);
+      });
+      var whRow = document.getElementById('kf-wh-subclasses');
+      if (whRow) whRow.style.display = (state.space.indexOf('wh') !== -1) ? 'flex' : 'none';
+    }
+
+    function buildQS() {
+      var qs = [];
+      if (state.space.length) qs.push('space=' + state.space.join(','));
+      if (state.wh_class.length) qs.push('wh_class=' + state.wh_class.join(','));
+      if (state.shattered) qs.push('shattered=1');
+      return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      var newQS = buildQS();
+      history.replaceState(null, '', '/intel/kills' + newQS);
+      var feed = document.getElementById('kf-feed');
+      if (feed) {
+        feed.setAttribute('hx-get', '/intel/kills/feed' + newQS);
+        feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
+        if (window.htmx) htmx.trigger(feed, 'load');
+      }
+    }
+
+    function toggle(arr, v) {
+      var i = arr.indexOf(v);
+      if (i === -1) arr.push(v); else arr.splice(i, 1);
+    }
+
+    document.querySelectorAll('.kf-chip').forEach(function(el) {
+      el.addEventListener('click', function() {
+        if (el.dataset.space) toggle(state.space, el.dataset.space);
+        else if (el.dataset.whclass) toggle(state.wh_class, el.dataset.whclass);
+        else if (el.dataset.mod === 'shattered') state.shattered = !state.shattered;
+        applyToChips();
+        persist();
+      });
+    });
+
+    // Restore from URL if any filter param is present; otherwise keep localStorage state.
+    var url = new URL(window.location.href);
+    var qsSpace = url.searchParams.get('space');
+    var qsWh = url.searchParams.get('wh_class');
+    var qsShat = url.searchParams.get('shattered');
+    if (qsSpace !== null || qsWh !== null || qsShat !== null) {
+      state.space = qsSpace ? qsSpace.split(',').filter(Boolean) : [];
+      state.wh_class = qsWh ? qsWh.split(',').filter(Boolean) : [];
+      state.shattered = !!qsShat && qsShat !== '0';
+    }
+    applyToChips();
+    // Override Task 5's hardcoded hx-get URL with any restored filter QS before
+    // htmx fires the initial `load` trigger.
+    var feed = document.getElementById('kf-feed');
+    if (feed) feed.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
+  })();
+</script>
 {% endblock %}
