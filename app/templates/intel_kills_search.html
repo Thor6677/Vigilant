@@ -45,6 +45,72 @@
   .kfs-show-more-wrap { text-align:center; padding:14px 0; }
   /* NPC badge — shared with live feed, defined here for the search page CSS scope */
   .kf-npc-badge { display:inline-block; background:var(--surface); color:var(--muted); padding:0 4px; font-size:8px; font-weight:600; letter-spacing:0.08em; border-radius:2px; border:1px solid var(--border); margin-left:4px; vertical-align:middle; }
+  /* ── Kill row + detail panel (copied from intel_kills.html — not globally loaded) ── */
+  .kf-row { display:grid; grid-template-columns:36px 1fr 90px; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); align-items:center; font-size:11px; color:var(--text); cursor:pointer; transition:background-color 0.2s ease; }
+  .kf-ship-thumb { width:36px; height:36px; border-radius:3px; background:var(--surface); }
+  .kf-meta-top { color:var(--text); }
+  .kf-meta-bot { color:var(--muted); font-size:10px; }
+  .kf-isk { text-align:right; color:#facc15; font-weight:600; }
+  .kf-ago { display:block; color:var(--muted); font-size:9px; font-weight:400; }
+  .kf-sys-hs { color:#4ade80; }
+  .kf-sys-ls { color:#facc15; }
+  .kf-sys-ns { color:#ef4444; }
+  .kf-sys-wh { color:#a78bfa; }
+  .kf-sys-unknown { color:var(--muted); }
+  .kf-row:hover { background:rgba(94,177,255,0.04); }
+  .kf-row.open { background:rgba(94,177,255,0.08); border-bottom:1px solid var(--accent); }
+  /* Expand/collapse animation */
+  .kf-detail {
+    background:rgba(94,177,255,0.04);
+    border-bottom:2px solid var(--accent);
+    max-height:0;
+    opacity:0;
+    overflow:hidden;
+    padding:0 14px;
+    transition: max-height 0.4s ease-out, opacity 0.3s ease-out 0.05s, padding 0.3s ease-out;
+  }
+  .kf-detail.shown {
+    max-height:2400px;
+    opacity:1;
+    padding:14px;
+  }
+  .kf-detail h4 { margin:0 0 6px; font-size:10px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase; }
+  .kf-detail-grid { display:grid; grid-template-columns:240px minmax(0,1fr) 320px; gap:16px; align-items:start; }
+  .kf-detail-left, .kf-detail-middle, .kf-detail-right { min-width:0; }
+  .kf-detail-right { max-height:560px; overflow-y:auto; padding-right:4px; }
+  .kf-isk-block { margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .kf-isk-value { font-size:18px; color:#facc15; font-weight:600; margin:4px 0 10px; font-family:"SF Mono",Menlo,monospace; }
+  .kf-zkb-link { font-size:10px; color:var(--accent); text-decoration:none; border:1px solid var(--accent); padding:4px 8px; display:inline-block; border-radius:3px; }
+  .kf-victim-card { display:flex; gap:12px; align-items:flex-start; font-size:11px; line-height:1.6; }
+  .kf-slot-group { margin-bottom:6px; }
+  .kf-slot-label { font-size:9px; color:var(--muted); letter-spacing:0.12em; margin-bottom:2px; text-transform:uppercase; }
+  .kf-slot { display:grid; grid-template-columns:18px 1fr 14px; gap:6px; padding:2px 0; align-items:center; font-size:10px; }
+  .kf-slot-name { color:var(--text); }
+  .kf-slot-name.dropped { color:#4ade80; }
+  .kf-slot-name.destroyed { color:#ef4444; opacity:0.85; }
+  .kf-slot-dot { width:6px; height:6px; border-radius:50%; }
+  .kf-slot-dot.d { background:#ef4444; }
+  .kf-slot-dot.k { background:#4ade80; }
+  .kf-attacker-compact { display:grid; grid-template-columns:28px 1fr; gap:8px; padding:6px 0; border-bottom:1px dotted var(--border); align-items:start; font-size:11px; }
+  .kf-attacker-compact.fb { background:rgba(239,68,68,0.05); margin:0 -4px; padding-left:4px; padding-right:4px; }
+  .kf-attacker-compact .info { min-width:0; }
+  .kf-attacker-compact .line1 { color:var(--text); }
+  .kf-attacker-compact .line1 a { color:var(--text); font-weight:600; text-decoration:none; }
+  .kf-attacker-compact .line2 { color:var(--muted); font-size:10px; margin-top:1px; }
+  .kf-attacker-compact .line2 .ship { color:var(--accent); }
+  .kf-attacker-compact .line3 { font-size:10px; margin-top:3px; color:#facc15; display:flex; align-items:center; gap:6px; }
+  .kf-attacker-compact .line3 .dmg-none { color:var(--muted); }
+  .kf-attacker-compact .line3 .pct { color:var(--muted); font-size:9px; }
+  .kf-attacker-compact .kf-dmg-bar { flex:1; min-width:30px; margin-top:0; }
+  .kf-fb-badge { display:inline-block; background:#ef4444; color:#0a0c0f; padding:1px 5px; font-size:8px; font-weight:700; letter-spacing:0.08em; border-radius:2px; margin-left:4px; vertical-align:middle; }
+  .kf-dmg-bar { height:4px; background:var(--surface); border-radius:2px; margin-top:3px; overflow:hidden; }
+  .kf-dmg-bar .fill { height:100%; background:linear-gradient(90deg,#facc15,#ef4444); }
+  @keyframes kf-row-in {
+    0%   { opacity:0; transform:translateY(-8px); background-color:rgba(94,177,255,0.18); }
+    60%  { opacity:1; transform:translateY(0); background-color:rgba(94,177,255,0.10); }
+    100% { background-color:transparent; }
+  }
+  .kf-row.kf-new { animation: kf-row-in 0.55s ease-out; }
 </style>
 {% endblock %}
 
@@ -187,4 +253,366 @@
     <button type="button" class="kfs-btn primary" id="kfs-show-more">↓ Show more (next 100)</button>
   </div>
 </div>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var STORAGE_KEY = 'vigilant:kfs:filters';
+
+    // Filter state — single source of truth for the page.
+    var state;
+    function defaultState() {
+      return {
+        time: '',                  // '' | '24h' | '7d' | '30d' | '90d'
+        time_start: '',
+        time_end: '',
+        space: [],
+        wh_class: [],
+        shattered: false,
+        category: [],
+        count: [],
+        isk: '',                   // string single-select
+        primetime: [],
+        ship_ids: [],              // [{id, name}]
+        attacker_mode: 'or',
+        attacker_items: [],        // [{id, name, kind}]   kind ∈ {character,corporation,alliance,ship}
+        either_mode: 'or',
+        either_items: [],
+        victim_mode: 'or',
+        victim_items: [],
+        sort: 'date',
+        direction: 'desc',
+        live: false,
+      };
+    }
+    try {
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || defaultState();
+    } catch (e) {
+      state = defaultState();
+    }
+    // Defensive: ensure all expected keys
+    var defaults = defaultState();
+    Object.keys(defaults).forEach(function(k) {
+      if (state[k] === undefined) state[k] = defaults[k];
+    });
+
+    // ── helpers ─────────────────────────────────────────────────
+    function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function splitItemsByKind(items) {
+      var by = { character: [], corporation: [], alliance: [], ship: [] };
+      (items || []).forEach(function(e) { if (by[e.kind]) by[e.kind].push(e.id); });
+      return by;
+    }
+
+    function buildQS() {
+      var qs = [];
+      if (state.time) qs.push('time=' + state.time);
+      if (state.time_start) qs.push('time_start=' + encodeURIComponent(state.time_start));
+      if (state.time_end) qs.push('time_end=' + encodeURIComponent(state.time_end));
+      if (state.space.length) qs.push('space=' + state.space.join(','));
+      if (state.wh_class.length) qs.push('wh_class=' + state.wh_class.join(','));
+      if (state.shattered) qs.push('shattered=1');
+      if (state.category.length) qs.push('category=' + state.category.join(','));
+      if (state.count.length) qs.push('count=' + state.count.join(','));
+      if (state.isk) qs.push('isk=' + state.isk);
+      if (state.primetime.length) qs.push('primetime=' + state.primetime.join(','));
+      if (state.ship_ids.length) qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
+      [['attacker_items','attacker'],['either_items','either'],['victim_items','victim']].forEach(function(pair) {
+        var items = state[pair[0]];
+        if (items.length) {
+          var by = splitItemsByKind(items);
+          qs.push(pair[1] + '_mode=' + state[pair[0].replace('items','mode')]);
+          if (by.character.length) qs.push(pair[1] + '_chars=' + by.character.join(','));
+          if (by.corporation.length) qs.push(pair[1] + '_corps=' + by.corporation.join(','));
+          if (by.alliance.length) qs.push(pair[1] + '_allis=' + by.alliance.join(','));
+          if (by.ship.length) qs.push(pair[1] + '_ships=' + by.ship.join(','));
+        }
+      });
+      qs.push('sort=' + state.sort);
+      qs.push('dir=' + state.direction);
+      return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      history.replaceState(null, '', '/intel/kills/search' + buildQS());
+    }
+
+    function applyChipsToDom() {
+      // Single-select rows
+      document.querySelectorAll('.kfs-chip[data-time]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.time === state.time);
+      });
+      document.querySelectorAll('.kfs-chip[data-isk]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.isk === state.isk);
+      });
+      document.querySelectorAll('.kfs-chip[data-sort]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.sort === state.sort);
+      });
+      document.querySelectorAll('.kfs-chip[data-dir]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.dir === state.direction);
+      });
+      // Multi-select rows
+      [['space','space'],['wh_class','whclass'],['category','category'],
+       ['count','count'],['primetime','primetime']].forEach(function(pair) {
+        document.querySelectorAll('.kfs-chip[data-' + pair[1] + ']').forEach(function(el) {
+          el.classList.toggle('on', state[pair[0]].indexOf(el.dataset[pair[1]]) !== -1);
+        });
+      });
+      // Shattered modifier
+      var sh = document.querySelector('.kfs-chip[data-mod="shattered"]');
+      if (sh) sh.classList.toggle('on', !!state.shattered);
+      // WH class row visibility
+      var whRow = document.getElementById('kfs-wh-subclasses');
+      if (whRow) whRow.style.display = state.space.indexOf('wh') !== -1 ? 'flex' : 'none';
+      // Date range
+      var dsi = document.getElementById('kfs-time-start');
+      var dei = document.getElementById('kfs-time-end');
+      if (dsi) dsi.value = state.time_start || '';
+      if (dei) dei.value = state.time_end || '';
+      // Live toggle button
+      var lt = document.getElementById('kfs-live-toggle');
+      var liveEnabled = state.sort === 'date' && state.direction === 'desc' && !state.time_end;
+      if (lt) {
+        lt.disabled = !liveEnabled;
+        lt.classList.toggle('primary', state.live && liveEnabled);
+        lt.textContent = (state.live && liveEnabled) ? '● Live' : '☐ Live';
+        if (!liveEnabled) state.live = false;
+      }
+    }
+
+    function toggleListMember(list, value) {
+      var i = list.indexOf(value);
+      if (i === -1) list.push(value); else list.splice(i, 1);
+    }
+
+    // ── chip click handlers (multi-select rows) ─────────────────
+    function bindChipClicks() {
+      document.querySelectorAll('.kfs-chip').forEach(function(el) {
+        if (el.dataset.bound === '1') return;
+        el.dataset.bound = '1';
+        el.addEventListener('click', function() {
+          if (el.dataset.time !== undefined) {
+            state.time = (state.time === el.dataset.time) ? '' : el.dataset.time;
+            state.time_start = '';
+            state.time_end = '';
+          } else if (el.dataset.space !== undefined) {
+            toggleListMember(state.space, el.dataset.space);
+            if (state.space.indexOf('wh') === -1) { state.wh_class = []; state.shattered = false; }
+          } else if (el.dataset.whclass !== undefined) {
+            toggleListMember(state.wh_class, el.dataset.whclass);
+          } else if (el.dataset.mod === 'shattered') {
+            state.shattered = !state.shattered;
+          } else if (el.dataset.category !== undefined) {
+            toggleListMember(state.category, el.dataset.category);
+          } else if (el.dataset.count !== undefined) {
+            toggleListMember(state.count, el.dataset.count);
+          } else if (el.dataset.isk !== undefined) {
+            state.isk = (state.isk === el.dataset.isk) ? '' : el.dataset.isk;
+          } else if (el.dataset.primetime !== undefined) {
+            toggleListMember(state.primetime, el.dataset.primetime);
+          } else if (el.dataset.sort !== undefined) {
+            state.sort = el.dataset.sort;
+          } else if (el.dataset.dir !== undefined) {
+            state.direction = el.dataset.dir;
+          }
+          applyChipsToDom();
+          persist();
+          refetchResults();
+        });
+      });
+    }
+
+    // ── date range inputs ───────────────────────────────────────
+    function bindDateRangeInputs() {
+      ['kfs-time-start', 'kfs-time-end'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el || el.dataset.bound === '1') return;
+        el.dataset.bound = '1';
+        var dbn;
+        el.addEventListener('input', function() {
+          clearTimeout(dbn);
+          dbn = setTimeout(function() {
+            state[id.replace('kfs-', '').replace('-', '_')] = el.value.trim();
+            if (state.time_start || state.time_end) state.time = '';
+            persist();
+            refetchResults();
+          }, 600);
+        });
+      });
+    }
+
+    // ── reset button ────────────────────────────────────────────
+    document.getElementById('kfs-reset').addEventListener('click', function() {
+      state = defaultState();
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      history.replaceState(null, '', '/intel/kills/search');
+      // Clear chip removable lists
+      document.getElementById('kfs-ship-chips').innerHTML = '';
+      document.getElementById('kfs-attacker-chips').innerHTML = '';
+      document.getElementById('kfs-either-chips').innerHTML = '';
+      document.getElementById('kfs-victim-chips').innerHTML = '';
+      applyChipsToDom();
+      refetchResults();
+    });
+
+    // ── refetchResults: fires the /search/results fetch call ────
+    var currentOldestCursor = '';
+    var currentNewestCursor = '';
+    function refetchResults() {
+      var feed = document.getElementById('kfs-results');
+      if (feed) feed.innerHTML = '';
+      currentOldestCursor = '';
+      currentNewestCursor = '';
+      var loading = document.getElementById('kfs-loading');
+      if (loading) { loading.style.display = ''; loading.textContent = 'Loading…'; }
+      var showMore = document.getElementById('kfs-show-more-wrap');
+      if (showMore) showMore.style.display = 'none';
+
+      fetch('/intel/kills/search/results' + buildQS())
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          if (loading) loading.style.display = 'none';
+          if (feed) {
+            feed.innerHTML = html;
+            consumeMarker(feed);
+            bindRowClicks();
+            if (typeof refreshAgo === 'function') refreshAgo();
+          }
+        })
+        .catch(function(err) {
+          if (loading) loading.textContent = 'Error loading results.';
+          console.error(err);
+        });
+    }
+
+    function consumeMarker(container) {
+      var marker = container.querySelector('[data-kfs-marker]');
+      if (!marker) return;
+      var total = marker.getAttribute('data-total-count');
+      var totalIsk = marker.getAttribute('data-total-isk');
+      currentOldestCursor = marker.getAttribute('data-oldest-cursor') || '';
+      currentNewestCursor = marker.getAttribute('data-newest-cursor') || '';
+      var rowCount = container.querySelectorAll('.kf-row').length;
+
+      var showingEl = document.getElementById('kfs-stats-showing');
+      var totalEl = document.getElementById('kfs-stats-total');
+      var iskEl = document.getElementById('kfs-stats-isk');
+      if (showingEl) showingEl.textContent = '1-' + rowCount;
+      if (totalEl) totalEl.textContent = total || rowCount;
+      if (iskEl && totalIsk) {
+        var n = parseFloat(totalIsk);
+        if (!isNaN(n)) {
+          if (n >= 1e12) iskEl.textContent = (n/1e12).toFixed(2) + 't';
+          else if (n >= 1e9) iskEl.textContent = (n/1e9).toFixed(2) + 'b';
+          else if (n >= 1e6) iskEl.textContent = (n/1e6).toFixed(2) + 'm';
+          else iskEl.textContent = n.toFixed(0);
+        }
+      }
+      marker.remove();
+
+      var showMore = document.getElementById('kfs-show-more-wrap');
+      if (showMore) showMore.style.display = (currentOldestCursor && rowCount >= 100) ? 'block' : 'none';
+
+      if (rowCount === 0) {
+        var feed = document.getElementById('kfs-results');
+        if (feed && !feed.querySelector('.kfs-no-results')) {
+          var msg = document.createElement('div');
+          msg.className = 'kfs-no-results';
+          msg.style.cssText = 'color:var(--muted);font-size:11px;padding:30px 0;text-align:center;';
+          msg.textContent = 'No kills match these filters.';
+          feed.appendChild(msg);
+        }
+      }
+    }
+
+    // ── Show More ──────────────────────────────────────────────
+    document.getElementById('kfs-show-more').addEventListener('click', function() {
+      if (!currentOldestCursor) return;
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Loading…';
+      fetch('/intel/kills/search/results' + qs + sep + 'cursor=' + encodeURIComponent(currentOldestCursor))
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          var feed = document.getElementById('kfs-results');
+          if (!feed) return;
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          // Consume + remove marker from the temp container, update cursor
+          var marker = tmp.querySelector('[data-kfs-marker]');
+          var newOldest = marker ? (marker.getAttribute('data-oldest-cursor') || '') : '';
+          if (marker) marker.remove();
+          // Append the new rows
+          while (tmp.firstChild) feed.appendChild(tmp.firstChild);
+          currentOldestCursor = newOldest;
+          // Update stats
+          var rowCount = feed.querySelectorAll('.kf-row').length;
+          document.getElementById('kfs-stats-showing').textContent = '1-' + rowCount;
+          // Re-bind row clicks for newly added rows
+          bindRowClicks();
+          if (typeof refreshAgo === 'function') refreshAgo();
+          btn.disabled = false;
+          btn.textContent = '↓ Show more (next 100)';
+          // Hide button if no more pages
+          var wrap = document.getElementById('kfs-show-more-wrap');
+          if (wrap) wrap.style.display = (currentOldestCursor && tmp.querySelectorAll('.kf-row').length >= 0) ? 'block' : 'none';
+          if (rowCount < 100 || !currentOldestCursor) wrap.style.display = 'none';
+        });
+    });
+
+    // ── row click → detail panel (reuses Feature A pattern) ────
+    function bindRowClicks() {
+      document.querySelectorAll('#kfs-results .kf-row').forEach(function(row) {
+        if (row.dataset.bound === '1') return;
+        row.dataset.bound = '1';
+        row.addEventListener('click', function() {
+          var kid = row.dataset.kid;
+          var existing = document.querySelector('#kfs-results .kf-detail[data-kid="' + kid + '"]');
+          if (existing) {
+            existing.classList.remove('shown');
+            row.classList.remove('open');
+            setTimeout(function() { if (existing.parentNode) existing.parentNode.removeChild(existing); }, 320);
+            return;
+          }
+          row.classList.add('open');
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              row.insertAdjacentHTML('afterend', html);
+              var panel = row.nextElementSibling;
+              if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+            })
+            .catch(function() { row.classList.remove('open'); });
+        });
+      });
+    }
+
+    // ── Time-ago refresh (reuse the existing kill-feed pattern) ─
+    function refreshAgo() {
+      var now = Date.now();
+      document.querySelectorAll('.kf-ago[data-time]').forEach(function(el) {
+        var raw = el.getAttribute('data-time') || '';
+        if (!/Z$/.test(raw)) raw += 'Z';
+        var t = new Date(raw).getTime();
+        if (isNaN(t)) { el.textContent = ''; return; }
+        var s = Math.max(0, Math.floor((now - t) / 1000));
+        if (s < 60) el.textContent = s + 's ago';
+        else if (s < 3600) el.textContent = Math.floor(s/60) + 'm ago';
+        else if (s < 86400) el.textContent = Math.floor(s/3600) + 'h ago';
+        else el.textContent = Math.floor(s/86400) + 'd ago';
+      });
+    }
+    setInterval(refreshAgo, 30000);
+
+    // ── init ───────────────────────────────────────────────────
+    applyChipsToDom();
+    bindChipClicks();
+    bindDateRangeInputs();
+    refetchResults();
+  })();
+</script>
 {% endblock %}
