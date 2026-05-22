@@ -96,6 +96,16 @@
     100% { background-color:transparent; }
   }
   .kf-row.kf-new { animation: kf-row-in 0.55s ease-out; }
+  /* Floating "N new" pill: appears when new kills land while the user is
+     scrolled below the top of the feed. Click to scroll back to the top. */
+  #kf-new-pill {
+    position:sticky; top:8px; z-index:30; margin:8px auto -28px; display:block;
+    background:var(--accent); color:#0a0c0f; border:none; border-radius:14px;
+    padding:5px 14px; font-size:11px; font-weight:600; letter-spacing:0.08em;
+    cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    width:fit-content; max-width:max-content;
+  }
+  #kf-new-pill:hover { background:#3a90df; }
 </style>
 {% endblock %}
 
@@ -148,6 +158,7 @@
   </div>
 
   <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
+  <button type="button" id="kf-new-pill" style="display:none;">↑ <span id="kf-new-pill-count">0</span> new</button>
   <div id="kf-feed"
        hx-get="/intel/kills/feed"
        hx-trigger="load, every 15s"
@@ -578,15 +589,70 @@
 
       if (kfInitialSwapDone) {
         // Any row not yet bound is a freshly-prepended live row.
+        var newRowCount = 0;
         feed.querySelectorAll('.kf-row:not([data-bound])').forEach(function(row) {
           row.classList.add('kf-new');
           setTimeout(function() { row.classList.remove('kf-new'); }, 650);
+          newRowCount++;
         });
+        if (newRowCount > 0) noteNewRows(newRowCount);
       }
       kfInitialSwapDone = true;
       bindRowClicks();
     });
     bindRowClicks();
+
+    // ── Floating "N new kills" pill ────────────────────────────────────
+    // Appears when new kills arrive while the user is scrolled past the top
+    // of the kill feed. Click to scroll back to the top and clear the count.
+    var pill = document.getElementById('kf-new-pill');
+    var pillCount = document.getElementById('kf-new-pill-count');
+    var pendingNew = 0;
+
+    function isFeedAtTop() {
+      var feedEl = document.getElementById('kf-feed');
+      if (!feedEl) return true;
+      var rect = feedEl.getBoundingClientRect();
+      // True if the first kill row is at-or-above the top of the viewport
+      // (i.e. user can see the top of the feed without scrolling up).
+      return rect.top >= 0;
+    }
+
+    function showPill() {
+      if (!pill) return;
+      if (pendingNew <= 0) { pill.style.display = 'none'; return; }
+      pillCount.textContent = pendingNew;
+      pill.style.display = 'block';
+    }
+
+    function noteNewRows(n) {
+      if (isFeedAtTop()) {
+        // User is already viewing the top — they see the new rows arrive,
+        // no need to nag with a pill.
+        pendingNew = 0;
+        showPill();
+        return;
+      }
+      pendingNew += n;
+      showPill();
+    }
+
+    if (pill) {
+      pill.addEventListener('click', function() {
+        var feedEl = document.getElementById('kf-feed');
+        if (feedEl) feedEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        pendingNew = 0;
+        showPill();
+      });
+    }
+
+    // When the user scrolls back to the top on their own, clear the pill.
+    window.addEventListener('scroll', function() {
+      if (pendingNew > 0 && isFeedAtTop()) {
+        pendingNew = 0;
+        showPill();
+      }
+    }, { passive: true });
 
     // Older-mode rows come in via raw fetch (not htmx), so wire them here too.
     var _fetchOlderChunk = fetchOlderChunk;
