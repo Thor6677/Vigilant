@@ -656,8 +656,8 @@ async def query_battles_window(days: int = 7, per_group: int = BATTLES_PER_GROUP
                 "pilots_involved": row[9],
                 "total_isk": row[10],
                 "top_ships": json.loads(row[11] or "[]"),
-                "attacker_label": row[14] or row[13],  # alliance over corp
-                "victim_label": row[16] or row[15],
+                "attacker_label": row[13] or row[12],  # alliance over corp
+                "victim_label": row[15] or row[14],
             })
     return dict(out)
 
