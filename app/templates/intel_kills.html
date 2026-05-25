@@ -286,7 +286,9 @@
       history.replaceState(null, '', '/intel/kills' + newQS);
       var feed = document.getElementById('kf-feed');
       if (feed) {
-        feed.setAttribute('hx-get', '/intel/kills/feed' + newQS);
+        // Filter params reach the request via htmx:configRequest below
+        // (see comment there) — mutating hx-get here is a no-op for the
+        // polling timer and for htmx.trigger(elt, 'load').
         feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
         // Reset the cursor: a fresh filter wants the full top-100, not just
         // kills newer than what the previous filter had seen.
@@ -396,13 +398,11 @@
     bindAutocomplete('kf-ship-input',     'kf-ship-results',     'kf-ship-chips',     'ship_ids',     'ship');
     bindAutocomplete('kf-attacker-input', 'kf-attacker-results', 'kf-attacker-chips', 'attacker_ids', 'entity');
     bindAutocomplete('kf-victim-input',   'kf-victim-results',   'kf-victim-chips',   'victim_ids',   'entity');
-    // Override Task 5's hardcoded hx-get URL with any restored filter QS before
-    // htmx fires the initial `load` trigger.
     // Note: ship_id / attacker_* / victim_* from URL are intentionally not
     // hydrated (no cheap name resolve by raw id); localStorage carries the
-    // labeled chips for personal-use persistence.
-    var feed = document.getElementById('kf-feed');
-    if (feed) feed.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
+    // labeled chips for personal-use persistence. Filter params reach the
+    // request via the htmx:configRequest handler below — htmx 1.9.x captures
+    // hx-get at processVerbs time so we can't propagate filters via attribute.
 
     // ------ Task 9: Load older / Back to live ------
     var olderContainer = document.getElementById('kf-load-older');
@@ -425,16 +425,12 @@
       var f = document.getElementById('kf-feed');
       if (f) {
         f.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
-        f.setAttribute('hx-get', '/intel/kills/feed' + buildQS());
-        f.setAttribute('hx-trigger', 'load, every 15s');
-        f.setAttribute('hx-swap', 'afterbegin');
+        // hx-get/hx-trigger/hx-swap stay at their declared values; filter
+        // params are injected via htmx:configRequest below.
         // Reset the cursor so the next fetch reloads the current top-N, not
         // just whatever has come in since we entered older-mode.
         kfSinceCursor = null;
-        if (window.htmx) {
-          htmx.process(f);
-          htmx.trigger(f, 'load');
-        }
+        if (window.htmx) htmx.trigger(f, 'load');
       }
     }
 
@@ -541,16 +537,34 @@
       });
     }
 
-    // ── Cursor management for incremental /feed polls ──────────────────
-    // We hold the `since` cursor in a JS variable and inject it on every
-    // outgoing request via htmx:configRequest. This is robust against any
-    // setAttribute('hx-get', ...) timing issues with htmx's polling timer.
+    // ── Cursor + filter params injected via configRequest ──────────────
+    // htmx 1.9.x captures the hx-get path in a closure at processVerbs time
+    // (DOMContentLoaded), so later setAttribute('hx-get', ...) calls do NOT
+    // propagate to the polling timer or to htmx.trigger(elt, 'load'). The
+    // `since` cursor avoided that by going through configRequest; filter
+    // params (space/wh_class/shattered/ship_id/attacker_*/victim_*) need the
+    // same treatment, otherwise chip toggles never reach the server and the
+    // live feed appears unfiltered. Older-mode fetches use raw fetch(), not
+    // htmx, so they're unaffected.
     var kfSinceCursor = null;
     document.addEventListener('htmx:configRequest', function(e) {
       if (!e.detail || !e.detail.elt || e.detail.elt.id !== 'kf-feed') return;
-      // Only inject `since` for live feed polls — never for older-mode fetches
-      // (those use raw fetch() anyway, not htmx).
-      if (kfSinceCursor) e.detail.parameters.since = kfSinceCursor;
+      var params = e.detail.parameters;
+      if (state.space.length) params.space = state.space.join(',');
+      if (state.wh_class.length) params.wh_class = state.wh_class.join(',');
+      if (state.shattered) params.shattered = 1;
+      if (state.ship_ids && state.ship_ids.length) {
+        params.ship_id = state.ship_ids.map(function(s){return s.id;}).join(',');
+      }
+      var aSplit = entitySplit(state.attacker_ids);
+      if (aSplit.character.length) params.attacker_char = aSplit.character.join(',');
+      if (aSplit.corporation.length) params.attacker_corp = aSplit.corporation.join(',');
+      if (aSplit.alliance.length) params.attacker_alli = aSplit.alliance.join(',');
+      var vSplit = entitySplit(state.victim_ids);
+      if (vSplit.character.length) params.victim_char = vSplit.character.join(',');
+      if (vSplit.corporation.length) params.victim_corp = vSplit.corporation.join(',');
+      if (vSplit.alliance.length) params.victim_alli = vSplit.alliance.join(',');
+      if (kfSinceCursor) params.since = kfSinceCursor;
     });
 
     // ── Pre-swap dedupe so rows already in the DOM don't visibly flicker ─
