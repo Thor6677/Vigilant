@@ -30,7 +30,11 @@ from app.db.models import (
     get_db,
 )
 from app.db.sde_models import SDESystem, SDEType
-from app.intel.killmail_stream import _sys_meta_cache, get_recent_kills
+from app.intel.killmail_stream import (
+    _sys_meta_cache,
+    batch_resolve_sys_meta,
+    get_recent_kills,
+)
 from app.intel.recent_battles import resolve_entity_names, sec_band
 from app.sde.lookup import search_ship_types, type_ids_to_names
 
@@ -340,6 +344,14 @@ async def intel_kills_feed(
     if since:
         kills = [k for k in kills if (k.get("killmail_id") or 0) > since]
 
+    # Populate _sys_meta_cache for any unresolved systems BEFORE filtering, so
+    # the space/wh_class chips see real bands instead of "unknown" for systems
+    # that never triggered a battle cluster or watch alert. Cache misses are
+    # negative-cached, so warm calls are ~0-cost.
+    await batch_resolve_sys_meta(
+        db, {k.get("solar_system_id") for k in kills if k.get("solar_system_id")}
+    )
+
     kills = _apply_space_filter(kills, spaces, wh_classes, shattered_only)
 
     if ship_ids:
@@ -590,6 +602,13 @@ async def _resolve_for_feed(
 
 async def _enrich_kills(kills: list[dict], db: AsyncSession) -> list[dict]:
     """Resolve names + sec band for a batch of kill records from _recent_kills."""
+    # Populate _sys_meta_cache for any unresolved systems (no-op if warm).
+    # intel_kills_feed already calls this before filtering; this guard covers
+    # /intel/kills/older which bypasses the filter path entirely.
+    await batch_resolve_sys_meta(
+        db, {k.get("solar_system_id") for k in kills if k.get("solar_system_id")}
+    )
+
     type_ids: set[int] = set()
     entity_ids: set[int] = set()
     for k in kills:

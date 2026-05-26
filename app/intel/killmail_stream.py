@@ -173,6 +173,53 @@ async def _resolve_sys_meta(system_id: int) -> dict | None:
         return meta
 
 
+async def batch_resolve_sys_meta(db, system_ids) -> None:
+    """Bulk-populate _sys_meta_cache for the given system_ids in one SDE
+    query. Used by /intel/kills enrichment so kills for systems that never
+    triggered a battle cluster or watch alert still render with their real
+    system name and band.
+
+    Walks WH class via the in-memory `_wh_class_cache` (no per-system DB
+    query) using the same system → constellation → region fallback as
+    `app.sde.lookup.get_system_wh_class`. Misses go to negative cache so
+    we don't retry abyssal / test / unknown IDs.
+    """
+    if not system_ids:
+        return
+    missing = {sid for sid in system_ids if sid and sid not in _sys_meta_cache}
+    if not missing:
+        return
+    rows = (await db.execute(
+        select(
+            SDESystem.system_id,
+            SDESystem.system_name,
+            SDESystem.security,
+            SDESystem.constellation_id,
+            SDESystem.region_id,
+        ).where(SDESystem.system_id.in_(missing))
+    )).all()
+
+    # Access _wh_class_cache via the module (feedback_module_global_rebind)
+    # so we read the live binding, not a None captured at import time.
+    from app.sde import lookup as sde_lookup
+    await sde_lookup._ensure_wh_class_cache(db)
+    wh_cache = sde_lookup._wh_class_cache or {}
+
+    resolved: set[int] = set()
+    for sid, name, sec, cid, rid in rows:
+        wc = wh_cache.get(sid) or wh_cache.get(cid) or wh_cache.get(rid)
+        wh_label = wh_class_label(wc)
+        _sys_meta_cache[sid] = {
+            "system_name": name,
+            "security": sec,
+            "group_label": wh_label or sec_band(sec),
+            "band": "w-space" if wh_label else sec_band(sec),
+        }
+        resolved.add(sid)
+    for sid in missing - resolved:
+        _sys_meta_cache[sid] = None
+
+
 async def _maybe_upsert_battle(system_id: int, kills: list[dict]) -> None:
     """If the cluster meets band-specific pilot thresholds, upsert a
     DetectedBattle row. Schema matches _cluster_system in recent_battles.py
