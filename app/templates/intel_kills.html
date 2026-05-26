@@ -419,7 +419,12 @@
       if (i === -1) arr.push(v); else arr.splice(i, 1);
     }
 
-    document.querySelectorAll('.kf-chip').forEach(function(el) {
+    // Scope to FILTER chips only. The .kf-chip class is also reused on the
+    // Load older / Back to live / Show more action buttons for styling — a
+    // broad selector would attach persist() to them too, wiping the feed
+    // and triggering a blocked reload (Loading… stuck) when older-mode is
+    // active. Match the three data-* attrs the handler actually consumes.
+    document.querySelectorAll('.kf-chip[data-space], .kf-chip[data-whclass], .kf-chip[data-mod]').forEach(function(el) {
       el.addEventListener('click', function() {
         if (el.dataset.space) toggle(state.space, el.dataset.space);
         else if (el.dataset.whclass) toggle(state.wh_class, el.dataset.whclass);
