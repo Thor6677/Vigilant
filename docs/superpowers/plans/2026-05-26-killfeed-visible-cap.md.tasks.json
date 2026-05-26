@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-26-killfeed-visible-cap.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Cap visible rows + Show more button",
+      "status": "pending",
+      "description": "**Goal:** After every htmx swap on #kf-feed, hide rows past index 100 and surface a \"Show more (N hidden)\" button that reveals the next 100 on click.\n\n**Files:**\n- Modify: app/templates/intel_kills.html (markup near #kf-load-older ~line 196; script body inside the existing IIFE ~lines 540–640)\n\n**Acceptance Criteria:**\n- Initial load shows ≤ 100 rows; Show more button hidden.\n- After live polls accumulate > 100 rows, only the newest 100 are visible; Show more button shows accurate hidden count.\n- Clicking Show more reveals exactly the next 100 hidden rows (oldest hidden first); counter decreases; button hides when count reaches 0.\n- Detail panel adjacent to a hidden row is also hidden (no orphan panel).\n- Toggling a filter chip clears the feed; Show more button hides; cap re-applies organically as new rows arrive.\n- \"Load older\" appends rows beyond the cap visibly (no trim); \"Back to live\" resets the feed and the button.\n\n**Verify:** Manual on production after deploy — see spec §Testing. No automated tests.\n\n**Steps:** See plan file. Insert show-more markup → add constants/helpers → hook trim into afterSwap → click handler with cap bump → reset cap in persist()/resumeLive() → grep sanity → commit → deploy → manual verify.\n\n```json:metadata\n{\"files\":[\"app/templates/intel_kills.html\"],\"verifyCommand\":\"manual\",\"acceptanceCriteria\":[\"Initial load ≤ 100 rows, button hidden\",\"Live polls cap at 100 visible with accurate hidden count\",\"Show more reveals next 100 oldest-first\",\"Hidden rows' detail panels also hide\",\"Filter chip resets cap to 100\",\"Load older bypasses cap; Back to live resets\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-26T00:00:00Z"
+}

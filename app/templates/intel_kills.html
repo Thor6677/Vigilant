@@ -193,6 +193,9 @@
        hx-get="/intel/kills/feed"
        hx-trigger="load, every 15s"
        hx-swap="afterbegin"></div>
+  <div id="kf-show-more-wrap" style="display:none;text-align:center;padding:8px;">
+    <button class="kf-chip" id="kf-show-more-btn" type="button">Show more (<span id="kf-show-more-count">0</span> hidden) &darr;</button>
+  </div>
   <div id="kf-load-older" style="display:none;text-align:center;padding:12px;margin-top:8px;">
     <button class="kf-chip" id="kf-load-older-btn" type="button">&darr; Load older kills (last 6h)</button>
     <button class="kf-chip" id="kf-back-to-live-btn" type="button" style="display:none;">&larr; Back to live</button>
@@ -261,6 +264,47 @@
       return by;
     }
 
+    // ── Visible-row cap ────────────────────────────────────────────────
+    // Live polling accumulates unbounded .kf-row nodes over multi-hour
+    // sessions. Cap the visible window at KF_VISIBLE_CAP; surplus rows stay
+    // in DOM (display:none) so ctrl-F still finds them and a Show more
+    // button can reveal the next chunk. Cap bumps on reveal (otherwise the
+    // next swap re-hides what we just showed) and resets on filter change
+    // / Back-to-live so a fresh window starts at 100.
+    var KF_VISIBLE_CAP = 100;
+    var KF_SHOW_MORE_CHUNK = 100;
+
+    function trimVisibleRows() {
+      var rows = document.querySelectorAll('#kf-feed .kf-row');
+      for (var i = 0; i < rows.length; i++) {
+        if (i >= KF_VISIBLE_CAP) {
+          if (rows[i].style.display !== 'none') rows[i].style.display = 'none';
+        } else {
+          if (rows[i].style.display === 'none') rows[i].style.display = '';
+        }
+      }
+      // Detail panels follow their row's visibility (no orphan panels).
+      document.querySelectorAll('#kf-feed .kf-detail').forEach(function(p) {
+        var prev = p.previousElementSibling;
+        if (prev && prev.classList.contains('kf-row')) {
+          p.style.display = (prev.style.display === 'none') ? 'none' : '';
+        }
+      });
+    }
+
+    function updateShowMoreButton() {
+      var hidden = document.querySelectorAll('#kf-feed .kf-row[style*="display: none"]').length;
+      var wrap = document.getElementById('kf-show-more-wrap');
+      var count = document.getElementById('kf-show-more-count');
+      if (!wrap || !count) return;
+      if (hidden > 0) {
+        count.textContent = hidden;
+        wrap.style.display = '';
+      } else {
+        wrap.style.display = 'none';
+      }
+    }
+
     function buildQS() {
       var qs = [];
       if (state.space.length) qs.push('space=' + state.space.join(','));
@@ -293,6 +337,7 @@
         // Reset the cursor: a fresh filter wants the full top-100, not just
         // kills newer than what the previous filter had seen.
         kfSinceCursor = null;
+        KF_VISIBLE_CAP = 100;
         if (window.htmx) htmx.trigger(feed, 'load');
       }
     }
@@ -430,6 +475,7 @@
         // Reset the cursor so the next fetch reloads the current top-N, not
         // just whatever has come in since we entered older-mode.
         kfSinceCursor = null;
+        KF_VISIBLE_CAP = 100;
         if (window.htmx) htmx.trigger(f, 'load');
       }
     }
@@ -631,6 +677,10 @@
       var loading = document.getElementById('kf-loading');
       if (loading) loading.remove();
 
+      // Cap visible rows at KF_VISIBLE_CAP; surplus stays in DOM (display:none).
+      trimVisibleRows();
+      updateShowMoreButton();
+
       if (kfInitialSwapDone) {
         // Any row not yet bound is a freshly-prepended live row.
         var newRowCount = 0;
@@ -705,6 +755,25 @@
         bindRowClicks();
       });
     };
+
+    var showMoreBtn = document.getElementById('kf-show-more-btn');
+    if (showMoreBtn) {
+      showMoreBtn.addEventListener('click', function() {
+        var hiddenRows = document.querySelectorAll('#kf-feed .kf-row[style*="display: none"]');
+        // DOM order is newest → oldest, so hiddenRows are the trailing slice
+        // past the cap. Reveal the first KF_SHOW_MORE_CHUNK — those are the
+        // rows closest to the visible boundary (oldest hidden first).
+        var toReveal = Array.prototype.slice.call(hiddenRows, 0, KF_SHOW_MORE_CHUNK);
+        toReveal.forEach(function(row) {
+          row.style.display = '';
+          var next = row.nextElementSibling;
+          if (next && next.classList.contains('kf-detail')) next.style.display = '';
+        });
+        // Bump the cap so the next afterSwap doesn't re-hide what we revealed.
+        KF_VISIBLE_CAP += toReveal.length;
+        updateShowMoreButton();
+      });
+    }
   })();
 </script>
 <script nonce="{{ request.state.csp_nonce }}">
