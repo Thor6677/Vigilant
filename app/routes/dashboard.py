@@ -2234,22 +2234,24 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
     cfg = _gs()
     if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
         return HTMLResponse("")
-    from app.intel.recent_battles import query_battles_window, SEC_BAND_ORDER
+    from app.intel.recent_battles import query_battles_window
     groups = await query_battles_window(days=7)
-    # Top tier: only render WH classes that actually have battles. C1-C6 are
-    # listed first in their natural order, then Thera/C13/Drifter/Pochven.
+    # Single unified card grid: K-space first (most active in fleet terms),
+    # then WH classes. Each entry is (label, color-hint, top-2 battles).
+    # color-hint is the band short-code for K-space cards (hs/ls/ns); None
+    # for WH classes (uses the default muted label color).
+    cards: list[tuple[str, str | None, list]] = []
+    kspace_order = [("NS", "ns", "Nullsec"), ("LS", "ls", "Lowsec"), ("HS", "hs", "Highsec")]
+    for short, color, full in kspace_order:
+        if groups.get(full):
+            cards.append((short, color, groups[full][:2]))
     wh_order = ["C1", "C2", "C3", "C4", "C5", "C6", "Thera", "C13 (Shattered)", "Drifter", "Pochven"]
-    wh_cards: list[tuple[str, list]] = []
     for k in wh_order:
         if groups.get(k):
-            wh_cards.append((k, groups[k][:2]))
-    # Bottom tier: top-3 per band, then merged + sorted desc by kill_count.
-    kspace_pool: list = []
-    for band in SEC_BAND_ORDER:
-        kspace_pool.extend((groups.get(band) or [])[:3])
-    kspace_rows = sorted(kspace_pool, key=lambda b: b["kill_count"], reverse=True)
-    return templates.TemplateResponse(request, "partials/dashboard_recent_battles.html", {"wh_cards": wh_cards,
-        "kspace_rows": kspace_rows})
+            cards.append((k, None, groups[k][:2]))
+    return templates.TemplateResponse(
+        request, "partials/dashboard_recent_battles.html", {"cards": cards}
+    )
 
 
 @router.get("/dashboard/activity", response_class=HTMLResponse)

@@ -1,13 +1,17 @@
-{# Two-tier recent battles widget.
-   Top: WH grid — only classes with battles (no empty placeholders).
-   Bottom: combined HS/LS/NS list ranked by kill_count, capped 3 per band.
-   Each row shows top combatant entities (alliance preferred over corp). #}
+{# Recent battles widget.
+   Single card grid for ALL bands — K-space (HS/LS/NS) first, then WH classes.
+   Each card shows top 2 battles. K-space cards get a color-coded title to
+   match the band; WH titles use the muted default. Cards-only avoids the
+   long off-screen K-space row list the old two-tier layout produced. #}
 <style nonce="{{ request.state.csp_nonce }}">
     .rb-wh-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:0.5rem; }
     @media (max-width: 1100px) { .rb-wh-grid { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 600px)  { .rb-wh-grid { grid-template-columns: repeat(2, 1fr); } }
     .rb-wh-card { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.5rem; display:flex; flex-direction:column; }
     .rb-wh-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.35rem; text-transform:uppercase; }
+    .rb-wh-title.rb-title-hs { color:#7fd99a; }
+    .rb-wh-title.rb-title-ls { color:#e0a85a; }
+    .rb-wh-title.rb-title-ns { color:#e07a7a; }
     .rb-wh-row { display:block; padding:3px 0; font-size:11px; text-decoration:none; color:inherit; border-bottom:1px solid rgba(255,255,255,0.04); }
     .rb-wh-row:last-of-type { border-bottom:none; }
     .rb-wh-row:hover { background:rgba(255,255,255,0.04); }
@@ -17,17 +21,6 @@
     .rb-vs { font-size:9px; color:var(--muted); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .rb-vs-att { color:#e07a7a; }
     .rb-vs-vic { color:#7fb8e0; }
-
-    .rb-kspace { margin-top:0.75rem; display:flex; flex-direction:column; gap:1px; }
-    .rb-kspace-row { display:grid; grid-template-columns: 42px 1fr auto; gap:0.5rem; align-items:baseline; padding:5px 8px; background:var(--bg-raised, #111); text-decoration:none; color:inherit; font-size:11px; border:1px solid var(--border); }
-    .rb-kspace-row:hover { background:rgba(255,255,255,0.04); }
-    .rb-band-badge { font-size:9px; letter-spacing:0.1em; padding:2px 0; text-transform:uppercase; text-align:center; font-family:monospace; font-weight:bold; }
-    .rb-band-hs { background:#1a4d2e; color:#7fd99a; }
-    .rb-band-ls { background:#5a3a1a; color:#e0a85a; }
-    .rb-band-ns { background:#5a1a1a; color:#e07a7a; }
-    .rb-ks-sys { color:var(--fg); }
-    .rb-ks-meta { color:var(--muted); font-size:10px; margin-left:0.35rem; }
-    .rb-ks-stat { color:var(--accent); font-family:monospace; font-size:10px; white-space:nowrap; }
 </style>
 
 <div class="b-section">
@@ -35,13 +28,13 @@
         <span class="b-label">Major Fleet Battles in New Eden — last 7 days</span>
     </div>
     <div class="b-pad-md">
-        {% if not wh_cards and not kspace_rows %}
+        {% if not cards %}
         <div style="font-size:11px;color:var(--muted);">No battles in the last 7 days. Discovery runs every 15 min.</div>
         {% else %}
         <div class="rb-wh-grid">
-            {% for label, battles in wh_cards %}
+            {% for label, color, battles in cards %}
             <div class="rb-wh-card">
-                <div class="rb-wh-title">{{ label }}</div>
+                <div class="rb-wh-title{% if color %} rb-title-{{ color }}{% endif %}">{{ label }}</div>
                 {% for b in battles %}
                 <a class="rb-wh-row" href="https://zkillboard.com/system/{{ b['system_id'] }}/" target="_blank" rel="noopener" title="Open {{ b['system_name'] }} on zKillboard">
                     <div class="rb-wh-line">
@@ -60,32 +53,6 @@
             </div>
             {% endfor %}
         </div>
-
-        {% if kspace_rows %}
-        <div class="rb-kspace">
-            {% for b in kspace_rows %}
-            {% set band_short = {'Highsec':'HS', 'Lowsec':'LS', 'Nullsec':'NS'}[b['band']] %}
-            {% set band_class = {'Highsec':'rb-band-hs', 'Lowsec':'rb-band-ls', 'Nullsec':'rb-band-ns'}[b['band']] %}
-            <a class="rb-kspace-row" href="https://zkillboard.com/system/{{ b['system_id'] }}/" target="_blank" rel="noopener" title="Open {{ b['system_name'] }} on zKillboard">
-                <span class="rb-band-badge {{ band_class }}" aria-label="{{ b['band'] }}">{{ band_short }}</span>
-                <span>
-                    <span class="rb-ks-sys">{{ b['system_name'] or b['system_id'] }}</span>
-                    <span class="rb-ks-meta">{{ b['start_time'].strftime('%m/%d %H:%M') }} · {{ b['duration_minutes'] }}m</span>
-                    {% if b['attacker_label'] or b['victim_label'] %}
-                    <div class="rb-vs">
-                        <span class="rb-vs-att">{{ b['attacker_label'] or '—' }}</span>
-                        <span> vs </span>
-                        <span class="rb-vs-vic">{{ b['victim_label'] or '—' }}</span>
-                    </div>
-                    {% endif %}
-                </span>
-                <span class="rb-ks-stat">
-                    {{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P{% if b['total_isk'] and b['total_isk'] > 0 %} · {{ (b['total_isk'] / 1e9) | round(1) }}B{% endif %}
-                </span>
-            </a>
-            {% endfor %}
-        </div>
-        {% endif %}
         {% endif %}
     </div>
 </div>
