@@ -2236,21 +2236,51 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
         return HTMLResponse("")
     from app.intel.recent_battles import query_battles_window
     groups = await query_battles_window(days=7)
-    # Single unified card grid: K-space first (most active in fleet terms),
-    # then WH classes. Each entry is (label, color-hint, top-2 battles).
-    # color-hint is the band short-code for K-space cards (hs/ls/ns); None
-    # for WH classes (uses the default muted label color).
-    cards: list[tuple[str, str | None, list]] = []
-    kspace_order = [("NS", "ns", "Nullsec"), ("LS", "ls", "Lowsec"), ("HS", "hs", "Highsec")]
-    for short, color, full in kspace_order:
-        if groups.get(full):
-            cards.append((short, color, groups[full][:2]))
-    wh_order = ["C1", "C2", "C3", "C4", "C5", "C6", "Thera", "C13 (Shattered)", "Drifter", "Pochven"]
-    for k in wh_order:
-        if groups.get(k):
-            cards.append((k, None, groups[k][:2]))
+
+    def _band_meta(label: str) -> tuple[str, str]:
+        """Map a group_label to (short_code, badge_css_class). K-space gets
+        its 2-char code + band-tinted badge; every WH class keeps its label
+        (collapsed to fit the 42px badge slot) on the shared purple WH tint."""
+        if label == "Nullsec":
+            return ("NS", "rb-band-ns")
+        if label == "Lowsec":
+            return ("LS", "rb-band-ls")
+        if label == "Highsec":
+            return ("HS", "rb-band-hs")
+        if label == "C13 (Shattered)":
+            return ("C13", "rb-band-wh")
+        return (label, "rb-band-wh")
+
+    rollup: list[dict] = []
+    all_battles: list[dict] = []
+    for label, battles in groups.items():
+        if not battles:
+            continue
+        short, css = _band_meta(label)
+        total_kills = sum(b["kill_count"] or 0 for b in battles)
+        total_isk = sum(b["total_isk"] or 0 for b in battles)
+        top = max(battles, key=lambda b: b["kill_count"] or 0)
+        for b in battles:
+            b["band_short"] = short
+            b["band_class"] = css
+            all_battles.append(b)
+        rollup.append({
+            "band_short": short,
+            "band_class": css,
+            "fight_count": len(battles),
+            "total_kills": total_kills,
+            "total_isk": total_isk,
+            "top_system_id": top["system_id"],
+            "top_system_name": top["system_name"] or f"#{top['system_id']}",
+            "top_attacker_label": top.get("attacker_label") or "",
+            "top_victim_label": top.get("victim_label") or "",
+        })
+    rollup.sort(key=lambda r: r["total_kills"], reverse=True)
+    top10 = sorted(all_battles, key=lambda b: b["kill_count"] or 0, reverse=True)[:10]
+
     return templates.TemplateResponse(
-        request, "partials/dashboard_recent_battles.html", {"cards": cards}
+        request, "partials/dashboard_recent_battles.html",
+        {"rollup": rollup, "top10": top10},
     )
 
 

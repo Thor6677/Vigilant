@@ -1,58 +1,80 @@
-{# Recent battles widget.
-   Single card grid for ALL bands — K-space (HS/LS/NS) first, then WH classes.
-   Each card shows top 2 battles. K-space cards get a color-coded title to
-   match the band; WH titles use the muted default. Cards-only avoids the
-   long off-screen K-space row list the old two-tier layout produced. #}
+{# Two-column recent-battles widget.
+   Left: per-band rollup, sorted by total kills DESC.
+   Right: flat top-10 by kill_count across all bands.
+   Both columns use minmax(0, 1fr) tracks so long content cannot blow
+   past the 1360px parent. Stacks vertically below 900px. #}
 <style nonce="{{ request.state.csp_nonce }}">
-    .rb-wh-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:0.5rem; }
-    @media (max-width: 1100px) { .rb-wh-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 600px)  { .rb-wh-grid { grid-template-columns: repeat(2, 1fr); } }
-    .rb-wh-card { background: var(--bg-raised, #111); border:1px solid var(--border); padding:0.5rem; display:flex; flex-direction:column; }
-    .rb-wh-title { font-size:10px; letter-spacing:0.15em; color:var(--muted); margin-bottom:0.35rem; text-transform:uppercase; }
-    .rb-wh-title.rb-title-hs { color:#7fd99a; }
-    .rb-wh-title.rb-title-ls { color:#e0a85a; }
-    .rb-wh-title.rb-title-ns { color:#e07a7a; }
-    .rb-wh-row { display:block; padding:3px 0; font-size:11px; text-decoration:none; color:inherit; border-bottom:1px solid rgba(255,255,255,0.04); }
-    .rb-wh-row:last-of-type { border-bottom:none; }
-    .rb-wh-row:hover { background:rgba(255,255,255,0.04); }
-    .rb-wh-line { display:flex; justify-content:space-between; align-items:baseline; gap:0.35rem; }
-    .rb-wh-sys { color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .rb-wh-stat { color:var(--accent); font-family:monospace; font-size:10px; white-space:nowrap; }
-    .rb-vs { font-size:9px; color:var(--muted); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .rb-vs-att { color:#e07a7a; }
-    .rb-vs-vic { color:#7fb8e0; }
+  .rb-grid { display:grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap:1rem; }
+  @media (max-width: 900px) { .rb-grid { grid-template-columns: minmax(0, 1fr); } }
+
+  .rb-col-head { font-size:9px; color:var(--muted); letter-spacing:0.15em; text-transform:uppercase; margin:0 0 0.4rem; padding:0 0.5rem; }
+
+  .rb-row { display:grid; align-items:center; gap:0.5rem; padding:6px 8px; text-decoration:none; color:inherit; border-bottom:1px solid var(--border); font-size:11px; background:var(--bg-raised, #111); }
+  .rb-row:hover { background:rgba(255,255,255,0.05); }
+  .rb-row:last-of-type { border-bottom:none; }
+
+  /* rollup row: badge (42px) · body (flex) · stat (auto) */
+  .rb-rollup-row { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  /* top10 row: rank (20px) · badge (42px) · body (flex) · stat (auto) */
+  .rb-top10-row { grid-template-columns: 20px 42px minmax(0, 1fr) auto; }
+
+  .rb-band-badge { font-size:9px; letter-spacing:0.1em; padding:2px 0; text-transform:uppercase; text-align:center; font-family:monospace; font-weight:bold; border-radius:2px; }
+  .rb-band-hs { background:#1a4d2e; color:#7fd99a; }
+  .rb-band-ls { background:#5a3a1a; color:#e0a85a; }
+  .rb-band-ns { background:#5a1a1a; color:#e07a7a; }
+  .rb-band-wh { background:#2a1a4d; color:#a78bfa; }
+
+  .rb-rank { color:var(--muted); font-family:monospace; font-size:10px; text-align:right; }
+  .rb-body { min-width:0; }
+  .rb-sys { color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .rb-meta { color:var(--muted); font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .rb-fightcount { color:var(--muted); font-size:9px; margin-left:4px; }
+  .rb-stat { color:var(--accent); font-family:monospace; font-size:10px; white-space:nowrap; text-align:right; }
 </style>
 
 <div class="b-section">
-    <div class="b-section-head">
-        <span class="b-label">Major Fleet Battles in New Eden — last 7 days</span>
+  <div class="b-section-head">
+    <span class="b-label">Major Fleet Battles in New Eden — last 7 days</span>
+  </div>
+  <div class="b-pad-md">
+    {% if not rollup and not top10 %}
+    <div style="font-size:11px;color:var(--muted);">No battles in the last 7 days. Discovery runs every 15 min.</div>
+    {% else %}
+    <div class="rb-grid">
+      <div>
+        <div class="rb-col-head">Band activity</div>
+        {% for r in rollup %}
+        <a class="rb-row rb-rollup-row"
+           href="https://zkillboard.com/system/{{ r['top_system_id'] }}/"
+           target="_blank" rel="noopener"
+           title="{{ r['top_attacker_label'] or '—' }} vs {{ r['top_victim_label'] or '—' }}">
+          <span class="rb-band-badge {{ r['band_class'] }}">{{ r['band_short'] }}</span>
+          <span class="rb-body">
+            <span class="rb-sys">{{ r['top_system_name'] }}<span class="rb-fightcount">{{ r['fight_count'] }}F</span></span>
+            <span class="rb-meta">{{ r['top_attacker_label'] or '—' }} vs {{ r['top_victim_label'] or '—' }}</span>
+          </span>
+          <span class="rb-stat">{{ r['total_kills'] }}K{% if r['total_isk'] and r['total_isk'] > 0 %} · {{ (r['total_isk']/1e9)|round(1) }}B{% endif %}</span>
+        </a>
+        {% endfor %}
+      </div>
+      <div>
+        <div class="rb-col-head">Top 10 by kills</div>
+        {% for b in top10 %}
+        <a class="rb-row rb-top10-row"
+           href="https://zkillboard.com/system/{{ b['system_id'] }}/"
+           target="_blank" rel="noopener"
+           title="{{ b['attacker_label'] or '—' }} vs {{ b['victim_label'] or '—' }}">
+          <span class="rb-rank">{{ loop.index }}</span>
+          <span class="rb-band-badge {{ b['band_class'] }}">{{ b['band_short'] }}</span>
+          <span class="rb-body">
+            <span class="rb-sys">{{ b['system_name'] or b['system_id'] }}</span>
+            <span class="rb-meta">{{ b['attacker_label'] or '—' }} vs {{ b['victim_label'] or '—' }}</span>
+          </span>
+          <span class="rb-stat">{{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P</span>
+        </a>
+        {% endfor %}
+      </div>
     </div>
-    <div class="b-pad-md">
-        {% if not cards %}
-        <div style="font-size:11px;color:var(--muted);">No battles in the last 7 days. Discovery runs every 15 min.</div>
-        {% else %}
-        <div class="rb-wh-grid">
-            {% for label, color, battles in cards %}
-            <div class="rb-wh-card">
-                <div class="rb-wh-title{% if color %} rb-title-{{ color }}{% endif %}">{{ label }}</div>
-                {% for b in battles %}
-                <a class="rb-wh-row" href="https://zkillboard.com/system/{{ b['system_id'] }}/" target="_blank" rel="noopener" title="Open {{ b['system_name'] }} on zKillboard">
-                    <div class="rb-wh-line">
-                        <span class="rb-wh-sys">{{ b['system_name'] or b['system_id'] }}</span>
-                        <span class="rb-wh-stat">{{ b['kill_count'] }}K · {{ b['pilots_involved'] }}P</span>
-                    </div>
-                    {% if b['attacker_label'] or b['victim_label'] %}
-                    <div class="rb-vs">
-                        <span class="rb-vs-att">{{ b['attacker_label'] or '—' }}</span>
-                        <span> vs </span>
-                        <span class="rb-vs-vic">{{ b['victim_label'] or '—' }}</span>
-                    </div>
-                    {% endif %}
-                </a>
-                {% endfor %}
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </div>
+    {% endif %}
+  </div>
 </div>

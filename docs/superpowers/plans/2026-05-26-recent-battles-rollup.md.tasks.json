@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-26-recent-battles-rollup.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Rebuild route aggregation + template",
+      "status": "pending",
+      "description": "**Goal:** /dashboard/recent-battles returns a band-rollup list and a top-10 list to the template; the template renders them in a two-column grid with overflow-safe tracks.\n\n**Files:**\n- Modify: app/routes/dashboard.py — dashboard_recent_battles function (~lines 2231–2252)\n- Modify: app/templates/partials/dashboard_recent_battles.html — full rewrite\n\n**Acceptance Criteria:**\n- Widget renders without horizontal overflow.\n- Left rollup: one row per band with battles, sorted by total kills DESC, badge + system + matchup + (kills · isk) stat.\n- Right top-10: ranked rows by kill_count DESC, badge + system + matchup + (kills · pilots) stat.\n- Empty groups skipped; empty-state fallback works.\n- Rows link to zKillboard, title tooltip carries full matchup.\n- Stacks vertically below 900px.\n\n**Verify:** Manual on production — spec §Testing.\n\n**Steps:** Rewrite route → rewrite template → python3 ast check → grep sanity → commit → deploy → manual verify.\n\n```json:metadata\n{\"files\":[\"app/routes/dashboard.py\",\"app/templates/partials/dashboard_recent_battles.html\"],\"verifyCommand\":\"manual\",\"acceptanceCriteria\":[\"No horizontal overflow\",\"Left rollup sorted by total kills DESC\",\"Right top-10 sorted by kill_count DESC\",\"Rows link to zKB with hover tooltip\",\"Stacks below 900px\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-26T00:00:00Z"
+}
