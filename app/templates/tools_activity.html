@@ -109,12 +109,12 @@
                 var d = data[btn.dataset.k];
                 var lbl = btn.dataset.lbl;
                 var deltaEl = document.getElementById('ta-live-delta');
-                if (d !== null && d !== undefined && d !== 0) {
-                    deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs ' + lbl;
-                    deltaEl.style.color = d > 0 ? 'var(--success)' : 'var(--danger)';
-                } else {
-                    deltaEl.textContent = d === null ? 'not enough data' : '';
+                if (d === null || d === undefined) {
+                    deltaEl.textContent = 'not enough data';
                     deltaEl.style.color = 'var(--muted)';
+                } else {
+                    deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs ' + lbl;
+                    deltaEl.style.color = d > 0 ? 'var(--success)' : d < 0 ? 'var(--danger)' : 'var(--muted)';
                 }
             }
 

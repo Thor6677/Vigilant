@@ -768,10 +768,11 @@ async def fetch_server_status() -> dict:
         return {"online": False, "players": None}
 
 
-async def _fetch_live_history(db: AsyncSession) -> dict:
+async def _fetch_live_history(db: AsyncSession, live_count: int | None = None) -> dict:
     """Return deltas for all selectable windows + last-10-min history.
-    Short deltas (60s/5m/10m) come from a single 15-row fetch; longer ones
-    (30m/1h/6h) use targeted LIMIT 1 queries on the indexed recorded_at col."""
+    live_count is the current ESI pilot count; deltas are computed as
+    live_count minus the DB snapshot from N minutes ago, so the displayed
+    count and the delta always share the same baseline."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff_10m = now - timedelta(minutes=10)
 
@@ -786,13 +787,14 @@ async def _fetch_live_history(db: AsyncSession) -> dict:
         return {k: None for k in ("delta_60s", "delta_5m", "delta_10m",
                                    "delta_30m", "delta_1h", "delta_6h")} | {"history": []}
 
-    latest = rows[0].player_count
+    # Baseline for all deltas: live ESI count when available, else latest DB row
+    baseline = live_count if live_count is not None else rows[0].player_count
 
     def _ref_from_rows(minutes: int) -> int | None:
         cutoff = now - timedelta(minutes=minutes)
         for row in rows:
             if row.recorded_at <= cutoff:
-                return latest - row.player_count
+                return baseline - row.player_count
         return None
 
     async def _ref_from_db(minutes: int) -> int | None:
@@ -804,7 +806,7 @@ async def _fetch_live_history(db: AsyncSession) -> dict:
             .order_by(PlayerCountSnapshot.recorded_at.desc())
             .limit(1)
         )).scalar_one_or_none()
-        return (latest - val) if val is not None else None
+        return (baseline - val) if val is not None else None
 
     history = [
         {"t": row.recorded_at.strftime("%H:%M"), "v": row.player_count}
@@ -812,8 +814,15 @@ async def _fetch_live_history(db: AsyncSession) -> dict:
         if row.recorded_at >= cutoff_10m
     ]
 
+    # delta_60s: live vs most recent DB snapshot (~60s old written by background sampler)
+    # Falls back to two consecutive DB rows when no live_count (server offline)
+    if live_count is not None:
+        delta_60s = live_count - rows[0].player_count
+    else:
+        delta_60s = (rows[0].player_count - rows[1].player_count) if len(rows) >= 2 else None
+
     return {
-        "delta_60s": (latest - rows[1].player_count) if len(rows) >= 2 else None,
+        "delta_60s": delta_60s,
         "delta_5m":  _ref_from_rows(5),
         "delta_10m": _ref_from_rows(10),
         "delta_30m": await _ref_from_db(30),
@@ -827,10 +836,11 @@ async def _fetch_live_history(db: AsyncSession) -> dict:
 async def api_server_status(db: AsyncSession = Depends(get_db)):
     status = await fetch_server_status()
     status["delta_15m"] = await _fetch_15m_delta(db)
-    live = await _fetch_live_history(db)
-    if status.get("online") and status.get("players") and live.get("history") is not None:
+    live_count = status["players"] if status.get("online") and status.get("players") else None
+    live = await _fetch_live_history(db, live_count=live_count)
+    if live_count and live.get("history") is not None:
         now_t = datetime.now(timezone.utc).strftime("%H:%M")
-        live["history"].append({"t": now_t, "v": status["players"]})
+        live["history"].append({"t": now_t, "v": live_count})
     status.update(live)
     return JSONResponse(status)
 
