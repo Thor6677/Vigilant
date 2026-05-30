@@ -768,10 +768,38 @@ async def fetch_server_status() -> dict:
         return {"online": False, "players": None}
 
 
+async def _fetch_live_history(db: AsyncSession) -> dict:
+    """Return delta_60s (latest minus previous snapshot) and last-10-min history
+    for the live activity page. Fetches at most 15 rows in one query."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff_10m = now - timedelta(minutes=10)
+
+    rows = (await db.execute(
+        select(PlayerCountSnapshot.player_count, PlayerCountSnapshot.recorded_at)
+        .where(PlayerCountSnapshot.source == "esi")
+        .order_by(PlayerCountSnapshot.recorded_at.desc())
+        .limit(15)
+    )).all()
+
+    delta_60s = None
+    history = []
+    if rows:
+        if len(rows) >= 2:
+            delta_60s = rows[0].player_count - rows[1].player_count
+        for row in reversed(rows):
+            if row.recorded_at >= cutoff_10m:
+                history.append({"t": row.recorded_at.strftime("%H:%M"), "v": row.player_count})
+
+    return {"delta_60s": delta_60s, "history": history}
+
+
 @router.get("/api/server-status")
 async def api_server_status(db: AsyncSession = Depends(get_db)):
     status = await fetch_server_status()
     status["delta_15m"] = await _fetch_15m_delta(db)
+    live = await _fetch_live_history(db)
+    status["delta_60s"] = live["delta_60s"]
+    status["history"] = live["history"]
     return JSONResponse(status)
 
 

@@ -71,43 +71,102 @@
     <div class="b-pad-md">
 
         {% if live_mode %}
-        <div style="text-align:center;padding:2rem 0 1.5rem;">
+        <div style="text-align:center;padding:1.5rem 0 0.75rem;">
             <div id="ta-live-count" style="font-size:42px;font-weight:600;color:var(--accent);letter-spacing:-0.02em;line-height:1;">—</div>
             <div id="ta-live-delta" style="font-size:13px;margin-top:0.4rem;min-height:1.4em;"></div>
             <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-top:0.5rem;">Pilots online · Tranquility</div>
             <div id="ta-live-updated" style="font-size:9px;color:var(--muted);margin-top:0.25rem;"></div>
         </div>
+        <div style="position:relative;height:120px;margin-top:0.75rem;">
+            <canvas id="ta-live-chart"></canvas>
+        </div>
         <script nonce="{{ request.state.csp_nonce }}">
         (function() {
+            var _liveChart = null;
+            var _countdown = 60;
+
+            function drawChart(history) {
+                if (typeof Chart === 'undefined' || !history || !history.length) return;
+                var el = document.getElementById('ta-live-chart');
+                if (!el) return;
+                var labels = history.map(function(p) { return p.t; });
+                var values = history.map(function(p) { return p.v; });
+                if (_liveChart) {
+                    _liveChart.data.labels = labels;
+                    _liveChart.data.datasets[0].data = values;
+                    _liveChart.update('none');
+                } else {
+                    _liveChart = new Chart(el, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: values,
+                                borderColor: 'rgba(94,177,255,0.9)',
+                                backgroundColor: 'rgba(94,177,255,0.12)',
+                                borderWidth: 1.5,
+                                pointRadius: 2,
+                                pointHoverRadius: 4,
+                                fill: true,
+                                tension: 0.3,
+                            }],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: false,
+                            plugins: { legend: { display: false }, tooltip: {
+                                callbacks: { label: function(ctx) { return ctx.parsed.y.toLocaleString() + ' pilots'; } }
+                            }},
+                            scales: {
+                                x: { ticks: { color: '#7a7a7a', font: { size: 9 } }, grid: { display: false } },
+                                y: { ticks: { color: '#7a7a7a', font: { size: 9 }, callback: function(v) { return v >= 1000 ? (v/1000).toFixed(0)+'K' : v; } },
+                                     grid: { color: 'rgba(255,255,255,0.05)' } },
+                            },
+                        },
+                    });
+                }
+            }
+
             function updateLive() {
                 fetch('/api/server-status')
-                    .then(r => r.json())
-                    .then(data => {
-                        const el = document.getElementById('ta-live-count');
-                        const deltaEl = document.getElementById('ta-live-delta');
-                        const updEl = document.getElementById('ta-live-updated');
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var el = document.getElementById('ta-live-count');
+                        var deltaEl = document.getElementById('ta-live-delta');
+                        var updEl = document.getElementById('ta-live-updated');
                         if (data.online && data.players) {
                             el.textContent = data.players.toLocaleString();
                             el.style.color = 'var(--accent)';
-                            const d = data.delta_15m;
+                            var d = data.delta_60s;
                             if (d !== null && d !== undefined && d !== 0) {
-                                deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' in 15 min';
+                                deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs 60s ago';
                                 deltaEl.style.color = d > 0 ? 'var(--success)' : 'var(--danger)';
                             } else {
                                 deltaEl.textContent = '';
                             }
-                            const now = new Date();
+                            var now = new Date();
                             updEl.textContent = 'Updated ' + now.getUTCHours().toString().padStart(2,'0') + ':' + now.getUTCMinutes().toString().padStart(2,'0') + ' UTC';
+                            _countdown = 60;
+                            drawChart(data.history);
                         } else {
                             el.textContent = 'OFFLINE';
                             el.style.color = 'var(--danger)';
                             deltaEl.textContent = '';
                         }
                     })
-                    .catch(() => {});
+                    .catch(function() {});
             }
             updateLive();
             setInterval(updateLive, 60000);
+            setInterval(function() {
+                _countdown = Math.max(0, _countdown - 1);
+                var el = document.getElementById('ta-live-updated');
+                if (el && el.textContent) {
+                    var base = el.textContent.replace(/ · next in \d+s$/, '');
+                    el.textContent = base + ' · next in ' + _countdown + 's';
+                }
+            }, 1000);
         })();
         </script>
         {% else %}
