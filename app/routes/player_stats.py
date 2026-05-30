@@ -82,6 +82,21 @@ async def tools_activity(
     if not request.session.get("user_id"):
         return RedirectResponse("/")
 
+    if window == "live":
+        return templates.TemplateResponse(request, "tools_activity.html", {
+            "window": "live",
+            "window_label": "Live · Tranquility",
+            "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
+            "live_mode": True,
+            "daily_kills_counts": [],
+            "daily_kills_labels": [],
+            "breakdowns_available": False,
+            "has_breakdown_data": False,
+            "zone_available": False,
+            "has_zone_data": False,
+            "has_heatmap_data": False,
+        })
+
     if window not in _WINDOWS:
         window = "30d"
     label, delta, bin_seconds, label_fmt = _WINDOWS[window]
@@ -487,6 +502,7 @@ async def tools_activity(
         "zone_isk_series": zone_isk_series,
         "daily_kills_labels": daily_kills_labels,
         "daily_kills_counts": daily_kills_counts,
+        "live_mode": False,
     }
     if window in _SLOW_WINDOWS:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)

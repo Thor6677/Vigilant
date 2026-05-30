@@ -60,12 +60,59 @@
                 {{ btn_label.get(w, w) }}
             </a>
             {% endfor %}
+            <a href="/tools/activity?window=live"
+               class="b-btn {% if window == 'live' %}is-active{% endif %}"
+               style="text-decoration:none;">
+                LIVE
+            </a>
         </div>
     </div>
 
     <div class="b-pad-md">
 
-        <div class="ta-stats" style="grid-template-columns:repeat(5,1fr);">
+        {% if live_mode %}
+        <div style="text-align:center;padding:2rem 0 1.5rem;">
+            <div id="ta-live-count" style="font-size:42px;font-weight:600;color:var(--accent);letter-spacing:-0.02em;line-height:1;">—</div>
+            <div id="ta-live-delta" style="font-size:13px;margin-top:0.4rem;min-height:1.4em;"></div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-top:0.5rem;">Pilots online · Tranquility</div>
+            <div id="ta-live-updated" style="font-size:9px;color:var(--muted);margin-top:0.25rem;"></div>
+        </div>
+        <script nonce="{{ request.state.csp_nonce }}">
+        (function() {
+            function updateLive() {
+                fetch('/api/server-status')
+                    .then(r => r.json())
+                    .then(data => {
+                        const el = document.getElementById('ta-live-count');
+                        const deltaEl = document.getElementById('ta-live-delta');
+                        const updEl = document.getElementById('ta-live-updated');
+                        if (data.online && data.players) {
+                            el.textContent = data.players.toLocaleString();
+                            el.style.color = 'var(--accent)';
+                            const d = data.delta_15m;
+                            if (d !== null && d !== undefined && d !== 0) {
+                                deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' in 15 min';
+                                deltaEl.style.color = d > 0 ? 'var(--success)' : 'var(--danger)';
+                            } else {
+                                deltaEl.textContent = '';
+                            }
+                            const now = new Date();
+                            updEl.textContent = 'Updated ' + now.getUTCHours().toString().padStart(2,'0') + ':' + now.getUTCMinutes().toString().padStart(2,'0') + ' UTC';
+                        } else {
+                            el.textContent = 'OFFLINE';
+                            el.style.color = 'var(--danger)';
+                            deltaEl.textContent = '';
+                        }
+                    })
+                    .catch(() => {});
+            }
+            updateLive();
+            setInterval(updateLive, 60000);
+        })();
+        </script>
+        {% else %}
+
+        <div class="ta-stats" style="grid-template-columns:repeat(4,1fr);">
             <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_pcu(peak_pcu) }}</div>
                 <div class="ta-stat-label">Peak players</div>
@@ -81,15 +128,6 @@
             <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_isk(total_isk) }}</div>
                 <div class="ta-stat-label">ISK destroyed</div>
-            </div>
-            <div id="live-pcu-tile"
-                 hx-get="/api/live-pcu"
-                 hx-trigger="load, every 60s"
-                 hx-swap="outerHTML">
-                <div class="ta-stat">
-                    <div class="ta-stat-val" style="color:var(--muted)">—</div>
-                    <div class="ta-stat-label">Live pilots</div>
-                </div>
             </div>
         </div>
 
@@ -118,6 +156,7 @@
             {% endfor %}
             {% if not source_counts %}live samples accumulating…{% endif %}
         </div>
+        {% endif %}{# end if live_mode #}
     </div>
 </div>
 
