@@ -509,7 +509,17 @@ function updateServerStatus() {
                 text.style.color = 'var(--success)';
                 text.textContent = 'TRANQUILITY — ONLINE';
                 if (data.players) {
-                    players.textContent = data.players.toLocaleString() + ' pilots online';
+                    players.innerHTML = '';
+                    const main = document.createElement('span');
+                    main.textContent = data.players.toLocaleString() + ' pilots online';
+                    players.appendChild(main);
+                    const d = data.delta_15m;
+                    if (d !== null && d !== undefined && d !== 0) {
+                        const badge = document.createElement('span');
+                        badge.textContent = (d > 0 ? '+' : '') + d.toLocaleString();
+                        badge.style.cssText = 'margin-left:0.5rem;font-size:10px;color:' + (d > 0 ? 'var(--success)' : 'var(--danger)');
+                        players.appendChild(badge);
+                    }
                     players.style.display = '';
                 }
             } else {
