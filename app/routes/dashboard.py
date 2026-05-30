@@ -769,8 +769,9 @@ async def fetch_server_status() -> dict:
 
 
 async def _fetch_live_history(db: AsyncSession) -> dict:
-    """Return delta_60s (latest minus previous snapshot) and last-10-min history
-    for the live activity page. Fetches at most 15 rows in one query."""
+    """Return deltas for all selectable windows + last-10-min history.
+    Short deltas (60s/5m/10m) come from a single 15-row fetch; longer ones
+    (30m/1h/6h) use targeted LIMIT 1 queries on the indexed recorded_at col."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff_10m = now - timedelta(minutes=10)
 
@@ -781,16 +782,45 @@ async def _fetch_live_history(db: AsyncSession) -> dict:
         .limit(15)
     )).all()
 
-    delta_60s = None
-    history = []
-    if rows:
-        if len(rows) >= 2:
-            delta_60s = rows[0].player_count - rows[1].player_count
-        for row in reversed(rows):
-            if row.recorded_at >= cutoff_10m:
-                history.append({"t": row.recorded_at.strftime("%H:%M"), "v": row.player_count})
+    if not rows:
+        return {k: None for k in ("delta_60s", "delta_5m", "delta_10m",
+                                   "delta_30m", "delta_1h", "delta_6h")} | {"history": []}
 
-    return {"delta_60s": delta_60s, "history": history}
+    latest = rows[0].player_count
+
+    def _ref_from_rows(minutes: int) -> int | None:
+        cutoff = now - timedelta(minutes=minutes)
+        for row in rows:
+            if row.recorded_at <= cutoff:
+                return latest - row.player_count
+        return None
+
+    async def _ref_from_db(minutes: int) -> int | None:
+        cutoff = now - timedelta(minutes=minutes)
+        val = (await db.execute(
+            select(PlayerCountSnapshot.player_count)
+            .where(PlayerCountSnapshot.source == "esi")
+            .where(PlayerCountSnapshot.recorded_at <= cutoff)
+            .order_by(PlayerCountSnapshot.recorded_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        return (latest - val) if val is not None else None
+
+    history = [
+        {"t": row.recorded_at.strftime("%H:%M"), "v": row.player_count}
+        for row in reversed(rows)
+        if row.recorded_at >= cutoff_10m
+    ]
+
+    return {
+        "delta_60s": (latest - rows[1].player_count) if len(rows) >= 2 else None,
+        "delta_5m":  _ref_from_rows(5),
+        "delta_10m": _ref_from_rows(10),
+        "delta_30m": await _ref_from_db(30),
+        "delta_1h":  await _ref_from_db(60),
+        "delta_6h":  await _ref_from_db(360),
+        "history":   history,
+    }
 
 
 @router.get("/api/server-status")
@@ -798,8 +828,10 @@ async def api_server_status(db: AsyncSession = Depends(get_db)):
     status = await fetch_server_status()
     status["delta_15m"] = await _fetch_15m_delta(db)
     live = await _fetch_live_history(db)
-    status["delta_60s"] = live["delta_60s"]
-    status["history"] = live["history"]
+    if status.get("online") and status.get("players") and live.get("history") is not None:
+        now_t = datetime.now(timezone.utc).strftime("%H:%M")
+        live["history"].append({"t": now_t, "v": status["players"]})
+    status.update(live)
     return JSONResponse(status)
 
 

@@ -71,10 +71,18 @@
     <div class="b-pad-md">
 
         {% if live_mode %}
-        <div style="text-align:center;padding:1.5rem 0 0.75rem;">
+        <div style="text-align:center;padding:1.5rem 0 0.5rem;">
             <div id="ta-live-count" style="font-size:42px;font-weight:600;color:var(--accent);letter-spacing:-0.02em;line-height:1;">—</div>
             <div id="ta-live-delta" style="font-size:13px;margin-top:0.4rem;min-height:1.4em;"></div>
-            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-top:0.5rem;">Pilots online · Tranquility</div>
+            <div style="display:flex;gap:0.2rem;justify-content:center;margin-top:0.5rem;" id="ta-delta-btns">
+                <button type="button" class="b-btn ta-delta-btn" data-w="60s" data-k="delta_60s" data-lbl="60s ago" style="padding:2px 7px;font-size:9px;">60S</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="5m"  data-k="delta_5m"  data-lbl="5m ago"  style="padding:2px 7px;font-size:9px;">5M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="10m" data-k="delta_10m" data-lbl="10m ago" style="padding:2px 7px;font-size:9px;">10M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="30m" data-k="delta_30m" data-lbl="30m ago" style="padding:2px 7px;font-size:9px;">30M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="1h"  data-k="delta_1h"  data-lbl="1h ago"  style="padding:2px 7px;font-size:9px;">1H</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="6h"  data-k="delta_6h"  data-lbl="6h ago"  style="padding:2px 7px;font-size:9px;">6H</button>
+            </div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-top:0.6rem;">Pilots online · Tranquility</div>
             <div id="ta-live-updated" style="font-size:9px;color:var(--muted);margin-top:0.25rem;"></div>
         </div>
         <div style="position:relative;height:120px;margin-top:0.75rem;">
@@ -84,6 +92,41 @@
         (function() {
             var _liveChart = null;
             var _countdown = 60;
+            var _lastData = null;
+            var _activeW = localStorage.getItem('ta_live_dw') || '60s';
+
+            function applyActive() {
+                document.querySelectorAll('.ta-delta-btn').forEach(function(btn) {
+                    var on = btn.dataset.w === _activeW;
+                    btn.style.color = on ? 'var(--accent)' : '';
+                    btn.style.borderColor = on ? 'var(--accent)' : '';
+                });
+            }
+
+            function showDelta(data) {
+                var btn = document.querySelector('.ta-delta-btn[data-w="' + _activeW + '"]');
+                if (!btn || !data) return;
+                var d = data[btn.dataset.k];
+                var lbl = btn.dataset.lbl;
+                var deltaEl = document.getElementById('ta-live-delta');
+                if (d !== null && d !== undefined && d !== 0) {
+                    deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs ' + lbl;
+                    deltaEl.style.color = d > 0 ? 'var(--success)' : 'var(--danger)';
+                } else {
+                    deltaEl.textContent = d === null ? 'not enough data' : '';
+                    deltaEl.style.color = 'var(--muted)';
+                }
+            }
+
+            document.querySelectorAll('.ta-delta-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    _activeW = btn.dataset.w;
+                    localStorage.setItem('ta_live_dw', _activeW);
+                    applyActive();
+                    showDelta(_lastData);
+                });
+            });
+            applyActive();
 
             function drawChart(history) {
                 if (typeof Chart === 'undefined' || !history || !history.length) return;
@@ -98,29 +141,22 @@
                 } else {
                     _liveChart = new Chart(el, {
                         type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                data: values,
-                                borderColor: 'rgba(94,177,255,0.9)',
-                                backgroundColor: 'rgba(94,177,255,0.12)',
-                                borderWidth: 1.5,
-                                pointRadius: 2,
-                                pointHoverRadius: 4,
-                                fill: true,
-                                tension: 0.3,
-                            }],
-                        },
+                        data: { labels: labels, datasets: [{
+                            data: values,
+                            borderColor: 'rgba(94,177,255,0.9)',
+                            backgroundColor: 'rgba(94,177,255,0.12)',
+                            borderWidth: 1.5, pointRadius: 2, pointHoverRadius: 4,
+                            fill: true, tension: 0.3,
+                        }]},
                         options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            animation: false,
+                            responsive: true, maintainAspectRatio: false, animation: false,
                             plugins: { legend: { display: false }, tooltip: {
                                 callbacks: { label: function(ctx) { return ctx.parsed.y.toLocaleString() + ' pilots'; } }
                             }},
                             scales: {
                                 x: { ticks: { color: '#7a7a7a', font: { size: 9 } }, grid: { display: false } },
-                                y: { ticks: { color: '#7a7a7a', font: { size: 9 }, callback: function(v) { return v >= 1000 ? (v/1000).toFixed(0)+'K' : v; } },
+                                y: { ticks: { color: '#7a7a7a', font: { size: 9 },
+                                             callback: function(v) { return v >= 1000 ? (v/1000).toFixed(0)+'K' : v; } },
                                      grid: { color: 'rgba(255,255,255,0.05)' } },
                             },
                         },
@@ -132,19 +168,13 @@
                 fetch('/api/server-status')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
+                        _lastData = data;
                         var el = document.getElementById('ta-live-count');
-                        var deltaEl = document.getElementById('ta-live-delta');
                         var updEl = document.getElementById('ta-live-updated');
                         if (data.online && data.players) {
                             el.textContent = data.players.toLocaleString();
                             el.style.color = 'var(--accent)';
-                            var d = data.delta_60s;
-                            if (d !== null && d !== undefined && d !== 0) {
-                                deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs 60s ago';
-                                deltaEl.style.color = d > 0 ? 'var(--success)' : 'var(--danger)';
-                            } else {
-                                deltaEl.textContent = '';
-                            }
+                            showDelta(data);
                             var now = new Date();
                             updEl.textContent = 'Updated ' + now.getUTCHours().toString().padStart(2,'0') + ':' + now.getUTCMinutes().toString().padStart(2,'0') + ' UTC';
                             _countdown = 60;
@@ -152,7 +182,7 @@
                         } else {
                             el.textContent = 'OFFLINE';
                             el.style.color = 'var(--danger)';
-                            deltaEl.textContent = '';
+                            document.getElementById('ta-live-delta').textContent = '';
                         }
                     })
                     .catch(function() {});
