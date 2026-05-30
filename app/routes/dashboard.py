@@ -840,7 +840,10 @@ async def api_server_status(db: AsyncSession = Depends(get_db)):
     live = await _fetch_live_history(db, live_count=live_count)
     if live_count and live.get("history") is not None:
         now_t = datetime.now(timezone.utc).strftime("%H:%M")
-        live["history"].append({"t": now_t, "v": live_count})
+        if live["history"] and live["history"][-1]["t"] == now_t:
+            live["history"][-1] = {"t": now_t, "v": live_count}
+        else:
+            live["history"].append({"t": now_t, "v": live_count})
     status.update(live)
     return JSONResponse(status)
 
