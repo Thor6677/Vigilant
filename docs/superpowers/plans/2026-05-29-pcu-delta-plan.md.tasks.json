@@ -1,0 +1,39 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-29-pcu-delta-plan.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Backend — delta helper + extend api_server_status + add api_live_pcu",
+      "status": "pending",
+      "description": "**Goal:** Two endpoints expose PCU delta data — api_server_status gains delta_15m, api_live_pcu returns an HTML partial.\n\n**Files:**\n- Modify: `app/routes/dashboard.py` (imports line 15, lines 731–750 area)\n\n**Acceptance Criteria:**\n- [ ] GET /api/server-status returns delta_15m: int | null\n- [ ] GET /api/live-pcu returns HTML fragment with id=\"live-pcu-tile\"\n- [ ] Both handle missing ESI rows gracefully (return null/empty)\n\n**Verify:** `curl https://vigilant.thunderborn.dev/api/server-status` — JSON includes delta_15m key.\n\n```json:metadata\n{\"files\": [\"app/routes/dashboard.py\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('app/routes/dashboard.py').read())\\\" && echo OK\", \"acceptanceCriteria\": [\"GET /api/server-status returns delta_15m key\", \"GET /api/live-pcu returns HTML with id=live-pcu-tile\", \"Graceful when no ESI snapshots exist\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Template — create live_pcu_tile.html partial",
+      "status": "pending",
+      "description": "**Goal:** htmx swap target partial that renders the live PCU tile and re-arms its own 60s poll on every swap.\n\n**Files:**\n- Create: `app/templates/partials/live_pcu_tile.html`\n\n**Acceptance Criteria:**\n- [ ] Wraps in id=\"live-pcu-tile\" div with hx-get/hx-trigger/hx-swap\n- [ ] Shows formatted count or — (muted) when count_str is None\n- [ ] Delta badge colored correctly\n\n**Verify:** ls app/templates/partials/live_pcu_tile.html\n\n```json:metadata\n{\"files\": [\"app/templates/partials/live_pcu_tile.html\"], \"verifyCommand\": \"ls app/templates/partials/live_pcu_tile.html\", \"acceptanceCriteria\": [\"id=live-pcu-tile wrapper with htmx attrs\", \"Handles null count_str gracefully\", \"Delta badge colored correctly\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Dashboard JS — render delta badge on pilots count",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** updateServerStatus() reads data.delta_15m and appends a colored +N/-N badge next to pilot count.\n\n**Files:**\n- Modify: `app/templates/dashboard.html` (lines ~499–527)\n\n**Acceptance Criteria:**\n- [ ] Green +N badge when delta_15m > 0\n- [ ] Red -N badge when delta_15m < 0\n- [ ] No badge when delta is 0, null, or server offline\n\n**Verify:** grep -n 'delta_15m' app/templates/dashboard.html\n\n```json:metadata\n{\"files\": [\"app/templates/dashboard.html\"], \"verifyCommand\": \"grep -n 'delta_15m' app/templates/dashboard.html | head -5\", \"acceptanceCriteria\": [\"delta_15m read from API\", \"+N green badge\", \"-N red badge\", \"No badge on 0/null\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Activity page — add live tile placeholder + widen stat grid",
+      "status": "pending",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** /tools/activity gains a 5th Live pilots tile that htmx loads on page load and refreshes every 60s.\n\n**Files:**\n- Modify: `app/templates/tools_activity.html` (lines ~68–85)\n\n**Acceptance Criteria:**\n- [ ] Stat grid is 5-column\n- [ ] Live tile fires hx-get on load + every 60s\n- [ ] Visible across all time windows\n\n**Verify:** grep -n 'repeat(5' app/templates/tools_activity.html\n\n```json:metadata\n{\"files\": [\"app/templates/tools_activity.html\"], \"verifyCommand\": \"grep -n 'repeat(5' app/templates/tools_activity.html\", \"acceptanceCriteria\": [\"Grid is 5-column\", \"hx-trigger load + every 60s\", \"Visible across all time windows\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Deploy and smoke-test",
+      "status": "pending",
+      "blockedBy": [1, 2, 3, 4],
+      "description": "**Goal:** All changes live on VPS, verified working.\n\n**Files:** None.\n\n**Acceptance Criteria:**\n- [ ] No startup errors in docker logs\n- [ ] Dashboard shows pilot count with colored delta badge\n- [ ] /tools/activity shows 5 stat tiles with live count\n- [ ] Live tile refreshes ~every 60s\n\n**Verify:** ssh ijohnson@146.190.140.112 'docker logs vigilant-app-1 --tail 20'\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"ssh ijohnson@146.190.140.112 'docker logs vigilant-app-1 --tail 20'\", \"acceptanceCriteria\": [\"No startup errors\", \"delta_15m in server-status JSON\", \"Live tile on activity page\", \"Dashboard delta badge visible\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-29T00:00:00Z"
+}
