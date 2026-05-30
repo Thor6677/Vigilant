@@ -732,14 +732,13 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
 async def _fetch_15m_delta(db: AsyncSession) -> int | None:
     """Return latest ESI player count minus the snapshot from ~15 min ago.
     Returns None when fewer than 15 min of ESI data exist."""
-    from sqlalchemy import desc as _desc
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     ref_cutoff = now - timedelta(minutes=14)
 
     latest = (await db.execute(
         select(PlayerCountSnapshot.player_count)
         .where(PlayerCountSnapshot.source == "esi")
-        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .order_by(PlayerCountSnapshot.recorded_at.desc())
         .limit(1)
     )).scalar_one_or_none()
 
@@ -750,7 +749,7 @@ async def _fetch_15m_delta(db: AsyncSession) -> int | None:
         select(PlayerCountSnapshot.player_count)
         .where(PlayerCountSnapshot.source == "esi")
         .where(PlayerCountSnapshot.recorded_at <= ref_cutoff)
-        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .order_by(PlayerCountSnapshot.recorded_at.desc())
         .limit(1)
     )).scalar_one_or_none()
 
@@ -780,14 +779,13 @@ async def api_server_status(db: AsyncSession = Depends(get_db)):
 async def api_live_pcu(request: Request, db: AsyncSession = Depends(get_db)):
     """HTML partial: current ESI player count + delta vs previous snapshot.
     Swapped by htmx every 60s on the /tools/activity page."""
-    from sqlalchemy import desc as _desc
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     stale_cutoff = now - timedelta(minutes=5)
 
     rows = (await db.execute(
         select(PlayerCountSnapshot.player_count, PlayerCountSnapshot.recorded_at)
         .where(PlayerCountSnapshot.source == "esi")
-        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .order_by(PlayerCountSnapshot.recorded_at.desc())
         .limit(2)
     )).all()
 
