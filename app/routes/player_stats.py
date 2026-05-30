@@ -88,12 +88,11 @@ async def tools_activity(
             "window_label": "Live · Tranquility",
             "window_options": [(k, v[0]) for k, v in _WINDOWS.items()],
             "live_mode": True,
-            "daily_kills_counts": [],
-            "daily_kills_labels": [],
-            "breakdowns_available": False,
-            "has_breakdown_data": False,
-            "zone_available": False,
-            "has_zone_data": False,
+            "peak_pcu": 0, "mean_pcu": 0, "total_kills": 0, "total_isk": 0,
+            "source_counts": {},
+            "daily_kills_counts": [], "daily_kills_labels": [],
+            "breakdowns_available": False, "has_breakdown_data": False,
+            "zone_available": False, "has_zone_data": False,
             "has_heatmap_data": False,
         })
 
