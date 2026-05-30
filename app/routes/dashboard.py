@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.utils.perf import perf_log, perf_enabled, ms_since
@@ -729,6 +729,34 @@ async def fetch_pi_data(characters: list[Character], db: AsyncSession) -> dict:
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def _fetch_15m_delta(db: AsyncSession) -> int | None:
+    """Return latest ESI player count minus the snapshot from ~15 min ago.
+    Returns None when fewer than 15 min of ESI data exist."""
+    from sqlalchemy import desc as _desc
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    ref_cutoff = now - timedelta(minutes=14)
+
+    latest = (await db.execute(
+        select(PlayerCountSnapshot.player_count)
+        .where(PlayerCountSnapshot.source == "esi")
+        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if latest is None:
+        return None
+
+    ref = (await db.execute(
+        select(PlayerCountSnapshot.player_count)
+        .where(PlayerCountSnapshot.source == "esi")
+        .where(PlayerCountSnapshot.recorded_at <= ref_cutoff)
+        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .limit(1)
+    )).scalar_one_or_none()
+
+    return (latest - ref) if ref is not None else None
+
+
 async def fetch_server_status() -> dict:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -742,8 +770,42 @@ async def fetch_server_status() -> dict:
 
 
 @router.get("/api/server-status")
-async def api_server_status():
-    return JSONResponse(await fetch_server_status())
+async def api_server_status(db: AsyncSession = Depends(get_db)):
+    status = await fetch_server_status()
+    status["delta_15m"] = await _fetch_15m_delta(db)
+    return JSONResponse(status)
+
+
+@router.get("/api/live-pcu", response_class=HTMLResponse)
+async def api_live_pcu(request: Request, db: AsyncSession = Depends(get_db)):
+    """HTML partial: current ESI player count + delta vs previous snapshot.
+    Swapped by htmx every 60s on the /tools/activity page."""
+    from sqlalchemy import desc as _desc
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    stale_cutoff = now - timedelta(minutes=5)
+
+    rows = (await db.execute(
+        select(PlayerCountSnapshot.player_count, PlayerCountSnapshot.recorded_at)
+        .where(PlayerCountSnapshot.source == "esi")
+        .order_by(_desc(PlayerCountSnapshot.recorded_at))
+        .limit(2)
+    )).all()
+
+    count = None
+    delta = None
+    if rows and rows[0].recorded_at >= stale_cutoff:
+        count = rows[0].player_count
+        delta = (count - rows[1].player_count) if len(rows) == 2 else None
+
+    count_str = None
+    if count is not None:
+        count_str = f"{count / 1000:.1f}K" if count >= 1000 else str(count)
+
+    return templates.TemplateResponse(
+        request,
+        "partials/live_pcu_tile.html",
+        {"count_str": count_str, "delta": delta},
+    )
 
 
 async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -> dict:
