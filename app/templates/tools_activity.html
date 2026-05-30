@@ -65,7 +65,7 @@
 
     <div class="b-pad-md">
 
-        <div class="ta-stats" style="grid-template-columns:repeat(4,1fr);">
+        <div class="ta-stats" style="grid-template-columns:repeat(5,1fr);">
             <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_pcu(peak_pcu) }}</div>
                 <div class="ta-stat-label">Peak players</div>
@@ -81,6 +81,15 @@
             <div class="ta-stat">
                 <div class="ta-stat-val">{{ fmt_isk(total_isk) }}</div>
                 <div class="ta-stat-label">ISK destroyed</div>
+            </div>
+            <div id="live-pcu-tile"
+                 hx-get="/api/live-pcu"
+                 hx-trigger="load, every 60s"
+                 hx-swap="outerHTML">
+                <div class="ta-stat">
+                    <div class="ta-stat-val" style="color:var(--muted)">—</div>
+                    <div class="ta-stat-label">Live pilots</div>
+                </div>
             </div>
         </div>
 
