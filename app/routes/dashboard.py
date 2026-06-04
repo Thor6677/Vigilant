@@ -1664,6 +1664,25 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("Killmail GC error: %s", e)
 
+                # EVERef historical backfill — one year per day, newest-first.
+                # Imports archived ESI killmail payloads to pre-seed the DB so
+                # zKB backfill skips ESI hydration for those kills.
+                if not hasattr(_background_scheduler, '_last_everef_tick') or \
+                   (now - _background_scheduler._last_everef_tick).total_seconds() >= 86400:
+                    try:
+                        from app.intel.everef_ingest import (
+                            find_next_year_to_import, import_year,
+                            is_running as _everef_running,
+                        )
+                        if not _everef_running():
+                            next_year = await find_next_year_to_import()
+                            if next_year is not None:
+                                asyncio.create_task(import_year(next_year))
+                                logger.info("EVERef backfill: queued year %d", next_year)
+                        _background_scheduler._last_everef_tick = now
+                    except Exception as e:
+                        logger.warning("EVERef backfill scheduling error: %s", e)
+
                 # Recent battle discovery — every 15 min, also gated by battles flag.
                 # Hard-capped to 100 ESI hydrations per run (see recent_battles.py).
                 if _km_settings.killmail_battles_enabled:

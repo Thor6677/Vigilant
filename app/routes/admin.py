@@ -873,6 +873,71 @@ async def admin_allowlist_add(request: Request, db: AsyncSession = Depends(get_d
     return await admin_users(request, db, admin)
 
 
+@router.post("/everef/backfill")
+async def admin_everef_backfill(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Manually trigger the next EVERef year import (bypasses 24h scheduler gate).
+
+    Safe to call even if the scheduler is about to fire — _import_running flag
+    prevents double-execution. Returns the year being imported.
+    """
+    from fastapi.responses import JSONResponse
+    from app.intel.everef_ingest import (
+        find_next_year_to_import, import_year, is_running as _everef_running,
+    )
+    if _everef_running():
+        return JSONResponse({"status": "already_running"})
+    next_year = await find_next_year_to_import()
+    if next_year is None:
+        return JSONResponse({"status": "complete", "message": "All years already imported"})
+    asyncio.create_task(import_year(next_year))
+    return JSONResponse({"status": "started", "year": next_year})
+
+
+@router.get("/everef/status")
+async def admin_everef_status(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Return per-year import progress for the EVERef backfill."""
+    from fastapi.responses import JSONResponse
+    from app.db.models import EverefImportDay
+    from app.intel.everef_ingest import find_next_year_to_import, is_running as _everef_running, START_YEAR
+
+    async with AsyncSessionLocal() as db:
+        total_days = (
+            await db.execute(select(func.count(EverefImportDay.date)))
+        ).scalar() or 0
+        total_kills = (
+            await db.execute(select(func.sum(EverefImportDay.killmail_count)))
+        ).scalar() or 0
+        per_year_rows = (
+            await db.execute(
+                select(
+                    func.strftime("%Y", EverefImportDay.date),
+                    func.count(),
+                    func.sum(EverefImportDay.killmail_count),
+                )
+                .group_by(func.strftime("%Y", EverefImportDay.date))
+                .order_by(func.strftime("%Y", EverefImportDay.date).desc())
+            )
+        ).all()
+
+    next_year = await find_next_year_to_import(start_year=START_YEAR)
+    return JSONResponse({
+        "is_running": _everef_running(),
+        "next_year": next_year,
+        "total_days_imported": total_days,
+        "total_kills_imported": int(total_kills),
+        "per_year": [
+            {"year": r[0], "days": r[1], "kills": int(r[2] or 0)}
+            for r in per_year_rows
+        ],
+    })
+
+
 @router.post("/action/allowlist-remove/{entry_id}", response_class=HTMLResponse)
 async def admin_allowlist_remove(entry_id: int, request: Request,
                                  db: AsyncSession = Depends(get_db),

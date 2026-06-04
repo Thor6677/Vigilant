@@ -730,6 +730,14 @@ class CharacterKillIngest(Base):
     last_synced = Column(DateTime, nullable=True)
 
 
+class EverefImportDay(Base):
+    __tablename__ = "everef_import_days"
+
+    date = Column(Date, primary_key=True)
+    killmail_count = Column(Integer, nullable=False, default=0)
+    imported_at = Column(DateTime, nullable=False)
+
+
 class DetectedBattle(Base):
     __tablename__ = "detected_battles"
 

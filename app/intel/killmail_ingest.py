@@ -181,6 +181,22 @@ async def backfill_character(character_id: int) -> dict:
 
             to_fetch = [c for c in candidates if c[0] not in already_stored]
 
+            # Patch EVERef-pre-seeded kills that are missing total_value.
+            # EVERef doesn't include zkb ISK data; the zKB stub we have now does.
+            seeded_with_value = [
+                (kid, float(zkb.get("totalValue") or 0))
+                for (kid, _, zkb) in candidates
+                if kid in already_stored and float(zkb.get("totalValue") or 0) > 0
+            ]
+            if seeded_with_value:
+                from app.db.models import Killmail as _KM
+                async with AsyncSessionLocal() as db:
+                    for kid, tv in seeded_with_value:
+                        row = await db.get(_KM, kid)
+                        if row and row.total_value is None:
+                            row.total_value = tv
+                    await db.commit()
+
             for i in range(0, len(to_fetch), ESI_BATCH_SIZE):
                 batch = to_fetch[i:i + ESI_BATCH_SIZE]
 
