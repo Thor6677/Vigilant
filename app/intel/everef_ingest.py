@@ -313,9 +313,47 @@ async def import_year(year: int) -> dict:
             "everef_ingest: year %d complete — %d new kills across %d days",
             year, total_inserted, days_processed,
         )
-        return {"year": year, "inserted": total_inserted, "days": days_processed}
+        result = {"year": year, "inserted": total_inserted, "days": days_processed}
+
+        # If no more years to import, fire a one-shot Discord notification.
+        if await find_next_year_to_import() is None:
+            await _notify_discord_complete()
+
+        return result
     finally:
         _import_running = False
+
+
+async def _notify_discord_complete() -> None:
+    """POST a one-shot message to DISCORD_WEBHOOK_URL when the backfill finishes."""
+    from app.config import get_settings
+    webhook = get_settings().discord_webhook_url
+    if not webhook:
+        log.info("everef_ingest: backfill complete — no DISCORD_WEBHOOK_URL set, skipping notify")
+        return
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import text as _text
+        row = (await db.execute(_text(
+            "SELECT count(*), sum(killmail_count) FROM everef_import_days"
+        ))).first()
+    total_days = int(row[0] or 0)
+    total_kills = int(row[1] or 0)
+    msg = (
+        f"**EVERef backfill complete** — all years {START_YEAR}–{date.today().year - 1} imported.\n"
+        f"{total_days:,} days processed · {total_kills:,} kills pre-seeded in DB.\n"
+        f"killmail.stream handles the current year going forward. "
+        f"You can set `KILLMAILS_ENABLED=false` or leave the scheduler running — "
+        f"it will silently no-op every 24h."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.post(webhook, json={"content": msg})
+            if resp.status_code not in (200, 204):
+                log.warning("everef_ingest: Discord notify failed HTTP %s", resp.status_code)
+            else:
+                log.info("everef_ingest: Discord notification sent")
+    except Exception as e:
+        log.warning("everef_ingest: Discord notify error: %s", e)
 
 
 async def find_next_year_to_import(start_year: int = START_YEAR) -> int | None:
