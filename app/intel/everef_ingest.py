@@ -319,15 +319,14 @@ async def import_year(year: int) -> dict:
 
 
 async def find_next_year_to_import(start_year: int = START_YEAR) -> int | None:
-    """Return the most-recent year that hasn't been fully imported yet.
-    Iterates current year → start_year. Returns None when all done."""
+    """Return the most-recent completed year that hasn't been fully imported yet.
+    Skips the current year — killmail.stream handles that going forward.
+    Iterates last_year → start_year. Returns None when all done."""
     today = date.today()
     async with AsyncSessionLocal() as db:
-        for year in range(today.year, start_year - 1, -1):
+        for year in range(today.year - 1, start_year - 1, -1):
             year_start = date(year, 1, 1)
-            year_end = min(date(year, 12, 31), today - timedelta(days=1))
-            if year_end < year_start:
-                continue
+            year_end = date(year, 12, 31)  # always fixed for completed years
             expected = (year_end - year_start).days + 1
             row = await db.execute(
                 select(func.count(EverefImportDay.date)).where(
