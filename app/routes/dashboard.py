@@ -3087,11 +3087,8 @@ async def sync_status_poll(request: Request, db: AsyncSession = Depends(get_db))
      hx-get="/dashboard/sync-status"
      hx-trigger="every 3s"
      hx-swap="outerHTML"
-     class="flex items-center gap-2 text-xs text-eve-muted px-1">
-    <svg class="w-3 h-3 animate-spin text-eve-accent flex-shrink-0" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/>
-    </svg>
+     style="display:flex;align-items:center;gap:0.4rem;color:var(--muted)">
+    <span class="spin-anim" style="display:inline-block;line-height:1;">&#9675;</span>
     Syncing {count} character{plural}...
 </div>
 """)
