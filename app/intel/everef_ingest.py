@@ -327,7 +327,7 @@ async def import_year(year: int) -> dict:
 async def _notify_discord_complete() -> None:
     """POST a one-shot message to DISCORD_WEBHOOK_URL when the backfill finishes."""
     from app.config import get_settings
-    webhook = get_settings().discord_webhook_url
+    webhook = get_settings().discord_webhook
     if not webhook:
         log.info("everef_ingest: backfill complete — no DISCORD_WEBHOOK_URL set, skipping notify")
         return
