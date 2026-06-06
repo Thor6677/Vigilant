@@ -432,7 +432,10 @@ async def _cluster_system(
     # Build the DetectedBattle-shaped dicts
     out: list[dict] = []
     for c in clusters:
-        start = c[0]["kill_time"]
+        # Floor to the hour so repeated discovery runs for an ongoing battle
+        # hit the same (system_id, start_time) upsert key instead of creating
+        # duplicate rows when the first kill's exact timestamp shifts slightly.
+        start = c[0]["kill_time"].replace(minute=0, second=0, microsecond=0)
         end = c[-1]["kill_time"]
         duration = max(1, int((end - start).total_seconds() / 60))
         kill_count = len(c)
