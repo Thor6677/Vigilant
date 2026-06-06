@@ -82,39 +82,46 @@ async def _batch_lookup(
 
 
 async def _store_exact(results: list[dict]) -> int:
-    """Upsert 'exact' results into StructureAgeCalibration. Returns insert count."""
+    """Upsert 'exact' results into StructureAgeCalibration using INSERT OR IGNORE.
+    Retries up to 3 times on lock contention. Returns insert count."""
+    from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
     exact = [r for r in results if r.get("method") == "exact"]
     if not exact:
         return 0
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    inserted = 0
-
-    async with AsyncSessionLocal() as db:
-        for r in exact:
-            try:
-                sid = int(r["id"])
-                mid = datetime.fromisoformat(r["midISO"].replace("Z", "+00:00")).replace(tzinfo=None)
-                low = datetime.fromisoformat(r["lowISO"].replace("Z", "+00:00")).replace(tzinfo=None)
-                high = datetime.fromisoformat(r["highISO"].replace("Z", "+00:00")).replace(tzinfo=None)
-            except (ValueError, KeyError):
-                continue
-
-            existing = await db.get(StructureAgeCalibration, sid)
-            if existing is None:
-                db.add(StructureAgeCalibration(
-                    structure_id=sid,
-                    anchor_mid=mid,
-                    anchor_low=low,
-                    anchor_high=high,
-                    days_wide=float(r.get("daysWide", 6.0)),
-                    fetched_at=now,
-                ))
-                inserted += 1
+    rows = []
+    for r in exact:
         try:
-            await db.commit()
-        except Exception:
-            await db.rollback()
+            rows.append({
+                "structure_id": int(r["id"]),
+                "anchor_mid": datetime.fromisoformat(r["midISO"].replace("Z", "+00:00")).replace(tzinfo=None),
+                "anchor_low": datetime.fromisoformat(r["lowISO"].replace("Z", "+00:00")).replace(tzinfo=None),
+                "anchor_high": datetime.fromisoformat(r["highISO"].replace("Z", "+00:00")).replace(tzinfo=None),
+                "days_wide": float(r.get("daysWide", 6.0)),
+                "fetched_at": now,
+            })
+        except (ValueError, KeyError):
+            continue
+
+    if not rows:
+        return 0
+
+    for attempt in range(3):
+        try:
+            async with AsyncSessionLocal() as db:
+                stmt = _sqlite_insert(StructureAgeCalibration).values(rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["structure_id"])
+                await db.execute(stmt)
+                await db.commit()
+            return len(rows)
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                log.warning("structure_age: _store_exact failed after 3 attempts: %s", e)
+    return 0
 
     return inserted
 

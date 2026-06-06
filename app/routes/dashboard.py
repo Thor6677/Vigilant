@@ -1697,12 +1697,12 @@ async def _background_scheduler():
                                 _count = (await _db.execute(
                                     select(_func.count(StructureAgeCalibration.structure_id))
                                 )).scalar() or 0
-                            if _count == 0:
+                            if _count < 5000:
                                 asyncio.create_task(run_full_scrape())
-                                logger.info("structure_age: calibration table empty — starting full scrape")
+                                logger.info("structure_age: %d calibration points (< 5000) — starting/resuming scrape", _count)
                             else:
                                 _background_scheduler._structure_age_done = True
-                                logger.info("structure_age: %d calibration points found, skipping", _count)
+                                logger.info("structure_age: %d calibration points, scrape complete", _count)
                     except Exception as e:
                         logger.warning("structure_age scheduler error: %s", e)
 
