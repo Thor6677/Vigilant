@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -728,6 +728,22 @@ class CharacterKillIngest(Base):
     backfill_complete = Column(Boolean, nullable=False, default=False)
     last_seen_killmail_id = Column(Integer, nullable=True)
     last_synced = Column(DateTime, nullable=True)
+
+
+class StructureAgeCalibration(Base):
+    """Calibration points for structure age interpolation.
+    Each row is a structure ID with a confirmed anchor-date window sourced
+    from triff.tools (method='exact'). Used to interpolate anchor dates for
+    any structure ID by finding the nearest known IDs above and below it.
+    """
+    __tablename__ = "structure_age_calibration"
+
+    structure_id = Column(BigInteger, primary_key=True)
+    anchor_mid = Column(DateTime, nullable=False)
+    anchor_low = Column(DateTime, nullable=False)
+    anchor_high = Column(DateTime, nullable=False)
+    days_wide = Column(Float, nullable=False, default=6.0)
+    fetched_at = Column(DateTime, nullable=False)
 
 
 class EverefImportDay(Base):

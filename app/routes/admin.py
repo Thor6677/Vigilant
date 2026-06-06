@@ -534,6 +534,69 @@ async def admin_sde_update(request: Request, db: AsyncSession = Depends(get_db),
     return HTMLResponse('<div class="b-empty" style="color:var(--success);">SDE update started. This may take a few minutes.</div>')
 
 
+@router.post("/structure-age/scrape")
+async def admin_structure_age_scrape(
+    request: Request,
+    phase: str = "all",
+    admin: User = Depends(require_admin),
+):
+    """Trigger the structure age calibration scraper.
+
+    phase: 'all' (Phase 1 + Phase 2), 'phase1' (EVERef only), 'phase2' (gap search only)
+    Runs in background — poll /admin/structure-age/status for progress.
+    """
+    from fastapi.responses import JSONResponse
+    from app.intel.structure_age_scraper import (
+        run_full_scrape, run_phase1, run_phase2, is_running,
+    )
+    if is_running():
+        return JSONResponse({"status": "already_running"})
+    if phase == "phase1":
+        asyncio.create_task(run_phase1())
+    elif phase == "phase2":
+        asyncio.create_task(run_phase2())
+    else:
+        asyncio.create_task(run_full_scrape())
+    return JSONResponse({"status": "started", "phase": phase})
+
+
+@router.get("/structure-age/status")
+async def admin_structure_age_status(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Return calibration table stats and scraper state."""
+    from fastapi.responses import JSONResponse
+    from app.db.models import StructureAgeCalibration
+    from app.intel.structure_age_scraper import is_running
+
+    async with AsyncSessionLocal() as db:
+        count = (await db.execute(
+            select(func.count(StructureAgeCalibration.structure_id))
+        )).scalar() or 0
+        bounds = (await db.execute(
+            select(
+                func.min(StructureAgeCalibration.structure_id),
+                func.max(StructureAgeCalibration.structure_id),
+                func.min(StructureAgeCalibration.anchor_mid),
+                func.max(StructureAgeCalibration.anchor_mid),
+            )
+        )).first()
+
+    return JSONResponse({
+        "is_running": is_running(),
+        "calibration_points": count,
+        "id_range": {
+            "min": bounds[0],
+            "max": bounds[1],
+        },
+        "anchor_date_coverage": {
+            "earliest": bounds[2].isoformat() if bounds[2] else None,
+            "latest": bounds[3].isoformat() if bounds[3] else None,
+        },
+    })
+
+
 @router.post("/player-count/backfill")
 async def admin_player_count_backfill(
     request: Request,
