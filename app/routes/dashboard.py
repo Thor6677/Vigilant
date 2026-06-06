@@ -1683,6 +1683,29 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("EVERef backfill scheduling error: %s", e)
 
+                # Structure age calibration scrape — runs once automatically when
+                # the calibration table is empty, then never again (guarded by flag).
+                if not getattr(_background_scheduler, '_structure_age_done', False):
+                    try:
+                        from app.intel.structure_age_scraper import (
+                            run_full_scrape, is_running as _sa_running,
+                        )
+                        from app.db.models import StructureAgeCalibration
+                        from sqlalchemy import func as _func
+                        if not _sa_running():
+                            async with AsyncSessionLocal() as _db:
+                                _count = (await _db.execute(
+                                    select(_func.count(StructureAgeCalibration.structure_id))
+                                )).scalar() or 0
+                            if _count == 0:
+                                asyncio.create_task(run_full_scrape())
+                                logger.info("structure_age: calibration table empty — starting full scrape")
+                            else:
+                                _background_scheduler._structure_age_done = True
+                                logger.info("structure_age: %d calibration points found, skipping", _count)
+                    except Exception as e:
+                        logger.warning("structure_age scheduler error: %s", e)
+
                 # Recent battle discovery — every 15 min, also gated by battles flag.
                 # Hard-capped to 100 ESI hydrations per run (see recent_battles.py).
                 if _km_settings.killmail_battles_enabled:
