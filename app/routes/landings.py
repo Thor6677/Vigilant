@@ -231,6 +231,16 @@ TOOLS_TOOLS = [
         ],
     },
     {
+        "name": "Structure Age",
+        "url": "/tools/structure-age",
+        "desc": "Estimate when an Upwell structure was anchored by pasting its in-game showinfo link. Uses 36k local calibration points — no external API needed.",
+        "features": [
+            "Paste showinfo link from chat",
+            "Anchor date estimate with confidence window",
+            "Parses system J-code and owner corp",
+        ],
+    },
+    {
         "name": "Discord Time",
         "url": "/tools/discordtime",
         "desc": "UTC-to-Discord-timestamp converter for fleet ops. Paste a time and get the Discord `<t:...>` codes for every rendering mode.",

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Structure Age — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/tools">Tools</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Structure Age</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .sa-input {
+        width: 100%; padding: 0.5rem 0.6rem;
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 11px;
+        resize: vertical; min-height: 70px;
+        font-family: monospace;
+    }
+    .sa-input:focus { outline: none; border-color: var(--accent); }
+    .sa-submit {
+        padding: 0.45rem 1.25rem; background: transparent;
+        border: 1px solid var(--accent); color: var(--accent);
+        font: inherit; font-size: 10px; letter-spacing: 0.12em;
+        text-transform: uppercase; cursor: pointer;
+    }
+    .sa-submit:hover { background: var(--accent); color: var(--bg); }
+    .sa-method {
+        font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+        padding: 1px 6px; border: 1px solid var(--border); color: var(--muted);
+        margin-left: 0.5rem;
+    }
+    .sa-method.is-exact { border-color: var(--success); color: var(--success); }
+    .sa-method.is-interpolate { border-color: var(--accent); color: var(--accent); }
+    .sa-method.is-extrapolate { border-color: var(--muted); color: var(--muted); }
+    .sa-age {
+        font-size: 28px; font-weight: 300; letter-spacing: -0.02em;
+        color: var(--accent); line-height: 1;
+    }
+    .sa-window {
+        font-size: 11px; color: var(--muted); margin-top: 0.25rem;
+    }
+    .sa-date-row {
+        display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap;
+    }
+    .sa-date-col { display: flex; flex-direction: column; gap: 2px; }
+    .sa-date-lbl { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+    .sa-date-val { font-size: 13px; color: var(--text); font-family: monospace; }
+    .sa-meta { display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap; }
+    .sa-meta-item { display: flex; flex-direction: column; gap: 2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Structure Age</h1>
+</div>
+
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head"><span class="b-label">Estimate</span></div>
+    <div style="padding:0.75rem;">
+        <p style="font-size:11px;color:var(--muted);margin-bottom:0.75rem;">
+            Paste an in-game showinfo link from chat or the structure window to estimate when it was anchored.
+            Uses {{ "{:,}".format(36403) }} local calibration points — no external API call needed.
+        </p>
+        <form method="GET" action="/tools/structure-age" style="display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea
+                name="paste"
+                class="sa-input"
+                placeholder="&lt;url=showinfo:35833//1051047582016&gt;J105705 - Storm's End (The Suicide Queens)&lt;/url&gt;"
+                autofocus
+            >{{ paste }}</textarea>
+            <div>
+                <button type="submit" class="sa-submit">Estimate Age</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if error %}
+<div class="b-banner" style="border-color:var(--danger);margin-bottom:1rem;">
+    <span style="color:var(--danger);">{{ error }}</span>
+</div>
+{% endif %}
+
+{% if estimate %}
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head">
+        <span class="b-label">Result</span>
+        <span class="sa-method is-{{ estimate.method }}">{{ estimate.method }}</span>
+    </div>
+    <div style="padding:0.75rem;">
+
+        <div class="sa-age">{{ estimate.age_str }}</div>
+        <div class="sa-window">±{{ estimate.days_wide }} day window</div>
+
+        <div class="sa-date-row">
+            <div class="sa-date-col">
+                <span class="sa-date-lbl">Midpoint</span>
+                <span class="sa-date-val">{{ estimate.mid_str }}</span>
+            </div>
+            <div class="sa-date-col">
+                <span class="sa-date-lbl">Earliest</span>
+                <span class="sa-date-val">{{ estimate.low_str }}</span>
+            </div>
+            <div class="sa-date-col">
+                <span class="sa-date-lbl">Latest</span>
+                <span class="sa-date-val">{{ estimate.high_str }}</span>
+            </div>
+        </div>
+
+        {% if estimate.get('note') %}
+        <div style="font-size:10px;color:var(--muted);margin-top:0.75rem;">⚠ {{ estimate.note }}</div>
+        {% endif %}
+
+        {% if parsed %}
+        <div class="sa-meta">
+            {% if parsed.structure_id %}
+            <div class="sa-meta-item">
+                <span class="sa-date-lbl">Structure ID</span>
+                <span style="font-size:11px;font-family:monospace;color:var(--text);">{{ parsed.structure_id }}</span>
+            </div>
+            {% endif %}
+            {% if parsed.jcode %}
+            <div class="sa-meta-item">
+                <span class="sa-date-lbl">System</span>
+                <a href="/intel/wormhole/{{ parsed.jcode }}" style="font-size:11px;color:var(--accent);">{{ parsed.jcode }}</a>
+            </div>
+            {% endif %}
+            {% if parsed.corp_name %}
+            <div class="sa-meta-item">
+                <span class="sa-date-lbl">Owner</span>
+                <span style="font-size:11px;color:var(--text);">{{ parsed.corp_name }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">How to get the showinfo link</span></div>
+    <div style="padding:0.75rem;font-size:11px;color:var(--muted);line-height:1.6;">
+        In-game: right-click any structure → <em>Show Info</em> → drag the title bar icon into a chat window.
+        The resulting link looks like:
+        <code style="font-family:monospace;background:var(--surface);padding:1px 4px;border:1px solid var(--border);">
+            &lt;url=showinfo:35833//1051047582016&gt;...&lt;/url&gt;
+        </code>
+        Paste the whole line here.
+    </div>
+</div>
+{% endblock %}
