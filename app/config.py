@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     killmail_battles_enabled: bool = False
     killmail_stream_enabled: bool = False  # killmail.stream live consumer for big-battle banner
     killmail_gc_enabled: bool = False  # off by default so /intel/kills has full history
+    everef_ingest_enabled: bool = False  # historical backfill from data.everef.net
 
     discord_webhook: str = ""  # optional — matches DISCORD_WEBHOOK used by thunderborn-ops
 

@@ -1667,8 +1667,9 @@ async def _background_scheduler():
                 # EVERef historical backfill — one year per day, newest-first.
                 # Imports archived ESI killmail payloads to pre-seed the DB so
                 # zKB backfill skips ESI hydration for those kills.
-                if not hasattr(_background_scheduler, '_last_everef_tick') or \
-                   (now - _background_scheduler._last_everef_tick).total_seconds() >= 86400:
+                if _km_settings.everef_ingest_enabled and (
+                        not hasattr(_background_scheduler, '_last_everef_tick') or
+                        (now - _background_scheduler._last_everef_tick).total_seconds() >= 86400):
                     try:
                         from app.intel.everef_ingest import (
                             find_next_year_to_import, import_year,
