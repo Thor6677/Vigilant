@@ -37,7 +37,7 @@ from app.intel.killmail_store import _write_items, get_our_char_ids
 log = logging.getLogger(__name__)
 
 EVEREF_BASE = "https://data.everef.net/killmails"
-START_YEAR = 2016
+START_YEAR = 2007
 INTER_ARCHIVE_SLEEP = 5.0  # seconds between daily archives within a year
 _CHUNK_SIZE = 200           # kills per DB transaction
 
