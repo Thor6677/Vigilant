@@ -8,15 +8,20 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": ["dist", "fonts"],
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./index.css": "./dist/index.css"
+  },
   "scripts": {
-    "build": "node build.mjs && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "node build.mjs && tsc -p tsconfig.build.json --emitDeclarationOnly --declaration --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "demo": "vite demo --open"
   },
   "peerDependencies": {
-    "react": ">=18",
-    "react-dom": ">=18"
+    "react": ">=19",
+    "react-dom": ">=19"
   },
   "devDependencies": {
     "@fontsource/jetbrains-mono": "^5.2.5",

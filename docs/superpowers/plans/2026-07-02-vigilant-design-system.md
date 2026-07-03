@@ -866,6 +866,8 @@ git commit -m "feat(design-system): ambient New Eden flythrough module with live
 
 **Goal:** Create the `@vigilant/ui` package with working esbuild build, tsc declarations, vitest, and the first component (Button) proving the whole pipeline.
 
+> **Post-review amendments (after 3f092f2):** no JS-side styles.css import (CSS built solely by build.mjs pass 2); React 19 peers; Button uses ComponentPropsWithRef<'button'>, optional children, type="button" default; exports map + sideEffects:false; declarations built via tsconfig.build.json (tests excluded from dist). The Step code blocks predate these — the package source is authoritative.
+
 **Files:**
 - Create: `design-system/react/package.json`
 - Create: `design-system/react/tsconfig.json`

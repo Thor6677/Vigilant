@@ -19,3 +19,10 @@ test('defaults to strip variant (bare b-btn)', () => {
   render(<Button>Refresh</Button>);
   expect(screen.getByRole('button', { name: 'Refresh' }).className.trim()).toBe('b-btn');
 });
+
+test('defaults to type=button but respects override', () => {
+  render(<Button>Go</Button>);
+  expect(screen.getByRole('button', { name: 'Go' })).toHaveProperty('type', 'button');
+  render(<Button type="submit">Send</Button>);
+  expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('type', 'submit');
+});

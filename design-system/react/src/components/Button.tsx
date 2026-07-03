@@ -1,11 +1,10 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   /** 'strip' = card action-strip button (default); 'primary' = gold solid with shine; 'ghost' = glass outline */
   variant?: 'strip' | 'primary' | 'ghost';
   /** danger tone (red hover/border) */
   danger?: boolean;
-  children: ReactNode;
 }
 
 export function Button({ variant = 'strip', danger = false, className = '', children, ...rest }: ButtonProps) {
@@ -17,7 +16,7 @@ export function Button({ variant = 'strip', danger = false, className = '', chil
     className,
   ].filter(Boolean).join(' ');
   return (
-    <button className={cls} {...rest}>
+    <button type="button" className={cls} {...rest}>
       {children}
     </button>
   );

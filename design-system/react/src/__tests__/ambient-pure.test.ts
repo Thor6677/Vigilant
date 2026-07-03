@@ -1,3 +1,4 @@
+// Reaches outside the package root by design: this package hosts the only vitest setup in design-system/.
 import { normalizeSystems, allianceColor } from '../../../ambient/vigilant-ambient.js';
 
 test('allianceColor returns stable rgb triple', () => {
