@@ -1773,6 +1773,8 @@ git commit -m "feat(design-system): data components (Stat, KeyValueRow, Table, B
 
 **Goal:** ButtonGroup, Banner, Toast/ToastStack, Modal, Skeleton — with tests.
 
+> **Post-review amendments (after e214d03):** Modal and ToastStack render via createPortal(document.body) — backdrop-filter glass ancestors are containing blocks for fixed positioning; Modal gains aria-modal + focus-on-open; Toast gains role=status + optional onDismiss; Skeleton aria-hidden; overlay-click both-direction tests. Source authoritative over Step blocks.
+
 **Files:**
 - Create: `design-system/react/src/components/ButtonGroup.tsx`
 - Create: `design-system/react/src/components/Banner.tsx`

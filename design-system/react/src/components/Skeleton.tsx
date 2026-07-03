@@ -7,7 +7,7 @@ export interface SkeletonProps {
 
 export function Skeleton({ lines = 3, lastLineWidth = '60%' }: SkeletonProps) {
   return (
-    <div>
+    <div aria-hidden="true">
       {Array.from({ length: lines }, (_, i) => (
         <div key={i} className="b-skeleton" style={i === lines - 1 ? { width: lastLineWidth } : undefined} />
       ))}

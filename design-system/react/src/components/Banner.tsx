@@ -7,6 +7,7 @@ export interface BannerProps {
 }
 
 export function Banner({ tone = 'accent', onDismiss, children }: BannerProps) {
+  // 'accent' is the base styling (no class) — deliberately not toneClass(), whose is-accent has no CSS here.
   const cls = ['b-banner', tone === 'danger' ? 'is-danger' : '', tone === 'ok' ? 'is-ok' : ''].filter(Boolean).join(' ');
   return (
     <div className={cls}>

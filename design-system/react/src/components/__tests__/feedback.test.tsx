@@ -23,22 +23,22 @@ test('Banner tone + dismiss', () => {
 });
 
 test('ToastStack positions toasts with tones', () => {
-  const { container } = render(
+  render(
     <ToastStack>
       <Toast tone="ok">Saved</Toast>
       <Toast tone="danger">Failed</Toast>
     </ToastStack>
   );
-  expect(container.querySelector('.b-toast-stack')).toBeTruthy();
+  expect(document.querySelector('.b-toast-stack')).toBeTruthy();
   expect(screen.getByText('Failed').closest('.b-toast')!.className).toContain('is-danger');
 });
 
 test('Modal hidden when closed, interactive when open', () => {
   const onClose = vi.fn();
-  const { rerender, container } = render(<Modal open={false} title="Confirm" onClose={onClose}>body</Modal>);
-  expect(container.querySelector('.b-modal')).toBeNull();
+  const { rerender } = render(<Modal open={false} title="Confirm" onClose={onClose}>body</Modal>);
+  expect(document.querySelector('.b-modal')).toBeNull();
   rerender(<Modal open title="Confirm" onClose={onClose}>body</Modal>);
-  expect(container.querySelector('.b-modal')).toBeTruthy();
+  expect(document.querySelector('.b-modal')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(onClose).toHaveBeenCalledTimes(2);
@@ -47,4 +47,29 @@ test('Modal hidden when closed, interactive when open', () => {
 test('Skeleton renders n lines', () => {
   const { container } = render(<Skeleton lines={4} />);
   expect(container.querySelectorAll('.b-skeleton')).toHaveLength(4);
+});
+
+test('Modal overlay click closes; content click does not', () => {
+  const onClose = vi.fn();
+  render(<Modal open title="T" onClose={onClose}>body</Modal>);
+  fireEvent.click(document.querySelector('.b-modal-body')!);
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.click(document.querySelector('.b-modal-overlay')!);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test('Modal focuses dialog on open and sets aria-modal', () => {
+  render(<Modal open title="T" onClose={() => {}}>body</Modal>);
+  const dialog = document.querySelector('.b-modal') as HTMLElement;
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(document.activeElement).toBe(dialog);
+});
+
+test('Toast optional dismiss and status role', () => {
+  const onDismiss = vi.fn();
+  render(<Toast tone="ok" onDismiss={onDismiss}>Saved</Toast>);
+  const toast = screen.getByText('Saved').closest('.b-toast')!;
+  expect(toast.getAttribute('role')).toBe('status');
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+  expect(onDismiss).toHaveBeenCalled();
 });
