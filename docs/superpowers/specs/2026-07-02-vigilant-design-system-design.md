@@ -114,6 +114,15 @@ Dependency-free ES module + IIFE build, rendering to a fixed full-viewport canva
 - Page-by-page straggler sweep of the 111 templates.
 - Deploy via `deploy.sh`.
 
+## Implementation amendments (recorded at final review, 2026-07-03)
+
+Deliberate deviations from this spec accepted during build/review; the code is authoritative:
+
+- Ambient module ships as **ES module only** (no IIFE build). Sub-project 2 loads it via `<script type="module">`.
+- No dedicated search-input class — generic `.b-input` covers search fields.
+- Ambient kill source is `{type:'poll', url, intervalMs}` (plus `{type:'simulate'}`), not the spec's `{type:'endpoint'}` naming; SSE deferred until the production endpoint exists.
+- Ambient background is scoped to the **SSO login screen only** (Task 10 review-gate decision; also noted in the Background decision row above).
+
 ## Reference material
 
 Brainstorm mockups (visual companion session) are preserved at `.superpowers/brainstorm/73208-1783035198/content/` — notably `motion-flair.html` (expressive tier C), `mapfly-sov.html` (approved background with live sov colors), and `vanta-demo.html` (rejected Vanta.js exploration).

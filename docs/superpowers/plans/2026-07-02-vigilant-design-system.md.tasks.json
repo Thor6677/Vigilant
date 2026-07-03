@@ -37,42 +37,42 @@
     {
       "id": 12,
       "subject": "Task 6: Layout components",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [11],
       "description": "**Goal:** NavBar, NavMenu, Breadcrumbs, PageHeader, Section, Panel, Grid, TabStrip, Footer with tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/NavBar.tsx\", \"design-system/react/src/components/Panel.tsx\", \"design-system/react/src/components/__tests__/layout.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"9 layout components render b-* classes\", \"Panel glass/brackets\", \"tests green\"]}\n```"
     },
     {
       "id": 13,
       "subject": "Task 7: Data components",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [11],
       "description": "**Goal:** StatStrip/StatBlock, KeyValueRow, Table/TableRow, Badge, ProgressBar, EmptyState, Eyebrow + tones.ts + tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/Stat.tsx\", \"design-system/react/src/components/tones.ts\", \"design-system/react/src/components/__tests__/data.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"shared Tone/toneClass\", \"ProgressBar clamps\", \"tests green\"]}\n```"
     },
     {
       "id": 14,
       "subject": "Task 8: Actions + feedback components",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [11],
       "description": "**Goal:** ButtonGroup, Banner, Toast/ToastStack, Modal, Skeleton with tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/Modal.tsx\", \"design-system/react/src/components/Toast.tsx\", \"design-system/react/src/components/__tests__/feedback.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"Modal esc/overlay/close all fire onClose\", \"Banner/Toast tones\", \"tests green\"]}\n```"
     },
     {
       "id": 15,
       "subject": "Task 9: AmbientBackground wrapper + fonts",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [10, 11],
       "description": "**Goal:** React wrapper mounting/destroying the ambient module; bundle JetBrains Mono woff2 with @font-face.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/AmbientBackground.tsx\", \"design-system/react/src/fonts.css\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit && npm run build\", \"acceptanceCriteria\": [\"mount/destroy lifecycle\", \"fonts bundled in dist\", \"tsc clean\"]}\n```"
     },
     {
       "id": 16,
       "subject": "Task 10: Demo harness (REVIEW GATE)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [12, 13, 14, 15],
       "description": "**Goal:** Vite demo page rendering every component with realistic EVE content over the live ambient background. REVIEW GATE: user eyeballs npm run demo before commit.\n\n```json:metadata\n{\"files\": [\"design-system/react/demo/main.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vite build demo\", \"acceptanceCriteria\": [\"demo builds\", \"all components rendered\", \"user approved the look\"]}\n```"
     },
     {
       "id": 17,
       "subject": "Task 11: Package README + final verification",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [16],
       "description": "**Goal:** design-system/README.md + full clean-state verification. After this, /design-sync runs in MAIN session.\n\n```json:metadata\n{\"files\": [\"design-system/README.md\"], \"verifyCommand\": \"cd design-system/react && npm test -- --run && npx tsc --noEmit && npm run build && npx vite build demo\", \"acceptanceCriteria\": [\"README idiom section accurate\", \"clean-state full suite green\"]}\n```"
     }
