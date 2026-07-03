@@ -1,0 +1,22 @@
+{
+  "projectId": "36adcd0a-8a7b-46e4-a32d-c746ca48b734",
+  "shape": "package",
+  "pkg": "@vigilant/ui",
+  "globalName": "VigilantUI",
+  "buildCmd": "cd design-system/react && rm -rf dist && npm run build",
+  "cssEntry": "dist/index.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraEntries": ["./preview-surface.mjs"],
+  "provider": { "component": "DarkSurface" },
+  "overrides": {
+    "Modal": { "cardMode": "single", "viewport": "800x600" },
+    "ToastStack": { "cardMode": "single", "viewport": "500x400" },
+    "Breadcrumbs": { "cardMode": "column" },
+    "Footer": { "cardMode": "column" },
+    "NavBar": { "cardMode": "column" },
+    "NavMenu": { "cardMode": "column" },
+    "PageHeader": { "cardMode": "column" },
+    "StatBlock": { "cardMode": "column" },
+    "StatStrip": { "cardMode": "column" }
+  }
+}
