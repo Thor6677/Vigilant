@@ -254,6 +254,10 @@ async def startup():
             # Indexes added in 2026-04 review-followup batch — create_all
             # skips existing tables, so these need explicit DDL.
             "CREATE INDEX IF NOT EXISTS ix_killmail_system_time ON killmails(solar_system_id, killmail_time)",
+            # ix_killmails_killmail_time is load-bearing for INDEXED BY in
+            # intel_kills_search — a missing index hard-errors every
+            # time-bounded search, so self-heal it at startup.
+            "CREATE INDEX IF NOT EXISTS ix_killmails_killmail_time ON killmails(killmail_time)",
             "CREATE INDEX IF NOT EXISTS ix_kma_corp_time ON killmail_attackers(corporation_id, killmail_id)",
             "CREATE INDEX IF NOT EXISTS ix_kma_alli_time ON killmail_attackers(alliance_id, killmail_id)",
             "CREATE INDEX IF NOT EXISTS ix_km_victim_corp_time ON killmails(victim_corporation_id, killmail_time DESC)",

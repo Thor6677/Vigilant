@@ -54,6 +54,25 @@ def _sqlite_get_from_hint_text(self, table, text):  # pragma: no cover - trivial
 
 
 SQLiteCompiler.get_from_hint_text = _sqlite_get_from_hint_text
+
+# Self-check: with_hint relies on the (undocumented) get_from_hint_text hook.
+# If a future SQLAlchemy renames/removes it, the assignment above still
+# "succeeds" and hints silently vanish — fail startup loudly instead.
+from sqlalchemy.dialects.sqlite import dialect as _sqlite_dialect  # noqa: E402
+from sqlalchemy import table as _probe_table, column as _probe_col, select as _probe_select  # noqa: E402
+
+_probe_t = _probe_table("_hint_probe", _probe_col("x"))
+_probe_sql = str(
+    _probe_select(_probe_t.c.x)
+    .with_hint(_probe_t, "INDEXED BY __probe__", dialect_name="sqlite")
+    .compile(dialect=_sqlite_dialect())
+)
+if "INDEXED BY __probe__" not in _probe_sql:
+    raise RuntimeError(
+        "SQLite INDEXED BY monkeypatch no longer effective "
+        "(SQLAlchemy get_from_hint_text hook changed?) — see intel_kills_search.py"
+    )
+del _probe_t, _probe_sql
 templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 100
