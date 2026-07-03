@@ -87,30 +87,30 @@ Legend:
 
 ## Batch C — Tools
 
-- [x]A [ ]V discordtime.html `[style-block]` — clean; `dt-*` namespaced in own block, script inside content block, no z-index/keyframes
-- [x]A [ ]V dscan_view.html — clean, pure `b-*`
-- [x]A [ ]V dscan.html — clean, pure `b-*`
-- [x]A [ ]V fitting_saved.html `[style-block]` — clean; `sf-*` namespaced; `sf-dps-loading` is a marker span with inline styles (no CSS rule needed)
-- [x]A [ ]V fitting_tool.html `[style-block] [zindex:[100]]` — clean; z-index:100 is on the 3 full-screen modals (info/char-import/EFT-import) + JS charge modal — coincides exactly with `--z-modal` (100), correct for full-viewport overlays, left as-is. In-content search dropdowns already at z:20 (below nav). Mobile browser-panel overlay z:50 ties with `--z-nav`; DOM order paints it above — works, noted. `module-search`/`module-results`/`ssb-*` are JS hooks, inline-styled. No filter/transform ancestor traps (`.b-main` chain verified).
-- [x]A [ ]V fittings.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
-- [x]A [ ]V **gatecheck.html `[style-block] [zindex:[100]]` — FIXED**: `.gc-dropdown` (in-content autocomplete) was z-index:100 = `--z-modal`, painting over the sticky nav (z:50) on scroll. Lowered to 20, matching fitting_tool.html's in-content dropdown convention.
-- [x]A [ ]V **planetary_calculator.html `[style-block] [zindex:[1000]]` — FIXED**: `#calc-sys-dd` autocomplete inline z-index:1000 (above even `--z-toast`:110) → 20. Flow-chart SVG z:5 is local, fine. `pi-flow-cell/grid/lines` are JS/SVG hooks, inline-styled. Hardcoded `#161616`/`#121212`/`#222` — cosmetic note.
-- [x]A [ ]V planetary_chain.html `[style-block]` — clean; `chain-item` states in own block; deep-link script inside content block
-- [x]A [ ]V **planetary_lookup.html `[style-block] [zindex:[1000]]` — FIXED**: `#sys-dd` autocomplete inline z-index:1000 → 20 (same fix as calculator). Hardcoded `#161616`/`#222` — cosmetic note.
-- [x]A [ ]V planetary.html `[style-block]` — clean; `pi-row`/`pi-arrow` expand states in own block (style block inside content, valid)
-- [x]A [ ]V ship_mastery.html `[style-block]` — clean; `.is-hidden` defined in own block; `mastery-details` is a JS toggle hook
-- [x]A [ ]V structure_age.html `[style-block]` — clean; `sa-*` namespaced incl. `is-exact/is-interpolate/is-extrapolate` method badges
-- [x]A [ ]V **structure_timers.html `[style-block] [keyframes] [zindex:[100]]` — FIXED ×2**: (1) `.range-btn` filter chips were used but never defined anywhere (not in old base.html either — pre-existing unstyled buttons); copied the canonical rules from mining_ledger.html/character_detail.html into the page's own style block. (2) 4 typeahead dropdowns (system/region/owner/ACL) inline z-index:100 → 20. `@keyframes timer-pulse` does NOT collide with motion.css names (`vg-*`, `spin`, `pulse`) — verified. UTC text inputs intentionally not datetime-local (per gotcha), untouched.
-- [x]A [ ]V partials/gatecheck_finder.html — clean
-- [x]A [ ]V **partials/gatecheck_route.html — FIXED**: summary stats used `b-stat-value`, a class that has never existed (components.css defines `b-stat-val`; old base.html did too). Values/labels rendered as unstyled inline spans. Converted to canonical `div.b-stat-val` / `div.b-stat-label`, preserving inline color overrides.
-- [x]A [ ]V **partials/gatecheck_wartarget.html — FIXED**: same `b-stat-value` → `div.b-stat-val` fix.
-- [x]A [ ]V partials/planetary_chain_node.html — clean; `piLoadNode` uses `typeof === 'undefined'` guard (htmx redefine gotcha respected)
-- [x]A [ ]V partials/planetary_planet_detail.html — clean
-- [x]A [ ]V partials/ship_mastery_check.html — clean
-- [x]A [ ]V partials/fitting_search_results.html — clean; calls parent-page functions (selectShip/addModule/addDrone), doesn't redefine them
-- [x]A [ ]V partials/fitting_stats.html — clean; `fr-val`/`def-hp-val`/`def-rep-val` are JS toggle hooks with inline styles
-- [x]A [ ]V partials/fitting_info.html — clean
-- [x]A [ ]V partials/planetary_lookup_system.html `[style-block]` — clean; `pi-conn-lines` SVG hook at local z:5; parent page re-parents injected scripts via `injectHtml`
+- [x]A [x]V discordtime.html `[style-block]` — clean; `dt-*` namespaced in own block, script inside content block, no z-index/keyframes
+- [x]A [x]V dscan_view.html — clean, pure `b-*`
+- [x]A [x]V dscan.html — clean, pure `b-*`
+- [x]A [x]V fitting_saved.html `[style-block]` — clean; `sf-*` namespaced; `sf-dps-loading` is a marker span with inline styles (no CSS rule needed)
+- [x]A [x]V fitting_tool.html `[style-block] [zindex:[100]]` — clean; z-index:100 is on the 3 full-screen modals (info/char-import/EFT-import) + JS charge modal — coincides exactly with `--z-modal` (100), correct for full-viewport overlays, left as-is. In-content search dropdowns already at z:20 (below nav). Mobile browser-panel overlay z:50 ties with `--z-nav`; DOM order paints it above — works, noted. `module-search`/`module-results`/`ssb-*` are JS hooks, inline-styled. No filter/transform ancestor traps (`.b-main` chain verified).
+- [x]A [x]V fittings.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
+- [x]A [x]V **gatecheck.html `[style-block] [zindex:[100]]` — FIXED**: `.gc-dropdown` (in-content autocomplete) was z-index:100 = `--z-modal`, painting over the sticky nav (z:50) on scroll. Lowered to 20, matching fitting_tool.html's in-content dropdown convention.
+- [x]A [x]V **planetary_calculator.html `[style-block] [zindex:[1000]]` — FIXED**: `#calc-sys-dd` autocomplete inline z-index:1000 (above even `--z-toast`:110) → 20. Flow-chart SVG z:5 is local, fine. `pi-flow-cell/grid/lines` are JS/SVG hooks, inline-styled. Hardcoded `#161616`/`#121212`/`#222` — cosmetic note.
+- [x]A [x]V planetary_chain.html `[style-block]` — clean; `chain-item` states in own block; deep-link script inside content block
+- [x]A [x]V **planetary_lookup.html `[style-block] [zindex:[1000]]` — FIXED**: `#sys-dd` autocomplete inline z-index:1000 → 20 (same fix as calculator). Hardcoded `#161616`/`#222` — cosmetic note.
+- [x]A [x]V planetary.html `[style-block]` — clean; `pi-row`/`pi-arrow` expand states in own block (style block inside content, valid)
+- [x]A [x]V ship_mastery.html `[style-block]` — clean; `.is-hidden` defined in own block; `mastery-details` is a JS toggle hook
+- [x]A [x]V structure_age.html `[style-block]` — clean; `sa-*` namespaced incl. `is-exact/is-interpolate/is-extrapolate` method badges
+- [x]A [x]V **structure_timers.html `[style-block] [keyframes] [zindex:[100]]` — FIXED ×2**: (1) `.range-btn` filter chips were used but never defined anywhere (not in old base.html either — pre-existing unstyled buttons); copied the canonical rules from mining_ledger.html/character_detail.html into the page's own style block. (2) 4 typeahead dropdowns (system/region/owner/ACL) inline z-index:100 → 20. `@keyframes timer-pulse` does NOT collide with motion.css names (`vg-*`, `spin`, `pulse`) — verified. UTC text inputs intentionally not datetime-local (per gotcha), untouched.
+- [x]A [x]V partials/gatecheck_finder.html — clean
+- [x]A [x]V **partials/gatecheck_route.html — FIXED**: summary stats used `b-stat-value`, a class that has never existed (components.css defines `b-stat-val`; old base.html did too). Values/labels rendered as unstyled inline spans. Converted to canonical `div.b-stat-val` / `div.b-stat-label`, preserving inline color overrides.
+- [x]A [x]V **partials/gatecheck_wartarget.html — FIXED**: same `b-stat-value` → `div.b-stat-val` fix.
+- [x]A [x]V partials/planetary_chain_node.html — clean; `piLoadNode` uses `typeof === 'undefined'` guard (htmx redefine gotcha respected)
+- [x]A [x]V partials/planetary_planet_detail.html — clean
+- [x]A [x]V partials/ship_mastery_check.html — clean
+- [x]A [x]V partials/fitting_search_results.html — clean; calls parent-page functions (selectShip/addModule/addDrone), doesn't redefine them
+- [x]A [x]V partials/fitting_stats.html — clean; `fr-val`/`def-hp-val`/`def-rep-val` are JS toggle hooks with inline styles
+- [x]A [x]V partials/fitting_info.html — clean
+- [x]A [x]V partials/planetary_lookup_system.html `[style-block]` — clean; `pi-conn-lines` SVG hook at local z:5; parent page re-parents injected scripts via `injectHtml`
 
 ## Batch D — Everything else (not analyzed this pass)
 

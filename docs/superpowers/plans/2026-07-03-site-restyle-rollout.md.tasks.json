@@ -51,7 +51,7 @@
     {
       "id": 26,
       "subject": "SP2 Task 7: sweep batch C (tools/fitting/planetary)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         25
       ],
@@ -67,5 +67,5 @@
       "description": "**Goal:** Remaining templates swept; 111/111; final deploy + report.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"111/111 ticked\", \"final report\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-07-03T22:45:18Z"
+  "lastUpdated": "2026-07-03T23:40:43Z"
 }
