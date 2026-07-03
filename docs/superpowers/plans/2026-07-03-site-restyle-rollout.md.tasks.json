@@ -4,56 +4,68 @@
     {
       "id": 20,
       "subject": "SP2 Task 1: kill-events endpoint + /static/ds mount",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Public GET /api/ambient/kills + /static/ds mount.\n\n```json:metadata\n{\"files\": [\"app/routes/ambient.py\", \"app/main.py\", \"tests/test_ambient_kills.py\"], \"verifyCommand\": \"python3 -m pytest tests/test_ambient_kills.py -v\", \"acceptanceCriteria\": [\"endpoint public, cached, distinct systems, errors return []\", \"static/ds serves design-system\", \"3 tests green\"]}\n```"
     },
     {
       "id": 21,
       "subject": "SP2 Task 2: site.css extraction + base.html swap",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** base.html style block -> 4 links; keepers to static/css/site.css per disposition map; notif z-index tokenized.\n\n```json:metadata\n{\"files\": [\"static/css/site.css\", \"app/templates/base.html\"], \"verifyCommand\": \"jinja parse base.html\", \"acceptanceCriteria\": [\"4 links in order\", \"site.css exact keeper set\", \"no head style block\"]}\n```"
     },
     {
       "id": 22,
       "subject": "SP2 Task 3: login page rebuild with ambient",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** index.html glass SSO login over ambient flythrough with real kill polling.\n\n```json:metadata\n{\"files\": [\"app/templates/index.html\"], \"verifyCommand\": \"jinja parse index.html; no eve-* classes\", \"acceptanceCriteria\": [\"ambient mounts on body with poll killSource\", \"glass panel + primary CTA\", \"nonce'd module script in content block\"]}\n```"
     },
     {
       "id": 23,
       "subject": "SP2 Task 4: deploy + smoke (HUMAN GATE)",
-      "status": "pending",
-      "blockedBy": [20, 21, 22],
+      "status": "completed",
+      "blockedBy": [
+        20,
+        21,
+        22
+      ],
       "description": "**Goal:** Live deploy; explicit user OK on public endpoints; push before deploy.sh; smoke + user eyeball; rollback path.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"curl /api/ambient/kills -> 200\", \"acceptanceCriteria\": [\"user OK on public endpoints\", \"clean startup\", \"smoke green\", \"user approves look\"]}\n```"
     },
     {
       "id": 24,
       "subject": "SP2 Task 5: sweep checklist + batch A (core)",
       "status": "pending",
-      "blockedBy": [23],
+      "blockedBy": [
+        23
+      ],
       "description": "**Goal:** 111-template checklist; batch A (core pages) verified/fixed/redeployed.\n\n```json:metadata\n{\"files\": [\"docs/superpowers/plans/sweep-checklist-2026-07-03.md\"], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"checklist lists 111 templates\", \"batch A verified\", \"redeployed\"]}\n```"
     },
     {
       "id": 25,
       "subject": "SP2 Task 6: sweep batch B (industry/assets/corp)",
       "status": "pending",
-      "blockedBy": [24],
+      "blockedBy": [
+        24
+      ],
       "description": "**Goal:** Batch B verified/fixed/redeployed.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"batch B verified\", \"redeployed\"]}\n```"
     },
     {
       "id": 26,
       "subject": "SP2 Task 7: sweep batch C (tools/fitting/planetary)",
       "status": "pending",
-      "blockedBy": [25],
+      "blockedBy": [
+        25
+      ],
       "description": "**Goal:** Batch C verified/fixed/redeployed.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"batch C verified\", \"redeployed\"]}\n```"
     },
     {
       "id": 27,
       "subject": "SP2 Task 8: sweep batch D + close-out",
       "status": "pending",
-      "blockedBy": [26],
+      "blockedBy": [
+        26
+      ],
       "description": "**Goal:** Remaining templates swept; 111/111; final deploy + report.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"111/111 ticked\", \"final report\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-07-03T18:00:00Z"
+  "lastUpdated": "2026-07-03T21:30:00Z"
 }

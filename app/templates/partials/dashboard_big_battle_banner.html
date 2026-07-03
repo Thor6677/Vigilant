@@ -14,7 +14,7 @@
             <div>
                 <span class="b-label" style="color:#e53e3e;">Active Battle</span>
                 <span style="font-family:monospace;font-size:9px;letter-spacing:0.1em;padding:1px 5px;margin-left:0.4rem;background:rgba(255,255,255,0.06);color:{{ band_color }};">{{ band_short }}</span>
-                <span style="font-size:13px;margin-left:0.4rem;color:var(--fg);">
+                <span style="font-size:13px;margin-left:0.4rem;color:var(--text);">
                     {{ battle['system_name'] or battle['system_id'] }}
                     {% if battle['group_label'] %}<span style="color:var(--muted);font-size:10px;letter-spacing:0.1em;"> · {{ battle['group_label'] }}</span>{% endif %}
                 </span>
@@ -27,8 +27,8 @@
                 {% endif %}
             </div>
             <div style="font-size:11px;color:var(--muted);">
-                <b style="color:var(--fg);font-family:monospace;">{{ battle['kill_count'] }}</b> kills
-                · <b style="color:var(--fg);font-family:monospace;">{{ battle['pilots_involved'] }}</b> pilots
+                <b style="color:var(--text);font-family:monospace;">{{ battle['kill_count'] }}</b> kills
+                · <b style="color:var(--text);font-family:monospace;">{{ battle['pilots_involved'] }}</b> pilots
                 {% if battle['total_isk'] %}
                 · <b style="color:var(--accent);font-family:monospace;">{{ (battle['total_isk'] / 1e9) | round(1) }}B</b>
                 {% endif %}

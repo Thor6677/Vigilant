@@ -30,7 +30,7 @@ Legend:
 - [x]A [ ]V status.html `[eve-classes:13]` — Tailwind-eve panel, flat old-look next to new glass panels. **Flag for visual pass** — candidate for `b-*` restyle (out of scope this pass).
 - [x]A [ ]V status_data.html `[eve-classes:98]` — same, heaviest Tailwind-eve usage in the whole app. **Flag for visual pass.**
 - [x]A [ ]V base.html — layout shell, reviewed as foundational infra for all Batch A pages. No stray classes, notif-dropdown already uses `z-index:var(--z-dropdown)` correctly. Clean.
-- [x]A [ ]V partials/dashboard_big_battle_banner.html — clean
+- [x]A [ ]V partials/dashboard_big_battle_banner.html — fixed: var(--fg)→var(--text) ×3 (caught in spec review)
 - [x]A [ ]V partials/dashboard_kill_pulse.html — clean
 - [x]A [ ]V partials/dashboard_combat_profile.html — clean
 - [x]A [ ]V **partials/dashboard_recent_battles.html `[style-block]` — FIXED**: `.rb-sys { color:var(--fg) }` referenced an undefined custom property (`--fg` never existed, not even in pre-restyle base.html — should have been `--text`, matching sibling rules `.rb-rank`/`.rb-meta`/`.rb-stat`). Changed to `var(--text)`.
