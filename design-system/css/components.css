@@ -13,7 +13,7 @@ body {
     font-size: var(--fs-md);
     line-height: 1.65;
     min-height: 100vh;
-    margin: 0;
+    margin: 0; /* base.html relies on UA default; flag for sub-project 2 rollout (8px shift) */
 }
 
 /* ── Navigation ──────────────────────────────────────────────────── */
@@ -50,8 +50,11 @@ body {
 
 /* ── Nav dropdown (expressive) ───────────────────────────────────── */
 .b-nav-dropdown { position: relative; }
+/* NOTE: .b-nav has backdrop-filter, so in Chromium this menu's own blur
+   samples the nav, not the page — the glass effect degrades to the rgba
+   tint. Acceptable; do not "fix" by moving the menu out of the nav. */
 .b-nav-dropdown-menu {
-    display: none; position: absolute; top: 100%; left: 0; margin-top: 6px;
+    display: none; position: absolute; top: 100%; left: 0; margin-top: 0;
     padding: 0.4rem 0; min-width: 170px; z-index: var(--z-dropdown);
     background: var(--glass-bg-heavy);
     backdrop-filter: blur(var(--glass-blur));
@@ -74,12 +77,12 @@ body {
     display: block; padding: 0.4rem 0.75rem; font-size: 11px;
     letter-spacing: var(--ls-wide); text-transform: uppercase;
     color: var(--muted); text-decoration: none; white-space: nowrap;
-    transition: color var(--dur-fast), background var(--dur-fast), letter-spacing var(--dur-fast);
+    transition: color var(--dur-fast), background var(--dur-fast), padding-left var(--dur-fast);
 }
 .b-nav-dropdown-item:hover {
     color: var(--accent-bright);
     background: linear-gradient(90deg, rgba(200, 169, 81, 0.14), transparent);
-    letter-spacing: 0.2em;
+    padding-left: 1rem;
 }
 .b-nav-dropdown-item.is-active { color: var(--accent); font-weight: 500; }
 
@@ -123,16 +126,18 @@ body {
 .b-label { font-size: 11px; font-weight: 600; letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--muted); }
 .b-link { font-size: 11px; letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); text-decoration: none; transition: color var(--dur-fast); }
 .b-link:hover { color: var(--accent-bright); }
-.b-eyebrow { font-size: var(--fs-sm); letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--accent); }
+.b-eyebrow { font-size: var(--fs-xs); letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--accent); }
 
 /* ── Text utilities (kept from base.html) ────────────────────────── */
-.b-muted { color: var(--muted); font-size: var(--fs-base); }
+.b-muted { color: var(--muted); }
 .b-muted-sm { color: var(--muted); font-size: 11px; }
-.b-text { font-size: var(--fs-base); color: var(--text); }
+.b-text { color: var(--text); }
 .b-pad-md { padding: var(--sp-3); }
-.is-ok { color: var(--success) !important; }
-.is-warn-text { color: var(--warn) !important; }
-.is-danger-text { color: var(--danger) !important; }
+.is-ok     { color: var(--success) !important; }
+.is-warn   { color: var(--warn) !important; }
+.is-danger { color: var(--danger) !important; }
+.is-muted  { color: var(--muted) !important; }
+.is-accent { color: var(--accent) !important; }
 
 /* ── Stats strip ─────────────────────────────────────────────────── */
 .b-stats { display: flex; border: 1px solid var(--glass-border); background: var(--glass-bg); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); margin-bottom: var(--sp-7); }
@@ -177,8 +182,8 @@ body {
 .b-progress { height: 2px; background: var(--border); margin-top: 4px; overflow: hidden; }
 .b-progress-fill { height: 100%; background: var(--muted); transition: width var(--dur-slow) var(--ease-std); }
 .b-progress-fill.is-active { background: var(--text); }
-.b-progress-fill.is-warn { background: var(--accent); box-shadow: 0 0 6px rgba(200, 169, 81, 0.6); }
-.b-progress-fill.is-crit { background: var(--danger); box-shadow: 0 0 6px rgba(204, 51, 51, 0.6); }
+.b-progress-fill.is-warn { background: var(--accent); }
+.b-progress-fill.is-crit { background: var(--danger); }
 .b-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .b-dot.is-ok { background: var(--success); box-shadow: 0 0 5px rgba(51, 170, 85, 0.8); }
 .b-dot.is-warn { background: var(--accent); box-shadow: 0 0 5px rgba(200, 169, 81, 0.8); }
@@ -226,7 +231,7 @@ body {
 .b-banner.is-ok { border-color: var(--success); background: rgba(51, 170, 85, 0.08); }
 .b-server-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; font-size: 11px; letter-spacing: var(--ls-wide); text-transform: uppercase; }
 .b-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); }
-.b-grid-3 > * { background: var(--surface); }
+.b-grid-3 > * { background-color: var(--surface-1); }
 .b-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
 
 /* ── Scrollbar ───────────────────────────────────────────────────── */
