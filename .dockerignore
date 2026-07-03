@@ -24,6 +24,11 @@ vigilant.pid
 static/uploads/
 frontend/node_modules
 frontend/dist
+design-system/react/node_modules
+design-system/react/dist
+design-system/react/demo/dist
+ds-bundle
+.ds-sync
 *.md
 !README.md
 wanderer-compose.yml

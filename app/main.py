@@ -96,6 +96,9 @@ app.add_middleware(
     same_site="lax",
 )
 
+# /static/ds must be mounted BEFORE /static — Starlette matches mounts in
+# registration order and /static would swallow the path. In the image only
+# design-system/{css,ambient} exist (Dockerfile copies nothing else).
 app.mount("/static/ds", StaticFiles(directory="design-system"), name="static_ds")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

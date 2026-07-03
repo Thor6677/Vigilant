@@ -55,6 +55,8 @@ docs/superpowers/plans/sweep-checklist-2026-07-03.md  # Task 5: sweep tracking (
 
 **Goal:** `GET /api/ambient/kills` returns recent-kill system IDs (public, cached, index-backed) and the design-system directory is served at `/static/ds`.
 
+> **Post-review amendments (after 35db932):** Dockerfile now COPYs design-system/{css,ambient} (the mount otherwise crashes the container — the image is built from selective COPYs, not the whole repo); .dockerignore excludes the react build trees; the kills query is restructured (time-ordered inner select, distinct outer) because SQLite's planner chose a full scan of ix_killmail_system_time on the 192 GB DB; a 15s in-process cache guards the public endpoint; tests/conftest.py provides dummy env so pytest runs clean. Code is authoritative over the Step blocks.
+
 **Files:**
 - Create: `app/routes/ambient.py`
 - Create: `tests/test_ambient_kills.py`

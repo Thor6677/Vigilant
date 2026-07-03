@@ -55,6 +55,8 @@ COPY --from=pydeps /install /usr/local
 # uploaded images, dev DBs) can't end up baked into an immutable image.
 COPY app/ ./app/
 COPY static/ ./static/
+COPY design-system/css/ ./design-system/css/
+COPY design-system/ambient/ ./design-system/ambient/
 COPY README.md ./
 # Frontend bundle from the node builder stage.
 COPY --from=frontend /build/dist ./frontend/dist

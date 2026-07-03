@@ -4,7 +4,7 @@ The app has import-time side effects (DB/SDE init), so we test the
 extracted query function, not the FastAPI route object.
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -30,14 +30,15 @@ def session_factory():
             await conn.run_sync(lambda c: Killmail.__table__.create(c))
 
     loop.run_until_complete(_init())
-    return async_sessionmaker(engine, expire_on_commit=False)
+    yield async_sessionmaker(engine, expire_on_commit=False)
+    loop.close()
 
 
 def _km(system_id: int, age_s: int) -> Killmail:
     return Killmail(
         killmail_id=hash((system_id, age_s)) % 10**9,
         killmail_hash="deadbeef",
-        killmail_time=datetime.utcnow() - timedelta(seconds=age_s),
+        killmail_time=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=age_s),
         solar_system_id=system_id,
         victim_ship_type_id=670,
     )
@@ -70,3 +71,14 @@ def test_distinct_systems(session_factory):
             return await _recent_kill_systems(s, window_s=120)
     result = asyncio.get_event_loop().run_until_complete(run())
     assert result == [30000142]
+
+
+def test_limit_caps_at_50(session_factory):
+    async def run():
+        async with session_factory() as s:
+            for i in range(60):
+                s.add(_km(30000000 + i, age_s=i))
+            await s.commit()
+            return await _recent_kill_systems(s, window_s=120)
+    result = asyncio.get_event_loop().run_until_complete(run())
+    assert len(result) == 50
