@@ -1,7 +1,11 @@
+import hashlib
+import sys
 import time
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -48,6 +52,44 @@ from app.routes.structure_age import router as structure_age_router
 from app.routes.wormholes import router as wormholes_router
 from app.routes.fitting import router as fitting_router
 from app.routes.landings import router as landings_router
+
+
+def _css_version() -> str:
+    """Content hash of the site's stylesheets, computed once at process
+    startup. The edge proxy serves /static/ as `public, immutable,
+    max-age=604800`; base.html appends `?v={{ css_v }}` to every stylesheet
+    link so a future CSS change busts the 7-day cache for returning
+    browsers instead of waiting it out.
+    """
+    h = hashlib.md5()
+    for p in [
+        Path("static/css/tailwind.css"),
+        Path("design-system/css/tokens.css"),
+        Path("design-system/css/motion.css"),
+        Path("design-system/css/components.css"),
+        Path("static/css/site.css"),
+    ]:
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            pass  # missing file — version stays stable, just doesn't reflect it
+    return h.hexdigest()[:8]
+
+
+# Every app/routes/*.py and app/auth/routes.py module instantiates its own
+# Jinja2Templates(directory="app/templates") — each gets its own private
+# jinja2.Environment (confirmed in starlette.templating.Jinja2Templates), so
+# setting env.globals on just one instance would only cache-bust pages
+# rendered through that one router. base.html is the shared layout for all
+# of them, so the global has to be pushed onto every instance. All router
+# modules are imported above (module-level), so by this point they're all
+# present in sys.modules with their `templates` attribute already built.
+CSS_V = _css_version()
+for _mod_name, _mod in list(sys.modules.items()):
+    if _mod_name.startswith(("app.routes.", "app.auth.")):
+        _templates = getattr(_mod, "templates", None)
+        if isinstance(_templates, Jinja2Templates):
+            _templates.env.globals["css_v"] = CSS_V
 
 settings = get_settings()
 

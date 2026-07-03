@@ -246,6 +246,8 @@ git commit -m "feat(ambient): public recent-kills endpoint + /static/ds mount fo
 
 **Goal:** `base.html`'s 795-line inline style block becomes four `<link>` tags; site-specific CSS lives in `static/css/site.css`.
 
+> **Post-review amendments (after 682e4a1):** stylesheet links carry ?v={{ css_v }} (startup content hash) — the edge serves /static/ as immutable/7d, so unversioned CSS would go stale on every later restyle deploy; the plan's "grep -c b-nav → 0" verify line was wrong (site.css legitimately re-touches .b-nav inside @media overrides — 2 hits is correct); ROLLBACK CAVEAT: never roll back to an image that has the new base.html without the /static/ds mount + Dockerfile COPY (whole site renders unstyled) — Task 1 and 2 commits must deploy together, which deploy.sh's whole-image model guarantees.
+
 **Files:**
 - Create: `static/css/site.css`
 - Modify: `app/templates/base.html` (style block lines 13–807; notif-dropdown inline z-index ~line 870)
@@ -414,7 +416,7 @@ git commit -m "feat(restyle): SSO login page with ambient New Eden flythrough"
 - [ ] **Step 2:** `git push origin main` then `ssh thunderborn-home "/opt/vigilant/scripts/deploy.sh"` (push FIRST — deploy.sh pulls from GitHub; deploy-before-push runs old code)
 - [ ] **Step 3:** `ssh thunderborn-home "docker logs vigilant-app-1 --since 5m 2>&1 | tail -30"` — no tracebacks
 - [ ] **Step 4:** curl smoke set above; then hand to the user for the eyeball pass
-- [ ] **Step 5:** If broken beyond quick fix: `ssh thunderborn-home "/opt/vigilant/scripts/rollback.sh"` and regroup (repo still has the commits; fix forward)
+- [ ] **Step 5:** If broken beyond quick fix: `ssh thunderborn-home "/opt/vigilant/scripts/rollback.sh"` and regroup (repo still has the commits; fix forward) (rollback.sh restores the whole :prev image — safe; never cherry-pick template-only changes onto older images.)
 
 ---
 
