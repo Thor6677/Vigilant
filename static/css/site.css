@@ -1,0 +1,233 @@
+/* Vigilant site-specific styles.
+   The shared b-* vocabulary lives in /static/ds/css/ (design-system/css in
+   the repo). This file holds only what the design system deliberately does
+   not cover, and loads AFTER it so responsive overrides win. */
+
+/* ── Inline icon ─────────────────────────────────────────────────── */
+.corp-logo {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    filter: grayscale(20%);
+}
+
+/* ── HTMX ────────────────────────────────────────────────────────── */
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator { display: inline; }
+.htmx-request.htmx-indicator { display: inline; }
+
+/* ── ESI banner override ─────────────────────────────────────────── */
+#esi-banner > div {
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+/* ── Structure alert banners ─────────────────────────────────────── */
+.structure-alert-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 2rem;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.structure-alert-banner.is-danger {
+    background: rgba(204, 51, 51, 0.10);
+    border-left: 3px solid var(--danger);
+    color: var(--danger);
+}
+.structure-alert-banner.is-warn {
+    background: rgba(200, 169, 81, 0.08);
+    border-left: 3px solid var(--warn);
+    color: var(--warn);
+}
+.structure-alert-banner .alert-icon { font-size: 13px; flex-shrink: 0; }
+.structure-alert-banner .alert-text { min-width: 0; }
+.structure-alert-banner .alert-text strong { font-weight: 600; }
+.structure-alert-banner .alert-time { color: var(--muted); font-size: 11px; }
+.structure-alert-banner .alert-dismiss {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 0.3rem;
+    line-height: 1;
+    flex-shrink: 0;
+    font-family: inherit;
+    transition: color 0.1s;
+}
+.structure-alert-banner .alert-dismiss:hover { color: var(--text); }
+
+/* ── Focus visibility (keyboard nav) ─────────────────────────────── */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+    outline: none;
+}
+/* Inline-text affordances get a thin gold underline instead of a box */
+.b-link:focus-visible,
+.b-nav-link:focus-visible,
+.b-nav-dropdown-item:focus-visible,
+.b-tab-strip a:focus-visible,
+.b-footer-link:focus-visible,
+.b-breadcrumbs a:focus-visible,
+.b-mobile-menu a:focus-visible {
+    outline: none;
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 3px;
+}
+
+/* ── Mobile hamburger ─────────────────────────────────────────── */
+.b-hamburger {
+    display: none;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0.25rem 0;
+}
+.b-hamburger:hover { color: var(--text); }
+.b-hamburger svg { flex-shrink: 0; }
+.b-mobile-menu {
+    display: none;
+    flex-direction: column;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0;
+    position: fixed;
+    top: 46px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 49;
+    overflow-y: auto;
+    border-bottom: none;
+    border-top: 1px solid var(--border);
+}
+.b-mobile-menu.is-open { display: flex; }
+.b-mobile-menu a {
+    display: block;
+    padding: 0.75rem 1.5rem;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.1s, background 0.1s;
+}
+.b-mobile-menu a:hover { color: var(--text); background: rgba(200,169,81,0.05); }
+.b-mobile-menu a.is-active { color: var(--accent); font-weight: 500; }
+.b-mobile-menu .b-mobile-sep {
+    border-top: 1px solid var(--border);
+    margin: 0.25rem 1.5rem;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width: 1000px) {
+    .b-grid-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+    .b-nav-links { display: none; }
+    .b-hamburger { display: flex; }
+    .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }
+    .b-footer-links { flex-wrap: wrap; justify-content: center; }
+    .b-breadcrumbs { padding: 0.5rem 1rem; }
+    /* Touch-friendly form elements on tablets */
+    input, select, textarea, .b-btn, button { min-height: 38px; }
+    /* Page headers stack vertically */
+    .b-page-header { flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+}
+@media (max-width: 640px) {
+    .b-grid-3 { grid-template-columns: 1fr; }
+    .b-grid-2 { grid-template-columns: 1fr; }
+    .b-nav { padding: 0 1rem; }
+    .b-main { padding: 1.5rem 1rem; }
+    .b-stats { flex-wrap: wrap; }
+    .b-stat { flex: 1 1 45%; }
+    /* Full touch compliance on phones (44px Apple HIG) */
+    input, select, textarea, .b-btn, button {
+        min-height: 44px;
+        font-size: max(12px, inherit);
+    }
+    /* Collapse inline 2-column grids to single column */
+    [style*="grid-template-columns:1fr 1fr"],
+    [style*="grid-template-columns: 1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+    /* Prevent fixed-width inline elements from overflowing */
+    [style*="width:340px"], [style*="width: 340px"] {
+        width: 100% !important; max-width: 100% !important;
+    }
+    /* Reduce min-widths that cause horizontal overflow */
+    [style*="min-width:150px"], [style*="min-width:160px"],
+    [style*="min-width:180px"], [style*="min-width:200px"] {
+        min-width: 0 !important;
+    }
+    /* Phone base bumped to 16px to prevent iOS input auto-zoom and meet web a11y floor */
+    body { font-size: 16px; }
+    .b-page-title { font-size: 18px; }
+    /* Alert banners wrap text */
+    .structure-alert-banner { flex-wrap: wrap; padding: 0.75rem 1rem; }
+    /* Exempt tiny icon buttons from min-height rule */
+    .alert-dismiss { min-height: auto !important; padding: 0.25rem; }
+    /* Card rows: allow values to wrap for long text */
+    .b-row { flex-wrap: wrap; gap: 0.25rem; }
+    .b-row-val { white-space: normal; text-align: right; word-break: break-word; }
+    /* Card actions: buttons wrap if needed */
+    .b-actions { flex-wrap: wrap; }
+    .b-actions .b-btn { min-height: 36px; }
+    /* Card portraits slightly smaller on phones */
+    .b-card-portrait { width: 64px; height: 64px; }
+    /* Server bar stacks */
+    .b-server-bar { flex-direction: column; gap: 0.25rem; padding: 0.4rem 1rem; }
+}
+@media (max-width: 480px) {
+    .b-main { padding: 1rem 0.75rem; }
+    .b-nav { padding: 0 0.75rem; }
+    .b-stat { flex: 1 1 100%; }
+}
+
+/* T-031 round 3: CSS hover utilities to replace inline mouseover/out
+   handlers. Avoid inline event handlers so CSP can drop unsafe-inline
+   in T-033.
+   NOTE: Do NOT pair any of these classes with an inline declaration
+   of the property they animate — inline style has higher CSS
+   specificity than a class `:hover` rule and silently masks the
+   effect. Affected pairings:
+     .b-hover-accent / .b-hover-surface / .b-hover-row — `background`
+     .b-hover-underline                                — `text-decoration`
+   The `.b-hover-row` / `.b-hover-underline` rules below declare the
+   non-hover state inside the class so the row-style and anchor-
+   underline conventions stay self-contained. */
+.b-hover-accent:hover    { background: rgba(200,169,81,0.07); }
+.b-hover-surface:hover   { background: var(--surface); }
+.b-hover-row             { background: var(--bg); transition: background 0.15s; }
+.b-hover-row:hover       { background: var(--surface); }
+/* Hover-only highlight that keeps a transparent rest state. Use on
+   rows inside a panel where the row should NOT carry its own
+   background at rest (otherwise it stands out from the panel
+   surface even when un-hovered). See ISS-025. */
+.b-hover-transparent        { background: transparent; transition: background 0.15s; }
+.b-hover-transparent:hover  { background: var(--surface); }
+/* Hover to var(--bg) — used by the fitting-tool implant search
+   dropdown where the panel surface is var(--surface) and rows want
+   to deepen on hover rather than lighten. ISS-020. */
+.b-hover-bg:hover        { background: var(--bg); }
+.b-hover-underline       { text-decoration: none; }
+.b-hover-underline:hover { text-decoration: underline; }
