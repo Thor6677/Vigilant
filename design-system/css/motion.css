@@ -1,5 +1,5 @@
 /* Vigilant Design System — motion
-   All keyframes live here. Every consumer animation must reference these
+   All keyframes and motion utilities live here. Every consumer animation must reference these
    names; nothing else defines @keyframes. */
 
 /* dropdown / overlay entrances */
@@ -63,6 +63,7 @@
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
+        animation-delay: 0.01ms !important;
         transition-duration: 0.01ms !important;
     }
 }
