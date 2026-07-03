@@ -243,6 +243,7 @@ body {
 /* ── Modal ───────────────────────────────────────────────────────── */
 .b-modal-overlay { position: fixed; inset: 0; z-index: var(--z-modal); background: rgba(4, 4, 8, 0.7); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); animation: vg-fade-in var(--dur-fast) var(--ease-std); }
 .b-modal { width: min(560px, 100%); max-height: 85vh; display: flex; flex-direction: column; background: var(--glass-bg-heavy); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--glass-border); box-shadow: var(--shadow-2), var(--glow-accent-soft); position: relative; animation: vg-menu-in var(--dur-menu) var(--ease-pop); transform-origin: top; }
+.b-modal:focus { outline: none; } /* focused programmatically on open; not an interactive target */
 .b-modal::before { content: ''; position: absolute; top: -1px; left: -1px; width: 14px; height: 14px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
 .b-modal::after { content: ''; position: absolute; bottom: -1px; right: -1px; width: 14px; height: 14px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 .b-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 0.65rem 1rem; border-bottom: 1px solid var(--glass-border); }
