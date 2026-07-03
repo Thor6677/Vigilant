@@ -1,0 +1,62 @@
+/* Vigilant Design System — tokens
+   Source of truth for both the Jinja2 site and @vigilant/ui.
+   Base palette is carried over from app/templates/base.html verbatim;
+   glass/elevation/motion tokens are new. */
+:root {
+    /* base palette (kept) */
+    --bg:      #080808;
+    --surface: #0e0e0e;
+    --text:    #dedede;
+    --muted:   #8a8a8a;
+    --border:  #191919;
+    --rule:    #dedede;
+    --accent:  #c8a951;
+    --danger:  #cc3333;
+    --success: #33aa55;
+    --warn:    #c8a951;
+    --info:    #5a8fc4;
+
+    /* accent variants */
+    --accent-bright: #e8d9a8;
+    --accent-dim:    rgba(200, 169, 81, 0.35);
+    --accent-faint:  rgba(200, 169, 81, 0.08);
+
+    /* glass surfaces */
+    --glass-bg:       rgba(13, 13, 17, 0.55);
+    --glass-bg-heavy: rgba(13, 13, 17, 0.80);
+    --glass-border:   var(--accent-dim);
+    --glass-blur:     8px;
+
+    /* elevation (surface steps + shadows) */
+    --surface-1: #0e0e0e;
+    --surface-2: #101014;
+    --surface-3: #14141a;
+    --shadow-1: 0 4px 18px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 8px 32px rgba(0, 0, 0, 0.55);
+    --glow-accent:       0 0 16px rgba(200, 169, 81, 0.45);
+    --glow-accent-soft:  0 0 24px rgba(200, 169, 81, 0.12);
+
+    /* typography */
+    --font-mono: 'JetBrains Mono', monospace;
+    --fs-xs: 9px;  --fs-sm: 10px;  --fs-base: 12px;  --fs-md: 14px;
+    --fs-lg: 18px; --fs-xl: 20px;
+    --ls-tight: 0.04em; --ls-wide: 0.14em; --ls-wider: 0.18em; --ls-widest: 0.22em;
+
+    /* spacing */
+    --sp-1: 0.25rem; --sp-2: 0.5rem; --sp-3: 0.75rem; --sp-4: 1rem;
+    --sp-5: 1.5rem;  --sp-6: 2rem;   --sp-7: 2.5rem;
+
+    /* motion */
+    --dur-fast: 180ms;
+    --dur-menu: 280ms;
+    --dur-slow: 500ms;
+    --ease-std: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ease-pop: cubic-bezier(0.2, 0.9, 0.25, 1.15);
+
+    /* z-layers */
+    --z-ambient: -1;
+    --z-nav: 50;
+    --z-dropdown: 60;
+    --z-modal: 100;
+    --z-toast: 110;
+}

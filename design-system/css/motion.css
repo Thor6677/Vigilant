@@ -1,0 +1,68 @@
+/* Vigilant Design System — motion
+   All keyframes live here. Every consumer animation must reference these
+   names; nothing else defines @keyframes. */
+
+/* dropdown / overlay entrances */
+@keyframes vg-menu-in {
+    from { opacity: 0; transform: translateY(-8px) scaleY(0.92); }
+    to   { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+@keyframes vg-fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes vg-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* accent effects */
+@keyframes vg-sweep {
+    0%   { opacity: 0.2; }
+    50%  { opacity: 1; }
+    100% { opacity: 0.2; }
+}
+@keyframes vg-shine {
+    0%   { left: -60%; }
+    55%  { left: 120%; }
+    100% { left: 120%; }
+}
+@keyframes vg-glow-pulse {
+    0%, 100% { box-shadow: var(--glow-accent-soft); }
+    50%      { box-shadow: var(--glow-accent); }
+}
+
+/* terminal-style row entrance */
+@keyframes vg-type-in {
+    from { max-width: 0; opacity: 0.4; }
+    to   { max-width: 100%; opacity: 1; }
+}
+
+/* skeleton shimmer */
+@keyframes vg-shimmer {
+    from { background-position: -200px 0; }
+    to   { background-position: 200px 0; }
+}
+
+/* legacy names kept for site compat (base.html uses these) */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin-anim  { animation: spin 1.5s linear infinite; display: inline-block; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.pulse-anim { animation: pulse 1.8s ease-in-out infinite; }
+
+/* stagger helper: apply .vg-stagger to a container; direct children fade up */
+.vg-stagger > * { animation: vg-fade-up var(--dur-slow) var(--ease-std) both; }
+.vg-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.vg-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.vg-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.vg-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.vg-stagger > *:nth-child(n+6) { animation-delay: 300ms; }
+
+/* kill switch — must remain the last rule block in this file */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
