@@ -1,0 +1,81 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-02-vigilant-design-system.md",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 1: Foundation stylesheets (tokens + motion)",
+      "status": "pending",
+      "description": "**Goal:** Create design-system/css/tokens.css and motion.css — all custom properties and keyframes.\n\n```json:metadata\n{\"files\": [\"design-system/css/tokens.css\", \"design-system/css/motion.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/tokens.css css/motion.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"both files parse under esbuild\", \"all spec tokens present\", \"reduced-motion guard present\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 2: Component CSS — restyled core vocabulary",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Create design-system/css/components.css restyling all existing b-* classes to the expressive look, keeping every class name.\n\n```json:metadata\n{\"files\": [\"design-system/css/components.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/components.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"all core b-* classes defined\", \"expressive dropdown/panel/button treatments\", \"no-radius reset preserved\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 3: Component CSS — new components",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Append modal, toast, tooltip, skeleton, switch, checkbox, inputs, select to components.css.\n\n```json:metadata\n{\"files\": [\"design-system/css/components.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/components.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"all new component classes exist\", \"modal glass+brackets+entrance\", \"input focus glow\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 4: Ambient background module",
+      "status": "pending",
+      "description": "**Goal:** Productionize the approved flythrough as design-system/ambient/vigilant-ambient.js (ESM, dependency-free) + .d.ts.\n\n```json:metadata\n{\"files\": [\"design-system/ambient/vigilant-ambient.js\", \"design-system/ambient/vigilant-ambient.d.ts\"], \"verifyCommand\": \"node --check design-system/ambient/vigilant-ambient.js\", \"acceptanceCriteria\": [\"mount/destroy API\", \"sov cache + silent degradation\", \"perf guards (hidden, reduced-motion, minWidth, fpsCap)\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 5: React package scaffold + build pipeline + Button",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Create @vigilant/ui package: package.json, tsconfig, build.mjs, vitest config, styles.css, index.ts, Button + test.\n\n```json:metadata\n{\"files\": [\"design-system/react/package.json\", \"design-system/react/build.mjs\", \"design-system/react/src/components/Button.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit && npm run build\", \"acceptanceCriteria\": [\"tests green\", \"dist has js+css+d.ts\", \"Button variants work\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 6: Layout components",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** NavBar, NavMenu, Breadcrumbs, PageHeader, Section, Panel, Grid, TabStrip, Footer with tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/NavBar.tsx\", \"design-system/react/src/components/Panel.tsx\", \"design-system/react/src/components/__tests__/layout.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"9 layout components render b-* classes\", \"Panel glass/brackets\", \"tests green\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 7: Data components",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** StatStrip/StatBlock, KeyValueRow, Table/TableRow, Badge, ProgressBar, EmptyState, Eyebrow + tones.ts + tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/Stat.tsx\", \"design-system/react/src/components/tones.ts\", \"design-system/react/src/components/__tests__/data.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"shared Tone/toneClass\", \"ProgressBar clamps\", \"tests green\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 8: Actions + feedback components",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** ButtonGroup, Banner, Toast/ToastStack, Modal, Skeleton with tests + exports.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/Modal.tsx\", \"design-system/react/src/components/Toast.tsx\", \"design-system/react/src/components/__tests__/feedback.test.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit\", \"acceptanceCriteria\": [\"Modal esc/overlay/close all fire onClose\", \"Banner/Toast tones\", \"tests green\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 9: AmbientBackground wrapper + fonts",
+      "status": "pending",
+      "blockedBy": [10, 11],
+      "description": "**Goal:** React wrapper mounting/destroying the ambient module; bundle JetBrains Mono woff2 with @font-face.\n\n```json:metadata\n{\"files\": [\"design-system/react/src/components/AmbientBackground.tsx\", \"design-system/react/src/fonts.css\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit && npm run build\", \"acceptanceCriteria\": [\"mount/destroy lifecycle\", \"fonts bundled in dist\", \"tsc clean\"]}\n```"
+    },
+    {
+      "id": 16,
+      "subject": "Task 10: Demo harness (REVIEW GATE)",
+      "status": "pending",
+      "blockedBy": [12, 13, 14, 15],
+      "description": "**Goal:** Vite demo page rendering every component with realistic EVE content over the live ambient background. REVIEW GATE: user eyeballs npm run demo before commit.\n\n```json:metadata\n{\"files\": [\"design-system/react/demo/main.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vite build demo\", \"acceptanceCriteria\": [\"demo builds\", \"all components rendered\", \"user approved the look\"]}\n```"
+    },
+    {
+      "id": 17,
+      "subject": "Task 11: Package README + final verification",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "**Goal:** design-system/README.md + full clean-state verification. After this, /design-sync runs in MAIN session.\n\n```json:metadata\n{\"files\": [\"design-system/README.md\"], \"verifyCommand\": \"cd design-system/react && npm test -- --run && npx tsc --noEmit && npm run build && npx vite build demo\", \"acceptanceCriteria\": [\"README idiom section accurate\", \"clean-state full suite green\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-02T00:00:00Z"
+}
