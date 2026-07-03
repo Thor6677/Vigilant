@@ -1473,6 +1473,8 @@ git commit -m "feat(design-system): layout components (NavBar, NavMenu, Panel, S
 
 **Goal:** StatStrip/StatBlock, KeyValueRow, Table/TableRow, Badge, ProgressBar, EmptyState, Eyebrow — with tests.
 
+> **Post-review amendments (after 349d9f2):** clickable TableRow gains tabIndex + Enter/Space handling (+ cursor:pointer CSS); ProgressBar gains progressbar ARIA and NaN hardening; Badge active-over-tone documented; five branch tests added. Source authoritative over Step blocks.
+
 **Files:**
 - Create: `design-system/react/src/components/Stat.tsx` (exports StatStrip + StatBlock)
 - Create: `design-system/react/src/components/KeyValueRow.tsx`

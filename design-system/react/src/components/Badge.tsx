@@ -3,7 +3,7 @@ import { toneClass, type Tone } from './tones';
 
 export interface BadgeProps {
   tone?: Tone;
-  /** inverted (filled) style */
+  /** inverted (filled) style; takes precedence over tone */
   active?: boolean;
   children: ReactNode;
 }

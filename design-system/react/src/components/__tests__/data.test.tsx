@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { StatStrip, StatBlock } from '../Stat';
 import { KeyValueRow } from '../KeyValueRow';
 import { Table, TableRow } from '../Table';
@@ -56,4 +56,44 @@ test('EmptyState and Eyebrow', () => {
   expect(screen.getByText('No kills recorded').className).toContain('b-empty');
   render(<Eyebrow>Intel</Eyebrow>);
   expect(screen.getByText('Intel').className).toContain('b-eyebrow');
+});
+
+test('clickable TableRow is keyboard-activatable', () => {
+  const onClick = vi.fn();
+  render(<Table><TableRow onClick={onClick}><span>Row</span></TableRow></Table>);
+  const row = screen.getByRole('button');
+  expect(row.getAttribute('tabindex')).toBe('0');
+  fireEvent.keyDown(row, { key: 'Enter' });
+  fireEvent.keyDown(row, { key: ' ' });
+  fireEvent.click(row);
+  expect(onClick).toHaveBeenCalledTimes(3);
+});
+
+test('Table title renders panel head', () => {
+  const { container } = render(<Table title="Kills"><TableRow><span>x</span></TableRow></Table>);
+  expect(container.querySelector('.b-panel-head')).toBeTruthy();
+});
+
+test('ProgressBar clamps low, handles NaN, exposes aria', () => {
+  const { container, rerender } = render(<ProgressBar value={-5} />);
+  const bar = container.querySelector('.b-progress') as HTMLElement;
+  const fill = container.querySelector('.b-progress-fill') as HTMLElement;
+  expect(fill.style.width).toBe('0%');
+  expect(fill.className.trim()).toBe('b-progress-fill');
+  expect(bar.getAttribute('role')).toBe('progressbar');
+  rerender(<ProgressBar value={NaN} />);
+  expect((container.querySelector('.b-progress-fill') as HTMLElement).style.width).toBe('0%');
+});
+
+test('Badge active takes precedence over tone', () => {
+  render(<Badge active tone="danger">FLAG</Badge>);
+  const el = screen.getByText('FLAG');
+  expect(el.className).toContain('is-active');
+  expect(el.className).not.toContain('is-danger');
+});
+
+test('StatBlock without tone has clean className', () => {
+  render(<StatBlock label="Fuel" value="42d" />);
+  const val = screen.getByText('42d');
+  expect(val.className).toBe('b-stat-val');
 });

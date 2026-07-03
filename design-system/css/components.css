@@ -176,6 +176,7 @@ body {
 .b-table-row { display: flex; align-items: center; padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--border); gap: 0.6rem; min-height: 30px; transition: background var(--dur-fast); }
 .b-table-row:last-child { border-bottom: none; }
 .b-table-row:hover { background: var(--accent-faint); }
+.b-table-row[role="button"] { cursor: pointer; }
 .b-portrait-sm { width: 20px; height: 20px; object-fit: cover; border: 1px solid var(--border); flex-shrink: 0; filter: grayscale(15%); }
 
 /* ── Progress / dot / badge ──────────────────────────────────────── */

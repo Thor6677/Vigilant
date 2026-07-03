@@ -26,7 +26,13 @@ export interface TableRowProps {
 
 export function TableRow({ children, onClick }: TableRowProps) {
   return (
-    <div className="b-table-row" onClick={onClick} role={onClick ? 'button' : undefined}>
+    <div
+      className="b-table-row"
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+    >
       {children}
     </div>
   );
