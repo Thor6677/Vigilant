@@ -112,29 +112,29 @@ Legend:
 - [x]A [x]V partials/fitting_info.html — clean
 - [x]A [x]V partials/planetary_lookup_system.html `[style-block]` — clean; `pi-conn-lines` SVG hook at local z:5; parent page re-parents injected scripts via `injectHtml`
 
-## Batch D — Everything else (not analyzed this pass)
+## Batch D — Everything else
 
-- [ ]A [ ]V alliance_detail.html `[style-block]`
-- [ ]A [ ]V skill_plan_detail.html `[zindex:[100]]`
-- [ ]A [ ]V skill_plan_shared.html
-- [ ]A [ ]V skill_plans.html
-- [ ]A [ ]V skills.html
-- [ ]A [ ]V tool_landing.html `[style-block]`
-- [ ]A [ ]V tools_activity.html `[style-block]`
-- [ ]A [ ]V tools_image_view.html
-- [ ]A [ ]V tools_images.html
-- [ ]A [ ]V trending.html `[style-block]`
-- [ ]A [ ]V wormhole_effects.html `[style-block]`
-- [ ]A [ ]V wormhole_system.html `[style-block]`
-- [ ]A [ ]V wormhole_type_page.html
-- [ ]A [ ]V wormhole_types.html `[style-block]`
-- [ ]A [ ]V wormholes.html `[style-block]`
-- [ ]A [ ]V partials/skill_plan_gap.html
-- [ ]A [ ]V partials/wormhole_kills.html
-- [ ]A [ ]V partials/wormhole_system_list.html
-- [ ]A [ ]V partials/wormhole_type_detail.html
-- [ ]A [ ]V partials/live_pcu_tile.html
-- [ ]A [ ]V partials/remap_results.html
+- [x]A [ ]V alliance_detail.html `[style-block]` — clean; page-local `b-change-row`/`b-change-dir.gain/.loss` in own block (no collision with components.css), JS template literals verified against own rules
+- [x]A [ ]V **skill_plan_detail.html `[zindex:[100]]` — FIXED**: `#skill-results` + `#ship-results` in-content autocomplete dropdowns inline z-index:100 (= `--z-modal`) → 20, matching the batch C convention. `skill-row` is a pure JS drag/drop hook riding on `b-table-row` (unstyled by design). Script inside content block, no keyframes, no fixed/sticky.
+- [x]A [ ]V skill_plan_shared.html — clean, pure `b-*` + inline token styles
+- [x]A [ ]V skill_plans.html — clean; scope/target pickers inline-styled, script in content block
+- [x]A [ ]V skills.html — clean; `remap-slider` is a marker class on range inputs (visuals via inline `accent-color`, never had a CSS rule — not broken)
+- [x]A [ ]V tool_landing.html `[style-block]` — clean; `tl-*` namespaced in own head-block style, all token refs resolve
+- [x]A [ ]V tools_activity.html `[style-block]` — clean; `ta-*` namespaced in head block; `ta-delta-btn` is a JS hook over `b-btn`; Chart.js hardcoded hex (#7a7a7a greys, rgba series colors) matches theme — cosmetic note. All chart scripts inside content block.
+- [x]A [ ]V tools_image_view.html — clean; `b-row`/`b-row-label`/`b-row-val`/`b-eyebrow`/`is-muted` all defined in components.css
+- [x]A [ ]V tools_images.html — clean
+- [x]A [ ]V trending.html `[style-block]` — clean; page-local `b-trending-*` (+`.neg` state) in own block, JS template literals verified
+- [x]A [ ]V wormhole_effects.html `[style-block]` — clean; `we-*` namespaced in head block
+- [x]A [ ]V wormhole_system.html `[style-block]` — clean; `ws-*` namespaced in head block; SVG diagram inline-attr styled; kill panel lazy-loads via htmx
+- [x]A [ ]V wormhole_type_page.html — clean; pure inline styles + includes wormhole_type_detail partial
+- [x]A [ ]V wormhole_types.html `[style-block]` — clean; `wm-*`/`wh-tab*` in head block. `ws-section-title` on the Connection Matrix heading is defined nowhere on this page BUT its full rule set is duplicated inline on the same element — renders correctly, dead class name only (cosmetic note, not fixed).
+- [x]A [ ]V wormholes.html `[style-block]` — clean; `wf-*`/`wh-tab*` in head block, `is-on` state defined in own block, `htmx-indicator` in site.css
+- [x]A [ ]V partials/skill_plan_gap.html — clean, pure `b-*` + inline styles
+- [x]A [ ]V partials/wormhole_kills.html — clean; `b-hover-row` defined in site.css; heatmap cells fully inline-styled
+- [x]A [ ]V partials/wormhole_system_list.html — clean style-wise; `b-hover-surface` in site.css. NOTE (pre-existing, functional not CSS): pagination buttons `hx-include="#wh-search, #wh-class-filter, #wh-effect-filter"` reference two IDs that no longer exist in wormholes.html (filters became toggle buttons) — paging drops class/effect filters. Flagged, not fixed (out of sweep scope).
+- [x]A [ ]V partials/wormhole_type_detail.html — clean, pure inline styles + `b-panel`
+- [x]A [ ]V partials/live_pcu_tile.html — clean style-wise but **orphaned partial**: commit 600c6fe removed its seed `#live-pcu-tile` div from tools_activity.html (replaced by the LIVE window); `/api/live-pcu` endpoint still exists but nothing renders the tile. Its `ta-stat*` classes only exist in tools_activity's style block. Dead code candidate — flagged, not deleted in a style sweep.
+- [x]A [ ]V partials/remap_results.html — clean, pure `b-*` + inline token styles
 
 ---
 
@@ -183,4 +183,20 @@ Legend:
 - **fitting_tool.html mobile module-browser overlay** sits at z:50, tying with the nav (`--z-nav`:50); DOM order paints it above so it works, but if the nav ever moves later in the DOM it would flip. Left as-is.
 - planetary lookup/calculator autocomplete panels use hardcoded `#161616` bg + `#222` hover (vs `var(--surface)` elsewhere) — cosmetic only, not fixed.
 - status of `#121212` header rows in planetary_calculator tables — hardcoded but matches theme; cosmetic note.
+
+## Batch D fixes applied this pass
+
+1. `app/templates/skill_plan_detail.html` — `#skill-results` and `#ship-results` in-content autocomplete dropdowns inline z-index:100 → 20. Same value as `--z-modal`; they'd paint over the sticky nav (z:50) on scroll. These are dropdowns, not modals — normalized to the batch C in-content dropdown convention (20).
+
+**Swap-orphan audit result: zero** (same programmatic old-vs-new selector check as batches B/C). No class used by any batch D template exists only in the old base.html inline block. No scripts inside `{% block title %}`. No `@keyframes` at all in batch D (no motion.css collision possible). No position:fixed/sticky, no backdrop-filter ancestor traps.
+
+**Completeness check:** all 111 templates in `app/templates/` + `partials/` are covered by exactly one checklist line and every line is now `[x]A`. Zero stragglers (verified by diffing the file inventory against the checklist entries).
+
+## Flagged for the user's visual pass (Batch D)
+
+- **skill_plan_detail.html Add Skill / Add from Ship dropdowns** — now slide under the sticky nav when scrolling instead of painting over it. Behavior change is the fix working; eyeball that results are still fully visible in normal (unscrolled) use.
+- **partials/live_pcu_tile.html is dead code** — nothing seeds `#live-pcu-tile` since commit 600c6fe (LIVE window replaced it). If the tile isn't coming back, delete the partial + the `/api/live-pcu` route in `app/routes/dashboard.py` (~line 851) in a cleanup pass.
+- **wormhole_system_list.html pagination loses filters** (pre-existing, functional): page 2+ requests only include `#wh-search`; the `#wh-class-filter`/`#wh-effect-filter` IDs it tries to include were removed when wormholes.html moved to toggle-button filters. Fixing means threading current filter state into the pagination links — out of scope for the style sweep.
+- wormhole_types.html carries a dead `ws-section-title` class name (styles duplicated inline on the same element) — cosmetic only.
+- tools_activity.html Chart.js colors are hardcoded (matches theme) — same note as mining_ledger in batch B.
 
