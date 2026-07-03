@@ -1,48 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Vigilant — EVE Online Operations Tracker{% endblock %}
 {% block content %}
-<div class="min-h-screen flex flex-col items-center justify-center text-center px-4" style="margin-top: -2rem;">
+<div style="min-height:calc(100vh - 80px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2rem;padding:1rem;">
 
-    <div class="mb-8">
-        <img src="/static/logo.png" alt="Vigilant" style="height:120px;width:auto;margin:0 auto;display:block;" class="mb-2">
-        <h1 class="text-4xl font-light tracking-widest text-white uppercase mb-2">Vigilant</h1>
-        <p class="text-eve-muted tracking-widest text-sm uppercase">EVE Online Operations Tracker</p>
-    </div>
-
-    <div class="max-w-lg w-full border border-eve-border p-6 bg-eve-surface mb-8">
-        <p class="text-gray-400 text-sm leading-relaxed mb-6">
-            Monitor your EVE Online operations in one place. Track characters, assets,
-            industry jobs, corporations, and server status — all synced through ESI.
-        </p>
-        <div class="grid grid-cols-2 gap-3 text-xs text-eve-muted mb-6">
-            <div class="border border-eve-border p-3">
-                <div class="text-eve-accent mb-1">◉ Dashboard</div>
-                Overview of all characters, wallets, skill queues, and industry jobs.
-            </div>
-            <div class="border border-eve-border p-3">
-                <div class="text-eve-accent mb-1">◉ Assets</div>
-                Search and browse assets across all characters and locations.
-            </div>
-            <div class="border border-eve-border p-3">
-                <div class="text-eve-accent mb-1">◉ Corporations</div>
-                Track corp membership, structures, and shared resources.
-            </div>
-            <div class="border border-eve-border p-3">
-                <div class="text-eve-accent mb-1">◉ Status</div>
-                Live server status, ESI health, and sync monitoring.
-            </div>
+    <div class="b-panel is-glass is-brackets" style="width:min(460px,100%);">
+        <div style="padding:2.5rem 2.5rem 2rem;text-align:center;display:flex;flex-direction:column;gap:1rem;align-items:center;">
+            <img src="/static/logo.png" alt="Vigilant" style="height:88px;width:auto;">
+            <span class="b-nav-logo" style="font-size:18px;">VIGILANT</span>
+            <span class="b-eyebrow">EVE Online Companion Dashboard</span>
+        </div>
+        <div style="padding:0 1.5rem;">
+            <div class="b-row"><span class="b-row-label">Dashboard</span><span class="b-row-val is-muted">Characters, wallets, skill queues</span></div>
+            <div class="b-row"><span class="b-row-label">Assets</span><span class="b-row-val is-muted">Search across all characters</span></div>
+            <div class="b-row"><span class="b-row-label">Intel</span><span class="b-row-val is-muted">Kill feed, d-scan, local watch</span></div>
+            <div class="b-row"><span class="b-row-label">Industry</span><span class="b-row-val is-muted">Jobs, blueprints, planetary</span></div>
         </div>
         {% if error %}
-        <div style="border:1px solid var(--danger);padding:0.6rem;margin-bottom:1rem;font-size:11px;color:var(--danger);">{{ error }}</div>
+        <div style="padding:1rem 1.5rem 0;">
+            <div class="b-banner is-danger" style="margin-bottom:0;">{{ error }}</div>
+        </div>
         {% endif %}
-        <a href="/auth/login"
-           class="block w-full bg-eve-accent hover:opacity-90 text-eve-bg font-semibold py-3 tracking-widest text-sm uppercase transition-opacity text-center">
-            Login with EVE Online SSO
-        </a>
+        <div style="padding:1.5rem;display:flex;flex-direction:column;gap:0.75rem;align-items:center;">
+            <a href="/auth/login" class="b-btn is-primary" style="width:100%;text-align:center;">Log in with EVE Online SSO</a>
+            <span class="b-muted-sm" style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;">SSO · CCP authorized third-party · no passwords stored</span>
+        </div>
     </div>
 
-    <p class="text-eve-muted text-xs">
-        Authenticate securely via EVE Online's official SSO. No passwords stored.
-    </p>
 </div>
+
+<script type="module" nonce="{{ request.state.csp_nonce }}">
+    import { mount } from '/static/ds/ambient/vigilant-ambient.js';
+    mount(document.body, {
+        systemsUrl: '/api/map/kspace-data/systems.json',
+        killSource: { type: 'poll', url: '/api/ambient/kills', intervalMs: 15000 }
+    });
+</script>
 {% endblock %}
