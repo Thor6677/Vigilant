@@ -33,3 +33,7 @@ nginx/thunderborn.conf
 .story/snapshots/
 .story/sessions/
 .story/status.json
+
+# design-sync local working dirs (never committed; .design-sync/ IS committed)
+.ds-sync/
+ds-bundle/
