@@ -50,19 +50,19 @@
                     <input type="text" name="system_name" id="system-search" placeholder="System" required autocomplete="off"
                            oninput="searchField('systems', 'system')"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                    <div id="system-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                    <div id="system-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="region_name" id="region-search" placeholder="Region (optional)" autocomplete="off"
                            oninput="searchField('regions', 'region')"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                    <div id="region-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                    <div id="region-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="owner_name" id="owner-search" placeholder="Owner (corp/alliance)" required autocomplete="off"
                            oninput="searchField('owners', 'owner')"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                    <div id="owner-results" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                    <div id="owner-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
             </div>
 
@@ -181,7 +181,7 @@
                     <input type="text" id="acl-search-{{ group.id }}" placeholder="Search…" autocomplete="off"
                            oninput="searchACL({{ group.id }})"
                            style="width:100%;padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
-                    <div id="acl-results-{{ group.id }}" style="position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                    <div id="acl-results-{{ group.id }}" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
                 <input type="hidden" id="acl-id-{{ group.id }}" value="">
                 <input type="hidden" id="acl-name-{{ group.id }}" value="">
@@ -376,6 +376,26 @@
 {% endif %}
 
 <style nonce="{{ request.state.csp_nonce }}">
+/* Filter chips — same rules as character_detail.html / mining_ledger.html
+   (this page used .range-btn without defining it anywhere). */
+.range-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.range-btn:hover { color: var(--text); border-color: var(--muted); }
+.range-btn.is-active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(200, 169, 81, 0.07);
+}
 @keyframes timer-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }

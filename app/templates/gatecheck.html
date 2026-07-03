@@ -25,7 +25,9 @@
     .gc-dropdown {
         position: absolute; top: 100%; left: 0; right: 0;
         background: var(--surface); border: 1px solid var(--border);
-        z-index: 100; max-height: 200px; overflow-y: auto;
+        /* below the sticky nav (--z-nav: 50) so it slides under it on scroll;
+           matches the in-content dropdowns in fitting_tool.html */
+        z-index: 20; max-height: 200px; overflow-y: auto;
     }
     .gc-dd-item {
         padding: 0.4rem 0.75rem; font-size: 11px;

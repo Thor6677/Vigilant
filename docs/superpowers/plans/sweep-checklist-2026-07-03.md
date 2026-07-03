@@ -85,32 +85,32 @@ Legend:
 - [x]A [x]V partials/component_panel.html — clean; uses `window.fn = window.fn || ...` guard pattern correctly
 - [x]A [x]V partials/shopping_list.html — clean
 
-## Batch C — Tools (not analyzed this pass)
+## Batch C — Tools
 
-- [ ]A [ ]V discordtime.html `[style-block]`
-- [ ]A [ ]V dscan_view.html
-- [ ]A [ ]V dscan.html
-- [ ]A [ ]V fitting_saved.html `[style-block]`
-- [ ]A [ ]V fitting_tool.html `[style-block] [zindex:[100]]`
-- [ ]A [ ]V fittings.html
-- [ ]A [ ]V gatecheck.html `[style-block] [zindex:[100]]`
-- [ ]A [ ]V planetary_calculator.html `[style-block] [zindex:[1000]]`
-- [ ]A [ ]V planetary_chain.html `[style-block]`
-- [ ]A [ ]V planetary_lookup.html `[style-block] [zindex:[1000]]`
-- [ ]A [ ]V planetary.html `[style-block]`
-- [ ]A [ ]V ship_mastery.html `[style-block]`
-- [ ]A [ ]V structure_age.html `[style-block]`
-- [ ]A [ ]V structure_timers.html `[style-block] [keyframes] [zindex:[100]]`
-- [ ]A [ ]V partials/gatecheck_finder.html
-- [ ]A [ ]V partials/gatecheck_route.html
-- [ ]A [ ]V partials/gatecheck_wartarget.html
-- [ ]A [ ]V partials/planetary_chain_node.html
-- [ ]A [ ]V partials/planetary_planet_detail.html
-- [ ]A [ ]V partials/ship_mastery_check.html
-- [ ]A [ ]V partials/fitting_search_results.html
-- [ ]A [ ]V partials/fitting_stats.html
-- [ ]A [ ]V partials/fitting_info.html
-- [ ]A [ ]V partials/planetary_lookup_system.html `[style-block]`
+- [x]A [ ]V discordtime.html `[style-block]` — clean; `dt-*` namespaced in own block, script inside content block, no z-index/keyframes
+- [x]A [ ]V dscan_view.html — clean, pure `b-*`
+- [x]A [ ]V dscan.html — clean, pure `b-*`
+- [x]A [ ]V fitting_saved.html `[style-block]` — clean; `sf-*` namespaced; `sf-dps-loading` is a marker span with inline styles (no CSS rule needed)
+- [x]A [ ]V fitting_tool.html `[style-block] [zindex:[100]]` — clean; z-index:100 is on the 3 full-screen modals (info/char-import/EFT-import) + JS charge modal — coincides exactly with `--z-modal` (100), correct for full-viewport overlays, left as-is. In-content search dropdowns already at z:20 (below nav). Mobile browser-panel overlay z:50 ties with `--z-nav`; DOM order paints it above — works, noted. `module-search`/`module-results`/`ssb-*` are JS hooks, inline-styled. No filter/transform ancestor traps (`.b-main` chain verified).
+- [x]A [ ]V fittings.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
+- [x]A [ ]V **gatecheck.html `[style-block] [zindex:[100]]` — FIXED**: `.gc-dropdown` (in-content autocomplete) was z-index:100 = `--z-modal`, painting over the sticky nav (z:50) on scroll. Lowered to 20, matching fitting_tool.html's in-content dropdown convention.
+- [x]A [ ]V **planetary_calculator.html `[style-block] [zindex:[1000]]` — FIXED**: `#calc-sys-dd` autocomplete inline z-index:1000 (above even `--z-toast`:110) → 20. Flow-chart SVG z:5 is local, fine. `pi-flow-cell/grid/lines` are JS/SVG hooks, inline-styled. Hardcoded `#161616`/`#121212`/`#222` — cosmetic note.
+- [x]A [ ]V planetary_chain.html `[style-block]` — clean; `chain-item` states in own block; deep-link script inside content block
+- [x]A [ ]V **planetary_lookup.html `[style-block] [zindex:[1000]]` — FIXED**: `#sys-dd` autocomplete inline z-index:1000 → 20 (same fix as calculator). Hardcoded `#161616`/`#222` — cosmetic note.
+- [x]A [ ]V planetary.html `[style-block]` — clean; `pi-row`/`pi-arrow` expand states in own block (style block inside content, valid)
+- [x]A [ ]V ship_mastery.html `[style-block]` — clean; `.is-hidden` defined in own block; `mastery-details` is a JS toggle hook
+- [x]A [ ]V structure_age.html `[style-block]` — clean; `sa-*` namespaced incl. `is-exact/is-interpolate/is-extrapolate` method badges
+- [x]A [ ]V **structure_timers.html `[style-block] [keyframes] [zindex:[100]]` — FIXED ×2**: (1) `.range-btn` filter chips were used but never defined anywhere (not in old base.html either — pre-existing unstyled buttons); copied the canonical rules from mining_ledger.html/character_detail.html into the page's own style block. (2) 4 typeahead dropdowns (system/region/owner/ACL) inline z-index:100 → 20. `@keyframes timer-pulse` does NOT collide with motion.css names (`vg-*`, `spin`, `pulse`) — verified. UTC text inputs intentionally not datetime-local (per gotcha), untouched.
+- [x]A [ ]V partials/gatecheck_finder.html — clean
+- [x]A [ ]V **partials/gatecheck_route.html — FIXED**: summary stats used `b-stat-value`, a class that has never existed (components.css defines `b-stat-val`; old base.html did too). Values/labels rendered as unstyled inline spans. Converted to canonical `div.b-stat-val` / `div.b-stat-label`, preserving inline color overrides.
+- [x]A [ ]V **partials/gatecheck_wartarget.html — FIXED**: same `b-stat-value` → `div.b-stat-val` fix.
+- [x]A [ ]V partials/planetary_chain_node.html — clean; `piLoadNode` uses `typeof === 'undefined'` guard (htmx redefine gotcha respected)
+- [x]A [ ]V partials/planetary_planet_detail.html — clean
+- [x]A [ ]V partials/ship_mastery_check.html — clean
+- [x]A [ ]V partials/fitting_search_results.html — clean; calls parent-page functions (selectShip/addModule/addDrone), doesn't redefine them
+- [x]A [ ]V partials/fitting_stats.html — clean; `fr-val`/`def-hp-val`/`def-rep-val` are JS toggle hooks with inline styles
+- [x]A [ ]V partials/fitting_info.html — clean
+- [x]A [ ]V partials/planetary_lookup_system.html `[style-block]` — clean; `pi-conn-lines` SVG hook at local z:5; parent page re-parents injected scripts via `injectHtml`
 
 ## Batch D — Everything else (not analyzed this pass)
 
@@ -163,3 +163,24 @@ Legend:
 - **status.html / status_data.html** — heaviest Tailwind-eve usage in the app (13 + 98 utility-class hits). These are flat, old-look panels that will visually clash next to the new `b-panel is-glass` idiom used elsewhere. Restyling to `b-*` is explicitly out of scope for this pass (visual-judgment work) but they're the top candidate.
 - **intel_kills.html / intel_kills_search.html** — both carry a large, near-duplicate `.kf-*`/`kfs-*` inline stylesheet (~100+ lines each) for the kill-feed row/detail layout. Not a runtime clash (each page loads only its own `<style>` block) but worth a look during the visual pass for whether the feed/detail rows read consistently between the live feed and advanced search pages, and whether it's worth extracting to a shared `kf.css`.
 - **map.html / map_wormholes.html** — full-bleed `.b-main`/`.b-footer` override (`padding:0 !important`) is intentional (star map canvas needs the full viewport) but worth an eyeball to confirm the loading spinner and nav bar still look right against the new glass nav.
+
+## Batch C fixes applied this pass
+
+1. `app/templates/partials/gatecheck_route.html` + `partials/gatecheck_wartarget.html` — summary stat strips used `span.b-stat-value`, a class that has **never** been defined (components.css and old base.html both define `b-stat-val`). Pre-existing bug, not a swap orphan: values/labels rendered as unstyled inline text. Converted to the canonical `div.b-stat-val` / `div.b-stat-label` pattern used by every other stats strip in the app, keeping the per-stat inline color overrides.
+2. `app/templates/gatecheck.html` — `.gc-dropdown` autocomplete z-index:100 → 20 (was equal to `--z-modal`; in-content dropdowns should slide UNDER the sticky nav (`--z-nav`:50) on scroll — fitting_tool.html already uses 20 for the identical pattern).
+3. `app/templates/planetary_lookup.html` — `#sys-dd` autocomplete inline z-index:1000 → 20 (was above the entire token scale, incl. `--z-toast`:110).
+4. `app/templates/planetary_calculator.html` — `#calc-sys-dd` autocomplete inline z-index:1000 → 20 (same).
+5. `app/templates/structure_timers.html` — (a) defined `.range-btn` / `:hover` / `.is-active` in the page's style block (used by the filter chips but never defined anywhere — pre-existing unstyled default buttons); rules copied verbatim from mining_ledger.html / character_detail.html. (b) 4 typeahead result dropdowns (system/region/owner/ACL) inline z-index:100 → 20.
+
+**Swap-orphan audit result: zero** (same programmatic check as Batch B). Both real class breaks found (`b-stat-value`, `range-btn`) predate the restyle — they were never defined in the old base.html inline block either.
+
+**z-index decisions (Batch C):** full-screen modals in fitting_tool.html stay at 100 (= `--z-modal`, correct for viewport-covering overlays with backdrop). All in-content autocomplete dropdowns normalized to 20 (< `--z-nav`:50). `@keyframes timer-pulse` (structure_timers.html) verified non-colliding with motion.css (`vg-*`, `spin`, `pulse`).
+
+## Flagged for the user's visual pass (Batch C)
+
+- **gatecheck.html Route Checker / War Targets tabs** — the summary stat strips now actually render in the design-system style (big 300-weight value over uppercase label) instead of unstyled inline text. Worth an eyeball — this is dormant styling lighting up, not a regression.
+- **structure-timers filter chips** (All / Hostile / Friendly / Critical) — now styled like the range chips on character detail / mining ledger instead of default browser buttons. Same "new behavior lighting up" caveat.
+- **fitting_tool.html mobile module-browser overlay** sits at z:50, tying with the nav (`--z-nav`:50); DOM order paints it above so it works, but if the nav ever moves later in the DOM it would flip. Left as-is.
+- planetary lookup/calculator autocomplete panels use hardcoded `#161616` bg + `#222` hover (vs `var(--surface)` elsewhere) — cosmetic only, not fixed.
+- status of `#121212` header rows in planetary_calculator tables — hardcoded but matches theme; cosmetic note.
+
