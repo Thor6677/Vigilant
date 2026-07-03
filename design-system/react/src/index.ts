@@ -43,3 +43,5 @@ export { Modal } from './components/Modal';
 export type { ModalProps } from './components/Modal';
 export { Skeleton } from './components/Skeleton';
 export type { SkeletonProps } from './components/Skeleton';
+export { AmbientBackground } from './components/AmbientBackground';
+export type { AmbientBackgroundProps } from './components/AmbientBackground';
