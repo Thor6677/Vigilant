@@ -1,66 +1,5 @@
 {% extends "base.html" %}
-{% block title %}INDUSTRY — VIGILANT
-<script nonce="{{ request.state.csp_nonce }}">
-/* ── Persist manufacturing state in localStorage ────────────────────────── */
-var MFG_KEY = 'vigilant_mfg_state';
-
-function saveMfgState() {
-    var state = {
-        typeId: selectedTypeId,
-        runs: document.getElementById('inp-runs').value,
-        me: document.getElementById('inp-me').value,
-        te: document.getElementById('inp-te').value,
-        structure: document.getElementById('inp-structure').value,
-        rig: document.getElementById('inp-rig').value,
-        security: document.getElementById('inp-security').value,
-    };
-    localStorage.setItem(MFG_KEY, JSON.stringify(state));
-}
-
-function restoreMfgState() {
-    var raw = localStorage.getItem(MFG_KEY);
-    if (!raw) return;
-    try {
-        var state = JSON.parse(raw);
-        if (state.typeId) {
-            document.getElementById('inp-runs').value = state.runs || 1;
-            document.getElementById('inp-me').value = state.me || 0;
-            document.getElementById('me-val').textContent = state.me || 0;
-            document.getElementById('inp-te').value = state.te || 0;
-            document.getElementById('te-val').textContent = state.te || 0;
-            document.getElementById('inp-structure').value = state.structure || 'npc_station';
-            document.getElementById('inp-rig').value = state.rig || 'none';
-            document.getElementById('inp-security').value = state.security || 'highsec';
-            selectBlueprint(state.typeId);
-        }
-    } catch(e) {}
-}
-
-function resetManufacturing() {
-    localStorage.removeItem(MFG_KEY);
-    window.location.href = '/industry';
-}
-
-/* Hook into recalculate to auto-save */
-var _origRecalc = recalculate;
-recalculate = function() {
-    _origRecalc();
-    saveMfgState();
-};
-
-/* Restore on page load — query param type_id takes priority */
-document.addEventListener('DOMContentLoaded', function() {
-    var params = new URLSearchParams(window.location.search);
-    var qTypeId = params.get('type_id');
-    if (qTypeId) {
-        selectBlueprint(parseInt(qTypeId));
-    } else {
-        restoreMfgState();
-    }
-});
-</script>
-
-{% endblock %}
+{% block title %}INDUSTRY — VIGILANT{% endblock %}
 {% block content %}
 
 <div class="b-page-header">
@@ -272,5 +211,65 @@ function generateShoppingList() {
 }
 </script>
 
+<script nonce="{{ request.state.csp_nonce }}">
+/* ── Persist manufacturing state in localStorage ────────────────────────── */
+/* Must load AFTER the script above: it wraps recalculate(). */
+var MFG_KEY = 'vigilant_mfg_state';
+
+function saveMfgState() {
+    var state = {
+        typeId: selectedTypeId,
+        runs: document.getElementById('inp-runs').value,
+        me: document.getElementById('inp-me').value,
+        te: document.getElementById('inp-te').value,
+        structure: document.getElementById('inp-structure').value,
+        rig: document.getElementById('inp-rig').value,
+        security: document.getElementById('inp-security').value,
+    };
+    localStorage.setItem(MFG_KEY, JSON.stringify(state));
+}
+
+function restoreMfgState() {
+    var raw = localStorage.getItem(MFG_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        if (state.typeId) {
+            document.getElementById('inp-runs').value = state.runs || 1;
+            document.getElementById('inp-me').value = state.me || 0;
+            document.getElementById('me-val').textContent = state.me || 0;
+            document.getElementById('inp-te').value = state.te || 0;
+            document.getElementById('te-val').textContent = state.te || 0;
+            document.getElementById('inp-structure').value = state.structure || 'npc_station';
+            document.getElementById('inp-rig').value = state.rig || 'none';
+            document.getElementById('inp-security').value = state.security || 'highsec';
+            selectBlueprint(state.typeId);
+        }
+    } catch(e) {}
+}
+
+function resetManufacturing() {
+    localStorage.removeItem(MFG_KEY);
+    window.location.href = '/industry';
+}
+
+/* Hook into recalculate to auto-save */
+var _origRecalc = recalculate;
+recalculate = function() {
+    _origRecalc();
+    saveMfgState();
+};
+
+/* Restore on page load — query param type_id takes priority */
+document.addEventListener('DOMContentLoaded', function() {
+    var params = new URLSearchParams(window.location.search);
+    var qTypeId = params.get('type_id');
+    if (qTypeId) {
+        selectBlueprint(parseInt(qTypeId));
+    } else {
+        restoreMfgState();
+    }
+});
+</script>
 
 {% endblock %}

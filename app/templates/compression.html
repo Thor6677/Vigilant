@@ -2,61 +2,7 @@
 {% block breadcrumbs %}
 <div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Compression</span></div>
 {% endblock %}
-{% block title %}COMPRESSION CALCULATOR — VIGILANT
-<script nonce="{{ request.state.csp_nonce }}">
-/* ── Persist compression state in localStorage ──────────────────────────── */
-var COMP_KEY = 'vigilant_comp_state';
-
-function saveCompState() {
-    var form = document.getElementById('compression-form');
-    if (!form) return;
-    var state = {};
-    var inputs = form.querySelectorAll('input[name], select[name]');
-    inputs.forEach(function(el) {
-        state[el.name] = el.value;
-    });
-    state._character = document.getElementById('inp-character') ? document.getElementById('inp-character').value : '';
-    localStorage.setItem(COMP_KEY, JSON.stringify(state));
-}
-
-function restoreCompState() {
-    /* Skip restore if URL has prefill params (from manufacturing shopping list) */
-    if (window.location.search.indexOf('mineral_') >= 0) {
-        /* Save the prefilled state immediately so it persists */
-        setTimeout(saveCompState, 100);
-        return;
-    }
-    var raw = localStorage.getItem(COMP_KEY);
-    if (!raw) return;
-    try {
-        var state = JSON.parse(raw);
-        var form = document.getElementById('compression-form');
-        if (!form) return;
-        Object.keys(state).forEach(function(name) {
-            if (name === '_character') {
-                var sel = document.getElementById('inp-character');
-                if (sel) sel.value = state[name];
-                return;
-            }
-            var el = form.querySelector('[name="' + name + '"]');
-            if (el) el.value = state[name];
-        });
-    } catch(e) {}
-}
-
-function resetCompression() {
-    localStorage.removeItem(COMP_KEY);
-    window.location.href = '/industry/compression';
-}
-
-/* Save on form submit */
-document.getElementById('compression-form').addEventListener('htmx:beforeRequest', saveCompState);
-
-/* Restore on load */
-document.addEventListener('DOMContentLoaded', restoreCompState);
-</script>
-
-{% endblock %}
+{% block title %}COMPRESSION CALCULATOR — VIGILANT{% endblock %}
 {% block content %}
 
 <div class="b-page-header">
@@ -216,5 +162,57 @@ document.body.addEventListener('htmx:afterSwap', function(evt) {
 });
 </script>
 
+<script nonce="{{ request.state.csp_nonce }}">
+/* ── Persist compression state in localStorage ──────────────────────────── */
+var COMP_KEY = 'vigilant_comp_state';
+
+function saveCompState() {
+    var form = document.getElementById('compression-form');
+    if (!form) return;
+    var state = {};
+    var inputs = form.querySelectorAll('input[name], select[name]');
+    inputs.forEach(function(el) {
+        state[el.name] = el.value;
+    });
+    state._character = document.getElementById('inp-character') ? document.getElementById('inp-character').value : '';
+    localStorage.setItem(COMP_KEY, JSON.stringify(state));
+}
+
+function restoreCompState() {
+    /* Skip restore if URL has prefill params (from manufacturing shopping list) */
+    if (window.location.search.indexOf('mineral_') >= 0) {
+        /* Save the prefilled state immediately so it persists */
+        setTimeout(saveCompState, 100);
+        return;
+    }
+    var raw = localStorage.getItem(COMP_KEY);
+    if (!raw) return;
+    try {
+        var state = JSON.parse(raw);
+        var form = document.getElementById('compression-form');
+        if (!form) return;
+        Object.keys(state).forEach(function(name) {
+            if (name === '_character') {
+                var sel = document.getElementById('inp-character');
+                if (sel) sel.value = state[name];
+                return;
+            }
+            var el = form.querySelector('[name="' + name + '"]');
+            if (el) el.value = state[name];
+        });
+    } catch(e) {}
+}
+
+function resetCompression() {
+    localStorage.removeItem(COMP_KEY);
+    window.location.href = '/industry/compression';
+}
+
+/* Save on form submit */
+document.getElementById('compression-form').addEventListener('htmx:beforeRequest', saveCompState);
+
+/* Restore on load */
+document.addEventListener('DOMContentLoaded', restoreCompState);
+</script>
 
 {% endblock %}

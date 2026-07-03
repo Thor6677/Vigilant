@@ -56,34 +56,34 @@ Legend:
 - [x]A [ ]V partials/contract_alert_banners.html — clean
 - [x]A [ ]V partials/timer_alert_banners.html — clean
 
-## Batch B — Industry / Assets / Corp (not analyzed this pass)
+## Batch B — Industry / Assets / Corp
 
-- [ ]A [ ]V appraisal.html
-- [ ]A [ ]V assets.html `[style-block]`
-- [ ]A [ ]V blueprints.html
-- [ ]A [ ]V compression.html
-- [ ]A [ ]V corp_contracts.html
-- [ ]A [ ]V corp_inventory.html
-- [ ]A [ ]V corporations.html `[style-block]`
-- [ ]A [ ]V hauling.html
-- [ ]A [ ]V industry_jobs.html `[style-block]`
-- [ ]A [ ]V industry.html
-- [ ]A [ ]V journal.html
-- [ ]A [ ]V mining_ledger.html `[style-block]`
-- [ ]A [ ]V mining.html
-- [ ]A [ ]V partials/assets_results.html
-- [ ]A [ ]V partials/corp_contract_items.html
-- [ ]A [ ]V partials/corp_inventory_items.html
-- [ ]A [ ]V partials/corp_detail.html
-- [ ]A [ ]V partials/appraisal_results.html
-- [ ]A [ ]V partials/compression_results.html
-- [ ]A [ ]V partials/hauling_resolved.html
-- [ ]A [ ]V partials/mining_ledger_corp.html
-- [ ]A [ ]V partials/mining_ledger_data.html
-- [ ]A [ ]V partials/calc_results.html
-- [ ]A [ ]V partials/corp_inventory_scan.html
-- [ ]A [ ]V partials/component_panel.html
-- [ ]A [ ]V partials/shopping_list.html
+- [x]A [ ]V appraisal.html — clean, pure `b-*` + inline token styles
+- [x]A [ ]V assets.html `[style-block]` — page-local `asset-*` classes, all `var(--token)` refs resolve, no vocabulary collision. Clean.
+- [x]A [ ]V blueprints.html — clean; all `is-*`/`b-*` variants defined
+- [x]A [ ]V **compression.html — FIXED**: `<script>` block (localStorage persist/restore + `resetCompression`) was inside `{% block title %}`, rendering into `<title>` (RCDATA — never executes, pollutes tab title; Reset button + state persistence dead). Pre-existing, not a swap break. Moved into `{% block content %}` before `{% endblock %}`.
+- [x]A [ ]V corp_contracts.html — clean
+- [x]A [ ]V corp_inventory.html — clean; `scan-low`/`scan-critical` are JS hooks with inline styles
+- [x]A [ ]V corporations.html `[style-block]` — page-local `corp-accordion`/`scope-pip`/drag classes, all token refs resolve. Clean.
+- [x]A [ ]V hauling.html — clean; `ship-entry`/`ship-capacity` are JS/template hooks, inline-styled
+- [x]A [ ]V industry_jobs.html `[style-block]` — `ij-*` namespaced; picker panel z-index:10 sits below token scale (dropdown=60) by design; `var(--warning, #e5c07b)` has inline fallback (pre-existing, `--warning` never defined — cosmetic note). Clean.
+- [x]A [ ]V **industry.html — FIXED**: same dead-script-in-`{% block title %}` bug as compression.html (`saveMfgState`/`restoreMfgState`/`resetManufacturing` + `recalculate` auto-save wrapper never executed). Moved into `{% block content %}` after the main script (it wraps `recalculate`, so order matters).
+- [x]A [ ]V journal.html — clean
+- [x]A [ ]V mining_ledger.html `[style-block]` — `.ml-selection-bar` position:fixed z-index:40 verified safe (no backdrop-filter/transform ancestor in `.b-main` chain, bottom-of-viewport so no nav clash). Chart.js hardcoded hex (#c8a951/#474747/#191919) matches theme — cosmetic note. Clean.
+- [x]A [ ]V mining.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
+- [x]A [ ]V partials/assets_results.html — clean; `b-badge is-warn/is-ok/is-danger` all defined
+- [x]A [ ]V partials/corp_contract_items.html — clean
+- [x]A [ ]V partials/corp_inventory_items.html — clean
+- [x]A [ ]V partials/corp_detail.html — clean; dynamic `struct.state_class` values (`is-warn`/`is-danger`/`is-muted`/``) all defined in components.css
+- [x]A [ ]V partials/appraisal_results.html — clean
+- [x]A [ ]V partials/compression_results.html — clean
+- [x]A [ ]V partials/hauling_resolved.html — clean; `var(--accent-rgb,200,170,110)` has inline fallback (pre-existing, `--accent-rgb` never defined — cosmetic note)
+- [x]A [ ]V partials/mining_ledger_corp.html — clean; `ml-check` defined in parent page (mining_ledger.html) style block
+- [x]A [ ]V partials/mining_ledger_data.html — clean
+- [x]A [ ]V partials/calc_results.html — clean; `build-toggle-btn` is a JS hook over `b-btn`
+- [x]A [ ]V partials/corp_inventory_scan.html — clean
+- [x]A [ ]V partials/component_panel.html — clean; uses `window.fn = window.fn || ...` guard pattern correctly
+- [x]A [ ]V partials/shopping_list.html — clean
 
 ## Batch C — Tools (not analyzed this pass)
 
@@ -144,6 +144,19 @@ Legend:
 2. `app/templates/map_wormholes.html` — same fix, same duplicate.
 3. `app/templates/partials/dashboard_recent_battles.html` — `.rb-sys` used `color:var(--fg)`, an undefined custom property (never existed, including pre-restyle). Changed to `var(--text)` to match the convention used by sibling rules in the same block.
 4. `app/templates/partials/admin_users.html` — allowlist search-results dropdown used inline `z-index:100` (same value as `--z-modal`). Retokened to `z-index:var(--z-dropdown)` to match the notif-dropdown pattern in base.html and avoid a stacking clash if a modal is opened while the dropdown is showing.
+
+## Batch B fixes applied this pass
+
+1. `app/templates/compression.html` — moved the localStorage persist/restore `<script>` out of `{% block title %}` (where it rendered as text inside `<title>` and never executed) into `{% block content %}`. Restores the Reset button (`data-click="resetCompression"`) and form-state persistence.
+2. `app/templates/industry.html` — same bug, same fix. Script placed after the page's main script because it wraps `recalculate()`. Restores Reset button, manufacturing-state persistence, and auto-save-on-recalculate.
+
+**Swap-orphan audit result: zero.** Every class, element/attribute selector, and CSS custom property from the old base.html inline block that Batch B templates use is present in the 4 new stylesheets (verified programmatically old-vs-new selector diff + per-template used-class check).
+
+## Flagged for the user's visual pass (Batch B)
+
+- **compression.html / industry.html** — browser tab titles were previously garbled by the embedded script text; now show clean titles. Verify Reset buttons + state restore actually work in the live app (they were dead code before this fix, so this is *new* behavior lighting up, not a regression risk from the restyle).
+- `--warning` (industry_jobs.html) and `--accent-rgb` (hauling_resolved.html) are referenced with inline fallbacks but never defined in tokens.css — works fine, but if you want them tunable, add to tokens.css.
+- mining_ledger.html Chart.js colors are hardcoded hex matching the theme (gold #c8a951, greys) — fine visually, just not token-driven.
 
 ## Flagged for the user's visual pass (Batch A)
 
