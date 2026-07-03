@@ -60,7 +60,7 @@ from starlette.requests import Request
 # Format string for the header. The {nonce} placeholder is filled per
 # request. Mirrors the existing nginx Report-Only policy at
 # /opt/edge/nginx/conf.d/vigilant.conf:47 with the addition of a nonce
-# source in script-src and style-src.
+# source in script-src (and ONLY script-src — see below).
 #
 # IMPORTANT (T-032 decision, 2026-05-19): `style-src 'unsafe-inline'` is
 # permanent — vigilant intentionally keeps inline `style="..."` attrs.
