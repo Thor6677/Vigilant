@@ -22,6 +22,7 @@ from app.routes.character_detail import router as character_detail_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
+from app.routes.ambient import router as ambient_router
 from app.routes.industry_jobs import router as industry_jobs_router
 from app.routes.pi import router as pi_router
 from app.routes.journal import router as journal_router
@@ -95,6 +96,7 @@ app.add_middleware(
     same_site="lax",
 )
 
+app.mount("/static/ds", StaticFiles(directory="design-system"), name="static_ds")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -106,6 +108,7 @@ async def healthz():
     return {"ok": True}
 
 app.include_router(auth_router)
+app.include_router(ambient_router)
 app.include_router(dashboard_router)
 app.include_router(characters_router)
 app.include_router(status_router)
