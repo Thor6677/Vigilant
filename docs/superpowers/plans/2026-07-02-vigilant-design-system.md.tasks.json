@@ -4,33 +4,33 @@
     {
       "id": 7,
       "subject": "Task 1: Foundation stylesheets (tokens + motion)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Create design-system/css/tokens.css and motion.css — all custom properties and keyframes.\n\n```json:metadata\n{\"files\": [\"design-system/css/tokens.css\", \"design-system/css/motion.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/tokens.css css/motion.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"both files parse under esbuild\", \"all spec tokens present\", \"reduced-motion guard present\"]}\n```"
     },
     {
       "id": 8,
       "subject": "Task 2: Component CSS — restyled core vocabulary",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [7],
       "description": "**Goal:** Create design-system/css/components.css restyling all existing b-* classes to the expressive look, keeping every class name.\n\n```json:metadata\n{\"files\": [\"design-system/css/components.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/components.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"all core b-* classes defined\", \"expressive dropdown/panel/button treatments\", \"no-radius reset preserved\"]}\n```"
     },
     {
       "id": 9,
       "subject": "Task 3: Component CSS — new components",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [8],
       "description": "**Goal:** Append modal, toast, tooltip, skeleton, switch, checkbox, inputs, select to components.css.\n\n```json:metadata\n{\"files\": [\"design-system/css/components.css\"], \"verifyCommand\": \"cd design-system && npx esbuild css/components.css --bundle --outdir=/tmp/css-check --allow-overwrite\", \"acceptanceCriteria\": [\"all new component classes exist\", \"modal glass+brackets+entrance\", \"input focus glow\"]}\n```"
     },
     {
       "id": 10,
       "subject": "Task 4: Ambient background module",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Productionize the approved flythrough as design-system/ambient/vigilant-ambient.js (ESM, dependency-free) + .d.ts.\n\n```json:metadata\n{\"files\": [\"design-system/ambient/vigilant-ambient.js\", \"design-system/ambient/vigilant-ambient.d.ts\"], \"verifyCommand\": \"node --check design-system/ambient/vigilant-ambient.js\", \"acceptanceCriteria\": [\"mount/destroy API\", \"sov cache + silent degradation\", \"perf guards (hidden, reduced-motion, minWidth, fpsCap)\"]}\n```"
     },
     {
       "id": 11,
       "subject": "Task 5: React package scaffold + build pipeline + Button",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [9],
       "description": "**Goal:** Create @vigilant/ui package: package.json, tsconfig, build.mjs, vitest config, styles.css, index.ts, Button + test.\n\n```json:metadata\n{\"files\": [\"design-system/react/package.json\", \"design-system/react/build.mjs\", \"design-system/react/src/components/Button.tsx\"], \"verifyCommand\": \"cd design-system/react && npx vitest --run && npx tsc --noEmit && npm run build\", \"acceptanceCriteria\": [\"tests green\", \"dist has js+css+d.ts\", \"Button variants work\"]}\n```"
     },
