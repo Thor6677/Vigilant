@@ -4,14 +4,18 @@ Step 1 of T-012 (remove CSP unsafe-inline). The middleware generates a
 fresh nonce per request, stashes it on `request.state.csp_nonce` so
 templates can render `<script nonce="{{ request.state.csp_nonce }}">`,
 and sets a `Content-Security-Policy-Report-Only` header whose
-script-src/style-src include both the nonce and `'unsafe-inline'`.
+script-src includes both the nonce and `'unsafe-inline'`.
 
-Why both nonce + unsafe-inline in Report-Only:
+Why both nonce + unsafe-inline in Report-Only (script-src only):
 - Per CSP Level 3, when a nonce is present in script-src, `'unsafe-inline'`
   is IGNORED by modern browsers. So nonced inline runs; un-nonced inline
   is *reported* (Report-Only = no enforcement, just CSP violation events).
 - Legacy browsers without CSP3 nonce support fall back to `'unsafe-inline'`
   and execute everything as before.
+- style-src carries NO nonce for exactly the same spec rule: a nonce there
+  would neuter `'unsafe-inline'` and make every un-nonceable `style=""`
+  attribute fire a report — the 2026-07-03 report-flood incident (see the
+  _CSP_TEMPLATE comment). Inline styles are permanently allowed per T-032.
 
 ## T-012 roadmap status (updated 2026-05-19 per T-032 decision)
 
@@ -63,10 +67,17 @@ from starlette.requests import Request
 # See module docstring for rationale. Removing it is not part of T-033 or
 # any planned future step; doing so requires a separate ticket with
 # explicit reconsideration of the threat model.
+#
+# NO nonce in style-src (2026-07-03 incident): per CSP3, a nonce in the
+# directive makes browsers IGNORE 'unsafe-inline' for it, and style=""
+# attributes can't carry nonces — so every inline style attr fired a
+# style-src-attr report (23k+ rows, ~97% of the sink log). The report
+# POSTs flooded the shared edge nginx rate bucket (30r/s) and 429'd real
+# requests. A nonce here defeats the T-032 decision above; do not re-add.
 _CSP_TEMPLATE = (
     "default-src 'self'; "
     "script-src 'self' 'nonce-{nonce}' 'unsafe-inline'; "
-    "style-src 'self' 'nonce-{nonce}' 'unsafe-inline' https://fonts.googleapis.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: blob: https:; "
     # esi.evetech.net: ambient module fetches public sovereignty data client-side (login page)
