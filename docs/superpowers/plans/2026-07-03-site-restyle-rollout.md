@@ -441,6 +441,8 @@ git commit -m "feat(restyle): SSO login page with ambient New Eden flythrough"
 
 **Steps** (repeat per page): load page → eyeball against the demo look → grep the template for page-local `<style>`/inline clashes → fix with `b-*`/token idiom → check page again → tick checklist. Commit batch, push, redeploy, verify.
 
+> **Incident fix (during batch A visual pass):** advanced search 504s — killmails grew to ~60M rows and SQLite's planner (no stats) chose the system-range index over the time index. Fixed with INDEXED BY ix_killmails_killmail_time on time-bounded date-sorted search queries + one-time sampled ANALYZE on prod. Not a restyle regression.
+
 ---
 
 ### Task 6: Sweep batch B (industry/assets/corp)

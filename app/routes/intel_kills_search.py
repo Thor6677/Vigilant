@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Float, Integer, and_, cast, exists, func, or_, select
+from sqlalchemy.dialects.sqlite.base import SQLiteCompiler
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Killmail, KillmailAttacker, get_db
@@ -34,6 +35,25 @@ from app.sde import lookup as sde_lookup
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+# ── SQLite INDEXED BY hint support ──────────────────────────────────────
+# SQLAlchemy's `with_hint(..., dialect_name="sqlite")` compiles to a no-op on
+# stock SQLAlchemy: SQLiteCompiler doesn't override `get_from_hint_text` (only
+# the MySQL/Oracle/MSSQL/Sybase dialects do), so the base class's `None`
+# return silently drops the hint text with no error. Verified empirically:
+# `str(select(Killmail).with_hint(...).compile(dialect=sqlite.dialect()))`
+# produces a bare `FROM killmails` with no hint text.
+#
+# Patch in the same mechanism those other dialects use — return the hint
+# text verbatim — so `INDEXED BY ix_killmails_killmail_time` actually reaches
+# the generated SQL. This is process-wide but inert unless a statement in
+# this codebase calls `.with_hint(dialect_name="sqlite")`, which today is
+# only `_build_search_statements` below.
+def _sqlite_get_from_hint_text(self, table, text):  # pragma: no cover - trivial passthrough
+    return text
+
+
+SQLiteCompiler.get_from_hint_text = _sqlite_get_from_hint_text
 templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 100
@@ -218,13 +238,25 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     Returns a dict with keys:
       where: list[ColumnElement]  — AND-combined clauses
       joins: set[str]              — table aliases needed ('sde_systems', 'sde_types')
+      sort: str                    — raw sort param ("date"/"isk"/"involved")
       sort_col, sort_dir           — for ORDER BY
       cursor_clause                — optional WHERE for pagination, separate from main where
+      has_time_bound: bool         — True iff a killmail_time LOWER bound is present
+                                      (drives the INDEXED BY ix_killmails_killmail_time
+                                      hint in _build_search_statements — see that
+                                      function for the perf-incident context)
 
     The caller composes the final SQL.
     """
     where: list = []
     joins: set[str] = set()
+    # True when a killmail_time LOWER bound is present, i.e. the planner can
+    # drive the query from ix_killmails_killmail_time and only scan forward
+    # from a bounded point instead of the whole table. An upper bound alone
+    # (time_end with no time_preset/time_start) does NOT set this — it would
+    # force a scan from the beginning of time, which is a pessimization, not
+    # a fix (see INDEXED BY hint gating below).
+    has_time_bound = False
 
     # ── Time ───────────────────────────────────────────────────────────
     cutoff_map = {"24h": timedelta(hours=24), "7d": timedelta(days=7),
@@ -232,8 +264,10 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     if params.get("time_preset") and params["time_preset"] in cutoff_map:
         cutoff = datetime.utcnow() - cutoff_map[params["time_preset"]]
         where.append(Killmail.killmail_time >= cutoff)
+        has_time_bound = True
     if params.get("time_start"):
         where.append(Killmail.killmail_time >= params["time_start"])
+        has_time_bound = True
     if params.get("time_end"):
         where.append(Killmail.killmail_time <= params["time_end"])
 
@@ -391,9 +425,11 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     return {
         "where": where,
         "joins": joins,
+        "sort": sort,
         "sort_col": sort_col,
         "sort_dir": direction,
         "cursor_clause": cursor_clause,
+        "has_time_bound": has_time_bound,
     }
 
 
@@ -659,6 +695,88 @@ def _resolve_sort_and_cursor(sort: str, direction: str, cursor: str | None) -> t
     return sort_col, cursor_clause
 
 
+# ── Perf incident (2026-07): killmails grew to ~60M rows (~192GB, EVERef
+# backfill) with no ANALYZE stats. On time-bounded, space-scoped searches
+# (e.g. time=7d&space=wh) SQLite's planner picked the covering
+# ix_killmail_system_time (solar_system_id, killmail_time) index, scanning
+# every J-space kill ever (~10M rows) then sorting, instead of
+# ix_killmails_killmail_time which would scan only the ~200-300k rows in the
+# time window. Force the correct index with an INDEXED BY hint whenever a
+# killmail_time lower bound is present. See _build_search_statements below.
+KILLMAIL_TIME_INDEX = "ix_killmails_killmail_time"
+
+
+def _build_search_statements(compiled: dict[str, Any], live: int, since: int) -> tuple[Any, Any]:
+    """Build the page SELECT and count/sum SELECT for /search/results.
+
+    Extracted from intel_kills_search_results so the query-shaping logic
+    (joins, where, cursor, sort, and the SQLite INDEXED BY perf hint) can be
+    exercised directly by tests without booting the FastAPI app.
+
+    Hint gating (see KILLMAIL_TIME_INDEX comment above for the incident):
+      - date-sorted, not live-polling, has_time_bound: hint BOTH the page
+        query and the count/sum query onto ix_killmails_killmail_time.
+      - isk/involved-sorted, has_time_bound: the time index can't serve
+        that ORDER BY, so hint the count/sum query ONLY (counts don't need
+        order) and leave the page query's plan to the optimizer.
+      - live-poll (``live`` and ``since`` both truthy): sorts by
+        killmail_id (the PK) with a ``killmail_id > since`` filter — an
+        unrelated access pattern, never hinted.
+      - no time lower bound at all: never hinted (INDEXED BY errors out if
+        the index can't be used for the compiled WHERE shape, so gating is
+        strictly tied to ``compiled["has_time_bound"]``, which is only set
+        for killmail_time ``>=`` clauses — see _compile_search_where).
+    """
+    where = list(compiled["where"])
+    joins = compiled["joins"]
+    sort_col = compiled["sort_col"]
+    sort_dir = compiled["sort_dir"]
+    cursor_clause = compiled["cursor_clause"]
+    sort = compiled["sort"]
+
+    # Live-poll mode: prepend new kills since=<id>. Sort always Date Desc by
+    # killmail_id (front-end gating ensures this) — unrelated to any time
+    # filter that may also be present, so the hint stays off (is_polling).
+    is_polling = bool(live and since)
+    if is_polling:
+        where = where + [Killmail.killmail_id > since]
+        sort_col = Killmail.killmail_id
+        sort_dir = "desc"
+        cursor_clause = None
+
+    hint_count = bool(compiled.get("has_time_bound")) and not is_polling
+    hint_page = hint_count and sort == "date"
+
+    stmt = select(Killmail)
+    if hint_page:
+        stmt = stmt.with_hint(Killmail, f"INDEXED BY {KILLMAIL_TIME_INDEX}", dialect_name="sqlite")
+    if "sde_systems" in joins:
+        stmt = stmt.join(SDESystem, SDESystem.system_id == Killmail.solar_system_id)
+    if "sde_types" in joins:
+        stmt = stmt.join(SDEType, SDEType.type_id == Killmail.victim_ship_type_id)
+    for clause in where:
+        stmt = stmt.where(clause)
+    if cursor_clause is not None:
+        stmt = stmt.where(cursor_clause)
+    if sort_dir == "desc":
+        stmt = stmt.order_by(sort_col.desc(), Killmail.killmail_id.desc())
+    else:
+        stmt = stmt.order_by(sort_col.asc(), Killmail.killmail_id.asc())
+    stmt = stmt.limit(PAGE_SIZE)
+
+    count_stmt = select(func.count(Killmail.killmail_id), func.sum(Killmail.total_value)).select_from(Killmail)
+    if hint_count:
+        count_stmt = count_stmt.with_hint(Killmail, f"INDEXED BY {KILLMAIL_TIME_INDEX}", dialect_name="sqlite")
+    if "sde_systems" in joins:
+        count_stmt = count_stmt.join(SDESystem, SDESystem.system_id == Killmail.solar_system_id)
+    if "sde_types" in joins:
+        count_stmt = count_stmt.join(SDEType, SDEType.type_id == Killmail.victim_ship_type_id)
+    for clause in where:
+        count_stmt = count_stmt.where(clause)
+
+    return stmt, count_stmt
+
+
 @router.get("/intel/kills/search/results", response_class=HTMLResponse)
 async def intel_kills_search_results(
     request: Request,
@@ -749,31 +867,7 @@ async def intel_kills_search_results(
 
     compiled = await _compile_search_where(params, db)
 
-    # ── Live-poll mode: prepend new kills since=<id>
-    if live and since:
-        compiled["where"].append(Killmail.killmail_id > since)
-        # Sort always Date Desc for live polling (front-end gating ensures this).
-        compiled["sort_col"] = Killmail.killmail_id
-        compiled["sort_dir"] = "desc"
-        compiled["cursor_clause"] = None
-
-    # Build base query
-    stmt = select(Killmail)
-    if "sde_systems" in compiled["joins"]:
-        stmt = stmt.join(SDESystem, SDESystem.system_id == Killmail.solar_system_id)
-    if "sde_types" in compiled["joins"]:
-        stmt = stmt.join(SDEType, SDEType.type_id == Killmail.victim_ship_type_id)
-    for clause in compiled["where"]:
-        stmt = stmt.where(clause)
-    if compiled["cursor_clause"] is not None:
-        stmt = stmt.where(compiled["cursor_clause"])
-
-    sort_col = compiled["sort_col"]
-    if compiled["sort_dir"] == "desc":
-        stmt = stmt.order_by(sort_col.desc(), Killmail.killmail_id.desc())
-    else:
-        stmt = stmt.order_by(sort_col.asc(), Killmail.killmail_id.asc())
-    stmt = stmt.limit(PAGE_SIZE)
+    stmt, count_stmt = _build_search_statements(compiled, live, since)
 
     rows = (await db.execute(stmt)).scalars().all()
 
@@ -781,13 +875,6 @@ async def intel_kills_search_results(
     total_count = None
     total_isk = None
     if not live:
-        count_stmt = select(func.count(Killmail.killmail_id), func.sum(Killmail.total_value)).select_from(Killmail)
-        if "sde_systems" in compiled["joins"]:
-            count_stmt = count_stmt.join(SDESystem, SDESystem.system_id == Killmail.solar_system_id)
-        if "sde_types" in compiled["joins"]:
-            count_stmt = count_stmt.join(SDEType, SDEType.type_id == Killmail.victim_ship_type_id)
-        for clause in compiled["where"]:
-            count_stmt = count_stmt.where(clause)
         result = (await db.execute(count_stmt)).one()
         total_count = int(result[0] or 0)
         total_isk = float(result[1] or 0)
