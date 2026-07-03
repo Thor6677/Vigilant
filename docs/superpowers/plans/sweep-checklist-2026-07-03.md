@@ -58,32 +58,32 @@ Legend:
 
 ## Batch B — Industry / Assets / Corp
 
-- [x]A [ ]V appraisal.html — clean, pure `b-*` + inline token styles
-- [x]A [ ]V assets.html `[style-block]` — page-local `asset-*` classes, all `var(--token)` refs resolve, no vocabulary collision. Clean.
-- [x]A [ ]V blueprints.html — clean; all `is-*`/`b-*` variants defined
-- [x]A [ ]V **compression.html — FIXED**: `<script>` block (localStorage persist/restore + `resetCompression`) was inside `{% block title %}`, rendering into `<title>` (RCDATA — never executes, pollutes tab title; Reset button + state persistence dead). Pre-existing, not a swap break. Moved into `{% block content %}` before `{% endblock %}`.
-- [x]A [ ]V corp_contracts.html — clean
-- [x]A [ ]V corp_inventory.html — clean; `scan-low`/`scan-critical` are JS hooks with inline styles
-- [x]A [ ]V corporations.html `[style-block]` — page-local `corp-accordion`/`scope-pip`/drag classes, all token refs resolve. Clean.
-- [x]A [ ]V hauling.html — clean; `ship-entry`/`ship-capacity` are JS/template hooks, inline-styled
-- [x]A [ ]V industry_jobs.html `[style-block]` — `ij-*` namespaced; picker panel z-index:10 sits below token scale (dropdown=60) by design; `var(--warning, #e5c07b)` has inline fallback (pre-existing, `--warning` never defined — cosmetic note). Clean.
-- [x]A [ ]V **industry.html — FIXED**: same dead-script-in-`{% block title %}` bug as compression.html (`saveMfgState`/`restoreMfgState`/`resetManufacturing` + `recalculate` auto-save wrapper never executed). Moved into `{% block content %}` after the main script (it wraps `recalculate`, so order matters).
-- [x]A [ ]V journal.html — clean
-- [x]A [ ]V mining_ledger.html `[style-block]` — `.ml-selection-bar` position:fixed z-index:40 verified safe (no backdrop-filter/transform ancestor in `.b-main` chain, bottom-of-viewport so no nav clash). Chart.js hardcoded hex (#c8a951/#474747/#191919) matches theme — cosmetic note. Clean.
-- [x]A [ ]V mining.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
-- [x]A [ ]V partials/assets_results.html — clean; `b-badge is-warn/is-ok/is-danger` all defined
-- [x]A [ ]V partials/corp_contract_items.html — clean
-- [x]A [ ]V partials/corp_inventory_items.html — clean
-- [x]A [ ]V partials/corp_detail.html — clean; dynamic `struct.state_class` values (`is-warn`/`is-danger`/`is-muted`/``) all defined in components.css
-- [x]A [ ]V partials/appraisal_results.html — clean
-- [x]A [ ]V partials/compression_results.html — clean
-- [x]A [ ]V partials/hauling_resolved.html — clean; `var(--accent-rgb,200,170,110)` has inline fallback (pre-existing, `--accent-rgb` never defined — cosmetic note)
-- [x]A [ ]V partials/mining_ledger_corp.html — clean; `ml-check` defined in parent page (mining_ledger.html) style block
-- [x]A [ ]V partials/mining_ledger_data.html — clean
-- [x]A [ ]V partials/calc_results.html — clean; `build-toggle-btn` is a JS hook over `b-btn`
-- [x]A [ ]V partials/corp_inventory_scan.html — clean
-- [x]A [ ]V partials/component_panel.html — clean; uses `window.fn = window.fn || ...` guard pattern correctly
-- [x]A [ ]V partials/shopping_list.html — clean
+- [x]A [x]V appraisal.html — clean, pure `b-*` + inline token styles
+- [x]A [x]V assets.html `[style-block]` — page-local `asset-*` classes, all `var(--token)` refs resolve, no vocabulary collision. Clean.
+- [x]A [x]V blueprints.html — clean; all `is-*`/`b-*` variants defined
+- [x]A [x]V **compression.html — FIXED**: `<script>` block (localStorage persist/restore + `resetCompression`) was inside `{% block title %}`, rendering into `<title>` (RCDATA — never executes, pollutes tab title; Reset button + state persistence dead). Pre-existing, not a swap break. Moved into `{% block content %}` before `{% endblock %}`.
+- [x]A [x]V corp_contracts.html — clean
+- [x]A [x]V corp_inventory.html — clean; `scan-low`/`scan-critical` are JS hooks with inline styles
+- [x]A [x]V corporations.html `[style-block]` — page-local `corp-accordion`/`scope-pip`/drag classes, all token refs resolve. Clean.
+- [x]A [x]V hauling.html — clean; `ship-entry`/`ship-capacity` are JS/template hooks, inline-styled
+- [x]A [x]V industry_jobs.html `[style-block]` — `ij-*` namespaced; picker panel z-index:10 sits below token scale (dropdown=60) by design; `var(--warning, #e5c07b)` has inline fallback (pre-existing, `--warning` never defined — cosmetic note). Clean.
+- [x]A [x]V **industry.html — FIXED**: same dead-script-in-`{% block title %}` bug as compression.html (`saveMfgState`/`restoreMfgState`/`resetManufacturing` + `recalculate` auto-save wrapper never executed). Moved into `{% block content %}` after the main script (it wraps `recalculate`, so order matters).
+- [x]A [x]V journal.html — clean
+- [x]A [x]V mining_ledger.html `[style-block]` — `.ml-selection-bar` position:fixed z-index:40 verified safe (no backdrop-filter/transform ancestor in `.b-main` chain, bottom-of-viewport so no nav clash). Chart.js hardcoded hex (#c8a951/#474747/#191919) matches theme — cosmetic note. Clean.
+- [x]A [x]V mining.html — clean; `fit-arrow` is a JS hook styled via `b-muted-sm`
+- [x]A [x]V partials/assets_results.html — clean; `b-badge is-warn/is-ok/is-danger` all defined
+- [x]A [x]V partials/corp_contract_items.html — clean
+- [x]A [x]V partials/corp_inventory_items.html — clean
+- [x]A [x]V partials/corp_detail.html — clean; dynamic `struct.state_class` values (`is-warn`/`is-danger`/`is-muted`/``) all defined in components.css
+- [x]A [x]V partials/appraisal_results.html — clean
+- [x]A [x]V partials/compression_results.html — clean
+- [x]A [x]V partials/hauling_resolved.html — clean; `var(--accent-rgb,200,170,110)` has inline fallback (pre-existing, `--accent-rgb` never defined — cosmetic note)
+- [x]A [x]V partials/mining_ledger_corp.html — clean; `ml-check` defined in parent page (mining_ledger.html) style block
+- [x]A [x]V partials/mining_ledger_data.html — clean
+- [x]A [x]V partials/calc_results.html — clean; `build-toggle-btn` is a JS hook over `b-btn`
+- [x]A [x]V partials/corp_inventory_scan.html — clean
+- [x]A [x]V partials/component_panel.html — clean; uses `window.fn = window.fn || ...` guard pattern correctly
+- [x]A [x]V partials/shopping_list.html — clean
 
 ## Batch C — Tools (not analyzed this pass)
 
