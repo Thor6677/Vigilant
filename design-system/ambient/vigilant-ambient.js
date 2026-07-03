@@ -1,8 +1,9 @@
 /* Vigilant Ambient — flying through New Eden with live sov colors and kill blips.
-   Dependency-free ES module. Canvas 2D. See design spec 2026-07-02. */
+   Dependency-free ES module. Canvas 2D. See design spec 2026-07-02.
+   Mount into <body> or a plain ancestor — position:fixed re-anchors under transformed/filtered ancestors (the glass styles use backdrop-filter). */
 
 const ESI_SOV_URL = 'https://esi.evetech.net/latest/sovereignty/map/?datasource=tranquility';
-const SOV_CACHE_KEY = 'vg-ambient-sov-v1';
+const SOV_CACHE_KEY = 'vg-ambient-sov-v2';
 const SOV_TTL_MS = 24 * 60 * 60 * 1000;
 
 const FACTION_COLORS = {
@@ -52,7 +53,10 @@ async function loadSovColors(systems) {
       const r = await fetch(ESI_SOV_URL);
       if (!r.ok) return cols;
       sov = await r.json();
-      try { localStorage.setItem(SOV_CACHE_KEY, JSON.stringify({ t: Date.now(), d: sov })); } catch (e) { /* quota */ }
+      try {
+        const slim = sov.map((e) => ({ system_id: e.system_id, alliance_id: e.alliance_id, faction_id: e.faction_id }));
+        localStorage.setItem(SOV_CACHE_KEY, JSON.stringify({ t: Date.now(), d: slim }));
+      } catch (e) { /* quota */ }
     } catch (e) { return cols; }
   }
   for (const e of sov) {
@@ -77,13 +81,16 @@ export function mount(el, options = {}) {
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduced || window.innerWidth < opts.minWidth) return { destroy() {} };
 
+  if (el.dataset.vgAmbient === '1') return { destroy() {} };
+  el.dataset.vgAmbient = '1';
+
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:var(--z-ambient,-1);pointer-events:none;';
   el.appendChild(canvas);
   const ctx = canvas.getContext('2d');
 
   let W = 0, H = 0, raf = 0, killTimer = 0, destroyed = false;
-  let systems = [], cols = [], kill = null;
+  let systems = [], cols = [], kill = null, idIndex = null;
   let t = 0, last = 0;
   const frameMs = 1000 / opts.fpsCap;
   const RX = 520, RZ = 420, CAMY = 120, FOV = 700, NEAR = 20, FAR = 1600;
@@ -101,7 +108,7 @@ export function mount(el, options = {}) {
     if (destroyed) return;
     raf = requestAnimationFrame(frame);
     if (document.hidden || now - last < frameMs) return;
-    last = now;
+    last = now - ((now - last) % frameMs);
     t += opts.speed;
     const cam = camPos(t), ahead = camPos(t + 0.012);
     let fx = ahead[0] - cam[0], fy = ahead[1] - cam[1] - 40, fz = ahead[2] - cam[2];
@@ -147,9 +154,8 @@ export function mount(el, options = {}) {
 
   function flare(systemId) {
     if (!kill) return;
-    for (let i = 0; i < systems.length; i++) {
-      if (systems[i].id === systemId) { kill[i] = 1; return; }
-    }
+    const i = idIndex?.get(systemId);
+    if (i !== undefined) kill[i] = 1;
   }
 
   function startKills() {
@@ -176,6 +182,7 @@ export function mount(el, options = {}) {
           const r = await fetch(src.url);
           if (r.ok) (await r.json()).forEach((k) => flare(k.system_id ?? k));
         } catch (e) { /* silent */ }
+        if (destroyed) return;
         killTimer = setTimeout(tick, src.intervalMs || 15000);
       };
       killTimer = setTimeout(tick, 1000);
@@ -187,6 +194,9 @@ export function mount(el, options = {}) {
       const r = await fetch(opts.systemsUrl);
       if (!r.ok) return;
       systems = normalizeSystems(await r.json());
+      if (destroyed) return;
+      if (!systems.length) return;
+      idIndex = new Map(systems.map((s, i) => [s.id, i]));
       kill = new Float32Array(systems.length);
       cols = await loadSovColors(systems);
       if (destroyed) return;
@@ -203,6 +213,7 @@ export function mount(el, options = {}) {
       clearTimeout(killTimer);
       removeEventListener('resize', resize);
       canvas.remove();
+      delete el.dataset.vgAmbient;
     },
   };
 }

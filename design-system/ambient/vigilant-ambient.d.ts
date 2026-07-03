@@ -15,6 +15,9 @@ export interface AmbientHandle {
   destroy(): void;
 }
 
+/**
+ * Mount into <body> or a plain ancestor — position:fixed re-anchors under transformed/filtered ancestors (the glass styles use backdrop-filter).
+ */
 export function mount(el: HTMLElement, options?: AmbientOptions): AmbientHandle;
 export function allianceColor(id: number): [number, number, number];
 export function normalizeSystems(
