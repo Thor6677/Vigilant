@@ -22,6 +22,7 @@ export interface AmbientBackgroundProps extends AmbientOptions {
 export function AmbientBackground({ className, ...options }: AmbientBackgroundProps) {
   const ref = useRef<HTMLDivElement>(null);
   const optionsRef = useRef(options);
+  // Intentional render-phase ref write (latest-ref idiom); read only by the once-effect.
   optionsRef.current = options;
 
   useEffect(() => {

@@ -2129,6 +2129,8 @@ git commit -m "feat(design-system): AmbientBackground wrapper and bundled JetBra
 
 **Goal:** A Vite page rendering every component with realistic EVE content over the live ambient background — the visual verification surface and the usage-example source for design-sync.
 
+> **Review-gate amendment:** ambient background judged too busy behind app content — demo reworked to an app view (neutral bg, no ambient) + a login-preview view where AmbientBackground lives, matching production intent (ambient = SSO login only). Sub-project 2 must mount the ambient module on the login template only.
+
 **Files:**
 - Create: `design-system/react/demo/index.html`
 - Create: `design-system/react/demo/main.tsx`

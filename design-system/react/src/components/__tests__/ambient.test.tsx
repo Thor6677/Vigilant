@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, cleanup } from '@testing-library/react';
 import type { AmbientOptions } from '../../../../ambient/vigilant-ambient.js';
 
@@ -16,4 +17,25 @@ test('mounts ambient module and destroys on unmount', () => {
   expect(mount.mock.calls[0][1]).toMatchObject({ systemsUrl: '/data/systems.json' });
   cleanup();
   expect(destroy).toHaveBeenCalledTimes(1);
+});
+
+test('host div passes through className and is aria-hidden', () => {
+  const { container } = render(<AmbientBackground className="my-ambient" />);
+  const host = container.firstChild as HTMLElement;
+  expect(host.className).toBe('my-ambient');
+  expect(host.getAttribute('aria-hidden')).toBe('true');
+  cleanup();
+});
+
+test('StrictMode double-invokes mount and still destroys cleanly', () => {
+  mount.mockClear();
+  destroy.mockClear();
+  render(
+    <StrictMode>
+      <AmbientBackground systemsUrl="/data/systems.json" killSource={{ type: 'simulate' }} />
+    </StrictMode>
+  );
+  expect(mount).toHaveBeenCalledTimes(2);
+  cleanup();
+  expect(destroy.mock.calls.length).toBeGreaterThanOrEqual(1);
 });
