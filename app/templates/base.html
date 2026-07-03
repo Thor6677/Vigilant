@@ -45,6 +45,7 @@
                 <a href="/intel" class="b-nav-dropdown-item {{ 'is-active' if _path == '/intel' }}">Overview</a>
                 <a href="/intel/kills" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/kills') }}">Kill Feed</a>
                 <a href="/intel/dscan" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/dscan') or _path.startswith('/dscan') }}">D-Scan / Local</a>
+                <a href="/intel/watch" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/watch') }}">Local Watch</a>
                 <a href="/intel/gatecheck" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
                 <a href="/map" class="b-nav-dropdown-item {{ 'is-active' if _path == '/map' or _path == '/map/wormholes' }}">Star Map</a>
                 <div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>
@@ -157,6 +158,7 @@
     <a href="/intel" class="{{ 'is-active' if _path == '/intel' }}">Intel Overview</a>
     <a href="/intel/kills" class="{{ 'is-active' if _path.startswith('/intel/kills') }}">Kill Feed</a>
     <a href="/intel/dscan" class="{{ 'is-active' if _path.startswith('/intel/dscan') or _path.startswith('/dscan') }}">D-Scan / Local</a>
+    <a href="/intel/watch" class="{{ 'is-active' if _path.startswith('/intel/watch') }}">Local Watch</a>
     <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
     <a href="/map" class="{{ 'is-active' if _path == '/map' or _path == '/map/wormholes' }}">Star Map</a>
     <a href="/wormholes" class="{{ 'is-active' if _path == '/wormholes' or _path.startswith('/wormholes/system') }}">Wormhole Systems</a>
