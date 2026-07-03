@@ -325,6 +325,8 @@ git commit -m "feat(restyle): swap base.html inline CSS for design-system styles
 
 **Goal:** `index.html` becomes the SSO login screen: ambient New Eden canvas behind a glass panel, real kill blips.
 
+> **Post-review amendments (after 8d94fb3):** login page uses a new slim cached /api/ambient/systems.json (id/name/x3/y3/z3, max-age=86400) instead of the star map's 1.27MB no-store payload; connect-src allows esi.evetech.net (ambient sov fetch — otherwise CSP violation noise now and dead sov colors when enforcing); h1 heading restored, decorative logo alt, role=alert on the error banner. Future candidates noted: proxy sov server-side; gate base.html script includes on user_id (Task 5 sweep).
+
 **Files:**
 - Modify: `app/templates/index.html` (full rewrite of the content block)
 

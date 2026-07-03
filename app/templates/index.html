@@ -5,8 +5,8 @@
 
     <div class="b-panel is-glass is-brackets" style="width:min(460px,100%);">
         <div style="padding:2.5rem 2.5rem 2rem;text-align:center;display:flex;flex-direction:column;gap:1rem;align-items:center;">
-            <img src="/static/logo.png" alt="Vigilant" style="height:88px;width:auto;">
-            <span class="b-nav-logo" style="font-size:18px;">VIGILANT</span>
+            <img src="/static/logo.png" alt="" style="height:88px;width:auto;">
+            <h1 class="b-nav-logo" style="font-size:18px;margin:0;">VIGILANT</h1>
             <span class="b-eyebrow">EVE Online Companion Dashboard</span>
         </div>
         <div style="padding:0 1.5rem;">
@@ -17,7 +17,7 @@
         </div>
         {% if error %}
         <div style="padding:1rem 1.5rem 0;">
-            <div class="b-banner is-danger" style="margin-bottom:0;">{{ error }}</div>
+            <div class="b-banner is-danger" role="alert" style="margin-bottom:0;">{{ error }}</div>
         </div>
         {% endif %}
         <div style="padding:1.5rem;display:flex;flex-direction:column;gap:0.75rem;align-items:center;">
@@ -30,8 +30,9 @@
 
 <script type="module" nonce="{{ request.state.csp_nonce }}">
     import { mount } from '/static/ds/ambient/vigilant-ambient.js';
+    // Mobile (<768px) intentionally gets the static dark background — module minWidth default.
     mount(document.body, {
-        systemsUrl: '/api/map/kspace-data/systems.json',
+        systemsUrl: '/api/ambient/systems.json',
         killSource: { type: 'poll', url: '/api/ambient/kills', intervalMs: 15000 }
     });
 </script>

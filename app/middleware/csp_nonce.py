@@ -69,7 +69,8 @@ _CSP_TEMPLATE = (
     "style-src 'self' 'nonce-{nonce}' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: blob: https:; "
-    "connect-src 'self'; "
+    # esi.evetech.net: ambient module fetches public sovereignty data client-side (login page)
+    "connect-src 'self' https://esi.evetech.net; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "
