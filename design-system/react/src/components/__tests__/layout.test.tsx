@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { NavBar } from '../NavBar';
 import { NavMenu } from '../NavMenu';
 import { Breadcrumbs } from '../Breadcrumbs';
@@ -76,4 +76,38 @@ test('Footer renders links and brand', () => {
   render(<Footer links={[{ label: 'GitHub', href: 'https://github.com' }]} brand="THUNDERBORN" />);
   expect(screen.getByText('GitHub').className).toContain('b-footer-link');
   expect(screen.getByText('THUNDERBORN')).toBeTruthy();
+});
+
+test('TabStrip link tabs render anchors and do not fire onSelect', () => {
+  const onSelect = vi.fn();
+  render(<TabStrip tabs={[{ label: 'Docs', href: '/docs' }]} onSelect={onSelect} />);
+  const link = screen.getByText('Docs');
+  expect(link.tagName).toBe('A');
+  fireEvent.click(link);
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+test('Panel without title renders no head', () => {
+  const { container } = render(<Panel>content</Panel>);
+  expect(container.querySelector('.b-panel-head')).toBeNull();
+});
+
+test('NavBar renders right slot', () => {
+  render(<NavBar logo="V" right={<span>acct</span>} />);
+  expect(screen.getByText('acct')).toBeTruthy();
+});
+
+test('Breadcrumbs is a labeled nav with aria-current on the last crumb', () => {
+  const { container } = render(<Breadcrumbs crumbs={[{ label: 'Home', href: '/' }, { label: 'Here' }]} />);
+  const nav = container.querySelector('nav.b-breadcrumbs');
+  expect(nav?.getAttribute('aria-label')).toBe('Breadcrumbs');
+  expect(screen.getByText('Here').getAttribute('aria-current')).toBe('page');
+});
+
+test('NavMenu honors explicit trigger href and hides caret from AT', () => {
+  const { container } = render(<NavMenu label="Intel" href="/intel" items={[{ label: 'Kills', href: '/intel/kills' }]} />);
+  const trigger = container.querySelector('a.b-nav-link')!;
+  expect(trigger.getAttribute('href')).toBe('/intel');
+  expect(trigger.getAttribute('aria-haspopup')).toBe('true');
+  expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy();
 });

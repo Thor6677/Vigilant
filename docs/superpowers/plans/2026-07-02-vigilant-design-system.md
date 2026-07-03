@@ -1090,6 +1090,8 @@ git commit -m "feat(design-system): @vigilant/ui scaffold with esbuild pipeline 
 
 **Goal:** NavBar, NavMenu, Breadcrumbs, PageHeader, Section, Panel, Grid, TabStrip, Footer — with tests.
 
+> **Post-review amendments (after 5798f42):** Breadcrumbs renders <nav aria-label> with aria-current; NavMenu gains optional href prop, aria-haspopup, aria-hidden caret; NavMenu/Footer use index keys (href collides on scaffolded '#' links); Section title is an h2; TabStrip href JSDoc; five branch tests added. Source is authoritative over the Step blocks.
+
 **Files:**
 - Create: `design-system/react/src/components/NavBar.tsx`
 - Create: `design-system/react/src/components/NavMenu.tsx`

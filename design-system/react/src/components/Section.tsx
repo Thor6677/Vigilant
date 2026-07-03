@@ -10,7 +10,7 @@ export function Section({ title, actions, children }: SectionProps) {
   return (
     <section className="b-section">
       <div className="b-section-head">
-        <span className="b-label">{title}</span>
+        <h2 className="b-label" style={{ margin: 0 }}>{title}</h2>
         {actions ? <div>{actions}</div> : null}
       </div>
       {children}

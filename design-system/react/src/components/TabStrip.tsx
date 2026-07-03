@@ -1,5 +1,6 @@
 export interface Tab {
   label: string;
+  /** presence makes this tab a link; onSelect will not fire for it */
   href?: string;
   active?: boolean;
 }

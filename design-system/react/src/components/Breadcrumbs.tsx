@@ -11,13 +11,13 @@ export interface BreadcrumbsProps {
 
 export function Breadcrumbs({ crumbs }: BreadcrumbsProps) {
   return (
-    <div className="b-breadcrumbs">
+    <nav aria-label="Breadcrumbs" className="b-breadcrumbs">
       {crumbs.map((c, i) => (
         <Fragment key={i}>
           {i > 0 && <span className="b-crumb-sep">/</span>}
-          {c.href ? <a href={c.href}>{c.label}</a> : <span className="b-crumb-current">{c.label}</span>}
+          {c.href ? <a href={c.href}>{c.label}</a> : <span className="b-crumb-current" aria-current="page">{c.label}</span>}
         </Fragment>
       ))}
-    </div>
+    </nav>
   );
 }
