@@ -509,6 +509,8 @@ git commit -m "feat(design-system): restyled b-* component vocabulary (glass, br
 
 **Goal:** Append the components the site lacks today: modal, toast, tooltip, skeleton, switch, checkbox, inputs, select.
 
+> **Post-review amendments (commit after 355f85f):** modal scrolls in .b-modal-body (flex column) not .b-modal, so brackets stay pinned; focus-visible outlines for switch/check/modal-close; tooltip gated on [data-tip] + focus-visible reveal; toast stack clamps to viewport; disabled states added. The Step 1 code block predates these — the CSS file is authoritative.
+
 **Files:**
 - Modify: `design-system/css/components.css` (append)
 
