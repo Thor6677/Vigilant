@@ -37,12 +37,12 @@
     {
       "id": 33,
       "subject": "Task 5: Deploy + prod verification (HUMAN GATE)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         32
       ],
       "description": "**Goal:** Deploy; warm completes 10 windows no OOM; backfill progressing; user approves UI.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"docker logs + stats + user approval\", \"acceptanceCriteria\": [\"clean deploy\", \"pre-warm 10 windows no OOM\", \"backfill logging\", \"user approval\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-07-04T03:02:29Z"
+  "lastUpdated": "2026-07-04T03:16:06Z"
 }
