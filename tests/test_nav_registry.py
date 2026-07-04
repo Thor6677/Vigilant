@@ -1,0 +1,200 @@
+"""Tests for the single-source navigation registry (`app.nav`).
+
+The headline test is the **dead-link** guard: every internal URL in
+`NAV_GROUPS` (both group-level and item-level) must resolve to a route
+registered on the real FastAPI app. This makes future orphan pages or typo'd
+URLs a hard test failure rather than a broken link discovered in production.
+
+We import `app.main` to collect the authoritative route table. This is cheap
+and side-effect-free under the test env (conftest.py sets the required
+EVE_CLIENT_ID / EVE_CLIENT_SECRET / SECRET_KEY vars); the module import builds
+the app + routers without starting the server or touching the network, so
+importing it is the most faithful source of "what paths actually exist".
+"""
+
+import app.main as main
+from app.nav import NAV_GROUPS, item_active, group_active
+
+
+# ── helpers to walk the registry ───────────────────────────────────────────
+
+def _internal_group_urls():
+    for group in NAV_GROUPS:
+        url = group["url"]
+        if url and not url.startswith(("http://", "https://", "#")):
+            yield group["label"], url
+
+
+def _internal_item_urls():
+    for group in NAV_GROUPS:
+        for item in group["items"]:
+            if item.get("external"):
+                continue
+            url = item["url"]
+            if url and not url.startswith(("http://", "https://", "#")):
+                yield group["label"], item["label"], url
+
+
+def _registered_paths():
+    return {route.path for route in main.app.routes if hasattr(route, "path")}
+
+
+def _find(label):
+    """Return the first item dict with the given label, searching all groups."""
+    for group in NAV_GROUPS:
+        for item in group["items"]:
+            if item["label"] == label:
+                return item
+    raise KeyError(label)
+
+
+def _group(label):
+    for group in NAV_GROUPS:
+        if group["label"] == label:
+            return group
+    raise KeyError(label)
+
+
+# ── dead-link guard ─────────────────────────────────────────────────────────
+
+def test_every_group_url_is_a_registered_route():
+    paths = _registered_paths()
+    dead = [(label, url) for label, url in _internal_group_urls()
+            if url not in paths]
+    assert not dead, f"Group URLs with no registered route: {dead}"
+
+
+def test_every_item_url_is_a_registered_route():
+    paths = _registered_paths()
+    dead = [(g, lbl, url) for g, lbl, url in _internal_item_urls()
+            if url not in paths]
+    assert not dead, f"Item URLs with no registered route: {dead}"
+
+
+# ── helper unit tests ───────────────────────────────────────────────────────
+
+def test_exact_match_only_matches_exact_path():
+    # "Overview" label repeats across groups; grab the Industry one explicitly.
+    overview = next(i for i in _group("Industry")["items"] if i["label"] == "Overview")
+    assert item_active(overview, "/industry") is True
+    assert item_active(overview, "/industry/manufacturing") is False
+
+
+def test_prefix_match_matches_subpaths():
+    mfg = _find("Manufacturing")
+    assert item_active(mfg, "/industry/manufacturing") is True
+    assert item_active(mfg, "/industry/manufacturing/blueprint/123") is True
+    assert item_active(mfg, "/industry") is False
+
+
+def test_dscan_item_matches_both_prefixes():
+    dscan = _find("D-Scan / Local")
+    assert item_active(dscan, "/intel/dscan") is True
+    assert item_active(dscan, "/intel/dscan/456") is True
+    assert item_active(dscan, "/dscan") is True
+    assert item_active(dscan, "/dscan/456") is True
+    assert item_active(dscan, "/intel/watch") is False
+
+
+def test_image_host_matches_tools_images_and_i_shortlink():
+    img = _find("Image Host")
+    assert item_active(img, "/tools/images") is True
+    assert item_active(img, "/i/abc123") is True
+    assert item_active(img, "/tools/fitting") is False
+
+
+def test_ship_fitting_exact_vs_saved_fits_prefix():
+    # /tools/fitting/saved must light Saved Fits but NOT Ship Fitting.
+    fitting = _find("Ship Fitting")
+    saved = _find("Saved Fits")
+    assert item_active(fitting, "/tools/fitting") is True
+    assert item_active(fitting, "/tools/fitting/saved") is False
+    assert item_active(saved, "/tools/fitting/saved") is True
+    assert item_active(saved, "/tools/fitting/saved/dps") is True
+
+
+def test_kill_feed_exclude_vs_kill_search():
+    """The one case a naive prefix-only impl breaks: /intel/kills/search.
+
+    Kill Feed's broad `/intel/kills` prefix must step aside (via its exclude
+    list) on the Kill Search page so the two nav items never light up together.
+    """
+    feed = _find("Kill Feed")
+    search = _find("Kill Search")
+    assert item_active(feed, "/intel/kills") is True
+    assert item_active(feed, "/intel/kills/top") is True
+    assert item_active(feed, "/intel/kills/feed") is True
+    assert item_active(feed, "/intel/kills/search") is False      # excluded
+    assert item_active(search, "/intel/kills/search") is True
+    assert item_active(search, "/intel/kills") is False
+
+
+def test_group_active_via_child_item():
+    tools = _group("Tools")
+    assert group_active(tools, "/tools/activity") is True
+    assert group_active(tools, "/assets") is True
+    assert group_active(tools, "/dashboard") is False
+
+
+def test_group_active_via_extra_group_match():
+    # Dashboard group has no item owning /character/<id>; the group-level
+    # extra prefix match must still light the group there.
+    dash = _group("Dashboard")
+    assert group_active(dash, "/character/90000001") is True
+    assert group_active(dash, "/dashboard") is True
+    assert group_active(dash, "/characters") is True
+    assert group_active(dash, "/intel") is False
+
+
+def test_plain_link_group_has_no_items_but_matches_by_group_rule():
+    corps = _group("Corporations")
+    assert corps["items"] == []
+    assert group_active(corps, "/corporations") is True
+    assert group_active(corps, "/corporations/98000001") is True
+    assert group_active(corps, "/intel") is False
+
+
+def test_admin_group_and_items_flagged_admin():
+    admin = _group("Admin")
+    assert admin["admin"] is True
+    assert all(item["admin"] is True for item in admin["items"])
+    # Non-admin groups are not admin-gated.
+    assert _group("Intel")["admin"] is False
+
+
+# ── uniqueness ──────────────────────────────────────────────────────────────
+
+def test_item_urls_are_unique():
+    # Scope to item URLs only. Group URLs legitimately equal their Overview
+    # item URL (e.g. /industry, /intel, /tools, /map, /dashboard, /admin), so
+    # they are deliberately excluded from this uniqueness assertion.
+    urls = [url for _g, _lbl, url in _internal_item_urls()]
+    # include external item urls too for full duplicate detection
+    ext = [item["url"] for grp in NAV_GROUPS for item in grp["items"]
+           if item.get("external")]
+    all_urls = urls + ext
+    dupes = [u for u in set(all_urls) if all_urls.count(u) > 1]
+    assert not dupes, f"Duplicate item URLs in registry: {dupes}"
+
+
+def test_labels_unique_within_each_group():
+    for group in NAV_GROUPS:
+        labels = [item["label"] for item in group["items"]]
+        dupes = [l for l in set(labels) if labels.count(l) > 1]
+        assert not dupes, f"Duplicate labels in group {group['label']!r}: {dupes}"
+
+
+def test_landing_group_override_only_on_wormhole_reference_items():
+    """The three wormhole reference tools live in the Map nav group but keep
+    their landing cards on the Intel landing via landing_group."""
+    overridden = {
+        item["label"]: item["landing_group"]
+        for grp in NAV_GROUPS
+        for item in grp["items"]
+        if item.get("landing_group")
+    }
+    assert overridden == {
+        "Wormhole Systems": "Intel",
+        "Wormhole Types": "Intel",
+        "System Effects": "Intel",
+    }
