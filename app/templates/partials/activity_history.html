@@ -1,0 +1,81 @@
+<div class="b-panel b-pad-md">
+    <div style="position:relative;height:320px;"><canvas id="hist-chart"></canvas></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
+        <button type="button" class="b-btn b-btn-sm" id="hist-prev">&lsaquo; year</button>
+        <input type="range" id="hist-slider" min="0" max="0" value="0" step="1"
+               style="flex:1;accent-color:var(--accent);">
+        <button type="button" class="b-btn b-btn-sm" id="hist-next">year &rsaquo;</button>
+        <span class="b-muted-sm" id="hist-span" style="min-width:170px;text-align:right;"></span>
+    </div>
+    <div class="b-empty" id="hist-error" style="display:none;">History unavailable — refresh to retry.</div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var VIEW = 365, H = null, chart = null;
+    var slider = document.getElementById('hist-slider');
+    var spanEl = document.getElementById('hist-span');
+
+    function fmtIsk(v) {
+        if (v == null) return '';
+        if (v >= 1e12) return (v / 1e12).toFixed(1) + 'T';
+        if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+        return Math.round(v / 1e6) + 'M';
+    }
+
+    function render(start) {
+        var end = Math.min(start + VIEW, H.dates.length);
+        chart.data.labels = H.dates.slice(start, end);
+        chart.data.datasets[0].data = H.pcu_avg.slice(start, end);
+        chart.data.datasets[1].data = H.kills.slice(start, end);
+        chart.data.datasets[2].data = H.isk.slice(start, end);
+        chart.update('none');
+        spanEl.textContent = H.dates[start] + ' → ' + H.dates[end - 1];
+    }
+
+    fetch('/tools/activity/history.json').then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+    }).then(function (data) {
+        H = data;
+        var maxStart = Math.max(0, H.dates.length - VIEW);
+        slider.max = maxStart;
+        slider.value = maxStart;  // open on the most recent year
+        chart = new Chart(document.getElementById('hist-chart'), {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'Avg players', data: [], borderColor: '#c8a951',
+                  backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y' },
+                { label: 'Kills/day', data: [], borderColor: '#8899aa',
+                  backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1' },
+                { label: 'ISK/day', data: [], borderColor: '#aa5555',
+                  backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1', hidden: true },
+            ]},
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                    y: { position: 'left', ticks: { color: '#c8a951' }, grid: { color: '#1a1a1a' } },
+                    y1: { position: 'right', ticks: { color: '#8899aa', callback: function (v) { return v >= 1e9 ? fmtIsk(v) : v; } }, grid: { drawOnChartArea: false } }
+                },
+                plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                    tooltip: { callbacks: { label: function (ctx) {
+                        if (ctx.dataset.label === 'ISK/day') return 'ISK: ' + fmtIsk(ctx.parsed.y);
+                        return ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '—' : ctx.parsed.y.toLocaleString());
+                    } } } }
+            }
+        });
+        render(maxStart);
+        slider.addEventListener('input', function () { render(parseInt(slider.value, 10)); });
+        document.getElementById('hist-prev').addEventListener('click', function () {
+            slider.value = Math.max(0, parseInt(slider.value, 10) - VIEW); render(parseInt(slider.value, 10));
+        });
+        document.getElementById('hist-next').addEventListener('click', function () {
+            slider.value = Math.min(parseInt(slider.max, 10), parseInt(slider.value, 10) + VIEW); render(parseInt(slider.value, 10));
+        });
+    }).catch(function () {
+        document.getElementById('hist-error').style.display = '';
+    });
+})();
+</script>

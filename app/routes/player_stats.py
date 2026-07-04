@@ -643,6 +643,13 @@ async def tools_activity_history(request: Request, db: AsyncSession = Depends(ge
     return JSONResponse(payload)
 
 
+@router.get("/tools/activity/history-panel", response_class=HTMLResponse)
+async def tools_activity_history_panel(request: Request):
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    return templates.TemplateResponse(request, "partials/activity_history.html", {})
+
+
 # Lazy-loaded prior-period overlay. Lives on its own endpoint so the main
 # /tools/activity render isn't slowed by a second pass over the data, and
 # so the slow-window response cache stays small. JS only fetches this when

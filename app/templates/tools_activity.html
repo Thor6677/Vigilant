@@ -680,4 +680,16 @@
 </script>
 {% endif %}
 
+{# ── History browser: full 2003→today timeline, pannable year viewport ──── #}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">History</span>
+        <span class="b-muted-sm">Daily averages since 2003 · drag the slider to travel</span>
+    </div>
+    <div id="history-panel" hx-get="/tools/activity/history-panel"
+         hx-trigger="revealed" hx-swap="innerHTML">
+        <div class="b-empty">Loading history…</div>
+    </div>
+</div>
+
 {% endblock %}
