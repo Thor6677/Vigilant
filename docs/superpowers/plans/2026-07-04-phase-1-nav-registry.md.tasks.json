@@ -1,0 +1,52 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-1-nav-registry.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: app/nav.py registry + helpers + dead-link tests [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Render desktop/mobile/footer chrome from registry [Opus]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Landing grids from registry + Watchlist naming [Sonnet]",
+      "status": "completed",
+      "blockedBy": [
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Legacy /dscan 301 redirects [Sonnet]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Page-header + breadcrumb sweep [Sonnet]",
+      "status": "completed"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Deploy + verify Phase 1 [coordinator]",
+      "status": "completed",
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-04"
+}
