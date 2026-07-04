@@ -1,0 +1,31 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-3-quick-wins.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Discord alert relay [Sonnet]",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: EVE-Scout Thera/Turnur routing [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: PWA manifest [Sonnet]",
+      "status": "completed"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Deploy + verify Phase 3 [coordinator]",
+      "status": "completed",
+      "blockedBy": [
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-04"
+}
