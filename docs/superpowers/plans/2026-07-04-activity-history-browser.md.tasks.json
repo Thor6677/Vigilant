@@ -4,13 +4,13 @@
     {
       "id": 29,
       "subject": "Task 1: Resumable ISK backfill module",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** app/intel/killmail_isk_backfill.py \u2014 month-chunked, insert-only, resumable backfill with tests. Full code in plan Task 1.\n\n```json:metadata\n{\"files\": [\"app/intel/killmail_isk_backfill.py\", \"tests/test_isk_backfill.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/ -v\", \"acceptanceCriteria\": [\"per-day aggregation correct\", \"existing dates untouched\", \"fully-covered month fast-skips\", \"20 tests pass\"]}\n```"
     },
     {
       "id": 30,
       "subject": "Task 2: Backfill wiring + aggregate ISK read + full warm list",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         29
       ],
@@ -19,7 +19,7 @@
     {
       "id": 31,
       "subject": "Task 3: history.json endpoint + SWR/warm slot",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         30
       ],
@@ -28,7 +28,7 @@
     {
       "id": 32,
       "subject": "Task 4: History UI section",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         31
       ],
@@ -44,5 +44,5 @@
       "description": "**Goal:** Deploy; warm completes 10 windows no OOM; backfill progressing; user approves UI.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"docker logs + stats + user approval\", \"acceptanceCriteria\": [\"clean deploy\", \"pre-warm 10 windows no OOM\", \"backfill logging\", \"user approval\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-07-04T01:46:14Z"
+  "lastUpdated": "2026-07-04T03:02:29Z"
 }
