@@ -110,13 +110,11 @@ async def warm_activity_cache() -> None:
     Called from main.py startup via asyncio.create_task.
     """
     await asyncio.sleep(30)  # let boot-time work (SDE check, consumers) settle
-    # 5y/all are EXCLUDED: their raw ISK scan walks the whole 60M-row
-    # killmails table and SQLite's GROUP BY temp b-tree blew the 2.5GB
-    # cgroup — warming them OOM-killed the container on 2026-07-04
-    # (kernel: "Memory cgroup out of memory: Killed process (uvicorn)").
-    # They stay compute-on-click until their ISK read moves to the daily
-    # aggregate table. Do NOT re-add them to this list before that.
-    for window in ("30d", "7d", "1d", "90d", "36h", "1h", "1y"):
+    # All 9 windows warm safely now: the 5y/all ISK read hits the daily
+    # aggregate (bounded rows), never the raw killmails table. The
+    # 2026-07-04 OOM that forced their exclusion is documented in
+    # docs/superpowers/specs/2026-07-04-activity-history-browser-design.md.
+    for window in ("30d", "7d", "1d", "90d", "36h", "1h", "1y", "5y", "all"):
         if window in _payload_cache:
             continue  # a user hit it first — SWR owns it now
         _refreshing.add(window)
@@ -353,23 +351,25 @@ async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
                 or any(sum(v) > 0 for v in npc_player_series.values())
             )
     else:
-        # Day+ bins (1y/5y/all): ISK from a raw scan (long windows change
-        # slowly; SWR + the 1h TTL absorb the cost), zones from the daily
-        # aggregate below; fleet/NPC breakdowns are off for these windows.
-        isk_q = (
-            select(
-                _bin_expr(Killmail.killmail_time).label("b"),
-                func.sum(Killmail.total_value).label("isk"),
+        # Day+ bins (1y/5y/all): ISK from the daily aggregate — NEVER a raw
+        # killmails scan (the unwindowed GROUP BY temp b-tree OOM-killed the
+        # container on 2026-07-04; see docs/superpowers/specs/
+        # 2026-07-04-activity-history-browser-design.md). Only vigilant rows
+        # carry ISK; dates the T-040 backfill hasn't reached yet simply
+        # contribute 0 to their bin.
+        isk_rows = (await db.execute(
+            select(KillmailDailyAggregate.date,
+                   KillmailDailyAggregate.total_isk_destroyed)
+            .where(
+                KillmailDailyAggregate.date >= cutoff.date(),
+                KillmailDailyAggregate.total_isk_destroyed.isnot(None),
             )
-            .where(Killmail.killmail_time >= cutoff)
-            .group_by("b")
-        )
-        for b, isk in (await db.execute(isk_q)).all():
-            if b is None:
-                continue
-            i = int(b)
-            if 0 <= i < num_bins:
-                isk_buckets[i] = float(isk or 0.0)
+        )).all()
+        for d, isk in isk_rows:
+            d_dt = datetime(d.year, d.month, d.day)
+            idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
+            if 0 <= idx < num_bins:
+                isk_buckets[idx] += float(isk or 0.0)
         zrows = (await db.execute(
             select(
                 KillmailZoneDailyAggregate.date,

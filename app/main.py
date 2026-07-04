@@ -435,3 +435,8 @@ async def startup():
     # cold (1y raw ISK scan); warming them here means no user ever pays it.
     from app.routes.player_stats import warm_activity_cache
     asyncio.create_task(warm_activity_cache())
+
+    # T-040: one-time resumable ISK backfill (month-chunked, self-skipping
+    # once complete). Enables the aggregate-based 5y/all reads below.
+    from app.intel.killmail_isk_backfill import run_backfill
+    asyncio.create_task(run_backfill())
