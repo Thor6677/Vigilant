@@ -1,0 +1,61 @@
+{# Command palette results partial (Phase 2 Task 1).
+   Rendered by app/routes/palette.py into #cmdk-results.
+
+   Empty query → only the Pages section is present; base.html JS prepends the
+   client-side Pinned / Recent sections above it (into #cmdk-client) and
+   re-applies the ☆/★ pin state after every swap.
+
+   Each result is an <a data-cmdk-item> (arrow keys + Enter navigate it). Page
+   rows carry a sibling ☆ pin button (data-cmdk-pin) OUTSIDE the anchor so a
+   pin click never triggers navigation. The first result overall is marked
+   data-cmdk-selected as a server-side default; the JS re-selects the first
+   visible row after injecting the client sections. #}
+{% set ns = namespace(first=true) %}
+
+{% macro cmdk_row(label, url, context, is_page=false) %}
+  <div class="cmdk-rowwrap">
+    <a class="cmdk-row" data-cmdk-item data-cmdk-url="{{ url }}" data-cmdk-label="{{ label }}"
+       href="{{ url }}"{% if ns.first %} data-cmdk-selected{% endif %}>
+      <span class="cmdk-row-label">{{ label }}</span>
+      <span class="cmdk-row-ctx">{{ context }}</span>
+    </a>
+    {% if is_page %}<button type="button" class="cmdk-star" data-cmdk-pin
+        data-cmdk-url="{{ url }}" data-cmdk-label="{{ label }}"
+        aria-label="Pin {{ label }}" title="Pin">&#9734;</button>{% endif %}
+  </div>
+  {% set ns.first = false %}
+{% endmacro %}
+
+{% set has_any = pages or characters or systems or items %}
+
+{% if pages %}
+<div class="cmdk-section">
+  <div class="cmdk-section-head">Pages</div>
+  {% for p in pages %}{{ cmdk_row(p['label'], p['url'], p['group'], is_page=true) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if characters %}
+<div class="cmdk-section">
+  <div class="cmdk-section-head">Characters</div>
+  {% for c in characters %}{{ cmdk_row(c['label'], c['url'], c['context']) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if systems %}
+<div class="cmdk-section">
+  <div class="cmdk-section-head">Systems</div>
+  {% for s in systems %}{{ cmdk_row(s['label'], s['url'], s['context']) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if items %}
+<div class="cmdk-section">
+  <div class="cmdk-section-head">Items</div>
+  {% for i in items %}{{ cmdk_row(i['label'], i['url'], i['context']) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if q and not has_any %}
+<div class="cmdk-empty">No matches for &ldquo;{{ q }}&rdquo;</div>
+{% endif %}

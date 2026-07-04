@@ -170,6 +170,40 @@
      hx-get="/alerts/timer-banners"
      hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
+
+{# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────
+   MUST be a direct child of <body> (a backdrop-filter / transform ancestor
+   would trap the position:fixed top-layer). Results come from /nav/palette;
+   Pinned/Recent are localStorage-only, injected client-side into #cmdk-client
+   when the query is empty. #}
+<style nonce="{{ request.state.csp_nonce }}">
+#cmdk { padding:0; border:1px solid var(--border); background:var(--surface); color:var(--text); width:min(560px, calc(100vw - 2rem)); max-width:560px; box-shadow:0 12px 48px rgba(0,0,0,0.55); }
+#cmdk::backdrop { background:rgba(0,0,0,0.55); }
+#cmdk .cmdk-inp { width:100%; box-sizing:border-box; padding:0.7rem 0.9rem; background:var(--bg); border:none; border-bottom:1px solid var(--border); color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+#cmdk .cmdk-scroll { max-height:min(60vh, 440px); overflow-y:auto; }
+#cmdk .cmdk-section-head { font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); padding:0.4rem 0.9rem 0.2rem; }
+#cmdk .cmdk-rowwrap { display:flex; align-items:center; }
+#cmdk .cmdk-row { flex:1 1 auto; display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.4rem 0.9rem; color:var(--text); text-decoration:none; font-size:12px; min-width:0; }
+#cmdk .cmdk-row-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#cmdk .cmdk-row-ctx { flex:none; color:var(--muted); font-size:10px; }
+#cmdk .cmdk-row:hover { background:rgba(255,255,255,0.04); }
+#cmdk .cmdk-row[data-cmdk-selected] { background:rgba(255,255,255,0.08); box-shadow:inset 2px 0 0 var(--accent); }
+#cmdk .cmdk-star { flex:none; background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; line-height:1; padding:0 0.7rem; }
+#cmdk .cmdk-star.is-pinned { color:var(--accent); }
+#cmdk .cmdk-empty { padding:0.9rem; text-align:center; font-size:11px; color:var(--muted); }
+#cmdk .cmdk-hint { display:flex; gap:0.9rem; padding:0.4rem 0.9rem; border-top:1px solid var(--border); font-size:9px; color:var(--muted); }
+</style>
+<dialog id="cmdk" aria-label="Command palette">
+    <input id="cmdk-input" class="cmdk-inp" type="text" name="q" autocomplete="off" spellcheck="false"
+           placeholder="Search pages, characters, systems, items…"
+           hx-get="/nav/palette" hx-trigger="input changed delay:150ms"
+           hx-target="#cmdk-results" hx-swap="innerHTML">
+    <div class="cmdk-scroll">
+        <div id="cmdk-client"></div>
+        <div id="cmdk-results"></div>
+    </div>
+    <div class="cmdk-hint"><span>&uarr;&darr; navigate</span><span>&crarr; open</span><span>&#9734; pin</span><span>esc close</span></div>
+</dialog>
 {% endif %}
 
 {% block breadcrumbs %}{% endblock %}
@@ -364,6 +398,165 @@
         el.innerHTML = '<div style="padding:0.3rem 0.6rem;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--surface);display:inline-block;">'
             + 'network error — refresh to retry'
             + '</div>';
+    });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* Command palette (Ctrl+K) — Phase 2 Task 1. Canonical JS lives here (never in
+   the partial — partial-override gotcha). Guarded so it initialises once.
+   Pins/recents are localStorage-only; the server never sees them. */
+(function() {
+    if (window.__cmdkInit) return;
+    window.__cmdkInit = true;
+
+    var RECENTS_KEY = 'cmdk_recents';
+    var PINS_KEY = 'cmdk_pins';
+    var RECENTS_CAP = 8;
+
+    function $(id) { return document.getElementById(id); }
+    function dlg() { return $('cmdk'); }
+
+    function readLS(key) {
+        try { var v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+    }
+    function writeLS(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {} }
+
+    function itemEls() { return Array.prototype.slice.call(dlg().querySelectorAll('[data-cmdk-item]')); }
+    function selected() { return dlg().querySelector('[data-cmdk-item][data-cmdk-selected]'); }
+    function selectFirst() {
+        var els = itemEls();
+        els.forEach(function (el) { el.removeAttribute('data-cmdk-selected'); });
+        if (els.length) els[0].setAttribute('data-cmdk-selected', '');
+    }
+    function move(delta) {
+        var els = itemEls();
+        if (!els.length) return;
+        var cur = selected();
+        var idx = cur ? els.indexOf(cur) : -1;
+        idx = (idx + delta + els.length) % els.length;
+        els.forEach(function (el) { el.removeAttribute('data-cmdk-selected'); });
+        els[idx].setAttribute('data-cmdk-selected', '');
+        els[idx].scrollIntoView({ block: 'nearest' });
+    }
+
+    function pushRecent(url, label) {
+        if (!url) return;
+        var recents = readLS(RECENTS_KEY).filter(function (r) { return r.url !== url; });
+        recents.unshift({ url: url, label: label, ts: Date.now() });
+        writeLS(RECENTS_KEY, recents.slice(0, RECENTS_CAP));
+    }
+    function isPinned(url) { return readLS(PINS_KEY).some(function (p) { return p.url === url; }); }
+    function togglePin(url, label) {
+        var pins = readLS(PINS_KEY);
+        if (pins.some(function (p) { return p.url === url; })) {
+            pins = pins.filter(function (p) { return p.url !== url; });
+        } else {
+            pins.unshift({ url: url, label: label });
+        }
+        writeLS(PINS_KEY, pins);
+    }
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function rowHTML(url, label, ctx) {
+        return '<div class="cmdk-rowwrap">'
+            + '<a class="cmdk-row" data-cmdk-item data-cmdk-url="' + esc(url) + '" data-cmdk-label="' + esc(label) + '" href="' + esc(url) + '">'
+            + '<span class="cmdk-row-label">' + esc(label) + '</span>'
+            + '<span class="cmdk-row-ctx">' + esc(ctx) + '</span></a>'
+            + '<button type="button" class="cmdk-star" data-cmdk-pin data-cmdk-url="' + esc(url) + '" data-cmdk-label="' + esc(label) + '" aria-label="Pin" title="Pin">&#9734;</button>'
+            + '</div>';
+    }
+    function sectionHTML(title, rows) {
+        if (!rows.length) return '';
+        var body = rows.map(function (r) { return rowHTML(r.url, r.label, r.ctx || ''); }).join('');
+        return '<div class="cmdk-section"><div class="cmdk-section-head">' + esc(title) + '</div>' + body + '</div>';
+    }
+    function renderClient() {
+        var client = $('cmdk-client');
+        if (!client) return;
+        var pins = readLS(PINS_KEY).map(function (p) { return { url: p.url, label: p.label, ctx: 'Pinned' }; });
+        var recents = readLS(RECENTS_KEY).map(function (r) { return { url: r.url, label: r.label, ctx: 'Recent' }; });
+        client.innerHTML = sectionHTML('Pinned', pins) + sectionHTML('Recent', recents);
+    }
+    function clearClient() { var c = $('cmdk-client'); if (c) c.innerHTML = ''; }
+    function applyStars() {
+        dlg().querySelectorAll('[data-cmdk-pin]').forEach(function (btn) {
+            var url = btn.getAttribute('data-cmdk-url');
+            if (isPinned(url)) { btn.classList.add('is-pinned'); btn.innerHTML = '&#9733;'; }
+            else { btn.classList.remove('is-pinned'); btn.innerHTML = '&#9734;'; }
+        });
+    }
+    function queryEmpty() { var i = $('cmdk-input'); return !i || !i.value.trim(); }
+
+    /* Re-apply pin state + selection after every palette results swap — same
+       discipline as the alert-banner dismiss re-apply. Scoped to #cmdk-results
+       so it never fights the banner handler above. */
+    function afterResults() {
+        if (queryEmpty()) renderClient(); else clearClient();
+        applyStars();
+        selectFirst();
+    }
+
+    function openPalette() {
+        var d = dlg();
+        if (!d || d.open) return;
+        var inp = $('cmdk-input');
+        if (inp) inp.value = '';
+        if (window.htmx) htmx.ajax('GET', '/nav/palette?q=', { target: '#cmdk-results', swap: 'innerHTML' });
+        d.showModal();
+        if (inp) setTimeout(function () { inp.focus(); }, 0);
+    }
+    function closePalette() { var d = dlg(); if (d && d.open) d.close(); }
+
+    document.addEventListener('keydown', function (e) {
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            var d = dlg();
+            if (d && d.open) closePalette(); else openPalette();
+        }
+    });
+
+    var d0 = dlg();
+    if (d0) {
+        d0.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+            else if (e.key === 'Enter') {
+                var sel = selected();
+                if (sel) {
+                    e.preventDefault();
+                    var url = sel.getAttribute('data-cmdk-url');
+                    pushRecent(url, sel.getAttribute('data-cmdk-label'));
+                    window.location.href = url;
+                }
+            }
+        });
+        d0.addEventListener('click', function (e) {
+            var star = e.target.closest ? e.target.closest('[data-cmdk-pin]') : null;
+            if (star) {
+                e.preventDefault();
+                e.stopPropagation();
+                togglePin(star.getAttribute('data-cmdk-url'), star.getAttribute('data-cmdk-label'));
+                if (queryEmpty()) renderClient();
+                applyStars();
+                selectFirst();
+                return;
+            }
+            var row = e.target.closest ? e.target.closest('[data-cmdk-item]') : null;
+            if (row) pushRecent(row.getAttribute('data-cmdk-url'), row.getAttribute('data-cmdk-label'));
+        });
+        /* Backdrop click (target is the dialog element itself) closes. */
+        d0.addEventListener('click', function (e) { if (e.target === d0) closePalette(); });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+        if (evt.detail && evt.detail.target && evt.detail.target.id === 'cmdk-results') {
+            afterResults();
+        }
     });
 })();
 </script>

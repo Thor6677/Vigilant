@@ -260,12 +260,23 @@ recalculate = function() {
     saveMfgState();
 };
 
-/* Restore on page load — query param type_id takes priority */
+/* Restore on page load — query params take priority (type_id > search).
+   ?search=<name> is used by the Ctrl+K command palette Items bucket: prefill
+   the blueprint search box and fire the existing htmx search so the user lands
+   on the picker with results already loaded. */
 document.addEventListener('DOMContentLoaded', function() {
     var params = new URLSearchParams(window.location.search);
     var qTypeId = params.get('type_id');
+    var qSearch = params.get('search');
     if (qTypeId) {
         selectBlueprint(parseInt(qTypeId));
+    } else if (qSearch) {
+        var inp = document.getElementById('bp-search');
+        if (inp) {
+            inp.value = qSearch;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.focus();
+        }
     } else {
         restoreMfgState();
     }

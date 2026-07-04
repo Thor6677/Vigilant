@@ -53,6 +53,7 @@ from app.routes.structure_age import router as structure_age_router
 from app.routes.wormholes import router as wormholes_router
 from app.routes.fitting import router as fitting_router
 from app.routes.landings import router as landings_router
+from app.routes.palette import router as palette_router
 
 
 def _css_version() -> str:
@@ -193,6 +194,7 @@ app.include_router(structure_age_router)
 app.include_router(wormholes_router)
 app.include_router(fitting_router)
 app.include_router(landings_router)
+app.include_router(palette_router)
 
 
 @app.on_event("startup")
