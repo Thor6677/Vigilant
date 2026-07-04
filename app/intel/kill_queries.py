@@ -368,9 +368,18 @@ async def solo_gang_split(character_id: int, days: int = 90) -> dict:
     return buckets
 
 
+STREAKS_MAX_ROWS = 20_000  # cap on most-recent involvements scanned per character
+
+
 async def streaks(character_id: int) -> dict:
     """Current win streak, longest win streak, days since last loss.
-    Ported from the v1 killmails-wip branch."""
+    Exact within the character's STREAKS_MAX_ROWS most recent involvements;
+    older history is ignored. This caps rows materialized in Python — the old
+    unbounded .all() loaded every involvement tuple into the 2.5GB container,
+    a memory/latency problem for prolific characters (2026-07-04 audit BUG-3).
+    The DB still gathers and sorts all involvements (multi-index OR + temp
+    b-tree; the LIMIT applies after the sort), so this bounds transfer, not
+    the scan. Ported from the v1 killmails-wip branch."""
     async with AsyncSessionLocal() as db:
         attacker_ids_q = select(KillmailAttacker.killmail_id).where(
             KillmailAttacker.character_id == character_id
@@ -381,9 +390,10 @@ async def streaks(character_id: int) -> dict:
                 Killmail.victim_character_id == character_id,
                 Killmail.killmail_id.in_(attacker_ids_q),
             ))
-            .order_by(Killmail.killmail_time.asc())
+            .order_by(Killmail.killmail_time.desc(), Killmail.killmail_id.desc())
+            .limit(STREAKS_MAX_ROWS)
         )
-        rows = (await db.execute(q)).all()
+        rows = list(reversed((await db.execute(q)).all()))
 
     current_win = 0
     longest_win = 0
