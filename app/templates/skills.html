@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_entity_links.html" import entity_links %}
 {% block title %}SKILL PLANNER — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 {% if char %}
@@ -24,6 +25,9 @@
 </div>
 
 {% if char %}
+{# ── Cross-links ─────────────────────────────────────────────────────────── #}
+<div style="margin-bottom:0.75rem;">{{ entity_links("character", char.character_id, char.character_name, current="skills") }}</div>
+
 {% set _cid = char.character_id %}
 <div class="b-tab-strip">
     <a href="/character/{{ _cid }}">Overview</a>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_entity_links.html" import entity_links %}
 {% block title %}{% if is_corp %}CORP {% endif %}MINING — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 {% if is_corp and corp_id %}
@@ -42,6 +43,9 @@
 </div>
 
 {% if char and char.character_id and not is_corp %}
+{# ── Cross-links ─────────────────────────────────────────────────────────── #}
+<div style="margin-bottom:0.75rem;">{{ entity_links("character", char.character_id, char.character_name, current="mining") }}</div>
+
 {% set _cid = char.character_id %}
 <div class="b-tab-strip">
     <a href="/character/{{ _cid }}">Overview</a>
