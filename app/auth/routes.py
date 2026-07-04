@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import secrets
 import base64
 import httpx
@@ -20,6 +21,7 @@ from app.esi import corporation as esi_corp
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
 templates = Jinja2Templates(directory="app/templates")
+logger = logging.getLogger(__name__)
 
 EVE_SCOPES = " ".join([
     "esi-location.read_location.v1",
@@ -144,8 +146,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         try:
             from dateutil import parser
             birthday = parser.isoparse(birthday_str).replace(tzinfo=None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("birthday parse failed for %s: %s", birthday_str, exc)
 
     corporation_name = None
     alliance_name = None
@@ -153,14 +155,14 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         try:
             corp_info = await esi_corp.get_corporation_info(esi, corporation_id)
             corporation_name = corp_info.get("name")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("corp name lookup failed for %s: %s", corporation_id, exc)
     if alliance_id:
         try:
             alliance_info = await esi_corp.get_alliance_info(esi, alliance_id)
             alliance_name = alliance_info.get("name")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("alliance name lookup failed for %s: %s", alliance_id, exc)
 
     result = await db.execute(select(Character).where(Character.character_id == character_id))
     existing_char = result.scalar_one_or_none()

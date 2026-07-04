@@ -3013,6 +3013,8 @@ async def _compute_corp_stats_html(user_id: int, db: AsyncSession) -> str:
 
             for (label, _), result in zip(tasks, results):
                 if result is None or isinstance(result, Exception):
+                    if isinstance(result, Exception):
+                        logger.warning("corp-stats %s fetch failed for corp %s: %s", label, corp_id, result)
                     continue
                 if label == "wallet" and isinstance(result, list):
                     corp_wallet_total += sum(d.get("balance", 0) for d in result)
@@ -3033,8 +3035,8 @@ async def _compute_corp_stats_html(user_id: int, db: AsyncSession) -> str:
                             corp_done_jobs += 1
                 elif label == "orders" and isinstance(result, list):
                     corp_active_orders += len(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("corp-stats fetch failed for corp %s: %s", corp_id, exc)
 
     await asyncio.gather(*[fetch_corp_data(cid, chars) for cid, chars in corp_char_lists.items()])
 
