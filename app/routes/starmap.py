@@ -39,9 +39,9 @@ ESI_STATS = [
     ("/industry/systems/",            "indices",      3600),   # industry cost indices
 ]
 
-# External (non-ESI) data sources. Polled with their own cadence.
-EVE_SCOUT_URL = "https://api.eve-scout.com/v2/public/signatures"
-EVE_SCOUT_POLL_SECONDS = 600   # 10 minutes — Eve-Scout updates infrequently
+# External (non-ESI) Thera/Turnur wormhole feed is owned by app/intel/evescout.py
+# (10-min TTL, single-flight, stale-on-error). The poller mirrors its raw output
+# into _stats_cache["thera"] so /api/map/stats keeps serving it unchanged.
 
 # EVE faction IDs
 FACTION_NAMES = {
@@ -178,24 +178,20 @@ async def _snapshot_activity(kills_data: list[dict], jumps_data: list[dict]):
         log.warning("Activity snapshot persistence error: %s", e)
 
 
-async def _poll_eve_scout(client: httpx.AsyncClient):
-    """Fetch current Thera/Turnur wormhole connections from Eve-Scout.
-    Cached under the 'thera' stats key; no auth required."""
-    cached = _stats_cache.get("thera", {})
-    last = cached.get("updated_at")
-    if last and (datetime.now(timezone.utc) - last).total_seconds() < EVE_SCOUT_POLL_SECONDS:
-        return
-    try:
-        resp = await client.get(EVE_SCOUT_URL, timeout=20)
-        if resp.status_code != 200:
-            log.warning("Eve-Scout returned %d", resp.status_code)
-            return
-        _stats_cache["thera"] = {
-            "data": resp.json(),
-            "updated_at": datetime.now(timezone.utc),
-        }
-    except Exception as e:
-        log.warning("Eve-Scout fetch error: %s", e)
+async def _poll_eve_scout():
+    """Refresh the Thera/Turnur wormhole feed and mirror it into the 'thera'
+    stats key so /api/map/stats keeps serving the raw signatures unchanged.
+
+    The actual fetch/parse/cache lives in app/intel/evescout.py; that module
+    owns the 10-minute TTL, single-flight lock, and stale-on-error fallback.
+    We only reflect its latest raw list + fetch timestamp into _stats_cache."""
+    from app.intel import evescout
+
+    data = await evescout.get_signatures()
+    _stats_cache["thera"] = {
+        "data": data,
+        "updated_at": evescout.last_updated() or datetime.now(timezone.utc),
+    }
 
 
 async def _poll_esi_stats():
@@ -213,83 +209,81 @@ async def _poll_esi_stats():
         timeout=30,
         headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"},
     ) as client:
-        async with httpx.AsyncClient(timeout=20,
-            headers={"Accept": "application/json", "User-Agent": "Vigilant/1.0"}) as ext_client:
-            while True:
-                kills_updated = False
-                jumps_updated = False
-                for path, key, interval in ESI_STATS:
-                    try:
-                        cached = _stats_cache.get(key, {})
-                        last = cached.get("updated_at")
-                        if last and (datetime.now(timezone.utc) - last).total_seconds() < interval:
-                            continue
-
-                        headers = {}
-                        if cached.get("etag"):
-                            headers["If-None-Match"] = cached["etag"]
-
-                        resp = await client.get(path, headers=headers)
-
-                        remain = resp.headers.get("X-ESI-Error-Limit-Remain")
-                        if remain and int(remain) < 20:
-                            log.warning("ESI error limit low (%s), pausing map poller 60s", remain)
-                            await asyncio.sleep(60)
-                            continue
-
-                        if resp.status_code == 304:
-                            _stats_cache[key]["updated_at"] = datetime.now(timezone.utc)
-                            continue
-
-                        if resp.status_code == 200:
-                            new_data = resp.json()
-                            _stats_cache[key] = {
-                                "data": new_data,
-                                "etag": resp.headers.get("ETag"),
-                                "updated_at": datetime.now(timezone.utc),
-                            }
-                            log.debug("Map stats updated: %s (%d items)", key, len(new_data))
-                            # Diff sovereignty changes
-                            if key == "sovereignty":
-                                try:
-                                    await _diff_and_store_sov_changes(new_data)
-                                except Exception as sov_err:
-                                    log.warning("Sov diff error: %s", sov_err)
-                                # Fire-and-forget warm of the alliance name
-                                # cache so clicks on system panels never
-                                # block on per-alliance ESI lookups.
-                                try:
-                                    asyncio.create_task(_warm_alliance_cache_from_sov())
-                                except Exception as warm_err:
-                                    log.warning("Alliance warm schedule error: %s", warm_err)
-                            if key == "kills":
-                                kills_updated = True
-                            elif key == "jumps":
-                                jumps_updated = True
-                        else:
-                            log.warning("ESI %s returned %d", path, resp.status_code)
-
-                    except Exception as e:
-                        log.warning("Map stats poll error for %s: %s", key, e)
-
-                # After a poll cycle where either kills or jumps just refreshed,
-                # persist an activity snapshot so the 48h graph has data.
-                if kills_updated or jumps_updated:
-                    try:
-                        await _snapshot_activity(
-                            _stats_cache.get("kills", {}).get("data", []),
-                            _stats_cache.get("jumps", {}).get("data", []),
-                        )
-                    except Exception as snap_err:
-                        log.warning("Snapshot error: %s", snap_err)
-
-                # External sources
+        while True:
+            kills_updated = False
+            jumps_updated = False
+            for path, key, interval in ESI_STATS:
                 try:
-                    await _poll_eve_scout(ext_client)
-                except Exception as ext_err:
-                    log.warning("Eve-Scout poll error: %s", ext_err)
+                    cached = _stats_cache.get(key, {})
+                    last = cached.get("updated_at")
+                    if last and (datetime.now(timezone.utc) - last).total_seconds() < interval:
+                        continue
 
-                await asyncio.sleep(60)
+                    headers = {}
+                    if cached.get("etag"):
+                        headers["If-None-Match"] = cached["etag"]
+
+                    resp = await client.get(path, headers=headers)
+
+                    remain = resp.headers.get("X-ESI-Error-Limit-Remain")
+                    if remain and int(remain) < 20:
+                        log.warning("ESI error limit low (%s), pausing map poller 60s", remain)
+                        await asyncio.sleep(60)
+                        continue
+
+                    if resp.status_code == 304:
+                        _stats_cache[key]["updated_at"] = datetime.now(timezone.utc)
+                        continue
+
+                    if resp.status_code == 200:
+                        new_data = resp.json()
+                        _stats_cache[key] = {
+                            "data": new_data,
+                            "etag": resp.headers.get("ETag"),
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                        log.debug("Map stats updated: %s (%d items)", key, len(new_data))
+                        # Diff sovereignty changes
+                        if key == "sovereignty":
+                            try:
+                                await _diff_and_store_sov_changes(new_data)
+                            except Exception as sov_err:
+                                log.warning("Sov diff error: %s", sov_err)
+                            # Fire-and-forget warm of the alliance name
+                            # cache so clicks on system panels never
+                            # block on per-alliance ESI lookups.
+                            try:
+                                asyncio.create_task(_warm_alliance_cache_from_sov())
+                            except Exception as warm_err:
+                                log.warning("Alliance warm schedule error: %s", warm_err)
+                        if key == "kills":
+                            kills_updated = True
+                        elif key == "jumps":
+                            jumps_updated = True
+                    else:
+                        log.warning("ESI %s returned %d", path, resp.status_code)
+
+                except Exception as e:
+                    log.warning("Map stats poll error for %s: %s", key, e)
+
+            # After a poll cycle where either kills or jumps just refreshed,
+            # persist an activity snapshot so the 48h graph has data.
+            if kills_updated or jumps_updated:
+                try:
+                    await _snapshot_activity(
+                        _stats_cache.get("kills", {}).get("data", []),
+                        _stats_cache.get("jumps", {}).get("data", []),
+                    )
+                except Exception as snap_err:
+                    log.warning("Snapshot error: %s", snap_err)
+
+            # External (non-ESI) sources — EVE-Scout Thera/Turnur feed.
+            try:
+                await _poll_eve_scout()
+            except Exception as ext_err:
+                log.warning("Eve-Scout poll error: %s", ext_err)
+
+            await asyncio.sleep(60)
 
 
 def start_map_poller():
