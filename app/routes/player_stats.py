@@ -110,7 +110,13 @@ async def warm_activity_cache() -> None:
     Called from main.py startup via asyncio.create_task.
     """
     await asyncio.sleep(30)  # let boot-time work (SDE check, consumers) settle
-    for window in ("30d", "7d", "1d", "90d", "36h", "1h", "1y", "5y", "all"):
+    # 5y/all are EXCLUDED: their raw ISK scan walks the whole 60M-row
+    # killmails table and SQLite's GROUP BY temp b-tree blew the 2.5GB
+    # cgroup — warming them OOM-killed the container on 2026-07-04
+    # (kernel: "Memory cgroup out of memory: Killed process (uvicorn)").
+    # They stay compute-on-click until their ISK read moves to the daily
+    # aggregate table. Do NOT re-add them to this list before that.
+    for window in ("30d", "7d", "1d", "90d", "36h", "1h", "1y"):
         if window in _payload_cache:
             continue  # a user hit it first — SWR owns it now
         _refreshing.add(window)
