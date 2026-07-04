@@ -100,12 +100,13 @@ def test_prefix_match_matches_subpaths():
     assert item_active(mfg, "/industry") is False
 
 
-def test_dscan_item_matches_both_prefixes():
+def test_dscan_item_matches_intel_prefix_only():
+    """Legacy /dscan paths 301-redirect (app/routes/dscan.py), so they are
+    no longer resting paths and need no active-state rule."""
     dscan = _find("D-Scan / Local")
     assert item_active(dscan, "/intel/dscan") is True
     assert item_active(dscan, "/intel/dscan/456") is True
-    assert item_active(dscan, "/dscan") is True
-    assert item_active(dscan, "/dscan/456") is True
+    assert item_active(dscan, "/dscan") is False
     assert item_active(dscan, "/intel/watch") is False
 
 
@@ -256,3 +257,18 @@ def test_landing_grids_built_from_registry():
     all_cards = INDUSTRY_TOOLS + INTEL_TOOLS + TOOLS_TOOLS
     assert not any(c["name"] == "Overview" for c in all_cards)
     assert all(c["desc"] and c["features"] for c in all_cards)
+
+
+def test_legacy_dscan_routes_301_redirect():
+    from fastapi.testclient import TestClient
+    import app.main as main
+
+    client = TestClient(main.app, follow_redirects=False)
+    r = client.get("/dscan")
+    assert r.status_code == 301
+    assert r.headers["location"] == "/intel/dscan"
+    r = client.get("/dscan/abc123")
+    assert r.status_code == 301
+    assert r.headers["location"] == "/intel/abc123"
+    r = client.get("/dscan?foo=1")
+    assert r.headers["location"] == "/intel/dscan?foo=1"

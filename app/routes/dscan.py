@@ -434,10 +434,13 @@ async def intel_page(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse(request, "intel.html", {"history": history})
 
 
-# Keep old /dscan URL working
+# Keep old /dscan URL working (301 so bookmarks/history migrate)
 @router.get("/dscan", response_class=HTMLResponse)
 async def dscan_redirect(request: Request):
-    return RedirectResponse("/intel/dscan")
+    target = "/intel/dscan"
+    if request.url.query:
+        target += f"?{request.url.query}"
+    return RedirectResponse(target, status_code=301)
 
 
 @router.post("/intel/parse")
@@ -551,10 +554,10 @@ async def intel_view(scan_id: str, request: Request, db: AsyncSession = Depends(
     })
 
 
-# Keep old /dscan/{id} URLs working
+# Keep old /dscan/{id} URLs working (301 so bookmarks/history migrate)
 @router.get("/dscan/{scan_id}", response_class=HTMLResponse)
 async def dscan_view_redirect(scan_id: str, request: Request):
-    return RedirectResponse(f"/intel/{scan_id}")
+    return RedirectResponse(f"/intel/{scan_id}", status_code=301)
 
 
 @router.post("/intel/{scan_id}/merge", response_class=HTMLResponse)

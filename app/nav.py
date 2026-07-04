@@ -224,7 +224,7 @@ NAV_GROUPS = [
             _item(
                 "D-Scan / Local", "/intel/dscan",
                 # Legacy /dscan prefix kept until the Task 4 301 redirects ship.
-                [("prefix", "/intel/dscan"), ("prefix", "/dscan")],
+                [("prefix", "/intel/dscan")],
                 desc="Paste a D-scan or local roster and get an analyzed breakdown: ships by class, per-pilot zKillboard links, and corp/alliance affiliations.",
                 features=[
                     "D-scan paste parsing",
