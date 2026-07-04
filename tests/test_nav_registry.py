@@ -237,3 +237,22 @@ def test_landing_group_override_only_on_wormhole_reference_items():
         "Wormhole Types": "Intel",
         "System Effects": "Intel",
     }
+
+
+def test_landing_grids_built_from_registry():
+    """landings.py card grids derive from NAV_GROUPS — composition pinned here."""
+    from app.routes.landings import INDUSTRY_TOOLS, INTEL_TOOLS, TOOLS_TOOLS
+
+    intel_names = [c["name"] for c in INTEL_TOOLS]
+    for expected in ("Kill Feed", "Kill Search", "Watchlist",
+                     "Wormhole Systems", "Wormhole Types", "System Effects"):
+        assert expected in intel_names
+
+    industry_names = [c["name"] for c in INDUSTRY_TOOLS]
+    assert len(industry_names) == 7 and "Manufacturing" in industry_names
+
+    assert "Structure Age" in [c["name"] for c in TOOLS_TOOLS]
+
+    all_cards = INDUSTRY_TOOLS + INTEL_TOOLS + TOOLS_TOOLS
+    assert not any(c["name"] == "Overview" for c in all_cards)
+    assert all(c["desc"] and c["features"] for c in all_cards)
