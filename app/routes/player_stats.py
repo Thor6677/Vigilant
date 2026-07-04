@@ -77,7 +77,7 @@ _WINDOWS = {
 # check and the add() in the handler — don't insert one.
 _WINDOW_TTL_SECONDS = {
     "1h": 300, "1d": 300, "36h": 300, "7d": 600, "30d": 900, "90d": 900,
-    "1y": 3600, "5y": 3600, "all": 3600,
+    "1y": 3600, "5y": 3600, "all": 3600, "history": 3600,
 }
 _payload_cache: dict[str, tuple[datetime, dict]] = {}
 _refreshing: set[str] = set()
@@ -87,7 +87,10 @@ async def _refresh_payload(window: str) -> None:
     """Background SWR refresh. Own DB session (async-session safety)."""
     try:
         async with AsyncSessionLocal() as db:
-            payload = await _build_activity_payload(db, window)
+            if window == "history":
+                payload = await _build_history_payload(db)
+            else:
+                payload = await _build_activity_payload(db, window)
         _payload_cache[window] = (
             datetime.now(timezone.utc).replace(tzinfo=None)
             + timedelta(seconds=_WINDOW_TTL_SECONDS[window]),
@@ -121,6 +124,9 @@ async def warm_activity_cache() -> None:
         _refreshing.add(window)
         await _refresh_payload(window)
         await asyncio.sleep(5)
+    if "history" not in _payload_cache:
+        _refreshing.add("history")
+        await _refresh_payload("history")
     log.info("tools/activity: cache pre-warm complete (%d windows)", len(_payload_cache))
 
 # Heatmap is a 90-day aggregate, window-independent, and runs ~1.5s via a
@@ -560,6 +566,81 @@ async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
         "live_mode": False,
     }
     return payload
+
+
+async def _build_history_payload(db: AsyncSession) -> dict:
+    """Full daily timeline for the History browser: 2003-05-28 → today,
+    parallel arrays, None where a series has no coverage. ~8,400 rows of
+    pre-aggregated dailies — bounded regardless of killmail volume."""
+    start = _FIRST_PCU.date()
+    today = datetime.now(timezone.utc).date()
+    n = (today - start).days + 1
+    dates = [start + timedelta(days=i) for i in range(n)]
+
+    pcu_avg: list[int | None] = [None] * n
+    pcu_peak: list[int | None] = [None] * n
+    kills: list[int | None] = [None] * n
+    isk: list[float | None] = [None] * n
+
+    best_pcu: dict = {}
+    for d, src, avg_pc, peak_pc in (await db.execute(
+        select(PlayerCountDailyAggregate.date, PlayerCountDailyAggregate.source,
+               PlayerCountDailyAggregate.avg_pc, PlayerCountDailyAggregate.peak_pc)
+    )).all():
+        pri = _PCU_SOURCE_PRIORITY.get(src, 99)
+        cur = best_pcu.get(d)
+        if cur is None or pri < cur[0]:
+            best_pcu[d] = (pri, avg_pc, peak_pc)
+    for d, (_pri, avg_pc, peak_pc) in best_pcu.items():
+        i = (d - start).days
+        if 0 <= i < n:
+            pcu_avg[i] = round(float(avg_pc)) if avg_pc is not None else None
+            pcu_peak[i] = int(peak_pc) if peak_pc is not None else None
+
+    best_kda: dict = {}
+    for d, src, kc, isk_v in (await db.execute(
+        select(KillmailDailyAggregate.date, KillmailDailyAggregate.source,
+               KillmailDailyAggregate.kill_count,
+               KillmailDailyAggregate.total_isk_destroyed)
+    )).all():
+        cur = best_kda.get(d)
+        if cur is None or (cur[0] == "zkb-totals" and src == "vigilant"):
+            best_kda[d] = (src, kc, isk_v)
+    for d, (_src, kc, isk_v) in best_kda.items():
+        i = (d - start).days
+        if 0 <= i < n:
+            kills[i] = int(kc) if kc is not None else None
+            isk[i] = float(isk_v) if isk_v is not None else None
+
+    return {
+        "dates": [d.isoformat() for d in dates],
+        "pcu_avg": pcu_avg, "pcu_peak": pcu_peak, "kills": kills, "isk": isk,
+    }
+
+
+@router.get("/tools/activity/history.json")
+async def tools_activity_history(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "auth"}, status_code=401)
+    cached = _payload_cache.get("history")
+    if cached is not None:
+        fresh_until, payload = cached
+        if datetime.now(timezone.utc).replace(tzinfo=None) >= fresh_until:
+            if "history" not in _refreshing:
+                _refreshing.add("history")
+                asyncio.create_task(_refresh_payload("history"))
+        return JSONResponse(payload)
+    try:
+        payload = await _build_history_payload(db)
+    except Exception:
+        log.exception("tools/activity: history build failed")
+        return JSONResponse({"error": "history unavailable"}, status_code=500)
+    _payload_cache["history"] = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        + timedelta(seconds=_WINDOW_TTL_SECONDS["history"]),
+        payload,
+    )
+    return JSONResponse(payload)
 
 
 # Lazy-loaded prior-period overlay. Lives on its own endpoint so the main
