@@ -28,6 +28,7 @@ from app.routes.intel_kills_search import (
     KILLMAIL_TIME_INDEX,
     _build_search_statements,
     _compile_search_where,
+    _should_show_defaulted_note,
 )
 
 
@@ -66,26 +67,78 @@ def test_custom_time_start_also_counts_as_time_bound():
     assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(count_stmt)
 
 
-def test_time_end_alone_is_not_a_time_bound():
+def test_time_end_alone_gets_default_lower_bound():
     # An upper bound alone would force a scan from the dawn of the table
-    # forward on the time index — a pessimization, not the fix. Must NOT
-    # set has_time_bound and must NOT hint.
+    # forward — the same whole-table pathology a filterless search hits. The
+    # 90d safety net now kicks in: has_time_bound becomes True, defaulted_time
+    # is set, the hint is applied, AND the user's upper bound is preserved.
     compiled = _compile({
         "time_end": datetime(2026, 1, 1),
         "sort": "date",
         "direction": "desc",
     })
-    assert compiled["has_time_bound"] is False
+    assert compiled["has_time_bound"] is True
+    assert compiled.get("defaulted_time") is True
     stmt, count_stmt = _build_search_statements(compiled, live=0, since=0)
-    assert "INDEXED BY" not in _sql(stmt)
-    assert "INDEXED BY" not in _sql(count_stmt)
+    page_sql = _sql(stmt)
+    count_sql = _sql(count_stmt)
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in page_sql
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in count_sql
+    # Both the defaulted lower bound and the user's explicit upper bound land.
+    assert "killmail_time >=" in count_sql
+    assert "killmail_time <=" in count_sql
 
 
-def test_no_time_bound_no_hint_on_either_statement():
+def test_time_end_alone_default_lower_bound_anchors_to_end_date():
+    # The injected default must anchor to the user's end date, not utcnow():
+    # with an old end date, utcnow()-90d would compile an impossible window
+    # (>= now-90d AND <= 2020-01-01) that silently returns nothing.
+    end = datetime(2020, 1, 1)
+    compiled = _compile({"time_end": end, "sort": "date", "direction": "desc"})
+    assert compiled["has_time_bound"] is True
+    assert compiled.get("defaulted_time") is True
+    lower_bounds = [
+        c.right.value for c in compiled["where"]
+        if getattr(getattr(c, "operator", None), "__name__", "") == "ge"
+    ]
+    assert lower_bounds == [end - timedelta(days=90)]  # satisfiable: lower < upper
+    stmt, count_stmt = _build_search_statements(compiled, live=0, since=0)
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(stmt)
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(count_stmt)
+
+
+def test_filterless_search_gets_default_time_bound_and_hint():
     compiled = _compile({"sort": "date", "direction": "desc"})
+    assert compiled["has_time_bound"] is True
+    assert compiled.get("defaulted_time") is True
     stmt, count_stmt = _build_search_statements(compiled, live=0, since=0)
-    assert "INDEXED BY" not in _sql(stmt)
-    assert "INDEXED BY" not in _sql(count_stmt)
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(stmt)
+    assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(count_stmt)
+    assert "killmail_time >=" in _sql(count_stmt)
+
+
+def test_defaulted_note_only_on_initial_render():
+    # The results partial is APPENDED by the consumer JS on live poll-appends
+    # and Show More cursor batches (only [data-kfs-marker] is stripped —
+    # intel_kills_search.html ~line 584), so the note must render only on the
+    # initial request or filterless scrolling sprays it mid-feed.
+    # Initial render, filterless (also the live=1&since=0 first load): shows.
+    assert _should_show_defaulted_note(True, False, None) is True
+    # Show More / IntersectionObserver batch (cursor set): suppressed.
+    assert not _should_show_defaulted_note(True, False, "123456")
+    # Live poll-append (live=1 & since=X → is_polling): suppressed.
+    assert not _should_show_defaulted_note(True, True, None)
+    # Not defaulted: never shows, regardless of path.
+    assert not _should_show_defaulted_note(False, False, None)
+
+
+def test_explicit_time_preset_is_not_defaulted():
+    # A search with a real lower bound must NOT be flagged as defaulted, so
+    # the "showing last 90 days" note never shows for intentionally-bounded
+    # searches.
+    compiled = _compile({"time_preset": "7d", "sort": "date", "direction": "desc"})
+    assert compiled["has_time_bound"] is True
+    assert compiled.get("defaulted_time") is False
 
 
 def test_isk_sort_hints_count_only_not_page():

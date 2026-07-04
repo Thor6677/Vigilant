@@ -264,6 +264,9 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
                                       (drives the INDEXED BY ix_killmails_killmail_time
                                       hint in _build_search_statements — see that
                                       function for the perf-incident context)
+      defaulted_time: bool         — True iff no lower bound was supplied and the
+                                      90-day safety-net default was injected (drives
+                                      the "showing last 90 days" UI note)
 
     The caller composes the final SQL.
     """
@@ -271,10 +274,10 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     joins: set[str] = set()
     # True when a killmail_time LOWER bound is present, i.e. the planner can
     # drive the query from ix_killmails_killmail_time and only scan forward
-    # from a bounded point instead of the whole table. An upper bound alone
-    # (time_end with no time_preset/time_start) does NOT set this — it would
-    # force a scan from the beginning of time, which is a pessimization, not
-    # a fix (see INDEXED BY hint gating below).
+    # from a bounded point instead of the whole table. If the user supplies
+    # no lower bound (filterless, or time_end alone), the 90-day safety net
+    # below injects one — so by the time this function returns, this is
+    # always True and every search is eligible for the INDEXED BY hint.
     has_time_bound = False
 
     # ── Time ───────────────────────────────────────────────────────────
@@ -289,6 +292,20 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         has_time_bound = True
     if params.get("time_end"):
         where.append(Killmail.killmail_time <= params["time_end"])
+
+    # Safety net: without a lower time bound every search (page AND count)
+    # scans the whole ~60M-row table (192GB in prod). Default to a 90-day
+    # window and surface it so the user knows the window was implied. When an
+    # upper bound (time_end) IS present, anchor the 90 days to it — anchoring
+    # to utcnow() would compile an impossible window (>= now-90d AND <= old
+    # date) and silently return nothing. Perf-identical either way: same
+    # bounded >= clause, same INDEXED BY eligibility.
+    defaulted_time = False
+    if not has_time_bound:
+        anchor = params["time_end"] if params.get("time_end") else datetime.utcnow()
+        where.append(Killmail.killmail_time >= anchor - timedelta(days=90))
+        has_time_bound = True
+        defaulted_time = True
 
     # ── Space (HS/LS/NS/WH/Abyssal) ────────────────────────────────────
     space = params.get("space") or set()
@@ -449,6 +466,7 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         "sort_dir": direction,
         "cursor_clause": cursor_clause,
         "has_time_bound": has_time_bound,
+        "defaulted_time": defaulted_time,
     }
 
 
@@ -725,6 +743,20 @@ def _resolve_sort_and_cursor(sort: str, direction: str, cursor: str | None) -> t
 KILLMAIL_TIME_INDEX = "ix_killmails_killmail_time"
 
 
+def _should_show_defaulted_note(defaulted_time: bool, is_polling: bool,
+                                cursor: str | None) -> bool:
+    """Gate the "showing last 90 days" note to the initial render only.
+
+    The results partial is consumed by appending JS (live poll-appends AND
+    Show More cursor batches strip only the [data-kfs-marker] div), so any
+    non-initial response that carries the note would spray it mid-feed:
+      - live poll-appends: live=1 & since=X (is_polling)
+      - Show More / IntersectionObserver batches: cursor is set
+    The initial live-mode load (live=1, since=0, no cursor) still shows it.
+    """
+    return defaulted_time and not is_polling and not cursor
+
+
 def _build_search_statements(compiled: dict[str, Any], live: int, since: int) -> tuple[Any, Any]:
     """Build the page SELECT and count/sum SELECT for /search/results.
 
@@ -741,10 +773,12 @@ def _build_search_statements(compiled: dict[str, Any], live: int, since: int) ->
       - live-poll (``live`` and ``since`` both truthy): sorts by
         killmail_id (the PK) with a ``killmail_id > since`` filter — an
         unrelated access pattern, never hinted.
-      - no time lower bound at all: never hinted (INDEXED BY errors out if
-        the index can't be used for the compiled WHERE shape, so gating is
-        strictly tied to ``compiled["has_time_bound"]``, which is only set
-        for killmail_time ``>=`` clauses — see _compile_search_where).
+      - gating stays strictly tied to ``compiled["has_time_bound"]``
+        (INDEXED BY errors out if the index can't serve the compiled WHERE
+        shape, so it must track a real killmail_time ``>=`` clause). Since
+        _compile_search_where's 90-day safety net, every compile carries a
+        lower bound, so has_time_bound is always True here in practice —
+        the flag is kept as the contract rather than assumed.
     """
     where = list(compiled["where"])
     joins = compiled["joins"]
@@ -888,6 +922,14 @@ async def intel_kills_search_results(
 
     stmt, count_stmt = _build_search_statements(compiled, live, since)
 
+    # When the default was anchored to a user-supplied time_end, the copy
+    # changes: there IS a time filter, we just implied its lower edge.
+    is_polling = bool(live and since)
+    show_defaulted_note = _should_show_defaulted_note(
+        bool(compiled.get("defaulted_time")), is_polling, params["cursor"]
+    )
+    defaulted_from_end = show_defaulted_note and params["time_end"] is not None
+
     rows = (await db.execute(stmt)).scalars().all()
 
     # Compute total_count + total_isk only when not a live poll (saves a query)
@@ -909,6 +951,8 @@ async def intel_kills_search_results(
                 "newest_cursor": "",
                 "oldest_cursor": "",
                 "live": bool(live),
+                "defaulted_time": show_defaulted_note,
+                "defaulted_from_end": defaulted_from_end,
             },
         )
 
@@ -934,6 +978,8 @@ async def intel_kills_search_results(
             "newest_cursor": str(newest),
             "oldest_cursor": oldest_cursor,
             "live": bool(live),
+            "defaulted_time": show_defaulted_note,
+            "defaulted_from_end": defaulted_from_end,
         },
     )
 

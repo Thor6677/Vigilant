@@ -5,6 +5,9 @@
      data-newest-cursor="{{ newest_cursor }}"
      data-oldest-cursor="{{ oldest_cursor }}"
      data-live="{{ 1 if live else 0 }}"></div>
+{% if defaulted_time %}
+<div style="color:var(--muted);font-size:10px;padding:4px 0 6px;">{% if defaulted_from_end %}Showing 90 days before your end date{% else %}No time filter — showing last 90 days{% endif %}</div>
+{% endif %}
 {# Reuse the live-feed row markup — _enrich_for_search emits the same dict shape #}
 {% with older_mode=true %}
   {% include 'partials/intel_kills_feed.html' %}
