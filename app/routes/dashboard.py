@@ -1303,8 +1303,23 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                         logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
 
     if stale_fields:
+        # Each gathered fetcher gets its own AsyncSessionLocal() session and
+        # its own Character row. The location and assets fetchers write/commit
+        # on their session via get_structure's structure-name caching; sharing
+        # the outer `db` across the concurrent gather raises
+        # greenlet/InvalidRequestError and marks fields silently failed
+        # (BUG-1). The result-processing loop below (including the roles
+        # write) still runs sequentially on the outer `db`, which is safe.
+        async def _run_fetcher(field: str):
+            async with AsyncSessionLocal() as fdb:
+                res = await fdb.execute(
+                    select(Character).where(Character.character_id == character_id)
+                )
+                fchar = res.scalar_one()
+                return await _FIELD_FETCHERS[field]([fchar], fdb)
+
         results = await asyncio.gather(
-            *[_FIELD_FETCHERS[field]([char], db) for field in stale_fields],
+            *[_run_fetcher(field) for field in stale_fields],
             return_exceptions=True,
         )
         for field, result in zip(stale_fields, results):
