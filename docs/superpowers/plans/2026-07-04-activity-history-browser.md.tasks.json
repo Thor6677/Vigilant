@@ -1,0 +1,48 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-activity-history-browser.md",
+  "tasks": [
+    {
+      "id": 29,
+      "subject": "Task 1: Resumable ISK backfill module",
+      "status": "pending",
+      "description": "**Goal:** app/intel/killmail_isk_backfill.py \u2014 month-chunked, insert-only, resumable backfill with tests. Full code in plan Task 1.\n\n```json:metadata\n{\"files\": [\"app/intel/killmail_isk_backfill.py\", \"tests/test_isk_backfill.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/ -v\", \"acceptanceCriteria\": [\"per-day aggregation correct\", \"existing dates untouched\", \"fully-covered month fast-skips\", \"20 tests pass\"]}\n```"
+    },
+    {
+      "id": 30,
+      "subject": "Task 2: Backfill wiring + aggregate ISK read + full warm list",
+      "status": "pending",
+      "blockedBy": [
+        29
+      ],
+      "description": "**Goal:** Startup runs backfill; 1y/5y/all ISK reads aggregate; 5y/all rejoin warm list. Full code in plan Task 2.\n\n```json:metadata\n{\"files\": [\"app/main.py\", \"app/routes/player_stats.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/ -q\", \"acceptanceCriteria\": [\"no Killmail query in day+ branch\", \"9-window warm tuple\", \"20 tests pass\"]}\n```"
+    },
+    {
+      "id": 31,
+      "subject": "Task 3: history.json endpoint + SWR/warm slot",
+      "status": "pending",
+      "blockedBy": [
+        30
+      ],
+      "description": "**Goal:** Full daily timeline endpoint, SWR key 'history', warm slot. Full code in plan Task 3.\n\n```json:metadata\n{\"files\": [\"app/routes/player_stats.py\", \"tests/test_activity_history.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/ -v\", \"acceptanceCriteria\": [\"parallel arrays full span UTC\", \"nulls where no coverage\", \"auth-gated\", \"23 tests pass\"]}\n```"
+    },
+    {
+      "id": 32,
+      "subject": "Task 4: History UI section",
+      "status": "pending",
+      "blockedBy": [
+        31
+      ],
+      "description": "**Goal:** Lazy HISTORY section: year viewport chart, slider + year buttons, client-side pan. Full markup/JS in plan Task 4.\n\n```json:metadata\n{\"files\": [\"app/templates/tools_activity.html\", \"app/templates/partials/activity_history.html\", \"app/routes/player_stats.py\"], \"verifyCommand\": \"jinja parse + pytest -q\", \"acceptanceCriteria\": [\"lazy load\", \"no-network panning\", \"nonce'd partial script\", \"templates parse\"]}\n```"
+    },
+    {
+      "id": 33,
+      "subject": "Task 5: Deploy + prod verification (HUMAN GATE)",
+      "status": "pending",
+      "blockedBy": [
+        32
+      ],
+      "description": "**Goal:** Deploy; warm completes 10 windows no OOM; backfill progressing; user approves UI.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"docker logs + stats + user approval\", \"acceptanceCriteria\": [\"clean deploy\", \"pre-warm 10 windows no OOM\", \"backfill logging\", \"user approval\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-04T01:46:14Z"
+}
