@@ -15,46 +15,46 @@ Legend:
 
 ## Batch A — Core (index, dashboard, intel, map, character, admin, status + their partials)
 
-- [x]A [ ]V index.html — clean, no page-local CSS, pure `b-*`
-- [x]A [ ]V dashboard.html — clean; JS-hook classes (`group-*`, `sortable-group`, `edit-mode-only`) are unstyled by design (inline `style=""` handles visuals)
-- [x]A [ ]V intel.html — clean
-- [x]A [ ]V intel_kills.html `[style-block] [keyframes]` — namespaced `kf-*` styles, custom `@keyframes kf-row-in` (no collision with motion.css), z-index 50/30 (below dropdown=60/modal=100). Clean, no fix needed.
-- [x]A [ ]V intel_kills_search.html `[style-block] [keyframes]` — same `kf-*`/`kfs-*` pattern, duplicates most of intel_kills.html's `.kf-*` rules (own-page `<style>`, no runtime clash, but a de-dup/extract-to-site.css opportunity — noted for later, not fixed here)
-- [x]A [ ]V intel_local.html — clean; `intel-*-row` classes are pure JS hooks over `.b-table-row`
-- [x]A [ ]V intel_watch.html `[style-block]` — `w-*` namespaced, all `var(--token)` refs resolve. Clean.
-- [x]A [ ]V intel_dscan.html — clean
-- [x]A [ ]V **map.html `[style-block] [keyframes]` — FIXED**: removed duplicate `@keyframes spin` (byte-identical to the one now defined globally in `design-system/css/motion.css`). `.b-main`/`.b-footer` full-bleed overrides kept — scoped to this page's own `<style>` block, don't leak.
-- [x]A [ ]V **map_wormholes.html `[style-block] [keyframes]` — FIXED**: same duplicate `@keyframes spin` removed.
-- [x]A [ ]V character_detail.html `[style-block]` — page-local classes (`.range-btn`, `.overview-grid`, `.stat-row`, etc.) all custom, no vocabulary collision, all `var(--token)` refs resolve. Clean.
-- [x]A [ ]V admin.html — clean, pure `b-*`
-- [x]A [ ]V status.html `[eve-classes:13]` — Tailwind-eve panel, flat old-look next to new glass panels. **Flag for visual pass** — candidate for `b-*` restyle (out of scope this pass).
-- [x]A [ ]V status_data.html `[eve-classes:98]` — same, heaviest Tailwind-eve usage in the whole app. **Flag for visual pass.**
-- [x]A [ ]V base.html — layout shell, reviewed as foundational infra for all Batch A pages. No stray classes, notif-dropdown already uses `z-index:var(--z-dropdown)` correctly. Clean.
-- [x]A [ ]V partials/dashboard_big_battle_banner.html — fixed: var(--fg)→var(--text) ×3 (caught in spec review)
-- [x]A [ ]V partials/dashboard_kill_pulse.html — clean
-- [x]A [ ]V partials/dashboard_combat_profile.html — clean
-- [x]A [ ]V **partials/dashboard_recent_battles.html `[style-block]` — FIXED**: `.rb-sys { color:var(--fg) }` referenced an undefined custom property (`--fg` never existed, not even in pre-restyle base.html — should have been `--text`, matching sibling rules `.rb-rank`/`.rb-meta`/`.rb-stat`). Changed to `var(--text)`.
-- [x]A [ ]V partials/dashboard_activity.html — clean
-- [x]A [ ]V partials/intel_kills_top.html — clean
-- [x]A [ ]V partials/intel_kills_feed.html — clean
-- [x]A [ ]V partials/intel_kills_detail.html — clean
-- [x]A [ ]V partials/intel_kills_search_results.html — clean (includes intel_kills_feed.html)
-- [x]A [ ]V partials/assets_partial.html — clean
-- [x]A [ ]V partials/mail_panel.html — clean
-- [x]A [ ]V partials/mail_body.html — clean
-- [x]A [ ]V partials/notifications_panel.html — clean
-- [x]A [ ]V partials/character_kill_stats.html — clean
-- [x]A [ ]V partials/admin_overview.html — clean
-- [x]A [ ]V **partials/admin_users.html — FIXED**: allowlist-search autocomplete result panel used inline `z-index:100` (coincides with `--z-modal`, risks stacking clash if a modal opens while the dropdown is showing). Retokened to `z-index:var(--z-dropdown)` (60), matching the notif-dropdown convention in base.html.
-- [x]A [ ]V partials/admin_esi.html `[style-block]` — `details[open] .b-archive-chevron` state-transform rule, scoped to its own inline-styled span. Clean.
-- [x]A [ ]V partials/admin_scheduler.html — clean
-- [x]A [ ]V partials/admin_database.html — clean
-- [x]A [ ]V partials/admin_sde.html — clean
-- [x]A [ ]V partials/admin_audit.html — clean
-- [x]A [ ]V partials/structure_alert_banners.html — clean, `.structure-alert-banner`/`.alert-dismiss` both defined in `static/css/site.css`
-- [x]A [ ]V partials/inventory_alert_banners.html — clean
-- [x]A [ ]V partials/contract_alert_banners.html — clean
-- [x]A [ ]V partials/timer_alert_banners.html — clean
+- [x]A [x]V index.html — clean, no page-local CSS, pure `b-*`
+- [x]A [x]V dashboard.html — clean; JS-hook classes (`group-*`, `sortable-group`, `edit-mode-only`) are unstyled by design (inline `style=""` handles visuals)
+- [x]A [x]V intel.html — clean
+- [x]A [x]V intel_kills.html `[style-block] [keyframes]` — namespaced `kf-*` styles, custom `@keyframes kf-row-in` (no collision with motion.css), z-index 50/30 (below dropdown=60/modal=100). Clean, no fix needed.
+- [x]A [x]V intel_kills_search.html `[style-block] [keyframes]` — same `kf-*`/`kfs-*` pattern, duplicates most of intel_kills.html's `.kf-*` rules (own-page `<style>`, no runtime clash, but a de-dup/extract-to-site.css opportunity — noted for later, not fixed here)
+- [x]A [x]V intel_local.html — clean; `intel-*-row` classes are pure JS hooks over `.b-table-row`
+- [x]A [x]V intel_watch.html `[style-block]` — `w-*` namespaced, all `var(--token)` refs resolve. Clean.
+- [x]A [x]V intel_dscan.html — clean
+- [x]A [x]V **map.html `[style-block] [keyframes]` — FIXED**: removed duplicate `@keyframes spin` (byte-identical to the one now defined globally in `design-system/css/motion.css`). `.b-main`/`.b-footer` full-bleed overrides kept — scoped to this page's own `<style>` block, don't leak.
+- [x]A [x]V **map_wormholes.html `[style-block] [keyframes]` — FIXED**: same duplicate `@keyframes spin` removed.
+- [x]A [x]V character_detail.html `[style-block]` — page-local classes (`.range-btn`, `.overview-grid`, `.stat-row`, etc.) all custom, no vocabulary collision, all `var(--token)` refs resolve. Clean.
+- [x]A [x]V admin.html — clean, pure `b-*`
+- [x]A [x]V status.html `[eve-classes:13]` — Tailwind-eve panel, flat old-look next to new glass panels. **Flag for visual pass** — candidate for `b-*` restyle (out of scope this pass).
+- [x]A [x]V status_data.html `[eve-classes:98]` — same, heaviest Tailwind-eve usage in the whole app. **Flag for visual pass.**
+- [x]A [x]V base.html — layout shell, reviewed as foundational infra for all Batch A pages. No stray classes, notif-dropdown already uses `z-index:var(--z-dropdown)` correctly. Clean.
+- [x]A [x]V partials/dashboard_big_battle_banner.html — fixed: var(--fg)→var(--text) ×3 (caught in spec review)
+- [x]A [x]V partials/dashboard_kill_pulse.html — clean
+- [x]A [x]V partials/dashboard_combat_profile.html — clean
+- [x]A [x]V **partials/dashboard_recent_battles.html `[style-block]` — FIXED**: `.rb-sys { color:var(--fg) }` referenced an undefined custom property (`--fg` never existed, not even in pre-restyle base.html — should have been `--text`, matching sibling rules `.rb-rank`/`.rb-meta`/`.rb-stat`). Changed to `var(--text)`.
+- [x]A [x]V partials/dashboard_activity.html — clean
+- [x]A [x]V partials/intel_kills_top.html — clean
+- [x]A [x]V partials/intel_kills_feed.html — clean
+- [x]A [x]V partials/intel_kills_detail.html — clean
+- [x]A [x]V partials/intel_kills_search_results.html — clean (includes intel_kills_feed.html)
+- [x]A [x]V partials/assets_partial.html — clean
+- [x]A [x]V partials/mail_panel.html — clean
+- [x]A [x]V partials/mail_body.html — clean
+- [x]A [x]V partials/notifications_panel.html — clean
+- [x]A [x]V partials/character_kill_stats.html — clean
+- [x]A [x]V partials/admin_overview.html — clean
+- [x]A [x]V **partials/admin_users.html — FIXED**: allowlist-search autocomplete result panel used inline `z-index:100` (coincides with `--z-modal`, risks stacking clash if a modal opens while the dropdown is showing). Retokened to `z-index:var(--z-dropdown)` (60), matching the notif-dropdown convention in base.html.
+- [x]A [x]V partials/admin_esi.html `[style-block]` — `details[open] .b-archive-chevron` state-transform rule, scoped to its own inline-styled span. Clean.
+- [x]A [x]V partials/admin_scheduler.html — clean
+- [x]A [x]V partials/admin_database.html — clean
+- [x]A [x]V partials/admin_sde.html — clean
+- [x]A [x]V partials/admin_audit.html — clean
+- [x]A [x]V partials/structure_alert_banners.html — clean, `.structure-alert-banner`/`.alert-dismiss` both defined in `static/css/site.css`
+- [x]A [x]V partials/inventory_alert_banners.html — clean
+- [x]A [x]V partials/contract_alert_banners.html — clean
+- [x]A [x]V partials/timer_alert_banners.html — clean
 
 ## Batch B — Industry / Assets / Corp
 
@@ -114,27 +114,27 @@ Legend:
 
 ## Batch D — Everything else
 
-- [x]A [ ]V alliance_detail.html `[style-block]` — clean; page-local `b-change-row`/`b-change-dir.gain/.loss` in own block (no collision with components.css), JS template literals verified against own rules
-- [x]A [ ]V **skill_plan_detail.html `[zindex:[100]]` — FIXED**: `#skill-results` + `#ship-results` in-content autocomplete dropdowns inline z-index:100 (= `--z-modal`) → 20, matching the batch C convention. `skill-row` is a pure JS drag/drop hook riding on `b-table-row` (unstyled by design). Script inside content block, no keyframes, no fixed/sticky.
-- [x]A [ ]V skill_plan_shared.html — clean, pure `b-*` + inline token styles
-- [x]A [ ]V skill_plans.html — clean; scope/target pickers inline-styled, script in content block
-- [x]A [ ]V skills.html — clean; `remap-slider` is a marker class on range inputs (visuals via inline `accent-color`, never had a CSS rule — not broken)
-- [x]A [ ]V tool_landing.html `[style-block]` — clean; `tl-*` namespaced in own head-block style, all token refs resolve
-- [x]A [ ]V tools_activity.html `[style-block]` — clean; `ta-*` namespaced in head block; `ta-delta-btn` is a JS hook over `b-btn`; Chart.js hardcoded hex (#7a7a7a greys, rgba series colors) matches theme — cosmetic note. All chart scripts inside content block.
-- [x]A [ ]V tools_image_view.html — clean; `b-row`/`b-row-label`/`b-row-val`/`b-eyebrow`/`is-muted` all defined in components.css
-- [x]A [ ]V tools_images.html — clean
-- [x]A [ ]V trending.html `[style-block]` — clean; page-local `b-trending-*` (+`.neg` state) in own block, JS template literals verified
-- [x]A [ ]V wormhole_effects.html `[style-block]` — clean; `we-*` namespaced in head block
-- [x]A [ ]V wormhole_system.html `[style-block]` — clean; `ws-*` namespaced in head block; SVG diagram inline-attr styled; kill panel lazy-loads via htmx
-- [x]A [ ]V wormhole_type_page.html — clean; pure inline styles + includes wormhole_type_detail partial
-- [x]A [ ]V wormhole_types.html `[style-block]` — clean; `wm-*`/`wh-tab*` in head block. `ws-section-title` on the Connection Matrix heading is defined nowhere on this page BUT its full rule set is duplicated inline on the same element — renders correctly, dead class name only (cosmetic note, not fixed).
-- [x]A [ ]V wormholes.html `[style-block]` — clean; `wf-*`/`wh-tab*` in head block, `is-on` state defined in own block, `htmx-indicator` in site.css
-- [x]A [ ]V partials/skill_plan_gap.html — clean, pure `b-*` + inline styles
-- [x]A [ ]V partials/wormhole_kills.html — clean; `b-hover-row` defined in site.css; heatmap cells fully inline-styled
-- [x]A [ ]V partials/wormhole_system_list.html — clean style-wise; `b-hover-surface` in site.css. NOTE (pre-existing, functional not CSS): pagination buttons `hx-include="#wh-search, #wh-class-filter, #wh-effect-filter"` reference two IDs that no longer exist in wormholes.html (filters became toggle buttons) — paging drops class/effect filters. Flagged, not fixed (out of sweep scope).
-- [x]A [ ]V partials/wormhole_type_detail.html — clean, pure inline styles + `b-panel`
-- [x]A [ ]V partials/live_pcu_tile.html — clean style-wise but **orphaned partial**: commit 600c6fe removed its seed `#live-pcu-tile` div from tools_activity.html (replaced by the LIVE window); `/api/live-pcu` endpoint still exists but nothing renders the tile. Its `ta-stat*` classes only exist in tools_activity's style block. Dead code candidate — flagged, not deleted in a style sweep.
-- [x]A [ ]V partials/remap_results.html — clean, pure `b-*` + inline token styles
+- [x]A [x]V alliance_detail.html `[style-block]` — clean; page-local `b-change-row`/`b-change-dir.gain/.loss` in own block (no collision with components.css), JS template literals verified against own rules
+- [x]A [x]V **skill_plan_detail.html `[zindex:[100]]` — FIXED**: `#skill-results` + `#ship-results` in-content autocomplete dropdowns inline z-index:100 (= `--z-modal`) → 20, matching the batch C convention. `skill-row` is a pure JS drag/drop hook riding on `b-table-row` (unstyled by design). Script inside content block, no keyframes, no fixed/sticky.
+- [x]A [x]V skill_plan_shared.html — clean, pure `b-*` + inline token styles
+- [x]A [x]V skill_plans.html — clean; scope/target pickers inline-styled, script in content block
+- [x]A [x]V skills.html — clean; `remap-slider` is a marker class on range inputs (visuals via inline `accent-color`, never had a CSS rule — not broken)
+- [x]A [x]V tool_landing.html `[style-block]` — clean; `tl-*` namespaced in own head-block style, all token refs resolve
+- [x]A [x]V tools_activity.html `[style-block]` — clean; `ta-*` namespaced in head block; `ta-delta-btn` is a JS hook over `b-btn`; Chart.js hardcoded hex (#7a7a7a greys, rgba series colors) matches theme — cosmetic note. All chart scripts inside content block.
+- [x]A [x]V tools_image_view.html — clean; `b-row`/`b-row-label`/`b-row-val`/`b-eyebrow`/`is-muted` all defined in components.css
+- [x]A [x]V tools_images.html — clean
+- [x]A [x]V trending.html `[style-block]` — clean; page-local `b-trending-*` (+`.neg` state) in own block, JS template literals verified
+- [x]A [x]V wormhole_effects.html `[style-block]` — clean; `we-*` namespaced in head block
+- [x]A [x]V wormhole_system.html `[style-block]` — clean; `ws-*` namespaced in head block; SVG diagram inline-attr styled; kill panel lazy-loads via htmx
+- [x]A [x]V wormhole_type_page.html — clean; pure inline styles + includes wormhole_type_detail partial
+- [x]A [x]V wormhole_types.html `[style-block]` — clean; `wm-*`/`wh-tab*` in head block. `ws-section-title` on the Connection Matrix heading is defined nowhere on this page BUT its full rule set is duplicated inline on the same element — renders correctly, dead class name only (cosmetic note, not fixed).
+- [x]A [x]V wormholes.html `[style-block]` — clean; `wf-*`/`wh-tab*` in head block, `is-on` state defined in own block, `htmx-indicator` in site.css
+- [x]A [x]V partials/skill_plan_gap.html — clean, pure `b-*` + inline styles
+- [x]A [x]V partials/wormhole_kills.html — clean; `b-hover-row` defined in site.css; heatmap cells fully inline-styled
+- [x]A [x]V partials/wormhole_system_list.html — clean style-wise; `b-hover-surface` in site.css. NOTE (pre-existing, functional not CSS): pagination buttons `hx-include="#wh-search, #wh-class-filter, #wh-effect-filter"` reference two IDs that no longer exist in wormholes.html (filters became toggle buttons) — paging drops class/effect filters. Flagged, not fixed (out of sweep scope).
+- [x]A [x]V partials/wormhole_type_detail.html — clean, pure inline styles + `b-panel`
+- [x]A [x]V partials/live_pcu_tile.html — clean style-wise but **orphaned partial**: commit 600c6fe removed its seed `#live-pcu-tile` div from tools_activity.html (replaced by the LIVE window); `/api/live-pcu` endpoint still exists but nothing renders the tile. Its `ta-stat*` classes only exist in tools_activity's style block. Dead code candidate — flagged, not deleted in a style sweep.
+- [x]A [x]V partials/remap_results.html — clean, pure `b-*` + inline token styles
 
 ---
 

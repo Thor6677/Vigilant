@@ -60,12 +60,12 @@
     {
       "id": 27,
       "subject": "SP2 Task 8: sweep batch D + close-out",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         26
       ],
       "description": "**Goal:** Remaining templates swept; 111/111; final deploy + report.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"111/111 ticked\", \"final report\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-07-03T23:40:43Z"
+  "lastUpdated": "2026-07-04T00:16:12Z"
 }
