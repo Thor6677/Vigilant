@@ -5,8 +5,8 @@ The dashboard panel at /dashboard/activity covers short windows (1H/24H/W/M)
 backed only by live ESI samples + the killmail stream. This page extends to
 years using the third-party historical archives loaded into
 player_count_snapshots via the eve-offline.net + eve-offline.com scrapers.
-ISK destroyed is bounded by the killmails table's 30-day discovery
-retention, so longer windows show ISK as zero on bins predating that.
+ISK destroyed on day+ windows reads killmail_daily_aggregates (vigilant
+rows; T-040 backfill extends coverage to ~2016 — earlier bins show zero).
 """
 
 from __future__ import annotations
@@ -102,12 +102,13 @@ async def _refresh_payload(window: str) -> None:
 async def warm_activity_cache() -> None:
     """Startup pre-warm so no user ever pays a cold window compute.
 
-    The long windows are brutal cold (measured on prod 2026-07-04:
-    90d ≈ 11s, 1y ≈ 54s raw ISK scan over ~6.5M killmail rows; 5y/all
-    are worse). SWR only helps once a window has been computed once —
-    this fills every window sequentially in the background, most-used
-    first, one at a time so the 0.5-CPU container isn't saturated.
-    Called from main.py startup via asyncio.create_task.
+    The long windows were brutal cold before the T-040 aggregate switch
+    (measured on prod 2026-07-04: 90d ≈ 11s, 1y ≈ 54s raw ISK scan; the
+    5y/all warm even OOM-killed the container). SWR only helps once a
+    window has been computed once — this fills every window sequentially
+    in the background, most-used first, one at a time so the container's
+    2-CPU cap isn't saturated at boot. Called from main.py startup via
+    asyncio.create_task.
     """
     await asyncio.sleep(30)  # let boot-time work (SDE check, consumers) settle
     # All 9 windows warm safely now: the 5y/all ISK read hits the daily
