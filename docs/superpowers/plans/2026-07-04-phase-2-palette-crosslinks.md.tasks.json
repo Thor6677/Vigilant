@@ -1,0 +1,37 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-2-palette-crosslinks.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Ctrl+K command palette + recents/pins [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: entity_links macro + first integrations [Opus]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: entity_links rollout [Sonnet]",
+      "status": "completed",
+      "blockedBy": [
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Deploy + verify Phase 2 [coordinator]",
+      "status": "completed",
+      "blockedBy": [
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-04"
+}
