@@ -930,6 +930,52 @@ async def fetch_zkillboard_data(characters: list[Character], db: AsyncSession) -
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def _resolve_structures(
+    client: ESIClient, structure_ids: set[int]
+) -> list[tuple[int, dict]]:
+    """Resolve player-structure names/systems via ESI, one session per coroutine.
+
+    Each ``_fetch_structure`` coroutine opens its OWN ``AsyncSessionLocal()`` and
+    passes it to both ``get_structure`` (which does a StructureNameCache read and,
+    on ESI success, a ``cache_structure_name`` commit) and ``get_cached_structure``.
+    Sharing the request-scoped session across the ``asyncio.gather`` fan-out caused
+    concurrent execute/commit on one session → hard greenlet / InvalidRequestError
+    failures that aborted the character's asset resolution (BUG-2). An
+    ``asyncio.Semaphore(5)`` bounds the fan-out to ESI ``/universe/structures/``.
+
+    Note the shared ``client`` (ESIClient) is safe to share: it stores no db, and
+    its cache layer (``cache_get``/``cache_set``) always opens its own isolated
+    session, so concurrent ``client.get()`` calls never touch a shared session.
+
+    Returns a list of ``(struct_id, {"system_id": ..., "structure_name": ...})``.
+    """
+    _struct_sem = asyncio.Semaphore(5)
+
+    async def _fetch_structure(struct_id):
+        async with _struct_sem:
+            async with AsyncSessionLocal() as sdb:
+                try:
+                    data = await esi_universe.get_structure(client, struct_id, db=sdb)
+                    sys_id = data.get("solar_system_id")
+                    name = data.get("name", "Unknown Structure")
+                    return struct_id, {"system_id": sys_id, "structure_name": name}
+                except Exception:
+                    # The failed get_structure may have left sdb with a
+                    # deactivated transaction (e.g. a "database is locked"
+                    # commit failure inside cache_structure_name); reading on
+                    # it then raises PendingRollbackError. Guard the fallback
+                    # so one structure can never fail the whole gather.
+                    try:
+                        cached = await esi_universe.get_cached_structure(sdb, struct_id)
+                    except Exception:
+                        cached = None
+                    if cached:
+                        return struct_id, {"system_id": cached.get("solar_system_id"), "structure_name": cached["name"]}
+                    return struct_id, {"system_id": None, "structure_name": "Unknown Structure"}
+
+    return await asyncio.gather(*[_fetch_structure(sid) for sid in structure_ids])
+
+
 async def _resolve_assets_for_character(
     char: Character, raw_assets: list, client, db: AsyncSession
 ) -> list[dict]:
@@ -989,22 +1035,10 @@ async def _resolve_assets_for_character(
         if st_info.get("system_id"):
             system_ids.add(st_info["system_id"])
 
-    # Resolve player structures via ESI (concurrent)
+    # Resolve player structures via ESI (concurrent, one session per coroutine)
     structure_cache: dict[int, dict] = {}
     if structure_ids:
-        async def _fetch_structure(struct_id):
-            try:
-                data = await esi_universe.get_structure(client, struct_id, db=db)
-                sys_id = data.get("solar_system_id")
-                name = data.get("name", "Unknown Structure")
-                return struct_id, {"system_id": sys_id, "structure_name": name}
-            except Exception:
-                cached = await esi_universe.get_cached_structure(db, struct_id)
-                if cached:
-                    return struct_id, {"system_id": cached.get("solar_system_id"), "structure_name": cached["name"]}
-                return struct_id, {"system_id": None, "structure_name": "Unknown Structure"}
-
-        results = await asyncio.gather(*[_fetch_structure(sid) for sid in structure_ids])
+        results = await _resolve_structures(client, structure_ids)
         for struct_id, info in results:
             structure_cache[struct_id] = info
             if info.get("system_id"):
