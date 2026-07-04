@@ -25,6 +25,14 @@ class Settings(BaseSettings):
 
     discord_webhook: str = ""  # optional — matches DISCORD_WEBHOOK used by thunderborn-ops
 
+    # Discord relay for user-facing alert notifications (structure attacks,
+    # fuel alerts, etc — see app/notify/discord.py). Deliberately a SEPARATE
+    # variable from discord_webhook above: that one is the shared ops/backfill
+    # ping used by everef_ingest.py, and reusing it here would silently start
+    # relaying alerts the moment DISCORD_WEBHOOK is set for unrelated reasons.
+    discord_webhook_url: str = ""  # optional — unset means the relay no-ops
+    discord_alert_types: str = "structure_attack,structure_fuel"  # comma-separated opt-in list
+
     class Config:
         env_file = ".env"
         extra = "ignore"

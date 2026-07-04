@@ -23,6 +23,7 @@ from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
+from app.notify.discord import send_discord_alert
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -54,9 +55,21 @@ _queued_sync: dict[int, datetime] = {}
 _notification_events: dict[int, list] = {}
 _NOTIFICATION_MAX = 50
 
+# Strong references to in-flight Discord-relay tasks. asyncio.create_task()
+# only holds a *weak* reference to the task internally — without keeping one
+# ourselves, the task can be garbage-collected mid-await (e.g. while waiting
+# on the httpx response), silently dropping the send. Each task removes
+# itself from this set on completion via add_done_callback.
+_discord_relay_tasks: set = set()
+
 
 def _emit_notification(user_id: int, event: dict):
-    """Add a notification event for a user."""
+    """Add a notification event for a user, and relay it to Discord if
+    configured. This is the single choke point every alert-emitting call
+    site (dashboard sync, corp inventory/contract thresholds, killmail
+    stream) funnels through, so wiring the Discord relay here covers all
+    notification types without touching each call site individually.
+    """
     if user_id not in _notification_events:
         _notification_events[user_id] = []
     q = _notification_events[user_id]
@@ -64,6 +77,20 @@ def _emit_notification(user_id: int, event: dict):
     q.append(event)
     if len(q) > _NOTIFICATION_MAX:
         _notification_events[user_id] = q[-_NOTIFICATION_MAX:]
+
+    # Fire-and-forget: schedule the relay but never await it here, so a slow
+    # or unreachable webhook can never delay/break the caller's sync path.
+    alert_type = event.get("type", "")
+    title = event.get("title") or alert_type
+    body = event.get("body") or ""
+    try:
+        task = asyncio.create_task(send_discord_alert(title, body, alert_type))
+        _discord_relay_tasks.add(task)
+        task.add_done_callback(_discord_relay_tasks.discard)
+    except RuntimeError:
+        # No running event loop (e.g. called outside an async context in a
+        # test) — nothing to schedule against, just skip the relay.
+        pass
 
 
 # Track which skills we've already notified about: {character_id: set(skill_id_level)}
