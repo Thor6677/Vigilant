@@ -172,8 +172,14 @@ async def fittings_list(
         # Resolve names from SDE + ship info from ESI (parallel)
         type_names = await sde.type_ids_to_names(db, list(all_type_ids))
 
-        # Fetch ship slot layouts
-        ship_info_tasks = {sid: _get_ship_info(client, sid) for sid in ship_type_ids}
+        # Fetch ship slot layouts (cap ESI fan-out — a user can have 30+ distinct hulls)
+        _ship_sem = asyncio.Semaphore(5)
+
+        async def _sem_ship_info(sid):
+            async with _ship_sem:
+                return await _get_ship_info(client, sid)
+
+        ship_info_tasks = {sid: _sem_ship_info(sid) for sid in ship_type_ids}
         ship_results = await asyncio.gather(*ship_info_tasks.values())
         ship_data = dict(zip(ship_info_tasks.keys(), ship_results))
 
