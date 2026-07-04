@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-07-03",
+  "description": "Items found during the 111-template restyle sweep (2026-07-03, batches A-D) that were out of sweep scope. All pre-existing, none urgent.\n\n**Functional:**\n1. wormhole_system_list.html pagination `hx-include`s `#wh-class-filter`/`#wh-effect-filter` — IDs removed when wormholes.html moved to toggle buttons, so paging drops active filters. Thread the wf-btn toggle state into the paging links.\n2. live_pcu_tile.html + `/api/live-pcu` (app/routes/dashboard.py:851) orphaned since 600c6fe removed the seed div from tools_activity.html — delete both, or re-seat the tile.\n\n**Convention stragglers (batch A predates the z-index convention):**\n3. intel_kills.html:34 + intel_kills_search.html:30 autocomplete dropdowns at z:50 == --z-nav — normalize to 20 like gatecheck/planetary/structure_timers/skill_plan_detail.\n\n**CSS dedup:**\n4. `.kf-*` rules duplicated between intel_kills and intel_kills_search.\n5. `.range-btn` rules now defined verbatim in 3 template style blocks (character_detail, mining_ledger, structure_timers) — promote to site.css.\n\n**Decisions needed (user judgment):**\n6. ~~status.html/status_data.html still Tailwind-eve styled~~ — DONE 2026-07-04 (Phase 0 audit, commit 38a4bf5): both migrated to b-* design system, zero eve-* classes remain.\n7. Gate base.html scripts on user_id so the anonymous login page ships a slimmer payload.\n8. gatecheck partials use inline `style=\"color:var(--danger)\"` where components.css offers `.b-stat-val.is-danger`/`.is-accent` modifiers — align on a future pass.",
+  "id": "T-039",
+  "order": 60,
+  "phase": null,
+  "status": "open",
+  "title": "Restyle sweep deferred fixes (post-SP2 close-out)",
+  "type": "task"
+}

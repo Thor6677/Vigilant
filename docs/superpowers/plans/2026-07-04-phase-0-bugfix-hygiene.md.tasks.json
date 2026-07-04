@@ -1,0 +1,14 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-0-bugfix-hygiene.md",
+  "tasks": [
+    {"id": 1, "subject": "Task 1: Per-field sessions in _sync_fields gather (BUG-1) [Opus]", "status": "completed"},
+    {"id": 2, "subject": "Task 2: Per-coroutine sessions + semaphore in structure resolution (BUG-2) [Opus]", "status": "completed", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: Killfeed search default 90d time bound (BUG-4/T-037) [Opus]", "status": "completed"},
+    {"id": 4, "subject": "Task 4: Bound streaks() to 20k recent rows (BUG-3) [Opus]", "status": "completed"},
+    {"id": 5, "subject": "Task 5: Log swallowed exceptions (BUG-5 + auth) [Sonnet]", "status": "completed", "blockedBy": [2]},
+    {"id": 6, "subject": "Task 6: Semaphore on fittings ship-info fan-out (BUG-6) [Sonnet]", "status": "completed"},
+    {"id": 7, "subject": "Task 7: Migrate status pages to design system (T-039) [Sonnet]", "status": "completed"},
+    {"id": 8, "subject": "Task 8: Deploy + verify Phase 0 (coordinator gate)", "status": "completed", "blockedBy": [1, 2, 3, 4, 5, 6, 7]}
+  ],
+  "lastUpdated": "2026-07-04"
+}

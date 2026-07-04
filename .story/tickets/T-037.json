@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-07-03",
+  "description": "Follow-ups from the 2026-07-03 advanced-search 504 incident (fixed in 62ac8cc + 319256f via SQLite INDEXED BY on ix_killmails_killmail_time; prod-verified 3ms page / 362ms count).\n\n1. **Refine the hint gate for entity+time searches** — a selective entity predicate (attacker/victim char/corp) plus a time bound is currently forced onto the time index; the entity index would be far more selective. Bounded ms-level regression today; revisit with fresh EXPLAIN QUERY PLAN runs ON THE VPS (192GB DB — laptop plans are meaningless).\n2. **Count/SUM query cost** — every search re-aggregates 200-300k rows even on the right index (~360ms). Options: covering index (killmail_time, total_value), htmx-split the count so results paint first, or short-TTL cache keyed by compiled filters.\n3. **Query timeout guard** — search endpoints have no statement timeout; a pathological filter shape can still pile up workers (the 504 cascade mechanism). aiosqlite interrupt or asyncio.wait_for + connection close.\n4. **Housekeeping** — move the SQLiteCompiler.get_from_hint_text monkeypatch from app/routes/intel_kills_search.py to app/db/sqlite_hints.py next time the file is touched (import-time probe comes along).\n\n**Progress 2026-07-04 (Phase 0 audit, commit 8b60d9d):** filterless/unbounded searches now get a 90d default lower bound (anchored to time_end when only an upper bound is given), always hint-eligible, with a muted UI note on initial render only. Prod EXPLAIN: unbounded count was `SCAN killmails USING COVERING INDEX ix_killmails_total_value_kid` (full ~60M rows); bounded is `SEARCH ... ix_killmails_killmail_time`. Items 1-4 above remain open.",
+  "id": "T-037",
+  "order": 40,
+  "phase": null,
+  "status": "open",
+  "title": "Killfeed search hardening follow-ups",
+  "type": "task"
+}
