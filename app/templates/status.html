@@ -4,41 +4,64 @@
 <div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Status</span></div>
 {% endblock %}
 
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+.st-table { width:100%; border-collapse:collapse; font-size:11px; }
+.st-table thead th {
+    text-align:left; padding:0.4rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+}
+.st-table tbody td {
+    padding:0.4rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text);
+    vertical-align:top;
+}
+.st-table tbody tr:last-child td { border-bottom:none; }
+.st-table tbody tr:hover { background:rgba(200,169,81,0.04); }
+.st-scroll { overflow-x:auto; overflow-y:auto; }
+.st-summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:0.35rem; width:fit-content; }
+.st-summary::-webkit-details-marker { display:none; }
+.st-detail-body { margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:0.4rem; }
+.st-detail-row { display:flex; align-items:flex-start; gap:0.5rem; }
+.st-detail-key { font-weight:600; white-space:nowrap; width:96px; flex-shrink:0; }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="space-y-6">
-
-  <!-- Header -->
-  <div class="flex items-center justify-between">
-    <h1 class="text-eve-accent font-semibold tracking-widest text-sm uppercase">◈ App Status</h1>
+<div class="b-page-header">
+    <h1 class="b-page-title">App Status</h1>
     {% if overall_status == "ok" %}
-      <span class="px-3 py-1 text-xs rounded-full bg-eve-success/20 text-eve-success border border-eve-success/30 font-mono">● OK</span>
+      <span class="b-badge is-ok">● OK</span>
     {% elif overall_status == "warning" %}
-      <span class="px-3 py-1 text-xs rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 font-mono">⚠ WARNING</span>
+      <span class="b-badge is-warn">⚠ WARNING</span>
     {% else %}
-      <span class="px-3 py-1 text-xs rounded-full bg-eve-danger/20 text-eve-danger border border-eve-danger/30 font-mono">✕ CRITICAL</span>
+      <span class="b-badge is-danger">✕ CRITICAL</span>
     {% endif %}
-  </div>
+</div>
 
-  <!-- Request activity chart (managed by JS, not HTMX) -->
-  <div class="eve-border rounded bg-eve-surface p-4">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-xs uppercase tracking-wider text-eve-muted">Request Activity</h2>
-      <div class="flex items-center gap-3 text-xs text-eve-muted font-mono">
-        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-success/70"></span>Fetched</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(100,160,220,0.7);"></span>Cached</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-eve-danger/70"></span>Rejected</span>
-        <span class="text-eve-muted/50">· last 30 min</span>
+<!-- Request activity chart (managed by JS, not HTMX) -->
+<div class="b-section">
+  <div class="b-panel">
+    <div class="b-panel-head">
+      <span class="b-label">Request Activity</span>
+      <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(77,166,77,0.7);"></span>Fetched</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(100,160,220,0.7);"></span>Cached</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(204,60,60,0.7);"></span>Rejected</span>
+        <span style="opacity:0.6;">&middot; last 30 min</span>
       </div>
     </div>
-    <div class="relative h-36">
+    <div style="position:relative;height:9rem;padding:0.75rem;">
       <canvas id="request-chart"></canvas>
     </div>
   </div>
-
-  <!-- Live-refreshing data section (HTMX partial) -->
-  {% include "status_data.html" %}
-
 </div>
+
+<!-- Live-refreshing data section (HTMX partial) -->
+{% include "status_data.html" %}
 
 <!-- Chart.js -->
 <script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
