@@ -6,6 +6,8 @@
     <meta name="csrf-token" content="{{ request.session.get('csrf_token', '') }}">
     <title>{% block title %}VIGILANT{% endblock %}</title>
     <link rel=icon href=/static/favicon.ico type=image/x-icon>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#080808">
     <link rel="stylesheet" href="/static/css/tailwind.css?v={{ css_v }}">
     <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
