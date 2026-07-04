@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.nav import NAV_GROUPS, item_active, group_active
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.csp_nonce import CSPNonceMiddleware
 from app.utils.perf import perf_enabled, perf_log
@@ -90,6 +91,12 @@ for _mod_name, _mod in list(sys.modules.items()):
         _templates = getattr(_mod, "templates", None)
         if isinstance(_templates, Jinja2Templates):
             _templates.env.globals["css_v"] = CSS_V
+            # Single-source nav registry (see app/nav.py). base.html renders the
+            # desktop nav, mobile menu, and footer from these; landings.py builds
+            # its card grids from the same NAV_GROUPS.
+            _templates.env.globals["nav_groups"] = NAV_GROUPS
+            _templates.env.globals["nav_item_active"] = item_active
+            _templates.env.globals["nav_group_active"] = group_active
 
 settings = get_settings()
 

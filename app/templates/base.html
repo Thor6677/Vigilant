@@ -23,53 +23,24 @@
     <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
     {% set _path = request.url.path %}
     <div class="b-nav-links">
-        <a href="/dashboard" class="b-nav-link {{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
-        <a href="/corporations" class="b-nav-link {{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
-        <a href="/skill-plans" class="b-nav-link {{ 'is-active' if _path.startswith('/skill-plans') }}">Skill Plans</a>
+        {# Desktop nav — rendered from the app.nav registry (single source). #}
+        {% for group in nav_groups %}
+            {% if not group['admin'] or request.session.get('is_admin') %}
+                {% if not group['items'] %}
+        <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+                {% else %}
         <span class="b-nav-dropdown">
-            <a href="/industry" class="b-nav-link {{ 'is-active' if _path.startswith('/industry') }}">Industry ▾</a>
+            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }} ▾</a>
             <div class="b-nav-dropdown-menu">
-                <a href="/industry" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry' }}">Overview</a>
-                <a href="/industry/manufacturing" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/industry/manufacturing') }}">Manufacturing</a>
-                <a href="/industry/jobs" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/industry/jobs') }}">Active Jobs</a>
-                <a href="/industry/compression" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/compression' }}">Compression</a>
-                <a href="/industry/hauling" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/hauling' }}">Hauling</a>
-                <a href="/industry/appraisal" class="b-nav-dropdown-item {{ 'is-active' if _path == '/industry/appraisal' }}">Appraisal</a>
-                <a href="/industry/mining-ledger" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/industry/mining-ledger') }}">Mining Ledger</a>
-                <a href="/industry/planetary" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/industry/planetary') }}">Planetary Industry</a>
+                {% for item in group['items'] %}
+                {% if item['divider_before'] %}<div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>{% endif %}
+                {% if item['external'] %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item" target="_blank" rel="noopener">{{ item['label'] }}</a>{% else %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item {{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>{% endif %}
+                {% endfor %}
             </div>
         </span>
-        <span class="b-nav-dropdown">
-            <a href="/intel" class="b-nav-link {{ 'is-active' if _path.startswith('/intel') or _path.startswith('/dscan') or _path.startswith('/wormholes') }}">Intel ▾</a>
-            <div class="b-nav-dropdown-menu">
-                <a href="/intel" class="b-nav-dropdown-item {{ 'is-active' if _path == '/intel' }}">Overview</a>
-                <a href="/intel/kills" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/kills') }}">Kill Feed</a>
-                <a href="/intel/dscan" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/dscan') or _path.startswith('/dscan') }}">D-Scan / Local</a>
-                <a href="/intel/watch" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/watch') }}">Local Watch</a>
-                <a href="/intel/gatecheck" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
-                <a href="/map" class="b-nav-dropdown-item {{ 'is-active' if _path == '/map' or _path == '/map/wormholes' }}">Star Map</a>
-                <div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>
-                <a href="/wormholes" class="b-nav-dropdown-item {{ 'is-active' if _path == '/wormholes' or _path.startswith('/wormholes/system') }}">Wormhole Systems</a>
-                <a href="/wormholes/types" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/wormholes/types') }}">Wormhole Types</a>
-                <a href="/wormholes/effects" class="b-nav-dropdown-item {{ 'is-active' if _path == '/wormholes/effects' }}">System Effects</a>
-                <a href="/tools/structure-age" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/structure-age') }}">Structure Age</a>
-            </div>
-        </span>
-        <span class="b-nav-dropdown">
-            <a href="/tools" class="b-nav-link {{ 'is-active' if _path == '/tools' or _path.startswith('/assets') or _path.startswith('/structure-timers') or _path.startswith('/tools/') or _path.startswith('/i/') }}">Tools ▾</a>
-            <div class="b-nav-dropdown-menu">
-                <a href="/tools" class="b-nav-dropdown-item {{ 'is-active' if _path == '/tools' }}">Overview</a>
-                <a href="/tools/activity" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/activity') }}">Activity</a>
-                <a href="/assets" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
-                <a href="/structure-timers" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>
-                <a href="/tools/images" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/images') or _path.startswith('/i/') }}">Image Host</a>
-                <a href="/tools/fitting" class="b-nav-dropdown-item {{ 'is-active' if _path == '/tools/fitting' }}">Ship Fitting</a>
-                <a href="/tools/fitting/saved" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/fitting/saved') }}">Saved Fits</a>
-                <a href="/tools/discordtime" class="b-nav-dropdown-item {{ 'is-active' if _path.startswith('/tools/discordtime') }}">Discord Time</a>
-                <a href="https://mapper.thunderborn.dev" class="b-nav-dropdown-item" target="_blank">Wormhole Mapper</a>
-            </div>
-        </span>
-        {% if request.session.get('is_admin') %}<a href="/admin" class="b-nav-link {{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
+                {% endif %}
+            {% endif %}
+        {% endfor %}
         <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -144,36 +115,35 @@
     </button>
 </nav>
 <div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
-    <a href="/dashboard" class="{{ 'is-active' if _path == '/dashboard' or _path.startswith('/character/') }}">Dashboard</a>
-    <a href="/corporations" class="{{ 'is-active' if _path.startswith('/corporations') }}">Corporations</a>
-    <a href="/skill-plans" class="{{ 'is-active' if _path.startswith('/skill-plans') }}">Skill Plans</a>
+    {# Mobile menu — rendered from the app.nav registry (single source).
+       Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
+       link that stands in for the Overview item (so that item is skipped in the
+       loop). Non-landing groups whose url equals their first item's url
+       (Dashboard/Map/Admin) suppress the parent to avoid a duplicate link.
+       Mobile is a flat list: no in-group dividers (divider_before is desktop-only). #}
+    {% for group in nav_groups %}
+        {% if not group['admin'] or request.session.get('is_admin') %}
+            {% if not group['items'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+            {% else %}
     <div class="b-mobile-sep"></div>
-    <a href="/industry" class="{{ 'is-active' if _path == '/industry' }}">Industry Overview</a>
-    <a href="/industry/manufacturing" class="{{ 'is-active' if _path.startswith('/industry/manufacturing') }}">Manufacturing</a>
-    <a href="/industry/compression" class="{{ 'is-active' if _path == '/industry/compression' }}">Compression</a>
-    <a href="/industry/hauling" class="{{ 'is-active' if _path == '/industry/hauling' }}">Hauling</a>
-    <a href="/industry/appraisal" class="{{ 'is-active' if _path == '/industry/appraisal' }}">Appraisal</a>
-    <a href="/industry/mining-ledger" class="{{ 'is-active' if _path.startswith('/industry/mining-ledger') }}">Mining Ledger</a>
-    <div class="b-mobile-sep"></div>
-    <a href="/intel" class="{{ 'is-active' if _path == '/intel' }}">Intel Overview</a>
-    <a href="/intel/kills" class="{{ 'is-active' if _path.startswith('/intel/kills') }}">Kill Feed</a>
-    <a href="/intel/dscan" class="{{ 'is-active' if _path.startswith('/intel/dscan') or _path.startswith('/dscan') }}">D-Scan / Local</a>
-    <a href="/intel/watch" class="{{ 'is-active' if _path.startswith('/intel/watch') }}">Local Watch</a>
-    <a href="/intel/gatecheck" class="{{ 'is-active' if _path.startswith('/intel/gatecheck') }}">Gate Check</a>
-    <a href="/map" class="{{ 'is-active' if _path == '/map' or _path == '/map/wormholes' }}">Star Map</a>
-    <a href="/wormholes" class="{{ 'is-active' if _path == '/wormholes' or _path.startswith('/wormholes/system') }}">Wormhole Systems</a>
-    <a href="/wormholes/types" class="{{ 'is-active' if _path.startswith('/wormholes/types') }}">Wormhole Types</a>
-    <a href="/wormholes/effects" class="{{ 'is-active' if _path == '/wormholes/effects' }}">System Effects</a>
-    <a href="/tools/structure-age" class="{{ 'is-active' if _path.startswith('/tools/structure-age') }}">Structure Age</a>
-    <div class="b-mobile-sep"></div>
-    <a href="/tools" class="{{ 'is-active' if _path == '/tools' }}">Tools Overview</a>
-    <a href="/tools/activity" class="{{ 'is-active' if _path.startswith('/tools/activity') }}">Activity</a>
-    <a href="/assets" class="{{ 'is-active' if _path.startswith('/assets') }}">Asset Search</a>
-    <a href="/structure-timers" class="{{ 'is-active' if _path.startswith('/structure-timers') }}">Structure Timers</a>
-    <a href="/tools/images" class="{{ 'is-active' if _path.startswith('/tools/images') or _path.startswith('/i/') }}">Image Host</a>
-    <a href="/tools/discordtime" class="{{ 'is-active' if _path.startswith('/tools/discordtime') }}">Discord Time</a>
-    <a href="https://mapper.thunderborn.dev" target="_blank">Wormhole Mapper</a>
-    {% if request.session.get('is_admin') %}<a href="/admin" class="{{ 'is-active' if _path.startswith('/admin') or _path.startswith('/status') }}">Admin</a>{% endif %}
+                {% if group['landing'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
+                {% elif group['url'] != group['items'][0]['url'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+                {% endif %}
+                {% for item in group['items'] %}
+                    {% if not (group['landing'] and item['url'] == group['url']) %}
+                        {% if item['external'] %}
+    <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
+                        {% else %}
+    <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
     <div class="b-mobile-sep"></div>
     <a href="/auth/add-character" style="color:var(--accent);">+ Add Character</a>
     <form method="post" action="/auth/logout" style="margin:0;">
@@ -212,12 +182,8 @@
 <footer class="b-footer">
     <span class="b-footer-brand"><img src="/static/logo.png" alt="" style="height:16px;width:auto;opacity:0.5;">Vigilant</span>
     <div class="b-footer-links">
-        <a href="/dashboard" class="b-footer-link">Dashboard</a>
-        <a href="/assets" class="b-footer-link">Assets</a>
-        <a href="/corporations" class="b-footer-link">Corporations</a>
-        <a href="/industry" class="b-footer-link">Industry</a>
-        <a href="/intel" class="b-footer-link">Intel</a>
-        {% if request.session.get('is_admin') %}<a href="/admin" class="b-footer-link">Admin</a>{% endif %}
+        {# Footer — one link per nav group, from the app.nav registry. #}
+        {% for group in nav_groups %}{% if not group['admin'] or request.session.get('is_admin') %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
     </div>
     <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
 </footer>

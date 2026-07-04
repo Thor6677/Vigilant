@@ -12,8 +12,21 @@ the app + routers without starting the server or touching the network, so
 importing it is the most faithful source of "what paths actually exist".
 """
 
+import os
+
+from jinja2 import Environment
+
 import app.main as main
 from app.nav import NAV_GROUPS, item_active, group_active
+
+_BASE_HTML = os.path.join(
+    os.path.dirname(__file__), "..", "app", "templates", "base.html"
+)
+
+
+def _base_html_source():
+    with open(_BASE_HTML, encoding="utf-8") as fh:
+        return fh.read()
 
 
 # ── helpers to walk the registry ───────────────────────────────────────────
@@ -182,6 +195,32 @@ def test_labels_unique_within_each_group():
         labels = [item["label"] for item in group["items"]]
         dupes = [l for l in set(labels) if labels.count(l) > 1]
         assert not dupes, f"Duplicate labels in group {group['label']!r}: {dupes}"
+
+
+# ── base.html renders from the registry, not hardcoded URLs ─────────────────
+
+def test_base_html_has_no_hardcoded_dropdown_urls():
+    """The nav/mobile/footer chrome must render from `nav_groups`, so the old
+    hand-maintained dropdown item URLs should no longer appear as literals in
+    base.html. If one reappears, someone re-hardcoded a nav link."""
+    source = _base_html_source()
+    for url in ("/industry/manufacturing", "/tools/discordtime",
+                "/wormholes/types"):
+        assert source.count(url) == 0, (
+            f"{url!r} is hardcoded in base.html; it must come from the "
+            f"nav registry instead"
+        )
+
+
+def test_base_html_references_nav_groups():
+    """base.html must drive its chrome from the registry global."""
+    assert "nav_groups" in _base_html_source()
+
+
+def test_base_html_is_valid_jinja():
+    """Guard against a broken template edit. Environment().parse validates the
+    template syntax without needing request/session globals to render."""
+    Environment().parse(_base_html_source())
 
 
 def test_landing_group_override_only_on_wormhole_reference_items():
