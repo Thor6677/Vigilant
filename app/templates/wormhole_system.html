@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_entity_links.html" import entity_links %}
 {% block title %}{{ system['system_name'] }} — Wormhole Systems — VIGILANT{% endblock %}
 
 {% block breadcrumbs %}
@@ -53,6 +54,7 @@
     {% endif %}
     {{ system['system_name'] }}
 </div>
+<div style="margin-bottom:1.25rem;">{{ entity_links("system", system['system_id'], system['system_name'], current="wh", jspace=True) }}</div>
 
 <!-- Connections -->
 <div class="ws-section">

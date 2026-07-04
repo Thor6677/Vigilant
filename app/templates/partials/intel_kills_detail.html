@@ -1,3 +1,4 @@
+{% from "partials/_entity_links.html" import entity_links %}
 <div class="kf-detail" data-kid="{{ kid }}">
   <div class="kf-detail-grid">
 
@@ -12,6 +13,12 @@
           <div style="color:var(--muted);font-size:10px;">{{ system_name }} · {{ km.killmail_time.strftime('%Y-%m-%d %H:%M') }} EVE</div>
         </div>
       </div>
+      {% if km.victim_character_id %}
+      <div style="margin-top:0.5rem;">{{ entity_links("character", km.victim_character_id, victim_pilot) }}</div>
+      {% endif %}
+      {% if km.solar_system_id %}
+      <div style="margin-top:0.35rem;">{{ entity_links("system", km.solar_system_id, system_name) }}</div>
+      {% endif %}
 
       <div class="kf-isk-block">
         <h4>ISK destroyed</h4>

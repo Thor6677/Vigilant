@@ -1,0 +1,34 @@
+{#
+  entity_links(kind, id, name, current=None, jspace=False)
+
+  Renders a compact chip row of cross-links for an EVE entity mention
+  (character / system / item). Skips the chip whose slug matches `current`
+  so the row never self-links the page it sits on.
+
+  Styling: `.el-chips` / `.el-chip` live in static/css/site.css (page-agnostic,
+  no <style> here so the rule isn't duplicated per render).
+
+  Import (loader-root-relative, works from any template regardless of dir):
+      {% from "partials/_entity_links.html" import entity_links %}
+#}
+{% macro entity_links(kind, id, name, current=None, jspace=False) -%}
+<div class="el-chips">
+  {%- if kind == "character" -%}
+    {% if current != "overview" %}<a class="el-chip" href="/character/{{ id }}">Overview</a>{% endif %}
+    {% if current != "skills" %}<a class="el-chip" href="/character/{{ id }}/skills">Skills</a>{% endif %}
+    {% if current != "journal" %}<a class="el-chip" href="/character/{{ id }}/journal">Journal</a>{% endif %}
+    {% if current != "blueprints" %}<a class="el-chip" href="/character/{{ id }}/blueprints">Blueprints</a>{% endif %}
+    {% if current != "fittings" %}<a class="el-chip" href="/character/{{ id }}/fittings">Fittings</a>{% endif %}
+    {% if current != "mining" %}<a class="el-chip" href="/character/{{ id }}/mining">Mining</a>{% endif %}
+    {% if current != "zkb" %}<a class="el-chip is-ext" href="https://zkillboard.com/character/{{ id }}/" target="_blank" rel="noopener">zKillboard</a>{% endif %}
+  {%- elif kind == "system" -%}
+    {% if current != "map" %}<a class="el-chip" href="/map?focus={{ id }}">Map</a>{% endif %}
+    {% if jspace and current != "wh" %}<a class="el-chip" href="/wormholes/system/{{ name }}">WH Info</a>{% endif %}
+    {% if current != "dotlan" %}<a class="el-chip is-ext" href="https://evemaps.dotlan.net/system/{{ name|replace(' ', '_') }}" target="_blank" rel="noopener">Dotlan</a>{% endif %}
+    {% if current != "zkb" %}<a class="el-chip is-ext" href="https://zkillboard.com/system/{{ id }}/" target="_blank" rel="noopener">zKillboard</a>{% endif %}
+  {%- elif kind == "item" -%}
+    {% if current != "build" %}<a class="el-chip" href="/industry/manufacturing?search={{ name|urlencode }}">Build</a>{% endif %}
+    {% if current != "zkb" %}<a class="el-chip is-ext" href="https://zkillboard.com/item/{{ id }}/" target="_blank" rel="noopener">zKillboard</a>{% endif %}
+  {%- endif -%}
+</div>
+{%- endmacro %}

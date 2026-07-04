@@ -231,3 +231,15 @@
 .b-hover-bg:hover        { background: var(--bg); }
 .b-hover-underline       { text-decoration: none; }
 .b-hover-underline:hover { text-decoration: underline; }
+
+/* entity_links cross-link chip row (partials/_entity_links.html) — small
+   muted deep-links to a character/system/item's related pages. */
+.el-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.el-chip {
+    font-size: 10px; letter-spacing: 0.04em; line-height: 1.4;
+    color: var(--muted); border: 1px solid var(--border);
+    padding: 2px 7px; border-radius: 3px; text-decoration: none; white-space: nowrap;
+    transition: color 0.1s, border-color 0.1s;
+}
+.el-chip:hover { color: var(--text); border-color: var(--muted); }
+.el-chip.is-ext::after { content: " \2197"; font-size: 9px; }
