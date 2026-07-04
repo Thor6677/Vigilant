@@ -788,6 +788,46 @@ class DetectedBattle(Base):
     )
 
 
+class MarketHistory(Base):
+    """Daily market history rows per (region, type), fetched ON DEMAND.
+
+    Phase 4 storage design (the "192GB lesson"): NO bulk ingest. Rows accrue
+    only for (region, type) pairs a user actually views (or that ROI /
+    profitability tools request). ESI `/markets/{region_id}/history/` returns
+    ~400 daily rows in a single call, so worst case is a few thousand types ×
+    ~400 rows ≈ tens of MB — never gigabytes. `MarketHistoryMeta.fetched_at`
+    stamps each pair for a 24h freshness TTL.
+
+    Composite PK (region_id, type_id, date) gives a natural upsert key and an
+    index the JSON endpoint slices on (date >= cutoff).
+    """
+    __tablename__ = "market_history"
+
+    region_id = Column(Integer, primary_key=True)
+    type_id = Column(Integer, primary_key=True)
+    date = Column(Date, primary_key=True)
+    average = Column(Float, nullable=True)
+    highest = Column(Float, nullable=True)
+    lowest = Column(Float, nullable=True)
+    # Daily volume for high-turnover types (e.g. Tritanium) overflows int32,
+    # so BigInteger. order_count stays well within int range.
+    volume = Column(BigInteger, nullable=True)
+    order_count = Column(Integer, nullable=True)
+
+
+class MarketHistoryMeta(Base):
+    """Freshness stamp per (region, type). `fetched_at` drives the 24h TTL in
+    app/market/history.py — a fresh stamp serves rows straight from the DB; a
+    stale/absent stamp triggers one ESI fetch + upsert. Stamped even when ESI
+    returns zero rows (a type with no market history) so we don't refetch it on
+    every page load."""
+    __tablename__ = "market_history_meta"
+
+    region_id = Column(Integer, primary_key=True)
+    type_id = Column(Integer, primary_key=True)
+    fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never

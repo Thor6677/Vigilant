@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Market — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/industry">Industry</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Market</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .mk-input {
+        width: 100%; padding: 0.55rem 0.7rem;
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 13px;
+    }
+    .mk-input:focus { outline: none; border-color: var(--accent); }
+    .mk-results { margin-top: 0.75rem; display: flex; flex-direction: column; }
+    .mk-row {
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 1rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border);
+        border-bottom: none; text-decoration: none; color: var(--text);
+    }
+    .mk-row:last-child { border-bottom: 1px solid var(--border); }
+    .mk-row:hover { background: var(--surface); border-color: var(--accent); }
+    .mk-row-name { font-size: 12px; }
+    .mk-row-group { font-size: 10px; color: var(--muted); }
+    .mk-hint { font-size: 11px; color: var(--muted); padding: 0.5rem 0.1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Market</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Price-history charts for any published item. Data from CCP ESI (The Forge / Jita),
+            fetched on demand and cached — the first view of a type pulls ~400 days of daily history.
+        </p>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Find an item</span></div>
+    <div style="padding:0.75rem;">
+        <input
+            type="text"
+            name="q"
+            class="mk-input"
+            placeholder="Search item name — e.g. Tritanium, PLEX, Rifter…"
+            autocomplete="off"
+            autofocus
+            hx-get="/market/search"
+            hx-trigger="keyup changed delay=300ms"
+            hx-target="#market-results"
+            hx-swap="innerHTML"
+        >
+        <div id="market-results" class="mk-results">
+            <div class="mk-hint">Type at least two characters to search.</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

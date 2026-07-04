@@ -123,6 +123,17 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
+                "Market", "/market",
+                [("prefix", "/market")],
+                desc="Price-history charts for any item — daily average, high/low band, and traded volume in The Forge (Jita), fetched on demand and cached. Search a type and watch its trend over 30 days to a year.",
+                features=[
+                    "Type search across all published items",
+                    "Average price line + daily high/low band",
+                    "Traded-volume bars",
+                    "30d / 90d / 1y / all range toggles",
+                ],
+            ),
+            _item(
                 "Active Jobs", "/industry/jobs",
                 [("prefix", "/industry/jobs")],
                 desc="Every running or queued industry job across all your characters in one table, sorted by completion time.",

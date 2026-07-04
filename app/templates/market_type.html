@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}{{ type_name or "Item" }} — Market — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/industry">Industry</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <a href="/market">Market</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ type_name or type_id }}</span>
+</div>
+{% endblock %}
+
+{% block head %}
+{% if not not_found %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endif %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .mk-ranges { display:flex; gap:0.25rem; flex-wrap:wrap; }
+    .mk-ranges .b-btn { padding:3px 12px; font-size:10px; }
+    .mk-ranges .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .mk-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:0.75rem; margin-bottom:0.75rem; }
+    .mk-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .mk-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
+    .mk-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if not_found %}
+<div class="b-page-header"><h1 class="b-page-title">Item not found</h1></div>
+<div class="b-banner" style="border-color:var(--danger);">
+    <span style="color:var(--danger);">No published item with type ID {{ type_id }}. <a href="/market" style="color:var(--accent);">Back to search</a>.</span>
+</div>
+{% else %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">{{ type_name }}</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            {{ group_name }} · Daily price history in The Forge (Jita). Average, daily high/low band, and traded volume.
+        </p>
+    </div>
+</div>
+
+<div class="mk-stats">
+    <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-avg">—</div><div class="mk-stat-label">Latest avg</div></div>
+    <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-high">—</div><div class="mk-stat-label">Latest high</div></div>
+    <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-low">—</div><div class="mk-stat-label">Latest low</div></div>
+    <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-vol">—</div><div class="mk-stat-label">Latest volume</div></div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">Price history</span>
+        <div class="mk-ranges" id="mk-ranges">
+            <button type="button" class="b-btn" data-range="30d">30D</button>
+            <button type="button" class="b-btn" data-range="90d">90D</button>
+            <button type="button" class="b-btn is-active" data-range="1y">1Y</button>
+            <button type="button" class="b-btn" data-range="all">ALL</button>
+        </div>
+    </div>
+    <div style="padding:0.75rem;">
+        <div style="position:relative;height:340px;"><canvas id="mk-chart"></canvas></div>
+        <div class="b-empty" id="mk-error" style="display:none;">Market history unavailable — try another range or refresh.</div>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var TYPE_ID = {{ type_id }};
+    var range = '1y', chart = null;
+    var errEl = document.getElementById('mk-error');
+
+    function fmtIsk(v) {
+        if (v == null) return '—';
+        if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+        return Number(v).toFixed(2);
+    }
+    function fmtNum(v) {
+        if (v == null) return '—';
+        return Number(v).toLocaleString();
+    }
+    function last(arr) {
+        for (var i = arr.length - 1; i >= 0; i--) {
+            if (arr[i] != null) return arr[i];
+        }
+        return null;
+    }
+
+    function build(data) {
+        errEl.style.display = 'none';
+        document.getElementById('mk-latest-avg').textContent = fmtIsk(last(data.average));
+        document.getElementById('mk-latest-high').textContent = fmtIsk(last(data.highest));
+        document.getElementById('mk-latest-low').textContent = fmtIsk(last(data.lowest));
+        document.getElementById('mk-latest-vol').textContent = fmtNum(last(data.volume));
+
+        var cfg = {
+            type: 'bar',
+            data: {
+                labels: data.dates,
+                datasets: [
+                    { type: 'line', label: 'Average', data: data.average,
+                      borderColor: '#c8a951', backgroundColor: 'transparent',
+                      pointRadius: 0, borderWidth: 1.6, yAxisID: 'y', order: 0 },
+                    { type: 'line', label: 'High', data: data.highest,
+                      borderColor: 'rgba(120,170,120,0.5)', backgroundColor: 'rgba(120,170,120,0.10)',
+                      pointRadius: 0, borderWidth: 0.8, yAxisID: 'y', fill: '+1', order: 1 },
+                    { type: 'line', label: 'Low', data: data.lowest,
+                      borderColor: 'rgba(170,120,120,0.5)', backgroundColor: 'transparent',
+                      pointRadius: 0, borderWidth: 0.8, yAxisID: 'y', order: 2 },
+                    { type: 'bar', label: 'Volume', data: data.volume,
+                      backgroundColor: 'rgba(136,153,170,0.35)', yAxisID: 'y1', order: 3 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                    y: { position: 'left', ticks: { color: '#c8a951',
+                          callback: function (v) { return fmtIsk(v); } }, grid: { color: '#1a1a1a' } },
+                    y1: { position: 'right', beginAtZero: true,
+                          ticks: { color: '#8899aa', callback: function (v) { return fmtIsk(v); } },
+                          grid: { drawOnChartArea: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                    tooltip: { callbacks: { label: function (ctx) {
+                        if (ctx.dataset.label === 'Volume') return 'Volume: ' + fmtNum(ctx.parsed.y);
+                        return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                    } } }
+                }
+            }
+        };
+        if (chart) { chart.destroy(); }
+        chart = new Chart(document.getElementById('mk-chart'), cfg);
+    }
+
+    function load() {
+        fetch('/market/type/' + TYPE_ID + '/history.json?range=' + range).then(function (r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.json();
+        }).then(function (data) {
+            if (!data.dates || !data.dates.length) {
+                if (chart) { chart.destroy(); chart = null; }
+                errEl.textContent = 'No market history recorded for this item in The Forge.';
+                errEl.style.display = '';
+                ['mk-latest-avg','mk-latest-high','mk-latest-low','mk-latest-vol'].forEach(function (id) {
+                    document.getElementById(id).textContent = '—';
+                });
+                return;
+            }
+            build(data);
+        }).catch(function () {
+            errEl.textContent = 'Market history unavailable — try another range or refresh.';
+            errEl.style.display = '';
+        });
+    }
+
+    document.getElementById('mk-ranges').addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-range]');
+        if (!btn) return;
+        range = btn.getAttribute('data-range');
+        Array.prototype.forEach.call(this.querySelectorAll('button'), function (b) {
+            b.classList.toggle('is-active', b === btn);
+        });
+        load();
+    });
+
+    load();
+})();
+</script>
+{% endif %}
+{% endblock %}
