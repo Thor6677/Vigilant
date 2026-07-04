@@ -430,3 +430,8 @@ async def startup():
         except Exception as e:
             logging.getLogger(__name__).warning("pcu daily rollup bootstrap error: %s", e)
     asyncio.create_task(_kick_pcu_rollup())
+
+    # /tools/activity SWR cache pre-warm — the long windows cost 10-60s
+    # cold (1y raw ISK scan); warming them here means no user ever pays it.
+    from app.routes.player_stats import warm_activity_cache
+    asyncio.create_task(warm_activity_cache())

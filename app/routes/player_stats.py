@@ -98,6 +98,26 @@ async def _refresh_payload(window: str) -> None:
     finally:
         _refreshing.discard(window)
 
+
+async def warm_activity_cache() -> None:
+    """Startup pre-warm so no user ever pays a cold window compute.
+
+    The long windows are brutal cold (measured on prod 2026-07-04:
+    90d ≈ 11s, 1y ≈ 54s raw ISK scan over ~6.5M killmail rows; 5y/all
+    are worse). SWR only helps once a window has been computed once —
+    this fills every window sequentially in the background, most-used
+    first, one at a time so the 0.5-CPU container isn't saturated.
+    Called from main.py startup via asyncio.create_task.
+    """
+    await asyncio.sleep(30)  # let boot-time work (SDE check, consumers) settle
+    for window in ("30d", "7d", "1d", "90d", "36h", "1h", "1y", "5y", "all"):
+        if window in _payload_cache:
+            continue  # a user hit it first — SWR owns it now
+        _refreshing.add(window)
+        await _refresh_payload(window)
+        await asyncio.sleep(5)
+    log.info("tools/activity: cache pre-warm complete (%d windows)", len(_payload_cache))
+
 # Heatmap is a 90-day aggregate, window-independent, and runs ~1.5s via a
 # row_number() over 200k+ rows. Cache the result for all windows to share.
 _HEATMAP_TTL_SECONDS = 1800
