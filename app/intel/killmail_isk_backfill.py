@@ -15,7 +15,9 @@ Design constraints:
 - Resumable: runs on EVERY startup. Fully-covered months fast-skip on a
   cheap date-count probe without touching the killmails table, so a
   finished backfill costs ~120 tiny queries per boot and a half-finished
-  one resumes exactly at its gap.
+  one resumes exactly at its gap. (Fast-skip assumes every day in a month
+  has >= 1 kill — true for all of 2016-2026 EVE; a hypothetical zero-kill
+  day would just make its month re-scan each boot, harmlessly.)
 """
 from __future__ import annotations
 
