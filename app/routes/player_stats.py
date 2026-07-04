@@ -11,6 +11,8 @@ retention, so longer windows show ISK as zero on bins predating that.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -20,6 +22,7 @@ from sqlalchemy import Integer, case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    AsyncSessionLocal,
     Killmail,
     KillmailDailyAggregate,
     KillmailZoneDailyAggregate,
@@ -38,6 +41,7 @@ _PCU_SOURCE_PRIORITY = {"esi": 0, "eve-offline-net": 1, "eve-offline-com": 2}
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+log = logging.getLogger(__name__)
 
 
 # Window → (cutoff_delta, bin_seconds, label_fmt). For all-time we use a
@@ -60,12 +64,39 @@ _WINDOWS = {
     "all":  ("All time (2003–)",  None,                     30 * 24 * 3600,  "%Y-%m"),
 }
 
-# Slow windows benefit from a short TTL cache — they don't change minute to
-# minute and most of the data is historical. Keyed by window. Values are
-# (expires_at, payload_dict).
-_SLOW_WINDOWS = {"1y", "5y", "all"}
-_SLOW_TTL_SECONDS = 3600
+# Stale-while-revalidate payload cache, ALL windows (same pattern as
+# corp-stats / kill-pulse — cache the context DICT, never rendered HTML,
+# so CSP nonces stay per-request). The 30d default costs ~3s of killmail
+# scanning even after query consolidation; serving the last payload and
+# refreshing in the background makes every click after the first instant.
+# Keyed by window → (fresh_until, payload_dict). A stale entry is served
+# immediately while one background task (single-flight via _refreshing)
+# rebuilds it with its own AsyncSessionLocal session — never the request's
+# session, which closes when the response returns. Single-flight is only
+# correct because there is no `await` between the _refreshing membership
+# check and the add() in the handler — don't insert one.
+_WINDOW_TTL_SECONDS = {
+    "1h": 300, "1d": 300, "36h": 300, "7d": 600, "30d": 900, "90d": 900,
+    "1y": 3600, "5y": 3600, "all": 3600,
+}
 _payload_cache: dict[str, tuple[datetime, dict]] = {}
+_refreshing: set[str] = set()
+
+
+async def _refresh_payload(window: str) -> None:
+    """Background SWR refresh. Own DB session (async-session safety)."""
+    try:
+        async with AsyncSessionLocal() as db:
+            payload = await _build_activity_payload(db, window)
+        _payload_cache[window] = (
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            + timedelta(seconds=_WINDOW_TTL_SECONDS[window]),
+            payload,
+        )
+    except Exception:
+        log.exception("tools/activity: background refresh failed for %s", window)
+    finally:
+        _refreshing.discard(window)
 
 # Heatmap is a 90-day aggregate, window-independent, and runs ~1.5s via a
 # row_number() over 200k+ rows. Cache the result for all windows to share.
@@ -98,16 +129,34 @@ async def tools_activity(
 
     if window not in _WINDOWS:
         window = "30d"
-    label, delta, bin_seconds, label_fmt = _WINDOWS[window]
 
-    # Slow-window cache: payload is mostly historical, fine to serve a
-    # 1-hour-old version. Skip for short windows where data turns over fast.
-    cached = _payload_cache.get(window) if window in _SLOW_WINDOWS else None
+    # SWR: fresh → serve; stale → serve stale + refresh in background;
+    # miss (first hit after restart) → compute inline.
+    cached = _payload_cache.get(window)
     if cached is not None:
-        expires_at, payload = cached
-        if datetime.now(timezone.utc).replace(tzinfo=None) < expires_at:
-            return templates.TemplateResponse(request, "tools_activity.html", {**payload})
+        fresh_until, payload = cached
+        if datetime.now(timezone.utc).replace(tzinfo=None) >= fresh_until:
+            if window not in _refreshing:
+                _refreshing.add(window)
+                asyncio.create_task(_refresh_payload(window))
+        return templates.TemplateResponse(request, "tools_activity.html", {**payload})
 
+    payload = await _build_activity_payload(db, window)
+    _payload_cache[window] = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        + timedelta(seconds=_WINDOW_TTL_SECONDS[window]),
+        payload,
+    )
+    return templates.TemplateResponse(request, "tools_activity.html", {**payload})
+
+
+async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
+    """Compute the full /tools/activity template context for one window.
+
+    Called inline on a cache miss and from the SWR background refresher
+    (which passes its own AsyncSessionLocal session).
+    """
+    label, delta, bin_seconds, label_fmt = _WINDOWS[window]
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = _FIRST_PCU if delta is None else (now - delta)
     total_seconds = int((now - cutoff).total_seconds())
@@ -203,22 +252,115 @@ async def tools_activity(
     nonempty = [v for v in pcu_values if v is not None]
     mean_pcu = round(sum(nonempty) / len(nonempty)) if nonempty else 0
 
-    # ── ISK destroyed: sum per bin ──
-    isk_q = (
-        select(
-            _bin_expr(Killmail.killmail_time).label("b"),
-            func.sum(Killmail.total_value).label("isk"),
-        )
-        .where(Killmail.killmail_time >= cutoff)
-        .group_by("b")
-    )
+    # ── Killmail series: ISK + fleet-size + NPC split + zone split ──
+    # ONE window scan instead of four. All four series group the same
+    # `killmail_time >= cutoff` rows by the same bin expression; running
+    # them as separate queries meant four random-read passes over ~530k
+    # rows on the 30d window (~6.3s measured on prod 2026-07-04 — the
+    # reason this page was slow). Group by bin × fleet-bucket × npc × zone
+    # (≤ num_bins×4×2×5 rows ≈ 10k) and decompose in Python. The LEFT JOIN
+    # to sde_systems is a per-row PK lookup that preserves row count, so
+    # ISK/count sums match the unjoined originals exactly.
+    breakdowns_available = window in ("1h", "1d", "36h", "7d", "30d")
+    has_breakdown_data = False
+    solo_fleet_series: dict[str, list[int]] = {}
+    npc_player_series: dict[str, list[int]] = {}
     isk_buckets: list[float] = [0.0] * num_bins
-    for b, isk in (await db.execute(isk_q)).all():
-        if b is None:
-            continue
-        i = int(b)
-        if 0 <= i < num_bins:
-            isk_buckets[i] = float(isk or 0.0)
+    zone_available = True
+    zone_series: dict[str, list[int]] = {z: [0] * num_bins for z in _ZONES}
+    zone_isk_series: dict[str, list[float]] = {z: [0.0] * num_bins for z in _ZONES}
+
+    if bin_seconds < 86400:
+        bucket_expr = case(
+            (Killmail.attacker_count <= 1, "solo"),
+            (Killmail.attacker_count <= 10, "small"),
+            (Killmail.attacker_count <= 50, "medium"),
+            else_="large",
+        ).label("bucket")
+        zone_expr = case(
+            (Killmail.solar_system_id >= 31000000, "wormhole"),
+            (SDESystem.security.is_(None), "unknown"),
+            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
+            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
+            else_="nullsec",
+        ).label("zone")
+        combined_q = (
+            select(
+                _bin_expr(Killmail.killmail_time).label("b"),
+                bucket_expr,
+                Killmail.is_npc.label("npc"),
+                zone_expr,
+                func.count().label("n"),
+                func.sum(Killmail.total_value).label("isk"),
+            )
+            .select_from(Killmail)
+            .join(SDESystem, SDESystem.system_id == Killmail.solar_system_id, isouter=True)
+            .where(Killmail.killmail_time >= cutoff)
+            .group_by("b", "bucket", "npc", "zone")
+        )
+        if breakdowns_available:
+            for name in ("solo", "small", "medium", "large"):
+                solo_fleet_series[name] = [0] * num_bins
+            npc_player_series["npc"] = [0] * num_bins
+            npc_player_series["player"] = [0] * num_bins
+        for b, bucket, is_npc, zone, n, isk in (await db.execute(combined_q)).all():
+            if b is None:
+                continue
+            i = int(b)
+            if not (0 <= i < num_bins):
+                continue
+            cnt = int(n or 0)
+            isk_f = float(isk or 0.0)
+            isk_buckets[i] += isk_f
+            if breakdowns_available:
+                if bucket in solo_fleet_series:
+                    solo_fleet_series[bucket][i] += cnt
+                npc_player_series["npc" if is_npc else "player"][i] += cnt
+            # 'unknown' zone rows still count toward ISK/breakdowns above,
+            # they just don't chart in the 4-zone split (as before).
+            if zone in zone_series:
+                zone_series[zone][i] += cnt
+                zone_isk_series[zone][i] += isk_f
+        if breakdowns_available:
+            has_breakdown_data = (
+                any(sum(v) > 0 for v in solo_fleet_series.values())
+                or any(sum(v) > 0 for v in npc_player_series.values())
+            )
+    else:
+        # Day+ bins (1y/5y/all): ISK from a raw scan (long windows change
+        # slowly; SWR + the 1h TTL absorb the cost), zones from the daily
+        # aggregate below; fleet/NPC breakdowns are off for these windows.
+        isk_q = (
+            select(
+                _bin_expr(Killmail.killmail_time).label("b"),
+                func.sum(Killmail.total_value).label("isk"),
+            )
+            .where(Killmail.killmail_time >= cutoff)
+            .group_by("b")
+        )
+        for b, isk in (await db.execute(isk_q)).all():
+            if b is None:
+                continue
+            i = int(b)
+            if 0 <= i < num_bins:
+                isk_buckets[i] = float(isk or 0.0)
+        zrows = (await db.execute(
+            select(
+                KillmailZoneDailyAggregate.date,
+                KillmailZoneDailyAggregate.zone,
+                KillmailZoneDailyAggregate.kill_count,
+                KillmailZoneDailyAggregate.total_isk_destroyed,
+            ).where(KillmailZoneDailyAggregate.date >= cutoff.date())
+        )).all()
+        for d, z, kc, isk in zrows:
+            if z not in zone_series:
+                continue
+            d_dt = datetime(d.year, d.month, d.day)
+            idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
+            if 0 <= idx < num_bins:
+                zone_series[z][idx] += int(kc or 0)
+                zone_isk_series[z][idx] += float(isk or 0.0)
+    has_zone_data = any(sum(s) > 0 for s in zone_series.values())
     total_isk = sum(isk_buckets)
 
     # Daily kill counts — pulled from killmail_daily_aggregates.
@@ -268,119 +410,6 @@ async def tools_activity(
     daily_kills_dates = sorted(dk_by_date.keys())
     daily_kills_labels = [d.strftime("%b %d") for d in daily_kills_dates]
     daily_kills_counts = [dk_by_date[d][0] for d in daily_kills_dates]
-
-    # ── Breakdown charts (only on windows ≤ 30d) ──
-    # Killmail rows are GC'd at 30d, so attacker-count + is_npc breakdowns
-    # only make sense on the trailing 30 days. Hide them for longer windows
-    # rather than showing partial data.
-    breakdowns_available = window in ("1h", "1d", "36h", "7d", "30d")
-    has_breakdown_data = False
-    solo_fleet_series: dict[str, list[int]] = {}
-    npc_player_series: dict[str, list[int]] = {}
-    if breakdowns_available:
-        # Solo / small / medium / large bucketing on attacker_count.
-        bucket_expr = case(
-            (Killmail.attacker_count <= 1, "solo"),
-            (Killmail.attacker_count <= 10, "small"),
-            (Killmail.attacker_count <= 50, "medium"),
-            else_="large",
-        ).label("bucket")
-        sf_q = (
-            select(
-                _bin_expr(Killmail.killmail_time).label("b"),
-                bucket_expr,
-                func.count().label("n"),
-            )
-            .where(Killmail.killmail_time >= cutoff)
-            .group_by("b", "bucket")
-        )
-        for name in ("solo", "small", "medium", "large"):
-            solo_fleet_series[name] = [0] * num_bins
-        for b, bucket, n in (await db.execute(sf_q)).all():
-            if b is None or bucket not in solo_fleet_series:
-                continue
-            i = int(b)
-            if 0 <= i < num_bins:
-                solo_fleet_series[bucket][i] = int(n or 0)
-
-        # NPC vs player kills — uses is_npc flag.
-        np_q = (
-            select(
-                _bin_expr(Killmail.killmail_time).label("b"),
-                Killmail.is_npc.label("npc"),
-                func.count().label("n"),
-            )
-            .where(Killmail.killmail_time >= cutoff)
-            .group_by("b", "npc")
-        )
-        npc_player_series["npc"] = [0] * num_bins
-        npc_player_series["player"] = [0] * num_bins
-        for b, is_npc, n in (await db.execute(np_q)).all():
-            if b is None:
-                continue
-            i = int(b)
-            if 0 <= i < num_bins:
-                key = "npc" if is_npc else "player"
-                npc_player_series[key][i] = int(n or 0)
-        has_breakdown_data = (
-            any(sum(v) > 0 for v in solo_fleet_series.values())
-            or any(sum(v) > 0 for v in npc_player_series.values())
-        )
-
-    # ── Security-zone split (kills + ISK by HS/LS/NS/WH) ──
-    # Two paths: sub-day bins (1d/7d) GROUP BY directly on Killmail joined
-    # to sde_systems — small windows, scan is cheap. Day+ bins read the
-    # pre-aggregated KillmailZoneDailyAggregate so we don't scan all of
-    # killmails on the longer windows. The aggregate is populated by
-    # killmail_daily_rollup; pre-rollup bins simply show as 0.
-    zone_available = True
-    zone_series: dict[str, list[int]] = {z: [0] * num_bins for z in _ZONES}
-    zone_isk_series: dict[str, list[float]] = {z: [0.0] * num_bins for z in _ZONES}
-    if bin_seconds < 86400:
-        zone_expr = case(
-            (Killmail.solar_system_id >= 31000000, "wormhole"),
-            (SDESystem.security.is_(None), "unknown"),
-            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
-            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
-            else_="nullsec",
-        ).label("zone")
-        zrows = (await db.execute(
-            select(
-                _bin_expr(Killmail.killmail_time).label("b"),
-                zone_expr,
-                func.count().label("n"),
-                func.sum(Killmail.total_value).label("isk"),
-            )
-            .select_from(Killmail)
-            .join(SDESystem, SDESystem.system_id == Killmail.solar_system_id, isouter=True)
-            .where(Killmail.killmail_time >= cutoff)
-            .group_by("b", "zone")
-        )).all()
-        for b, z, n, isk in zrows:
-            if b is None or z not in zone_series:
-                continue
-            i = int(b)
-            if 0 <= i < num_bins:
-                zone_series[z][i] += int(n or 0)
-                zone_isk_series[z][i] += float(isk or 0.0)
-    else:
-        zrows = (await db.execute(
-            select(
-                KillmailZoneDailyAggregate.date,
-                KillmailZoneDailyAggregate.zone,
-                KillmailZoneDailyAggregate.kill_count,
-                KillmailZoneDailyAggregate.total_isk_destroyed,
-            ).where(KillmailZoneDailyAggregate.date >= cutoff.date())
-        )).all()
-        for d, z, kc, isk in zrows:
-            if z not in zone_series:
-                continue
-            d_dt = datetime(d.year, d.month, d.day)
-            idx = int((d_dt - cutoff).total_seconds() // bin_seconds)
-            if 0 <= idx < num_bins:
-                zone_series[z][idx] += int(kc or 0)
-                zone_isk_series[z][idx] += float(isk or 0.0)
-    has_zone_data = any(sum(s) > 0 for s in zone_series.values())
 
     # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
     # Independent of the selected chart window — it answers a different
@@ -503,10 +532,7 @@ async def tools_activity(
         "daily_kills_counts": daily_kills_counts,
         "live_mode": False,
     }
-    if window in _SLOW_WINDOWS:
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
-        _payload_cache[window] = (expires_at, payload)
-    return templates.TemplateResponse(request, "tools_activity.html", {**payload})
+    return payload
 
 
 # Lazy-loaded prior-period overlay. Lives on its own endpoint so the main
@@ -527,7 +553,9 @@ async def tools_activity_compare(
     if window not in _WINDOWS or window == "all":
         return JSONResponse({"error": "no prior period for this window"}, status_code=400)
 
-    cached = _compare_cache.get(window) if window in _SLOW_WINDOWS else None
+    # Prior-period data is historical, so it changes only as `now` drifts —
+    # cache every window with the same TTLs as the main payload.
+    cached = _compare_cache.get(window)
     if cached is not None:
         expires_at, body = cached
         if datetime.now(timezone.utc).replace(tzinfo=None) < expires_at:
@@ -630,7 +658,8 @@ async def tools_activity_compare(
         "isk_values": isk_values,
         "kills_values": kills_values,
     }
-    if window in _SLOW_WINDOWS:
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_SLOW_TTL_SECONDS)
-        _compare_cache[window] = (expires_at, body)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        seconds=_WINDOW_TTL_SECONDS[window]
+    )
+    _compare_cache[window] = (expires_at, body)
     return JSONResponse(body)
