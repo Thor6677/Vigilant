@@ -7,7 +7,7 @@
 {% block head %}
 <style nonce="{{ request.state.csp_nonce }}">
   .kf-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
-  .kf-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; }
+  .kf-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; margin:0; }
   .kf-live { font-size:9px; color:var(--accent); letter-spacing:0.18em; }
   .kf-live::before { content:"● "; color:#4ade80; }
   .kf-filters { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
@@ -136,7 +136,7 @@
 {% block content %}
 <div class="b-section">
   <div class="b-section-head kf-head">
-    <span class="kf-title">KILL FEED</span>
+    <h1 class="kf-title">KILL FEED</h1>
     <a href="/intel/kills/search" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
     <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
   </div>

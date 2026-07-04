@@ -8,7 +8,7 @@
 <style nonce="{{ request.state.csp_nonce }}">
   /* ── filter card ──────────────────────────────────────────────── */
   .kfs-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
-  .kfs-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; }
+  .kfs-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; margin:0; }
   .kfs-head-actions { display:flex; gap:6px; }
   .kfs-btn { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:4px 10px; font-size:10px; cursor:pointer; border-radius:3px; }
   .kfs-btn:hover { border-color:var(--accent); }
@@ -117,7 +117,7 @@
 {% block content %}
 <div class="b-section">
   <div class="b-section-head kfs-head">
-    <span class="kfs-title">ADVANCED KILL SEARCH</span>
+    <h1 class="kfs-title">ADVANCED KILL SEARCH</h1>
     <div class="kfs-head-actions">
       <button type="button" class="kfs-btn" id="kfs-reset">Reset</button>
       <a class="kfs-btn" href="/intel/kills" style="text-decoration:none;">← Back to live feed</a>

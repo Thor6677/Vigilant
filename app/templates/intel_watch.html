@@ -24,6 +24,10 @@
 
 {% block content %}
 
+<div class="b-page-header">
+    <h1 class="b-page-title">Watchlist</h1>
+</div>
+
 {% if request.query_params.get('err') %}
 <div class="b-section" style="margin-bottom:0.75rem;border-left:3px solid var(--danger);">
     <div class="w-banner" style="color:var(--danger);">
