@@ -1,14 +1,17 @@
-"""Market → price-history browser + per-type charts (Phase 4 Task 1).
+"""Market → price-history browser + per-type charts (Phase 4 Task 1/2).
 
-Three surfaces, all auth-gated:
+Surfaces, all auth-gated:
 
   * `/market`                          — type search browser (htmx live search).
   * `/market/type/{type_id}`           — chart page for one type in The Forge.
   * `/market/type/{type_id}/history.json` — JSON feed for the chart, range-sliced.
+  * `/market/type/{type_id}/orders`    — htmx partial: hub order-book (Task 2).
 
 History rows are fetched on demand and cached via `app.market.history` — see
-that module for the storage design. The search buckets reuse the palette's
-published-SDEType LIKE idiom (small table, small LIMIT, no new indexes).
+that module for the storage design. The order book is a separate, much
+shorter-lived cache — see `app.market.orders`. The search buckets reuse the
+palette's published-SDEType LIKE idiom (small table, small LIMIT, no new
+indexes).
 """
 from __future__ import annotations
 
@@ -23,6 +26,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import MarketHistory, get_db
 from app.db.sde_models import SDEGroup, SDEType
 from app.market.history import DEFAULT_REGION_ID, get_history
+from app.market.orders import (
+    STATION_ID_CEILING,
+    build_order_book,
+    get_orders,
+    location_ids_in_book,
+    location_name,
+)
+from app.sde import lookup as sde
 
 router = APIRouter(tags=["market"])
 # MUST be named `templates` — main.py's sys.modules loop pushes the nav globals
@@ -149,3 +160,67 @@ async def market_type_history(
         "volume": [v for _d, _a, _h, _l, v in rows],
     }
     return JSONResponse(payload)
+
+
+def _fmt_price(v: float | None) -> str:
+    """ISK price formatter for order-book rows/header stats. Order prices are
+    per-unit (can be sub-1-ISK for minerals or hundreds of millions for
+    capital modules), so we keep 2 decimals below 1B rather than always
+    abbreviating — matches the precision players actually price orders at."""
+    if v is None:
+        return "—"
+    if v >= 1_000_000_000:
+        return f"{v / 1_000_000_000:.2f}B"
+    return f"{v:,.2f}"
+
+
+def _fmt_qty(v: int | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,}"
+
+
+@router.get("/market/type/{type_id}/orders", response_class=HTMLResponse)
+async def market_type_orders(request: Request, type_id: int, db: AsyncSession = Depends(get_db)):
+    """htmx partial: hub order-book section (The Forge) for a type page.
+
+    Lazy-loaded via `hx-trigger="load"` on `market_type.html` so the chart page
+    itself never blocks on an ESI round trip. Auth-gated like every other
+    partial in this router (empty body + 401, not a redirect — htmx swaps the
+    body in place)."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+
+    region_id = DEFAULT_REGION_ID
+    raw_orders = await get_orders(region_id, type_id)
+    book = build_order_book(raw_orders)
+
+    # Resolve names only for the ≤30 rows actually displayed, not every order
+    # in the region for this type.
+    station_ids = [
+        lid for lid in location_ids_in_book(book) if lid < STATION_ID_CEILING
+    ]
+    station_map = await sde.stations_by_ids(db, station_ids) if station_ids else {}
+    station_names = {sid: info["station_name"] for sid, info in station_map.items()}
+
+    def _display_row(row: dict) -> dict:
+        return {
+            "price_str": _fmt_price(row["price"]),
+            "volume_str": _fmt_qty(row["volume_remain"]),
+            "location_name": location_name(row["location_id"], station_names),
+        }
+
+    return templates.TemplateResponse(
+        request, "partials/market_order_book.html",
+        {
+            "type_id": type_id,
+            "sell_orders": [_display_row(r) for r in book["sell_orders"]],
+            "buy_orders": [_display_row(r) for r in book["buy_orders"]],
+            "best_sell_str": _fmt_price(book["best_sell"]),
+            "best_buy_str": _fmt_price(book["best_buy"]),
+            "spread_str": _fmt_price(book["spread"]),
+            "spread_pct_str": (
+                f"{book['spread_pct']:.1f}%" if book["spread_pct"] is not None else "—"
+            ),
+        },
+    )

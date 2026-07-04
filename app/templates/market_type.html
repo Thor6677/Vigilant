@@ -64,6 +64,17 @@
     </div>
 </div>
 
+<div id="mk-order-book"
+     hx-get="/market/type/{{ type_id }}/orders"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-top:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Order book — The Forge</span></div>
+        <div class="b-empty">Loading order book…</div>
+    </div>
+</div>
+
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
     var TYPE_ID = {{ type_id }};
