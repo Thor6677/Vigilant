@@ -151,11 +151,11 @@ NAV_GROUPS = [
             _item(
                 "Build Finder", "/industry/build-finder",
                 [("prefix", "/industry/build-finder")],
-                desc="What should you build? Pick a group and rank its buildable items by manufacturing margin — build cost per unit vs. Jita sell value, at your ME / structure / rig / security assumptions.",
+                desc="What should you build? Pick a group and rank its buildable items by manufacturing margin — build cost per unit vs. sell value, at your ME / structure / rig / security assumptions. Priced from CCP's global average reference prices.",
                 features=[
                     "Margin ISK + margin % per item, best-first",
                     "Reuses the manufacturing cost engine (ME / rig / security)",
-                    "Global ESI pricing for products and materials",
+                    "Global ESI reference pricing for products and materials",
                     "Up to 200 items per group with compute time shown",
                 ],
             ),
