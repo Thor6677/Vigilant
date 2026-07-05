@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, Depends, Query
+from fastapi import APIRouter, Request, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.db.models import get_db, UserFitting, UserFittingFolder, Character
 from app.sde import lookup as sde
 from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
+from app.fitting.compare import build_compare_sections
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.db.sde_models import (
     SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute, SDEDogmaAttribute,
@@ -227,6 +228,76 @@ async def saved_fittings_dps(request: Request, db: AsyncSession = Depends(get_db
     return out
 
 
+async def _owned_fit_or_none(
+    db: AsyncSession, fitting_id: int, user_id: int
+) -> UserFitting | None:
+    """Return the fitting only if it belongs to ``user_id``; else None.
+
+    Single ownership gate for the compare view — a fit owned by another user
+    resolves to None here, which the route maps to a 404 (never leaking that
+    the id exists).
+    """
+    r = await db.execute(
+        select(UserFitting)
+        .where(UserFitting.id == fitting_id)
+        .where(UserFitting.user_id == user_id)
+    )
+    return r.scalar_one_or_none()
+
+
+@router.get("/tools/fitting/compare", response_class=HTMLResponse)
+async def compare_fittings(
+    request: Request,
+    a: int = Query(...),
+    b: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Side-by-side comparison of two owned saved fits (Phase 5 Task 4b).
+
+    Both fits' stats come from the same ``calculate_fitting_stats`` engine
+    call used across the fitting tool — no duplicated stat math. A fit that
+    isn't owned by the session user 404s via ``_owned_fit_or_none``. Reads
+    only, so the two sequential engine calls share the request session safely.
+
+    Implants are intentionally NOT modeled here (deferred — see UI note).
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/")
+
+    fit_a = await _owned_fit_or_none(db, a, user_id)
+    fit_b = await _owned_fit_or_none(db, b, user_id)
+    if not fit_a or not fit_b:
+        raise HTTPException(status_code=404, detail="Fitting not found")
+
+    async def _stats_for(fit: UserFitting) -> dict:
+        try:
+            items = json.loads(fit.items_json) if fit.items_json else []
+        except Exception:
+            items = []
+        return await calculate_fitting_stats(db, fit.ship_type_id, items)
+
+    stats_a = await _stats_for(fit_a)
+    stats_b = await _stats_for(fit_b)
+
+    names = await sde.type_ids_to_names(db, [fit_a.ship_type_id, fit_b.ship_type_id])
+    sections = build_compare_sections(stats_a, stats_b)
+
+    return templates.TemplateResponse(request, "fitting_compare.html", {
+        "fit_a": {
+            "id": fit_a.id, "name": fit_a.name,
+            "ship_name": names.get(fit_a.ship_type_id, f"Type {fit_a.ship_type_id}"),
+            "ship_type_id": fit_a.ship_type_id,
+        },
+        "fit_b": {
+            "id": fit_b.id, "name": fit_b.name,
+            "ship_name": names.get(fit_b.ship_type_id, f"Type {fit_b.ship_type_id}"),
+            "ship_type_id": fit_b.ship_type_id,
+        },
+        "sections": sections,
+    })
+
+
 @router.get("/tools/fitting/search/ships", response_class=HTMLResponse)
 async def search_ships(
     request: Request,
@@ -338,6 +409,17 @@ async def fitting_stats(
 
     items = body.get("items", [])
     damage_profile = body.get("damage_profile", "uniform")
+    # Custom damage profile: 4 raw EM/Therm/Kin/Exp weights from the slider
+    # UI. Normalized in resolve_damage_profile; when present it overrides the
+    # named preset for EHP weighting only (see engine.resolve_damage_profile).
+    damage_profile_custom = body.get("damage_profile_custom")
+    if damage_profile_custom is not None:
+        try:
+            damage_profile_custom = [float(x) for x in damage_profile_custom]
+            if len(damage_profile_custom) != 4:
+                damage_profile_custom = None
+        except (TypeError, ValueError):
+            damage_profile_custom = None
     # Profile selector in the UI drives BOTH defensive EHP weighting
     # (damage_profile = incoming damage type fractions) AND offensive
     # effective DPS (target_resist_profile = the target's resists). One
@@ -372,6 +454,7 @@ async def fitting_stats(
         skill_levels=skill_levels,
         target_resist_profile=target_resist_profile,
         implants=implants,
+        damage_profile_custom=damage_profile_custom,
     )
 
     # Get ship name

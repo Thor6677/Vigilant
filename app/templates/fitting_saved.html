@@ -16,6 +16,7 @@
     text-decoration:none; display:inline-block;
 }
 .sf-chip:hover { color:var(--text); border-color:var(--muted); }
+.sf-chip:disabled { opacity:0.45; cursor:default; }
 .sf-chip.is-active { color:var(--accent); border-color:var(--accent); background:rgba(200,169,81,0.07); }
 .sf-chip.is-primary { color:var(--accent); border-color:var(--accent); }
 
@@ -94,6 +95,7 @@
     <button class="sf-chip" data-sort="cost">Cost</button>
     <button class="sf-chip" data-sort="folder">Folder</button>
     <button class="sf-chip" id="sf-new-folder" title="Create a folder">+ Folder</button>
+    <button class="sf-chip" id="sf-compare" title="Tick two fits to compare them side by side" disabled>Compare (0/2)</button>
 </div>
 
 <div class="b-panel">
@@ -129,6 +131,8 @@
                 <td class="sf-dps">{% if r.dps is none %}<span class="sf-dps-loading" style="color:var(--muted);font-weight:normal;">…</span>{% else %}{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}{% endif %}</td>
                 <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>
                 <td class="sf-actions">
+                    <input type="checkbox" class="sf-compare-check" value="{{ r.id }}"
+                           onclick="event.stopPropagation()" title="Select for compare">
                     <button onclick="event.stopPropagation();moveFit({{ r.id }})" title="Move to folder">&#8644;</button>
                     <button onclick="event.stopPropagation();deleteFit({{ r.id }}, this)" title="Delete">&times;</button>
                 </td>
@@ -216,6 +220,29 @@
             rows.forEach(function(r) { tbody.appendChild(r); });
         });
     });
+
+    /* --- Compare (pick exactly 2) --- */
+    var compareBtn = document.getElementById('sf-compare');
+    function checkedFits() {
+        return Array.prototype.slice.call(
+            tbody.querySelectorAll('.sf-compare-check:checked')
+        ).map(function(cb) { return cb.value; });
+    }
+    if (compareBtn) {
+        tbody.addEventListener('change', function(e) {
+            if (!e.target.classList.contains('sf-compare-check')) return;
+            var picked = checkedFits();
+            if (picked.length > 2) { e.target.checked = false; picked = checkedFits(); }
+            compareBtn.textContent = 'Compare (' + picked.length + '/2)';
+            compareBtn.disabled = picked.length !== 2;
+            compareBtn.classList.toggle('is-primary', picked.length === 2);
+        });
+        compareBtn.addEventListener('click', function() {
+            var picked = checkedFits();
+            if (picked.length !== 2) return;
+            window.location = '/tools/fitting/compare?a=' + picked[0] + '&b=' + picked[1];
+        });
+    }
 })();
 
 function _folderPickPrompt(message) {

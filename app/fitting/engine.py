@@ -840,6 +840,34 @@ DAMAGE_PROFILES = {
     "drifter": (0.0, 0.0, 0.0, 1.0),
 }
 
+def resolve_damage_profile(
+    name: str = "uniform",
+    custom: list[float] | tuple[float, ...] | None = None,
+) -> tuple[float, float, float, float]:
+    """Resolve an (em, therm, kin, expl) weight tuple for EHP weighting.
+
+    Presentation-layer helper (paired with ``_calc_ehp``) — it never touches
+    the dogma modifier pipeline, only how the already-computed layer HP/resists
+    are combined into displayed effective HP.
+
+    Precedence: an explicit ``custom`` list wins over the named preset. Custom
+    weights are normalized to sum 1.0 so arbitrary slider input (e.g. 40/30/20/10
+    or raw 4/3/2/1) yields well-defined EHP. A degenerate all-zero custom list
+    falls back to the named preset (or uniform).
+    """
+    if custom is not None:
+        try:
+            vals = [max(0.0, float(x)) for x in custom]
+        except (TypeError, ValueError):
+            vals = []
+        if len(vals) == 4:
+            total = sum(vals)
+            if total > 0:
+                return (vals[0] / total, vals[1] / total,
+                        vals[2] / total, vals[3] / total)
+    return DAMAGE_PROFILES.get(name, DAMAGE_PROFILES["uniform"])
+
+
 # Target ship's resist profile by damage type (em, therm, kin, expl) — values
 # 0.0–1.0. Used to compute effective ("resist-weighted") DPS: how much DPS
 # actually lands on a target with these resists. Numbers are approximate
@@ -868,6 +896,7 @@ async def calculate_fitting_stats(
     skill_levels: dict[int, int] | None = None,
     target_resist_profile: str = "uniform",
     implants: list[int] | None = None,
+    damage_profile_custom: list[float] | None = None,
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
 
@@ -1461,7 +1490,7 @@ async def calculate_fitting_stats(
     shield_hp = mattr(ATTR_SHIELD_HP)
     armor_hp = mattr(ATTR_ARMOR_HP)
     hull_hp = mattr(ATTR_HP)
-    dmg_prof = DAMAGE_PROFILES.get(damage_profile, DAMAGE_PROFILES["uniform"])
+    dmg_prof = resolve_damage_profile(damage_profile, damage_profile_custom)
     shield_ehp = _calc_ehp(shield_hp, shield_em_res, shield_therm_res, shield_kin_res, shield_expl_res, dmg_prof)
     armor_ehp = _calc_ehp(armor_hp, armor_em_res, armor_therm_res, armor_kin_res, armor_expl_res, dmg_prof)
     hull_ehp = _calc_ehp(hull_hp, hull_em_res, hull_therm_res, hull_kin_res, hull_expl_res, dmg_prof)

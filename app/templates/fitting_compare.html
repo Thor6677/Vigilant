@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}COMPARE FITS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/tools/fitting">Fitting</a><span class="b-crumb-sep">&gt;</span><a href="/tools/fitting/saved">Saved</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Compare</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+.fc-table { width:100%; border-collapse:collapse; font-size:11px; }
+.fc-table thead th {
+    text-align:right; padding:0.45rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+}
+.fc-table thead th:first-child { text-align:left; }
+.fc-table tbody td {
+    padding:0.35rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text); text-align:right;
+    font-variant-numeric:tabular-nums;
+}
+.fc-table tbody td:first-child { text-align:left; color:var(--muted); }
+.fc-section td {
+    background:var(--surface); color:var(--accent) !important;
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    text-align:left !important; font-weight:600;
+}
+/* Delta coloring: cls describes fit B relative to fit A, direction-aware
+   (lower sig radius / align time / cap drain colors green). */
+.fc-delta-better { color:var(--success); }
+.fc-delta-worse  { color:var(--danger); }
+.fc-delta-same, .fc-delta-neutral, .fc-delta-bool { color:var(--muted); }
+.fc-fit-head { display:flex; align-items:center; gap:0.5rem; justify-content:flex-end; }
+.fc-fit-head img { width:24px; height:24px; border:1px solid var(--border); }
+.fc-fit-name { max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:600px) { .fc-fit-name { max-width:90px; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Compare Fits</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            {{ fit_a.name }} ({{ fit_a.ship_name }}) vs {{ fit_b.name }} ({{ fit_b.ship_name }})
+            &middot; All V skills, uniform damage profile &middot; implants not modeled (deferred)
+        </div>
+    </div>
+    <div>
+        <a href="/tools/fitting/saved" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);text-decoration:none;">&larr; Saved Fits</a>
+    </div>
+</div>
+
+<div class="b-panel">
+    <table class="fc-table">
+        <thead>
+            <tr>
+                <th>Stat</th>
+                <th>
+                    <div class="fc-fit-head">
+                        <img src="https://images.evetech.net/types/{{ fit_a.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
+                        <span class="fc-fit-name" title="{{ fit_a.name }}">A: {{ fit_a.name }}</span>
+                    </div>
+                </th>
+                <th>
+                    <div class="fc-fit-head">
+                        <img src="https://images.evetech.net/types/{{ fit_b.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
+                        <span class="fc-fit-name" title="{{ fit_b.name }}">B: {{ fit_b.name }}</span>
+                    </div>
+                </th>
+                <th title="B minus A; green = B better for that stat (direction-aware)">&Delta; B&minus;A</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for section in sections %}
+            <tr class="fc-section"><td colspan="4">{{ section.name }}</td></tr>
+            {% for row in section.rows %}
+            <tr>
+                <td>{{ row.label }}</td>
+                <td>{{ row.a }}</td>
+                <td>{{ row.b }}</td>
+                <td class="fc-delta-{{ row.cls }}">{{ row.delta }}</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

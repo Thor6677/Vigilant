@@ -30,7 +30,23 @@
             <option value="thermal">Thermal only</option>
             <option value="kinetic">Kinetic only</option>
             <option value="explosive">Explosive only</option>
+            <option value="custom">Custom&hellip;</option>
         </select>
+        <span id="dmg-custom-sliders" style="display:none;align-items:center;gap:0.4rem;font-size:9px;color:var(--muted);border:1px solid var(--border);background:var(--surface);padding:2px 8px;"
+              title="Custom incoming damage weights — normalized server-side, EHP display only">
+            <label style="display:flex;align-items:center;gap:2px;color:#00bfff;">EM
+                <input type="range" class="dmg-custom-w" data-dmg-idx="0" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#ff6347;">Th
+                <input type="range" class="dmg-custom-w" data-dmg-idx="1" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#999;">Kin
+                <input type="range" class="dmg-custom-w" data-dmg-idx="2" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#ff8c00;">Exp
+                <input type="range" class="dmg-custom-w" data-dmg-idx="3" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+        </span>
         <a href="/tools/fitting/saved" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;">Saved Fits</a>
         <button data-click="showImportModal" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import EFT</button>
         <button data-click="showCharImportModal" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import from Character</button>
@@ -767,10 +783,43 @@ function removeImplant(slot) {
 
 /* ── Damage / target profile selector ─────────────────────────────── */
 var PROFILE_KEY = 'vigilant_fit_dmg_profile';
+var PROFILE_CUSTOM_KEY = 'vigilant_fit_dmg_custom';
 
 function getSelectedProfile() {
     var sel = document.getElementById('dmg-profile-select');
     return sel ? sel.value : 'uniform';
+}
+
+/* Custom EM/Th/Kin/Exp weights (0-100 each; server normalizes). Returns
+   null unless the "custom" profile is selected — presets send no weights. */
+function getCustomWeights() {
+    if (getSelectedProfile() !== 'custom') return null;
+    var out = [25, 25, 25, 25];
+    document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+        out[parseInt(inp.dataset.dmgIdx, 10)] = parseInt(inp.value, 10) || 0;
+    });
+    return out;
+}
+
+function _syncCustomSliderUI() {
+    var wrap = document.getElementById('dmg-custom-sliders');
+    if (!wrap) return;
+    wrap.style.display = getSelectedProfile() === 'custom' ? 'inline-flex' : 'none';
+    document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+        var val = inp.parentElement.querySelector('.dmg-custom-val');
+        if (val) val.textContent = inp.value;
+    });
+}
+
+var _customDebounce = null;
+function onCustomWeightInput() {
+    _syncCustomSliderUI();
+    try {
+        localStorage.setItem(PROFILE_CUSTOM_KEY, JSON.stringify(getCustomWeights()));
+    } catch (e) {}
+    /* Debounce — range inputs fire continuously while dragging. */
+    if (_customDebounce) clearTimeout(_customDebounce);
+    _customDebounce = setTimeout(recalcStats, 250);
 }
 
 function onProfileChange() {
@@ -778,6 +827,7 @@ function onProfileChange() {
     if (sel) {
         try { localStorage.setItem(PROFILE_KEY, sel.value); } catch (e) {}
     }
+    _syncCustomSliderUI();
     recalcStats();
 }
 
@@ -787,7 +837,17 @@ function restoreProfileSelection() {
     try {
         var saved = localStorage.getItem(PROFILE_KEY);
         if (saved) sel.value = saved;
+        /* If a stale value no longer matches an option, fall back. */
+        if (sel.value !== saved && saved) sel.value = 'uniform';
+        var weights = JSON.parse(localStorage.getItem(PROFILE_CUSTOM_KEY) || 'null');
+        if (weights && weights.length === 4) {
+            document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+                var w = weights[parseInt(inp.dataset.dmgIdx, 10)];
+                if (typeof w === 'number' && w >= 0 && w <= 100) inp.value = w;
+            });
+        }
     } catch (e) {}
+    _syncCustomSliderUI();
 }
 
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
@@ -803,7 +863,10 @@ function recalcStats() {
             items: state.items,
             character_id: charId,
             damage_profile: profile,
-            target_resist_profile: profile,
+            /* "custom" isn't a target-resist preset — treat the target as
+               unresisted (uniform) when custom EHP weights are in play. */
+            target_resist_profile: profile === 'custom' ? 'uniform' : profile,
+            damage_profile_custom: getCustomWeights(),
             implants: getImplantTypeIds(),
         })
     })
