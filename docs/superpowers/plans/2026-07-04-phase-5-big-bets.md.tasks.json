@@ -1,0 +1,43 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-5-big-bets.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Net-worth tracker [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Entity stats from local archive [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Stockpile watchlists [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Fit comparison + damage profiles [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Trading P&L FIFO matching [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Deploy + verify Phase 5 [coordinator]",
+      "status": "completed",
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-04"
+}

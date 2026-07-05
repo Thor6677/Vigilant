@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-07-04",
+  "description": "Deferred items from the 2026-07-04 site-audit roadmap execution (Phases 0-5, all shipped same day). None urgent.\n\n1. **Fitting implants/boosters** — deferred from fit comparison (b062565); compare view + tool note both say 'implants not modeled'.\n2. **Industry P&L** — Trading P&L (fad4d82) ships FIFO trade matching only; manufacture-cost linkage (build cost -> sale) is a separate engine.\n3. **Invention/decryptor math** — Build Finder (c42c255) ranks manufacturing margin only; no T2 invention expected-cost math.\n4. **Net-worth escrow + industry WIP** — orders_json/industry_json cache columns are vestigial (never written); wiring order escrow + job value into snapshots needs a new sync field each (wallet_transactions sync from fad4d82 is the pattern to copy).\n5. **Star map ?focus auto-pan** — palette + entity_links link k-space systems to /map?focus={id}; the React StarMap has focusSystem(id) + a URL-param useEffect but needs a small frontend wire-up + npm run build.\n6. **Nav crowding 768-1120px** — 8 top-level groups don't wrap (.b-nav-links is nowrap); hamburger only kicks in at 768px. Consider flex-wrap or a lower breakpoint.\n7. **Killfeed route-leg labeling** — GateRoutePlannerPanel doesn't label which leg is the Thera/Turnur hole; evescout.parse_connections now returns `via` so it's cheap.\n8. **Entity-stats composite indexes** — prod EXPLAIN showed ix_km_victim_corp_time / ix_kma_corp_time already cover the shapes (0.00s); revisit only if character/alliance kinds prove slower (they use different columns — spot-check EXPLAIN if a page feels slow).\n9. **Deferred from earlier**: killfeed visible-row cap (memory note, schedule after Feature B).",
+  "id": "T-041",
+  "order": 70,
+  "phase": null,
+  "status": "open",
+  "title": "Site-audit roadmap follow-ups (implants, industry P&L, invention, escrow, map focus)",
+  "type": "task"
+}
