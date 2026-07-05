@@ -1,7 +1,14 @@
-"""Manufacturing calculator — nested build/buy with ME/TE, structure, rig, and security modifiers."""
+"""Manufacturing calculator — nested build/buy with ME/TE, structure, rig, and security modifiers.
+
+The pure cost/time modifier math (`_calc_material`, `_calc_time`, `_format_time`
+and the `STRUCTURES`/`RIGS`/`SEC_STATUS` tables) lives in
+`app/industry/manufacturing.py` so the build-profitability finder can reuse the
+exact same engine without a circular import — see that module. They are
+re-imported here under their original names, so every endpoint below is
+unchanged.
+"""
 
 import json
-import math
 
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,43 +25,15 @@ from app.industry.compression import (
     SECURITY as REPRO_SECURITY, IMPLANTS as REPRO_IMPLANTS,
     TRADE_HUBS, compute_yield, solve_compression,
 )
+from app.industry.manufacturing import (
+    STRUCTURES, RIGS, SEC_STATUS,
+    _calc_material, _calc_time, _format_time,
+)
 from app.esi.client import ESIClient
 from app.esi import market as esi_market
 
 router = APIRouter(tags=["industry"])
 templates = Jinja2Templates(directory="app/templates")
-
-# ── Manufacturing modifier tables ─────────────────────────────────────────────
-
-STRUCTURES = {
-    "npc_station": {"label": "NPC Station",  "mat": 1.00, "time": 1.00},
-    "raitaru":     {"label": "Raitaru",       "mat": 0.99, "time": 0.85},
-    "azbel":       {"label": "Azbel",         "mat": 0.99, "time": 0.80},
-    "sotiyo":      {"label": "Sotiyo",        "mat": 0.99, "time": 0.70},
-}
-
-RIGS = {
-    "none":            {"label": "None",             "mat": 0.0,    "time": 0.0},
-    "t1_basic":        {"label": "T1 Basic",         "mat": 0.020,  "time": 0.20},
-    "t2_basic":        {"label": "T2 Basic",         "mat": 0.024,  "time": 0.24},
-    "t1_specialized":  {"label": "T1 Specialized",   "mat": 0.042,  "time": 0.20},
-    "t2_specialized":  {"label": "T2 Specialized",   "mat": 0.0504, "time": 0.24},
-}
-
-SEC_STATUS = {
-    "highsec":  {"label": "Highsec",      "mult": 1.0},
-    "lowsec":   {"label": "Lowsec",       "mult": 1.9},
-    "nullsec":  {"label": "Null / WH",    "mult": 2.1},
-}
-
-
-def _calc_material(base_qty: int, runs: int, me: int,
-                   struct_mat: float, rig_mat_base: float, sec_mult: float) -> int:
-    me_mod = 1.0 - me / 100.0
-    rig_mod = 1.0 - (rig_mat_base * sec_mult)
-    adjusted = runs * base_qty * me_mod * struct_mat * rig_mod
-    adjusted = round(adjusted, 2)
-    return max(runs, math.ceil(adjusted))
 
 
 async def _get_price_map(db: AsyncSession, type_ids: set[int]) -> dict[int, float]:
@@ -71,34 +50,6 @@ async def _get_price_map(db: AsyncSession, type_ids: set[int]) -> dict[int, floa
         pass
     return price_map
 
-
-
-def _calc_time(base_time: int, te: int, struct_time: float, rig_time_base: float,
-               sec_mult: float, industry: int = 5, adv_industry: int = 5) -> int:
-    """Calculate manufacturing time in seconds with all modifiers."""
-    if not base_time:
-        return 0
-    t = base_time
-    t *= (1 - te / 100.0)
-    t *= struct_time
-    t *= (1 - rig_time_base * sec_mult)
-    t *= (1 - industry * 0.04)
-    t *= (1 - adv_industry * 0.03)
-    return max(1, round(t))
-
-
-def _format_time(seconds: int) -> str:
-    """Format seconds into human-readable duration."""
-    if seconds <= 0:
-        return "—"
-    days = seconds // 86400
-    hours = (seconds % 86400) // 3600
-    mins = (seconds % 3600) // 60
-    if days > 0:
-        return f"{days}d {hours}h {mins}m"
-    if hours > 0:
-        return f"{hours}h {mins}m"
-    return f"{mins}m"
 
 
 @router.get("/industry/manufacturing", response_class=HTMLResponse)
