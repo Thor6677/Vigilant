@@ -1253,6 +1253,92 @@ async def get_market_group_items(
     ]
 
 
+# ── Build-profitability finder (Task 4) ──────────────────────────────────
+
+
+async def get_buildable_groups(db: AsyncSession) -> list[dict]:
+    """Inv-groups (SDEGroup) that contain at least one published product with a
+    manufacturing blueprint — the category picker for the build-finder.
+
+    Flat, sorted by name; each carries a category_id in case the route wants to
+    optgroup. Inv-groups are chosen over SDE market groups here because
+    `SDEType.group_id` sits flat and indexed (a single indexed join gives the
+    whole bucket), whereas `get_market_group_items` is exact-group-only with no
+    subtree helper — a parent market-group pick like "Battleships" would return
+    nothing without new hierarchy traversal."""
+    rows = (await db.execute(
+        select(SDEGroup.group_id, SDEGroup.group_name, SDEGroup.category_id)
+        .distinct()
+        .join(SDEType, SDEType.group_id == SDEGroup.group_id)
+        .join(SDEBlueprintInfo, SDEBlueprintInfo.product_type_id == SDEType.type_id)
+        .where(SDEType.published.is_(True))
+        .order_by(SDEGroup.group_name)
+    )).all()
+    return [
+        {"group_id": gid, "group_name": name, "category_id": cat}
+        for gid, name, cat in rows
+    ]
+
+
+async def get_group_buildables(
+    db: AsyncSession, group_id: int, cap: int = 200
+) -> tuple[int, list[dict]]:
+    """Buildable products in one inv-group, capped at `cap` by name.
+
+    Returns `(total_n, products)`. `total_n` is the full buildable count in the
+    group (for a "showing N of M" footer); `products` is the first `cap`
+    products by name, each:
+      `{product_type_id, product_name, blueprint_type_id,
+        product_quantity, materials: [{type_id, quantity}, ...]}`.
+
+    The names+blueprint head is one cheap indexed query over a single group; the
+    expensive material join runs only for the ≤cap blueprints actually shown, so
+    this never iterates all ~40k blueprints (the 2-CPU-container cap)."""
+    head = (await db.execute(
+        select(
+            SDEType.type_id, SDEType.type_name,
+            SDEBlueprintInfo.blueprint_type_id, SDEBlueprintInfo.product_quantity,
+        )
+        .join(SDEBlueprintInfo, SDEBlueprintInfo.product_type_id == SDEType.type_id)
+        .where(SDEType.group_id == group_id, SDEType.published.is_(True))
+        .order_by(SDEType.type_name)
+    )).all()
+
+    total_n = len(head)
+    head = head[:cap]
+    if not head:
+        return total_n, []
+
+    bp_ids = [r.blueprint_type_id for r in head]
+    mat_rows = (await db.execute(
+        select(
+            SDEBlueprintMaterial.blueprint_type_id,
+            SDEBlueprintMaterial.material_type_id,
+            SDEBlueprintMaterial.quantity,
+        )
+        .where(SDEBlueprintMaterial.blueprint_type_id.in_(bp_ids))
+        .where(SDEBlueprintMaterial.activity_id == 1)
+    )).all()
+
+    mats_by_bp: dict[int, list[dict]] = {}
+    for bp_id, mat_id, qty in mat_rows:
+        mats_by_bp.setdefault(bp_id, []).append({"type_id": mat_id, "quantity": qty})
+
+    products = []
+    for r in head:
+        mats = mats_by_bp.get(r.blueprint_type_id)
+        if not mats:
+            continue  # blueprint has no manufacturing materials → not buildable
+        products.append({
+            "product_type_id": r.type_id,
+            "product_name": r.type_name,
+            "blueprint_type_id": r.blueprint_type_id,
+            "product_quantity": r.product_quantity or 1,
+            "materials": mats,
+        })
+    return total_n, products
+
+
 # ── Module fit restriction checking ──────────────────────────────────────
 
 # canFitShipType attribute IDs (all 12 slots)

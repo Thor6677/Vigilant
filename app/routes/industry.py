@@ -9,6 +9,7 @@ unchanged.
 """
 
 import json
+import time
 
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -29,6 +30,8 @@ from app.industry.manufacturing import (
     STRUCTURES, RIGS, SEC_STATUS,
     _calc_material, _calc_time, _format_time,
 )
+from app.industry import build_finder
+from app.market import lp as market_lp
 from app.esi.client import ESIClient
 from app.esi import market as esi_market
 
@@ -416,6 +419,109 @@ async def industry_shopping_list(
         "price_map": {shopping[tid]["name"]: price_map.get(tid, 0) for tid in shopping},
         "mineral_items": mineral_items})
 
+
+
+# ── Build-Profitability Finder (Phase 4 Task 4) ───────────────────────────────
+
+BUILD_FINDER_CAP = 200
+
+
+def _fmt_isk(v: float | None) -> str:
+    """Compact ISK for the finder table (B/M/K, signed for margins)."""
+    if v is None:
+        return "—"
+    a = abs(v)
+    if a >= 1_000_000_000:
+        return f"{v / 1_000_000_000:.2f}B"
+    if a >= 1_000_000:
+        return f"{v / 1_000_000:.2f}M"
+    if a >= 1_000:
+        return f"{v / 1_000:.2f}K"
+    return f"{v:,.2f}"
+
+
+def _fmt_pct(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,.1f}%"
+
+
+@router.get("/industry/build-finder", response_class=HTMLResponse)
+async def build_finder_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Landing page — a buildable-group picker + ME/structure/rig/security
+    controls. The ranked table loads via htmx on submit (see below)."""
+    if not request.session.get("user_id"):
+        return RedirectResponse("/")
+    groups = await sde.get_buildable_groups(db)
+    return templates.TemplateResponse(request, "build_finder.html", {
+        "groups": groups,
+        "structures": STRUCTURES,
+        "rigs": RIGS,
+        "sec_statuses": SEC_STATUS,
+        "cap": BUILD_FINDER_CAP,
+    })
+
+
+@router.get("/industry/build-finder/results", response_class=HTMLResponse)
+async def build_finder_results(
+    request: Request,
+    group_id: int = Query(0),
+    me: int = Query(10),
+    structure: str = Query("npc_station"),
+    rig: str = Query("none"),
+    security: str = Query("highsec"),
+    db: AsyncSession = Depends(get_db),
+):
+    """htmx partial: buildable products in one group, ranked by margin %.
+
+    Bounded work: at most `BUILD_FINDER_CAP` blueprints priced per request (the
+    group's full count is reported for a "showing N of M" footer). TE is
+    intentionally not a control — it only affects build *time*, and the ranking
+    is by ISK margin, so it can't change the result. Sell value + material costs
+    come from the global `/markets/prices/` map (`market_lp.get_price_map`), the
+    same source the LP tool uses. No invention/decryptor math (deferred)."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    if not group_id:
+        return HTMLResponse('<div class="b-empty">Pick a group to rank.</div>')
+
+    me = max(0, min(10, me))
+    struct_info = STRUCTURES.get(structure, STRUCTURES["npc_station"])
+    rig_info = RIGS.get(rig, RIGS["none"])
+    sec_info = SEC_STATUS.get(security, SEC_STATUS["highsec"])
+
+    start = time.perf_counter()
+    total_n, products = await sde.get_group_buildables(db, group_id, cap=BUILD_FINDER_CAP)
+
+    ranked = []
+    if products:
+        # One global price fetch covers products + every material.
+        price_map = await market_lp.get_price_map(db)
+        ranked = build_finder.rank_builds(
+            products, me, struct_info["mat"], rig_info["mat"], sec_info["mult"],
+            price_map,
+        )
+    compute_ms = round((time.perf_counter() - start) * 1000, 1)
+
+    rows = [{
+        "product_type_id": r["product_type_id"],
+        "product_name": r["product_name"],
+        "cost_str": _fmt_isk(r["cost_per_unit"]),
+        "sell_str": _fmt_isk(r["sell_per_unit"]),
+        "margin_isk_str": _fmt_isk(r["margin_isk"]),
+        "margin_pct_str": _fmt_pct(r["margin_pct"]),
+        "margin_positive": (r["margin_isk"] is not None and r["margin_isk"] > 0),
+        "priced": r["priced"],
+    } for r in ranked]
+
+    return templates.TemplateResponse(request, "partials/build_finder_results.html", {
+        "rows": rows,
+        "total_n": total_n,
+        "shown": len(products),
+        "capped": total_n > BUILD_FINDER_CAP,
+        "me": me,
+        "compute_ms": compute_ms,
+    })
 
 
 # ── Compression Calculator ────────────────────────────────────────────────────

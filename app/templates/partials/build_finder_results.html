@@ -1,0 +1,45 @@
+{# Build-finder ranked results — margin % desc, unpriced rows last #}
+{% if not rows %}
+<div class="b-section">
+    <div class="b-empty">No buildable items found for this group.</div>
+    <div style="font-size:9px;color:var(--muted);padding:0.4rem 0.75rem;">
+        Computed in {{ compute_ms }} ms.
+    </div>
+</div>
+{% else %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Ranked by margin %</span>
+            <span class="b-muted-sm">
+                showing {{ shown }} of {{ total_n }}{% if capped %} (capped){% endif %} · ME {{ me }}
+            </span>
+        </div>
+
+        <div class="b-table-row" style="border-bottom:1px solid var(--border);">
+            <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Product</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Build / unit</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Sell / unit</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Margin</span>
+            <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Margin %</span>
+        </div>
+
+        {% for r in rows %}
+        <div class="b-table-row">
+            <span style="flex:3;font-size:11px;">
+                <a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a>
+            </span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.cost_str }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="font-size:9px;color:var(--muted);padding:0.4rem 0.1rem;">
+        Ranked {{ shown }} of {{ total_n }} buildable items in {{ compute_ms }} ms.
+        Prices: global CCP ESI average (The Forge). Unpriced items (blueprints /
+        illiquid materials) show “—” and sort last. Invention costs not included.
+    </div>
+</div>
+{% endif %}
