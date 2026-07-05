@@ -1,0 +1,46 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-04-phase-4-market-foundation.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Market history storage + service + chart page [Opus]",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Hub order-book view [Sonnet]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: LP store ROI calculator [Sonnet]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Build-profitability finder [Opus]",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Deploy + verify Phase 4 [coordinator]",
+      "status": "completed",
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-04"
+}
