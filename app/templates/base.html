@@ -98,6 +98,9 @@
                         <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
                             <input type="checkbox" data-notif-type="contract_low" data-change="saveNotifPrefs" checked> Contract Alerts
                         </label>
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="stockpile_low" data-change="saveNotifPrefs" checked> Stockpile Alerts
+                        </label>
                     </div>
                 </div>
                 <div id="notif-list">
@@ -313,7 +316,7 @@
 })();
 </script>
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
-<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=4"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=5"></script>
 <script nonce="{{ request.state.csp_nonce }}">
 /* Global dismiss handler for alert banners — runs after every htmx swap */
 (function() {

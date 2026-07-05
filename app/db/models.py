@@ -150,6 +150,35 @@ class NetWorthSnapshot(Base):
                          default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+class StockpileTarget(Base):
+    """A user's stockpile watchlist target (Phase 5 Task 3).
+
+    One row = "I want to keep at least `target_qty` of `type_id` on hand".
+    Current holdings are computed at read time by summing the synced
+    `CharacterAssetCache.assets_json` across the user's active characters
+    account-wide (see `app/stockpiles/holdings.py` for what's included /
+    excluded), so a target carries no location — holdings are summed across
+    every station and hangar. `note` is free text for the user's own context
+    (e.g. "PvP doctrine hulls", "reaction fuel") in place of a location hint.
+
+    `id` is a plain autoincrement PK (targets are cheap CRUD rows, not an
+    idempotent upsert like the snapshot tables). `user_id` is indexed because
+    every read/alert path filters by it. A background checker
+    (`app/stockpiles/alerts.py`, hooked into `_background_scheduler`) compares
+    holdings vs `target_qty` and emits a `stockpile_low` notification when a
+    target is under-stocked (24h per-target suppression).
+    """
+    __tablename__ = "stockpile_targets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    type_id = Column(Integer, nullable=False)
+    target_qty = Column(Integer, nullable=False, default=0)
+    note = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False,
+                        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 class KillmailDailyAggregate(Base):
     """Daily total kill counts and ISK destroyed. Multi-source by design:
 

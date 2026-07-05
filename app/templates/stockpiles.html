@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Stockpiles — Tools — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/tools">Tools</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Stockpiles</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .sp-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .sp-table th {
+        font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+        color:var(--muted); padding:0.4rem 0.6rem; border-bottom:1px solid var(--border);
+    }
+    .sp-table td { padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); color:var(--text); }
+    .sp-table tr.is-under td { background:color-mix(in srgb, var(--danger) 12%, transparent); }
+    .sp-table tr.is-under .sp-deficit { color:var(--danger); font-weight:600; }
+    .sp-note { color:var(--muted); font-size:11px; }
+    .sp-del { padding:2px 9px; font-size:13px; line-height:1; }
+    .sp-input {
+        width:100%; padding:0.5rem 0.7rem; background:var(--bg);
+        border:1px solid var(--border); color:var(--text); font:inherit; font-size:13px;
+    }
+    .sp-input:focus { outline:none; border-color:var(--accent); }
+    .sp-results { margin-top:0.5rem; display:flex; flex-direction:column; max-height:260px; overflow-y:auto; }
+    .sp-srow {
+        display:flex; align-items:baseline; justify-content:space-between; gap:1rem;
+        padding:0.45rem 0.6rem; border:1px solid var(--border); border-bottom:none;
+        background:var(--bg); color:var(--text); text-align:left; cursor:pointer; font:inherit;
+    }
+    .sp-srow:last-child { border-bottom:1px solid var(--border); }
+    .sp-srow:hover { background:var(--surface); border-color:var(--accent); }
+    .sp-srow-name { font-size:12px; }
+    .sp-srow-group { font-size:10px; color:var(--muted); }
+    .sp-hint { font-size:11px; color:var(--muted); padding:0.5rem 0.1rem; }
+    .sp-form-grid { display:grid; grid-template-columns:1fr 140px auto; gap:0.5rem; align-items:end; }
+    @media (max-width:640px) { .sp-form-grid { grid-template-columns:1fr; } }
+    .sp-field-label { font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom:0.2rem; display:block; }
+    .sp-selected { font-size:12px; color:var(--accent); padding:0.5rem 0.7rem; border:1px solid var(--accent); }
+    .sp-note-text { color:var(--muted); font-size:10px; line-height:1.5; margin-top:0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Stockpiles</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Set target quantities for the items you keep on hand and watch current stock vs. target across all your characters. Get an alert when a stockpile runs low.
+        </p>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Watchlist</span></div>
+    <div style="padding:0.75rem;">
+        <div id="sp-rows">
+            {% include "partials/stockpile_rows.html" %}
+        </div>
+        <p class="sp-note-text">
+            Current stock is summed from your synced asset caches across all
+            <strong>active</strong> characters, account-wide (every station and hangar).
+            <strong>Excluded:</strong> quantities sitting in open market orders and in-progress
+            manufacturing output are not counted — they aren't in the persisted sync cache.
+        </p>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Add a target</span></div>
+    <div style="padding:0.75rem;">
+        <span class="sp-field-label">Find an item</span>
+        <input type="text" id="sp-search" class="sp-input" autocomplete="off"
+               placeholder="Search item name — e.g. Antimatter Charge L, Hobgoblin II…"
+               hx-get="/tools/stockpiles/search"
+               hx-trigger="keyup changed delay=300ms"
+               hx-target="#sp-search-results" hx-swap="innerHTML">
+        <div id="sp-search-results" class="sp-results"></div>
+
+        <form id="sp-add-form" style="margin-top:0.75rem;"
+              hx-post="/tools/stockpiles" hx-target="#sp-rows" hx-swap="innerHTML">
+            <input type="hidden" name="type_id" id="sp-type-id" value="">
+            <div class="sp-form-grid">
+                <div>
+                    <span class="sp-field-label">Selected item</span>
+                    <div class="sp-selected" id="sp-selected">None — pick from search above</div>
+                </div>
+                <div>
+                    <span class="sp-field-label">Target qty</span>
+                    <input type="number" name="target_qty" id="sp-qty" class="sp-input"
+                           min="0" step="1" value="0">
+                </div>
+                <div>
+                    <button type="submit" class="b-btn" id="sp-add-btn" disabled>Add target</button>
+                </div>
+            </div>
+            <div style="margin-top:0.5rem;">
+                <span class="sp-field-label">Note (optional)</span>
+                <input type="text" name="note" id="sp-note" class="sp-input" maxlength="120"
+                       placeholder="e.g. PvP doctrine ammo, reaction fuel…">
+            </div>
+        </form>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    // Search-result rows call this via data-click (delegated in actions.js).
+    // `this` is the clicked <button>; populate the hidden type_id + label and
+    // enable the add button.
+    window.pickStockType = function () {
+        var tid = this.getAttribute('data-type-id');
+        var name = this.getAttribute('data-type-name') || ('Type ' + tid);
+        document.getElementById('sp-type-id').value = tid;
+        document.getElementById('sp-selected').textContent = name;
+        document.getElementById('sp-add-btn').disabled = false;
+        // Clear the search box + results so the picker collapses.
+        document.getElementById('sp-search').value = '';
+        document.getElementById('sp-search-results').innerHTML = '';
+        document.getElementById('sp-qty').focus();
+    };
+
+    // After a successful add, reset the form's selection state (the table has
+    // already been swapped in by htmx).
+    var form = document.getElementById('sp-add-form');
+    form.addEventListener('htmx:afterRequest', function (evt) {
+        if (!evt.detail || !evt.detail.successful) return;
+        document.getElementById('sp-type-id').value = '';
+        document.getElementById('sp-selected').textContent = 'None — pick from search above';
+        document.getElementById('sp-qty').value = '0';
+        document.getElementById('sp-note').value = '';
+        document.getElementById('sp-add-btn').disabled = true;
+    });
+})();
+</script>
+{% endblock %}

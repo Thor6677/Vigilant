@@ -381,6 +381,17 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
+                "Stockpiles", "/tools/stockpiles",
+                [("prefix", "/tools/stockpiles")],
+                desc="Set target quantities for the items you keep on hand — ammo, doctrine hulls, reaction fuel — and see current stock across all your characters vs. target, with deficits highlighted. Get a browser + Discord alert when a stockpile runs low.",
+                features=[
+                    "Per-item target quantity vs. account-wide holdings",
+                    "Deficit highlighting for under-stocked items",
+                    "Type search add form (htmx CRUD)",
+                    "Sync-time \"stockpile low\" alerts (24h dedup)",
+                ],
+            ),
+            _item(
                 "Asset Search", "/assets",
                 [("prefix", "/assets")],
                 desc="Search across every linked character's assets at once. Find any item by name, see every stack and location.",

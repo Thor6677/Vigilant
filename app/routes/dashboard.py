@@ -1833,6 +1833,22 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Net-worth snapshot error: %s", e)
 
+            # Stockpile-low alert check — compare each user's summed active-
+            # character holdings against their watchlist targets and emit
+            # `stockpile_low` via _emit_notification. Runs hourly (matching the
+            # hourly asset-cache refresh) so the 24h per-target suppression in
+            # the checker actually gates repeats. Lazy import keeps the module
+            # out of the dashboard import graph.
+            if not hasattr(_background_scheduler, '_last_stockpile_check') or \
+               (now - _background_scheduler._last_stockpile_check).total_seconds() >= 3600:
+                try:
+                    from app.stockpiles.alerts import run_stockpile_check
+                    res = await run_stockpile_check()
+                    logger.info("stockpile alert check: %s", res)
+                    _background_scheduler._last_stockpile_check = now
+                except Exception as e:
+                    logger.warning("Stockpile alert check error: %s", e)
+
             # Daily GC of archived ESI rate-limit events (>30 days old).
             # Runs regardless of flags — small query, safe cheap.
             if not hasattr(_background_scheduler, '_last_esi_events_gc') or \

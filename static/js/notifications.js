@@ -40,6 +40,7 @@
         poco: true,
         inventory_low: true,
         contract_low: true,
+        stockpile_low: true,
     };
 
     /* Human-readable type labels */
@@ -58,6 +59,7 @@
         inventory_critical: 'Inventory',
         contract_low: 'Contracts',
         contract_critical: 'Contracts',
+        stockpile_low: 'Stockpile',
         structure_alert: 'Structure',
     };
 
@@ -77,6 +79,7 @@
         inventory_critical: 'var(--danger)',
         contract_low: 'var(--accent)',
         contract_critical: 'var(--danger)',
+        stockpile_low: 'var(--accent)',
     };
 
     function loadPrefs() {
