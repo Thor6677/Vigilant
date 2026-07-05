@@ -20,6 +20,7 @@
     {% if current != "blueprints" %}<a class="el-chip" href="/character/{{ id }}/blueprints">Blueprints</a>{% endif %}
     {% if current != "fittings" %}<a class="el-chip" href="/character/{{ id }}/fittings">Fittings</a>{% endif %}
     {% if current != "mining" %}<a class="el-chip" href="/character/{{ id }}/mining">Mining</a>{% endif %}
+    {% if current != "stats" %}<a class="el-chip" href="/intel/entity/character/{{ id }}">Stats</a>{% endif %}
     {% if current != "zkb" %}<a class="el-chip is-ext" href="https://zkillboard.com/character/{{ id }}/" target="_blank" rel="noopener">zKillboard</a>{% endif %}
   {%- elif kind == "system" -%}
     {% if current != "map" %}<a class="el-chip" href="/map?focus={{ id }}">Map</a>{% endif %}

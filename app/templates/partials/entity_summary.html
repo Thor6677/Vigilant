@@ -1,0 +1,18 @@
+<div class="ent-tiles">
+    <div class="ent-tile">
+        <div class="ent-tile-val">{{ "{:,}".format(stats.kills) }}</div>
+        <div class="ent-tile-label">Kills ({{ days }}d)</div>
+    </div>
+    <div class="ent-tile">
+        <div class="ent-tile-val">{{ "{:,}".format(stats.losses) }}</div>
+        <div class="ent-tile-label">Losses ({{ days }}d)</div>
+    </div>
+    <div class="ent-tile">
+        <div class="ent-tile-val">{{ "%.0f"|format(stats.danger * 100) }}%</div>
+        <div class="ent-tile-label">Danger</div>
+    </div>
+    <div class="ent-tile">
+        <div class="ent-tile-val">{{ "%.0f"|format(stats.solo_ratio * 100) }}%</div>
+        <div class="ent-tile-label">Solo ratio</div>
+    </div>
+</div>

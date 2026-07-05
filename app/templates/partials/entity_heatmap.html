@@ -1,0 +1,25 @@
+{% if peak > 0 %}
+<div class="ent-hm">
+    <div class="ent-hm-corner"></div>
+    {% for h in hours %}<div class="ent-hm-hh">{{ "%02d"|format(h) }}</div>{% endfor %}
+    {% for d in range(7) %}
+        <div class="ent-hm-day">{{ dow_labels[d] }}</div>
+        {% for h in hours %}
+            {% set c = grid.get(d ~ "-" ~ h, 0) %}
+            {% set op = (0.12 + 0.88 * (c / peak)) if c else 0 %}
+            <div class="ent-hm-cell"
+                 {% if c %}style="background:rgba(94,177,255,{{ "%.3f"|format(op) }});"{% endif %}
+                 title="{{ dow_labels[d] }} {{ '%02d'|format(h) }}:00 — {{ c }}"></div>
+        {% endfor %}
+    {% endfor %}
+</div>
+<div class="ent-hm-legend">
+    <span>Less</span>
+    <span class="ent-hm-swatch" style="background:rgba(94,177,255,0.12);"></span>
+    <span class="ent-hm-swatch" style="background:rgba(94,177,255,0.45);"></span>
+    <span class="ent-hm-swatch" style="background:rgba(94,177,255,1);"></span>
+    <span>More · peak {{ peak }}/hr</span>
+</div>
+{% else %}
+<div class="ent-empty">No activity in the last {{ days }} days.</div>
+{% endif %}
