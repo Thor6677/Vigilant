@@ -109,6 +109,47 @@ class WalletSnapshot(Base):
     recorded_at = Column(DateTime, nullable=False)  # naive UTC
 
 
+class NetWorthSnapshot(Base):
+    """One daily valuation point per character (Phase 5 Task 1).
+
+    Composite PK (character_id, date) makes the daily snapshot job idempotent:
+    re-running for the same date overwrites the row in place via
+    `on_conflict_do_update`, never accumulating duplicates.
+
+    Valuation is intentionally partial and cheap — see
+    `app/networth/snapshot.py` for the "what's included / excluded" rationale:
+      * `wallet`        — CharacterDashboardCache.wallet (synced).
+      * `assets_value`  — qty x global reference price over the synced
+                          CharacterAssetCache.assets_json list.
+      * `escrow`        — always 0.0 for now: personal market orders are not
+                          in any persisted sync cache (the orders_json column
+                          is vestigial), so buy-order escrow / sell-order value
+                          isn't available without new per-character ESI calls.
+                          Kept as a column for schema fidelity + future wiring.
+      * `total`         — wallet + assets_value + escrow, PER CHARACTER. The
+                          account-wide total is summed across a user's
+                          characters at query time, never stored as its own row.
+      * `unpriced_count`— assets skipped because their type_id had no price in
+                          the global map (BPCs, some rare items). Surfaced on
+                          the page so the number isn't silently understated.
+
+    `user_id` is denormalized for convenience but queries filter by the user's
+    character_ids (Character.user_id is nullable), never by this column alone.
+    """
+    __tablename__ = "net_worth_snapshots"
+
+    character_id = Column(Integer, ForeignKey("characters.character_id"), primary_key=True)
+    date = Column(Date, primary_key=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    wallet = Column(Float, nullable=False, default=0.0)
+    assets_value = Column(Float, nullable=False, default=0.0)
+    escrow = Column(Float, nullable=False, default=0.0)
+    total = Column(Float, nullable=False, default=0.0)
+    unpriced_count = Column(Integer, nullable=False, default=0)
+    recorded_at = Column(DateTime, nullable=False,
+                         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 class KillmailDailyAggregate(Base):
     """Daily total kill counts and ISK destroyed. Multi-source by design:
 

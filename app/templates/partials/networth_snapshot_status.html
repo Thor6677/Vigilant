@@ -1,0 +1,5 @@
+{% if result.written %}
+<span style="color:var(--accent);">Snapshot taken · {{ result.written }} character{{ '' if result.written == 1 else 's' }} · {{ result.date }}</span>
+{% else %}
+<span>No character data to snapshot yet — sync a character first.</span>
+{% endif %}

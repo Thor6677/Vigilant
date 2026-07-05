@@ -1819,6 +1819,20 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("PCU daily rollup error: %s", e)
 
+            # Daily net-worth snapshot — one valuation row per character per
+            # day (wallet + assets from the synced caches, one global price
+            # map). Idempotent upsert, so a same-day restart re-running this
+            # tick just overwrites today's rows. Top-level (not flag-gated).
+            if not hasattr(_background_scheduler, '_last_networth_snapshot') or \
+               (now - _background_scheduler._last_networth_snapshot).total_seconds() >= 86400:
+                try:
+                    from app.networth.snapshot import run_daily_snapshot
+                    res = await run_daily_snapshot()
+                    logger.info("net-worth snapshot: %s", res)
+                    _background_scheduler._last_networth_snapshot = now
+                except Exception as e:
+                    logger.warning("Net-worth snapshot error: %s", e)
+
             # Daily GC of archived ESI rate-limit events (>30 days old).
             # Runs regardless of flags — small query, safe cheap.
             if not hasattr(_background_scheduler, '_last_esi_events_gc') or \

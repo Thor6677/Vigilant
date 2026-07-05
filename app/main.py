@@ -55,6 +55,7 @@ from app.routes.fitting import router as fitting_router
 from app.routes.landings import router as landings_router
 from app.routes.palette import router as palette_router
 from app.routes.market import router as market_router
+from app.routes.networth import router as networth_router
 
 
 def _css_version() -> str:
@@ -197,6 +198,7 @@ app.include_router(fitting_router)
 app.include_router(landings_router)
 app.include_router(palette_router)
 app.include_router(market_router)
+app.include_router(networth_router)
 
 
 @app.on_event("startup")

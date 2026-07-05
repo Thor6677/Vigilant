@@ -370,6 +370,17 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
+                "Net Worth", "/tools/networth",
+                [("prefix", "/tools/networth")],
+                desc="Track your total net worth over time — a daily snapshot of every character's wallet plus assets, valued at CCP's global average reference price, stacked into one chart.",
+                features=[
+                    "Per-character stacked area + account total",
+                    "30d / 90d / 1y range toggles",
+                    "Daily automatic snapshots + on-demand \"Snapshot now\"",
+                    "Unpriced-item count shown for transparency",
+                ],
+            ),
+            _item(
                 "Asset Search", "/assets",
                 [("prefix", "/assets")],
                 desc="Search across every linked character's assets at once. Find any item by name, see every stack and location.",

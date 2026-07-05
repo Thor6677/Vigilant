@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Net Worth — Tools — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/tools">Tools</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Net Worth</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style nonce="{{ request.state.csp_nonce }}">
+    .nw-ranges { display:flex; gap:0.25rem; flex-wrap:wrap; }
+    .nw-ranges .b-btn { padding:3px 12px; font-size:10px; }
+    .nw-ranges .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .nw-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:0.75rem; }
+    .nw-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .nw-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
+    .nw-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    .nw-note { color:var(--muted); font-size:10px; line-height:1.5; margin-top:0.5rem; }
+    #nw-status { font-size:10px; color:var(--muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Net Worth</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Daily valuation across all your characters — wallet balance plus assets priced at CCP's global average reference price. One snapshot is taken automatically each day.
+        </p>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <span id="nw-status"></span>
+        <button type="button" class="b-btn" id="nw-snapshot-btn"
+                hx-post="/tools/networth/snapshot"
+                hx-target="#nw-status"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this">Snapshot now</button>
+    </div>
+</div>
+
+<div class="nw-stats">
+    <div class="nw-stat"><div class="nw-stat-val" id="nw-total">—</div><div class="nw-stat-label">Total net worth</div></div>
+    <div class="nw-stat"><div class="nw-stat-val" id="nw-change">—</div><div class="nw-stat-label">Change over range</div></div>
+    <div class="nw-stat"><div class="nw-stat-val" id="nw-unpriced">—</div><div class="nw-stat-label">Unpriced items skipped</div></div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">Net worth over time — stacked by character</span>
+        <div class="nw-ranges" id="nw-ranges">
+            <button type="button" class="b-btn" data-range="30d">30D</button>
+            <button type="button" class="b-btn is-active" data-range="90d">90D</button>
+            <button type="button" class="b-btn" data-range="1y">1Y</button>
+        </div>
+    </div>
+    <div style="padding:0.75rem;">
+        <div style="position:relative;height:360px;"><canvas id="nw-chart"></canvas></div>
+        <div class="b-empty" id="nw-empty" style="display:none;">
+            No snapshots yet. Hit <strong>Snapshot now</strong> above to record the first data point — the daily job fills in the rest over time.
+        </div>
+        <p class="nw-note">
+            Net worth = wallet + assets (valued at CCP global average reference price). <strong>Excluded:</strong> market-order escrow / sell-order value and in-progress industry-job value are not currently tracked (they aren't in the persisted sync cache). Unpriced items (blueprint copies, some untradeable types) are skipped and counted above.
+        </p>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var range = '90d', chart = null;
+    var emptyEl = document.getElementById('nw-empty');
+    var PALETTE = ['#c8a951','#6fa8dc','#93c47d','#e06666','#b48ead',
+                   '#76c7c0','#e6a15c','#8fce00','#d98cb3','#7fa6ff'];
+
+    function fmtIsk(v) {
+        if (v == null) return '—';
+        var n = Number(v), sign = n < 0 ? '-' : '';
+        n = Math.abs(n);
+        if (n >= 1e12) return sign + (n / 1e12).toFixed(2) + 'T';
+        if (n >= 1e9) return sign + (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return sign + (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return sign + (n / 1e3).toFixed(1) + 'K';
+        return sign + n.toFixed(0);
+    }
+
+    function updateStats(data) {
+        var total = data.total || [];
+        var latest = total.length ? total[total.length - 1] : null;
+        var first = total.length ? total[0] : null;
+        document.getElementById('nw-total').textContent = fmtIsk(latest);
+        if (first != null && latest != null) {
+            var delta = latest - first;
+            document.getElementById('nw-change').textContent =
+                (delta >= 0 ? '+' : '') + fmtIsk(delta);
+        } else {
+            document.getElementById('nw-change').textContent = '—';
+        }
+        document.getElementById('nw-unpriced').textContent =
+            (data.unpriced_count != null ? Number(data.unpriced_count).toLocaleString() : '—');
+    }
+
+    function build(data) {
+        emptyEl.style.display = 'none';
+        var datasets = (data.characters || []).map(function (c, i) {
+            var col = PALETTE[i % PALETTE.length];
+            return {
+                label: c.name, data: c.total,
+                borderColor: col, backgroundColor: col + '55',
+                pointRadius: 0, borderWidth: 1.4, fill: true, tension: 0.15,
+                spanGaps: true, stack: 'nw',
+            };
+        });
+        var cfg = {
+            type: 'line',
+            data: { labels: data.dates, datasets: datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                    y: { stacked: true, position: 'left',
+                         ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
+                         grid: { color: '#1a1a1a' } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                    tooltip: { callbacks: { label: function (ctx) {
+                        return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                    } } }
+                }
+            }
+        };
+        if (chart) { chart.destroy(); }
+        chart = new Chart(document.getElementById('nw-chart'), cfg);
+    }
+
+    function load() {
+        fetch('/tools/networth/data.json?range=' + range).then(function (r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.json();
+        }).then(function (data) {
+            updateStats(data);
+            if (!data.dates || !data.dates.length) {
+                if (chart) { chart.destroy(); chart = null; }
+                emptyEl.style.display = '';
+                return;
+            }
+            build(data);
+        }).catch(function () {
+            if (chart) { chart.destroy(); chart = null; }
+            emptyEl.textContent = 'Net-worth data unavailable — try again shortly.';
+            emptyEl.style.display = '';
+        });
+    }
+
+    document.getElementById('nw-ranges').addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-range]');
+        if (!btn) return;
+        range = btn.getAttribute('data-range');
+        Array.prototype.forEach.call(this.querySelectorAll('button'), function (b) {
+            b.classList.toggle('is-active', b === btn);
+        });
+        load();
+    });
+
+    // The Snapshot-now POST fires HX-Trigger: networthSnapshot on success.
+    document.body.addEventListener('networthSnapshot', function () { load(); });
+
+    load();
+})();
+</script>
+{% endblock %}
