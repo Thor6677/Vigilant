@@ -125,12 +125,27 @@ NAV_GROUPS = [
             _item(
                 "Market", "/market",
                 [("prefix", "/market")],
+                # LP Store ROI lives under /market/lp; keep it out of
+                # Market's broad prefix so both don't light up together
+                # (same pattern as Kill Feed / Kill Search).
+                exclude=["/market/lp"],
                 desc="Price-history charts for any item — daily average, high/low band, and traded volume in The Forge (Jita), fetched on demand and cached. Search a type and watch its trend over 30 days to a year.",
                 features=[
                     "Type search across all published items",
                     "Average price line + daily high/low band",
                     "Traded-volume bars",
                     "30d / 90d / 1y / all range toggles",
+                ],
+            ),
+            _item(
+                "LP Store ROI", "/market/lp",
+                [("prefix", "/market/lp")],
+                desc="Pick an NPC corporation and rank its loyalty-point store offers by ISK/LP — required-item cost and item sell value are priced from current market data.",
+                features=[
+                    "Full NPC corporation roster",
+                    "Per-offer required-items cost",
+                    "ISK/LP ratio, sorted best-first",
+                    "Blueprint offers flagged when unpriced",
                 ],
             ),
             _item(

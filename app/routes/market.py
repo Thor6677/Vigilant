@@ -1,4 +1,4 @@
-"""Market → price-history browser + per-type charts (Phase 4 Task 1/2).
+"""Market → price-history browser + per-type charts (Phase 4 Task 1/2/3).
 
 Surfaces, all auth-gated:
 
@@ -6,12 +6,15 @@ Surfaces, all auth-gated:
   * `/market/type/{type_id}`           — chart page for one type in The Forge.
   * `/market/type/{type_id}/history.json` — JSON feed for the chart, range-sliced.
   * `/market/type/{type_id}/orders`    — htmx partial: hub order-book (Task 2).
+  * `/market/lp`                       — LP store ROI calculator landing (Task 3).
+  * `/market/lp/offers`                — htmx partial: ranked offers for one corp.
 
 History rows are fetched on demand and cached via `app.market.history` — see
 that module for the storage design. The order book is a separate, much
-shorter-lived cache — see `app.market.orders`. The search buckets reuse the
-palette's published-SDEType LIKE idiom (small table, small LIMIT, no new
-indexes).
+shorter-lived cache — see `app.market.orders`. LP store offers + the NPC corp
+roster live in `app.market.lp` — see that module for the ISK/LP formula and
+its guards. The search buckets reuse the palette's published-SDEType LIKE
+idiom (small table, small LIMIT, no new indexes).
 """
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MarketHistory, get_db
 from app.db.sde_models import SDEGroup, SDEType
+from app.market import lp as market_lp
 from app.market.history import DEFAULT_REGION_ID, get_history
 from app.market.orders import (
     STATION_ID_CEILING,
@@ -223,4 +227,61 @@ async def market_type_orders(request: Request, type_id: int, db: AsyncSession = 
                 f"{book['spread_pct']:.1f}%" if book["spread_pct"] is not None else "—"
             ),
         },
+    )
+
+
+# ── LP store ROI (Task 3) ──────────────────────────────────────────────────────
+
+@router.get("/market/lp", response_class=HTMLResponse)
+async def market_lp_page(request: Request):
+    """LP store ROI calculator landing — an NPC corp picker; the offers table
+    loads via htmx on selection change (see `market_lp_offers` below)."""
+    if not request.session.get("user_id"):
+        return RedirectResponse("/")
+    corps = await market_lp.get_npc_corps()
+    return templates.TemplateResponse(request, "market_lp.html", {"corps": corps})
+
+
+def _fmt_isk_per_lp(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,.2f}"
+
+
+@router.get("/market/lp/offers", response_class=HTMLResponse)
+async def market_lp_offers(
+    request: Request, corporation_id: int = 0, db: AsyncSession = Depends(get_db),
+):
+    """htmx partial: one corp's LP store offers, ranked by ISK/LP.
+
+    `corporation_id=0` (nothing selected yet, or a cleared dropdown) renders
+    an empty body rather than erroring — the select's own default option
+    round-trips here on first render in some browsers."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    if not corporation_id:
+        return HTMLResponse("")
+
+    raw_offers = await market_lp.get_offers(corporation_id)
+    price_map = await market_lp.get_price_map(db)
+    ranked = market_lp.rank_offers(raw_offers, price_map)
+
+    type_ids = {r["type_id"] for r in ranked if r["type_id"] is not None}
+    name_map = await sde.type_ids_to_names(db, list(type_ids))
+
+    def _display_row(r: dict) -> dict:
+        return {
+            "item_name": name_map.get(r["type_id"], f"Type {r['type_id']}"),
+            "quantity_str": _fmt_qty(r["quantity"]),
+            "lp_cost_str": _fmt_qty(r["lp_cost"]),
+            "isk_cost_str": _fmt_price(r["isk_cost"]),
+            "materials_cost_str": _fmt_price(r["materials_cost"]),
+            "unit_price_str": _fmt_price(r["unit_price"]),
+            "isk_per_lp_str": _fmt_isk_per_lp(r["isk_per_lp"]),
+            "priced": r["priced"],
+        }
+
+    return templates.TemplateResponse(
+        request, "partials/market_lp_offers.html",
+        {"corporation_id": corporation_id, "rows": [_display_row(r) for r in ranked]},
     )

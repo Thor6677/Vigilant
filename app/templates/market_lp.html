@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}LP Store ROI — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/industry">Industry</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">LP Store ROI</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .lp-select {
+        width: 100%; padding: 0.55rem 0.7rem;
+        background: var(--bg); border: 1px solid var(--border);
+        color: var(--text); font: inherit; font-size: 13px;
+    }
+    .lp-select:focus { outline: none; border-color: var(--accent); }
+    .lp-row {
+        display: flex; align-items: baseline; gap: 0.6rem;
+        padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+        font-size: 11px;
+    }
+    .lp-row:last-child { border-bottom: none; }
+    .lp-row.lp-unpriced { opacity: 0.55; }
+    .lp-col-item { flex: 3; color: var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .lp-col-num { flex: 1; text-align: right; color: var(--text); }
+    .lp-col-ratio { flex: 1; text-align: right; color: var(--accent); font-weight: 600; }
+    .lp-head { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">LP Store ROI</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Pick an NPC corporation to see its loyalty-point store offers ranked by ISK/LP —
+            required-item cost and item sell value are priced from current global market data.
+        </p>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Corporation</span></div>
+    <div style="padding:0.75rem;">
+        <select
+            name="corporation_id"
+            class="lp-select"
+            hx-get="/market/lp/offers"
+            hx-trigger="change"
+            hx-target="#lp-offers-panel"
+            hx-swap="innerHTML"
+            hx-indicator="#lp-loading"
+        >
+            <option value="0">— Select a corporation —</option>
+            {% for corp in corps %}
+            <option value="{{ corp.corporation_id }}">{{ corp.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="b-section" style="margin-top:0.75rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="b-label">Offers</span>
+        <span id="lp-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading…</span>
+    </div>
+    <div id="lp-offers-panel">
+        <div class="b-empty">Select a corporation above to load its LP store offers.</div>
+    </div>
+</div>
+
+<p style="color:var(--muted);font-size:9px;margin-top:0.75rem;">
+    Blueprint offers show item sell value from the blueprint's own market price when it has one;
+    unpriced blueprints and any offer requiring an unpriced item show "—" and are excluded from the
+    ranking (they still appear in the list). No manufacture-value math is computed for blueprints —
+    see the build-finder tool (planned) for that.
+</p>
+{% endblock %}

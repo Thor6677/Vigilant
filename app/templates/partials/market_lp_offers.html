@@ -1,0 +1,27 @@
+{# htmx partial — swapped via innerHTML into #lp-offers-panel in
+   market_lp.html, so no {% extends %}/base globals here; the lp-* / b-empty
+   classes are already on the page from the parent template's head block. #}
+{% if rows %}
+<div class="lp-row lp-head">
+    <span class="lp-col-item">Item</span>
+    <span class="lp-col-num">Qty</span>
+    <span class="lp-col-num">LP cost</span>
+    <span class="lp-col-num">ISK cost</span>
+    <span class="lp-col-num">Materials</span>
+    <span class="lp-col-num">Unit sell</span>
+    <span class="lp-col-ratio">ISK/LP</span>
+</div>
+{% for r in rows %}
+<div class="lp-row{% if not r.priced %} lp-unpriced{% endif %}">
+    <span class="lp-col-item" title="{{ r.item_name }}">{{ r.item_name }}</span>
+    <span class="lp-col-num">{{ r.quantity_str }}</span>
+    <span class="lp-col-num">{{ r.lp_cost_str }}</span>
+    <span class="lp-col-num">{{ r.isk_cost_str }}</span>
+    <span class="lp-col-num">{{ r.materials_cost_str }}</span>
+    <span class="lp-col-num">{{ r.unit_price_str }}</span>
+    <span class="lp-col-ratio">{{ r.isk_per_lp_str }}</span>
+</div>
+{% endfor %}
+{% else %}
+<div class="b-empty">This corporation has no LP store offers (or none could be fetched).</div>
+{% endif %}
