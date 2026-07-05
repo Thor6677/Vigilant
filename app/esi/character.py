@@ -25,6 +25,21 @@ async def get_wallet_journal(client: ESIClient, character_id: int, page: int = 1
     return await client.get(f"/characters/{character_id}/wallet/journal/", params={"page": page})
 
 
+async def get_wallet_transactions(
+    client: ESIClient, character_id: int, from_id: int | None = None
+) -> list:
+    """Market transactions (buy/sell fills) for a character.
+
+    ESI returns up to 2500 rows, newest-first. `from_id` pages backwards: only
+    transactions with id STRICTLY LESS than `from_id` are returned, so passing
+    the smallest id seen so far walks further into history without overlap.
+    Requires the esi-wallet.read_character_wallet.v1 scope (same as the wallet
+    balance endpoint).
+    """
+    params = {"from_id": from_id} if from_id is not None else None
+    return await client.get(f"/characters/{character_id}/wallet/transactions/", params=params)
+
+
 async def get_public_info(client: ESIClient, character_id: int) -> dict:
     return await client.get_public(f"/characters/{character_id}/")
 

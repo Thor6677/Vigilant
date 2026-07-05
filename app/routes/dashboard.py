@@ -10,9 +10,10 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.utils.perf import perf_log, perf_enabled, ms_since
@@ -370,6 +371,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "zkill":        3600,   # zkillboard — 1h is plenty
     "assets":       3600,   # ESI max-age: 3600s
     "roles":        3600,   # corp roles — rarely change, cached for permission checks
+    "transactions": 3600,   # wallet fills — immutable; hourly incremental page-back is plenty
 }
 
 FIELD_SCOPES: dict[str, str] = {
@@ -383,6 +385,7 @@ FIELD_SCOPES: dict[str, str] = {
     "zkill":         None,   # no ESI scope required
     "assets":        "esi-assets.read_assets.v1",
     "roles":         "esi-characters.read_corporation_roles.v1",
+    "transactions":  "esi-wallet.read_character_wallet.v1",   # same scope as wallet balance
 }
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
@@ -397,6 +400,7 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "zkill":         "zkill_json",
     "assets":        None,
     "roles":         None,   # roles stored in CharacterCorpRoles (separate table)
+    "transactions":  None,   # rows written by the fetcher into wallet_transactions
 }
 
 # UI staleness thresholds (based on last_synced, for indicator colours)
@@ -1199,6 +1203,99 @@ async def fetch_corp_roles_data(characters: list[Character], db: AsyncSession) -
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+def _parse_esi_dt(s: str) -> datetime:
+    """Parse an ESI ISO-8601 datetime ("2026-07-04T12:00:00Z") to naive UTC.
+
+    Older Python's fromisoformat chokes on the trailing 'Z'; strip it defensively
+    so the fetcher can't die mid-page on a runtime that predates 3.11."""
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+# Bound the first-ever (full backfill) fetch. ESI returns up to 2500 rows/page,
+# so 20 pages = up to 50k transactions — far more than any personal history.
+# Incremental runs stop as soon as they overlap stored ids (usually 1 page).
+_TX_MAX_PAGES = 20
+
+
+async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncSession) -> dict:
+    """Fetch + persist wallet transactions (buy/sell fills) per character.
+
+    Unlike the other fetchers this one WRITES its results directly (into
+    `wallet_transactions`) using the per-fetcher `db` session handed to it by
+    `_sync_fields._run_fetcher`, then returns a lightweight marker
+    ``{character_id: (rows_inserted, warning)}`` through the normal return path.
+    Mirrors `fetch_assets_data`'s shape but persists instead of handing JSON
+    back for the caller to store — transactions are append-only immutable rows,
+    not a snapshot blob.
+
+    Transactions are immutable, so we only fetch NEW ones: page newest-first via
+    `from_id` and stop once we reach ids already stored. INSERT-OR-IGNORE on the
+    transaction_id PK makes every write idempotent regardless of overlap.
+    """
+    async def _get(char):
+        if not _has_scope(char, "esi-wallet.read_character_wallet.v1"):
+            return char.character_id, 0, "missing_scope"
+        client, err = await _client_for(char)
+        if not client:
+            return char.character_id, 0, err
+        # These rows are append-only and immutable; skip the DB/ETag response
+        # cache so we get live fills each cycle and don't pollute esi_cache with
+        # one-shot backfill pages.
+        client.cache_enabled = False
+        try:
+            before = (await db.execute(
+                select(func.count()).select_from(WalletTransaction)
+                .where(WalletTransaction.character_id == char.character_id)
+            )).scalar() or 0
+            existing_max = (await db.execute(
+                select(func.max(WalletTransaction.transaction_id))
+                .where(WalletTransaction.character_id == char.character_id)
+            )).scalar()
+
+            from_id = None
+            for _page in range(_TX_MAX_PAGES):
+                batch = await esi_char.get_wallet_transactions(client, char.character_id, from_id)
+                if not batch:
+                    break
+                rows = [{
+                    "transaction_id": t["transaction_id"],
+                    "character_id": char.character_id,
+                    "date": _parse_esi_dt(t["date"]),
+                    "type_id": t["type_id"],
+                    "quantity": t["quantity"],
+                    "unit_price": float(t["unit_price"]),
+                    "is_buy": bool(t["is_buy"]),
+                    "client_id": t.get("client_id"),
+                    "location_id": t.get("location_id"),
+                } for t in batch]
+                stmt = sqlite_insert(WalletTransaction).values(rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
+                await db.execute(stmt)
+                await db.commit()
+
+                min_id = min(t["transaction_id"] for t in batch)
+                # Reached data we already have — stop paging further back.
+                if existing_max is not None and min_id <= existing_max:
+                    break
+                from_id = min_id
+
+            after = (await db.execute(
+                select(func.count()).select_from(WalletTransaction)
+                .where(WalletTransaction.character_id == char.character_id)
+            )).scalar() or 0
+            return char.character_id, after - before, None
+        except Exception as e:
+            logger.warning("Wallet transactions fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, 0, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
 # Dispatch table — defined after all fetch functions
 _FIELD_FETCHERS = {
     "wallet":        fetch_wallet_data,
@@ -1211,6 +1308,7 @@ _FIELD_FETCHERS = {
     "zkill":         fetch_zkillboard_data,
     "assets":        fetch_assets_data,
     "roles":         fetch_corp_roles_data,
+    "transactions":  fetch_wallet_transactions_data,
 }
 
 
@@ -1421,6 +1519,17 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                     warnings.pop(field, None)
                 elif warn and warn != "missing_scope":
                     warnings[field] = warn
+                field_synced[field] = now.isoformat()
+                continue
+            if field == "transactions":
+                # The fetcher already persisted rows into wallet_transactions on
+                # its own session; `val` is just a row-count marker. MUST NOT
+                # fall through to the `col is None` wallet branch below or it
+                # would clobber cache.wallet with a transaction count.
+                if warn and warn != "missing_scope":
+                    warnings[field] = warn
+                else:
+                    warnings.pop(field, None)
                 field_synced[field] = now.isoformat()
                 continue
             if val is not None:

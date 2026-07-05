@@ -109,6 +109,40 @@ class WalletSnapshot(Base):
     recorded_at = Column(DateTime, nullable=False)  # naive UTC
 
 
+class WalletTransaction(Base):
+    """Immutable wallet transaction (buy/sell fill) per character (Phase 5 Task 5).
+
+    Sourced from ESI ``GET /characters/{id}/wallet/transactions/`` — a DIFFERENT
+    endpoint from the wallet *journal* (which carries fees/taxes/bounties). This
+    table backs the Trading P&L FIFO matcher (`app/market/pnl.py`).
+
+    ``transaction_id`` is CCP's own int64 id and the primary key, so the sync
+    fetcher stores rows with INSERT-OR-IGNORE and re-runs never duplicate.
+    Transactions are immutable, so the fetcher only pages back far enough to
+    reach ids already stored (see `fetch_wallet_transactions_data` in
+    `app/routes/dashboard.py`). ``client_id``/``location_id`` are kept for
+    provenance but the P&L engine only reads type_id/quantity/unit_price/is_buy/
+    date. Fees + taxes are NOT linked per-row (the journal can't be reliably
+    joined to a fill) — the FIFO engine applies flat-rate broker/tax assumptions
+    instead, documented on the page.
+    """
+    __tablename__ = "wallet_transactions"
+
+    transaction_id = Column(BigInteger, primary_key=True, autoincrement=False)
+    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
+    date = Column(DateTime, nullable=False)      # naive UTC
+    type_id = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    unit_price = Column(Float, nullable=False)
+    is_buy = Column(Boolean, nullable=False)
+    client_id = Column(BigInteger, nullable=True)
+    location_id = Column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        Index("ix_wallet_tx_char_date", "character_id", "date"),
+    )
+
+
 class NetWorthSnapshot(Base):
     """One daily valuation point per character (Phase 5 Task 1).
 

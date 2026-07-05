@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Trading P&L — Industry — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/industry">Industry</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Trading P&amp;L</span>
+</div>
+{% endblock %}
+
+{% block head %}
+{% if has_rows and monthly.labels %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endif %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .pnl-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:0.75rem; }
+    .pnl-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .pnl-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
+    .pnl-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    .pnl-note { color:var(--muted); font-size:10px; line-height:1.5; margin-top:0.5rem; }
+    .pnl-profit { color:#93c47d; }
+    .pnl-loss { color:#e06666; }
+    .pnl-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .pnl-table th, .pnl-table td { padding:5px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    .pnl-table th:first-child, .pnl-table td:first-child { text-align:left; }
+    .pnl-table th { color:var(--muted); font-size:9px; letter-spacing:0.1em; text-transform:uppercase; }
+    .pnl-filter { display:flex; align-items:center; gap:0.5rem; }
+    .pnl-filter select { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 8px; font-size:11px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Trading P&amp;L</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Realized profit from market flips — buys FIFO-matched against sells per item, across your synced wallet transactions. Manufacturing / industry P&amp;L is not included.
+        </p>
+    </div>
+    <div class="pnl-filter">
+        <label for="pnl-char" style="font-size:10px;color:var(--muted);">Character</label>
+        <select id="pnl-char">
+            <option value="0"{% if selected_character_id == 0 %} selected{% endif %}>All characters</option>
+            {% for c in char_options %}
+            <option value="{{ c.character_id }}"{% if c.character_id == selected_character_id %} selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+{% if not has_rows %}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">No transaction data yet</span></div>
+    <div class="b-empty" style="padding:1rem;">
+        No wallet transactions have been synced yet. Trading P&amp;L data accumulates automatically after the next character sync — once your buy/sell fills come in, this page fills itself in. (Only characters granting the wallet scope are included.)
+    </div>
+</div>
+{% else %}
+<div class="pnl-stats">
+    <div class="pnl-stat">
+        <div class="pnl-stat-val {% if totals.realized_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ totals.realized_isk_str }}</div>
+        <div class="pnl-stat-label">Realized profit</div>
+    </div>
+    <div class="pnl-stat"><div class="pnl-stat-val">{{ totals.qty_flipped_str }}</div><div class="pnl-stat-label">Units flipped</div></div>
+    <div class="pnl-stat"><div class="pnl-stat-val">{{ totals.types_traded }}</div><div class="pnl-stat-label">Item types traded</div></div>
+</div>
+
+{% if monthly.labels %}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Realized profit by month</span></div>
+    <div style="padding:0.75rem;">
+        <div style="position:relative;height:240px;"><canvas id="pnl-chart"></canvas></div>
+    </div>
+</div>
+{% endif %}
+
+<div class="b-section" style="margin-top:0.75rem;">
+    <div class="b-section-head"><span class="b-label">Realized P&amp;L by item — best first</span></div>
+    <div style="padding:0.25rem;overflow-x:auto;">
+        <table class="pnl-table">
+            <thead>
+                <tr><th>Item</th><th>Realized ISK</th><th>Units flipped</th><th>Avg margin</th></tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td><a href="/market/type/{{ r.type_id }}" style="color:var(--accent);">{{ r.type_name }}</a></td>
+                    <td class="{% if r.profit_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ r.realized_isk_str }}</td>
+                    <td>{{ r.qty_flipped_str }}</td>
+                    <td>{{ r.margin_pct_str }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="pnl-note">
+        <strong>Assumptions:</strong> fees/taxes are applied at flat rates — broker fee {{ "%.2f"|format(assumptions.broker_pct) }}% on each side (buy + sell) and sales tax {{ "%.2f"|format(assumptions.sales_tax_pct) }}% on sells. Actual in-game rates vary with your Broker Relations / Accounting skills and standings, so figures are indicative, not exact.
+        {% if unmatched_total %}<br><strong>Unmatched sells excluded:</strong> {{ "{:,}".format(unmatched_total) }} units were sold with no matching buy in the synced history (their purchase predates your data) and are left out of P&amp;L.{% endif %}
+        Avg margin is cost-weighted (realized profit ÷ effective buy cost).{% if selected_character_id == 0 %} The <strong>All characters</strong> view pools every character's fills into one FIFO book — one alt's buy can match another's sell for the same item.{% endif %}
+    </p>
+</div>
+{% endif %}
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    // Character filter reloads the page with the chosen character_id (CSP-safe:
+    // no inline handler attribute, listener attached here).
+    var sel = document.getElementById('pnl-char');
+    if (sel) {
+        sel.addEventListener('change', function () {
+            window.location = '/market/pnl?character_id=' + encodeURIComponent(this.value);
+        });
+    }
+
+    {% if has_rows and monthly.labels %}
+    var MONTHLY = {{ monthly | tojson }};
+    function fmtIsk(v) {
+        if (v == null) return '—';
+        var n = Number(v), sign = n < 0 ? '-' : '';
+        n = Math.abs(n);
+        if (n >= 1e12) return sign + (n / 1e12).toFixed(2) + 'T';
+        if (n >= 1e9) return sign + (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return sign + (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return sign + (n / 1e3).toFixed(1) + 'K';
+        return sign + n.toFixed(0);
+    }
+    var colors = MONTHLY.realized.map(function (v) {
+        return v >= 0 ? 'rgba(147,196,125,0.55)' : 'rgba(224,102,102,0.55)';
+    });
+    new Chart(document.getElementById('pnl-chart'), {
+        type: 'bar',
+        data: {
+            labels: MONTHLY.labels,
+            datasets: [{ label: 'Realized profit', data: MONTHLY.realized,
+                         backgroundColor: colors, borderWidth: 0 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            scales: {
+                x: { ticks: { color: '#888' }, grid: { color: '#1a1a1a' } },
+                y: { ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
+                     grid: { color: '#1a1a1a' } }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: function (ctx) {
+                    return 'Realized: ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                } } }
+            }
+        }
+    });
+    {% endif %}
+})();
+</script>
+{% endblock %}

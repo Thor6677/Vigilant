@@ -250,10 +250,11 @@ def test_landing_grids_built_from_registry():
         assert expected in intel_names
 
     industry_names = [c["name"] for c in INDUSTRY_TOOLS]
-    assert len(industry_names) == 10 and "Manufacturing" in industry_names
+    assert len(industry_names) == 11 and "Manufacturing" in industry_names
     assert "Market" in industry_names
     assert "LP Store ROI" in industry_names
     assert "Build Finder" in industry_names
+    assert "Trading P&L" in industry_names
 
     assert "Structure Age" in [c["name"] for c in TOOLS_TOOLS]
 

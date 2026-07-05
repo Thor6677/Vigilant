@@ -125,10 +125,11 @@ NAV_GROUPS = [
             _item(
                 "Market", "/market",
                 [("prefix", "/market")],
-                # LP Store ROI lives under /market/lp; keep it out of
-                # Market's broad prefix so both don't light up together
-                # (same pattern as Kill Feed / Kill Search).
-                exclude=["/market/lp"],
+                # LP Store ROI (/market/lp) and Trading P&L (/market/pnl) live
+                # under the /market prefix too; keep them out of Market's broad
+                # prefix so the items don't light up together (same pattern as
+                # Kill Feed / Kill Search).
+                exclude=["/market/lp", "/market/pnl"],
                 desc="Price-history charts for any item — daily average, high/low band, and traded volume in The Forge (Jita), fetched on demand and cached. Search a type and watch its trend over 30 days to a year.",
                 features=[
                     "Type search across all published items",
@@ -146,6 +147,17 @@ NAV_GROUPS = [
                     "Per-offer required-items cost",
                     "ISK/LP ratio, sorted best-first",
                     "Blueprint offers flagged when unpriced",
+                ],
+            ),
+            _item(
+                "Trading P&L", "/market/pnl",
+                [("prefix", "/market/pnl")],
+                desc="Realized trading profit — your market buys are FIFO-matched against sells per item across synced wallet transactions, with broker fees and sales tax applied at flat rates.",
+                features=[
+                    "Per-item realized ISK, units flipped, cost-weighted margin",
+                    "Monthly realized-profit chart",
+                    "Per-character or account-wide filter",
+                    "Unmatched (pre-history) sells excluded and counted",
                 ],
             ),
             _item(
