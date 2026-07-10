@@ -366,7 +366,7 @@ def test_pnl_page_empty_state_when_no_data():
     r = _authed_client(user_id=987654).get("/market/pnl")
     assert r.status_code == 200
     body = r.text
-    assert "Trading P&L" in body or "Trading P&amp;L" in body
+    assert "Trading &amp; Industry P&amp;L" in body or "Trading & Industry P&L" in body
     assert "accumulates" in body               # empty-state copy
     assert "nav_groups" not in body            # nav rendered, not a literal
 
