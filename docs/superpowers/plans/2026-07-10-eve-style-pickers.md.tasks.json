@@ -4,13 +4,13 @@
     {
       "id": 1,
       "subject": "PICK Task 1: subtree resolver + group search (Opus)",
-      "status": "pending",
+      "status": "completed",
       "description": "```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-eve-style-pickers.md\", \"planTask\": 1, \"model\": \"opus\", \"files\": [\"app/sde/lookup.py\", \"tests/test_market_group_subtree.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/test_market_group_subtree.py -q\"}\n```"
     },
     {
       "id": 2,
       "subject": "PICK Task 2: Build Finder tree UI (Sonnet)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
@@ -19,13 +19,13 @@
     {
       "id": 3,
       "subject": "PICK Task 3: LP faction mapping + tree endpoint (Sonnet)",
-      "status": "pending",
+      "status": "completed",
       "description": "```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-eve-style-pickers.md\", \"planTask\": 3, \"model\": \"sonnet\", \"files\": [\"app/market/lp.py\", \"app/routes/market.py\", \"app/templates/market_lp.html\", \"app/templates/partials/lp_corp_tree.html\", \"tests/test_lp_factions.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/test_lp_factions.py tests/ -q\"}\n```"
     },
     {
       "id": 4,
       "subject": "PICK Task 4: LP tree template + filter JS (Haiku)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         3
       ],
@@ -34,7 +34,7 @@
     {
       "id": 5,
       "subject": "PICK Task 5: deploy + live verify (Fable)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         2,
         4
@@ -42,5 +42,5 @@
       "description": "```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-eve-style-pickers.md\", \"planTask\": 5, \"model\": \"fable\", \"files\": [], \"verifyCommand\": \"\"}\n```"
     }
   ],
-  "lastUpdated": "2026-07-10T19:00:00Z"
+  "lastUpdated": "2026-07-10T21:00:00Z"
 }
