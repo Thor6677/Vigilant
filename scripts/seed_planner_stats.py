@@ -95,6 +95,15 @@ rows += [
     ("killmail_attackers", "ix_kma_alli_time",                     stat(AT, max(2, AT // 5_000), 2)),
 ]
 
+# sqlite_stat1 only springs into existence via a successful ANALYZE. Phase A
+# normally provides that; if every table somehow skipped, bootstrap with the
+# tiny users table so Phase B's writes have a target.
+has_stat1 = conn.execute(
+    "SELECT count(*) FROM sqlite_master WHERE name='sqlite_stat1'").fetchone()[0]
+if not has_stat1:
+    conn.execute('ANALYZE "users"')
+    conn.commit()
+
 # Only seed stat1 rows for indexes that actually exist (schema drift guard).
 existing = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='index'")}

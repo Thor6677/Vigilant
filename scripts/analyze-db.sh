@@ -21,5 +21,7 @@ set -euo pipefail
 cd /opt/vigilant
 
 echo "[analyze-db] seeding planner stats (live, no service stop)..."
-docker exec -i vigilant-app-1 python3 - < scripts/seed_planner_stats.py
+# -u vigilant: match the app's user — exec'ing as root trips SQLite's
+# "attempt to write a readonly database" against the vigilant-owned WAL.
+docker exec -i -u vigilant vigilant-app-1 python3 - < scripts/seed_planner_stats.py
 echo "[analyze-db] complete. Stats take effect on next app restart/deploy."
