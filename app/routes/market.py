@@ -7,6 +7,7 @@ Surfaces, all auth-gated:
   * `/market/type/{type_id}/history.json` — JSON feed for the chart, range-sliced.
   * `/market/type/{type_id}/orders`    — htmx partial: hub order-book (Task 2).
   * `/market/lp`                       — LP store ROI calculator landing (Task 3).
+  * `/market/lp/corps-tree`            — htmx partial: faction -> corp tree (Task 3).
   * `/market/lp/offers`                — htmx partial: ranked offers for one corp.
 
 History rows are fetched on demand and cached via `app.market.history` — see
@@ -234,12 +235,32 @@ async def market_type_orders(request: Request, type_id: int, db: AsyncSession = 
 
 @router.get("/market/lp", response_class=HTMLResponse)
 async def market_lp_page(request: Request):
-    """LP store ROI calculator landing — an NPC corp picker; the offers table
-    loads via htmx on selection change (see `market_lp_offers` below)."""
+    """LP store ROI calculator landing — a faction -> corp tree picker (see
+    `market_lp_corps_tree` below); the offers table loads via htmx once a
+    corp is picked (see `market_lp_offers` below). The tree itself loads
+    lazily (`hx-trigger="load"` in the template) so this route never blocks
+    page render on the ~270-corp ESI pass."""
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    corps = await market_lp.get_npc_corps()
-    return templates.TemplateResponse(request, "market_lp.html", {"corps": corps})
+    return templates.TemplateResponse(request, "market_lp.html", {})
+
+
+@router.get("/market/lp/corps-tree", response_class=HTMLResponse)
+async def market_lp_corps_tree(request: Request):
+    """htmx partial: the whole faction -> corp tree in one fragment (~270
+    corps, no lazy per-level loading — see `app.market.lp.get_corps_by_faction`
+    for the grouping + caching discipline). Corp click sets the page's
+    existing hidden `corporation_id` input and triggers the offers load
+    exactly as the old flat `<select>` did — this endpoint only supplies the
+    tree data; wiring the click handlers is a follow-up task."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    factions = await market_lp.get_corps_by_faction()
+    degraded = any(f.get("degraded") for f in factions)
+    return templates.TemplateResponse(
+        request, "partials/lp_corp_tree.html",
+        {"factions": factions, "degraded": degraded},
+    )
 
 
 def _fmt_isk_per_lp(v: float | None) -> str:

@@ -144,6 +144,142 @@ def _corps_list() -> list[dict]:
     )
 
 
+# ── Faction grouping (EVE-style pickers Task 3; forever cache like the roster
+# it's built on top of) ────────────────────────────────────────────────────────
+
+MAJOR_FACTIONS = (
+    "Amarr Empire",
+    "Caldari State",
+    "Gallente Federation",
+    "Minmatar Republic",
+)
+
+# corp_id -> faction_id, only for corps that HAVE a faction_id (a corp absent
+# from this map falls to "Other"). `None` = not yet built.
+_corp_faction_map: dict[int, int] | None = None
+_faction_names: dict[int, str] = {}
+_corp_faction_lock = asyncio.Lock()
+
+
+async def _fetch_factions_esi() -> list[dict]:
+    """Monkeypatched in tests. `GET /universe/factions/` — public, the full
+    faction list `[{faction_id, name, ...}, ...]`."""
+    client = ESIClient("", cache_enabled=False)
+    data = await client.get_public("/universe/factions/")
+    return data if isinstance(data, list) else []
+
+
+async def _fetch_corp_public_esi(corporation_id: int) -> dict:
+    """Monkeypatched in tests. `GET /corporations/{id}/` — public corp info;
+    `faction_id` is only present for corps that belong to one of the four
+    empire factions or a pirate faction, so most rows come back without it."""
+    client = ESIClient("", cache_enabled=False)
+    data = await client.get_public(f"/corporations/{corporation_id}/")
+    return data if isinstance(data, dict) else {}
+
+
+async def _fetch_corp_faction_map_esi(corp_ids: list[int]) -> dict[int, int]:
+    """Bulk per-corp `faction_id` lookup using the site's ESI bulk pattern —
+    semaphore 3, batches of 10, `await asyncio.sleep(1)` between batches (see
+    `app/routes/corporations.py`'s contract-items fetch for the same idiom).
+
+    A single corp's own fetch failing (or simply having no `faction_id`) is
+    swallowed here — that corp just falls to "Other" — rather than aborting
+    the whole build. Only `_fetch_factions_esi` failing (the one call every
+    corp's grouping depends on) is treated as a hard failure by
+    `get_corps_by_faction` below.
+    """
+    result: dict[int, int] = {}
+    sem = asyncio.Semaphore(3)
+
+    async def fetch_one(cid: int) -> None:
+        async with sem:
+            try:
+                data = await _fetch_corp_public_esi(cid)
+            except Exception:
+                return
+            fid = data.get("faction_id") if isinstance(data, dict) else None
+            if fid is not None:
+                result[cid] = fid
+
+    batch_size = 10
+    for i in range(0, len(corp_ids), batch_size):
+        batch = corp_ids[i:i + batch_size]
+        await asyncio.gather(*[fetch_one(c) for c in batch])
+        if i + batch_size < len(corp_ids):
+            await asyncio.sleep(1)
+    return result
+
+
+def _group_corps_by_faction(
+    corps: list[dict],
+    faction_map: dict[int, int],
+    faction_names: dict[int, str],
+) -> list[dict]:
+    """`corps` (already name-sorted by `get_npc_corps`) bucketed by faction
+    name, majors first alphabetically, then remaining named factions
+    alphabetically, "Other" last. Corps within a bucket keep the incoming
+    (name-sorted) order."""
+    buckets: dict[str, list[dict]] = {}
+    for c in corps:
+        fid = faction_map.get(c["corporation_id"])
+        fname = faction_names.get(fid, "Other") if fid is not None else "Other"
+        buckets.setdefault(fname, []).append(c)
+
+    def sort_key(name: str) -> tuple:
+        if name in MAJOR_FACTIONS:
+            return (0, MAJOR_FACTIONS.index(name))
+        if name == "Other":
+            return (2, "")
+        return (1, name)
+
+    return [
+        {"faction_name": name, "corps": buckets[name]}
+        for name in sorted(buckets, key=sort_key)
+    ]
+
+
+async def get_corps_by_faction() -> list[dict]:
+    """`[{"faction_name": str, "corps": [{"corporation_id", "name"}, ...]},
+    ...]` — the NPC corp roster (`get_npc_corps`) grouped by faction, majors
+    first alphabetically, then remaining named factions alphabetically,
+    "Other" last.
+
+    Backed by a module-scope `_corp_faction_map` / `_faction_names` cache
+    built once behind a single-flight lock — same fetch-once,
+    failure-not-cached discipline as `get_npc_corps` above (read that one
+    first). On a hard failure (the shared `/universe/factions/` fetch
+    raising) the roster still renders, entirely under "Other", with
+    `degraded: True` set on that single group so the caller/template can
+    show a muted retry note; the cache stays unpopulated so the next call
+    retries.
+    """
+    global _corp_faction_map, _faction_names
+    corps = await get_npc_corps()
+
+    if _corp_faction_map is not None:
+        return _group_corps_by_faction(corps, _corp_faction_map, _faction_names)
+
+    async with _corp_faction_lock:
+        if _corp_faction_map is not None:
+            return _group_corps_by_faction(corps, _corp_faction_map, _faction_names)
+        try:
+            factions = await _fetch_factions_esi()
+        except Exception:
+            return [{"faction_name": "Other", "corps": corps, "degraded": True}]
+        names = {
+            f["faction_id"]: f["name"]
+            for f in factions
+            if isinstance(f, dict) and "faction_id" in f and "name" in f
+        }
+        faction_map = await _fetch_corp_faction_map_esi(
+            [c["corporation_id"] for c in corps]
+        )
+        _corp_faction_map = faction_map
+        _faction_names = names
+    return _group_corps_by_faction(corps, _corp_faction_map, _faction_names)
+
+
 # ── Offers cache (24h TTL, one entry per corp) ─────────────────────────────────
 
 OFFERS_TTL = timedelta(hours=24)

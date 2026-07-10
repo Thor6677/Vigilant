@@ -44,20 +44,27 @@
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Corporation</span></div>
     <div style="padding:0.75rem;">
-        <select
+        {#
+            Hidden input preserves the exact mechanism the old flat
+            `<select name="corporation_id">` used to load offers: an htmx
+            `change` trigger targeting #lp-offers-panel. Corp-tree clicks
+            (follow-up task) set this input's value and dispatch a `change`
+            event on it — no new load path is introduced.
+        #}
+        <input
+            type="hidden"
+            id="lp-corp-id"
             name="corporation_id"
-            class="lp-select"
+            value="0"
             hx-get="/market/lp/offers"
             hx-trigger="change"
             hx-target="#lp-offers-panel"
             hx-swap="innerHTML"
             hx-indicator="#lp-loading"
         >
-            <option value="0">— Select a corporation —</option>
-            {% for corp in corps %}
-            <option value="{{ corp.corporation_id }}">{{ corp.name }}</option>
-            {% endfor %}
-        </select>
+        <div id="lp-corp-tree" hx-get="/market/lp/corps-tree" hx-trigger="load" hx-swap="innerHTML">
+            <div class="b-empty">Loading corporations…</div>
+        </div>
     </div>
 </div>
 

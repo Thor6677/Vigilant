@@ -1,0 +1,19 @@
+{#
+    Minimal placeholder fragment (EVE-style pickers Task 3). Iterates the
+    faction -> corp data structure as a flat list — no collapsing, no
+    styling, no filter JS. The follow-up task restyles this into the
+    collapsible faction tree (`.lpt-fac` / `.lpt-corps` / `.lpt-corp`); it
+    MUST keep the `data-corp-id` attribute below, since that's the stable
+    contract the corp-click wiring and this task's tests both depend on.
+#}
+{% if degraded %}
+<div class="b-muted-sm" style="font-style:italic;">Faction data unavailable — showing all corporations under Other; reload to retry.</div>
+{% endif %}
+{% for f in factions %}
+<div data-faction-group="{{ loop.index }}">
+    <div class="b-label">{{ f.faction_name }} ({{ f.corps|length }})</div>
+    {% for c in f.corps %}
+    <button type="button" class="lpt-corp" data-corp-id="{{ c.corporation_id }}">{{ c.name }}</button>
+    {% endfor %}
+</div>
+{% endfor %}
