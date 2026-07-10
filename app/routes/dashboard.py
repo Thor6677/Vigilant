@@ -1863,7 +1863,11 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("dashboard panel pre-warm error: %s", e)
 
-                asyncio.create_task(_prewarm_dashboard_panels())
+                # Pin the task reference — a bare create_task can be
+                # garbage-collected during its 120s sleep (asyncio docs:
+                # "save a reference to avoid a task disappearing").
+                _background_scheduler._prewarm_task = asyncio.create_task(
+                    _prewarm_dashboard_panels())
 
             # Inventory threshold check (every 5 minutes)
             if not hasattr(_background_scheduler, '_last_inv_check') or \
