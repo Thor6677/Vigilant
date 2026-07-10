@@ -246,7 +246,7 @@ async def market_lp_page(request: Request):
 
 
 @router.get("/market/lp/corps-tree", response_class=HTMLResponse)
-async def market_lp_corps_tree(request: Request):
+async def market_lp_corps_tree(request: Request, db: AsyncSession = Depends(get_db)):
     """htmx partial: the whole faction -> corp tree in one fragment (~270
     corps, no lazy per-level loading — see `app.market.lp.get_corps_by_faction`
     for the grouping + caching discipline). Corp click sets the page's
@@ -255,11 +255,15 @@ async def market_lp_corps_tree(request: Request):
     tree data; wiring the click handlers is a follow-up task."""
     if not request.session.get("user_id"):
         return HTMLResponse("", status_code=401)
-    factions = await market_lp.get_corps_by_faction()
+    factions = await market_lp.get_corps_by_faction(db)
     degraded = any(f.get("degraded") for f in factions)
+    note = next(
+        (f.get("note") for f in factions if f.get("degraded") and f.get("note")),
+        None,
+    )
     return templates.TemplateResponse(
         request, "partials/lp_corp_tree.html",
-        {"factions": factions, "degraded": degraded},
+        {"factions": factions, "degraded": degraded, "note": note},
     )
 
 

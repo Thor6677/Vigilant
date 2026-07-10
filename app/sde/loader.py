@@ -25,7 +25,7 @@ from app.db.sde_models import (
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar,
     SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot,
     SDEMarketGroup, SDEEffect, SDETypeEffect, SDEModifier,
-    SDETypeBonus,
+    SDETypeBonus, SDENpcCorp,
 )
 
 # Planet type IDs that support PI (shattered / exotic types excluded).
@@ -179,6 +179,32 @@ def _parse_invention_item(item: dict):
     skills = [{"blueprint_type_id": bp_id, "skill_type_id": int(s["typeID"])}
               for s in inv.get("skills", []) if s.get("typeID")]
     return info, mats, skills
+
+
+def _parse_npc_corp_item(item: dict) -> dict | None:
+    """One `npcCorporations.jsonl` row -> `{"corporation_id", "faction_id"}`
+    (or `None` if unparseable). CCP field name is `factionID` (camelCase —
+    see the SDE JSONL gotchas memory). Most NPC corps (mission-agent
+    employers, mercenary/security dens, etc.) have no owning faction at
+    all, which we deliberately keep as a row with `faction_id: None` rather
+    than skipping it — the corp still needs to resolve for the roster, just
+    to "Other" downstream in `app.market.lp.get_corps_by_faction`.
+
+    This is the correct source for corp -> NPC faction ownership. ESI's
+    `GET /corporations/{id}/` `faction_id` field is NOT this — it means
+    factional-warfare enlistment, and only the single corp actively
+    enlisted in FW per empire ever has it set."""
+    try:
+        corp_id = int(item["_key"])
+    except (KeyError, ValueError, TypeError):
+        return None
+    faction_id = item.get("factionID")
+    if faction_id is not None:
+        try:
+            faction_id = int(faction_id)
+        except (ValueError, TypeError):
+            faction_id = None
+    return {"corporation_id": corp_id, "faction_id": faction_id}
 
 
 async def download_and_import(db: AsyncSession):
@@ -516,6 +542,33 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDEBlueprintInventionSkill.__table__, skill_batch)
     skill_count += len(skill_batch)
     log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, {skill_count} invention skills")
+
+    # --- npcCorporations (LP faction mapping: corp -> owning NPC faction,
+    # NOT ESI's per-corp `faction_id`, which means FW enlistment — see
+    # `_parse_npc_corp_item` docstring) ---
+    log.info("Importing NPC corporation faction mapping...")
+    await db.execute(text("DELETE FROM sde_npc_corps"))
+    await db.commit()
+    count, batch = 0, []
+    try:
+        for item in _iter_jsonl(zf, "npcCorporations.jsonl"):
+            row = _parse_npc_corp_item(item)
+            if row is None:
+                continue
+            batch.append(row)
+            if len(batch) >= 500:
+                await _bulk_insert(db, SDENpcCorp.__table__, batch)
+                count += len(batch)
+                batch = []
+        await _bulk_insert(db, SDENpcCorp.__table__, batch)
+        count += len(batch)
+        log.info(f"Imported {count} NPC corp faction mappings")
+    except KeyError:
+        # SDE zip without npcCorporations.jsonl (e.g. an older/alternate
+        # mirror) — leave sde_npc_corps empty rather than aborting the whole
+        # import. app.market.lp.get_corps_by_faction degrades gracefully
+        # (everything under "Other") when this table is empty.
+        log.warning("npcCorporations.jsonl not found in SDE zip — skipping NPC corp faction import.")
 
     # --- typeMaterials (reprocessing outputs) ---
     log.info("Importing type materials (reprocessing)...")

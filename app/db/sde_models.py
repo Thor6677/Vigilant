@@ -390,3 +390,16 @@ class SDEModifier(Base):
     operator = Column(Integer, nullable=False)
     filter_type = Column(String, nullable=True)
     filter_value = Column(Integer, nullable=True)
+
+
+class SDENpcCorp(Base):
+    """npcCorporations — NPC corp -> owning faction (factionID). This is the
+    correct source for "which empire/pirate faction does this NPC corp
+    belong to" — ESI's `GET /corporations/{id}/` `faction_id` field means
+    FACTIONAL-WARFARE ENLISTMENT, not NPC faction ownership, and only ever
+    returns a value for the single corp actively enlisted in FW per empire.
+    See `app.market.lp.get_corps_by_faction`."""
+    __tablename__ = "sde_npc_corps"
+
+    corporation_id = Column(Integer, primary_key=True)
+    faction_id = Column(Integer, nullable=True, index=True)

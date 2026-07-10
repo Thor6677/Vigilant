@@ -14,7 +14,7 @@
 </style>
 
 {% if degraded %}
-<div class="b-muted-sm" style="font-style:italic;">Faction data unavailable — showing all corporations under Other; reload to retry.</div>
+<div class="b-muted-sm" style="font-style:italic;">{{ note or "Faction data unavailable — showing all corporations under Other; reload to retry." }}</div>
 {% endif %}
 {% for f in factions %}
 <button type="button" class="lpt-fac" data-fac="{{ loop.index }}">▸ {{ f.faction_name }} <span class="b-muted-sm">({{ f.corps|length }})</span></button>

@@ -1,11 +1,9 @@
 """LP store ROI calculator (Phase 4 Task 3).
 
 **Investigation (done up front, per the plan):** LP store offers are NOT in
-the imported SDE. `grep -ri "loyalty\\|lpoffer\\|npccorp" app/sde
-app/db/models.py app/db/sde_models.py` turns up nothing — the bsd/fsd SDE
-dumps this app imports don't carry `invLoyaltyOffers` or
-`crpNPCCorporations` at all. So this module goes straight to ESI for both
-halves of the picture:
+the imported SDE — the bsd/fsd SDE dumps this app imports don't carry
+`invLoyaltyOffers` at all. So offer catalogs and the NPC corp roster itself
+go straight to ESI:
 
   * `/loyalty/stores/{corporation_id}/offers/` — public, one corp's offer
     catalog. Cached 24h per corp, module-dict-keyed idiom identical to
@@ -19,6 +17,15 @@ halves of the picture:
     *forever* at module scope (no TTL at all) rather than reusing the 24h
     idiom — resolved to names once via a single batched `/universe/names/`
     POST (ESI allows 1000 ids/call, comfortably covering the whole roster).
+
+**Faction grouping is different**: it comes from the SDE's
+`npcCorporations.jsonl` (`sde_npc_corps` table, loaded by
+`app.sde.loader`), NOT ESI. An earlier version of this module used ESI's
+`GET /corporations/{id}/` `faction_id` field per corp — that field means
+FACTIONAL-WARFARE ENLISTMENT, not NPC faction ownership, so it only ever
+returned a value for the single corp per empire actively enlisted in FW,
+dumping the other ~270+ corps into "Other". See `get_corps_by_faction` /
+`_fetch_corp_faction_map_sde` below.
 
 Item prices (both the awarded item's sell value and each required item's
 cost) come from the global `/markets/prices/` list
@@ -58,8 +65,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.sde_models import SDENpcCorp
 from app.esi import market as esi_market
 from app.esi.client import ESIClient
 
@@ -169,46 +178,29 @@ async def _fetch_factions_esi() -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-async def _fetch_corp_public_esi(corporation_id: int) -> dict:
-    """Monkeypatched in tests. `GET /corporations/{id}/` — public corp info;
-    `faction_id` is only present for corps that belong to one of the four
-    empire factions or a pirate faction, so most rows come back without it."""
-    client = ESIClient("", cache_enabled=False)
-    data = await client.get_public(f"/corporations/{corporation_id}/")
-    return data if isinstance(data, dict) else {}
+async def _fetch_corp_faction_map_sde(db: AsyncSession) -> dict[int, int] | None:
+    """`{corporation_id: faction_id}` from the SDE's `sde_npc_corps` table
+    (loaded from `npcCorporations.jsonl` — see
+    `app.sde.loader._parse_npc_corp_item`). This is the correct source for
+    "which NPC faction owns this corp" — ESI's `GET /corporations/{id}/`
+    `faction_id` means factional-warfare enlistment (only ever set for the
+    single corp actively enlisted in FW per empire), NOT NPC ownership,
+    which is why this module no longer calls it.
 
-
-async def _fetch_corp_faction_map_esi(corp_ids: list[int]) -> dict[int, int]:
-    """Bulk per-corp `faction_id` lookup using the site's ESI bulk pattern —
-    semaphore 3, batches of 10, `await asyncio.sleep(1)` between batches (see
-    `app/routes/corporations.py`'s contract-items fetch for the same idiom).
-
-    A single corp's own fetch failing (or simply having no `faction_id`) is
-    swallowed here — that corp just falls to "Other" — rather than aborting
-    the whole build. Only `_fetch_factions_esi` failing (the one call every
-    corp's grouping depends on) is treated as a hard failure by
-    `get_corps_by_faction` below.
+    Returns `None` if the table has zero rows at all — a pre-reimport /
+    freshly-migrated deploy where the SDE loader hasn't run its
+    `npcCorporations.jsonl` pass yet — so the caller can render an explicit
+    "pending SDE reimport" degraded state instead of silently (and
+    incorrectly) showing every corp under Other with no explanation. A
+    populated table where a given corp simply has no `faction_id` (most NPC
+    corps don't) is NOT this case — that corp just isn't in the returned
+    dict and falls to "Other" normally.
     """
-    result: dict[int, int] = {}
-    sem = asyncio.Semaphore(3)
-
-    async def fetch_one(cid: int) -> None:
-        async with sem:
-            try:
-                data = await _fetch_corp_public_esi(cid)
-            except Exception:
-                return
-            fid = data.get("faction_id") if isinstance(data, dict) else None
-            if fid is not None:
-                result[cid] = fid
-
-    batch_size = 10
-    for i in range(0, len(corp_ids), batch_size):
-        batch = corp_ids[i:i + batch_size]
-        await asyncio.gather(*[fetch_one(c) for c in batch])
-        if i + batch_size < len(corp_ids):
-            await asyncio.sleep(1)
-    return result
+    result = await db.execute(select(SDENpcCorp.corporation_id, SDENpcCorp.faction_id))
+    rows = result.all()
+    if not rows:
+        return None
+    return {cid: fid for cid, fid in rows if fid is not None}
 
 
 def _group_corps_by_faction(
@@ -239,20 +231,35 @@ def _group_corps_by_faction(
     ]
 
 
-async def get_corps_by_faction() -> list[dict]:
+_SDE_PENDING_NOTE = (
+    "NPC corp faction data not loaded yet — showing all corporations under "
+    "Other until the next SDE reimport finishes. Reload to retry."
+)
+
+
+async def get_corps_by_faction(db: AsyncSession) -> list[dict]:
     """`[{"faction_name": str, "corps": [{"corporation_id", "name"}, ...]},
     ...]` — the NPC corp roster (`get_npc_corps`) grouped by faction, majors
     first alphabetically, then remaining named factions alphabetically,
     "Other" last.
 
+    corp -> faction comes from the SDE (`_fetch_corp_faction_map_sde`, see
+    its docstring for why — ESI's per-corp `faction_id` means FW enlistment,
+    not NPC ownership); faction_id -> name still comes from ESI's
+    `/universe/factions/` (that field means what it says there, and there's
+    no SDE table for it).
+
     Backed by a module-scope `_corp_faction_map` / `_faction_names` cache
     built once behind a single-flight lock — same fetch-once,
     failure-not-cached discipline as `get_npc_corps` above (read that one
-    first). On a hard failure (the shared `/universe/factions/` fetch
-    raising) the roster still renders, entirely under "Other", with
-    `degraded: True` set on that single group so the caller/template can
-    show a muted retry note; the cache stays unpopulated so the next call
-    retries.
+    first). Two independent conditions degrade the roster to a single
+    "Other" group (cache left unpopulated either way, so the next call
+    retries):
+
+      * `sde_npc_corps` is empty (pending SDE reimport) — `degraded: True`
+        with a `note` explaining the pending reimport.
+      * the shared `/universe/factions/` fetch raises — `degraded: True`,
+        no `note` (template falls back to its generic retry message).
     """
     global _corp_faction_map, _faction_names
     corps = await get_npc_corps()
@@ -263,6 +270,16 @@ async def get_corps_by_faction() -> list[dict]:
     async with _corp_faction_lock:
         if _corp_faction_map is not None:
             return _group_corps_by_faction(corps, _corp_faction_map, _faction_names)
+
+        sde_map = await _fetch_corp_faction_map_sde(db)
+        if sde_map is None:
+            return [{
+                "faction_name": "Other",
+                "corps": corps,
+                "degraded": True,
+                "note": _SDE_PENDING_NOTE,
+            }]
+
         try:
             factions = await _fetch_factions_esi()
         except Exception:
@@ -272,10 +289,7 @@ async def get_corps_by_faction() -> list[dict]:
             for f in factions
             if isinstance(f, dict) and "faction_id" in f and "name" in f
         }
-        faction_map = await _fetch_corp_faction_map_esi(
-            [c["corporation_id"] for c in corps]
-        )
-        _corp_faction_map = faction_map
+        _corp_faction_map = sde_map
         _faction_names = names
     return _group_corps_by_faction(corps, _corp_faction_map, _faction_names)
 
