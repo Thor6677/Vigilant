@@ -1752,6 +1752,24 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Cache GC error: %s", e)
 
+            # Daily PRAGMA optimize (T-038) — incremental planner-stat upkeep.
+            # analysis_limit bounds the work so this is a sub-second write txn
+            # (it re-ANALYZEs only indexes SQLite thinks are stale). It only
+            # touches large tables once sqlite_stat1 has been seeded by
+            # scripts/analyze-db.sh (maintenance-window sampled ANALYZE).
+            if not hasattr(_background_scheduler, '_last_pragma_optimize') or \
+               (now - _background_scheduler._last_pragma_optimize).total_seconds() >= 86400:
+                try:
+                    from sqlalchemy import text as _text
+                    async with AsyncSessionLocal() as _odb:
+                        await _odb.execute(_text("PRAGMA analysis_limit=400"))
+                        await _odb.execute(_text("PRAGMA optimize"))
+                        await _odb.commit()
+                    logger.info("PRAGMA optimize completed (daily planner-stat upkeep)")
+                    _background_scheduler._last_pragma_optimize = now
+                except Exception as e:
+                    logger.warning("PRAGMA optimize error: %s", e)
+
             # One-time dashboard panel pre-warm (ISS-018). SWR panels go cold
             # on every container restart, making the first dashboard visit
             # after a deploy eat 3-9s of synchronous compute. Warm them in the
