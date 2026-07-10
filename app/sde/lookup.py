@@ -1257,30 +1257,6 @@ async def get_market_group_items(
 # ── Build-profitability finder (Task 4) ──────────────────────────────────
 
 
-async def get_buildable_groups(db: AsyncSession) -> list[dict]:
-    """Inv-groups (SDEGroup) that contain at least one published product with a
-    manufacturing blueprint — the category picker for the build-finder.
-
-    Flat, sorted by name; each carries a category_id in case the route wants to
-    optgroup. Inv-groups are chosen over SDE market groups here because
-    `SDEType.group_id` sits flat and indexed (a single indexed join gives the
-    whole bucket), whereas `get_market_group_items` is exact-group-only with no
-    subtree helper — a parent market-group pick like "Battleships" would return
-    nothing without new hierarchy traversal."""
-    rows = (await db.execute(
-        select(SDEGroup.group_id, SDEGroup.group_name, SDEGroup.category_id)
-        .distinct()
-        .join(SDEType, SDEType.group_id == SDEGroup.group_id)
-        .join(SDEBlueprintInfo, SDEBlueprintInfo.product_type_id == SDEType.type_id)
-        .where(SDEType.published.is_(True))
-        .order_by(SDEGroup.group_name)
-    )).all()
-    return [
-        {"group_id": gid, "group_name": name, "category_id": cat}
-        for gid, name, cat in rows
-    ]
-
-
 async def get_group_buildables(
     db: AsyncSession, group_id: int, cap: int = 200
 ) -> tuple[int, list[dict]]:

@@ -16,6 +16,12 @@ Route-level invention composition (Task 4) reuses the authed-session +
 seeded with a full invention chain (mirrors `tests/test_invention_lookup.py`'s
 fixture), `market_lp.get_price_map` monkeypatched to a fixture map (no
 network), hit through the actual `/industry/build-finder/results` endpoint.
+
+The EVE-style tree picker (2026-07-10 plan, Task 2) keys results by
+`market_group_id` (subtree semantics via `get_market_group_subtree_products`)
+and adds two auth-gated htmx fragment endpoints: `/industry/build-finder/tree`
+(lazy per-level expansion) and `/industry/build-finder/tree/search` (path-
+labeled group search; a sub-2-char query restores the root tree).
 """
 import asyncio
 import base64
@@ -29,7 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import Base, get_db
 from app.db.sde_models import (
-    SDEType, SDEGroup, SDEBlueprintInfo, SDEBlueprintMaterial,
+    SDEType, SDEGroup, SDEMarketGroup, SDEBlueprintInfo, SDEBlueprintMaterial,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
 )
 from app.industry import build_finder
@@ -281,7 +287,19 @@ def test_build_finder_page_redirects_when_unauthenticated():
 
 
 def test_build_finder_results_401_when_unauthenticated():
-    r = _client().get("/industry/build-finder/results?group_id=42",
+    r = _client().get("/industry/build-finder/results?market_group_id=42",
+                      follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_build_finder_tree_401_when_unauthenticated():
+    r = _client().get("/industry/build-finder/tree?parent=0",
+                      follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_build_finder_tree_search_401_when_unauthenticated():
+    r = _client().get("/industry/build-finder/tree/search?q=frig",
                       follow_redirects=False)
     assert r.status_code == 401
 
@@ -289,6 +307,7 @@ def test_build_finder_results_401_when_unauthenticated():
 # ── route-level invention composition ──────────────────────────────────────────
 
 INV_GROUP_ID = 5501
+INV_MARKET_GROUP_ID = 5601
 INV_PRODUCT_ID = 115501
 INV_T2_BLUEPRINT_ID = 115502
 INV_T1_BLUEPRINT_ID = 115503
@@ -326,8 +345,12 @@ def _seeded_invention_db(with_invention_chain: bool):
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
             db.add(SDEGroup(group_id=INV_GROUP_ID, category_id=6, group_name="Test T2 Group"))
+            db.add(SDEMarketGroup(
+                market_group_id=INV_MARKET_GROUP_ID, parent_group_id=None,
+                market_group_name="Test T2 Market Group"))
             db.add(SDEType(type_id=INV_PRODUCT_ID, type_name="Test T2 Widget",
-                           group_id=INV_GROUP_ID, published=True))
+                           group_id=INV_GROUP_ID,
+                           market_group_id=INV_MARKET_GROUP_ID, published=True))
             db.add(SDEBlueprintInfo(
                 blueprint_type_id=INV_T2_BLUEPRINT_ID, product_type_id=INV_PRODUCT_ID,
                 product_quantity=1, manufacturing_time=600,
@@ -395,8 +418,8 @@ def test_build_finder_results_inventable_row_shows_overhead_suffix(monkeypatch):
         r = _authed_client().get(
             "/industry/build-finder/results",
             params={
-                "group_id": INV_GROUP_ID, "me": 0, "structure": "npc_station",
-                "rig": "none", "security": "highsec",
+                "market_group_id": INV_MARKET_GROUP_ID, "me": 0,
+                "structure": "npc_station", "rig": "none", "security": "highsec",
                 "character_id": 0, "encryption": 4, "science": 4,
                 "decryptor": "none",
             },
@@ -424,11 +447,214 @@ def test_build_finder_results_tables_empty_shows_not_imported_note(monkeypatch):
     try:
         r = _authed_client().get(
             "/industry/build-finder/results",
-            params={"group_id": INV_GROUP_ID, "me": 0},
+            params={"market_group_id": INV_MARKET_GROUP_ID, "me": 0},
         )
         assert r.status_code == 200
         body = r.text
         assert "not yet imported" in body
         assert "inv)" not in body
+    finally:
+        teardown()
+
+
+# ── tree + search fragments (EVE-style picker, Task 2) ────────────────────────
+
+TREE_ROOT_ID = 10        # Ships
+TREE_FRIGATES_ID = 11    # child of Ships, has a child of its own
+TREE_CRUISERS_ID = 12    # leaf child of Ships
+TREE_AF_ID = 13          # Assault Frigates, child of Frigates
+
+TREE_RIFTER_ID = 100     # buildable at Frigates
+TREE_RIFTER_BP_ID = 1100
+TREE_WOLF_ID = 200       # buildable at Assault Frigates
+TREE_WOLF_BP_ID = 1200
+
+
+def _seeded_tree_db():
+    """Temp sqlite DB with a 3-level market-group tree + two buildable
+    products at different depths (mirrors tests/test_market_group_subtree.py's
+    fixture), wired in via the get_db override idiom."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp.name}")
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def seed():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            db.add(SDEMarketGroup(market_group_id=TREE_ROOT_ID,
+                                  parent_group_id=None, market_group_name="Ships"))
+            db.add(SDEMarketGroup(market_group_id=TREE_FRIGATES_ID,
+                                  parent_group_id=TREE_ROOT_ID,
+                                  market_group_name="Frigates"))
+            db.add(SDEMarketGroup(market_group_id=TREE_CRUISERS_ID,
+                                  parent_group_id=TREE_ROOT_ID,
+                                  market_group_name="Cruisers"))
+            db.add(SDEMarketGroup(market_group_id=TREE_AF_ID,
+                                  parent_group_id=TREE_FRIGATES_ID,
+                                  market_group_name="Assault Frigates"))
+
+            db.add(SDEType(type_id=TREE_RIFTER_ID, type_name="Rifter",
+                           market_group_id=TREE_FRIGATES_ID, published=True))
+            db.add(SDEType(type_id=TREE_WOLF_ID, type_name="Wolf",
+                           market_group_id=TREE_AF_ID, published=True))
+
+            db.add(SDEBlueprintInfo(blueprint_type_id=TREE_RIFTER_BP_ID,
+                                    product_type_id=TREE_RIFTER_ID,
+                                    product_quantity=1))
+            db.add(SDEBlueprintInfo(blueprint_type_id=TREE_WOLF_BP_ID,
+                                    product_type_id=TREE_WOLF_ID,
+                                    product_quantity=1))
+            db.add(SDEBlueprintMaterial(blueprint_type_id=TREE_RIFTER_BP_ID,
+                                        activity_id=1, material_type_id=34,
+                                        quantity=100))
+            db.add(SDEBlueprintMaterial(blueprint_type_id=TREE_WOLF_BP_ID,
+                                        activity_id=1, material_type_id=34,
+                                        quantity=200))
+            await db.commit()
+
+    _run(seed())
+
+    async def override_get_db():
+        async with SessionLocal() as session:
+            yield session
+
+    import app.main as main
+    main.app.dependency_overrides[get_db] = override_get_db
+
+    def teardown():
+        main.app.dependency_overrides.pop(get_db, None)
+        _run(engine.dispose())
+        os.unlink(tmp.name)
+
+    return teardown
+
+
+def test_build_finder_tree_root_fragment():
+    """parent=0 -> root groups: Ships appears with an expand control that
+    htmx-loads its children into a per-node child slot."""
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder/tree", params={"parent": 0})
+        assert r.status_code == 200
+        body = r.text
+        assert "Ships" in body
+        # expand arrow targets the next level + per-node child slot exists
+        assert f"/industry/build-finder/tree?parent={TREE_ROOT_ID}" in body
+        assert f'id="bft-kids-{TREE_ROOT_ID}"' in body
+        # only roots at this level
+        assert "Frigates" not in body
+    finally:
+        teardown()
+
+
+def test_build_finder_tree_children_fragment():
+    """parent=<id> -> that node's children, wrapped in the node's own child
+    slot (outerHTML swap target). Branch children get an expand control;
+    leaves don't."""
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder/tree",
+                                 params={"parent": TREE_ROOT_ID})
+        assert r.status_code == 200
+        body = r.text
+        # fragment IS the child slot for the expanded node
+        assert f'id="bft-kids-{TREE_ROOT_ID}"' in body
+        assert "Frigates" in body and "Cruisers" in body
+        # Frigates has a child (Assault Frigates) -> expandable
+        assert f"/industry/build-finder/tree?parent={TREE_FRIGATES_ID}" in body
+        # Cruisers is a leaf -> no expand URL for it
+        assert f"/industry/build-finder/tree?parent={TREE_CRUISERS_ID}" not in body
+        # both are selectable
+        assert f'data-mg-id="{TREE_FRIGATES_ID}"' in body
+        assert f'data-mg-id="{TREE_CRUISERS_ID}"' in body
+    finally:
+        teardown()
+
+
+def test_build_finder_tree_search_returns_path_labels():
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder/tree/search",
+                                 params={"q": "frig"})
+        assert r.status_code == 200
+        body = r.text
+        # path-labeled, selectable results (HTML-escaped " > " separator)
+        assert "Ships &gt; Frigates" in body
+        assert "Ships &gt; Frigates &gt; Assault Frigates" in body
+        assert f'data-mg-id="{TREE_FRIGATES_ID}"' in body
+        assert f'data-mg-id="{TREE_AF_ID}"' in body
+        assert "Cruisers" not in body
+    finally:
+        teardown()
+
+
+def test_build_finder_tree_search_short_query_restores_root():
+    """Under 2 chars (incl. cleared box) the search endpoint returns the root
+    tree so the htmx swap restores the browser instead of erroring."""
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder/tree/search",
+                                 params={"q": "f"})
+        assert r.status_code == 200
+        body = r.text
+        assert "Ships" in body
+        assert "&gt;" not in body  # no path labels — this is the root tree
+    finally:
+        teardown()
+
+
+def test_build_finder_results_ranks_whole_subtree(monkeypatch):
+    """Selecting a branch node (Ships) ranks buildables from ALL descendant
+    groups — Rifter (depth 2) and Wolf (depth 3)."""
+    teardown = _seeded_tree_db()
+    monkeypatch.setattr(
+        market_lp, "get_price_map",
+        lambda db: asyncio.sleep(0, result={
+            34: 5.0, TREE_RIFTER_ID: 1000.0, TREE_WOLF_ID: 5000.0,
+        }),
+    )
+    try:
+        r = _authed_client().get(
+            "/industry/build-finder/results",
+            params={"market_group_id": TREE_ROOT_ID, "me": 0},
+        )
+        assert r.status_code == 200
+        assert "Rifter" in r.text
+        assert "Wolf" in r.text
+    finally:
+        teardown()
+
+
+def test_build_finder_results_no_group_prompts_pick(monkeypatch):
+    teardown = _seeded_tree_db()
+    monkeypatch.setattr(
+        market_lp, "get_price_map",
+        lambda db: asyncio.sleep(0, result={}),
+    )
+    try:
+        r = _authed_client().get("/industry/build-finder/results",
+                                 params={"me": 0})
+        assert r.status_code == 200
+        assert "Pick a group" in r.text
+    finally:
+        teardown()
+
+
+def test_build_finder_page_has_tree_picker():
+    """The page carries the tree container (htmx root load), the hidden
+    market_group_id input inside the results form, the selected-path label,
+    and the search box — and no longer renders the flat group_id select."""
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder")
+        assert r.status_code == 200
+        body = r.text
+        assert 'id="bf-tree"' in body
+        assert 'name="market_group_id"' in body
+        assert 'id="bf-selected-path"' in body
+        assert 'id="bf-tree-search"' in body
+        assert 'name="group_id"' not in body
     finally:
         teardown()

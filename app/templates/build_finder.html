@@ -49,6 +49,30 @@
         background: var(--accent); color: var(--bg); border-color: var(--accent);
     }
     .bf-chip-radio:focus-visible + .bf-chip { outline: 2px solid var(--accent); }
+    /* ── market-group tree picker ── */
+    .bf-selected-path {
+        font-size: 11px; color: var(--accent); min-height: 16px;
+        padding: 2px 0 4px; word-break: break-word;
+    }
+    .bf-tree {
+        margin-top: 4px; max-height: 260px; overflow-y: auto;
+        border: 1px solid var(--border); background: var(--bg);
+    }
+    .bft-list { list-style: none; margin: 0; padding: 0; }
+    .bft-kids > .bft-list { padding-left: 14px; }
+    .bft-row { display: flex; align-items: center; }
+    .bft-arrow {
+        background: none; border: none; color: var(--muted); width: 18px;
+        flex: none; font: inherit; font-size: 9px; cursor: pointer; padding: 2px 0;
+    }
+    .bft-arrow:hover { color: var(--accent); }
+    .bft-arrow-empty { width: 18px; flex: none; display: inline-block; }
+    .bft-select {
+        background: none; border: none; text-align: left; color: var(--text);
+        flex: 1; font: inherit; font-size: 11px; cursor: pointer; padding: 3px 4px;
+    }
+    .bft-select:hover, .bft-select.is-selected { color: var(--accent); }
+    .bft-empty { font-size: 10px; color: var(--muted); padding: 6px; }
 </style>
 {% endblock %}
 
@@ -67,6 +91,7 @@
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Assumptions</span></div>
     <form
+        id="bf-form"
         hx-get="/industry/build-finder/results"
         hx-target="#bf-results"
         hx-swap="innerHTML"
@@ -109,14 +134,25 @@
             </div>
         </div>
         <div class="bf-controls">
-            <div class="bf-field" style="flex:2;min-width:200px;">
-                <label for="bf-group">Group</label>
-                <select id="bf-group" name="group_id" class="bf-select" required style="width:100%;">
-                    <option value="">Select a group…</option>
-                    {% for g in groups %}
-                    <option value="{{ g.group_id }}">{{ g.group_name }}</option>
-                    {% endfor %}
-                </select>
+            <div class="bf-field" style="flex:2;min-width:240px;">
+                <label for="bf-tree-search">Group</label>
+                {# selection state lives in this hidden input, inside the
+                   results form so htmx serializes it like every other control #}
+                <input type="hidden" id="bf-market-group" name="market_group_id" value="">
+                <div id="bf-selected-path" class="bf-selected-path">No group selected — pick one below</div>
+                <input type="text" id="bf-tree-search" name="q" class="bf-input"
+                       placeholder="Search market groups… (min 2 chars)"
+                       autocomplete="off" style="width:100%;"
+                       hx-get="/industry/build-finder/tree/search"
+                       hx-trigger="input changed delay:300ms"
+                       hx-target="#bf-tree"
+                       hx-swap="innerHTML">
+                {# root tree loads via htmx on page load; search results swap
+                   the same container (a sub-2-char / cleared query returns
+                   the root tree again, restoring the browser) #}
+                <div id="bf-tree" class="bf-tree"
+                     hx-get="/industry/build-finder/tree?parent=0"
+                     hx-trigger="load"></div>
             </div>
             <div class="bf-field">
                 <label for="bf-me">ME %</label>
@@ -194,10 +230,90 @@
         if (sci) sci.disabled = useChar;
     }
 
+    /* ── market-group tree picker ──────────────────────────────────────
+       Canonical tree behavior lives HERE, not in the htmx fragment
+       (partials can redefine parent JS — repo gotcha). All handlers are
+       delegated on the #bf-tree container because its contents are
+       htmx-swapped in after load. */
+
+    function bfNodePath(btn) {
+        /* Walk li.bft-node ancestors to build "Ships > Frigates > …".
+           Search results carry their full path in data-mg-name already
+           and are un-nested, so this returns it unchanged. */
+        var names = [];
+        var li = btn.closest('li.bft-node');
+        while (li) {
+            var sel = li.querySelector(':scope > .bft-row > .bft-select');
+            if (sel) names.unshift(sel.dataset.mgName);
+            li = li.parentElement ? li.parentElement.closest('li.bft-node') : null;
+        }
+        return names.join(' > ');
+    }
+
+    function bfSelectNode(btn) {
+        var hidden = document.getElementById('bf-market-group');
+        var label = document.getElementById('bf-selected-path');
+        if (hidden) hidden.value = btn.dataset.mgId;
+        if (label) label.textContent = bfNodePath(btn);
+        var tree = document.getElementById('bf-tree');
+        if (tree) {
+            tree.querySelectorAll('.bft-select.is-selected').forEach(function(el) {
+                el.classList.remove('is-selected');
+            });
+        }
+        btn.classList.add('is-selected');
+        /* Same mechanism as the "Rank builds" button: submit the htmx form. */
+        var form = document.getElementById('bf-form');
+        if (form && window.htmx) htmx.trigger(form, 'submit');
+    }
+
+    function initBfTree() {
+        var tree = document.getElementById('bf-tree');
+        if (!tree) return;
+
+        tree.addEventListener('click', function(evt) {
+            var btn = evt.target.closest('.bft-select');
+            if (btn) bfSelectNode(btn);
+        });
+
+        /* Expand arrows carry hx-get; once a node's child slot is loaded
+           (data-loaded="1"), cancel the refetch and just toggle collapse. */
+        tree.addEventListener('htmx:beforeRequest', function(evt) {
+            var el = evt.detail.elt;
+            if (!el.classList || !el.classList.contains('bft-arrow')) return;
+            var kids = document.getElementById('bft-kids-' + el.dataset.mgId);
+            if (kids && kids.dataset.loaded === '1') {
+                evt.preventDefault();
+                var open = kids.style.display !== 'none';
+                kids.style.display = open ? 'none' : '';
+                el.textContent = open ? '▸' : '▾';
+            }
+        });
+
+        /* Flip the arrow to ▾ once its children have loaded. */
+        tree.addEventListener('htmx:afterRequest', function(evt) {
+            var el = evt.detail.elt;
+            if (el.classList && el.classList.contains('bft-arrow') &&
+                evt.detail.successful) {
+                el.textContent = '▾';
+            }
+        });
+
+        /* Enter in the search box must not submit the results form
+           (the debounced hx-trigger already handles searching). */
+        var search = document.getElementById('bf-tree-search');
+        if (search) {
+            search.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') e.preventDefault();
+            });
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         loadBfCharacters();
         var sel = document.getElementById('bf-char');
         if (sel) sel.addEventListener('change', onBfCharChange);
+        initBfTree();
     });
 })();
 </script>

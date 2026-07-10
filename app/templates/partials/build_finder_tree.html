@@ -1,0 +1,47 @@
+{# One level of the Build Finder market-group tree (or search results).
+
+   Context: nodes, parent (0 = root level), mode ("tree" | "search").
+   - tree, parent=0   → bare list, htmx-loaded into #bf-tree on page load.
+   - tree, parent=<id>→ list wrapped in the node's own #bft-kids-<id> slot;
+     the expand arrow targets that slot with hx-swap="outerHTML", so the
+     empty placeholder rendered alongside each branch node is replaced in
+     place (fitting-browse idiom, htmx-flavored). data-loaded="1" on the
+     filled slot lets the page JS toggle collapse without refetching.
+   - search           → flat list of path-labeled selectable nodes.
+
+   All behavior (select, expand/collapse toggle, search debounce) lives in
+   build_finder.html — canonical JS stays in the page, never the fragment. #}
+{% if mode == 'tree' and parent %}<div id="bft-kids-{{ parent }}" class="bft-kids" data-loaded="1">{% endif %}
+<ul class="bft-list">
+    {% for n in nodes %}
+    <li class="bft-node">
+        <div class="bft-row">
+            {% if mode == 'tree' and n['has_children'] %}
+            <button type="button" class="bft-arrow"
+                    data-mg-id="{{ n['market_group_id'] }}"
+                    aria-label="Expand {{ n['market_group_name'] }}"
+                    hx-get="/industry/build-finder/tree?parent={{ n['market_group_id'] }}"
+                    hx-target="#bft-kids-{{ n['market_group_id'] }}"
+                    hx-swap="outerHTML">&#9656;</button>
+            {% else %}
+            <span class="bft-arrow-empty"></span>
+            {% endif %}
+            {% if mode == 'search' %}
+            <button type="button" class="bft-select"
+                    data-mg-id="{{ n['market_group_id'] }}"
+                    data-mg-name="{{ n['path'] }}">{{ n['path'] }}</button>
+            {% else %}
+            <button type="button" class="bft-select"
+                    data-mg-id="{{ n['market_group_id'] }}"
+                    data-mg-name="{{ n['market_group_name'] }}">{{ n['market_group_name'] }}</button>
+            {% endif %}
+        </div>
+        {% if mode == 'tree' and n['has_children'] %}
+        <div id="bft-kids-{{ n['market_group_id'] }}" class="bft-kids"></div>
+        {% endif %}
+    </li>
+    {% else %}
+    <li class="bft-empty">{% if mode == 'search' %}No matching groups{% else %}No subgroups{% endif %}</li>
+    {% endfor %}
+</ul>
+{% if mode == 'tree' and parent %}</div>{% endif %}

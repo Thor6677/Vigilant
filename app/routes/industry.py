@@ -454,14 +454,13 @@ def _fmt_pct(v: float | None) -> str:
 
 @router.get("/industry/build-finder", response_class=HTMLResponse)
 async def build_finder_page(request: Request, db: AsyncSession = Depends(get_db)):
-    """Landing page — a buildable-group picker + ME/structure/rig/security
-    controls, plus invention controls (character/skills/decryptor). The
-    ranked table loads via htmx on submit (see below)."""
+    """Landing page — an EVE-style market-group tree picker (htmx-loaded via
+    the /tree fragments below) + ME/structure/rig/security controls, plus
+    invention controls (character/skills/decryptor). The ranked table loads
+    via htmx on submit (see below)."""
     if not request.session.get("user_id"):
         return RedirectResponse("/")
-    groups = await sde.get_buildable_groups(db)
     return templates.TemplateResponse(request, "build_finder.html", {
-        "groups": groups,
         "structures": STRUCTURES,
         "rigs": RIGS,
         "sec_statuses": SEC_STATUS,
@@ -470,10 +469,63 @@ async def build_finder_page(request: Request, db: AsyncSession = Depends(get_db)
     })
 
 
+@router.get("/industry/build-finder/tree", response_class=HTMLResponse)
+async def build_finder_tree(
+    request: Request,
+    parent: int = Query(0),
+    db: AsyncSession = Depends(get_db),
+):
+    """htmx fragment: one level of the market-group tree.
+
+    `parent=0` → root groups (parent_group_id IS NULL), rendered as a bare
+    list for the tree container. `parent=<id>` → that node's children,
+    wrapped in the node's own `#bft-kids-<id>` slot so the expand arrow's
+    `hx-swap="outerHTML"` replaces the empty placeholder in place (the same
+    per-level lazy idiom as fitting's /tools/fitting/browse/groups)."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    nodes = await sde.get_market_group_children(db, parent or None)
+    return templates.TemplateResponse(request, "partials/build_finder_tree.html", {
+        "nodes": nodes,
+        "parent": parent,
+        "mode": "tree",
+    })
+
+
+@router.get("/industry/build-finder/tree/search", response_class=HTMLResponse)
+async def build_finder_tree_search(
+    request: Request,
+    q: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """htmx fragment: market-group search results, path-labeled ("Ships >
+    Frigates > Assault Frigates"), each selectable like a tree node.
+
+    Queries under 2 chars (including a cleared box) return the ROOT tree
+    fragment instead — the search input targets the same container as the
+    tree, so this is what makes clearing the box restore the browser."""
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
+    q = (q or "").strip()
+    if len(q) < 2:
+        nodes = await sde.get_market_group_children(db, None)
+        return templates.TemplateResponse(request, "partials/build_finder_tree.html", {
+            "nodes": nodes,
+            "parent": 0,
+            "mode": "tree",
+        })
+    rows = await sde.search_market_groups(db, q)
+    return templates.TemplateResponse(request, "partials/build_finder_tree.html", {
+        "nodes": rows,
+        "parent": 0,
+        "mode": "search",
+    })
+
+
 @router.get("/industry/build-finder/results", response_class=HTMLResponse)
 async def build_finder_results(
     request: Request,
-    group_id: int = Query(0),
+    market_group_id: int = Query(0),
     me: int = Query(10),
     structure: str = Query("npc_station"),
     rig: str = Query("none"),
@@ -484,10 +536,11 @@ async def build_finder_results(
     decryptor: str = Query("none"),
     db: AsyncSession = Depends(get_db),
 ):
-    """htmx partial: buildable products in one group, ranked by margin %.
+    """htmx partial: buildable products in a market-group SUBTREE (the picked
+    tree node + all its descendants), ranked by margin %.
 
     Bounded work: at most `BUILD_FINDER_CAP` blueprints priced per request (the
-    group's full count is reported for a "showing N of M" footer). TE is
+    subtree's full count is reported for a "showing N of M" footer). TE is
     intentionally not a control — it only affects build *time*, and the ranking
     is by ISK margin, so it can't change the result. Sell value + material costs
     come from the global `/markets/prices/` map (`market_lp.get_price_map`), the
@@ -504,7 +557,7 @@ async def build_finder_results(
     `rank_builds` treats as unpriced — never silently zero-costed."""
     if not request.session.get("user_id"):
         return HTMLResponse("", status_code=401)
-    if not group_id:
+    if not market_group_id:
         return HTMLResponse('<div class="b-empty">Pick a group to rank.</div>')
 
     user_id = request.session.get("user_id")
@@ -514,7 +567,8 @@ async def build_finder_results(
     sec_info = SEC_STATUS.get(security, SEC_STATUS["highsec"])
 
     start = time.perf_counter()
-    total_n, products = await sde.get_group_buildables(db, group_id, cap=BUILD_FINDER_CAP)
+    total_n, products = await sde.get_market_group_subtree_products(
+        db, market_group_id, cap=BUILD_FINDER_CAP)
 
     ranked = []
     invention_active = False
