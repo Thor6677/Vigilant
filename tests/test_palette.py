@@ -42,8 +42,8 @@ def test_flatten_pages_includes_admin_for_admin():
 
 
 def test_flatten_pages_includes_plain_link_groups():
-    # Groups with no dropdown items (Corporations, Skill Plans) contribute
-    # their own group row.
+    # Groups with no dropdown items (Corporations) contribute their own
+    # group row; Skill Plans surfaces as a Dashboard item row.
     urls = _urls(_flatten_pages(is_admin=False))
     assert "/corporations" in urls
     assert "/skill-plans" in urls

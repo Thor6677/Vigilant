@@ -117,11 +117,13 @@ def test_image_host_matches_tools_images_and_i_shortlink():
     assert item_active(img, "/tools/fitting") is False
 
 
-def test_ship_fitting_exact_vs_saved_fits_prefix():
-    # /tools/fitting/saved must light Saved Fits but NOT Ship Fitting.
+def test_ship_fitting_prefix_vs_saved_fits_exclude():
+    # /tools/fitting/saved must light Saved Fits but NOT Ship Fitting;
+    # other sub-pages (e.g. /tools/fitting/compare) light Ship Fitting.
     fitting = _find("Ship Fitting")
     saved = _find("Saved Fits")
     assert item_active(fitting, "/tools/fitting") is True
+    assert item_active(fitting, "/tools/fitting/compare") is True
     assert item_active(fitting, "/tools/fitting/saved") is False
     assert item_active(saved, "/tools/fitting/saved") is True
     assert item_active(saved, "/tools/fitting/saved/dps") is True
@@ -158,6 +160,49 @@ def test_group_active_via_extra_group_match():
     assert group_active(dash, "/dashboard") is True
     assert group_active(dash, "/characters") is True
     assert group_active(dash, "/intel") is False
+
+
+def test_intel_group_catchall_covers_shared_and_entity_pages():
+    # /intel/<scan_id> shared views and /intel/entity/... combat-stats pages
+    # have no owning item; the group-level /intel/ prefix lights the group.
+    intel = _group("Intel")
+    assert group_active(intel, "/intel/abc123") is True
+    assert group_active(intel, "/intel/entity/character/90000001") is True
+    assert group_active(intel, "/intel") is True          # Overview item
+    assert group_active(intel, "/industry") is False
+
+
+def test_map_group_catchall_covers_alliance_pages():
+    # /alliance/<id> detail pages are linked from Trending (a Map item).
+    map_grp = _group("Map")
+    assert group_active(map_grp, "/alliance/99000001") is True
+    assert group_active(map_grp, "/map") is True
+    assert group_active(map_grp, "/intel") is False
+
+
+def test_skill_plans_lives_in_dashboard_group():
+    dash = _group("Dashboard")
+    labels = [i["label"] for i in dash["items"]]
+    assert "Skill Plans" in labels
+    assert not any(g["label"] == "Skill Plans" for g in NAV_GROUPS)
+    assert group_active(dash, "/skill-plans/42") is True
+
+
+def test_market_group_shape():
+    # Market is a non-landing group whose parent url is the Prices page
+    # itself (items[0]) — the Map/Dashboard pattern.
+    market = _group("Market")
+    assert market["landing"] is False
+    assert market["items"][0]["url"] == market["url"] == "/market"
+    labels = [i["label"] for i in market["items"]]
+    assert labels == ["Prices", "LP Store ROI", "Trading P&L",
+                      "Appraisal", "Net Worth"]
+    # Prices' broad /market prefix steps aside for LP / P&L sub-pages.
+    prices = _find("Prices")
+    assert item_active(prices, "/market") is True
+    assert item_active(prices, "/market/type/34") is True
+    assert item_active(prices, "/market/lp") is False
+    assert item_active(prices, "/market/pnl") is False
 
 
 def test_plain_link_group_has_no_items_but_matches_by_group_rule():
@@ -218,26 +263,31 @@ def test_base_html_references_nav_groups():
     assert "nav_groups" in _base_html_source()
 
 
+def test_desktop_dropdown_suppresses_group_url_duplicate():
+    """The desktop dropdown must skip the item whose url equals the group's
+    own url (Overview / Star Map / Console…) — otherwise the group label link
+    and the first dropdown row are two visible links to the same page."""
+    assert "item['url'] != group['url']" in _base_html_source()
+
+
 def test_base_html_is_valid_jinja():
     """Guard against a broken template edit. Environment().parse validates the
     template syntax without needing request/session globals to render."""
     Environment().parse(_base_html_source())
 
 
-def test_landing_group_override_only_on_wormhole_reference_items():
-    """The three wormhole reference tools live in the Map nav group but keep
-    their landing cards on the Intel landing via landing_group."""
+def test_no_landing_group_overrides():
+    """Every item's nav home and landing-card home agree — the wormhole
+    reference tools moved into Intel (2026-07), so no item needs the
+    landing_group escape hatch anymore. If one reappears, make sure the
+    split identity is deliberate."""
     overridden = {
         item["label"]: item["landing_group"]
         for grp in NAV_GROUPS
         for item in grp["items"]
         if item.get("landing_group")
     }
-    assert overridden == {
-        "Wormhole Systems": "Intel",
-        "Wormhole Types": "Intel",
-        "System Effects": "Intel",
-    }
+    assert overridden == {}
 
 
 def test_landing_grids_built_from_registry():
@@ -250,13 +300,17 @@ def test_landing_grids_built_from_registry():
         assert expected in intel_names
 
     industry_names = [c["name"] for c in INDUSTRY_TOOLS]
-    assert len(industry_names) == 11 and "Manufacturing" in industry_names
-    assert "Market" in industry_names
-    assert "LP Store ROI" in industry_names
+    assert len(industry_names) == 8 and "Manufacturing" in industry_names
     assert "Build Finder" in industry_names
-    assert "Trading P&L" in industry_names
+    assert "Stockpiles" in industry_names
+    # The economy pillar moved to the (non-landing) Market group.
+    for moved in ("LP Store ROI", "Trading P&L", "Appraisal"):
+        assert moved not in industry_names
 
-    assert "Structure Age" in [c["name"] for c in TOOLS_TOOLS]
+    tools_names = [c["name"] for c in TOOLS_TOOLS]
+    assert "Structure Age" in tools_names
+    for moved in ("Net Worth", "Stockpiles"):
+        assert moved not in tools_names
 
     all_cards = INDUSTRY_TOOLS + INTEL_TOOLS + TOOLS_TOOLS
     assert not any(c["name"] == "Overview" for c in all_cards)

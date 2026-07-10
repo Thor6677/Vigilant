@@ -57,7 +57,7 @@ def _flatten_pages(is_admin: bool) -> list[dict]:
 
     Each row: {"label", "url", "group"}. Skips external links (zKillboard,
     Wanderer) and admin-only entries unless `is_admin`. Plain-link groups
-    with no items (Corporations, Skill Plans) contribute their own group row.
+    with no items (Corporations) contribute their own group row.
     De-duplicated by url, preserving first-seen order.
     """
     pages: list[dict] = []

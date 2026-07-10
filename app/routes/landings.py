@@ -3,9 +3,9 @@
 Each menu's top-level link renders a card grid summarizing the sub-tools.
 The grids are built from the single-source nav registry (app/nav.py) —
 add a page there with a desc/features and its card appears here
-automatically. See the landing_group field for cards surfaced on another
-group's landing (e.g. the wormhole reference tools live in the Map nav
-group but keep their cards on the Intel landing)."""
+automatically. The landing_group field (currently unused) can surface a
+card on another group's landing when an item's nav home and card home
+must differ."""
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -54,7 +54,7 @@ async def industry_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Industry",
-        "page_subtitle": "Manufacturing, hauling, compression, PI — pick a tool.",
+        "page_subtitle": "Manufacturing, hauling, compression, PI, stockpiles — pick a tool.",
         "tools": INDUSTRY_TOOLS})
 
 
@@ -63,7 +63,7 @@ async def intel_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Intel",
-        "page_subtitle": "Scans, gate checks, star map, wormhole reference.",
+        "page_subtitle": "Killboards, scans, gate checks, wormhole reference.",
         "tools": INTEL_TOOLS})
 
 
@@ -72,5 +72,5 @@ async def tools_landing(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     return templates.TemplateResponse(request, "tool_landing.html", {"page_title": "Tools",
-        "page_subtitle": "Fittings, assets, timers, image host, timezone converter.",
+        "page_subtitle": "Fittings, assets, timers, image host, utilities.",
         "tools": TOOLS_TOOLS})

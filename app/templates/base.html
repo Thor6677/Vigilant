@@ -34,9 +34,14 @@
         <span class="b-nav-dropdown">
             <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }} ▾</a>
             <div class="b-nav-dropdown-menu">
+                {# Skip the item that duplicates the group's own destination
+                   (Overview / Star Map / Console…) — the group label link
+                   above already goes there. Mirrors the mobile suppression. #}
                 {% for item in group['items'] %}
+                {% if item['url'] != group['url'] %}
                 {% if item['divider_before'] %}<div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>{% endif %}
                 {% if item['external'] %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item" target="_blank" rel="noopener">{{ item['label'] }}</a>{% else %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item {{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>{% endif %}
+                {% endif %}
                 {% endfor %}
             </div>
         </span>

@@ -78,6 +78,8 @@ NAV_GROUPS = [
                   in_landing=False),
             _item("Characters", "/characters", [("prefix", "/characters")],
                   in_landing=False),
+            _item("Skill Plans", "/skill-plans", [("prefix", "/skill-plans")],
+                  in_landing=False),
         ],
     },
 
@@ -86,16 +88,6 @@ NAV_GROUPS = [
         "label": "Corporations",
         "url": "/corporations",
         "match": [("prefix", "/corporations")],
-        "admin": False,
-        "landing": False,
-        "items": [],
-    },
-
-    # ── Skill Plans (plain link) ───────────────────────────────────────────
-    {
-        "label": "Skill Plans",
-        "url": "/skill-plans",
-        "match": [("prefix", "/skill-plans")],
         "admin": False,
         "landing": False,
         "items": [],
@@ -120,44 +112,6 @@ NAV_GROUPS = [
                     "Security-status penalty modeling",
                     "Jita buy/sell price lookups",
                     "Per-run material totals and ISK figures",
-                ],
-            ),
-            _item(
-                "Market", "/market",
-                [("prefix", "/market")],
-                # LP Store ROI (/market/lp) and Trading P&L (/market/pnl) live
-                # under the /market prefix too; keep them out of Market's broad
-                # prefix so the items don't light up together (same pattern as
-                # Kill Feed / Kill Search).
-                exclude=["/market/lp", "/market/pnl"],
-                desc="Price-history charts for any item — daily average, high/low band, and traded volume in The Forge (Jita), fetched on demand and cached. Search a type and watch its trend over 30 days to a year.",
-                features=[
-                    "Type search across all published items",
-                    "Average price line + daily high/low band",
-                    "Traded-volume bars",
-                    "30d / 90d / 1y / all range toggles",
-                ],
-            ),
-            _item(
-                "LP Store ROI", "/market/lp",
-                [("prefix", "/market/lp")],
-                desc="Pick an NPC corporation and rank its loyalty-point store offers by ISK/LP — required-item cost and item sell value are priced from current market data.",
-                features=[
-                    "Full NPC corporation roster",
-                    "Per-offer required-items cost",
-                    "ISK/LP ratio, sorted best-first",
-                    "Blueprint offers flagged when unpriced",
-                ],
-            ),
-            _item(
-                "Trading P&L", "/market/pnl",
-                [("prefix", "/market/pnl")],
-                desc="Realized trading profit — your market buys are FIFO-matched against sells per item across synced wallet transactions, with broker fees and sales tax applied at flat rates.",
-                features=[
-                    "Per-item realized ISK, units flipped, cost-weighted margin",
-                    "Monthly realized-profit chart",
-                    "Per-character or account-wide filter",
-                    "Unmatched (pre-history) sells excluded and counted",
                 ],
             ),
             _item(
@@ -203,16 +157,6 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
-                "Appraisal", "/industry/appraisal",
-                [("exact", "/industry/appraisal")],
-                desc="Paste a cargo or asset list and get a Jita valuation at current market prices. Works with contract exports, loot drops, and inventory dumps.",
-                features=[
-                    "Paste any item / qty list",
-                    "Jita buy vs. sell totals",
-                    "Per-item breakdown",
-                ],
-            ),
-            _item(
                 "Mining Ledger", "/industry/mining-ledger",
                 [("prefix", "/industry/mining-ledger")],
                 desc="Per-character mining output — ore type, quantity, ISK value — sourced from the ESI mining ledger and aggregated over time.",
@@ -232,6 +176,85 @@ NAV_GROUPS = [
                     "Per-character PI status (if linked)",
                 ],
             ),
+            _item(
+                "Stockpiles", "/tools/stockpiles",
+                [("prefix", "/tools/stockpiles")],
+                desc="Set target quantities for the items you keep on hand — ammo, doctrine hulls, reaction fuel — and see current stock across all your characters vs. target, with deficits highlighted. Get a browser + Discord alert when a stockpile runs low.",
+                features=[
+                    "Per-item target quantity vs. account-wide holdings",
+                    "Deficit highlighting for under-stocked items",
+                    "Type search add form (htmx CRUD)",
+                    "Sync-time \"stockpile low\" alerts (24h dedup)",
+                ],
+            ),
+        ],
+    },
+
+    # ── Market (non-landing; parent url is the price-chart page itself) ─────
+    # The economy pillar: prices, LP conversion, realized P&L, valuation, and
+    # net worth in one place. `Prices` is the group's own destination
+    # (url == group url) so the chrome suppresses its duplicate dropdown row;
+    # it stays as items[0] for active-state matching and the mobile menu.
+    {
+        "label": "Market",
+        "url": "/market",
+        "match": [],
+        "admin": False,
+        "landing": False,
+        "items": [
+            _item(
+                "Prices", "/market",
+                [("prefix", "/market")],
+                # LP Store ROI (/market/lp) and Trading P&L (/market/pnl) live
+                # under the /market prefix too; keep them out of Prices' broad
+                # prefix so the items don't light up together (same pattern as
+                # Kill Feed / Kill Search).
+                exclude=["/market/lp", "/market/pnl"],
+                in_landing=False,
+            ),
+            _item(
+                "LP Store ROI", "/market/lp",
+                [("prefix", "/market/lp")],
+                desc="Pick an NPC corporation and rank its loyalty-point store offers by ISK/LP — required-item cost and item sell value are priced from current market data.",
+                features=[
+                    "Full NPC corporation roster",
+                    "Per-offer required-items cost",
+                    "ISK/LP ratio, sorted best-first",
+                    "Blueprint offers flagged when unpriced",
+                ],
+            ),
+            _item(
+                "Trading P&L", "/market/pnl",
+                [("prefix", "/market/pnl")],
+                desc="Realized trading profit — your market buys are FIFO-matched against sells per item across synced wallet transactions, with broker fees and sales tax applied at flat rates.",
+                features=[
+                    "Per-item realized ISK, units flipped, cost-weighted margin",
+                    "Monthly realized-profit chart",
+                    "Per-character or account-wide filter",
+                    "Unmatched (pre-history) sells excluded and counted",
+                ],
+            ),
+            _item(
+                "Appraisal", "/industry/appraisal",
+                [("exact", "/industry/appraisal")],
+                desc="Paste a cargo or asset list and get a Jita valuation at current market prices. Works with contract exports, loot drops, and inventory dumps.",
+                features=[
+                    "Paste any item / qty list",
+                    "Jita buy vs. sell totals",
+                    "Per-item breakdown",
+                ],
+            ),
+            _item(
+                "Net Worth", "/tools/networth",
+                [("prefix", "/tools/networth")],
+                desc="Track your total net worth over time — a daily snapshot of every character's wallet plus assets, valued at CCP's global average reference price, stacked into one chart.",
+                features=[
+                    "Per-character stacked area + account total",
+                    "30d / 90d / 1y range toggles",
+                    "Daily automatic snapshots + on-demand \"Snapshot now\"",
+                    "Unpriced-item count shown for transparency",
+                ],
+            ),
         ],
     },
 
@@ -239,7 +262,9 @@ NAV_GROUPS = [
     {
         "label": "Intel",
         "url": "/intel",
-        "match": [],
+        # Group also lights up on pages no single item owns: shared scan views
+        # (/intel/<scan_id>) and entity combat-stats pages (/intel/entity/...).
+        "match": [("prefix", "/intel/")],
         "admin": False,
         "landing": True,
         "items": [
@@ -303,29 +328,12 @@ NAV_GROUPS = [
                     "Activity timestamps",
                 ],
             ),
-        ],
-    },
-
-    # ── Map (new group; parent url is the map itself, no landing page) ──────
-    {
-        "label": "Map",
-        "url": "/map",
-        "match": [],
-        "admin": False,
-        "landing": False,
-        "items": [
-            _item("Star Map", "/map", [("exact", "/map")],
-                  in_landing=False),
-            _item("Wormhole Map", "/map/wormholes",
-                  [("exact", "/map/wormholes")], in_landing=False),
-            _item("Trending", "/trending", [("prefix", "/trending")],
-                  in_landing=False),
+            # Wormhole reference — recon you do before a scan or a fight.
+            # Nav home and landing cards both live here (no landing_group).
             _item(
                 "Wormhole Systems", "/wormholes",
                 [("exact", "/wormholes"), ("prefix", "/wormholes/system")],
                 divider_before=True,
-                # Nav item lives in Map; its card stays on the /intel landing.
-                landing_group="Intel",
                 desc="Per-system reference for every J-space system — class, effect, planets, static connections, recent kill activity.",
                 features=[
                     "Shattered / Drifter / Thera flags",
@@ -336,7 +344,6 @@ NAV_GROUPS = [
             _item(
                 "Wormhole Types", "/wormholes/types",
                 [("prefix", "/wormholes/types")],
-                landing_group="Intel",
                 desc="Complete wormhole signature reference — K162, A/B/C/..., mass and lifetime by code.",
                 features=[
                     "All static/transient wormhole types",
@@ -347,7 +354,6 @@ NAV_GROUPS = [
             _item(
                 "System Effects", "/wormholes/effects",
                 [("exact", "/wormholes/effects")],
-                landing_group="Intel",
                 desc="Wolf-Rayet, Black Hole, Pulsar, Cataclysmic Variable, Magnetar, Red Giant — per-class effect bonuses and penalties.",
                 features=[
                     "Per-effect bonus/penalty tables",
@@ -355,6 +361,25 @@ NAV_GROUPS = [
                     "Fit relevance hints",
                 ],
             ),
+        ],
+    },
+
+    # ── Map (live maps only; parent url is the map itself, no landing page) ─
+    {
+        "label": "Map",
+        "url": "/map",
+        # Alliance detail pages (/alliance/<id>, linked from Trending) have no
+        # owning item; light the group there like Dashboard does /character/.
+        "match": [("prefix", "/alliance/")],
+        "admin": False,
+        "landing": False,
+        "items": [
+            _item("Star Map", "/map", [("exact", "/map")],
+                  in_landing=False),
+            _item("Wormhole Map", "/map/wormholes",
+                  [("exact", "/map/wormholes")], in_landing=False),
+            _item("Trending", "/trending", [("prefix", "/trending")],
+                  in_landing=False),
             _item("Wanderer", "https://mapper.thunderborn.dev",
                   external=True, in_landing=False),
         ],
@@ -379,28 +404,6 @@ NAV_GROUPS = [
                     "Player-count + ISK destroyed overlay",
                     "Peak / mean PCU markers",
                     "Cross-validated historical archive (Chribba + Adminor)",
-                ],
-            ),
-            _item(
-                "Net Worth", "/tools/networth",
-                [("prefix", "/tools/networth")],
-                desc="Track your total net worth over time — a daily snapshot of every character's wallet plus assets, valued at CCP's global average reference price, stacked into one chart.",
-                features=[
-                    "Per-character stacked area + account total",
-                    "30d / 90d / 1y range toggles",
-                    "Daily automatic snapshots + on-demand \"Snapshot now\"",
-                    "Unpriced-item count shown for transparency",
-                ],
-            ),
-            _item(
-                "Stockpiles", "/tools/stockpiles",
-                [("prefix", "/tools/stockpiles")],
-                desc="Set target quantities for the items you keep on hand — ammo, doctrine hulls, reaction fuel — and see current stock across all your characters vs. target, with deficits highlighted. Get a browser + Discord alert when a stockpile runs low.",
-                features=[
-                    "Per-item target quantity vs. account-wide holdings",
-                    "Deficit highlighting for under-stocked items",
-                    "Type search add form (htmx CRUD)",
-                    "Sync-time \"stockpile low\" alerts (24h dedup)",
                 ],
             ),
             _item(
@@ -436,7 +439,10 @@ NAV_GROUPS = [
             ),
             _item(
                 "Ship Fitting", "/tools/fitting",
-                [("exact", "/tools/fitting")],
+                # Prefix covers sub-pages like /tools/fitting/compare; the
+                # exclude keeps Saved Fits pages from lighting both items.
+                [("prefix", "/tools/fitting")],
+                exclude=["/tools/fitting/saved"],
                 desc="Fit a ship and see accurate DPS, EHP, cap stability, and fitting resources — matches Pyfa's numbers closely and threads through character skills.",
                 features=[
                     "Character-accurate DPS / EHP / cap",
