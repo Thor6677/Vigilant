@@ -6,13 +6,22 @@ against hand-computed numbers (see tests/test_pnl.py).
 
 The realized-profit model FIFO-matches buys against sells **per type_id**:
 
-  * Buys enter a per-type FIFO queue as lots ``(qty, unit_price, date)``.
+  * Buys enter a per-type FIFO queue as lots ``(qty, unit_price, date, source)``.
   * Sells consume the oldest lots first. A sell larger than the head lot spans
     multiple lots; a sell smaller than the head lot splits it (the remainder
     stays at the front of the queue).
   * A sell with no available lot (the buy predates our synced history) is
     "unmatched" — its quantity is counted and **excluded** from P&L rather than
     guessed at.
+
+Lots carry a ``source``: "trade" (default) or "build". A trade lot is stock you
+bought off the market — you paid a broker's fee to place that buy order, so its
+cost basis is marked up by ``(1 + broker_fee)``. A build lot is stock you
+manufactured (injected later from completed industry jobs) — there is no
+acquisition broker fee, so it enters the queue at its raw ``unit_price`` (the
+job's per-unit build cost). Sell-side fees are symmetric across both sources.
+This asymmetry is the whole point of the source tag: mis-charging a broker fee
+on manufactured stock would understate build profit.
 
 Fees/taxes are NOT taken from the journal (linking a fee row to a specific fill
 is unreliable). Instead we apply flat, configurable rates — the same assumption
@@ -47,6 +56,7 @@ class _Lot:
     qty: int
     unit_price: float
     date: object  # datetime | str — opaque to the matcher, echoed into rows
+    source: str = "trade"  # "trade" (bought) | "build" (manufactured)
 
 
 def _sort_key(t: dict):
@@ -67,14 +77,18 @@ def match_fifo(
     """FIFO-match buys against sells per type_id.
 
     Each transaction dict needs: ``type_id``, ``quantity`` (>0), ``unit_price``,
-    ``is_buy`` (bool), ``date``. ``transaction_id`` is optional (tiebreaker).
+    ``is_buy`` (bool), ``date``. ``transaction_id`` is optional (tiebreaker) and
+    ``source`` is optional ("trade" default | "build"); build lots skip the
+    acquisition broker fee (see module docstring).
 
     Returns ``{type_id: {"lots": [...remaining buys...], "realized": [...match
     rows...], "unmatched_sell_qty": int}}``. Each match row:
         {type_id, qty, buy_price, sell_price, buy_date, sell_date,
-         cost_basis, proceeds, profit}
+         cost_basis, proceeds, profit, lot_source}
     where cost_basis/proceeds are the fee-adjusted effective totals for that
-    matched quantity and profit = proceeds - cost_basis.
+    matched quantity, profit = proceeds - cost_basis, and lot_source echoes the
+    consumed lot's source. Leftover-lot dicts echo ``source`` only when it is
+    non-default ("build"), keeping trade-only output byte-identical.
     """
     # Per-type FIFO queue of buy lots + accumulated match rows.
     queues: dict[int, deque[_Lot]] = {}
@@ -96,7 +110,9 @@ def match_fifo(
         price = float(t["unit_price"])
 
         if t["is_buy"]:
-            queues[type_id].append(_Lot(qty=qty, unit_price=price, date=t["date"]))
+            queues[type_id].append(_Lot(
+                qty=qty, unit_price=price, date=t["date"],
+                source=t.get("source", "trade")))
             continue
 
         # Sell — consume oldest lots first.
@@ -105,7 +121,12 @@ def match_fifo(
         while remaining > 0 and q:
             lot = q[0]
             take = min(remaining, lot.qty)
-            buy_cost_eff = lot.unit_price * (1 + broker_fee)
+            # Build lots enter at raw build cost (no acquisition broker fee);
+            # trade lots carry the broker markup you paid to place the buy order.
+            buy_cost_eff = (
+                lot.unit_price if lot.source == "build"
+                else lot.unit_price * (1 + broker_fee)
+            )
             sell_rev_eff = price * (1 - sales_tax - broker_fee)
             cost_basis = buy_cost_eff * take
             proceeds = sell_rev_eff * take
@@ -119,6 +140,7 @@ def match_fifo(
                 "cost_basis": cost_basis,
                 "proceeds": proceeds,
                 "profit": proceeds - cost_basis,
+                "lot_source": lot.source,
             })
             lot.qty -= take
             remaining -= take
@@ -128,12 +150,17 @@ def match_fifo(
             # Sell with no matching buy in our history (pre-sync) — excluded.
             unmatched[type_id] += remaining
 
+    def _lot_out(lot: _Lot) -> dict:
+        # Echo ``source`` only for non-default (build) lots so trade-only output
+        # stays byte-identical to the pre-source-tag shape.
+        out = {"qty": lot.qty, "unit_price": lot.unit_price, "date": lot.date}
+        if lot.source != "trade":
+            out["source"] = lot.source
+        return out
+
     return {
         type_id: {
-            "lots": [
-                {"qty": lot.qty, "unit_price": lot.unit_price, "date": lot.date}
-                for lot in queues[type_id]
-            ],
+            "lots": [_lot_out(lot) for lot in queues[type_id]],
             "realized": realized[type_id],
             "unmatched_sell_qty": unmatched[type_id],
         }
@@ -155,6 +182,8 @@ def aggregate_by_type(result: dict) -> list[dict]:
         cost_basis = sum(m["cost_basis"] for m in matches)
         proceeds = sum(m["proceeds"] for m in matches)
         qty_flipped = sum(m["qty"] for m in matches)
+        trade_profit = sum(m["profit"] for m in matches if m["lot_source"] == "trade")
+        build_profit = sum(m["profit"] for m in matches if m["lot_source"] == "build")
         margin_pct = (realized_isk / cost_basis * 100) if cost_basis > 0 else None
         rows.append({
             "type_id": type_id,
@@ -163,6 +192,8 @@ def aggregate_by_type(result: dict) -> list[dict]:
             "cost_basis": cost_basis,
             "proceeds": proceeds,
             "margin_pct": margin_pct,
+            "trade_profit": trade_profit,
+            "build_profit": build_profit,
             "unmatched_sell_qty": data["unmatched_sell_qty"],
         })
     rows.sort(key=lambda r: r["realized_isk"], reverse=True)
@@ -187,9 +218,16 @@ def aggregate_monthly(result: dict) -> list[dict]:
     for data in result.values():
         for m in data["realized"]:
             key = _month_key(m["sell_date"])
-            b = buckets.setdefault(key, {"month": key, "realized_isk": 0.0, "qty_flipped": 0})
+            b = buckets.setdefault(key, {
+                "month": key, "realized_isk": 0.0, "qty_flipped": 0,
+                "trade_profit": 0.0, "build_profit": 0.0,
+            })
             b["realized_isk"] += m["profit"]
             b["qty_flipped"] += m["qty"]
+            if m["lot_source"] == "build":
+                b["build_profit"] += m["profit"]
+            else:
+                b["trade_profit"] += m["profit"]
     return [buckets[k] for k in sorted(buckets)]
 
 
@@ -202,16 +240,24 @@ def totals(result: dict) -> dict:
     qty_flipped = 0
     cost_basis = 0.0
     unmatched = 0
+    trade_profit = 0.0
+    build_profit = 0.0
     for data in result.values():
         for m in data["realized"]:
             realized_isk += m["profit"]
             qty_flipped += m["qty"]
             cost_basis += m["cost_basis"]
+            if m["lot_source"] == "build":
+                build_profit += m["profit"]
+            else:
+                trade_profit += m["profit"]
         unmatched += data["unmatched_sell_qty"]
     return {
         "realized_isk": realized_isk,
         "qty_flipped": qty_flipped,
         "cost_basis": cost_basis,
+        "trade_profit": trade_profit,
+        "build_profit": build_profit,
         "unmatched_sell_qty": unmatched,
         "types_traded": sum(1 for d in result.values() if d["realized"]),
     }

@@ -28,6 +28,12 @@ from app.db.models import (
     WalletTransaction,
 )
 from app.market import pnl as engine
+from app.market.pnl import (
+    aggregate_by_type,
+    aggregate_monthly,
+    match_fifo,
+    totals,
+)
 
 BROKER = engine.BROKER_FEE_RATE      # 0.015
 TAX = engine.SALES_TAX_RATE          # 0.0337
@@ -363,3 +369,67 @@ def test_pnl_page_empty_state_when_no_data():
     assert "Trading P&L" in body or "Trading P&amp;L" in body
     assert "accumulates" in body               # empty-state copy
     assert "nav_groups" not in body            # nav rendered, not a literal
+
+
+# ── Industry P&L: build lots (T-041 item 2) ─────────────────────────────────
+
+def test_build_lot_no_buy_broker_fee():
+    """A build lot's cost basis is raw build cost — no acquisition broker fee."""
+    txs = [
+        {"type_id": 1, "quantity": 10, "unit_price": 100.0, "is_buy": True,
+         "date": "2026-01-01", "source": "build"},
+        {"type_id": 1, "quantity": 10, "unit_price": 200.0, "is_buy": False,
+         "date": "2026-01-02"},
+    ]
+    r = match_fifo(txs, broker_fee=0.01, sales_tax=0.02)
+    m = r[1]["realized"][0]
+    assert m["lot_source"] == "build"
+    assert m["cost_basis"] == pytest.approx(100.0 * 10)          # raw, no 1.01x
+    assert m["proceeds"] == pytest.approx(200.0 * (1 - 0.02 - 0.01) * 10)
+
+
+def test_trade_and_build_lots_interleave_fifo_order():
+    """Sells consume oldest lots first regardless of source; rows are tagged."""
+    txs = [
+        {"type_id": 1, "quantity": 5, "unit_price": 10.0, "is_buy": True,
+         "date": "2026-01-01"},                                   # trade lot
+        {"type_id": 1, "quantity": 5, "unit_price": 7.0, "is_buy": True,
+         "date": "2026-01-02", "source": "build"},                # build lot
+        {"type_id": 1, "quantity": 8, "unit_price": 20.0, "is_buy": False,
+         "date": "2026-01-03"},
+    ]
+    r = match_fifo(txs, broker_fee=0.0, sales_tax=0.0)
+    rows = r[1]["realized"]
+    assert [(m["qty"], m["lot_source"]) for m in rows] == [(5, "trade"), (3, "build")]
+
+
+def test_per_source_aggregation_splits():
+    txs = [
+        {"type_id": 1, "quantity": 1, "unit_price": 10.0, "is_buy": True,
+         "date": "2026-01-01"},
+        {"type_id": 1, "quantity": 1, "unit_price": 5.0, "is_buy": True,
+         "date": "2026-01-02", "source": "build"},
+        {"type_id": 1, "quantity": 2, "unit_price": 20.0, "is_buy": False,
+         "date": "2026-02-01"},
+    ]
+    r = match_fifo(txs, broker_fee=0.0, sales_tax=0.0)
+    by_type = aggregate_by_type(r)[0]
+    assert by_type["trade_profit"] == pytest.approx(10.0)   # 20-10
+    assert by_type["build_profit"] == pytest.approx(15.0)   # 20-5
+    t = totals(r)
+    assert t["trade_profit"] == pytest.approx(10.0)
+    assert t["build_profit"] == pytest.approx(15.0)
+    monthly = aggregate_monthly(r)
+    assert monthly[0]["trade_profit"] == pytest.approx(10.0)
+    assert monthly[0]["build_profit"] == pytest.approx(15.0)
+
+
+def test_default_source_is_trade_and_legacy_shape_unchanged():
+    txs = [
+        {"type_id": 1, "quantity": 1, "unit_price": 10.0, "is_buy": True,
+         "date": "2026-01-01"},
+        {"type_id": 1, "quantity": 1, "unit_price": 20.0, "is_buy": False,
+         "date": "2026-01-02"},
+    ]
+    r = match_fifo(txs, broker_fee=0.0, sales_tax=0.0)
+    assert r[1]["realized"][0]["lot_source"] == "trade"
