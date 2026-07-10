@@ -62,7 +62,7 @@
             No snapshots yet. Hit <strong>Snapshot now</strong> above to record the first data point — the daily job fills in the rest over time.
         </div>
         <p class="nw-note">
-            Net worth = wallet + assets (valued at CCP global average reference price). <strong>Excluded:</strong> market-order escrow / sell-order value and in-progress industry-job value are not currently tracked (they aren't in the persisted sync cache). Unpriced items (blueprint copies, some untradeable types) are skipped and counted above.
+            Net worth = wallet + assets + market-locked value (buy-order escrow &amp; listed sell-order goods) + industry work-in-progress (job output value), all at CCP global average reference price. Order and job figures refresh with the hourly character sync. Unpriced items (blueprint copies, some untradeable types) are skipped and counted above.
         </p>
     </div>
 </div>

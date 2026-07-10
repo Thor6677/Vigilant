@@ -372,6 +372,8 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "assets":       3600,   # ESI max-age: 3600s
     "roles":        3600,   # corp roles — rarely change, cached for permission checks
     "transactions": 3600,   # wallet fills — immutable; hourly incremental page-back is plenty
+    "orders":       3600,   # ESI max-age: 1200s; hourly is enough for net-worth escrow
+    "industry":     3600,   # ESI max-age: 300s; hourly is enough for WIP valuation
 }
 
 FIELD_SCOPES: dict[str, str] = {
@@ -386,6 +388,8 @@ FIELD_SCOPES: dict[str, str] = {
     "assets":        "esi-assets.read_assets.v1",
     "roles":         "esi-characters.read_corporation_roles.v1",
     "transactions":  "esi-wallet.read_character_wallet.v1",   # same scope as wallet balance
+    "orders":        "esi-markets.read_character_orders.v1",
+    "industry":      "esi-industry.read_character_jobs.v1",
 }
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
@@ -401,6 +405,8 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "assets":        None,
     "roles":         None,   # roles stored in CharacterCorpRoles (separate table)
     "transactions":  None,   # rows written by the fetcher into wallet_transactions
+    "orders":        "orders_json",     # T-041: net-worth escrow valuation
+    "industry":      "industry_json",   # T-041: net-worth WIP valuation
 }
 
 # UI staleness thresholds (based on last_synced, for indicator colours)
@@ -1265,6 +1271,61 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def fetch_orders_data(characters: list[Character], db: AsyncSession) -> dict:
+    """Open personal market orders, trimmed to what net-worth valuation needs
+    (T-041 item 4). Stored as JSON in CharacterDashboardCache.orders_json —
+    buy-order escrow + sell-order goods value feed the daily snapshot."""
+    async def _get(char):
+        if not _has_scope(char, "esi-markets.read_character_orders.v1"):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char)
+        if not client:
+            return char.character_id, None, err
+        try:
+            from app.esi import market as esi_market
+            orders = await esi_market.get_character_orders(client, char.character_id)
+            trimmed = [{
+                "type_id": o.get("type_id"),
+                "is_buy_order": bool(o.get("is_buy_order")),
+                "price": float(o.get("price") or 0),
+                "volume_remain": int(o.get("volume_remain") or 0),
+                "escrow": float(o.get("escrow") or 0),
+            } for o in orders or []]
+            return char.character_id, trimmed, None
+        except Exception as e:
+            logger.warning("Orders fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
+async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession) -> dict:
+    """Active personal industry jobs, trimmed for WIP valuation (T-041 item 4).
+    Stored as JSON in CharacterDashboardCache.industry_json."""
+    async def _get(char):
+        if not _has_scope(char, "esi-industry.read_character_jobs.v1"):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char)
+        if not client:
+            return char.character_id, None, err
+        try:
+            from app.esi import industry as esi_industry
+            jobs = await esi_industry.get_character_jobs(client, char.character_id)
+            trimmed = [{
+                "activity_id": j.get("activity_id"),
+                "blueprint_type_id": j.get("blueprint_type_id"),
+                "product_type_id": j.get("product_type_id"),
+                "runs": int(j.get("runs") or 0),
+                "status": j.get("status"),
+            } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
+            return char.character_id, trimmed, None
+        except Exception as e:
+            logger.warning("Industry jobs fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
 # Dispatch table — defined after all fetch functions
 _FIELD_FETCHERS = {
     "wallet":        fetch_wallet_data,
@@ -1278,6 +1339,8 @@ _FIELD_FETCHERS = {
     "assets":        fetch_assets_data,
     "roles":         fetch_corp_roles_data,
     "transactions":  fetch_wallet_transactions_data,
+    "orders":        fetch_orders_data,
+    "industry":      fetch_industry_jobs_data,
 }
 
 

@@ -10,15 +10,17 @@ cheap to value in a once-a-day batch job with no extra ESI round trips:
   * **assets** — `CharacterAssetCache.assets_json`, a flat JSON list of
     resolved asset stacks (`{type_id, quantity, ...}`), refreshed hourly.
 
-The other two are deliberately EXCLUDED (documented on the page footnote):
+Two further inputs joined in T-041 item 4, once their sync fields landed
+("orders" and "industry" in dashboard.py's `_FIELD_FETCHERS`, hourly):
 
-  * **market orders / sell-order escrow** — NOT synced anywhere. The
-    `orders_json` column on `CharacterDashboardCache` is vestigial (never
-    written) and `esi/market.get_character_orders` has no callers. Capturing
-    escrow would mean a new per-character ESI sync field — that's Task 5's
-    territory, not a valuation shortcut. The `escrow` column is kept at 0.0.
-  * **industry jobs (work-in-progress value)** — fetched live per request in
-    `industry_jobs.py`, never persisted.
+  * **market orders** (`CharacterDashboardCache.orders_json`) — buy orders
+    contribute their ISK `escrow`; sell orders contribute goods value
+    (global reference price of the type, falling back to the order's own
+    ask price, x volume_remain). Both land in the `escrow` column.
+  * **industry jobs** (`industry_json`) — active/paused/ready jobs valued
+    at product reference price x runs x per-run product quantity
+    (SDEBlueprintInfo). Jobs whose product has no reference price are
+    skipped. Lands in `industry_value`.
 
 **Valuation rule (the "no per-item ESI" constraint):** exactly ONE global
 price map (`app.market.lp.get_price_map`, backed by `/markets/prices/`) is
@@ -93,12 +95,64 @@ def _parse_assets(asset_cache: CharacterAssetCache | None) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+def _parse_json_list(raw: str | None) -> list[dict]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def value_orders(orders: list[dict], price_map: dict[int, float]) -> float:
+    """Market-locked value: buy-order ISK escrow + sell-order goods value.
+
+    Sell orders are valued at the global reference price when available
+    (consistent with asset valuation), falling back to the order's own ask
+    price — an unpriced type listed for sale still has the seller's price
+    as a defensible estimate. Pure math, unit-testable."""
+    total = 0.0
+    for o in orders:
+        if o.get("is_buy_order"):
+            total += float(o.get("escrow") or 0.0)
+        else:
+            price = price_map.get(o.get("type_id"))
+            if price is None:
+                price = float(o.get("price") or 0.0)
+            total += price * (o.get("volume_remain") or 0)
+    return total
+
+
+def value_industry_jobs(
+    jobs: list[dict],
+    price_map: dict[int, float],
+    product_qty_map: dict[int, int],
+) -> float:
+    """Work-in-progress value of active industry jobs.
+
+    Valued as the OUTPUT: reference price of the product x runs x per-run
+    product quantity (from SDEBlueprintInfo, keyed by blueprint_type_id;
+    defaults to 1). Jobs without a priced product contribute nothing —
+    consistent with how unpriced assets are skipped. Pure math."""
+    total = 0.0
+    for j in jobs:
+        pid = j.get("product_type_id")
+        price = price_map.get(pid) if pid is not None else None
+        if price is None:
+            continue
+        qty = product_qty_map.get(j.get("blueprint_type_id"), 1) or 1
+        total += price * (j.get("runs") or 0) * qty
+    return total
+
+
 def build_snapshot_values(
     char: Character,
     dash_cache: CharacterDashboardCache | None,
     asset_cache: CharacterAssetCache | None,
     price_map: dict[int, float],
     on_date: date_cls,
+    product_qty_map: dict[int, int] | None = None,
 ) -> dict | None:
     """Build the upsert `values` dict for one character, or None to skip.
 
@@ -116,9 +170,16 @@ def build_snapshot_values(
     if wallet is None and not assets:
         return None
 
+    escrow = 0.0
+    industry_value = 0.0
+    if dash_cache is not None:
+        escrow = value_orders(_parse_json_list(dash_cache.orders_json), price_map)
+        industry_value = value_industry_jobs(
+            _parse_json_list(dash_cache.industry_json), price_map,
+            product_qty_map or {})
+
     wallet_val = wallet or 0.0
-    escrow = 0.0  # not synced — see module docstring.
-    total = wallet_val + assets_value + escrow
+    total = wallet_val + assets_value + escrow + industry_value
     return {
         "character_id": char.character_id,
         "date": on_date,
@@ -126,6 +187,7 @@ def build_snapshot_values(
         "wallet": wallet_val,
         "assets_value": assets_value,
         "escrow": escrow,
+        "industry_value": industry_value,
         "total": total,
         "unpriced_count": unpriced,
         "recorded_at": datetime.now(timezone.utc).replace(tzinfo=None),
@@ -163,6 +225,23 @@ async def take_snapshots(
     )).scalars().all()
     asset_by_cid = {r.character_id: r for r in asset_rows}
 
+    # Per-run product quantities for WIP valuation — one bulk query for
+    # exactly the blueprints appearing in the synced industry jobs.
+    bp_ids: set[int] = set()
+    for r in dash_rows:
+        for j in _parse_json_list(r.industry_json):
+            if j.get("blueprint_type_id"):
+                bp_ids.add(j["blueprint_type_id"])
+    product_qty_map: dict[int, int] = {}
+    if bp_ids:
+        from app.db.sde_models import SDEBlueprintInfo
+        qty_rows = (await db.execute(
+            select(SDEBlueprintInfo.blueprint_type_id,
+                   SDEBlueprintInfo.product_quantity)
+            .where(SDEBlueprintInfo.blueprint_type_id.in_(bp_ids))
+        )).all()
+        product_qty_map = {r[0]: (r[1] or 1) for r in qty_rows}
+
     written = 0
     skipped = 0
     for char in characters:
@@ -172,6 +251,7 @@ async def take_snapshots(
             asset_by_cid.get(char.character_id),
             price_map,
             on_date,
+            product_qty_map=product_qty_map,
         )
         if values is None:
             skipped += 1
@@ -184,6 +264,7 @@ async def take_snapshots(
                 "wallet": stmt.excluded.wallet,
                 "assets_value": stmt.excluded.assets_value,
                 "escrow": stmt.excluded.escrow,
+                "industry_value": stmt.excluded.industry_value,
                 "total": stmt.excluded.total,
                 "unpriced_count": stmt.excluded.unpriced_count,
                 "recorded_at": stmt.excluded.recorded_at,

@@ -743,6 +743,8 @@ async def map_stats(request: Request):
     # Thera/Turnur public wormhole connections from Eve-Scout.
     # Each entry: {in_signature, in_system_id, out_system_id, wh_type, ...}
     # We expose an array of {src, dst, src_system, dst_system, type, mass_status, life_status}.
+    from app.intel.evescout import ANCHOR_SYSTEM_IDS
+
     thera = []
     for sig in _stats_cache.get("thera", {}).get("data", []) or []:
         src = sig.get("out_system_id")
@@ -759,6 +761,12 @@ async def map_stats(request: Request):
             "life_hours": sig.get("remaining_hours"),
             "sig": sig.get("out_signature") or "",
             "created_at": sig.get("created_at"),
+            # Which anchor hub ("Thera"/"Turnur") this hole routes through, so
+            # route-planner UI can label the leg (e.g. "via Thera"). Falls
+            # back to None for the rare row whose "out" side isn't a known
+            # anchor (shouldn't happen — EVE-Scout only publishes holes
+            # anchored at one of the two hubs).
+            "via": ANCHOR_SYSTEM_IDS.get(src),
         })
     result["thera"] = thera
 

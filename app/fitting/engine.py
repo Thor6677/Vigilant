@@ -134,34 +134,36 @@ PASSIVE_EFFECT_CATS = {EFFECT_CAT_PASSIVE, EFFECT_CAT_ONLINE}
 STACKING_CONSTANT = 7.1289
 
 
-# ── ISS-015: per-ship modifier overrides ────────────────────────────────
-# Some ships have SDE modifierInfo that targets the wrong filter — the
-# documented case is Sacrilege (type_id 12019) whose hull bonus rows
-# target skill 3306 (Medium Energy Turret) but should target a missile
-# skill, because CCP redirected the in-game bonus without updating
-# modifierInfo. Pyfa works around this with ~5000 hand-coded effect
-# handlers in `effects.py`.
-#
-# This table is the integration point: when populated, it overrides the
-# SDE modifier row's filter_type / filter_value at evaluation time.
-# Empty entries are a silent no-op preserving current behavior.
+# ── ISS-015 framework / ISS-029 audit: per-ship modifier overrides ───────
+# Historically some ships shipped SDE modifierInfo that targeted the wrong
+# filter — the documented case was the Sacrilege (type_id 12019), whose
+# damage bonus rows once pointed at skill 3306 (Medium Energy Turret) after
+# CCP converted it to a missile boat without updating modifierInfo. This
+# table is the integration point to correct such rows: when populated, it
+# overrides a modifier's filter_type / filter_value at evaluation time.
 #
 # Schema:
 #   { ship_type_id: { (effect_id, modifying_attribute_id): override } }
 # where `override` is a dict with optional keys 'filter_type', 'filter_value'.
 # Any key not present falls back to the SDE row's value, so partial
 # overrides are fine (e.g. just changing the skill ID while keeping
-# filter_type='skill').
+# filter_type='skill'). Empty entries are a silent no-op.
 #
-# Populating overrides requires verified EVE-domain knowledge per ship.
-# Reference: github.com/pyfa-org/Pyfa, eos/effects/ — Pyfa's per-effect
-# Python handlers encode the correct targeting.
-_SHIP_MODIFIER_OVERRIDES: dict[int, dict[tuple[int, int], dict]] = {
-    # TODO(ISS-015): populate. Example shape, NOT verified:
-    # 12019: {  # Sacrilege
-    #     (EFFECT_ID, MODIFYING_ATTR_ID): {'filter_value': 25719},  # Heavy Assault Missiles
-    # },
-}
+# ISS-029 audit (2026-07-09, against the live SDE, read-only): the current
+# modifierInfo is CORRECT for the Sacrilege and every audited Amarr /
+# Force-Recon-priority hull (Sacrilege, Zealot, Devoter, Guardian, Curse
+# [type_id 20125 — note 17722 is the Vigilant], Pilgrim, Rapier, Huginn,
+# Arazu, Lachesis, Falcon, Rook). Each hull's modifier filter_value was
+# cross-checked against CCP's own trait keyword (sde_type_bonuses) and
+# matches. The Sacrilege now targets 25719 (Heavy Assault Missiles) and
+# 3324 (Heavy Missiles) — precisely the value the ISS-015 example proposed
+# to inject — and nothing on 12019 references 3306. CCP fixed the redirect
+# upstream, so no overrides are warranted. This dict stays empty by design;
+# it is not a TODO. See tests/test_ship_modifier_overrides.py.
+#
+# If a future hull IS found broken, verify the correct target against
+# github.com/pyfa-org/Pyfa (eos/effects/) before adding an entry.
+_SHIP_MODIFIER_OVERRIDES: dict[int, dict[tuple[int, int], dict]] = {}
 
 
 def _modifier_filter(ship_type_id: int, mod) -> tuple[str | None, int | None]:

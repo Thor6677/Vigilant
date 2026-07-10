@@ -142,9 +142,18 @@
 @media (max-width: 1000px) {
     .b-grid-3 { grid-template-columns: repeat(2, 1fr); }
 }
-@media (max-width: 768px) {
+/* Nav-only breakpoint, deliberately separate from the general 768px tablet
+   block below: with 8 top-level groups (see app/nav.py) plus the notif
+   bell / Add Character / Logout links, .b-nav-links (display:flex, no
+   flex-wrap) starts overflowing the sticky nav well above 768px — the
+   hamburger needs to take over earlier than the rest of the tablet layout
+   does. Measured against the current registry; bump this if groups are
+   added. */
+@media (max-width: 1120px) {
     .b-nav-links { display: none; }
     .b-hamburger { display: flex; }
+}
+@media (max-width: 768px) {
     .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }
     .b-footer-links { flex-wrap: wrap; justify-content: center; }
     .b-breadcrumbs { padding: 0.5rem 1rem; }

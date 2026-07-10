@@ -155,14 +155,17 @@ class NetWorthSnapshot(Base):
       * `wallet`        — CharacterDashboardCache.wallet (synced).
       * `assets_value`  — qty x global reference price over the synced
                           CharacterAssetCache.assets_json list.
-      * `escrow`        — always 0.0 for now: personal market orders are not
-                          in any persisted sync cache (the orders_json column
-                          is vestigial), so buy-order escrow / sell-order value
-                          isn't available without new per-character ESI calls.
-                          Kept as a column for schema fidelity + future wiring.
-      * `total`         — wallet + assets_value + escrow, PER CHARACTER. The
-                          account-wide total is summed across a user's
-                          characters at query time, never stored as its own row.
+      * `escrow`        — buy-order ISK escrow + sell-order goods value from
+                          the synced CharacterDashboardCache.orders_json
+                          (hourly "orders" sync field, T-041 item 4).
+      * `industry_value`— output value of active/paused/ready industry jobs
+                          from industry_json ("industry" sync field): global
+                          reference price of the product x runs x per-run
+                          product quantity (SDEBlueprintInfo).
+      * `total`         — wallet + assets_value + escrow + industry_value,
+                          PER CHARACTER. The account-wide total is summed
+                          across a user's characters at query time, never
+                          stored as its own row.
       * `unpriced_count`— assets skipped because their type_id had no price in
                           the global map (BPCs, some rare items). Surfaced on
                           the page so the number isn't silently understated.
@@ -178,6 +181,7 @@ class NetWorthSnapshot(Base):
     wallet = Column(Float, nullable=False, default=0.0)
     assets_value = Column(Float, nullable=False, default=0.0)
     escrow = Column(Float, nullable=False, default=0.0)
+    industry_value = Column(Float, nullable=False, default=0.0)
     total = Column(Float, nullable=False, default=0.0)
     unpriced_count = Column(Integer, nullable=False, default=0)
     recorded_at = Column(DateTime, nullable=False,

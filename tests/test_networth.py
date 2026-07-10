@@ -24,7 +24,12 @@ from app.db.models import (
     CharacterDashboardCache,
     NetWorthSnapshot,
 )
-from app.networth.snapshot import take_snapshots, value_assets
+from app.networth.snapshot import (
+    take_snapshots,
+    value_assets,
+    value_industry_jobs,
+    value_orders,
+)
 
 import json
 
@@ -94,6 +99,37 @@ def test_value_assets_handles_empty_and_missing_qty():
     # Missing quantity defaults to 0 (not 1) so a malformed row can't inflate.
     total, unpriced = value_assets([{"type_id": 34}], {34: 5.0})
     assert total == 0.0 and unpriced == 0
+
+
+def test_value_orders_buy_escrow_plus_sell_goods():
+    orders = [
+        # Buy order: only its escrow counts, never price x volume.
+        {"type_id": 34, "is_buy_order": True, "price": 4.0,
+         "volume_remain": 1000, "escrow": 3500.0},
+        # Sell order with a reference price: valued at ref price, not ask.
+        {"type_id": 35, "is_buy_order": False, "price": 99.0,
+         "volume_remain": 10, "escrow": 0.0},
+        # Sell order without a reference price: falls back to its ask price.
+        {"type_id": 999999, "is_buy_order": False, "price": 2.5,
+         "volume_remain": 4, "escrow": 0.0},
+    ]
+    total = value_orders(orders, {34: 5.0, 35: 12.5})
+    assert total == 3500.0 + 12.5 * 10 + 2.5 * 4
+    assert value_orders([], {}) == 0.0
+
+
+def test_value_industry_jobs_output_valuation():
+    jobs = [
+        # 3 runs x qty 100/run x 6.0 = 1800
+        {"blueprint_type_id": 1001, "product_type_id": 44, "runs": 3},
+        # No per-run quantity known -> defaults to 1: 2 x 1 x 50 = 100
+        {"blueprint_type_id": 1002, "product_type_id": 45, "runs": 2},
+        # Unpriced product contributes nothing.
+        {"blueprint_type_id": 1003, "product_type_id": 999999, "runs": 9},
+    ]
+    total = value_industry_jobs(jobs, {44: 6.0, 45: 50.0}, {1001: 100})
+    assert total == 1800.0 + 100.0
+    assert value_industry_jobs([], {}, {}) == 0.0
 
 
 # ── snapshot: wallet + assets, idempotent upsert ────────────────────────────
@@ -240,7 +276,7 @@ def test_networth_page_renders_when_authenticated():
     body = r.text
     assert "Net Worth" in body
     assert "nw-chart" in body          # chart canvas scaffold present
-    assert "Excluded" in body          # exclusion footnote surfaced
+    assert "market-locked value" in body   # valuation footnote surfaced (T-041 item 4)
     assert "nav_groups" not in body    # nav rendered, not left as a literal
 
 

@@ -50,6 +50,9 @@ export interface TheraConnection {
   life_hours: number | null;
   sig: string;
   created_at?: string | null;
+  /** Anchor hub this hole routes through ("Thera" / "Turnur"), for labeling
+   * the leg in the gate route planner (e.g. "via Thera"). */
+  via?: string | null;
 }
 
 export interface MapStats {

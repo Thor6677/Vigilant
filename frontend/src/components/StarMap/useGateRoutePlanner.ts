@@ -101,6 +101,13 @@ export interface GateRoutePlannerState {
   /** Computed route — null when origin/dest not both set or no path exists. */
   activeRoute: number[] | null;
 
+  /** Which hops of activeRoute are Thera/Turnur wormhole legs rather than
+   *  stargate jumps, keyed by the *destination* system id of that hop —
+   *  e.g. activeRouteVia.get(activeRoute[i]) === 'Thera' means the jump
+   *  INTO activeRoute[i] used the Thera hole. Only populated when useThera
+   *  is on and the computed route actually used a spliced-in edge. */
+  activeRouteVia: Map<number, string>;
+
   /** Per-hop intel from /api/map/route-safety, keyed by system_id. */
   hopIntel: Map<number, HopIntel>;
   hopIntelLoading: boolean;
@@ -147,6 +154,7 @@ export function useGateRoutePlanner(
   const [avoidEntries, setAvoidEntries] = useState<AvoidEntry[]>([]);
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [activeRoute, setActiveRoute] = useState<number[] | null>(null);
+  const [activeRouteVia, setActiveRouteVia] = useState<Map<number, string>>(() => new Map());
   const [hopIntel, setHopIntel] = useState<Map<number, HopIntel>>(() => new Map());
   const [hopIntelLoading, setHopIntelLoading] = useState(false);
   const [activeCharacterId, setActiveCharacterId] = useState<number | null>(null);
@@ -403,12 +411,16 @@ export function useGateRoutePlanner(
     const graph = getGraph();
     if (!graph || origin === null || dest === null) {
       setActiveRoute(prev => (prev === null ? prev : null));
+      setActiveRouteVia(prev => (prev.size === 0 ? prev : new Map()));
       return;
     }
 
     // Optionally splice Thera/Turnur wormhole edges into the graph for this
     // compute only. Restored in `finally` so the gate-edge graph stays clean.
+    // Also index src/dst -> anchor label so we can tell pathfinding's flat
+    // system-id list which hops were wormhole legs (for "via Thera" labels).
     const theraEdgeKeys: string[] = [];
+    const theraViaByPair = new Map<string, string>();
     const theraConns = useThera && getTheraConnections ? getTheraConnections() : null;
     if (theraConns && theraConns.length) {
       for (const c of theraConns) {
@@ -416,6 +428,10 @@ export function useGateRoutePlanner(
         const a = String(c.src);
         const b = String(c.dst);
         if (!graph.hasNode(a) || !graph.hasNode(b)) continue;
+        if (c.via) {
+          const pairKey = c.src < c.dst ? `${c.src}-${c.dst}` : `${c.dst}-${c.src}`;
+          theraViaByPair.set(pairKey, c.via);
+        }
         if (graph.hasEdge(a, b)) continue;
         const key = graph.addEdge(a, b, { weight: 1 });
         theraEdgeKeys.push(key);
@@ -437,6 +453,7 @@ export function useGateRoutePlanner(
       if (!seg) {
         cleanup();
         setActiveRoute(null);
+        setActiveRouteVia(new Map());
         setErrorMessage(`No path between system ${stops[i]} and ${stops[i + 1]}`);
         return;
       }
@@ -449,6 +466,21 @@ export function useGateRoutePlanner(
       }
     }
     cleanup();
+
+    // Label any hop of the final path that matches a spliced Thera/Turnur
+    // edge, keyed by the hop's destination system id.
+    const viaMap = new Map<number, string>();
+    if (theraViaByPair.size > 0) {
+      for (let i = 0; i < fullPath.length - 1; i++) {
+        const a = fullPath[i];
+        const b = fullPath[i + 1];
+        const pairKey = a < b ? `${a}-${b}` : `${b}-${a}`;
+        const via = theraViaByPair.get(pairKey);
+        if (via) viaMap.set(b, via);
+      }
+    }
+    setActiveRouteVia(viaMap);
+
     // Bail out of state updates if the new path is identical to the previous
     // one (same systems in the same order). This prevents the infinite loop:
     // compute → setActiveRoute(newArr) → intel re-fetch → killWeights changes
@@ -614,6 +646,7 @@ export function useGateRoutePlanner(
     setDest(null);
     setWaypoints([]);
     setActiveRoute(null);
+    setActiveRouteVia(new Map());
     setErrorMessage(null);
   }, []);
 
@@ -630,6 +663,7 @@ export function useGateRoutePlanner(
     savedRoutes, saveCurrentRoute, deleteSavedRoute, loadSavedRoute, toggleShareSavedRoute, reloadSavedRoutes,
     loadRouteData,
     activeRoute,
+    activeRouteVia,
     hopIntel, hopIntelLoading,
     activeCharacterId, setActiveCharacterId,
     followCharacter, setFollowCharacter,

@@ -219,6 +219,7 @@ export function GateRoutePlannerPanel({
           </div>
           <RouteHopList
             route={planner.activeRoute}
+            routeVia={planner.activeRouteVia}
             stops={stops}
             waypoints={planner.waypoints}
             systems={systems}
@@ -411,6 +412,7 @@ export function GateRoutePlannerPanel({
 
 function RouteHopList({
   route,
+  routeVia,
   stops,
   waypoints,
   systems,
@@ -424,6 +426,9 @@ function RouteHopList({
 }: {
   /** Full pathfinding result — every gate hop. */
   route: number[];
+  /** Thera/Turnur wormhole legs, keyed by the hop's destination system id
+   *  (see useGateRoutePlanner's activeRouteVia). */
+  routeVia: Map<number, string>;
   /** User-set stops in order: [origin, ...waypoints, dest]. */
   stops: number[];
   /** Just the waypoint system IDs (origin / dest excluded). */
@@ -484,6 +489,9 @@ function RouteHopList({
 
         const intel = hopIntel.get(id);
         const threatColor = intel ? THREAT_COLORS[intel.threat] : null;
+        // Jump INTO this hop used a Thera/Turnur wormhole rather than a
+        // stargate — never true for the route's first entry (i === 0).
+        const viaHub = i > 0 ? routeVia.get(id) : undefined;
 
         return (
           <div key={`${id}-${i}`}>
@@ -560,6 +568,17 @@ function RouteHopList({
                 </span>
                 {sys.hasStation && !isIntermediate && (
                   <span style={{ color: '#33aa55', marginLeft: 3, fontSize: 7 }}>STN</span>
+                )}
+                {viaHub && (
+                  <span
+                    title={`This hop is a wormhole jump through the ${viaHub} connection, not a stargate`}
+                    style={{
+                      color: GATE_COLOR, marginLeft: 3, fontSize: 7,
+                      border: `1px solid ${GATE_COLOR}`, padding: '0 2px',
+                    }}
+                  >
+                    VIA {viaHub.toUpperCase()}
+                  </span>
                 )}
               </span>
 

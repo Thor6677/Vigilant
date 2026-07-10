@@ -72,6 +72,12 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   const tooltipTimerRef = useRef<number | null>(null);
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const qtRef = useRef<Quadtree<SystemData> | null>(null);
+  // Set by the "Parse URL params" effect below when ?focus=<id> is present,
+  // consumed once the Pixi viewport for the *current* `data` is ready (Pixi
+  // init is async, so the viewport isn't guaranteed to exist yet when the
+  // URL is parsed on mount). Cleared after use so a later space toggle
+  // (which re-runs the Pixi-init effect with new `data`) doesn't re-pan.
+  const pendingFocusRef = useRef<number | null>(null);
 
   const systemRendererRef = useRef<SystemRenderer | null>(null);
   const edgeRendererRef = useRef<EdgeRenderer | null>(null);
@@ -776,6 +782,25 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
       vp.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
       updateView(vp);
 
+      // Auto-pan to a system requested via ?focus=<id> (Ctrl+K palette and
+      // entity-link pages deep-link here). See pendingFocusRef declaration
+      // for why this is consumed here rather than in the URL-parsing effect.
+      if (pendingFocusRef.current !== null) {
+        const focusId = pendingFocusRef.current;
+        pendingFocusRef.current = null;
+        const focusSys = data.systemMap.get(focusId);
+        if (focusSys) {
+          vp.animate({
+            position: { x: focusSys.x, y: focusSys.y },
+            scale: 2,
+            time: 600,
+            ease: 'easeInOutCubic',
+          });
+          setSelectedSystem(focusSys);
+          systemRenderer.setSelected(focusId);
+        }
+      }
+
       // Update on zoom/pan
       vp.on('zoomed', () => {
         updateView(vp);
@@ -1184,9 +1209,10 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
   }, [characters, gateRoutePlanner.activeCharacterId, gateRoutePlanner]);
 
   // Parse URL params on mount and pre-populate the gate route planner.
-  // Supports two forms:
+  // Supports three forms:
   //   /map?route=<share_token>          → fetch shared SavedGateRoute and load
   //   /map?origin=X&dest=Y&waypoints=A,B&prefs=highsec → direct deep link
+  //   /map?focus=<system_id>            → pan/zoom to a system (Ctrl+K palette, entity links)
   // After loading, clean the URL via history.replaceState so a refresh
   // doesn't reload the same route.
   const urlHandledRef = useRef(false);
@@ -1200,6 +1226,7 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
     const destParam = params.get('dest');
     const waypointsParam = params.get('waypoints');
     const prefsParam = params.get('prefs');
+    const focusParam = params.get('focus');
 
     const cleanUrl = () => {
       window.history.replaceState({}, '', window.location.pathname);
@@ -1251,6 +1278,14 @@ export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystem
         gateRoutePlanner.setActive(true);
         cleanUrl();
       }
+    } else if (focusParam) {
+      const focusId = Number(focusParam);
+      if (!Number.isNaN(focusId)) {
+        // The Pixi viewport may not exist yet (async init) — stash the id
+        // and let the Pixi-init effect consume it once `vp` is ready.
+        pendingFocusRef.current = focusId;
+      }
+      cleanUrl();
     }
   }, [gateRoutePlanner]);
 

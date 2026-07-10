@@ -272,6 +272,8 @@ async def startup():
             "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
             # Fitting tool: implant loadout persisted with saved fits (ISS-016)
             "ALTER TABLE user_fittings ADD COLUMN implants_json TEXT NOT NULL DEFAULT '{}'",
+            # Net worth: industry work-in-progress value (T-041 item 4)
+            "ALTER TABLE net_worth_snapshots ADD COLUMN industry_value FLOAT NOT NULL DEFAULT 0",
             # ESI rate-limit events: soft-archive column for admin dismiss
             "ALTER TABLE esi_rate_limit_events ADD COLUMN archived_at DATETIME",
             # Indexes added in 2026-04 review-followup batch — create_all
