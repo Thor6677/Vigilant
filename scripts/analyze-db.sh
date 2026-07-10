@@ -35,7 +35,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[analyze-db] running sampled ANALYZE (analysis_limit=4000)..."
-docker run --rm -v vigilant_app_data:/data --entrypoint python3 vigilant-app - <<'PYEOF'
+# -i is required: python3 reads the script from stdin (a plain `docker run`
+# leaves stdin unattached and python3 exits silently having done nothing).
+docker run --rm -i -v vigilant_app_data:/data --entrypoint python3 vigilant-app - <<'PYEOF'
 import sqlite3, time
 
 t0 = time.time()
