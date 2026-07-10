@@ -1,31 +1,33 @@
-"""Industry → Trading P&L (Phase 5 Task 5).
+"""Industry → Trading P&L (Phase 5 Task 5; industry splits added T-041 item 2).
 
 Realized-profit tracking via FIFO matching of synced wallet transactions
-(buys → sells per type per character). All surfaces auth-gated:
+(buys → sells per type per character), extended with manufactured "build
+lots" synthesized from completed industry jobs. All surfaces auth-gated:
 
   * `/market/pnl`  — per-type realized P&L table + monthly bar chart, with an
-                     optional per-character filter.
+                     optional per-character filter. Shows Trading / Industry /
+                     Total splits.
 
-Everything is computed **on request** from the `wallet_transactions` table
-(filled by the dashboard sync's `transactions` field). The read is bounded by
-what's synced — one `SELECT ... ORDER BY date` over a user's characters, fed
-straight into the pure `app.market.pnl` engine — so there is no killmail-scale
-scan here. The FIFO/fee math and the flat-rate broker/tax assumptions live in
-`app/market/pnl.py`; this module is just query + present.
-
-Industry (manufacture-cost) P&L is deliberately OUT OF SCOPE — the page is
-titled "Trading P&L" and only reflects market flips. See the Phase 5 follow-up
-ticket for industry P&L.
+Wallet-transaction buys/sells are read straight from `wallet_transactions`
+(filled by the dashboard sync). Build lots are synthesized from
+`IndustryJobHistory` rows already priced at ingest (see
+`app/industry/job_cost.py`) — one buy-side transaction per completed job,
+priced at `build_cost / output_qty`, dated at completion. Both streams feed
+the same FIFO queue in `app.market.pnl.match_fifo`, tagged by `source`, so
+Trading vs Industry P&L falls out of one engine run. This module is just
+query + synthesize + present; the FIFO/fee math and the flat-rate
+broker/tax assumptions live in `app/market/pnl.py`.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Character, WalletTransaction, get_db
+from app.db.models import Character, IndustryJobHistory, WalletTransaction, get_db
+from app.industry import job_cost
 from app.market import pnl as pnl_engine
 from app.sde import lookup as sde
 
@@ -62,7 +64,8 @@ def _fmt_isk(v: float | None) -> str:
 async def pnl_page(
     request: Request, character_id: int = 0, db: AsyncSession = Depends(get_db),
 ):
-    """Trading P&L page. `character_id=0` = all of the user's characters."""
+    """Trading & Industry P&L page. `character_id=0` = all of the user's
+    characters."""
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/")
@@ -92,18 +95,46 @@ async def pnl_page(
         .order_by(WalletTransaction.date)
     )).all()
 
-    if not tx_rows:
+    # Build lots: completed jobs already priced at ingest (app/industry/job_cost.py),
+    # synthesized as buy-side transactions dated at completion. Negative
+    # transaction_id keeps the FIFO sort tiebreaker stable while being
+    # collision-free against real CCP transaction ids (always positive).
+    job_rows = (await db.execute(
+        select(
+            IndustryJobHistory.job_id, IndustryJobHistory.product_type_id,
+            IndustryJobHistory.output_qty, IndustryJobHistory.build_cost,
+            IndustryJobHistory.completed_date,
+        )
+        .where(IndustryJobHistory.character_id.in_(target_cids))
+        .where(IndustryJobHistory.build_cost.is_not(None))
+        .where(IndustryJobHistory.product_type_id.is_not(None))
+        .where(IndustryJobHistory.output_qty > 0)
+    )).all()
+
+    unpriced_jobs = (await db.execute(
+        select(func.count()).select_from(IndustryJobHistory)
+        .where(IndustryJobHistory.character_id.in_(target_cids))
+        .where(IndustryJobHistory.build_cost.is_(None))
+    )).scalar() or 0
+
+    if not tx_rows and not job_rows:
         return templates.TemplateResponse(request, "pnl.html", {
             "char_options": char_options, "selected_character_id": selected,
             "has_rows": False, "rows": [], "monthly": [],
             "totals": None, "unmatched_total": 0,
-            "assumptions": _assumptions(),
+            "assumptions": _assumptions(unpriced_jobs),
         })
 
     transactions = [{
         "transaction_id": tid, "date": d, "type_id": type_id,
         "quantity": qty, "unit_price": price, "is_buy": bool(is_buy),
     } for tid, d, type_id, qty, price, is_buy in tx_rows]
+    transactions += [{
+        "transaction_id": -job_id, "date": completed_date,
+        "type_id": product_type_id, "quantity": output_qty,
+        "unit_price": build_cost / output_qty, "is_buy": True,
+        "source": "build",
+    } for job_id, product_type_id, output_qty, build_cost, completed_date in job_rows]
 
     result = pnl_engine.match_fifo(transactions)
     per_type = pnl_engine.aggregate_by_type(result)
@@ -124,11 +155,19 @@ async def pnl_page(
         "margin_pct": r["margin_pct"],
         "margin_pct_str": (f"{r['margin_pct']:.1f}%" if r["margin_pct"] is not None else "—"),
         "profit_positive": r["realized_isk"] >= 0,
+        # Muted trade/build split annotation — only shown when the type has
+        # any industry-sourced profit mixed in with its trades.
+        "split_note": (
+            f"T: {_fmt_isk(r['trade_profit'])} · B: {_fmt_isk(r['build_profit'])}"
+            if r["build_profit"] != 0 else None
+        ),
     } for r in per_type if r["qty_flipped"] > 0]
 
     monthly_chart = {
         "labels": [m["month"] for m in monthly],
         "realized": [m["realized_isk"] for m in monthly],
+        "trade": [m["trade_profit"] for m in monthly],
+        "build": [m["build_profit"] for m in monthly],
     }
 
     return templates.TemplateResponse(request, "pnl.html", {
@@ -140,18 +179,26 @@ async def pnl_page(
         "totals": {
             "realized_isk_str": _fmt_isk(grand["realized_isk"]),
             "realized_positive": grand["realized_isk"] >= 0,
+            "trade_isk_str": _fmt_isk(grand["trade_profit"]),
+            "trade_positive": grand["trade_profit"] >= 0,
+            "build_isk_str": _fmt_isk(grand["build_profit"]),
+            "build_positive": grand["build_profit"] >= 0,
             "qty_flipped_str": f"{grand['qty_flipped']:,}",
             "types_traded": grand["types_traded"],
         },
         "unmatched_total": grand["unmatched_sell_qty"],
-        "assumptions": _assumptions(),
+        "assumptions": _assumptions(unpriced_jobs),
     })
 
 
-def _assumptions() -> dict:
-    """Flat-rate fee/tax figures surfaced in the page footnote, sourced from the
-    single source of truth in the engine so page + math never drift."""
+def _assumptions(unpriced_jobs: int = 0) -> dict:
+    """Flat-rate fee/tax figures + industry-valuation assumptions surfaced in
+    the page footnote, sourced from the single source of truth in the engine
+    / job_cost module so page + math never drift."""
     return {
         "broker_pct": pnl_engine.BROKER_FEE_RATE * 100,
         "sales_tax_pct": pnl_engine.SALES_TAX_RATE * 100,
+        "me_manufacturing": job_cost.ME_MANUFACTURING,
+        "me_reaction": job_cost.ME_REACTION,
+        "unpriced_jobs": unpriced_jobs,
     }

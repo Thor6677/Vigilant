@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Trading P&L — Industry — VIGILANT{% endblock %}
+{% block title %}Trading & Industry P&L — Industry — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 <div class="b-breadcrumbs">
     <a href="/market">Market</a>
     <span class="b-crumb-sep">&gt;</span>
-    <span class="b-crumb-current">Trading P&amp;L</span>
+    <span class="b-crumb-current">Trading &amp; Industry P&amp;L</span>
 </div>
 {% endblock %}
 
@@ -32,9 +32,9 @@
 {% block content %}
 <div class="b-page-header">
     <div>
-        <h1 class="b-page-title">Trading P&amp;L</h1>
+        <h1 class="b-page-title">Trading &amp; Industry P&amp;L</h1>
         <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
-            Realized profit from market flips — buys FIFO-matched against sells per item, across your synced wallet transactions. Manufacturing / industry P&amp;L is not included.
+            Realized profit from market flips and completed manufacturing/reaction jobs — buys and build lots FIFO-matched against sells per item, across your synced wallet transactions and industry job history.
         </p>
     </div>
     <div class="pnl-filter">
@@ -52,15 +52,28 @@
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">No transaction data yet</span></div>
     <div class="b-empty" style="padding:1rem;">
-        No wallet transactions have been synced yet. Trading P&amp;L data accumulates automatically after the next character sync — once your buy/sell fills come in, this page fills itself in. (Only characters granting the wallet scope are included.)
+        No wallet transactions or completed industry jobs have been synced yet. P&amp;L data accumulates automatically after the next character sync — once your buy/sell fills (or completed manufacturing/reaction jobs) come in, this page fills itself in. (Only characters granting the relevant ESI scopes are included.)
+        {% if assumptions.unpriced_jobs %}
+        <br><br>{{ assumptions.unpriced_jobs }} completed jobs awaiting pricing are excluded (revalued automatically on a future sync) — they will appear here once material prices resolve.
+        {% endif %}
     </div>
 </div>
 {% else %}
 <div class="pnl-stats">
     <div class="pnl-stat">
         <div class="pnl-stat-val {% if totals.realized_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ totals.realized_isk_str }}</div>
-        <div class="pnl-stat-label">Realized profit</div>
+        <div class="pnl-stat-label">Total realized profit</div>
     </div>
+    <div class="pnl-stat">
+        <div class="pnl-stat-val {% if totals.trade_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ totals.trade_isk_str }}</div>
+        <div class="pnl-stat-label">Trading</div>
+    </div>
+    <div class="pnl-stat">
+        <div class="pnl-stat-val {% if totals.build_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ totals.build_isk_str }}</div>
+        <div class="pnl-stat-label">Industry</div>
+    </div>
+</div>
+<div class="pnl-stats" style="grid-template-columns:repeat(2,1fr);">
     <div class="pnl-stat"><div class="pnl-stat-val">{{ totals.qty_flipped_str }}</div><div class="pnl-stat-label">Units flipped</div></div>
     <div class="pnl-stat"><div class="pnl-stat-val">{{ totals.types_traded }}</div><div class="pnl-stat-label">Item types traded</div></div>
 </div>
@@ -84,7 +97,10 @@
             <tbody>
                 {% for r in rows %}
                 <tr>
-                    <td><a href="/market/type/{{ r.type_id }}" style="color:var(--accent);">{{ r.type_name }}</a></td>
+                    <td>
+                        <a href="/market/type/{{ r.type_id }}" style="color:var(--accent);">{{ r.type_name }}</a>
+                        {% if r.split_note %}<div style="color:var(--muted);font-size:9px;margin-top:1px;">{{ r.split_note }}</div>{% endif %}
+                    </td>
                     <td class="{% if r.profit_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ r.realized_isk_str }}</td>
                     <td>{{ r.qty_flipped_str }}</td>
                     <td>{{ r.margin_pct_str }}</td>
@@ -95,6 +111,9 @@
     </div>
     <p class="pnl-note">
         <strong>Assumptions:</strong> fees/taxes are applied at flat rates — broker fee {{ "%.2f"|format(assumptions.broker_pct) }}% on each side (buy + sell) and sales tax {{ "%.2f"|format(assumptions.sales_tax_pct) }}% on sells. Actual in-game rates vary with your Broker Relations / Accounting skills and standings, so figures are indicative, not exact.
+        <br><strong>Build costs</strong> assume ME {{ assumptions.me_manufacturing }} manufacturing / ME {{ assumptions.me_reaction }} reactions, neutral facility (no structure/rig/security bonuses) — ESI jobs don't expose blueprint ME or the facility a job ran in.
+        <br><strong>Build lots are priced at the job's completion date</strong> (Jita daily-average market history for that day, falling back to the current global reference price when history is unavailable) and never drift with today's prices.
+        {% if assumptions.unpriced_jobs %}<br>{{ assumptions.unpriced_jobs }} completed jobs awaiting pricing are excluded (revalued automatically on a future sync).{% endif %}
         {% if unmatched_total %}<br><strong>Unmatched sells excluded:</strong> {{ "{:,}".format(unmatched_total) }} units were sold with no matching buy in the synced history (their purchase predates your data) and are left out of P&amp;L.{% endif %}
         Avg margin is cost-weighted (realized profit ÷ effective buy cost).{% if selected_character_id == 0 %} The <strong>All characters</strong> view pools every character's fills into one FIFO book — one alt's buy can match another's sell for the same item.{% endif %}
     </p>
@@ -124,27 +143,38 @@
         if (n >= 1e3) return sign + (n / 1e3).toFixed(1) + 'K';
         return sign + n.toFixed(0);
     }
-    var colors = MONTHLY.realized.map(function (v) {
+    // Two stacked datasets — Trading (existing green/red palette) and
+    // Industry (muted gold/red variant). Works fine when one side is all
+    // zeros (e.g. no build lots yet): Chart.js just renders a zero-height
+    // segment, no special-casing needed.
+    var tradeColors = MONTHLY.trade.map(function (v) {
         return v >= 0 ? 'rgba(147,196,125,0.55)' : 'rgba(224,102,102,0.55)';
+    });
+    var buildColors = MONTHLY.build.map(function (v) {
+        return v >= 0 ? 'rgba(200,169,81,0.55)' : 'rgba(224,102,102,0.3)';
     });
     new Chart(document.getElementById('pnl-chart'), {
         type: 'bar',
         data: {
             labels: MONTHLY.labels,
-            datasets: [{ label: 'Realized profit', data: MONTHLY.realized,
-                         backgroundColor: colors, borderWidth: 0 }]
+            datasets: [
+                { label: 'Trading', data: MONTHLY.trade,
+                  backgroundColor: tradeColors, borderWidth: 0, stack: 'pnl' },
+                { label: 'Industry', data: MONTHLY.build,
+                  backgroundColor: buildColors, borderWidth: 0, stack: 'pnl' }
+            ]
         },
         options: {
             responsive: true, maintainAspectRatio: false, animation: false,
             scales: {
-                x: { ticks: { color: '#888' }, grid: { color: '#1a1a1a' } },
-                y: { ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
+                x: { stacked: true, ticks: { color: '#888' }, grid: { color: '#1a1a1a' } },
+                y: { stacked: true, ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
                      grid: { color: '#1a1a1a' } }
             },
             plugins: {
-                legend: { display: false },
+                legend: { display: true, labels: { color: '#888', boxWidth: 10, font: { size: 10 } } },
                 tooltip: { callbacks: { label: function (ctx) {
-                    return 'Realized: ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                    return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
                 } } }
             }
         }
