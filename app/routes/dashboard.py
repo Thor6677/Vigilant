@@ -879,37 +879,6 @@ async def api_server_status(db: AsyncSession = Depends(get_db)):
     return JSONResponse(status)
 
 
-@router.get("/api/live-pcu", response_class=HTMLResponse)
-async def api_live_pcu(request: Request, db: AsyncSession = Depends(get_db)):
-    """HTML partial: current ESI player count + delta vs previous snapshot.
-    Swapped by htmx every 60s on the /tools/activity page."""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    stale_cutoff = now - timedelta(minutes=5)
-
-    rows = (await db.execute(
-        select(PlayerCountSnapshot.player_count, PlayerCountSnapshot.recorded_at)
-        .where(PlayerCountSnapshot.source == "esi")
-        .order_by(PlayerCountSnapshot.recorded_at.desc())
-        .limit(2)
-    )).all()
-
-    count = None
-    delta = None
-    if rows and rows[0].recorded_at >= stale_cutoff:
-        count = rows[0].player_count
-        delta = (count - rows[1].player_count) if len(rows) == 2 else None
-
-    count_str = None
-    if count is not None:
-        count_str = f"{count / 1000:.1f}K" if count >= 1000 else str(count)
-
-    return templates.TemplateResponse(
-        request,
-        "partials/live_pcu_tile.html",
-        {"count_str": count_str, "delta": delta},
-    )
-
-
 async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -> dict:
     async def _get(char):
         if not _has_scope(char, "esi-skills.read_skillqueue.v1"):
@@ -1783,6 +1752,38 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Cache GC error: %s", e)
 
+            # One-time dashboard panel pre-warm (ISS-018). SWR panels go cold
+            # on every container restart, making the first dashboard visit
+            # after a deploy eat 3-9s of synchronous compute. Warm them in the
+            # background ~2 min after boot (delay avoids the SQLite writer
+            # stampede while character syncs settle).
+            if not getattr(_background_scheduler, '_panels_prewarm_started', False):
+                _background_scheduler._panels_prewarm_started = True
+
+                async def _prewarm_dashboard_panels():
+                    await asyncio.sleep(120)
+                    try:
+                        from app.config import get_settings as _pg
+                        _cfg = _pg()
+                        from app.db.models import User as _User
+                        async with AsyncSessionLocal() as _pdb:
+                            _uids = [r[0] for r in (await _pdb.execute(select(_User.id))).all()]
+                        _year = datetime.now(timezone.utc).year
+                        for _uid in _uids:
+                            await _refresh_corp_stats_background(_uid)
+                            if _cfg.killmails_enabled and _cfg.killmail_dashboard_enabled:
+                                await _refresh_kill_pulse_background(_uid, 30)
+                                await _refresh_combat_profile_background(_uid, _year)
+                        if _cfg.killmails_enabled and _cfg.killmail_dashboard_enabled:
+                            await _refresh_dashboard_activity_background("24h")
+                        if _cfg.killmails_enabled and _cfg.killmail_battles_enabled:
+                            await _refresh_recent_battles_background()
+                        logger.info("dashboard panel pre-warm complete (%d user(s))", len(_uids))
+                    except Exception as e:
+                        logger.warning("dashboard panel pre-warm error: %s", e)
+
+                asyncio.create_task(_prewarm_dashboard_panels())
+
             # Inventory threshold check (every 5 minutes)
             if not hasattr(_background_scheduler, '_last_inv_check') or \
                (now - _background_scheduler._last_inv_check).total_seconds() >= 300:
@@ -2635,12 +2636,15 @@ async def dashboard_combat_profile(
     return templates.TemplateResponse(request, "partials/dashboard_combat_profile.html", ctx)
 
 
-@router.get("/dashboard/recent-battles", response_class=HTMLResponse)
-async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(get_db)):
-    from app.config import get_settings as _gs
-    cfg = _gs()
-    if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
-        return HTMLResponse("")
+# ISS-018: SWR cache for recent-battles. Battle data is global (not
+# per-user) and only changes when the 15-min discovery tick lands, so a
+# single cached context with a 5-min TTL removes the ~1.6s median cost.
+_recent_battles_cache: dict[str, dict] = {}
+_recent_battles_revalidating: set[str] = set()
+_RECENT_BATTLES_TTL = 300
+
+
+async def _compute_recent_battles_context() -> dict:
     from app.intel.recent_battles import query_battles_window
     groups = await query_battles_window(days=7)
 
@@ -2684,43 +2688,71 @@ async def dashboard_recent_battles(request: Request, db: AsyncSession = Depends(
         })
     rollup.sort(key=lambda r: r["total_kills"], reverse=True)
     top10 = sorted(all_battles, key=lambda b: b["kill_count"] or 0, reverse=True)[:10]
-
-    return templates.TemplateResponse(
-        request, "partials/dashboard_recent_battles.html",
-        {"rollup": rollup, "top10": top10},
-    )
+    return {"rollup": rollup, "top10": top10}
 
 
-@router.get("/dashboard/activity", response_class=HTMLResponse)
-async def dashboard_activity(
-    request: Request,
-    window: str = "24h",
-    db: AsyncSession = Depends(get_db),
-):
-    """Activity overlay: ISK destroyed + concurrent player count over a
-    selectable window. Same chart, dual y-axis. Universe-wide ISK from the
-    killmails table; PCU from player_count_snapshots (source='esi')."""
+async def _refresh_recent_battles_background() -> None:
+    try:
+        ctx = await _compute_recent_battles_context()
+        _recent_battles_cache["all"] = {
+            "context": ctx,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_RECENT_BATTLES_TTL),
+        }
+    except Exception as e:
+        logger.info("recent-battles SWR refresh failed: %s", e)
+    finally:
+        _recent_battles_revalidating.discard("all")
+
+
+@router.get("/dashboard/recent-battles", response_class=HTMLResponse)
+async def dashboard_recent_battles(request: Request):
     from app.config import get_settings as _gs
     cfg = _gs()
-    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+    if not (cfg.killmails_enabled and cfg.killmail_battles_enabled):
         return HTMLResponse("")
 
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+    cached = _recent_battles_cache.get("all")
+    now = datetime.now(timezone.utc)
+    if cached:
+        if cached["expires_at"] <= now and "all" not in _recent_battles_revalidating:
+            _recent_battles_revalidating.add("all")
+            asyncio.create_task(_refresh_recent_battles_background())
+        return templates.TemplateResponse(
+            request, "partials/dashboard_recent_battles.html", cached["context"]
+        )
 
-    # Window → (cutoff_delta, bin_seconds, label_fmt). Bins match the
-    # /tools/activity panel so both views read the same way (~150-300
-    # points per window).
-    windows = {
-        "1h":    (timedelta(hours=1),    60,           "%H:%M"),
-        "24h":   (timedelta(hours=24),   5 * 60,       "%H:%M"),
-        "week":  (timedelta(days=7),     30 * 60,      "%b %d %H:%M"),
-        "month": (timedelta(days=30),    3 * 3600,     "%b %d %H:00"),
+    # Cold path — synchronous compute, prime cache.
+    ctx = await _compute_recent_battles_context()
+    _recent_battles_cache["all"] = {
+        "context": ctx,
+        "expires_at": now + timedelta(seconds=_RECENT_BATTLES_TTL),
     }
-    if window not in windows:
-        window = "24h"
-    delta, bin_seconds, label_fmt = windows[window]
+    return templates.TemplateResponse(
+        request, "partials/dashboard_recent_battles.html", ctx)
+
+
+# ISS-018: SWR cache for the dashboard activity overlay. ISK/PCU data is
+# universe-wide (identical for every user), so cache per window string.
+_dash_activity_cache: dict[str, dict] = {}
+_dash_activity_revalidating: set[str] = set()
+_DASH_ACTIVITY_TTL = 300
+
+# Window → (cutoff_delta, bin_seconds, label_fmt). Bins match the
+# /tools/activity panel so both views read the same way (~150-300
+# points per window).
+_DASH_ACTIVITY_WINDOWS = {
+    "1h":    (timedelta(hours=1),    60,           "%H:%M"),
+    "24h":   (timedelta(hours=24),   5 * 60,       "%H:%M"),
+    "week":  (timedelta(days=7),     30 * 60,      "%b %d %H:%M"),
+    "month": (timedelta(days=30),    3 * 3600,     "%b %d %H:00"),
+}
+
+
+async def _compute_dashboard_activity_context(window: str, db: AsyncSession) -> dict:
+    """Activity overlay context: ISK destroyed + concurrent player count over
+    a selectable window. Universe-wide ISK from the killmails table; PCU from
+    player_count_snapshots (source='esi')."""
+    delta, bin_seconds, label_fmt = _DASH_ACTIVITY_WINDOWS[window]
 
     from app.db.models import Killmail, PlayerCountSnapshot
     from sqlalchemy import Integer, func as _func
@@ -2774,14 +2806,67 @@ async def dashboard_activity(
             pcu_values[i] = round(float(avg_pc))
     peak_pcu = max((v for v in pcu_values if v is not None), default=0)
 
-    return templates.TemplateResponse(request, "partials/dashboard_activity.html", {"window": window,
-            "labels": labels,
-            "isk_values": isk_buckets,
-            "pcu_values": pcu_values,
-            "total_isk": total_isk,
-            "peak_pcu": peak_pcu,
-        },
-    )
+    return {
+        "window": window,
+        "labels": labels,
+        "isk_values": isk_buckets,
+        "pcu_values": pcu_values,
+        "total_isk": total_isk,
+        "peak_pcu": peak_pcu,
+    }
+
+
+async def _refresh_dashboard_activity_background(window: str) -> None:
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            ctx = await _compute_dashboard_activity_context(window, bg_db)
+        _dash_activity_cache[window] = {
+            "context": ctx,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_DASH_ACTIVITY_TTL),
+        }
+    except Exception as e:
+        logger.info("dashboard-activity SWR refresh failed for %s: %s", window, e)
+    finally:
+        _dash_activity_revalidating.discard(window)
+
+
+@router.get("/dashboard/activity", response_class=HTMLResponse)
+async def dashboard_activity(
+    request: Request,
+    window: str = "24h",
+    db: AsyncSession = Depends(get_db),
+):
+    """Activity overlay panel — SWR-cached per window (data is global)."""
+    from app.config import get_settings as _gs
+    cfg = _gs()
+    if not (cfg.killmails_enabled and cfg.killmail_dashboard_enabled):
+        return HTMLResponse("")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("<div class='b-empty'>Forbidden.</div>", status_code=403)
+
+    if window not in _DASH_ACTIVITY_WINDOWS:
+        window = "24h"
+
+    cached = _dash_activity_cache.get(window)
+    now = datetime.now(timezone.utc)
+    if cached:
+        if cached["expires_at"] <= now and window not in _dash_activity_revalidating:
+            _dash_activity_revalidating.add(window)
+            asyncio.create_task(_refresh_dashboard_activity_background(window))
+        return templates.TemplateResponse(
+            request, "partials/dashboard_activity.html", cached["context"]
+        )
+
+    # Cold path — synchronous compute, prime cache.
+    ctx = await _compute_dashboard_activity_context(window, db)
+    _dash_activity_cache[window] = {
+        "context": ctx,
+        "expires_at": now + timedelta(seconds=_DASH_ACTIVITY_TTL),
+    }
+    return templates.TemplateResponse(
+        request, "partials/dashboard_activity.html", ctx)
 
 
 @router.get("/dashboard/big-battle-banner", response_class=HTMLResponse)

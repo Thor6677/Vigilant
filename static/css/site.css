@@ -244,6 +244,108 @@
 .el-chip:hover { color: var(--text); border-color: var(--muted); }
 .el-chip.is-ext::after { content: " \2197"; font-size: 9px; }
 
+/* ── Range filter buttons (character_detail / mining_ledger / structure_timers) ── */
+/* T-039: was defined verbatim in all three template style blocks; promoted
+   here since the rules were byte-identical across all three. */
+.range-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.range-btn:hover { color: var(--text); border-color: var(--muted); }
+.range-btn.is-active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(200, 169, 81, 0.07);
+}
+
+/* ── Killfeed shared (.kf-*) ── */
+/* T-039: rules identical (or trivially combinable) between intel_kills.html
+   and intel_kills_search.html — the search page copies the live feed's
+   kill-row/detail-panel markup ("Feature A pattern") to render results.
+   Kept here so both pages stay in sync; each template still owns the
+   .kf-* rules that are unique to its own layout (filter chips on
+   intel_kills.html; .kfs-* filter UI on intel_kills_search.html). */
+.kf-row {
+    display:grid; grid-template-columns:36px 1fr 90px; gap:10px; padding:8px 0;
+    border-bottom:1px solid var(--border); align-items:center; font-size:11px;
+    color:var(--text); cursor:pointer; transition: background-color 0.2s ease;
+}
+.kf-row:hover { background:rgba(94,177,255,0.04); }
+.kf-row.open { background:rgba(94,177,255,0.08); border-bottom:1px solid var(--accent); }
+.kf-ship-thumb { width:36px; height:36px; border-radius:3px; background:var(--surface); }
+.kf-meta-top { color:var(--text); }
+.kf-meta-bot { color:var(--muted); font-size:10px; }
+.kf-isk { text-align:right; color:#facc15; font-weight:600; }
+.kf-ago { display:block; color:var(--muted); font-size:9px; font-weight:400; }
+.kf-sys-hs { color:#4ade80; }
+.kf-sys-ls { color:#facc15; }
+.kf-sys-ns { color:#ef4444; }
+.kf-sys-wh { color:#a78bfa; }
+.kf-sys-unknown { color:var(--muted); }
+.kf-npc-badge { display:inline-block; background:var(--surface); color:var(--muted); padding:0 4px; font-size:8px; font-weight:600; letter-spacing:0.08em; border-radius:2px; border:1px solid var(--border); margin-left:4px; vertical-align:middle; }
+/* Expand/collapse animation: max-height 0 → grown, with opacity + padding eased. */
+.kf-detail {
+    background:rgba(94,177,255,0.04);
+    border-bottom:2px solid var(--accent);
+    max-height:0;
+    opacity:0;
+    overflow:hidden;
+    padding:0 14px;
+    transition: max-height 0.4s ease-out, opacity 0.3s ease-out 0.05s, padding 0.3s ease-out;
+}
+.kf-detail.shown {
+    max-height:2400px;
+    opacity:1;
+    padding:14px;
+}
+.kf-detail h4 { margin:0 0 6px; font-size:10px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase; }
+/* 3 columns: Victim+ISK | Fitting | Attackers */
+.kf-detail-grid { display:grid; grid-template-columns:240px minmax(0,1fr) 320px; gap:16px; align-items:start; }
+.kf-detail-left, .kf-detail-middle, .kf-detail-right { min-width:0; }
+.kf-detail-right { max-height:560px; overflow-y:auto; padding-right:4px; }
+.kf-isk-block { margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+.kf-isk-value { font-size:18px; color:#facc15; font-weight:600; margin:4px 0 10px; font-family:"SF Mono",Menlo,monospace; }
+.kf-zkb-link { font-size:10px; color:var(--accent); text-decoration:none; border:1px solid var(--accent); padding:4px 8px; display:inline-block; border-radius:3px; }
+.kf-victim-card { display:flex; gap:12px; align-items:flex-start; font-size:11px; line-height:1.6; }
+.kf-slot-group { margin-bottom:6px; }
+.kf-slot-label { font-size:9px; color:var(--muted); letter-spacing:0.12em; margin-bottom:2px; text-transform:uppercase; }
+.kf-slot { display:grid; grid-template-columns:18px 1fr 14px; gap:6px; padding:2px 0; align-items:center; font-size:10px; }
+.kf-slot-name { color:var(--text); }
+.kf-slot-name.dropped { color:#4ade80; }
+.kf-slot-name.destroyed { color:#ef4444; opacity:0.85; }
+.kf-slot-dot { width:6px; height:6px; border-radius:50%; }
+.kf-slot-dot.d { background:#ef4444; }
+.kf-slot-dot.k { background:#4ade80; }
+/* Compact attacker rows for the right column (zKB-style). */
+.kf-attacker-compact { display:grid; grid-template-columns:28px 1fr; gap:8px; padding:6px 0; border-bottom:1px dotted var(--border); align-items:start; font-size:11px; }
+.kf-attacker-compact.fb { background:rgba(239,68,68,0.05); margin:0 -4px; padding-left:4px; padding-right:4px; }
+.kf-attacker-compact .info { min-width:0; }
+.kf-attacker-compact .line1 { color:var(--text); }
+.kf-attacker-compact .line1 a { color:var(--text); font-weight:600; text-decoration:none; }
+.kf-attacker-compact .line2 { color:var(--muted); font-size:10px; margin-top:1px; }
+.kf-attacker-compact .line2 .ship { color:var(--accent); }
+.kf-attacker-compact .line3 { font-size:10px; margin-top:3px; color:#facc15; display:flex; align-items:center; gap:6px; }
+.kf-attacker-compact .line3 .dmg-none { color:var(--muted); }
+.kf-attacker-compact .line3 .pct { color:var(--muted); font-size:9px; }
+.kf-attacker-compact .kf-dmg-bar { flex:1; min-width:30px; margin-top:0; }
+.kf-fb-badge { display:inline-block; background:#ef4444; color:#0a0c0f; padding:1px 5px; font-size:8px; font-weight:700; letter-spacing:0.08em; border-radius:2px; margin-left:4px; vertical-align:middle; }
+.kf-dmg-bar { height:4px; background:var(--surface); border-radius:2px; margin-top:3px; overflow:hidden; }
+.kf-dmg-bar .fill { height:100%; background:linear-gradient(90deg,#facc15,#ef4444); }
+@keyframes kf-row-in {
+    0%   { opacity:0; transform:translateY(-8px); background-color:rgba(94,177,255,0.18); }
+    60%  { opacity:1; transform:translateY(0); background-color:rgba(94,177,255,0.10); }
+    100% { background-color:transparent; }
+}
+.kf-row.kf-new { animation: kf-row-in 0.55s ease-out; }
+
 /* ── Structure-age estimate (tool page + wormhole system embed) ─────────── */
 .sa-input {
     width: 100%; padding: 0.5rem 0.6rem;

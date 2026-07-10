@@ -55,6 +55,42 @@ def test_time_bound_date_sort_hints_both_page_and_count():
     assert f"FROM killmails INDEXED BY {KILLMAIL_TIME_INDEX}" in count_sql
 
 
+def test_victim_entity_filter_suppresses_hint():
+    """T-037 item 1: victim-side equality filters hit composite victim
+    indexes (ix_km_victim_*_time) that beat the forced time index by 17-660x
+    on the prod DB — so any victim filter must suppress INDEXED BY on BOTH
+    the page and count statements."""
+    for extra in (
+        {"victim_corps": [98593817]},
+        {"victim_chars": [90000001]},
+        {"victim_allis": [99000001]},
+        {"victim_ships": [670]},
+        {"ship_ids": [670]},
+    ):
+        compiled = _compile({"time_preset": "7d", "sort": "date",
+                             "direction": "desc", **extra})
+        assert compiled["has_selective_victim"] is True, extra
+        stmt, count_stmt = _build_search_statements(compiled, live=0, since=0)
+        assert "INDEXED BY" not in _sql(stmt), extra
+        assert "INDEXED BY" not in _sql(count_stmt), extra
+
+
+def test_attacker_and_either_filters_keep_hint():
+    """Attacker EXISTS shapes measured hint-neutral on prod (the outer query
+    drives from the time index either way), and either_* mixes attacker
+    EXISTS into an OR — neither suppresses the hint."""
+    for extra in (
+        {"attacker_corps": [98593817]},
+        {"either_corps": [98593817]},
+    ):
+        compiled = _compile({"time_preset": "7d", "sort": "date",
+                             "direction": "desc", **extra})
+        assert compiled["has_selective_victim"] is False, extra
+        stmt, count_stmt = _build_search_statements(compiled, live=0, since=0)
+        assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(stmt), extra
+        assert f"INDEXED BY {KILLMAIL_TIME_INDEX}" in _sql(count_stmt), extra
+
+
 def test_custom_time_start_also_counts_as_time_bound():
     compiled = _compile({
         "time_start": datetime(2026, 1, 1),

@@ -16,6 +16,7 @@ category.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,7 +25,6 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Float, Integer, and_, cast, exists, func, or_, select
-from sqlalchemy.dialects.sqlite.base import SQLiteCompiler
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Killmail, KillmailAttacker, get_db
@@ -36,46 +36,54 @@ from app.sde import lookup as sde_lookup
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# ── SQLite INDEXED BY hint support ──────────────────────────────────────
-# SQLAlchemy's `with_hint(..., dialect_name="sqlite")` compiles to a no-op on
-# stock SQLAlchemy: SQLiteCompiler doesn't override `get_from_hint_text` (only
-# the MySQL/Oracle/MSSQL/Sybase dialects do), so the base class's `None`
-# return silently drops the hint text with no error. Verified empirically:
-# `str(select(Killmail).with_hint(...).compile(dialect=sqlite.dialect()))`
-# produces a bare `FROM killmails` with no hint text.
-#
-# Patch in the same mechanism those other dialects use — return the hint
-# text verbatim — so `INDEXED BY ix_killmails_killmail_time` actually reaches
-# the generated SQL. This is process-wide but inert unless a statement in
-# this codebase calls `.with_hint(dialect_name="sqlite")`, which today is
-# only `_build_search_statements` below.
-def _sqlite_get_from_hint_text(self, table, text):  # pragma: no cover - trivial passthrough
-    return text
+# SQLite INDEXED BY hint support — importing applies the process-wide
+# SQLAlchemy patch + startup self-check (T-037 item 4: moved to app/db).
+from app.db import sqlite_hints  # noqa: F401, E402
 
-
-SQLiteCompiler.get_from_hint_text = _sqlite_get_from_hint_text
-
-# Self-check: with_hint relies on the (undocumented) get_from_hint_text hook.
-# If a future SQLAlchemy renames/removes it, the assignment above still
-# "succeeds" and hints silently vanish — fail startup loudly instead.
-from sqlalchemy.dialects.sqlite import dialect as _sqlite_dialect  # noqa: E402
-from sqlalchemy import table as _probe_table, column as _probe_col, select as _probe_select  # noqa: E402
-
-_probe_t = _probe_table("_hint_probe", _probe_col("x"))
-_probe_sql = str(
-    _probe_select(_probe_t.c.x)
-    .with_hint(_probe_t, "INDEXED BY __probe__", dialect_name="sqlite")
-    .compile(dialect=_sqlite_dialect())
-)
-if "INDEXED BY __probe__" not in _probe_sql:
-    raise RuntimeError(
-        "SQLite INDEXED BY monkeypatch no longer effective "
-        "(SQLAlchemy get_from_hint_text hook changed?) — see intel_kills_search.py"
-    )
-del _probe_t, _probe_sql
 templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 100
+
+# T-037 item 2: the count/SUM query re-aggregates 200-300k rows (~360ms) on
+# every search even when only the cursor changed. Cache (count, isk) keyed by
+# the filter-shaping params (sort/cursor excluded — they don't affect totals)
+# with a short TTL. Time presets ("24h") recompute their cutoff each compile,
+# so a cached total is at most TTL seconds stale — acceptable for a killboard.
+_count_cache: dict[str, dict] = {}
+_COUNT_CACHE_TTL = 180
+_COUNT_CACHE_MAX = 256
+
+# T-037 item 3: statement timeout. A pathological filter shape used to pile
+# up workers until the proxy 504'd (2026-07-03 incident). asyncio.wait_for
+# frees the worker; sqlite3.Connection.interrupt() (thread-safe per stdlib
+# docs) then stops the abandoned query burning IO in aiosqlite's executor.
+_SEARCH_TIMEOUT_S = 20
+
+
+async def _execute_with_timeout(db: AsyncSession, stmt):
+    try:
+        return await asyncio.wait_for(db.execute(stmt), timeout=_SEARCH_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        try:
+            raw = (await db.connection()).get_raw_connection()
+            sqlite_conn = getattr(getattr(raw, "driver_connection", None), "_conn", None)
+            if sqlite_conn is not None:
+                sqlite_conn.interrupt()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        raise
+
+
+def _count_cache_key(params: dict[str, Any]) -> str:
+    parts = []
+    for k in sorted(params):
+        if k in ("sort", "direction", "cursor"):
+            continue
+        v = params[k]
+        if isinstance(v, (set, frozenset)):
+            v = sorted(v)
+        parts.append((k, repr(v)))
+    return repr(parts)
 
 # Hardcoded EVE-meta constants for the compiler.
 CAPITAL_GROUP_IDS = {547, 485, 30, 659, 513, 902, 1538}  # Carrier, Dread, Titan, Super, Freighter, JF, FAX
@@ -420,6 +428,20 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     if params.get("ship_ids"):
         where.append(Killmail.victim_ship_type_id.in_(params["ship_ids"]))
 
+    # T-037 item 1: victim-side equality filters hit indexed killmails
+    # columns with (col, killmail_time DESC) composites (ix_km_victim_*_time)
+    # or selective single-column indexes. Prod EXPLAIN (2026-07-10, 192GB DB):
+    # un-hinted planner picks ix_km_victim_corp_time — count 82ms vs 1430ms
+    # forced onto the time index; page 1ms vs 660ms. So a victim filter must
+    # SUPPRESS the INDEXED BY hint. Attacker-side EXISTS shapes measured
+    # hint-neutral (planner drives from the time index either way), and
+    # either_* mixes attacker EXISTS into an OR, so neither sets this flag.
+    has_selective_victim = bool(
+        params.get("ship_ids")
+        or params.get("victim_chars") or params.get("victim_corps")
+        or params.get("victim_allis") or params.get("victim_ships")
+    )
+
     # ── Three entity sides: Attackers / Either / Victim ──────────────
     where.extend(_compile_attacker_clauses(
         params.get("attacker_mode", "or"),
@@ -466,6 +488,7 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
         "sort_dir": direction,
         "cursor_clause": cursor_clause,
         "has_time_bound": has_time_bound,
+        "has_selective_victim": has_selective_victim,
         "defaulted_time": defaulted_time,
     }
 
@@ -797,7 +820,11 @@ def _build_search_statements(compiled: dict[str, Any], live: int, since: int) ->
         sort_dir = "desc"
         cursor_clause = None
 
-    hint_count = bool(compiled.get("has_time_bound")) and not is_polling
+    # Victim-side equality filters suppress the hint entirely — the planner's
+    # composite victim indexes beat the forced time index by 17-660x there
+    # (see has_selective_victim in _compile_search_where).
+    hint_count = (bool(compiled.get("has_time_bound")) and not is_polling
+                  and not compiled.get("has_selective_victim"))
     hint_page = hint_count and sort == "date"
 
     stmt = select(Killmail)
@@ -930,15 +957,44 @@ async def intel_kills_search_results(
     )
     defaulted_from_end = show_defaulted_note and params["time_end"] is not None
 
-    rows = (await db.execute(stmt)).scalars().all()
+    try:
+        rows = (await _execute_with_timeout(db, stmt)).scalars().all()
 
-    # Compute total_count + total_isk only when not a live poll (saves a query)
-    total_count = None
-    total_isk = None
-    if not live:
-        result = (await db.execute(count_stmt)).one()
-        total_count = int(result[0] or 0)
-        total_isk = float(result[1] or 0)
+        # Compute total_count + total_isk only when not a live poll. Totals
+        # are cursor-independent, so paging hits the short-TTL cache instead
+        # of re-aggregating a couple hundred thousand rows per click.
+        total_count = None
+        total_isk = None
+        if not live:
+            ckey = _count_cache_key(params)
+            centry = _count_cache.get(ckey)
+            now_utc = datetime.utcnow()
+            if centry and centry["expires_at"] > now_utc:
+                total_count, total_isk = centry["count"], centry["isk"]
+            else:
+                result = (await _execute_with_timeout(db, count_stmt)).one()
+                total_count = int(result[0] or 0)
+                total_isk = float(result[1] or 0)
+                if len(_count_cache) >= _COUNT_CACHE_MAX:
+                    # Drop expired entries; if none expired, reset outright —
+                    # it's a tiny recompute cache, correctness never depends on it.
+                    live_entries = {k: v for k, v in _count_cache.items()
+                                    if v["expires_at"] > now_utc}
+                    _count_cache.clear()
+                    if len(live_entries) < _COUNT_CACHE_MAX:
+                        _count_cache.update(live_entries)
+                _count_cache[ckey] = {
+                    "count": total_count,
+                    "isk": total_isk,
+                    "expires_at": now_utc + timedelta(seconds=_COUNT_CACHE_TTL),
+                }
+    except asyncio.TimeoutError:
+        log.warning("kill search timed out after %ss (params=%s)", _SEARCH_TIMEOUT_S, params)
+        return HTMLResponse(
+            "<div class='b-empty' style='padding:0.75rem;'>Search timed out after "
+            f"{_SEARCH_TIMEOUT_S}s — narrow the time window or add a filter and retry."
+            "</div>"
+        )
 
     if not rows:
         return templates.TemplateResponse(

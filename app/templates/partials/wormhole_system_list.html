@@ -31,30 +31,39 @@
 </div>
 
 {% if total_pages > 1 %}
+{# Thread the active filters (already known server-side from this request)
+   into paging links, since the toggle-button filters on wormholes.html
+   have no stable container id for hx-include to pull from anymore. #}
+{% set qs_parts = [] %}
+{% if q %}{% set _ = qs_parts.append('q=' + q|urlencode) %}{% endif %}
+{% if wh_class %}{% set _ = qs_parts.append('wh_class=' + wh_class|urlencode) %}{% endif %}
+{% if effect %}{% set _ = qs_parts.append('effect=' + effect|urlencode) %}{% endif %}
+{% if static_dest %}{% set _ = qs_parts.append('static_dest=' + static_dest|urlencode) %}{% endif %}
+{% if planets %}{% set _ = qs_parts.append('planets=' + planets|urlencode) %}{% endif %}
+{% if perfect_pi %}{% set _ = qs_parts.append('perfect_pi=' + perfect_pi|urlencode) %}{% endif %}
+{% if shattered %}{% set _ = qs_parts.append('shattered=' + shattered|urlencode) %}{% endif %}
+{% set base_qs = qs_parts|join('&') %}
 <div style="display:flex;justify-content:center;gap:0.25rem;margin-top:0.75rem;">
     {% if page > 1 %}
     <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
-            hx-get="/wormholes/search?page={{ page - 1 }}"
-            hx-target="#wh-results"
-            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">&lt; Prev</button>
+            hx-get="/wormholes/search?page={{ page - 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}"
+            hx-target="#wh-results">&lt; Prev</button>
     {% endif %}
     {% for p in range(1, total_pages + 1) %}
     {% if p == page %}
     <span style="background:var(--accent);color:var(--bg);padding:0.3rem 0.6rem;font-size:10px;">{{ p }}</span>
     {% elif p <= 3 or p >= total_pages - 1 or (p >= page - 1 and p <= page + 1) %}
     <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
-            hx-get="/wormholes/search?page={{ p }}"
-            hx-target="#wh-results"
-            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">{{ p }}</button>
+            hx-get="/wormholes/search?page={{ p }}{% if base_qs %}&{{ base_qs }}{% endif %}"
+            hx-target="#wh-results">{{ p }}</button>
     {% elif p == 4 or p == total_pages - 2 %}
     <span style="color:var(--muted);padding:0.3rem 0.2rem;font-size:10px;">...</span>
     {% endif %}
     {% endfor %}
     {% if page < total_pages %}
     <button style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;font-size:10px;cursor:pointer;font-family:inherit;"
-            hx-get="/wormholes/search?page={{ page + 1 }}"
-            hx-target="#wh-results"
-            hx-include="#wh-search, #wh-class-filter, #wh-effect-filter">Next &gt;</button>
+            hx-get="/wormholes/search?page={{ page + 1 }}{% if base_qs %}&{{ base_qs }}{% endif %}"
+            hx-target="#wh-results">Next &gt;</button>
     {% endif %}
 </div>
 {% endif %}

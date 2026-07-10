@@ -9,7 +9,15 @@
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#080808">
     <link rel="stylesheet" href="/static/css/tailwind.css?v={{ css_v }}">
+    {# T-039: htmx is only used by logged-in chrome (nav status banners, alert
+       banners, command palette, and every authed page's hx-* panels) — the
+       anonymous landing page (index.html) has zero hx- attributes. Gating
+       here trims the anonymous payload without touching any authed page,
+       since every htmx consumer already lives inside a user_id-gated block
+       or an authed-only route/template. #}
+    {% if request.session.get('user_id') %}
     <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
+    {% endif %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/ds/css/tokens.css?v={{ css_v }}">
@@ -320,8 +328,14 @@
     }, true);
 })();
 </script>
+{# actions.js dispatches on data-click (nav notif bell/hamburger + authed-page
+   widgets) and notifications.js drives the nav notif bell/poller — both are
+   only ever wired to elements inside the user_id-gated nav or authed-only
+   page templates. Nothing on the anonymous landing page uses either. #}
+{% if request.session.get('user_id') %}
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=5"></script>
+{% endif %}
 <script nonce="{{ request.state.csp_nonce }}">
 /* Global dismiss handler for alert banners — runs after every htmx swap */
 (function() {
@@ -411,6 +425,11 @@
     });
 })();
 </script>
+{# The #cmdk dialog markup only renders in the user_id-gated block above, so
+   this script is fully inert for anonymous visitors (dlg() returns null and
+   every handler below no-ops). Gate it too — no point shipping/parsing it
+   on the landing page. #}
+{% if request.session.get('user_id') %}
 <script nonce="{{ request.state.csp_nonce }}">
 /* Command palette (Ctrl+K) — Phase 2 Task 1. Canonical JS lives here (never in
    the partial — partial-override gotcha). Guarded so it initialises once.
@@ -570,5 +589,6 @@
     });
 })();
 </script>
+{% endif %}
 </body>
 </html>

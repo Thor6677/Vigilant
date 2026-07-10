@@ -190,7 +190,18 @@ async def wormhole_systems_search(
         "class_label": _class_label,
         "class_color": _class_color,
         "effect_label": _effect_label,
-        "wh_data": _wh_data})
+        "wh_data": _wh_data,
+        # Active filter values, threaded into pagination links server-side so
+        # paging doesn't drop the active toggle-button filters (there's no
+        # persistent form element for hx-include to pull from — filters live
+        # in ephemeral .wf-btn.is-on state on the parent page).
+        "q": search_q,
+        "wh_class": wh_class,
+        "effect": effect,
+        "static_dest": static_dest,
+        "planets": planets,
+        "perfect_pi": perfect_pi,
+        "shattered": shattered})
 
 
 # ── System Detail ───────────────────────────────────────────────────────────

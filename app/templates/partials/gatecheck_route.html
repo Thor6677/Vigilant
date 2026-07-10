@@ -7,15 +7,15 @@
         <div class="b-stat-label">Jumps</div>
     </div>
     <div class="b-stat">
-        <div class="b-stat-val" style="{% if total_kills %}color:var(--danger){% endif %}">{{ total_kills }}</div>
+        <div class="b-stat-val{% if total_kills %} is-danger{% endif %}">{{ total_kills }}</div>
         <div class="b-stat-label">PvP Kills</div>
     </div>
     <div class="b-stat">
-        <div class="b-stat-val" style="{% if dangerous_count %}color:var(--danger){% endif %}">{{ dangerous_count }}</div>
+        <div class="b-stat-val{% if dangerous_count %} is-danger{% endif %}">{{ dangerous_count }}</div>
         <div class="b-stat-label">Dangerous</div>
     </div>
     <div class="b-stat">
-        <div class="b-stat-val" style="{% if caution_count %}color:var(--accent){% endif %}">{{ caution_count }}</div>
+        <div class="b-stat-val{% if caution_count %} is-accent{% endif %}">{{ caution_count }}</div>
         <div class="b-stat-label">Caution</div>
     </div>
 </div>
