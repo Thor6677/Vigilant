@@ -46,15 +46,15 @@ for t in tables:
     try:
         conn.execute(f'ANALYZE "{t}"')
         conn.commit()
-        print(f"  analyzed {t} in {time.time()-t0:.1f}s")
+        print(f"  analyzed {t} in {time.time()-t0:.1f}s", flush=True)
     except sqlite3.OperationalError as e:
         conn.rollback()
-        print(f"  SKIPPED {t}: {e}")
+        print(f"  SKIPPED {t}: {e}", flush=True)
 
 # ── Phase B: hand-seeded stats for the giants ─────────────────────────────
 n_km = conn.execute("SELECT max(rowid) FROM killmails").fetchone()[0] or 1
 n_at = conn.execute("SELECT max(rowid) FROM killmail_attackers").fetchone()[0] or 1
-print(f"  killmails ~{n_km:,} rows, killmail_attackers ~{n_at:,} rows")
+print(f"  killmails ~{n_km:,} rows, killmail_attackers ~{n_at:,} rows", flush=True)
 
 
 def stat(n, *avgs):
