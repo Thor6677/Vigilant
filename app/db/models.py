@@ -143,6 +143,42 @@ class WalletTransaction(Base):
     )
 
 
+class IndustryJobHistory(Base):
+    """Completed manufacturing/reaction job, priced at completion date
+    (Industry P&L, T-041 item 2). Append-only, mirrors WalletTransaction's
+    insert-once-by-id pattern — ``job_id`` is CCP's own id, so the fetcher
+    persists with INSERT-OR-IGNORE and re-runs never duplicate.
+
+    Build cost is computed ONCE at ingest by `app.industry.job_cost`
+    (materials valued at the Jita daily average on the job's completion
+    date; ME 10 assumed for manufacturing, ME 0 for reactions — ESI jobs
+    don't expose blueprint ME or facility bonuses, so both are documented
+    assumptions surfaced on `/market/pnl`). ``build_cost`` is NULL when any
+    material was unpriceable at ingest; `fetch_industry_jobs_data`
+    (`app/routes/dashboard.py`) retries valuation for NULL rows on every
+    sync until prices resolve. ``cost_basis`` records whether every
+    material priced from market history ("history") or any fell back to
+    the current global reference price ("reference").
+
+    `app/routes/pnl.py` synthesizes "build lot" transactions from these
+    rows for the FIFO matcher in `app/market/pnl.py` (``source="build"``).
+    """
+    __tablename__ = "industry_job_history"
+
+    job_id = Column(Integer, primary_key=True, autoincrement=False)
+    character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
+    activity_id = Column(Integer, nullable=False)   # 1 = manufacturing, 11 = reactions
+    blueprint_type_id = Column(Integer, nullable=False)
+    product_type_id = Column(Integer, nullable=True, index=True)
+    runs = Column(Integer, nullable=False)
+    output_qty = Column(Integer, nullable=False)
+    install_cost = Column(Float, nullable=False, default=0.0)
+    build_cost = Column(Float, nullable=True)
+    cost_basis = Column(String, nullable=True)
+    start_date = Column(DateTime, nullable=True)
+    completed_date = Column(DateTime, nullable=False, index=True)
+
+
 class NetWorthSnapshot(Base):
     """One daily valuation point per character (Phase 5 Task 1).
 

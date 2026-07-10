@@ -1299,9 +1299,124 @@ async def fetch_orders_data(characters: list[Character], db: AsyncSession) -> di
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def _persist_completed_jobs(db: AsyncSession, character_id: int,
+                                   jobs: list[dict]) -> int:
+    """Persist delivered manufacturing/reaction jobs with build cost valued
+    at completion date (Industry P&L, T-041 item 2). Idempotent via
+    insert-or-ignore on job_id; NULL build_costs retry valuation here on
+    every sync until prices resolve.
+
+    Materials are looked up per (blueprint_type_id, activity_id), NOT just
+    blueprint_type_id — a single blueprint_type_id can carry SDE rows for
+    multiple activities (e.g. activity_id=1 manufacturing materials AND
+    activity_id=8 invention datacores), so an unscoped lookup would fold
+    unrelated material cost into a job's build_cost. Every other call site
+    in this codebase (app/sde/lookup.py) filters SDEBlueprintMaterial by
+    activity_id for the same reason.
+    """
+    from app.db.models import IndustryJobHistory
+    from app.db.sde_models import SDEBlueprintInfo, SDEBlueprintMaterial
+    from app.industry.job_cost import (
+        ME_MANUFACTURING, ME_REACTION, job_build_cost, prices_at_bulk,
+    )
+    from app.market import lp as market_lp
+
+    # ESI activity ids: 1 = manufacturing, 11 = reactions.
+    delivered = [j for j in jobs
+                 if j.get("status") == "delivered"
+                 and j.get("activity_id") in (1, 11)
+                 and j.get("job_id") and j.get("completed_date")]
+
+    existing = {r[0] for r in (await db.execute(
+        select(IndustryJobHistory.job_id).where(
+            IndustryJobHistory.character_id == character_id)
+    )).all()}
+    new_jobs = [j for j in delivered if j["job_id"] not in existing]
+
+    # Still retry NULL-cost rows even when nothing new arrived this sync.
+    null_rows = (await db.execute(
+        select(IndustryJobHistory).where(
+            IndustryJobHistory.character_id == character_id,
+            IndustryJobHistory.build_cost.is_(None))
+    )).scalars().all()
+
+    bp_activity_ids = ({(j["blueprint_type_id"], j["activity_id"]) for j in new_jobs}
+                        | {(r.blueprint_type_id, r.activity_id) for r in null_rows})
+    if not bp_activity_ids and not new_jobs:
+        return 0
+
+    bp_ids = {bp for bp, _act in bp_activity_ids}
+    info_rows = (await db.execute(
+        select(SDEBlueprintInfo).where(
+            SDEBlueprintInfo.blueprint_type_id.in_(bp_ids))
+    )).scalars().all()
+    qty_by_bp = {r.blueprint_type_id: (r.product_quantity or 1) for r in info_rows}
+
+    mat_rows = (await db.execute(
+        select(SDEBlueprintMaterial).where(
+            SDEBlueprintMaterial.blueprint_type_id.in_(bp_ids),
+            SDEBlueprintMaterial.activity_id.in_((1, 11)))
+    )).scalars().all()
+    mats_by_bp: dict[tuple[int, int], list[dict]] = {}
+    for m in mat_rows:
+        key = (m.blueprint_type_id, m.activity_id)
+        mats_by_bp.setdefault(key, []).append(
+            {"type_id": m.material_type_id, "quantity": m.quantity})
+
+    reference_map = await market_lp.get_price_map(db)
+
+    async def _value(bp_id, activity_id, runs, install_cost, completed):
+        mats = mats_by_bp.get((bp_id, activity_id))
+        if not mats:
+            return None, None
+        me = ME_MANUFACTURING if activity_id == 1 else ME_REACTION
+        prices = await prices_at_bulk(
+            db, [m["type_id"] for m in mats], completed.date(), reference_map)
+        return job_build_cost(mats, runs, me, install_cost,
+                               lambda tid: prices.get(tid, (None, None)))
+
+    inserted = 0
+    for j in new_jobs:
+        completed = _parse_esi_dt(j["completed_date"])
+        runs = int(j.get("runs") or 0)
+        cost, basis = await _value(j["blueprint_type_id"], j["activity_id"],
+                                    runs, float(j.get("cost") or 0.0), completed)
+        db.add(IndustryJobHistory(
+            job_id=j["job_id"], character_id=character_id,
+            activity_id=j["activity_id"],
+            blueprint_type_id=j["blueprint_type_id"],
+            product_type_id=j.get("product_type_id"),
+            runs=runs,
+            output_qty=runs * qty_by_bp.get(j["blueprint_type_id"], 1),
+            install_cost=float(j.get("cost") or 0.0),
+            build_cost=cost, cost_basis=basis,
+            start_date=_parse_esi_dt(j["start_date"]) if j.get("start_date") else None,
+            completed_date=completed,
+        ))
+        inserted += 1
+
+    for row in null_rows:
+        cost, basis = await _value(row.blueprint_type_id, row.activity_id,
+                                    row.runs, row.install_cost or 0.0,
+                                    row.completed_date)
+        if cost is not None:
+            row.build_cost, row.cost_basis = cost, basis
+
+    await db.commit()
+    return inserted
+
+
 async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession) -> dict:
     """Active personal industry jobs, trimmed for WIP valuation (T-041 item 4).
-    Stored as JSON in CharacterDashboardCache.industry_json."""
+    Stored as JSON in CharacterDashboardCache.industry_json.
+
+    Also persists completed manufacturing/reaction jobs into
+    industry_job_history with completion-date build cost (Industry P&L,
+    T-041 item 2) — one ESI call covers both: include_completed=True returns
+    active AND delivered jobs in the same payload, so the trimmed active-jobs
+    list (net-worth WIP) is derived from the same response instead of a
+    second ESI round-trip. Persist failures are logged and swallowed so they
+    never break the net-worth field."""
     async def _get(char):
         if not _has_scope(char, "esi-industry.read_character_jobs.v1"):
             return char.character_id, None, "missing_scope"
@@ -1310,7 +1425,8 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
             return char.character_id, None, err
         try:
             from app.esi import industry as esi_industry
-            jobs = await esi_industry.get_character_jobs(client, char.character_id)
+            jobs = await esi_industry.get_character_jobs(
+                client, char.character_id, include_completed=True)
             trimmed = [{
                 "activity_id": j.get("activity_id"),
                 "blueprint_type_id": j.get("blueprint_type_id"),
@@ -1318,6 +1434,10 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 "runs": int(j.get("runs") or 0),
                 "status": j.get("status"),
             } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
+            try:
+                await _persist_completed_jobs(db, char.character_id, jobs or [])
+            except Exception as e:
+                logger.warning("Completed jobs persist failed for char %s: %s", char.character_id, e)
             return char.character_id, trimmed, None
         except Exception as e:
             logger.warning("Industry jobs fetch failed for char %s: %s", char.character_id, e)
