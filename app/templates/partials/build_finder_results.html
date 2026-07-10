@@ -29,7 +29,9 @@
             <span style="flex:3;font-size:11px;">
                 <a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a>
             </span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.cost_str }}</span>
+            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">
+                {{ r.cost_str }}{% if r.inv_str %}<span style="font-size:9px;"> (+{{ r.inv_str }} inv)</span>{% endif %}{% if r.skill_missing %}<span title="character missing an invention skill (level 0 used)" style="color:var(--danger);cursor:help;padding-left:2px;">&#9888;</span>{% endif %}
+            </span>
             <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
             <span style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
             <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
@@ -40,7 +42,16 @@
         Ranked {{ shown }} of {{ total_n }} buildable items in {{ compute_ms }} ms.
         Prices: CCP's global average reference price (ESI /markets/prices/, not
         region-specific). Unpriced items (blueprints / illiquid materials) show
-        “—” and sort last. Invention costs not included.
+        “—” and sort last.
+        {% if invention_active %}
+        Invention probability: P = base_prob × (1 + E/40 + (S1+S2)/30) ×
+        decryptor_mult, clamped to (0, 1]. Invented BPCs are ME2/TE4 base,
+        modified by the chosen decryptor. T1 copy cost is excluded from the
+        overhead shown ("+N inv"); an unpriced decryptor or a zero probability
+        drops the item back to unpriced rather than costing it at zero.
+        {% elif tables_empty %}
+        Invention data not yet imported — rankings exclude invention costs.
+        {% endif %}
     </div>
 </div>
 {% endif %}

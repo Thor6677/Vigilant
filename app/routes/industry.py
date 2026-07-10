@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import get_db, Character
+from app.db.sde_models import SDEBlueprintInvention
 import asyncio
 from app.sde import lookup as sde
 from app.industry.compression import (
@@ -31,6 +32,11 @@ from app.industry.manufacturing import (
     _calc_material, _calc_time, _format_time,
 )
 from app.industry import build_finder
+from app.industry.invention import (
+    DECRYPTORS, attempt_cost, invented_bpc, invention_overhead_per_unit,
+    invention_probability,
+)
+from app.routes.fitting import _character_skills_map
 from app.market import lp as market_lp
 from app.esi.client import ESIClient
 from app.esi import market as esi_market
@@ -449,7 +455,8 @@ def _fmt_pct(v: float | None) -> str:
 @router.get("/industry/build-finder", response_class=HTMLResponse)
 async def build_finder_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Landing page — a buildable-group picker + ME/structure/rig/security
-    controls. The ranked table loads via htmx on submit (see below)."""
+    controls, plus invention controls (character/skills/decryptor). The
+    ranked table loads via htmx on submit (see below)."""
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     groups = await sde.get_buildable_groups(db)
@@ -459,6 +466,7 @@ async def build_finder_page(request: Request, db: AsyncSession = Depends(get_db)
         "rigs": RIGS,
         "sec_statuses": SEC_STATUS,
         "cap": BUILD_FINDER_CAP,
+        "decryptors": DECRYPTORS,
     })
 
 
@@ -470,6 +478,10 @@ async def build_finder_results(
     structure: str = Query("npc_station"),
     rig: str = Query("none"),
     security: str = Query("highsec"),
+    character_id: int = Query(0),
+    encryption: int = Query(4, ge=0, le=5),
+    science: int = Query(4, ge=0, le=5),
+    decryptor: str = Query("none"),
     db: AsyncSession = Depends(get_db),
 ):
     """htmx partial: buildable products in one group, ranked by margin %.
@@ -479,12 +491,23 @@ async def build_finder_results(
     intentionally not a control — it only affects build *time*, and the ranking
     is by ISK margin, so it can't change the result. Sell value + material costs
     come from the global `/markets/prices/` map (`market_lp.get_price_map`), the
-    same source the LP tool uses. No invention/decryptor math (deferred)."""
+    same source the LP tool uses.
+
+    Invention: `sde.get_invention_data` resolves which of this group's
+    products are T2-inventable. When any are, per-product probability comes
+    from either the selected character's ESI skills (ownership + scope
+    checked, same pattern as `/market/pnl`) or the manual `encryption`/
+    `science` selects, and expected per-unit overhead
+    (`app.industry.invention`) is folded into the ranking via
+    `build_finder.rank_builds(..., invention=...)`. An unpriced decryptor
+    (or any un-inventable product) yields `overhead_per_unit=None`, which
+    `rank_builds` treats as unpriced — never silently zero-costed."""
     if not request.session.get("user_id"):
         return HTMLResponse("", status_code=401)
     if not group_id:
         return HTMLResponse('<div class="b-empty">Pick a group to rank.</div>')
 
+    user_id = request.session.get("user_id")
     me = max(0, min(10, me))
     struct_info = STRUCTURES.get(structure, STRUCTURES["npc_station"])
     rig_info = RIGS.get(rig, RIGS["none"])
@@ -494,12 +517,86 @@ async def build_finder_results(
     total_n, products = await sde.get_group_buildables(db, group_id, cap=BUILD_FINDER_CAP)
 
     ranked = []
+    invention_active = False
+    tables_empty = False
+    selected_character_id = 0
     if products:
-        # One global price fetch covers products + every material.
+        from sqlalchemy import select
+
+        # One global price fetch covers products + every material + decryptors.
         price_map = await market_lp.get_price_map(db)
+
+        invention_data = await sde.get_invention_data(
+            db, [p["product_type_id"] for p in products],
+        )
+        invention_active = bool(invention_data)
+        if not invention_active:
+            # Distinguish "this group has no T2/inventable items" (normal,
+            # no message needed) from "invention tables were never imported"
+            # (SDE reload pending — surfaced in the footnote).
+            exists_row = (await db.execute(
+                select(SDEBlueprintInvention.blueprint_type_id).limit(1)
+            )).first()
+            tables_empty = exists_row is None
+
+        invention_map: dict[int, dict] = {}
+        if invention_data:
+            dec = DECRYPTORS.get(decryptor)
+
+            char_skills = None
+            if character_id:
+                char_result = await db.execute(
+                    select(Character).where(
+                        Character.character_id == character_id,
+                        Character.user_id == user_id,
+                    )
+                )
+                char = char_result.scalar_one_or_none()
+                if char and _SKILLS_SCOPE in (char.scopes or ""):
+                    selected_character_id = character_id
+                    try:
+                        char_skills = await _character_skills_map(db, char)
+                    except Exception:
+                        char_skills = None
+
+            all_skill_ids = sorted({
+                sid for inv in invention_data.values() for sid in inv["skill_ids"]
+            })
+            skill_names = (
+                await sde.type_ids_to_names(db, all_skill_ids) if all_skill_ids else {}
+            )
+
+            decryptor_price = price_map.get(dec.type_id) if dec else None
+
+            for product_id, inv in invention_data.items():
+                e, s1, s2, missing = _resolve_invention_skills(
+                    char_skills, inv["skill_ids"], skill_names, encryption, science,
+                )
+                p_final = invention_probability(
+                    inv["probability"], e, s1, s2,
+                    dec.prob_mult if dec else 1.0,
+                )
+                if dec is not None and decryptor_price is None:
+                    attempt = None
+                else:
+                    attempt = attempt_cost(
+                        inv["datacores"], price_map, decryptor_price or 0.0,
+                    )
+                runs, ime = invented_bpc(inv["base_runs"], dec)
+                overhead = (
+                    invention_overhead_per_unit(
+                        attempt, p_final, runs, inv["per_run_output_qty"],
+                    ) if attempt is not None else None
+                )
+                invention_map[product_id] = {
+                    "overhead_per_unit": overhead,
+                    "invented_me": ime,
+                    "skill_missing": missing,
+                }
+
         ranked = build_finder.rank_builds(
             products, me, struct_info["mat"], rig_info["mat"], sec_info["mult"],
-            price_map,
+            price_map, invention=invention_map or None,
         )
     compute_ms = round((time.perf_counter() - start) * 1000, 1)
 
@@ -512,6 +609,8 @@ async def build_finder_results(
         "margin_pct_str": _fmt_pct(r["margin_pct"]),
         "margin_positive": (r["margin_isk"] is not None and r["margin_isk"] > 0),
         "priced": r["priced"],
+        "inv_str": _fmt_isk(r["invention_overhead"]) if r["invention_overhead"] is not None else None,
+        "skill_missing": r["skill_missing"],
     } for r in ranked]
 
     return templates.TemplateResponse(request, "partials/build_finder_results.html", {
@@ -521,6 +620,12 @@ async def build_finder_results(
         "capped": total_n > BUILD_FINDER_CAP,
         "me": me,
         "compute_ms": compute_ms,
+        "invention_active": invention_active,
+        "tables_empty": tables_empty,
+        "selected_character_id": selected_character_id,
+        "encryption": encryption,
+        "science": science,
+        "decryptor": decryptor,
     })
 
 

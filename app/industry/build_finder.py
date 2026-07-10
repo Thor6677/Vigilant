@@ -22,10 +22,19 @@ OR any required material is unpriced, the row is EXCLUDED from the ranking
 material as free would understate cost and float phantom-profit items to the top
 — the exact failure the LP tool guards against.
 
-**No invention/decryptor math:** T2 invention costs (datacores, decryptors,
-invention probability) are out of scope for this task and deliberately not
-modeled — the finder prices T2 builds off their raw BPC material list only. A
-follow-up ticket covers invention. This is surfaced in the page footnote.
+**Invention overhead (optional):** `rank_builds` accepts an optional
+`invention` dict keyed by `product_type_id` —
+`{"overhead_per_unit": float | None, "invented_me": int, "skill_missing": bool}`.
+The overhead itself (datacores + decryptor + failed-attempt expectation) is
+precomputed upstream by the route via `app.industry.invention` — this module
+just consumes the number. For a product present in the dict, the build-cost
+half of the row is recomputed at `invented_me` (an invented T2 BPC starts at
+ME2, not necessarily the page's chosen ME) instead of the page `me`, then
+`invention_overhead` is added on top. A `None` overhead (e.g. an unpriced
+decryptor) forces the row unpriced — never silently zero-costed — the same
+"excluded, sorts last" convention as an unpriced material. Products absent
+from the dict, or when `invention` is omitted/`None` entirely, behave
+exactly as before this feature existed.
 """
 from __future__ import annotations
 
@@ -68,6 +77,7 @@ def rank_builds(
     rig_mat_base: float,
     sec_mult: float,
     price_map: dict[int, float],
+    invention: dict[int, dict] | None = None,
 ) -> list[dict]:
     """Rank buildable products by margin % descending.
 
@@ -79,19 +89,46 @@ def rank_builds(
     cost resolved to a positive number (all materials priced, cost > 0).
     Unpriced rows keep their place in the table (cost/sell/margin shown as
     None) but sort AFTER every priced row — same convention as the LP tool.
+
+    `invention` (optional) is keyed by `product_type_id` — see the module
+    docstring. For a product present in it, build cost is computed at
+    `invented_me` instead of `me` and `overhead_per_unit` is added; a `None`
+    overhead forces the row unpriced. Products absent from `invention` (or
+    `invention=None`) are unaffected.
     """
+    invention = invention or {}
     rows = []
     for p in products:
+        product_id = p["product_type_id"]
+        inv = invention.get(product_id)
+
+        invention_overhead = None
+        invented_me = None
+        skill_missing = False
+        effective_me = me
+        if inv is not None:
+            invention_overhead = inv.get("overhead_per_unit")
+            invented_me = inv.get("invented_me")
+            skill_missing = bool(inv.get("skill_missing", False))
+            if invented_me is not None:
+                effective_me = invented_me
+
         cost = build_cost_per_unit(
             p.get("materials") or [], p.get("product_quantity") or 1,
-            me, struct_mat, rig_mat_base, sec_mult, price_map,
+            effective_me, struct_mat, rig_mat_base, sec_mult, price_map,
         )
-        sell = price_map.get(p["product_type_id"])
+        if inv is not None:
+            if invention_overhead is None or cost is None:
+                cost = None
+            else:
+                cost = cost + invention_overhead
+
+        sell = price_map.get(product_id)
         priced = cost is not None and cost > 0 and sell is not None
         margin_isk = (sell - cost) if priced else None
         margin_pct = (margin_isk / cost * 100.0) if priced else None
         rows.append({
-            "product_type_id": p["product_type_id"],
+            "product_type_id": product_id,
             "product_name": p["product_name"],
             "blueprint_type_id": p.get("blueprint_type_id"),
             "cost_per_unit": cost,
@@ -99,6 +136,9 @@ def rank_builds(
             "margin_isk": margin_isk,
             "margin_pct": margin_pct,
             "priced": priced,
+            "invention_overhead": invention_overhead,
+            "invented_me": invented_me,
+            "skill_missing": skill_missing,
         })
     rows.sort(key=lambda r: (r["margin_pct"] is None, -(r["margin_pct"] or 0.0)))
     return rows

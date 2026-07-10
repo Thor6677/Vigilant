@@ -33,6 +33,22 @@
         font-weight: 600; cursor: pointer;
     }
     .bf-go:hover { opacity: 0.85; }
+    .bf-select:disabled { opacity: 0.4; cursor: not-allowed; }
+    .bf-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .bf-chip-radio {
+        position: absolute; opacity: 0; width: 1px; height: 1px;
+        pointer-events: none;
+    }
+    .bf-chip {
+        display: inline-block; padding: 0.35rem 0.7rem; background: var(--bg);
+        border: 1px solid var(--border); color: var(--muted); font-size: 11px;
+        cursor: pointer; user-select: none;
+    }
+    .bf-chip:hover { border-color: var(--accent); }
+    .bf-chip-radio:checked + .bf-chip {
+        background: var(--accent); color: var(--bg); border-color: var(--accent);
+    }
+    .bf-chip-radio:focus-visible + .bf-chip { outline: 2px solid var(--accent); }
 </style>
 {% endblock %}
 
@@ -56,6 +72,42 @@
         hx-swap="innerHTML"
         hx-indicator="#bf-loading"
     >
+        <div class="bf-controls" style="border-bottom:1px solid var(--border);padding-bottom:0.75rem;margin-bottom:0.25rem;">
+            <div class="bf-field" style="flex:2;min-width:220px;">
+                <label for="bf-char">Character (invention skills)</label>
+                <select id="bf-char" name="character_id" class="bf-select" style="width:100%;">
+                    <option value="0">Manual skill levels</option>
+                    {# populated via JS on init #}
+                </select>
+            </div>
+            <div class="bf-field">
+                <label for="bf-encryption">Encryption</label>
+                <select id="bf-encryption" name="encryption" class="bf-select" style="min-width:60px;">
+                    {% for lvl in range(6) %}
+                    <option value="{{ lvl }}"{% if lvl == 4 %} selected{% endif %}>{{ lvl }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="bf-field">
+                <label for="bf-science">Science</label>
+                <select id="bf-science" name="science" class="bf-select" style="min-width:60px;">
+                    {% for lvl in range(6) %}
+                    <option value="{{ lvl }}"{% if lvl == 4 %} selected{% endif %}>{{ lvl }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="bf-field" style="flex:1 1 100%;">
+                <label>Decryptor</label>
+                <div class="bf-chip-row">
+                    <input type="radio" id="bf-dec-none" name="decryptor" value="none" class="bf-chip-radio" checked>
+                    <label for="bf-dec-none" class="bf-chip" title="No decryptor">None</label>
+                    {% for slug, dec in decryptors.items() %}
+                    <input type="radio" id="bf-dec-{{ slug }}" name="decryptor" value="{{ slug }}" class="bf-chip-radio">
+                    <label for="bf-dec-{{ slug }}" class="bf-chip" title="{{ dec.name }}">{{ dec.name.replace(' Decryptor', '') }}</label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
         <div class="bf-controls">
             <div class="bf-field" style="flex:2;min-width:200px;">
                 <label for="bf-group">Group</label>
@@ -104,8 +156,9 @@
     <div style="font-size:9px;color:var(--muted);padding:0 0.75rem 0.5rem;">
         Up to {{ cap }} items ranked per group. Cost per unit is the blueprint's
         material bill at the chosen ME / structure / rig / security, divided by
-        per-run output. Invention (datacores / decryptors) is not modeled — T2
-        builds are priced off their raw BPC materials only.
+        per-run output. For inventable T2 items, expected invention cost
+        (datacores, decryptor, failed attempts) is folded in — see the
+        results footnote for the formula and its assumptions.
     </div>
 </div>
 
@@ -113,4 +166,39 @@
     Ranking…
 </div>
 <div id="bf-results"></div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    function loadBfCharacters() {
+        var sel = document.getElementById('bf-char');
+        if (!sel) return;
+        fetch('/industry/build-finder/characters')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                (data.characters || []).forEach(function(c) {
+                    var opt = document.createElement('option');
+                    opt.value = String(c.id);
+                    opt.textContent = c.name;
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(function() { /* dropdown just stays at "Manual skill levels" */ });
+    }
+
+    function onBfCharChange() {
+        var sel = document.getElementById('bf-char');
+        var enc = document.getElementById('bf-encryption');
+        var sci = document.getElementById('bf-science');
+        var useChar = !!(sel && sel.value && sel.value !== '0');
+        if (enc) enc.disabled = useChar;
+        if (sci) sci.disabled = useChar;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadBfCharacters();
+        var sel = document.getElementById('bf-char');
+        if (sel) sel.addEventListener('change', onBfCharChange);
+    });
+})();
+</script>
 {% endblock %}
