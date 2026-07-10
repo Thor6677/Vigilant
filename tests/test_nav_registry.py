@@ -195,7 +195,7 @@ def test_market_group_shape():
     assert market["landing"] is False
     assert market["items"][0]["url"] == market["url"] == "/market"
     labels = [i["label"] for i in market["items"]]
-    assert labels == ["Prices", "LP Store ROI", "Trading P&L",
+    assert labels == ["Prices", "LP Store ROI", "Trading & Industry P&L",
                       "Appraisal", "Net Worth"]
     # Prices' broad /market prefix steps aside for LP / P&L sub-pages.
     prices = _find("Prices")

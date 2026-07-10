@@ -117,12 +117,12 @@ NAV_GROUPS = [
             _item(
                 "Build Finder", "/industry/build-finder",
                 [("prefix", "/industry/build-finder")],
-                desc="What should you build? Pick a group and rank its buildable items by manufacturing margin — build cost per unit vs. sell value, at your ME / structure / rig / security assumptions. Priced from CCP's global average reference prices.",
+                desc="What should you build? Pick a group and rank its buildable items by manufacturing margin — build cost per unit vs. sell value, at your ME / structure / rig / security assumptions. T2 rankings include expected invention cost (datacores, decryptors, failed attempts).",
                 features=[
                     "Margin ISK + margin % per item, best-first",
+                    "T2 invention math: character skills or manual levels + decryptor picker",
                     "Reuses the manufacturing cost engine (ME / rig / security)",
                     "Global ESI reference pricing for products and materials",
-                    "Up to 200 items per group with compute time shown",
                 ],
             ),
             _item(
@@ -224,14 +224,14 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
-                "Trading P&L", "/market/pnl",
+                "Trading & Industry P&L", "/market/pnl",
                 [("prefix", "/market/pnl")],
-                desc="Realized trading profit — your market buys are FIFO-matched against sells per item across synced wallet transactions, with broker fees and sales tax applied at flat rates.",
+                desc="Realized profit from trading AND manufacturing — market buys and completed industry jobs (valued at completion-date build cost) FIFO-matched against sells, with broker fees and sales tax applied at flat rates.",
                 features=[
+                    "Trading / Industry / Total profit split",
                     "Per-item realized ISK, units flipped, cost-weighted margin",
-                    "Monthly realized-profit chart",
+                    "Monthly realized-profit chart, stacked by source",
                     "Per-character or account-wide filter",
-                    "Unmatched (pre-history) sells excluded and counted",
                 ],
             ),
             _item(
