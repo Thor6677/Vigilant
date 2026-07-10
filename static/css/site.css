@@ -243,3 +243,39 @@
 }
 .el-chip:hover { color: var(--text); border-color: var(--muted); }
 .el-chip.is-ext::after { content: " \2197"; font-size: 9px; }
+
+/* ── Structure-age estimate (tool page + wormhole system embed) ─────────── */
+.sa-input {
+    width: 100%; padding: 0.5rem 0.6rem;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font: inherit; font-size: 11px;
+    resize: vertical; min-height: 70px;
+    font-family: monospace;
+}
+.sa-input:focus { outline: none; border-color: var(--accent); }
+.sa-submit {
+    padding: 0.45rem 1.25rem; background: transparent;
+    border: 1px solid var(--accent); color: var(--accent);
+    font: inherit; font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; cursor: pointer;
+}
+.sa-submit:hover { background: var(--accent); color: var(--bg); }
+.sa-method {
+    font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 1px 6px; border: 1px solid var(--border); color: var(--muted);
+    margin-left: 0.5rem;
+}
+.sa-method.is-exact { border-color: var(--success); color: var(--success); }
+.sa-method.is-interpolate { border-color: var(--accent); color: var(--accent); }
+.sa-method.is-extrapolate { border-color: var(--muted); color: var(--muted); }
+.sa-age {
+    font-size: 28px; font-weight: 300; letter-spacing: -0.02em;
+    color: var(--accent); line-height: 1;
+}
+.sa-window { font-size: 11px; color: var(--muted); margin-top: 0.25rem; }
+.sa-date-row { display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap; }
+.sa-date-col { display: flex; flex-direction: column; gap: 2px; }
+.sa-date-lbl { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.sa-date-val { font-size: 13px; color: var(--text); font-family: monospace; }
+.sa-meta { display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap; }
+.sa-meta-item { display: flex; flex-direction: column; gap: 2px; }

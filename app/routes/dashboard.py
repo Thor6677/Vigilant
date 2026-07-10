@@ -1892,6 +1892,22 @@ async def _background_scheduler():
                     except Exception as e:
                         logger.warning("structure_age scheduler error: %s", e)
 
+                # Daily structure-calibration top-up from EVERef (T-036).
+                # Cheap: one small JSON + a handful of triff.tools calls for
+                # IDs not yet in the calibration table. Skipped while the
+                # one-time full scrape is still running.
+                if not hasattr(_background_scheduler, '_last_sa_refresh') or \
+                   (now - _background_scheduler._last_sa_refresh).total_seconds() >= 86400:
+                    try:
+                        from app.intel.structure_age_scraper import (
+                            refresh_from_everef, is_running as _sa_refresh_running,
+                        )
+                        if not _sa_refresh_running():
+                            asyncio.create_task(refresh_from_everef())
+                            _background_scheduler._last_sa_refresh = now
+                    except Exception as e:
+                        logger.warning("structure_age refresh scheduling error: %s", e)
+
                 # Recent battle discovery — every 15 min, also gated by battles flag.
                 # Hard-capped to 100 ESI hydrations per run (see recent_battles.py).
                 if _km_settings.killmail_battles_enabled:

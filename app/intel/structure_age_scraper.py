@@ -306,6 +306,59 @@ async def run_phase2(max_passes: int = 20) -> dict:
     return {"passes": passes_run, "total_found": total_found}
 
 
+# ── Daily refresh from EVERef (T-036) ─────────────────────────────────────
+
+EVEREF_LATEST = "https://data.everef.net/universe-structures/universe-structures-latest.json"
+
+
+async def refresh_from_everef() -> dict:
+    """Daily calibration top-up: pull EVERef's latest public-structure list,
+    query triff.tools for every ID not yet in the calibration table, and store
+    any method='exact' results.
+
+    New structures first return 'extrapolate-tail' from triff.tools; as their
+    crowdsourced dataset catches up (days to weeks), subsequent daily runs
+    flip those IDs to 'exact' and they become proper calibration anchors —
+    which is why non-exact IDs are deliberately re-queried every day.
+    """
+    headers = {"User-Agent": "Vigilant/1.0 EVE Dashboard (personal use)"}
+
+    async with httpx.AsyncClient(headers=headers, timeout=60) as http:
+        try:
+            resp = await http.get(EVEREF_LATEST)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning("structure_age refresh: EVERef fetch failed: %s", e)
+            return {"error": str(e)}
+
+        if isinstance(data, dict):
+            ids = {int(k) for k in data if str(k).isdigit()}
+        elif isinstance(data, list):
+            ids = {int(x) for x in data
+                   if isinstance(x, int) or (isinstance(x, str) and x.isdigit())}
+        else:
+            log.warning("structure_age refresh: unexpected payload type %s", type(data))
+            return {"error": "unexpected payload"}
+
+        existing = await _get_existing_ids()
+        new_ids = sorted(ids - existing)
+        if not new_ids:
+            log.info("structure_age refresh: %d EVERef IDs, none new", len(ids))
+            return {"everef_ids": len(ids), "new_ids": 0, "new_exact": 0}
+
+        sem = asyncio.Semaphore(CONCURRENCY)
+        inserted = 0
+        CHUNK = 100
+        for i in range(0, len(new_ids), CHUNK):
+            results = await _batch_lookup(http, sem, new_ids[i:i + CHUNK])
+            inserted += await _store_exact(results)
+
+    log.info("structure_age refresh: %d EVERef IDs, %d not in table, %d new exact stored",
+             len(ids), len(new_ids), inserted)
+    return {"everef_ids": len(ids), "new_ids": len(new_ids), "new_exact": inserted}
+
+
 # ── Full scrape ───────────────────────────────────────────────────────────
 
 async def run_full_scrape() -> dict:

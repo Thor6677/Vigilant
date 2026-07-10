@@ -127,8 +127,8 @@ def _age_str(anchor_mid: datetime) -> str:
     return f"≈ {years}y {rem}m"
 
 
-@router.get("/tools/structure-age", response_class=HTMLResponse)
-async def structure_age_page(request: Request, paste: str = ""):
+async def _build_ctx(paste: str) -> dict:
+    """Shared context builder for the full page and the htmx partial."""
     ctx: dict = {"paste": paste, "parsed": None, "estimate": None, "error": None}
 
     if paste.strip():
@@ -150,4 +150,17 @@ async def structure_age_page(request: Request, paste: str = ""):
                     "high_str": est["high"].strftime("%d %b %Y"),
                 }
 
-    return templates.TemplateResponse(request, "structure_age.html", ctx)
+    return ctx
+
+
+@router.get("/tools/structure-age", response_class=HTMLResponse)
+async def structure_age_page(request: Request, paste: str = ""):
+    return templates.TemplateResponse(
+        request, "structure_age.html", await _build_ctx(paste))
+
+
+@router.get("/tools/structure-age/partial", response_class=HTMLResponse)
+async def structure_age_partial(request: Request, paste: str = ""):
+    """Result card only — embedded via htmx on the wormhole system page."""
+    return templates.TemplateResponse(
+        request, "structure_age_result.html", await _build_ctx(paste))

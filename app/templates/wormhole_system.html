@@ -306,6 +306,24 @@
             </div>
         </div>
 
+        <!-- Structure Age (paste a showinfo link from local) -->
+        <div class="ws-section">
+            <div class="ws-section-title">Structure Age</div>
+            <div class="b-panel" style="padding:0.75rem;">
+                <p class="b-muted-sm" style="margin-bottom:0.5rem;">
+                    Paste a structure showinfo link to estimate when it was anchored.
+                    <a href="/tools/structure-age" style="color:var(--accent);">Full tool →</a>
+                </p>
+                <form hx-get="/tools/structure-age/partial" hx-target="#ws-structure-age-result"
+                      hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.5rem;">
+                    <textarea name="paste" class="sa-input" style="min-height:44px;"
+                        placeholder="&lt;url=showinfo:35833//1051047582016&gt;{{ system['system_name'] }} - ...&lt;/url&gt;"></textarea>
+                    <div><button type="submit" class="sa-submit">Estimate Age</button></div>
+                </form>
+            </div>
+            <div id="ws-structure-age-result" style="margin-top:0.5rem;"></div>
+        </div>
+
         <!-- External Links -->
         <div class="ws-section">
             <div class="ws-section-title">External Links</div>
