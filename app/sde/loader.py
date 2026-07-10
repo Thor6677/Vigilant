@@ -18,6 +18,7 @@ from app.db.models import AsyncSessionLocal
 from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
+    SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
@@ -145,6 +146,39 @@ async def _bulk_insert(db: AsyncSession, table, rows: list[dict]):
     if rows:
         await db.execute(table.insert(), rows)
         await db.commit()
+
+
+def _parse_invention_item(item: dict):
+    """(info_row | None, material_rows, skill_rows) for one blueprints.jsonl
+    entry's invention activity. CCP field names: typeID / quantity /
+    probability (see the SDE JSONL gotchas memory — no 'operator' style
+    surprises here, but keys are camelCase)."""
+    inv = item.get("activities", {}).get("invention")
+    if not inv:
+        return None, [], []
+    products = inv.get("products") or []
+    if not products:
+        return None, [], []
+    try:
+        bp_id = int(item["_key"])
+        p0 = products[0]
+        info = {
+            "blueprint_type_id": bp_id,
+            "product_blueprint_type_id": int(p0["typeID"]),
+            "probability": float(p0.get("probability") or 0.0),
+            "base_runs": int(p0.get("quantity") or 1),
+            "time": inv.get("time"),
+        }
+    except (KeyError, ValueError, TypeError):
+        return None, [], []
+    mats = [{"blueprint_type_id": bp_id,
+             "material_type_id": int(m["typeID"]),
+             "quantity": int(m["quantity"])}
+            for m in inv.get("materials", [])
+            if m.get("typeID") and m.get("quantity")]
+    skills = [{"blueprint_type_id": bp_id, "skill_type_id": int(s["typeID"])}
+              for s in inv.get("skills", []) if s.get("typeID")]
+    return info, mats, skills
 
 
 async def download_and_import(db: AsyncSession):
@@ -447,6 +481,41 @@ async def download_and_import(db: AsyncSession):
     await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
     count += len(batch)
     log.info(f"Imported {count} blueprint info rows")
+
+    # --- blueprint invention (T1 -> T2 datacores/decryptor/skills) ---
+    log.info("Importing blueprint invention activities...")
+    await db.execute(text("DELETE FROM sde_blueprint_invention"))
+    await db.execute(text("DELETE FROM sde_blueprint_invention_materials"))
+    await db.execute(text("DELETE FROM sde_blueprint_invention_skills"))
+    await db.commit()
+    info_count, mat_count, skill_count = 0, 0, 0
+    info_batch, mat_batch, skill_batch = [], [], []
+    for item in _iter_jsonl(zf, "blueprints.jsonl"):
+        info, mats, skills = _parse_invention_item(item)
+        if info is None:
+            continue
+        info_batch.append(info)
+        mat_batch.extend(mats)
+        skill_batch.extend(skills)
+        if len(info_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInvention.__table__, info_batch)
+            info_count += len(info_batch)
+            info_batch = []
+        if len(mat_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInventionMaterial.__table__, mat_batch)
+            mat_count += len(mat_batch)
+            mat_batch = []
+        if len(skill_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInventionSkill.__table__, skill_batch)
+            skill_count += len(skill_batch)
+            skill_batch = []
+    await _bulk_insert(db, SDEBlueprintInvention.__table__, info_batch)
+    info_count += len(info_batch)
+    await _bulk_insert(db, SDEBlueprintInventionMaterial.__table__, mat_batch)
+    mat_count += len(mat_batch)
+    await _bulk_insert(db, SDEBlueprintInventionSkill.__table__, skill_batch)
+    skill_count += len(skill_batch)
+    log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, {skill_count} invention skills")
 
     # --- typeMaterials (reprocessing outputs) ---
     log.info("Importing type materials (reprocessing)...")

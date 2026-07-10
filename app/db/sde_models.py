@@ -113,6 +113,36 @@ class SDEBlueprintInfo(Base):
     product_quantity = Column(Integer, nullable=True, default=1)
 
 
+class SDEBlueprintInvention(Base):
+    """Invention activity info — T1 blueprint -> invented T2 blueprint."""
+    __tablename__ = "sde_blueprint_invention"
+
+    blueprint_type_id = Column(Integer, primary_key=True)  # T1 blueprint being invented FROM
+    product_blueprint_type_id = Column(Integer, nullable=True, index=True)  # T2 blueprint produced
+    probability = Column(Float, nullable=True)
+    base_runs = Column(Integer, nullable=True)
+    time = Column(Integer, nullable=True)  # seconds
+
+
+class SDEBlueprintInventionMaterial(Base):
+    """Datacores (and other invention materials) consumed per invention attempt."""
+    __tablename__ = "sde_blueprint_invention_materials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)
+    material_type_id = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+
+class SDEBlueprintInventionSkill(Base):
+    """Skills (encryption + science) required for an invention attempt."""
+    __tablename__ = "sde_blueprint_invention_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+
+
 # ── Skill planning SDE tables ───────────────────────────────────────────────
 
 class SDEGroup(Base):
