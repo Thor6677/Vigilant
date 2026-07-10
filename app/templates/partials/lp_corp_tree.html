@@ -1,17 +1,24 @@
 {#
-    Minimal placeholder fragment (EVE-style pickers Task 3). Iterates the
-    faction -> corp data structure as a flat list — no collapsing, no
-    styling, no filter JS. The follow-up task restyles this into the
-    collapsible faction tree (`.lpt-fac` / `.lpt-corps` / `.lpt-corp`); it
-    MUST keep the `data-corp-id` attribute below, since that's the stable
-    contract the corp-click wiring and this task's tests both depend on.
+    EVE-style collapsible faction tree with search filter support.
+    Each faction is a toggleable header with a corps container that
+    expands/collapses. The fragment is htmx-swapped in after page load,
+    so JS uses event delegation on the container.
 #}
+{# `request is defined` guard: tests render this fragment standalone
+   through a bare Jinja Environment with no request in context. #}
+<style nonce="{{ request.state.csp_nonce if request is defined else '' }}">
+.lpt-fac { display:block; width:100%; text-align:left; background:none; border:none; color:var(--text); font:inherit; font-size:11px; padding:4px 6px; cursor:pointer; border-bottom:1px solid var(--border); }
+.lpt-fac:hover { color:var(--accent); }
+.lpt-corp { display:block; width:100%; text-align:left; background:none; border:none; color:var(--muted); font:inherit; font-size:11px; padding:3px 6px 3px 22px; cursor:pointer; }
+.lpt-corp:hover, .lpt-corp.is-selected { color:var(--accent); }
+</style>
+
 {% if degraded %}
 <div class="b-muted-sm" style="font-style:italic;">Faction data unavailable — showing all corporations under Other; reload to retry.</div>
 {% endif %}
 {% for f in factions %}
-<div data-faction-group="{{ loop.index }}">
-    <div class="b-label">{{ f.faction_name }} ({{ f.corps|length }})</div>
+<button type="button" class="lpt-fac" data-fac="{{ loop.index }}">▸ {{ f.faction_name }} <span class="b-muted-sm">({{ f.corps|length }})</span></button>
+<div class="lpt-corps" data-fac="{{ loop.index }}" style="display:none;">
     {% for c in f.corps %}
     <button type="button" class="lpt-corp" data-corp-id="{{ c.corporation_id }}">{{ c.name }}</button>
     {% endfor %}

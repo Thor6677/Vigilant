@@ -48,8 +48,8 @@
             Hidden input preserves the exact mechanism the old flat
             `<select name="corporation_id">` used to load offers: an htmx
             `change` trigger targeting #lp-offers-panel. Corp-tree clicks
-            (follow-up task) set this input's value and dispatch a `change`
-            event on it — no new load path is introduced.
+            set this input's value and dispatch a `change` event on it —
+            no new load path is introduced.
         #}
         <input
             type="hidden"
@@ -62,6 +62,7 @@
             hx-swap="innerHTML"
             hx-indicator="#lp-loading"
         >
+        <input type="text" id="lp-corp-filter" placeholder="Filter corporations…" autocomplete="off" style="width:100%;padding:0.35rem 0.5rem;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;margin-bottom:0.4rem;">
         <div id="lp-corp-tree" hx-get="/market/lp/corps-tree" hx-trigger="load" hx-swap="innerHTML">
             <div class="b-empty">Loading corporations…</div>
         </div>
@@ -84,4 +85,72 @@
     ranking (they still appear in the list). No manufacture-value math is computed for blueprints —
     see the build-finder tool (planned) for that.
 </p>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var tree = document.getElementById('lp-corp-tree');
+    var filter = document.getElementById('lp-corp-filter');
+
+    function setArrow(facBtn, open) {
+        var node = facBtn.firstChild; // leading text node "▸ Name "
+        if (node && node.nodeType === 3) {
+            node.textContent = node.textContent.replace(open ? '▸' : '▾', open ? '▾' : '▸');
+        }
+    }
+
+    // Event delegation: the tree fragment is htmx-swapped in after load,
+    // so listeners must live on the container, not the fragment's nodes.
+    tree.addEventListener('click', function (e) {
+        var facBtn = e.target.closest('.lpt-fac');
+        if (facBtn) {
+            var corps = tree.querySelector('.lpt-corps[data-fac="' + facBtn.getAttribute('data-fac') + '"]');
+            if (!corps) return;
+            var opening = corps.style.display === 'none';
+            corps.style.display = opening ? 'block' : 'none';
+            setArrow(facBtn, opening);
+            return;
+        }
+        var corpBtn = e.target.closest('.lpt-corp');
+        if (corpBtn) {
+            tree.querySelectorAll('.lpt-corp.is-selected').forEach(function (b) {
+                b.classList.remove('is-selected');
+            });
+            corpBtn.classList.add('is-selected');
+            var inp = document.getElementById('lp-corp-id');
+            inp.value = corpBtn.getAttribute('data-corp-id');
+            inp.dispatchEvent(new Event('change'));
+        }
+    });
+
+    filter.addEventListener('input', function () {
+        var q = filter.value.trim().toLowerCase();
+        tree.querySelectorAll('.lpt-fac').forEach(function (facBtn) {
+            var fac = facBtn.getAttribute('data-fac');
+            var corps = tree.querySelector('.lpt-corps[data-fac="' + fac + '"]');
+            if (!corps) return;
+            var visible = 0;
+            corps.querySelectorAll('.lpt-corp').forEach(function (btn) {
+                var match = !q || btn.textContent.toLowerCase().indexOf(q) !== -1;
+                btn.style.display = match ? '' : 'none';
+                if (match) visible++;
+            });
+            var wasOpen = corps.style.display !== 'none';
+            if (!q) {
+                // empty query restores collapsed-all state
+                facBtn.style.display = '';
+                corps.style.display = 'none';
+                if (wasOpen) setArrow(facBtn, false);
+            } else if (visible > 0) {
+                facBtn.style.display = '';
+                corps.style.display = 'block';
+                if (!wasOpen) setArrow(facBtn, true);
+            } else {
+                facBtn.style.display = 'none';
+                corps.style.display = 'none';
+                if (wasOpen) setArrow(facBtn, false);
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}
