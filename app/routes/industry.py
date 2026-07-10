@@ -524,6 +524,78 @@ async def build_finder_results(
     })
 
 
+# ── Invention: characters + skill resolution ─────────────────────────────
+
+_SKILLS_SCOPE = "esi-skills.read_skills.v1"
+
+
+@router.get("/industry/build-finder/characters")
+async def build_finder_characters(request: Request, db: AsyncSession = Depends(get_db)):
+    """Dropdown source — characters the user owns that have the skills scope
+    (copy of `list_fitting_characters` in app/routes/fitting.py)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"characters": []}
+    from sqlalchemy import select
+    r = await db.execute(
+        select(Character)
+        .where(Character.user_id == user_id)
+        .order_by(Character.character_name)
+    )
+    return {
+        "characters": [
+            {"id": c.character_id, "name": c.character_name}
+            for c in r.scalars().all()
+            if _SKILLS_SCOPE in (c.scopes or "")
+        ],
+    }
+
+
+def _resolve_invention_skills(
+    char_skills: dict[int, int] | None,
+    skill_ids: list[int],
+    skill_names: dict[int, str],
+    encryption_manual: int,
+    science_manual: int,
+) -> tuple[int, int, int, bool]:
+    """Resolve (E, S1, S2, missing_flag) feeding `invention_probability`.
+
+    Character mode (`char_skills` is not None): the encryption skill is the
+    one whose SDE type name ends with "Encryption Methods" — identified by
+    NAME, never by position, since `skill_ids` order from the SDE is not
+    guaranteed. The other two entries are the sciences. E = the character's
+    level of the encryption skill (0 if untrained); S1/S2 = levels of the two
+    sciences. `missing_flag` is True if ANY of the three resolves to 0
+    (untrained or not owned).
+
+    A degenerate `skill_ids` list — not exactly 3 entries, or no entry whose
+    name resolves to an "Encryption Methods" skill — can't be safely split
+    into E vs S, so it falls back to the manual values with
+    `missing_flag=False`.
+
+    Manual mode (`char_skills` is None): `(encryption_manual, science_manual,
+    science_manual, False)` — no character data, so nothing can be "missing"."""
+    if char_skills is None:
+        return encryption_manual, science_manual, science_manual, False
+
+    encryption_id = None
+    if len(skill_ids) == 3:
+        for sid in skill_ids:
+            if skill_names.get(sid, "").endswith("Encryption Methods"):
+                encryption_id = sid
+                break
+
+    if encryption_id is None:
+        return encryption_manual, science_manual, science_manual, False
+
+    science_ids = [sid for sid in skill_ids if sid != encryption_id]
+    e_level = char_skills.get(encryption_id, 0)
+    s1 = char_skills.get(science_ids[0], 0)
+    s2 = char_skills.get(science_ids[1], 0)
+    missing = e_level == 0 or s1 == 0 or s2 == 0
+    return e_level, s1, s2, missing
+
+
 # ── Compression Calculator ────────────────────────────────────────────────────
 
 @router.get("/industry/compression", response_class=HTMLResponse)

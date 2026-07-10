@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
+    SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
@@ -1337,6 +1338,98 @@ async def get_group_buildables(
             "materials": mats,
         })
     return total_n, products
+
+
+async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> dict[int, dict]:
+    """Bulk-resolve invention chain data for sellable T2 products.
+
+    Chain: product_type_id -> `SDEBlueprintInfo` row whose product_type_id
+    matches (gives the T2 blueprint id + per-run output qty) -> the
+    `SDEBlueprintInvention` row whose product_blueprint_type_id equals that T2
+    blueprint id (gives probability/base_runs and the T1 blueprint id, which
+    is the invention row's own PK) -> materials (datacores) + skills keyed off
+    that T1 blueprint id.
+
+    Every step is a single bulk `IN(...)` query, stitched together in Python —
+    no per-product round trips (see `get_group_buildables` for the same
+    style). Non-inventable products (no blueprint, or no matching invention
+    row) are simply absent from the returned dict.
+
+    Returns `{product_type_id: {"t1_blueprint_type_id", "t2_blueprint_type_id",
+    "probability", "base_runs", "per_run_output_qty",
+    "datacores": [{"material_type_id", "quantity"}], "skill_ids": [int, ...]}}`.
+    """
+    if not product_type_ids:
+        return {}
+
+    bp_rows = (await db.execute(
+        select(
+            SDEBlueprintInfo.product_type_id,
+            SDEBlueprintInfo.blueprint_type_id,
+            SDEBlueprintInfo.product_quantity,
+        )
+        .where(SDEBlueprintInfo.product_type_id.in_(product_type_ids))
+    )).all()
+    if not bp_rows:
+        return {}
+    t2_bp_by_product = {r.product_type_id: r.blueprint_type_id for r in bp_rows}
+    output_qty_by_product = {r.product_type_id: (r.product_quantity or 1) for r in bp_rows}
+    t2_bp_ids = list(t2_bp_by_product.values())
+
+    inv_rows = (await db.execute(
+        select(
+            SDEBlueprintInvention.blueprint_type_id,
+            SDEBlueprintInvention.product_blueprint_type_id,
+            SDEBlueprintInvention.probability,
+            SDEBlueprintInvention.base_runs,
+        )
+        .where(SDEBlueprintInvention.product_blueprint_type_id.in_(t2_bp_ids))
+    )).all()
+    if not inv_rows:
+        return {}
+    inv_by_t2_bp = {r.product_blueprint_type_id: r for r in inv_rows}
+    t1_bp_ids = [r.blueprint_type_id for r in inv_rows]
+
+    mat_rows = (await db.execute(
+        select(
+            SDEBlueprintInventionMaterial.blueprint_type_id,
+            SDEBlueprintInventionMaterial.material_type_id,
+            SDEBlueprintInventionMaterial.quantity,
+        )
+        .where(SDEBlueprintInventionMaterial.blueprint_type_id.in_(t1_bp_ids))
+    )).all()
+    mats_by_t1_bp: dict[int, list[dict]] = {}
+    for r in mat_rows:
+        mats_by_t1_bp.setdefault(r.blueprint_type_id, []).append(
+            {"material_type_id": r.material_type_id, "quantity": r.quantity})
+
+    skill_rows = (await db.execute(
+        select(
+            SDEBlueprintInventionSkill.blueprint_type_id,
+            SDEBlueprintInventionSkill.skill_type_id,
+        )
+        .where(SDEBlueprintInventionSkill.blueprint_type_id.in_(t1_bp_ids))
+    )).all()
+    skills_by_t1_bp: dict[int, list[int]] = {}
+    for r in skill_rows:
+        skills_by_t1_bp.setdefault(r.blueprint_type_id, []).append(r.skill_type_id)
+
+    result: dict[int, dict] = {}
+    for product_id, t2_bp_id in t2_bp_by_product.items():
+        inv = inv_by_t2_bp.get(t2_bp_id)
+        if inv is None:
+            continue  # T2 blueprint exists but has no invention activity (not inventable)
+        t1_bp_id = inv.blueprint_type_id
+        result[product_id] = {
+            "t1_blueprint_type_id": t1_bp_id,
+            "t2_blueprint_type_id": t2_bp_id,
+            "probability": inv.probability,
+            "base_runs": inv.base_runs,
+            "per_run_output_qty": output_qty_by_product[product_id],
+            "datacores": mats_by_t1_bp.get(t1_bp_id, []),
+            "skill_ids": skills_by_t1_bp.get(t1_bp_id, []),
+        }
+    return result
 
 
 # ── Module fit restriction checking ──────────────────────────────────────
