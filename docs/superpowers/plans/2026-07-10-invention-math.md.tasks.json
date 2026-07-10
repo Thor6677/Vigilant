@@ -1,0 +1,39 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-10-invention-math.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "INV Task 1: SDE invention tables + loader parse pass (Sonnet)",
+      "status": "pending",
+      "description": "**Goal:** Three invention tables + testable _parse_invention_item + loader block over blueprints.jsonl.\n\n```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-invention-math.md\", \"planTask\": 1, \"model\": \"sonnet\", \"files\": [\"app/db/sde_models.py\", \"app/sde/loader.py\", \"tests/test_sde_invention_parse.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/test_sde_invention_parse.py -q\", \"acceptanceCriteria\": [\"three models\", \"pure parse function\", \"batched loader block\", \"no-invention and no-products cases\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "INV Task 2: pure invention math module (Opus)",
+      "status": "pending",
+      "description": "**Goal:** Probability/attempt-cost/invented-BPC/overhead functions + verified DECRYPTORS table; DCII reference test.\n\n```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-invention-math.md\", \"planTask\": 2, \"model\": \"opus\", \"files\": [\"app/industry/invention.py\", \"tests/test_invention_math.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/test_invention_math.py -q\", \"acceptanceCriteria\": [\"formula with clamps\", \"DCII all-IV reference 0.4647\", \"unpriced datacore None\", \"decryptor attrs verified against SDE with cited query\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "INV Task 3: inventability lookup + skill resolution (Sonnet)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** sde.get_invention_data bulk lookup; characters endpoint; _resolve_invention_skills with missing-skill flag.\n\n```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-invention-math.md\", \"planTask\": 3, \"model\": \"sonnet\", \"files\": [\"app/sde/lookup.py\", \"app/routes/industry.py\", \"tests/test_invention_lookup.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/test_invention_lookup.py -q\", \"acceptanceCriteria\": [\"bulk chain product->T2bp->invention\", \"characters endpoint skills-scope filtered\", \"missing science -> level 0 + flag\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "INV Task 4: Build Finder integration + UI (Sonnet)",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** rank_builds accepts invention dict (invented ME override + overhead); route params + chips + dropdown + footnote; pre-reimport graceful.\n\n```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-invention-math.md\", \"planTask\": 4, \"model\": \"sonnet\", \"files\": [\"app/industry/build_finder.py\", \"app/routes/industry.py\", \"app/templates/build_finder.html\", \"app/templates/partials/build_finder_results.html\", \"tests/test_build_finder.py\"], \"verifyCommand\": \".venv/bin/python -m pytest tests/ -q\", \"acceptanceCriteria\": [\"invented ME override\", \"None overhead excludes row\", \"non-inventable rows unchanged\", \"pre-reimport graceful\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "INV Task 5: deploy + SDE reimport runbook (Fable/coordinator)",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Deploy, trigger SDE reimport (delete sde_meta last_updated + restart — never stop the app), verify invention rows > 3000 and live rankings.\n\n```json:metadata\n{\"plan\": \"docs/superpowers/plans/2026-07-10-invention-math.md\", \"planTask\": 5, \"model\": \"fable\", \"files\": [], \"verifyCommand\": \"\", \"acceptanceCriteria\": [\"reimport completes\", \"invention rows > 3000\", \"live page verified\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-10T13:30:00Z"
+}
