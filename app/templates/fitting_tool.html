@@ -213,6 +213,12 @@
             <div id="implant-results"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
         </div>
+        {# ISS-016: import the skill-character's currently-plugged implants #}
+        <button type="button" id="btn-clone-implants" onclick="loadCloneImplants()"
+                style="margin-top:0.35rem;padding:0.25rem 0.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;"
+                title="Fetch the selected skill character's active clone implants from ESI">
+            Load active clone
+        </button>
     </div>
 </div>
 
@@ -712,8 +718,11 @@ function renderImplantSlots() {
     var html = '';
     for (var s = 1; s <= 10; s++) {
         var rec = (state.implants || {})[String(s)];
+        var cloneTag = (rec && rec.from_clone)
+            ? '<span style="font-size:8px;letter-spacing:0.1em;color:var(--accent);border:1px solid var(--accent);padding:0 3px;margin-left:0.4rem;" title="Imported from active jump clone">CLONE</span>'
+            : '';
         var nameCell = rec
-            ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' +
+            ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' + cloneTag +
               '<button data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
             : '<span style="color:var(--muted);font-style:italic;">empty</span>';
         html +=
@@ -779,6 +788,33 @@ function removeImplant(slot) {
     saveState();
     renderImplantSlots();
     recalcStats();
+}
+
+/* ISS-016: import the selected skill character's active-clone implants.
+   Replaces the whole loadout (a clone IS a full loadout); imported slots
+   get from_clone=true so renderImplantSlots badges them. */
+function loadCloneImplants() {
+    var charId = getSelectedSkillCharId();
+    if (!charId) { alert('Select a skill character first (top of the stats panel).'); return; }
+    var btn = document.getElementById('btn-clone-implants');
+    btn.disabled = true; btn.textContent = 'Loading…';
+    fetch('/tools/fitting/clone-implants/' + charId)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        state.implants = data.implants || {};
+        saveState();
+        renderImplantSlots();
+        recalcStats();
+        var n = Object.keys(state.implants).length;
+        btn.textContent = n ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's')) : 'Clone is empty';
+        setTimeout(function() { btn.textContent = 'Load active clone'; }, 2500);
+    })
+    .catch(function() { alert('Clone implant fetch failed.'); })
+    .finally(function() {
+        btn.disabled = false;
+        if (btn.textContent === 'Loading…') btn.textContent = 'Load active clone';
+    });
 }
 
 /* ── Damage / target profile selector ─────────────────────────────── */
@@ -1259,6 +1295,7 @@ function saveFitting() {
         ship_type_id: state.shipTypeId,
         name: name,
         items: state.items,
+        implants_map: state.implants || {},
         fitting_id: state.fittingId
     };
 
@@ -1308,6 +1345,7 @@ function loadFitting(id) {
         state.fittingName = data.name;
         state.fittingId = data.id;
         state.items = data.items;
+        state.implants = data.implants || {};
         saveState();
         applyState();
     });

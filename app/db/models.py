@@ -654,6 +654,8 @@ class UserFitting(Base):
     description = Column(String, nullable=True)
     ship_type_id = Column(Integer, nullable=False)
     items_json = Column(Text, nullable=False, default="[]")
+    # Implant loadout: {"<slot 1-10>": {"type_id": int, "name": str}, ...}
+    implants_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 

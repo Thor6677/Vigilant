@@ -732,6 +732,94 @@ async def export_eft(
     return PlainTextResponse("\n".join(lines).rstrip())
 
 
+def _sanitize_implants_map(raw) -> dict:
+    """Validate an implant loadout map to {"1".."10": {type_id, name}}.
+
+    Accepts untrusted JSON (save body or a stored row); drops anything
+    malformed rather than erroring — an implant map is never worth failing
+    a fit save over. `from_clone` marks slots imported from the active
+    jump clone (ISS-016) so the UI can badge them.
+    """
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for slot, rec in raw.items():
+        try:
+            s = int(slot)
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= s <= 10) or not isinstance(rec, dict):
+            continue
+        try:
+            type_id = int(rec.get("type_id"))
+        except (TypeError, ValueError):
+            continue
+        entry = {"type_id": type_id, "name": str(rec.get("name") or f"Type {type_id}")[:128]}
+        if rec.get("from_clone"):
+            entry["from_clone"] = True
+        out[str(s)] = entry
+    return out
+
+
+@router.get("/tools/fitting/clone-implants/{character_id}")
+async def clone_implants(
+    request: Request,
+    character_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Active-clone implants for a linked character (ISS-016).
+
+    Fetches the character's currently-plugged implants from ESI
+    (GET /characters/{id}/implants/, esi-clones.read_implants.v1), resolves
+    each type's slot via the implantness dogma attribute (331), and returns
+    the same slot-map shape the fitting UI keeps in state.implants.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"error": "Not logged in"}
+
+    r = await db.execute(
+        select(Character)
+        .where(Character.character_id == character_id)
+        .where(Character.user_id == user_id)
+    )
+    char = r.scalar_one_or_none()
+    if not char:
+        return {"error": "Character not found"}
+    if "esi-clones.read_implants.v1" not in (char.scopes or ""):
+        return {"error": "Character lacks the implants scope — re-add it to grant."}
+
+    try:
+        token = await refresh_token(char, db)
+        client = ESIClient(token, db=db)
+        type_ids = await client.get(f"/characters/{character_id}/implants/") or []
+    except Exception as e:
+        logger.warning("clone-implants ESI fetch failed for %s: %s", character_id, e)
+        return {"error": "ESI implant fetch failed — try again shortly."}
+
+    if not type_ids:
+        return {"implants": {}}
+
+    rows = (await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDETypeDogmaAttribute.value)
+        .join(SDETypeDogmaAttribute,
+              (SDETypeDogmaAttribute.type_id == SDEType.type_id)
+              & (SDETypeDogmaAttribute.attribute_id == 331))
+        .where(SDEType.type_id.in_([int(t) for t in type_ids]))
+    )).fetchall()
+
+    implants: dict = {}
+    for type_id, name, slot_val in rows:
+        try:
+            slot = int(slot_val)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= slot <= 10:
+            implants[str(slot)] = {"type_id": type_id, "name": name, "from_clone": True}
+
+    return {"implants": implants, "character_name": char.character_name}
+
+
 @router.post("/tools/fitting/save")
 async def save_fitting(
     request: Request,
@@ -750,6 +838,7 @@ async def save_fitting(
     name = body.get("name", "Unnamed").strip()
     description = body.get("description", "").strip()
     items = body.get("items", [])
+    implants = _sanitize_implants_map(body.get("implants_map"))
     fitting_id = body.get("fitting_id")
     folder_id = body.get("folder_id")
     if folder_id is not None:
@@ -783,6 +872,7 @@ async def save_fitting(
             fitting.description = description
             fitting.ship_type_id = int(ship_type_id)
             fitting.items_json = json.dumps(items)
+            fitting.implants_json = json.dumps(implants)
             fitting.updated_at = now
             if "folder_id" in body:
                 fitting.folder_id = folder_id
@@ -796,6 +886,7 @@ async def save_fitting(
         description=description,
         ship_type_id=int(ship_type_id),
         items_json=json.dumps(items),
+        implants_json=json.dumps(implants),
         created_at=now,
         updated_at=now,
     )
@@ -832,6 +923,11 @@ async def load_fitting(
         if "type_name" not in item:
             item["type_name"] = type_names.get(item["type_id"], f"Type {item['type_id']}")
 
+    try:
+        implants = _sanitize_implants_map(json.loads(fitting.implants_json or "{}"))
+    except (ValueError, TypeError):
+        implants = {}
+
     return {
         "id": fitting.id,
         "name": fitting.name,
@@ -839,6 +935,7 @@ async def load_fitting(
         "ship_type_id": fitting.ship_type_id,
         "ship_name": ship_name or f"Ship {fitting.ship_type_id}",
         "items": items,
+        "implants": implants,
     }
 
 
