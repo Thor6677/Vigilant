@@ -1340,6 +1340,132 @@ async def get_group_buildables(
     return total_n, products
 
 
+async def get_market_group_descendants(
+    db: AsyncSession, market_group_id: int
+) -> set[int]:
+    """The node id + every descendant market-group id, as a flat set.
+
+    Loads all `(market_group_id, parent_group_id)` pairs in one query (the
+    table is ~2.5k rows) and walks the tree in Python (BFS). No recursive
+    SQL — a single scan plus an in-memory adjacency map is cheaper and keeps
+    us off SQLite's recursive-CTE path. The starting node is always included,
+    even if it has no children (a leaf resolves to `{market_group_id}`)."""
+    rows = (await db.execute(
+        select(SDEMarketGroup.market_group_id, SDEMarketGroup.parent_group_id)
+    )).all()
+
+    children_by_parent: dict[int, list[int]] = {}
+    for mg_id, parent_id in rows:
+        children_by_parent.setdefault(parent_id, []).append(mg_id)
+
+    result: set[int] = set()
+    queue = deque([market_group_id])
+    while queue:
+        node = queue.popleft()
+        if node in result:
+            continue
+        result.add(node)
+        for child in children_by_parent.get(node, ()):
+            if child not in result:
+                queue.append(child)
+    return result
+
+
+async def get_market_group_subtree_products(
+    db: AsyncSession, market_group_id: int, cap: int = 200
+) -> tuple[int, list[dict]]:
+    """Buildable products across a market-group's whole subtree, capped by name.
+
+    Selecting any tree node (branch or leaf) ranks every buildable product in
+    its subtree. Returns `(total_n, products)` shaped EXACTLY like
+    `get_group_buildables`: `total_n` is the full buildable count (for a
+    "showing N of M" footer), `products` is the first `cap` by name, each
+      `{product_type_id, product_name, blueprint_type_id,
+        product_quantity, materials: [{type_id, quantity}, ...]}`.
+
+    Descendant set is computed once in Python (see
+    `get_market_group_descendants`); the head query is one indexed pass over
+    `SDEType.market_group_id` joined to blueprints, and the material join runs
+    only for the ≤cap blueprints shown — mirroring `get_group_buildables` so
+    the route/rank composition is unchanged."""
+    descendants = await get_market_group_descendants(db, market_group_id)
+
+    head = (await db.execute(
+        select(
+            SDEType.type_id, SDEType.type_name,
+            SDEBlueprintInfo.blueprint_type_id, SDEBlueprintInfo.product_quantity,
+        )
+        .join(SDEBlueprintInfo, SDEBlueprintInfo.product_type_id == SDEType.type_id)
+        .where(SDEType.market_group_id.in_(descendants), SDEType.published.is_(True))
+        .order_by(SDEType.type_name)
+    )).all()
+
+    total_n = len(head)
+    head = head[:cap]
+    if not head:
+        return total_n, []
+
+    bp_ids = [r.blueprint_type_id for r in head]
+    mat_rows = (await db.execute(
+        select(
+            SDEBlueprintMaterial.blueprint_type_id,
+            SDEBlueprintMaterial.material_type_id,
+            SDEBlueprintMaterial.quantity,
+        )
+        .where(SDEBlueprintMaterial.blueprint_type_id.in_(bp_ids))
+        .where(SDEBlueprintMaterial.activity_id == 1)
+    )).all()
+
+    mats_by_bp: dict[int, list[dict]] = {}
+    for bp_id, mat_id, qty in mat_rows:
+        mats_by_bp.setdefault(bp_id, []).append({"type_id": mat_id, "quantity": qty})
+
+    products = []
+    for r in head:
+        mats = mats_by_bp.get(r.blueprint_type_id)
+        if not mats:
+            continue  # blueprint has no manufacturing materials → not buildable
+        products.append({
+            "product_type_id": r.type_id,
+            "product_name": r.type_name,
+            "blueprint_type_id": r.blueprint_type_id,
+            "product_quantity": r.product_quantity or 1,
+            "materials": mats,
+        })
+    return total_n, products
+
+
+async def search_market_groups(
+    db: AsyncSession, q: str, limit: int = 30
+) -> list[dict]:
+    """Case-insensitive substring search over market-group names.
+
+    Returns up to `limit` rows, each
+      `{market_group_id, market_group_name, path}`
+    where `path` is the " > "-joined full breadcrumb from root (via
+    `get_market_group_path`). Empty/blank query → `[]`."""
+    q = (q or "").strip()
+    if not q:
+        return []
+
+    rows = (await db.execute(
+        select(SDEMarketGroup.market_group_id, SDEMarketGroup.market_group_name)
+        .where(SDEMarketGroup.market_group_name.ilike(f"%{q}%"))
+        .order_by(SDEMarketGroup.market_group_name)
+        .limit(limit)
+    )).all()
+
+    out = []
+    for mg_id, name in rows:
+        path = await get_market_group_path(db, mg_id)
+        out.append({
+            "market_group_id": mg_id,
+            "market_group_name": name,
+            "path": " > ".join(p["market_group_name"] for p in path),
+        })
+    return out
+
+
 async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> dict[int, dict]:
     """Bulk-resolve invention chain data for sellable T2 products.
 
