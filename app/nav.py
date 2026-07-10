@@ -328,6 +328,17 @@ NAV_GROUPS = [
                     "Activity timestamps",
                 ],
             ),
+            _item(
+                "WH Tracker", "/intel/tracker",
+                [("prefix", "/intel/tracker")],
+                desc="Second-monitor live view for wormhole diving — polls your character's location and auto-renders the current J-system's reference plus killmail-archive intelligence.",
+                features=[
+                    "Auto-detects the tracked character's J-system",
+                    "Statics, class, effect at a glance",
+                    "Who lives here + capital activity + last structure kill",
+                    "Structure-age paste box and live kill feed",
+                ],
+            ),
             # Wormhole reference — recon you do before a scan or a fight.
             # Nav home and landing cards both live here (no landing_group).
             _item(

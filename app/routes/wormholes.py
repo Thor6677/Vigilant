@@ -206,19 +206,14 @@ async def wormhole_systems_search(
 
 # ── System Detail ───────────────────────────────────────────────────────────
 
-@router.get("/wormholes/system/{name}", response_class=HTMLResponse)
-async def wormhole_system_detail(name: str, request: Request, db: AsyncSession = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/")
-
+async def build_wh_system_context(db: AsyncSession, name: str) -> dict | None:
+    """Shared J-system context: SDE detail + celestials + statics/effect/
+    wandering resolution. Used by the system detail page and the live
+    tracker (app/routes/wh_tracker.py, T-034). Returns None when the name
+    isn't a known wormhole system."""
     sys_detail = await sde.get_wormhole_system_detail(db, name)
     if not sys_detail:
-        return templates.TemplateResponse(request, "wormholes.html", {"error": f"System '{name}' not found.",
-            "effects_list": list(_wh_data.get("effects", {}).keys()),
-            "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
-        })
+        return None
 
     celestials = await sde.get_system_celestials(db, sys_detail["system_id"])
 
@@ -278,7 +273,7 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
                                 "from_class": from_class,
                             })
 
-    return templates.TemplateResponse(request, "wormhole_system.html", {"system": sys_detail,
+    return {"system": sys_detail,
         "celestials": celestials,
         "statics": static_details,
         "statics_known": statics_known,
@@ -288,7 +283,24 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
         "class_label": _class_label,
         "class_color": _class_color,
         "effect_label": _effect_label,
-        "wh_data": _wh_data})
+        "wh_data": _wh_data}
+
+
+@router.get("/wormholes/system/{name}", response_class=HTMLResponse)
+async def wormhole_system_detail(name: str, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/")
+
+    ctx = await build_wh_system_context(db, name)
+    if ctx is None:
+        return templates.TemplateResponse(request, "wormholes.html", {"error": f"System '{name}' not found.",
+            "effects_list": list(_wh_data.get("effects", {}).keys()),
+            "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
+        })
+
+    return templates.TemplateResponse(request, "wormhole_system.html", ctx)
 
 
 @router.get("/wormholes/system/{name}/kills", response_class=HTMLResponse)
