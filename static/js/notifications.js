@@ -441,4 +441,21 @@
     });
 
     window.addEventListener('beforeunload', releaseLock);
+
+    /* Defense-in-depth for F4: when the user logs out, clear this account's
+       notification data from localStorage so it can't be read by the next user
+       of a shared browser. The server also sends Clear-Site-Data on logout;
+       this covers browsers with weak support for that header. Runs in the
+       capture phase so it fires before the form actually navigates away. */
+    document.addEventListener('submit', function(evt) {
+        var form = evt.target;
+        if (!form || form.tagName !== 'FORM') return;
+        if ((form.getAttribute('action') || '').indexOf('/auth/logout') === -1) return;
+        try {
+            localStorage.removeItem(EVENTS_KEY);
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(PREFS_KEY);
+            localStorage.removeItem(LOCK_KEY);
+        } catch (e) {}
+    }, true);
 })();

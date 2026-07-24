@@ -62,6 +62,14 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 git pull --ff-only
 
+# Secrets live in .env — keep it owner-only (0600) so a co-located, less-
+# privileged account on the host cannot read SECRET_KEY or the EVE client
+# secret. Idempotent, runs every deploy, so it also retro-tightens an install
+# whose .env was created world-readable before this guard existed. See F3.
+if [ -f .env ]; then
+    chmod 600 .env
+fi
+
 echo "[2/4] Tag current image as :prev (for fast rollback)"
 if docker image inspect vigilant-app:latest >/dev/null 2>&1; then
     docker tag vigilant-app:latest vigilant-app:prev

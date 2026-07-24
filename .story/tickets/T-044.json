@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-07-24",
+  "createdDate": "2026-07-24",
+  "description": "Security finding F3 (MEDIUM, CWE-276) from the 2026-07-23 Claude Security scan (revision 5bc5d569, verified by a 3-voter adversarial panel, 2/3).\n\n## Problem\nstart.sh creates .env via `cp .env.example .env` and writes secrets with no chmod/umask, leaving it world/group-readable (0644). The file holds SECRET_KEY (signs sessions, derives the token-encryption key) and EVE_CLIENT_SECRET. Any local principal that is neither the owner nor root can read both. (2/3 panel: the defenses lens noted no unprivileged local reader exists in a single-operator box — so this matters most on shared/multi-tenant hosts.)\n\n## Fix (applied to working tree, pending commit + deploy)\n- `chmod 600 .env` in start.sh, placed before any secret is written (idempotent, also tightens a pre-existing loose .env every run).\n- Idempotent `chmod 600 .env` in scripts/deploy.sh so the live VPS host self-heals on every deploy.\n- Updated the setup_vps.sh echoed instruction to include chmod 600.\nFiles: start.sh, setup_vps.sh, scripts/deploy.sh. Patch: CLAUDE-SECURITY-20260723-213128/patches/F3-env-file-permissions.patch.\n\n## Verification\nFable 3-voter panel: 2/3 TRUE_POSITIVE. Fable adversarial patch-verifier: SOUND-WITH-CAVEATS (chmod-before-secrets ordering correct; start.sh is local-dev-only, deploy.sh is the right lever for the Docker host). Shell syntax OK.\n\n## Remaining work (this ticket)\n- One-time tighten of the already-deployed host now: `ssh thunderborn-home \"chmod 600 /opt/vigilant/.env\"` (or just run the next deploy, which now self-heals).\n- Optional doc consistency: README.md:294 still shows `cp .env.example .env` without chmod (README:511 already documents 600).\n- Sync to sec-toolkit.\n",
+  "id": "T-044",
+  "order": 200,
+  "phase": "security-hardening",
+  "status": "complete",
+  "title": "F3: Harden .env file permissions to 0600 (secret exposure)",
+  "type": "task"
+}

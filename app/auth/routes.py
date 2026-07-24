@@ -313,7 +313,14 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
 @router.post("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/", status_code=303)
+    resp = RedirectResponse("/", status_code=303)
+    # Clear client-side storage on logout so per-account notification data
+    # (character names, corp inventory, structure-attack alerts) cached in
+    # localStorage does not leak to the next user of a shared browser. The
+    # client also clears its own keys as a fallback for browsers with weak
+    # Clear-Site-Data support (see static/js/notifications.js). F4.
+    resp.headers["Clear-Site-Data"] = '"storage"'
+    return resp
 
 
 @router.post("/switch/{character_id}")

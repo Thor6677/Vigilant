@@ -334,7 +334,7 @@
    page templates. Nothing on the anonymous landing page uses either. #}
 {% if request.session.get('user_id') %}
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
-<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=5"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=6"></script>
 {% endif %}
 <script nonce="{{ request.state.csp_nonce }}">
 /* Global dismiss handler for alert banners — runs after every htmx swap */

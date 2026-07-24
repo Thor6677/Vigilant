@@ -366,12 +366,44 @@ async def startup():
     except Exception as e:
         logging.warning("detected_battles wh-class backfill warning: %s", e)
 
-    # ── Auto-promote first user to admin if no admin exists ────────────
+    # ── Bootstrap the admin from a verified identity, never MIN(id) ────
+    # Promoting the lowest-id user hands admin to whoever registers first on a
+    # fresh, publicly reachable deploy (an admin-takeover race). Instead promote
+    # ONLY the account that owns the character named by ADMIN_CHARACTER_ID; if
+    # that is unset, or that character has not logged in yet, promote no one
+    # (fail closed) and log how to fix it. See F2.
     async with AsyncSessionLocal() as db:
         admin_check = await db.execute(text("SELECT id FROM users WHERE is_admin = 1 LIMIT 1"))
         if not admin_check.fetchone():
-            await db.execute(text("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = (SELECT MIN(id) FROM users)"))
-            await db.commit()
+            admin_char_id = settings.admin_character_id
+            if admin_char_id:
+                owner = await db.execute(
+                    text(
+                        "SELECT user_id FROM characters "
+                        "WHERE character_id = :cid AND user_id IS NOT NULL"
+                    ),
+                    {"cid": admin_char_id},
+                )
+                row = owner.fetchone()
+                if row:
+                    await db.execute(
+                        text("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = :uid"),
+                        {"uid": row[0]},
+                    )
+                    await db.commit()
+                    logging.info("Bootstrapped admin from ADMIN_CHARACTER_ID=%s (user %s).", admin_char_id, row[0])
+                else:
+                    logging.warning(
+                        "No admin exists and ADMIN_CHARACTER_ID=%s has not logged in yet; "
+                        "no admin was promoted. Log in with that character, then restart.",
+                        admin_char_id,
+                    )
+            else:
+                logging.warning(
+                    "No admin exists and ADMIN_CHARACTER_ID is unset; refusing to auto-promote. "
+                    "Set ADMIN_CHARACTER_ID in .env to your owner character id and restart, "
+                    "or promote a user manually in the database."
+                )
         # Sync role column for existing admins
         await db.execute(text("UPDATE users SET role = 'admin' WHERE is_admin = 1 AND role = 'user'"))
         await db.commit()

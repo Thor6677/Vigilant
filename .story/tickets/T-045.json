@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-07-24",
+  "createdDate": "2026-07-24",
+  "description": "Security finding F4 (LOW, CWE-359) from the 2026-07-23 Claude Security scan (revision 5bc5d569, verified by a 3-voter adversarial panel, 3/3).\n\n## Problem\nsaveEvents() (static/js/notifications.js:141) writes per-account notification data (character names, corp inventory items+locations+quantities, structure-attack alerts) to the origin-wide localStorage key vigilant_notif_events. Logout (app/auth/routes.py:315) only clears the server session; nothing clears localStorage, and loadEvents() re-reads it on the next page load. On a shared browser profile the next user sees the previous user's data.\n\n## Fix (applied to working tree, pending commit + deploy)\n- Server sets `Clear-Site-Data: \"storage\"` on the /auth/logout response — app/auth/routes.py.\n- Client fallback: a capture-phase submit listener clears the four notif keys when a /auth/logout form is submitted (covers browsers with weak Clear-Site-Data support) — static/js/notifications.js.\n- Bumped the notifications.js cache-bust v5->v6 in base.html so the fallback actually ships.\nFiles: app/auth/routes.py, static/js/notifications.js, app/templates/base.html. Patch: CLAUDE-SECURITY-20260723-213128/patches/F4-clear-storage-on-logout.patch.\n\n## Verification\nFable 3-voter panel: 3/3 TRUE_POSITIVE. Fable adversarial patch-verifier: SOUND-WITH-CAVEATS (both logout forms covered by the capture-phase listener; no CSRF-handler or middleware conflict). JS syntax OK; full test suite green (290 passed).\n\n## Remaining work (this ticket)\n- Commit + deploy; verify logout clears localStorage in a real browser.\n- Known residual (shared-browser threat model): session expiry / walking away without clicking Logout bypasses both mechanisms; and only the 4 notif keys get the JS fallback (other per-user keys — haul lists, dismissed-alert IDs — rely on the header, which covers evergreen browsers). Durable fix: user-id-scoped localStorage keys or server-side event storage. Consider a follow-up issue.\n- Sync to sec-toolkit.\n",
+  "id": "T-045",
+  "order": 210,
+  "phase": "security-hardening",
+  "status": "complete",
+  "title": "F4: Clear per-account localStorage on logout (shared-browser data leak)",
+  "type": "task"
+}

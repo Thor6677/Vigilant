@@ -490,19 +490,17 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 - **Security headers** — recommended set baked into the sample vhost; replicate in your own proxy config if you don't use it.
 - **Container hardening** — read-only filesystem, `no-new-privileges`, `cap_drop: ALL` (with minimal `cap_add: [CHOWN, SETUID, SETGID]` consumed by the entrypoint to drop to a non-root `vigilant` uid before uvicorn starts), memory/CPU/PID limits
 
-### First-User Admin Bootstrap (Accepted Risk)
+### First-User Admin Bootstrap
 
-Vigilant has no out-of-band admin provisioning step. Instead, on every app startup the bootstrap routine in `app/main.py` runs:
+Vigilant has no interactive admin provisioning step. Instead, on every app startup the bootstrap routine in `app/main.py` runs:
 
-> If no user has `is_admin=true`, promote the user with the lowest `id` to admin.
+> If no user has `is_admin=true`, promote the account that owns the character named by `ADMIN_CHARACTER_ID` to admin. If that variable is unset, or that character has not logged in yet, promote no one.
 
-In practice this means **the operator should sign up first after a fresh deploy** — that account becomes admin on the next app restart (or immediately, since the bootstrap runs at startup). Once an admin exists, the routine is a no-op forever.
+Set `ADMIN_CHARACTER_ID` in `.env` to your own EVE character id before first launch. Then sign in with that character and restart (the documented weekly auto-update also triggers a restart) — your account becomes admin. Once an admin exists, the routine is a no-op forever.
 
-**The risk:** between a fresh deploy and the operator's first signup, anyone who reaches the URL with a valid EVE Online character could sign up first and end up as admin. For a self-hosted, single-operator deployment behind Cloudflare with EVE SSO required, this attack window is small in practice — but it is real and is flagged by static analysis (sec-toolkit finding VVP-2026-013, CWE-269).
+Because promotion is bound to a specific operator-designated character (proven via EVE SSO), an attacker who registers first on a fresh, public deploy gets an ordinary user account and is **never** auto-promoted. This closes the earlier lowest-`id` bootstrap (sec-toolkit finding VVP-2026-013, CWE-269), which handed admin to whoever signed up first.
 
-**Why this is accepted rather than fixed:** the operator controls deploy timing, the existing `/admin` flow lets admins promote/demote, and the `users` table only contains people who completed full EVE SSO with a real character — not anonymous signups. Replacing this with an env-var allowlist or bootstrap-window flag (paths B / C in the original ticket discussion) would add operational friction without meaningfully changing the threat model for this deployment shape.
-
-**If you fork Vigilant for a deployment where this isn't acceptable** (multi-tenant, public-facing without admin pre-provisioning, etc.), replace the bootstrap block in `app/main.py` with an `ADMIN_EVE_IDS=12345,67890` env-var allowlist that only auto-promotes character IDs in the list, or a one-shot `ADMIN_BOOTSTRAP=true` env flag the operator sets for the first deploy and then unsets.
+**Fail-closed:** if `ADMIN_CHARACTER_ID` is unset, no account is auto-promoted and the app logs a reminder. Promote your account manually in the `users` table if you prefer not to set the variable.
 
 ### Production Checklist
 
@@ -551,7 +549,7 @@ No. Vigilant uses only official ESI endpoints. It doesn't automate gameplay or i
 Go to `/characters` and click the remove button next to the character.
 
 **How do I access the admin panel?**
-The first user to register is automatically an admin. Admins can promote other users to Manager or Admin roles from `/admin`.
+The account that owns the character set in `ADMIN_CHARACTER_ID` becomes admin at startup (see "First-User Admin Bootstrap"). Admins can promote other users to Manager or Admin roles from `/admin`.
 
 ---
 
