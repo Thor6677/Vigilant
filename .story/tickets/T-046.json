@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-07-24",
+  "description": "Operational follow-up to the F1-F4 security fixes (T-042..T-045), committed on branch security-fixes-claude-scan-2026-07-24 but NOT yet deployed. Production still runs the vulnerable code until this ticket is done.\n\n## Deploy\n- Merge the branch and deploy: `ssh thunderborn-home \"/opt/vigilant/scripts/deploy.sh\"` (rebuilds the image — code/template/JS changes require a rebuild, not just restart).\n- deploy.sh now self-heals `.env` perms; confirm the run logs no chmod error.\n\n## Set config (F2)\n- Set `ADMIN_CHARACTER_ID=<owner char id>` in /opt/vigilant/.env before/at deploy. Prod already has an admin so the new branch is a no-op today, but set it so a future rebuild/DB reset stays safe. Do NOT leave an empty `ADMIN_CHARACTER_ID=` (pydantic rejects \"\" for int|None -> startup crash).\n\n## Verify in prod (browser)\n- F1: as a role-holding char, load a corp page (wallet/assets); then as a role-less same-corp account, confirm no cached corp data is served.\n- F4: log in, accrue notifications, log out, confirm localStorage `vigilant_notif_*` is cleared (and that the notifications.js?v=6 asset is served).\n- F3: `ssh thunderborn-home \"stat -c %a /opt/vigilant/.env\"` shows 600.\n\n## One-time cleanup (F1)\n- Evict pre-patch poisoned cache rows: `DELETE FROM esi_cache WHERE key LIKE '%/corporations/%'` (unreachable post-patch, but matters if rollback.sh reverts to the old image).\n\n## Sec-toolkit sync\n- `~/sec-toolkit/bin/sec_findings.py mark-attempted vigilant-vps <id> --branch security-fixes-claude-scan-2026-07-24 --commit <sha> --note \"...\"` for each finding (F2 = VVP-2026-013).\n- Refresh: `~/sec-toolkit/bin/sec_findings.py open-md vigilant-vps > SECURITY_TODO.md`.\n",
+  "id": "T-046",
+  "order": 220,
+  "phase": "security-hardening",
+  "status": "open",
+  "title": "Deploy & verify security fixes F1-F4 in production",
+  "type": "chore"
+}

@@ -3,6 +3,7 @@ import asyncio
 import httpx
 import json
 import base64
+import hashlib
 from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,9 +48,42 @@ _etag_cache: OrderedDict[str, dict] = OrderedDict()
 _ETAG_CACHE_MAX = 5000
 
 
-def _etag_key(path: str, token: str) -> str:
-    """Build a cache key from path + token (first 16 chars)."""
-    return f"{path}:{token[:16]}"
+def _etag_key(path: str, principal: str) -> str:
+    """Build an in-memory ETag cache key from path + requesting identity.
+
+    Namespaced by the caller's stable principal (see _principal_from_token) so
+    the tier-2 ETag cache is per-identity, matching the tier-1 DB cache. (The
+    previous token[:16] was effectively constant — every EVE JWT shares the
+    same base64 header prefix — so this key was path-global.)
+    """
+    return f"{path}:{principal}"
+
+
+def _principal_from_token(token: str) -> str:
+    """Stable per-identity namespace for the authenticated DB cache.
+
+    EVE SSO access tokens are JWTs whose `sub` claim is `CHARACTER:EVE:<id>`.
+    The character id is stable across token refreshes, so it namespaces cached
+    responses per identity without thrashing the cache every ~20 minutes when
+    the token rotates. This is what keeps a corp-privileged response fetched by
+    a role-holder from being served to a different (role-less) same-corp
+    member: their requests carry a different principal, miss the cache, and hit
+    ESI — which returns the per-token 403 the app already handles.
+
+    Used only as a cache namespace, never for authorization, so the JWT is not
+    signature-verified. If it cannot be parsed, fall back to a hash of the
+    token itself — still per-identity, just not stable across refreshes.
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)  # restore base64 padding
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        sub = payload.get("sub")
+        if sub:
+            return str(sub)  # e.g. "CHARACTER:EVE:123456789"
+    except Exception:
+        pass
+    return "tok:" + hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
 # Global ESI throttle: a single asyncio.Event coordinates 429/420 backoff
@@ -207,6 +241,9 @@ class ESIClient:
         cannot be misused for writes against a shared session.
         """
         self.token = token
+        # Namespaces the authenticated DB cache to this token's identity so a
+        # role-gated response is never served to a different caller. See F1.
+        self.principal = _principal_from_token(token)
         self.cache_enabled = cache_enabled if cache_enabled is not None else (db is not None)
         self.base = settings.eve_esi_base
         self.headers = {
@@ -245,7 +282,7 @@ class ESIClient:
         # Tier 1: DB cache check — survives restarts, skips network entirely.
         if self.cache_enabled and not bypass_cache:
             try:
-                cached = await cache_get(None, path, params)
+                cached = await cache_get(None, path, params, principal=self.principal)
                 if cached is not None:
                     return cached
             except Exception:
@@ -257,7 +294,7 @@ class ESIClient:
         req_headers = dict(self.headers)
 
         # Tier 2: in-memory ETag cache — send If-None-Match for cheap 304.
-        ek = _etag_key(path, self.token)
+        ek = _etag_key(path, self.principal)
         cached_entry = _etag_cache.get(ek)
         if cached_entry and not bypass_cache:
             req_headers["If-None-Match"] = cached_entry["etag"]
@@ -274,7 +311,7 @@ class ESIClient:
             # skip the network entirely — we just confirmed the data is valid.
             if self.cache_enabled and not bypass_cache:
                 try:
-                    await cache_set(None, path, cached_entry["data"], params)
+                    await cache_set(None, path, cached_entry["data"], params, principal=self.principal)
                 except Exception:
                     pass
             return cached_entry["data"]
@@ -320,7 +357,7 @@ class ESIClient:
         # module — see _ttl_for_path().
         if self.cache_enabled and not bypass_cache:
             try:
-                await cache_set(None, path, data, params)
+                await cache_set(None, path, data, params, principal=self.principal)
             except Exception:
                 pass
 

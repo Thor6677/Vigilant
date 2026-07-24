@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     uploads_dir: str = "./uploads"
     debug: bool = False
 
+    # EVE character id of the owner. On a fresh deploy with no admin yet, ONLY
+    # the account that owns this character is auto-promoted to admin at startup.
+    # Unset (None) means no one is auto-promoted (fail closed) — see app/main.py.
+    admin_character_id: int | None = None
+
     eve_sso_auth_url: str = "https://login.eveonline.com/v2/oauth/authorize"
     eve_sso_token_url: str = "https://login.eveonline.com/v2/oauth/token"
     eve_sso_verify_url: str = "https://login.eveonline.com/oauth/verify"

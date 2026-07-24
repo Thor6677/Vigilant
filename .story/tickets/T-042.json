@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-07-24",
+  "createdDate": "2026-07-24",
+  "description": "Security finding F1 (MEDIUM, CWE-863) from the 2026-07-23 Claude Security scan (revision 5bc5d569, verified by a 3-voter adversarial panel, 3/3).\n\n## Problem\nThe authenticated ESI response cache is principal-agnostic. `ESIClient.get()` (app/esi/client.py:248) returns the cached body before the caller's token is sent, and `_cache_key` (app/db/cache.py:46) keys only on path+params. A corp-privileged response cached under a role-holding director's token is served verbatim to any same-corp member requesting the same /corporations/{id}/... path, bypassing ESI's per-token 403. The route layer gates on OAuth scope only (corporations.py:476); the 403-fallback (`_try_api_call_with_fallback`) that enforces the in-game role never runs on a cache hit.\n\n## Fix (applied to working tree, pending commit + deploy)\n- Added optional `principal` to `_cache_key`/`cache_get`/`cache_set` (app/db/cache.py).\n- ESIClient derives a stable principal from the access-token JWT `sub` (CHARACTER:EVE:<id>), falls back to a token hash, and passes it on the authenticated `get()` path only; `get_public`/`post_public` stay globally shared. Also hardened the in-memory ETag-tier key (was effectively path-global).\n- Direct corp-cache calls in `check_corp_contracts` scoped `principal=f\"user:{user_id}\"`.\nFiles: app/db/cache.py, app/esi/client.py, app/routes/corporations.py. Patch: CLAUDE-SECURITY-20260723-213128/patches/F1-esi-cache-principal-scope.patch.\n\n## Verification\nFable 3-voter panel: 3/3 TRUE_POSITIVE. Fable adversarial patch-verifier: SOUND-WITH-CAVEATS. Full test suite green (290 passed).\n\n## Remaining work (this ticket)\n- Commit, deploy to VPS, verify corp pages still render for role-holders and role-less members get no cached corp data.\n- Optional: one-time `DELETE FROM esi_cache WHERE key LIKE '%/corporations/%'` at deploy to evict pre-patch poisoned rows (unreachable post-patch, but matters under image rollback).\n- Sync to sec-toolkit: mark-attempted vigilant-vps for the matching finding.\n",
+  "id": "T-042",
+  "order": 180,
+  "phase": "security-hardening",
+  "status": "complete",
+  "title": "F1: Principal-scope the authenticated ESI cache (corp-data authz bypass)",
+  "type": "task"
+}

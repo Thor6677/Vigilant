@@ -978,14 +978,17 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
     # Fetch all outstanding corp contracts (with DB cache)
     from app.db.cache import cache_get, cache_set
     contracts_cache_path = f"/corporations/{corp_id}/contracts/"
-    contracts = await cache_get(db, contracts_cache_path)
+    # Role-gated corp data: namespace the cache per user so a role-holder's
+    # fetched contracts are never served to another user's alert check. See F1.
+    cache_principal = f"user:{user_id}"
+    contracts = await cache_get(db, contracts_cache_path, principal=cache_principal)
     if contracts is None:
         contracts, _ = await _try_api_call_with_fallback(
             "contracts", scope_chars, esi_corp.get_corporation_contracts, corp_id, db
         )
         if contracts is None:
             return
-        await cache_set(db, contracts_cache_path, contracts)
+        await cache_set(db, contracts_cache_path, contracts, principal=cache_principal)
 
 
     outstanding = [c for c in contracts if c.get("status") == "outstanding" and c.get("type") == "item_exchange"]
@@ -1017,7 +1020,7 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
             if not cid:
                 continue
             cache_path = f"/corporations/{corp_id}/contracts/{cid}/items/"
-            cached = await cache_get(db, cache_path)
+            cached = await cache_get(db, cache_path, principal=cache_principal)
             if cached is not None:
                 contract_type_ids[cid] = {i.get("type_id") for i in cached}
             else:
@@ -1041,7 +1044,7 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
                             items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
                             if isinstance(items, list):
                                 contract_type_ids[cid] = {i.get("type_id") for i in items}
-                                await cache_set(sess, cache_path, items)
+                                await cache_set(sess, cache_path, items, principal=cache_principal)
                     except Exception:
                         pass
 

@@ -39,10 +39,19 @@ class ESICache(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
 
 
-def _cache_key(path: str, params: dict = None) -> str:
+def _cache_key(path: str, params: dict = None, principal: str = None) -> str:
     raw = path
     if params:
         raw += "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    # Principal-scope authenticated responses so a value fetched with one
+    # identity's token can never be served to a different caller. Public data
+    # passes principal=None and stays globally shared (correct — it is not
+    # authorization-gated). Without this, a corp-privileged response cached
+    # under a role-holder's token is returned verbatim to any same-corp member
+    # requesting the same path, before their own token (and ESI's per-token
+    # 403) is ever consulted.
+    if principal:
+        raw = f"@{principal}|{raw}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32] + ":" + raw[:100]
 
 
@@ -97,16 +106,20 @@ async def _cache_get_impl(db: AsyncSession, key: str):
     return json.loads(row.data)
 
 
-async def cache_get(db: AsyncSession | None, path: str, params: dict = None):
+async def cache_get(db: AsyncSession | None, path: str, params: dict = None, principal: str = None):
     """Return cached data if present and not expired, else None.
 
     Always uses an isolated AsyncSessionLocal so concurrent cache operations
     can never poison the caller's session. The `db` argument is accepted for
     API compatibility but not used — previous behavior shared the caller's
     session, which cascaded SQLAlchemy errors during dashboard fan-outs.
+
+    Pass `principal` for authorization-gated (authenticated) responses so the
+    entry is namespaced to the requesting identity; leave it None for public
+    data that is safe to share across all callers.
     """
     del db  # explicitly unused — kept for backwards-compat callsites
-    key = _cache_key(path, params)
+    key = _cache_key(path, params, principal)
     from app.db.models import AsyncSessionLocal
     try:
         async with AsyncSessionLocal() as fresh_db:
@@ -138,15 +151,18 @@ async def _cache_set_impl(db: AsyncSession, key: str, data, ttl: int):
     await db.commit()
 
 
-async def cache_set(db: AsyncSession | None, path: str, data, params: dict = None):
+async def cache_set(db: AsyncSession | None, path: str, data, params: dict = None, principal: str = None):
     """Store data in cache with the appropriate TTL.
 
     Always uses an isolated AsyncSessionLocal; see cache_get() for rationale.
     Cache writes are best-effort: any failure is swallowed so the caller's
     flow is never interrupted.
+
+    Pass `principal` for authorization-gated (authenticated) responses; it must
+    match the value used at read time. Leave it None for public data.
     """
     del db  # explicitly unused — kept for backwards-compat callsites
-    key = _cache_key(path, params)
+    key = _cache_key(path, params, principal)
     ttl = _ttl_for_path(path)
     from app.db.models import AsyncSessionLocal
     try:

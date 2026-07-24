@@ -16,6 +16,12 @@ if [ ! -f ".env" ]; then
     cp .env.example .env
 fi
 
+# .env holds SECRET_KEY (signs sessions, derives the token-encryption key) and
+# the EVE OAuth client secret. Make it owner-only (0600) so a co-located,
+# less-privileged local account cannot read those secrets. Idempotent and
+# applied every run, so it also tightens a pre-existing world-readable .env.
+chmod 600 .env
+
 # Read a value from .env
 _env_get() {
     grep -E "^${1}=" .env | cut -d= -f2- | tr -d '[:space:]'

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-07-24",
+  "createdDate": "2026-07-24",
+  "description": "Security finding F2 (MEDIUM, CWE-269) from the 2026-07-23 Claude Security scan (revision 5bc5d569, verified by a 3-voter adversarial panel, 3/3).\n\n## Problem\nThe startup handler (app/main.py:373) unconditionally runs `UPDATE users SET is_admin=1, role='admin' WHERE id=(SELECT MIN(id) FROM users)` whenever no admin exists. Registration is open by default (the RegistrationAllowlist is inert until seeded by an admin who does not yet exist), so on a fresh, publicly reachable deploy an attacker who registers before the owner becomes MIN(id) and is promoted to full admin on the next restart (the weekly auto-update guarantees one).\n\n## Fix (applied to working tree, pending commit + deploy)\n- Added `admin_character_id: int | None = None` to Settings (env ADMIN_CHARACTER_ID) — app/config.py.\n- Replaced the MIN(id) promotion with: promote ONLY the account owning the character named by ADMIN_CHARACTER_ID (SSO-proven ownership); if unset or that character hasn't logged in, promote no one (fail closed) and log guidance — app/main.py.\n- Updated README bootstrap sections + .env.example.\nFiles: app/config.py, app/main.py, .env.example, README.md. Patch: CLAUDE-SECURITY-20260723-213128/patches/F2-admin-bootstrap-identity.patch.\n\n## Verification\nFable 3-voter panel: 3/3 TRUE_POSITIVE. Fable adversarial patch-verifier: SOUND-WITH-CAVEATS (ownership can't be forged at the OAuth callback; existing-admin deployments untouched by the preserved short-circuit). Full test suite green (290 passed).\n\n## Remaining work (this ticket)\n- Set ADMIN_CHARACTER_ID in the VPS .env to the owner character id before/at deploy (existing prod already has an admin, so the new branch is a no-op there — but set it so a future rebuild/DB reset stays safe).\n- Do NOT leave an empty ADMIN_CHARACTER_ID= in .env (pydantic rejects \"\" for int|None → startup crash); keep it commented or set a real id.\n- Optional: promote at the OAuth callback to remove the login-then-restart step.\n- Sync to sec-toolkit (finding VVP-2026-013).\n",
+  "id": "T-043",
+  "order": 190,
+  "phase": "security-hardening",
+  "status": "complete",
+  "title": "F2: Bootstrap admin from ADMIN_CHARACTER_ID, not MIN(id) (admin-takeover race)",
+  "type": "task"
+}
