@@ -1,0 +1,74 @@
+# Dev instance — a second Vigilant on the same host, for testing changes before
+# they are tagged and promoted to production.
+#
+# STANDALONE ON PURPOSE. This is NOT an overlay of docker-compose.yml.
+# Verified 2026-07-26: a later compose file cannot REMOVE a service's network.
+# `docker compose -f docker-compose.yml -f overlay.yml config` with
+# `networks: []` in the overlay still renders `networks: {web: null}` — the
+# service joins the shared edge bridge anyway. Edge nginx resolves upstreams by
+# container name at request time, so a dev container on `web` is one typo in a
+# vhost away from serving public traffic. Duplicating prod's hardening here is
+# the price of that isolation; tests/test_dev_compose_isolation.py keeps the two
+# files from drifting apart.
+#
+# Usage (on the host, from the dev checkout):
+#   docker compose -f docker-compose.dev.yml up -d --build
+# Reach it from your workstation over an SSH tunnel:
+#   ssh -L 8001:127.0.0.1:8001 <your-host>     then http://localhost:8001
+name: vigilant-dev
+
+services:
+  app:
+    build: .
+    # Pinned to a dev-only tag. Prod's compose names
+    # ghcr.io/thor6677/vigilant:<tag>; if dev reused that name, a dev build
+    # would overwrite the locally cached prod image on this shared daemon, and a
+    # later prod `up` without a pull would silently run dev code.
+    image: vigilant-dev:local
+    # `no` rather than `unless-stopped`: dev is meant to be down most of the
+    # time, and a restart policy would fight that (and re-raise the monitoring
+    # false-positive problem).
+    restart: "no"
+    env_file: .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
+      - UPLOADS_DIR=/data/uploads
+      - VIGILANT_VERSION=dev
+      # Never ingest from dev: it would double the ESI/zKB traffic attributed to
+      # one CONTACT_EMAIL and compete with prod for the shared spinning disk.
+      - BACKGROUND_JOBS_ENABLED=false
+    volumes:
+      - dev_data:/data
+    # Deliberately NO `networks:` key — dev joins only the implicit per-project
+    # bridge, never the shared external `web` network that edge nginx uses.
+    ports:
+      - "127.0.0.1:8001:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Same minimal set as prod: the entrypoint runs as root, chowns /data, then
+    # drops to uid 10001 via gosu. See docker-entrypoint.sh.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Strictly below prod's 2560M / 2.0 cpus, so a runaway dev build cannot OOM
+    # the box or starve production.
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: "1.0"
+          pids: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dev_data:
