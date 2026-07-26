@@ -33,7 +33,13 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
       - UPLOADS_DIR=/data/uploads
-      - VIGILANT_VERSION=dev
+      # Defaults to "dev", which the update checker treats as "never notify".
+      # Interpolated (not hardcoded) so you can temporarily give dev an older
+      # identity to exercise the update banner:
+      #   VIGILANT_VERSION=v0.9.0 in .env  ->  banner shows v1.0.0 available
+      # A compose `environment:` entry always beats `env_file:`, so hardcoding
+      # this made the value impossible to override from .env at all.
+      - VIGILANT_VERSION=${VIGILANT_VERSION:-dev}
       # Never ingest from dev: it would double the ESI/zKB traffic attributed to
       # one CONTACT_EMAIL and compete with prod for the shared spinning disk.
       - BACKGROUND_JOBS_ENABLED=false
