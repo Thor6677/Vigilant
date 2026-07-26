@@ -432,6 +432,29 @@ docker compose down && docker compose up -d --build
 
 The app automatically migrates the database schema on startup.
 
+### Dev Instance
+
+Run a second, disposable Vigilant beside production to test changes before
+releasing them:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+ssh -L 8001:127.0.0.1:8001 <your-host>   # then browse http://localhost:8001
+```
+
+`docker-compose.dev.yml` is a **standalone** stack, not an overlay of the main
+compose file. It binds loopback only, never joins the reverse proxy's network,
+and runs with `BACKGROUND_JOBS_ENABLED=false` so it does not duplicate
+production's ESI/zKB polling. It needs its own `.env` and its own EVE
+application — see `.env.example`, since refresh tokens are bound to the
+`client_id` that issued them and production's are useless in dev.
+
+Seed its database from production with `scripts/refresh-dev-db.sh`. That copies
+everything except killmails whole, plus a recent slice of killmails and their
+attackers/items, and blanks all stored OAuth tokens. Production stays up
+throughout: the copy is index-driven and reopens its read transaction every
+chunk, and a watchdog pauses the run if the write-ahead log starts growing.
+
 ---
 
 ## EVE Online Developer Application Setup
