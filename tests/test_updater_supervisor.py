@@ -65,6 +65,13 @@ def test_validation_rejects_unicode_digits():
     assert validate_tag("v١.٠.٠") is False
 
 
+@pytest.mark.parametrize("tag", [b"v1.0.0", 1.0, 100, ["v1.0.0"], {"tag": "v1.0.0"}, True])
+def test_non_string_tags_rejected_without_raising(tag):
+    """The tag arrives from JSON written by another process, so a non-str is a
+    real possibility. re.match would raise TypeError rather than return False."""
+    assert validate_tag(tag) is False
+
+
 # ── .deployed parsing and rollback eligibility ───────────────────────────────
 
 def test_parse_deployed_extracts_tags_in_order():
@@ -130,6 +137,16 @@ def test_eligible_targets_empty_when_running_the_oldest_recorded_release():
     assert eligible_rollback_targets(lines, current_tag="v1.1.0") == []
 
 
+def test_eligible_targets_fail_closed_on_an_unparseable_current_tag():
+    """Skipping the at-or-newer guard would offer releases NEWER than the
+    running one. This function is also the pickup-time re-validation, so
+    failing open here would let a mislabelled "roll back" actually execute."""
+    lines = "t v1.1.0\nt v9.9.9\n"
+    assert eligible_rollback_targets(lines, current_tag="garbage") == []
+    assert eligible_rollback_targets(lines, current_tag=None) == []
+    assert eligible_rollback_targets(lines, current_tag="dev") == []
+
+
 # ── Lock staleness ───────────────────────────────────────────────────────────
 
 def test_lock_held_by_a_live_recent_process_is_not_stale():
@@ -189,7 +206,7 @@ def test_log_tail_keeps_the_most_recent_lines():
 def test_log_tail_capped_at_eight_kilobytes():
     """A chatty failure must not be able to fill the control volume."""
     out = clamp_log_tail(["x" * 1000] * 100)
-    assert sum(len(l) for l in out) <= 8192
+    assert sum(len(l.encode()) for l in out) <= 8192
 
 
 def test_log_tail_never_empties_on_a_single_oversized_line():
@@ -198,9 +215,28 @@ def test_log_tail_never_empties_on_a_single_oversized_line():
     path where the log is all they have."""
     out = clamp_log_tail(["x" * 100_000])
     assert len(out) == 1
-    assert sum(len(l) for l in out) <= 8192
+    assert sum(len(l.encode()) for l in out) <= 8192
     assert out[0].endswith("...")
 
 
 def test_log_tail_of_empty_input_is_empty():
     assert clamp_log_tail([]) == []
+
+
+def test_log_tail_cap_counts_bytes_not_characters():
+    """deploy.sh emits 3-byte UTF-8 (→ ✓ ✗ ⚠) on the auto-revert path, so a
+    character-counted cap silently allowed 2x the intended size — 4x for emoji.
+    The constant is named _BYTES and justified by disk space on a shared volume."""
+    for filler in ("é", "🚀"):
+        out = clamp_log_tail([filler * 9000])
+        assert sum(len(l.encode()) for l in out) <= 8192, filler
+
+
+def test_log_tail_truncation_never_splits_a_codepoint():
+    """A byte slice landing mid-codepoint would produce invalid UTF-8, which the
+    app's json.load would reject — turning a readable failure into no status
+    at all."""
+    out = clamp_log_tail(["🚀" * 9000])
+    assert len(out) == 1
+    out[0].encode("utf-8")            # must not raise
+    assert out[0].endswith("...")

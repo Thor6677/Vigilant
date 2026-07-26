@@ -105,6 +105,13 @@ def eligible_rollback_targets(deployed_text: str, current_tag: str | None,
     """
     floor = parse_version(min_tag)
     current = parse_version(current_tag)
+    # Fail CLOSED on an unparseable running version. Skipping the at-or-newer
+    # guard instead would offer releases NEWER than the running one, and this
+    # same function is the pickup-time re-validation, so a mislabelled "roll
+    # back" could actually execute. No current version also means nothing to
+    # roll back FROM, so [] is the honest answer either way.
+    if current is None:
+        return []
     out = {}
     for tag in parse_deployed(deployed_text):
         if not validate_tag(tag):
@@ -154,6 +161,13 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
     Both caps matter: 100 lines of ordinary output is small, but 100 lines of a
     docker pull progress dump is not, and this file lives on a shared volume.
 
+    Measured in BYTES, not characters. deploy.sh emits multibyte output on the
+    path that matters most — `→ Automatically reverting`, `✓`, `✗`, `⚠` are all
+    3-byte UTF-8 — so a character-counted cap silently allowed 2x, and 4x for
+    emoji. The truncation below encodes, slices, and decodes with errors="ignore"
+    so a cut can never land mid-codepoint and produce invalid UTF-8 that the
+    app's json.load would then reject.
+
     Never returns [] for a non-empty input. Popping until the total fits would
     do exactly that for a single oversized line — routine here, since a docker
     pull progress dump or a traceback arrives as one long line — and an empty
@@ -161,8 +175,9 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
     when this is the only thing the operator has.
     """
     out = list(lines)[-_LOG_MAX_LINES:]
-    while len(out) > 1 and sum(len(l) for l in out) > _LOG_MAX_BYTES:
+    while len(out) > 1 and sum(len(l.encode()) for l in out) > _LOG_MAX_BYTES:
         out.pop(0)
-    if out and len(out[0]) > _LOG_MAX_BYTES:
-        out[0] = out[0][:_LOG_MAX_BYTES - 3] + "..."
+    if out and len(out[0].encode()) > _LOG_MAX_BYTES:
+        clipped = out[0].encode()[:_LOG_MAX_BYTES - 3].decode(errors="ignore")
+        out[0] = clipped + "..."
     return out
