@@ -188,6 +188,13 @@
      hx-get="/alerts/timer-banners"
      hx-trigger="load delay:200ms, every 60s"
      hx-swap="outerHTML"></div>
+{# "A newer release is available" — admin-only; the endpoint returns empty
+   content for everyone else. innerHTML (not outerHTML) so this slot survives
+   the swap and keeps polling. #}
+<div id="update-banner-slot"
+     hx-get="/status/update-banner"
+     hx-trigger="load delay:400ms, every 300s"
+     hx-swap="innerHTML"></div>
 
 {# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────
    MUST be a direct child of <body> (a backdrop-filter / transform ancestor
@@ -357,10 +364,20 @@
                 else if (el.style.display === 'none') el.style.display = '';
             });
         } catch(e) {}
+        /* Update-available banner — keyed by release tag, so a NEWER release is
+           never pre-dismissed by the dismissal of an older one. */
+        try {
+            var ud = JSON.parse(localStorage.getItem('vigilant_dismissed_update') || '{}');
+            document.querySelectorAll('#update-banner[data-update-tag]').forEach(function(el) {
+                var tag = el.getAttribute('data-update-tag');
+                el.style.display = ud[tag] ? 'none' : '';
+            });
+        } catch(e) {}
     }
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         var id = evt.detail.target.id || '';
-        if (id === 'structure-alerts' || id === 'timer-alerts' || id === 'inventory-alerts') {
+        if (id === 'structure-alerts' || id === 'timer-alerts' ||
+            id === 'inventory-alerts' || id === 'update-banner-slot') {
             applyDismissState();
         }
     });

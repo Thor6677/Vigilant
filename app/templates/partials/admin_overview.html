@@ -46,3 +46,32 @@
         <span class="b-row-val">{{ queue_depth }} queued · {{ active_syncs }}/{{ sync_concurrency }} active</span>
     </div>
 </div>
+
+{# Update checker state. Notification-only — Vigilant never updates itself. #}
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Updates</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Running</span>
+        <span class="b-row-val">{{ app_version }}</span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Latest Release</span>
+        <span class="b-row-val">
+            {% if update_latest %}
+                {% if update_url %}<a href="{{ update_url }}" target="_blank" rel="noopener noreferrer">{{ update_latest }}</a>{% else %}{{ update_latest }}{% endif %}
+            {% else %}Unknown{% endif %}
+        </span>
+    </div>
+    <div class="b-row">
+        <span class="b-row-label">Last Checked</span>
+        <span class="b-row-val">{{ update_checked_at }}</span>
+    </div>
+    {% if update_error %}
+    <div class="b-row">
+        <span class="b-row-label">Last Error</span>
+        <span class="b-row-val is-warn">{{ update_error }}</span>
+    </div>
+    {% endif %}
+</div>

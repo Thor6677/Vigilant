@@ -290,3 +290,41 @@ async def status_banner(request: Request):
         f'{icon} {msg}'
         f'</div>'
     )
+
+
+@router.get("/status/update-banner", response_class=HTMLResponse)
+async def update_banner(request: Request, db: AsyncSession = Depends(get_db)):
+    """Site-wide "a newer release is available" banner. Empty for non-admins.
+
+    Lives on the status router, NOT under /admin/, because base.html loads it on
+    every page for every visitor — an /admin/* route that deliberately answers
+    anonymous callers reads as an auth hole to anyone auditing
+    tests/test_route_auth_gating.py. /status/banner (the ESI banner) is the
+    existing precedent for exactly this shape.
+
+    Returns empty content rather than 403 for anonymous visitors: a 403 would
+    log a console error on every navigation. The session/is_admin check below is
+    the authorization gate.
+    """
+    from app.config import get_settings
+    from app.db.models import UpdateStatus
+    from app.ops.version import is_newer
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+    user = await db.get(User, user_id)
+    if not user or not user.is_admin:
+        return HTMLResponse("")
+
+    settings = get_settings()
+    row = (await db.execute(
+        select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+    if not row or not row.latest_tag or not is_newer(row.latest_tag, settings.version):
+        return HTMLResponse("")
+
+    return templates.TemplateResponse(request, "partials/update_banner.html", {
+        "latest_tag": row.latest_tag,
+        "latest_url": row.latest_url,
+        "running": settings.version,
+    })

@@ -1,0 +1,35 @@
+{# Starts hidden on purpose. The inline script below reveals it unless THIS
+   exact tag was dismissed, and the global htmx:afterSwap handler in base.html
+   re-applies that state after every swap. Never invert this to
+   visible-by-default: a dismissed banner would flash back on every page. #}
+<div id="update-banner"
+     class="update-banner"
+     data-update-tag="{{ latest_tag }}"
+     style="display:none;padding:0.5rem 2rem;background:#0e0e0e;border-bottom:1px solid var(--accent);font-size:12px;font-family:'JetBrains Mono',monospace;">
+    <strong>Vigilant {{ latest_tag }} is available</strong>
+    &mdash; running {{ running }}.
+    {% if latest_url %}
+    <a href="{{ latest_url }}" target="_blank" rel="noopener noreferrer">Release notes</a>
+    {% endif %}
+    <button type="button" data-update-dismiss="{{ latest_tag }}"
+            aria-label="Dismiss update notice"
+            style="float:right;background:none;border:none;cursor:pointer;color:var(--muted);font:inherit;">&times;</button>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    var el = document.getElementById('update-banner');
+    if (!el) return;
+    var tag = el.getAttribute('data-update-tag');
+    var d = {};
+    try { d = JSON.parse(localStorage.getItem('vigilant_dismissed_update') || '{}'); } catch (e) {}
+    /* Keyed by TAG, so a newer release is never pre-dismissed by an older
+       dismissal. */
+    if (!d[tag]) el.style.display = '';
+    var btn = el.querySelector('[data-update-dismiss]');
+    if (btn) btn.addEventListener('click', function() {
+        d[tag] = 1;
+        try { localStorage.setItem('vigilant_dismissed_update', JSON.stringify(d)); } catch (e) {}
+        el.style.display = 'none';
+    });
+})();
+</script>
