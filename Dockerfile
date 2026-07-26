@@ -71,6 +71,19 @@ RUN mkdir -p /data && chown vigilant:vigilant /data
 
 ENV DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
 
+# Build version. Injected by release CI as --build-arg VIGILANT_VERSION=v1.2.3;
+# source builds leave it at "dev", which the update checker treats as "never
+# notify". Declared HERE, in the final stage and as late as possible: an ARG
+# earlier in the file would invalidate the npm ci / pip install layer caches on
+# every single tag.
+#
+# The image `source` label is set by CI from ${{ github.repository }} rather
+# than hardcoded here, so a fork labels its own images.
+ARG VIGILANT_VERSION=dev
+ENV VIGILANT_VERSION=${VIGILANT_VERSION}
+LABEL org.opencontainers.image.version="${VIGILANT_VERSION}" \
+      org.opencontainers.image.title="Vigilant"
+
 # Liveness probe. Uses urllib so we don't have to apt-install curl.
 # Runs as the vigilant uid (the entrypoint has already dropped privs
 # by the time docker invokes the healthcheck against the running pid).
