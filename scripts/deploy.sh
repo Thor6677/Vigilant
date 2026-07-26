@@ -35,12 +35,18 @@ if [ -z "${VIGILANT_DEPLOY_REEXEC:-}" ]; then
 fi
 
 # Which stack this run targets. Defaults reproduce production exactly; the
-# in-app updater and the throwaway verification stack override them. Anything
-# that resolves a path MUST go through VIGILANT_ROOT — a single stray literal
-# would point one step of a dev deploy back at production.
-VIGILANT_ROOT="${VIGILANT_ROOT:-/opt/vigilant}"
-VIGILANT_IMAGE="${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}"
-VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
+# in-app updater and the throwaway verification stack override them.
+#
+# readonly, and resolved BEFORE .health-env is sourced, on purpose. .health-env
+# lives INSIDE the root it describes, so a stale or copied one naming a different
+# stack must not be able to retarget the run. Verified 2026-07-26: without this,
+# a .health-env setting VIGILANT_ROOT produced a split-brain deploy — the
+# checkout and .env pin landed in the caller's root while .deployed was appended
+# to the OTHER stack's ledger, which is exactly the file rollback.sh reads to
+# choose a target. Aborting on "readonly variable" beats that.
+readonly VIGILANT_ROOT="${VIGILANT_ROOT:-/opt/vigilant}"
+readonly VIGILANT_IMAGE="${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}"
+readonly VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
 
 cd "$VIGILANT_ROOT"
 
@@ -51,9 +57,13 @@ cd "$VIGILANT_ROOT"
 # shellcheck disable=SC1091
 [ -r "$VIGILANT_ROOT/.health-env" ] && source "$VIGILANT_ROOT/.health-env"
 MAINTENANCE="${MAINTENANCE:-}"
-APP_CONTAINER="${APP_CONTAINER:-vigilant-app-1}"
+# Tracks compose's own basename(cwd) project-name derivation (verified against
+# production 2026-07-26: no top-level `name:`, no COMPOSE_PROJECT_NAME, no
+# override file, so /opt/vigilant -> project "vigilant" -> container
+# vigilant-app-1). .health-env may still override this because that file
+# legitimately describes the stack it lives in.
+APP_CONTAINER="${APP_CONTAINER:-$(basename "$VIGILANT_ROOT")-app-1}"
 
-IMAGE="$VIGILANT_IMAGE"
 DEPLOY_LOG="$VIGILANT_ROOT/.deployed"
 REPO_SLUG="${VIGILANT_REPO:-Thor6677/Vigilant}"
 
@@ -166,8 +176,12 @@ _deploy_tag() {
     # account cannot read SECRET_KEY or the EVE client secret. Idempotent, so it
     # also retro-tightens an install whose .env was created world-readable.
     [ -f .env ] && chmod 600 .env
-    docker pull "$IMAGE:$tag"
+    docker pull "$VIGILANT_IMAGE:$tag"
     _pin_tag_in_env "$tag"
+    # Explicit -f suppresses compose's automatic merge of docker-compose.override.yml.
+    # Intentional: the app recreate must use the checked-out compose file verbatim,
+    # not silently blended with whatever override happens to sit on disk. This is a
+    # real behaviour change from the previous bare `docker compose up`.
     VIGILANT_TAG="$tag" docker compose -f "$VIGILANT_COMPOSE_FILE" up -d --no-deps --force-recreate app
 }
 
