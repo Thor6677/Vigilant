@@ -668,6 +668,12 @@ docker compose up -d --build
 
 ---
 
+## AI Assistance
+
+Vigilant was built with the help of AI coding assistants. Every change is reviewed by a human before it lands, and the test suite (`pytest`, plus the design-system suite) runs in CI on every push — see the badge at the top of this file.
+
+---
+
 ## Contributing
 
 Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to get a development environment running, how to run the test suite, and the conventions worth knowing before your first change.
