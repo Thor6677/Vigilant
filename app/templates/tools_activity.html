@@ -1,0 +1,695 @@
+{% extends "base.html" %}
+{% block title %}Activity — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/tools">Tools</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Activity</span></div>
+{% endblock %}
+
+{% block head %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style nonce="{{ request.state.csp_nonce }}">
+    .ta-windows { display:flex; gap:0.25rem; flex-wrap:wrap; }
+    .ta-windows .b-btn { padding:3px 10px; font-size:10px; }
+    .ta-windows .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .ta-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:0.75rem; }
+    .ta-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .ta-stat-val { font-size:18px; color:var(--accent); font-weight:600; }
+    .ta-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    .ta-source { font-size:9px; color:var(--muted); }
+    .ta-source code { color:var(--text); }
+    .ta-heatmap { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; font-size:9px; }
+    .ta-heatmap-row-label { color:var(--muted); display:flex; align-items:center; padding-right:4px; justify-content:flex-end; }
+    .ta-heatmap-cell { aspect-ratio:1; min-height:14px; background:rgba(94,177,255,0); border:1px solid rgba(255,255,255,0.03); }
+    .ta-heatmap-col-labels { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; font-size:8px; color:var(--muted); margin-bottom:2px; }
+    .ta-heatmap-col-labels > div { text-align:center; }
+</style>
+{% endblock %}
+
+{% macro fmt_isk(amount) %}
+  {%- if amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro fmt_pcu(n) %}
+  {%- if n >= 1000 -%}{{ "%.1f"|format(n / 1000) }}K{%- else -%}{{ n }}{%- endif -%}
+{% endmacro %}
+
+{% block content %}
+
+<div class="b-page-header">
+    <div>
+        <h1 style="margin:0;font-size:14px;letter-spacing:0.18em;">EVE Activity</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            Server health + universe-wide kill activity. Live data from EVE ESI; historical archive cross-validated from eve-offline.net (Chribba) and eve-offline.com (Adminor).
+        </p>
+    </div>
+</div>
+
+<div class="b-section" style="margin-bottom:0.75rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">{{ window_label }}</span>
+        <div class="ta-windows">
+            {% set btn_label = {'1h':'1H','1d':'24H','36h':'36H','7d':'7D','30d':'30D','90d':'90D','1y':'1Y','5y':'5Y','all':'ALL'} %}
+            {% for w, label in window_options %}
+            <a href="/tools/activity?window={{ w }}"
+               class="b-btn {% if w == window %}is-active{% endif %}"
+               style="text-decoration:none;">
+                {{ btn_label.get(w, w) }}
+            </a>
+            {% endfor %}
+            <a href="/tools/activity?window=live"
+               class="b-btn {% if window == 'live' %}is-active{% endif %}"
+               style="text-decoration:none;">
+                LIVE
+            </a>
+        </div>
+    </div>
+
+    <div class="b-pad-md">
+
+        {% if live_mode %}
+        <div style="text-align:center;padding:1.5rem 0 0.5rem;">
+            <div id="ta-live-count" style="font-size:42px;font-weight:600;color:var(--accent);letter-spacing:-0.02em;line-height:1;">—</div>
+            <div id="ta-live-delta" style="font-size:13px;margin-top:0.4rem;min-height:1.4em;"></div>
+            <div style="display:flex;gap:0.2rem;justify-content:center;margin-top:0.5rem;" id="ta-delta-btns">
+                <button type="button" class="b-btn ta-delta-btn" data-w="60s" data-k="delta_60s" data-lbl="60s ago" style="padding:2px 7px;font-size:9px;">60S</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="5m"  data-k="delta_5m"  data-lbl="5m ago"  style="padding:2px 7px;font-size:9px;">5M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="10m" data-k="delta_10m" data-lbl="10m ago" style="padding:2px 7px;font-size:9px;">10M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="30m" data-k="delta_30m" data-lbl="30m ago" style="padding:2px 7px;font-size:9px;">30M</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="1h"  data-k="delta_1h"  data-lbl="1h ago"  style="padding:2px 7px;font-size:9px;">1H</button>
+                <button type="button" class="b-btn ta-delta-btn" data-w="6h"  data-k="delta_6h"  data-lbl="6h ago"  style="padding:2px 7px;font-size:9px;">6H</button>
+            </div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-top:0.6rem;">Pilots online · Tranquility</div>
+            <div id="ta-live-updated" style="font-size:9px;color:var(--muted);margin-top:0.25rem;"></div>
+        </div>
+        <div style="position:relative;height:120px;margin-top:0.75rem;">
+            <canvas id="ta-live-chart"></canvas>
+        </div>
+        <script nonce="{{ request.state.csp_nonce }}">
+        (function() {
+            var _liveChart = null;
+            var _countdown = 60;
+            var _lastData = null;
+            var _activeW = localStorage.getItem('ta_live_dw') || '60s';
+
+            function applyActive() {
+                document.querySelectorAll('.ta-delta-btn').forEach(function(btn) {
+                    var on = btn.dataset.w === _activeW;
+                    btn.style.color = on ? 'var(--accent)' : '';
+                    btn.style.borderColor = on ? 'var(--accent)' : '';
+                });
+            }
+
+            function showDelta(data) {
+                var btn = document.querySelector('.ta-delta-btn[data-w="' + _activeW + '"]');
+                if (!btn || !data) return;
+                var d = data[btn.dataset.k];
+                var lbl = btn.dataset.lbl;
+                var deltaEl = document.getElementById('ta-live-delta');
+                if (d === null || d === undefined) {
+                    deltaEl.textContent = 'not enough data';
+                    deltaEl.style.color = 'var(--muted)';
+                } else {
+                    deltaEl.textContent = (d > 0 ? '+' : '') + d.toLocaleString() + ' vs ' + lbl;
+                    deltaEl.style.color = d > 0 ? 'var(--success)' : d < 0 ? 'var(--danger)' : 'var(--muted)';
+                }
+            }
+
+            document.querySelectorAll('.ta-delta-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    _activeW = btn.dataset.w;
+                    localStorage.setItem('ta_live_dw', _activeW);
+                    applyActive();
+                    showDelta(_lastData);
+                });
+            });
+            applyActive();
+
+            function drawChart(history) {
+                if (typeof Chart === 'undefined' || !history || !history.length) return;
+                var el = document.getElementById('ta-live-chart');
+                if (!el) return;
+                var labels = history.map(function(p) { return p.t; });
+                var values = history.map(function(p) { return p.v; });
+                if (_liveChart) {
+                    _liveChart.data.labels = labels;
+                    _liveChart.data.datasets[0].data = values;
+                    _liveChart.update('none');
+                } else {
+                    _liveChart = new Chart(el, {
+                        type: 'line',
+                        data: { labels: labels, datasets: [{
+                            data: values,
+                            borderColor: 'rgba(94,177,255,0.9)',
+                            backgroundColor: 'rgba(94,177,255,0.12)',
+                            borderWidth: 1.5, pointRadius: 2, pointHoverRadius: 4,
+                            fill: true, tension: 0.3,
+                        }]},
+                        options: {
+                            responsive: true, maintainAspectRatio: false, animation: false,
+                            plugins: { legend: { display: false }, tooltip: {
+                                callbacks: { label: function(ctx) { return ctx.parsed.y.toLocaleString() + ' pilots'; } }
+                            }},
+                            scales: {
+                                x: { ticks: { color: '#7a7a7a', font: { size: 9 } }, grid: { display: false } },
+                                y: { ticks: { color: '#7a7a7a', font: { size: 9 },
+                                             callback: function(v) { return v >= 1000 ? (v/1000).toFixed(0)+'K' : v; } },
+                                     grid: { color: 'rgba(255,255,255,0.05)' } },
+                            },
+                        },
+                    });
+                }
+            }
+
+            function updateLive() {
+                fetch('/api/server-status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        _lastData = data;
+                        var el = document.getElementById('ta-live-count');
+                        var updEl = document.getElementById('ta-live-updated');
+                        if (data.online && data.players) {
+                            el.textContent = data.players.toLocaleString();
+                            el.style.color = 'var(--accent)';
+                            showDelta(data);
+                            var now = new Date();
+                            updEl.textContent = 'Updated ' + now.getUTCHours().toString().padStart(2,'0') + ':' + now.getUTCMinutes().toString().padStart(2,'0') + ' UTC';
+                            _countdown = 60;
+                            drawChart(data.history);
+                        } else {
+                            el.textContent = 'OFFLINE';
+                            el.style.color = 'var(--danger)';
+                            document.getElementById('ta-live-delta').textContent = '';
+                        }
+                    })
+                    .catch(function() {});
+            }
+            updateLive();
+            setInterval(updateLive, 60000);
+            setInterval(function() {
+                _countdown = Math.max(0, _countdown - 1);
+                var el = document.getElementById('ta-live-updated');
+                if (el && el.textContent) {
+                    var base = el.textContent.replace(/ · next in \d+s$/, '');
+                    el.textContent = base + ' · next in ' + _countdown + 's';
+                }
+            }, 1000);
+        })();
+        </script>
+        {% else %}
+
+        <div class="ta-stats" style="grid-template-columns:repeat(4,1fr);">
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(peak_pcu) }}</div>
+                <div class="ta-stat-label">Peak players</div>
+            </div>
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(mean_pcu) }}</div>
+                <div class="ta-stat-label">Mean players</div>
+            </div>
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_pcu(total_kills) }}</div>
+                <div class="ta-stat-label">Kills in window</div>
+            </div>
+            <div class="ta-stat">
+                <div class="ta-stat-val">{{ fmt_isk(total_isk) }}</div>
+                <div class="ta-stat-label">ISK destroyed</div>
+            </div>
+        </div>
+
+        {% if peak_pcu == 0 and total_isk == 0 and total_kills == 0 %}
+        <div class="b-empty" style="padding:1.5rem;color:var(--muted);font-size:11px;text-align:center;">
+            No data in this window yet. Backfills auto-run on first startup
+            and accumulate over time.
+        </div>
+        {% else %}
+        {% if window != 'all' %}
+        <div style="display:flex;justify-content:flex-end;margin-bottom:0.4rem;">
+            <button id="ta-compare-toggle" type="button" class="b-btn" style="padding:3px 10px;font-size:10px;">
+                Compare to prior period
+            </button>
+        </div>
+        {% endif %}
+        <div style="position:relative;height:360px;">
+            <canvas id="activity-chart-{{ window }}"></canvas>
+        </div>
+        {% endif %}
+
+        <div class="ta-source" style="margin-top:0.75rem;">
+            Window sample coverage:
+            {% for src, n in source_counts.items() %}
+            <code>{{ src }}</code>: {{ n }} sample{{ 's' if n != 1 else '' }}{% if not loop.last %} · {% endif %}
+            {% endfor %}
+            {% if not source_counts %}live samples accumulating…{% endif %}
+        </div>
+        {% endif %}{# end if live_mode #}
+    </div>
+</div>
+
+{% if daily_kills_counts and daily_kills_counts|sum > 0 %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Daily kills · trailing 30 days</span></div>
+    <div class="b-pad-md">
+        <div style="position:relative;height:220px;">
+            <canvas id="daily-kills-chart"></canvas>
+        </div>
+        <div style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
+            One point per day from killmail_daily_aggregates. Independent of the window selector — gives a smoothed view of recent activity that doesn't collapse into a single bin on short windows.
+        </div>
+    </div>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const el = document.getElementById('daily-kills-chart');
+    if (!el) return;
+    const labels = {{ daily_kills_labels|tojson }};
+    const data = {{ daily_kills_counts|tojson }};
+    new Chart(el, {
+        type:'line',
+        data:{
+            labels:labels,
+            datasets:[{
+                label:'Kills', data:data,
+                borderColor:'rgba(238,85,85,0.95)',
+                backgroundColor:'rgba(238,85,85,0.18)',
+                borderWidth:1.5, pointRadius:0, pointHoverRadius:3,
+                fill:true, tension:0.35,
+            }],
+        },
+        options:{
+            responsive:true, maintainAspectRatio:false,
+            interaction:{mode:'index', intersect:false},
+            plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:(ctx) => 'Kills: ' + ctx.parsed.y.toLocaleString()}}},
+            scales:{
+                x:{ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:12},
+                   grid:{display:false}},
+                y:{beginAtZero:true,
+                   ticks:{color:'#7a7a7a',font:{size:9},callback:(v)=>v.toLocaleString()},
+                   grid:{color:'rgba(255,255,255,0.05)'}},
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+
+{% if breakdowns_available and has_breakdown_data %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">PvP composition · {{ window_label.lower() }}</span></div>
+    <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">Solo vs fleet kills</div>
+            <div style="position:relative;height:220px;">
+                <canvas id="solo-fleet-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">NPC vs player kills</div>
+            <div style="position:relative;height:220px;">
+                <canvas id="npc-player-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+    </div>
+    <div style="padding:0 0.75rem 0.75rem;font-size:9px;color:var(--muted);">
+        Killmail data is retained for 30 days, so these breakdowns hide on longer windows. Solo/fleet bucket on attacker count: solo=1, small=2–10, medium=11–50, large=51+.
+    </div>
+</div>
+{% endif %}
+
+{% if zone_available and has_zone_data %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Kills by security zone · {{ window_label }}</span></div>
+    <div style="padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">Kill count</div>
+            <div style="position:relative;height:240px;">
+                <canvas id="zone-kills-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+        <div>
+            <div style="font-size:9px;letter-spacing:0.12em;color:var(--muted);text-transform:uppercase;margin-bottom:0.4rem;">ISK destroyed</div>
+            <div style="position:relative;height:240px;">
+                <canvas id="zone-isk-chart-{{ window }}"></canvas>
+            </div>
+        </div>
+    </div>
+    <div style="padding:0 0.75rem 0.75rem;font-size:9px;color:var(--muted);">
+        Zone split is only available for dates after the rollup first ran on this deployment. Long-tail history (zKB totals) is universe-wide only and can't be split. J-systems → wormhole; other systems classified by SDE security rounded to 1 decimal.
+    </div>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const labels = {{ labels|tojson }};
+    const k = {{ zone_series|tojson }};
+    const i = {{ zone_isk_series|tojson }};
+    const colors = {
+        highsec:  ['rgba(120,200,140,0.9)', 'rgba(120,200,140,0.35)'],
+        lowsec:   ['rgba(220,170,90,0.9)',  'rgba(220,170,90,0.35)'],
+        nullsec:  ['rgba(238,85,85,0.9)',   'rgba(238,85,85,0.35)'],
+        wormhole: ['rgba(170,120,220,0.9)', 'rgba(170,120,220,0.35)'],
+    };
+    const order = ['highsec','lowsec','nullsec','wormhole'];
+    const datasetsFrom = (src, fmt) => order.map(z => ({
+        label: z[0].toUpperCase()+z.slice(1),
+        data: src[z],
+        borderColor: colors[z][0],
+        backgroundColor: colors[z][1],
+        borderWidth: 1, pointRadius: 0, fill: true, tension: 0.25,
+    }));
+    const fmtISK = (v) => {
+        if (v == null) return '';
+        if (v >= 1e12) return (v/1e12).toFixed(2)+'T';
+        if (v >= 1e9)  return (v/1e9).toFixed(2)+'B';
+        if (v >= 1e6)  return (v/1e6).toFixed(2)+'M';
+        if (v >= 1e3)  return (v/1e3).toFixed(1)+'K';
+        return v.toFixed(0);
+    };
+    const baseOpts = {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+            legend:{display:true, position:'top', align:'end',
+                    labels:{font:{size:9},color:'#bfbfbf',boxWidth:14,boxHeight:2}},
+        },
+        scales:{
+            x:{stacked:true, ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:10}, grid:{display:false}},
+            y:{stacked:true, beginAtZero:true,
+               ticks:{color:'#7a7a7a',font:{size:9}}, grid:{color:'rgba(255,255,255,0.05)'}}
+        }
+    };
+    const kEl = document.getElementById('zone-kills-chart-{{ window }}');
+    if (kEl) new Chart(kEl, {type:'line', data:{labels:labels, datasets:datasetsFrom(k)},
+        options:{...baseOpts, plugins:{...baseOpts.plugins, tooltip:{callbacks:{label:(c)=>c.dataset.label+': '+c.parsed.y.toLocaleString()}}}}});
+    const iEl = document.getElementById('zone-isk-chart-{{ window }}');
+    if (iEl) new Chart(iEl, {type:'line', data:{labels:labels, datasets:datasetsFrom(i)},
+        options:{...baseOpts,
+            plugins:{...baseOpts.plugins, tooltip:{callbacks:{label:(c)=>c.dataset.label+': '+fmtISK(c.parsed.y)+' ISK'}}},
+            scales:{...baseOpts.scales, y:{...baseOpts.scales.y, ticks:{...baseOpts.scales.y.ticks, callback:(v)=>fmtISK(v)}}}}});
+})();
+</script>
+{% endif %}
+
+{% if has_heatmap_data %}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">When is EVE busiest? · trailing 90 days · UTC</span></div>
+    <div class="b-pad-md">
+        <div class="ta-heatmap-col-labels">
+            <div></div>
+            {% for h in range(24) %}<div>{{ "%02d"|format(h) }}</div>{% endfor %}
+        </div>
+        {% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+        <div class="ta-heatmap" id="pcu-heatmap" data-grid='{{ pcu_heatmap|tojson }}'>
+            {% for dow in range(7) %}
+                <div class="ta-heatmap-row-label">{{ days[dow] }}</div>
+                {% for hr in range(24) %}
+                <div class="ta-heatmap-cell" data-dow="{{ dow }}" data-hr="{{ hr }}"
+                     {% if pcu_heatmap[dow][hr] is not none %}title="{{ days[dow] }} {{ '%02d'|format(hr) }}:00 — {{ pcu_heatmap[dow][hr] }} avg players"{% endif %}></div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:0.5rem;">
+            Cell color = average concurrent players online at that hour over the last 90 days. Combines ESI live samples with eve-offline.net (Chribba) and eve-offline.com (Adminor) minute-resolution archives. Downtime is at 11:00 UTC; expect a dip there.
+        </div>
+    </div>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    const el = document.getElementById('pcu-heatmap');
+    if (!el) return;
+    const grid = JSON.parse(el.dataset.grid);
+    let min = Infinity, max = -Infinity;
+    for (const row of grid) for (const v of row) {
+        if (v == null) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (!isFinite(min) || max <= min) return;
+    // EVE's PCU never goes near zero, so a (0, max) scale collapses every
+    // cell into a narrow band. Rescale to (min, max) and lerp through a
+    // perceptually distinct ramp: deep blue → cyan → gold → red. Anchor
+    // colors picked to read on the dark theme.
+    const stops = [
+        [0.00, [22,  40,  90 ]],   // deep blue
+        [0.35, [60, 130, 200 ]],   // mid blue
+        [0.65, [220,170, 90  ]],   // gold
+        [1.00, [238, 85, 85  ]],   // red
+    ];
+    const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+    const colorAt = (t) => {
+        for (let i = 1; i < stops.length; i++) {
+            if (t <= stops[i][0]) {
+                const [t0, c0] = stops[i-1], [t1, c1] = stops[i];
+                const k = (t - t0) / (t1 - t0);
+                return [lerp(c0[0],c1[0],k), lerp(c0[1],c1[1],k), lerp(c0[2],c1[2],k)];
+            }
+        }
+        return stops[stops.length-1][1];
+    };
+    el.querySelectorAll('.ta-heatmap-cell').forEach(cell => {
+        const dow = parseInt(cell.dataset.dow, 10);
+        const hr = parseInt(cell.dataset.hr, 10);
+        const v = grid[dow][hr];
+        if (v == null) return;
+        const t = (v - min) / (max - min);
+        const [r, g, b] = colorAt(t);
+        cell.style.background = `rgb(${r},${g},${b})`;
+    });
+})();
+</script>
+{% endif %}
+
+{# ── Credits ─────────────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head"><span class="b-label">Credits</span></div>
+    <div style="padding:0.75rem 1rem;font-size:11px;line-height:1.55;color:var(--text);">
+        Vigilant doesn't archive EVE's history itself — the long-tail data
+        shown here predating this dashboard's deployment is sourced from
+        community projects that have been doing the patient work for nearly
+        two decades:
+        <ul style="margin:0.5rem 0 0.75rem 1.25rem;padding:0;">
+            <li>
+                <strong><a href="https://eve-offline.net/?server=tranquility"
+                          target="_blank" rel="noopener"
+                          style="color:var(--accent);">Chribba / OMG Labs — eve-offline.net</a></strong>
+                — concurrent player count tracking since 2003-05-28, the canonical historical PCU source.
+            </li>
+            <li style="margin-top:0.25rem;">
+                <strong><a href="https://eve-offline.com/" target="_blank"
+                          rel="noopener" style="color:var(--accent);">Adminor.net — eve-offline.com</a></strong>
+                — modern rebuild of the player-count dataset with a clean JSON API and
+                a newborn-pilot overlay (newly created characters).
+            </li>
+            <li style="margin-top:0.25rem;">
+                <strong><a href="https://zkillboard.com/" target="_blank"
+                          rel="noopener" style="color:var(--accent);">zKillboard</a></strong>
+                — daily kill-count totals (<code>/api/history/totals.json</code>) since 2007-12-05.
+                Provides the long-tail daily-kills series.
+            </li>
+        </ul>
+        These sites serve their data freely. Vigilant pulls each historical
+        archive once at first startup, then goes silent — live data going
+        forward comes directly from the
+        <a href="https://esi.evetech.net/latest/status/" target="_blank"
+           rel="noopener" class="b-text">EVE ESI /status/</a>
+        endpoint and the killmail.stream consumer. If you find this view
+        useful, consider visiting their sites directly — community-run
+        infrastructure runs on goodwill.
+    </div>
+</div>
+
+{% if peak_pcu > 0 or total_isk > 0 or total_kills > 0 %}
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const el = document.getElementById('activity-chart-{{ window }}');
+    if (!el) return;
+    const labels = {{ labels|tojson }};
+    const iskValues = {{ isk_values|tojson }};
+    const pcuValues = {{ pcu_values|tojson }};
+    const killsValues = {{ kills_values|tojson }};
+    const fmtISK = (v) => {
+        if (v === null) return '';
+        if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+        if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
+        if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
+        if (v >= 1e3)  return (v/1e3).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    const fmtPCU = (v) => {
+        if (v === null) return '';
+        if (v >= 1000) return (v/1000).toFixed(1) + 'K';
+        return v.toFixed(0);
+    };
+    const mainChart = new Chart(el, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label:'Players online', data: pcuValues, yAxisID:'y',
+                  borderColor:'rgba(94,177,255,0.95)', backgroundColor:'rgba(94,177,255,0.10)',
+                  borderWidth:1.5, pointRadius:0, pointHoverRadius:3, fill:false, tension:0, spanGaps:true },
+                { label:'ISK destroyed', data: iskValues, yAxisID:'y1',
+                  borderColor:'rgba(200,169,81,0.95)', backgroundColor:'rgba(200,169,81,0.08)',
+                  borderWidth:1.5, borderDash:[4,3], pointRadius:0, pointHoverRadius:3, fill:false, tension:0 },
+            ],
+        },
+        options: {
+            responsive:true, maintainAspectRatio:false,
+            interaction: { mode:'index', intersect:false },
+            plugins: {
+                legend: { display:true, position:'top', align:'end',
+                          labels:{font:{size:10},color:'#bfbfbf',boxWidth:18,boxHeight:2} },
+                tooltip: { callbacks: { label: (ctx) => {
+                    const v = ctx.parsed.y;
+                    if (v === null) return ctx.dataset.label + ': —';
+                    if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
+                    return ctx.dataset.label + ': ' + fmtPCU(v);
+                }}}
+            },
+            scales: {
+                x: { ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:14}, grid:{display:false} },
+                y: { type:'linear', position:'left', beginAtZero:false,
+                     ticks:{color:'rgba(94,177,255,0.95)',font:{size:9},callback:(v)=>fmtPCU(v)},
+                     grid:{color:'rgba(255,255,255,0.05)'},
+                     title:{display:true,text:'Players',color:'rgba(94,177,255,0.7)',font:{size:10}} },
+                y1:{ type:'linear', position:'right', beginAtZero:true,
+                     ticks:{color:'rgba(200,169,81,0.95)',font:{size:9},callback:(v)=>fmtISK(v)},
+                     grid:{drawOnChartArea:false},
+                     title:{display:true,text:'ISK',color:'rgba(200,169,81,0.7)',font:{size:10}} },
+            }
+        }
+    });
+
+    // Compare-to-prior-period toggle. Lazy-fetches /tools/activity/compare.json,
+    // overlays 3 faded datasets on the main chart. Re-clicking removes them.
+    const toggleBtn = document.getElementById('ta-compare-toggle');
+    if (toggleBtn) {
+        let added = false;
+        let cached = null;
+        toggleBtn.addEventListener('click', async () => {
+            if (added) {
+                mainChart.data.datasets = mainChart.data.datasets.filter(d => !d._isCompare);
+                mainChart.update();
+                toggleBtn.classList.remove('is-active');
+                toggleBtn.textContent = 'Compare to prior period';
+                added = false;
+                return;
+            }
+            toggleBtn.disabled = true;
+            toggleBtn.textContent = 'Loading…';
+            try {
+                if (!cached) {
+                    const r = await fetch('/tools/activity/compare.json?window={{ window }}');
+                    if (!r.ok) throw new Error('http '+r.status);
+                    cached = await r.json();
+                }
+                // Pad/truncate prior series to match current chart length so
+                // the lines render aligned to the same x-axis bins.
+                const n = mainChart.data.labels.length;
+                const fit = (arr) => {
+                    if (!arr) return new Array(n).fill(null);
+                    if (arr.length === n) return arr;
+                    if (arr.length > n) return arr.slice(0, n);
+                    return arr.concat(new Array(n - arr.length).fill(null));
+                };
+                mainChart.data.datasets.push(
+                    { label:'Players (prior)', data: fit(cached.pcu_values), yAxisID:'y',
+                      borderColor:'rgba(94,177,255,0.4)', borderWidth:1, borderDash:[2,2],
+                      pointRadius:0, fill:false, tension:0, spanGaps:true, _isCompare:true },
+                    { label:'ISK (prior)', data: fit(cached.isk_values), yAxisID:'y1',
+                      borderColor:'rgba(200,169,81,0.4)', borderWidth:1, borderDash:[2,2],
+                      pointRadius:0, fill:false, tension:0, _isCompare:true },
+                );
+                mainChart.update();
+                toggleBtn.classList.add('is-active');
+                toggleBtn.textContent = 'Hide prior period';
+                added = true;
+            } catch (e) {
+                toggleBtn.textContent = 'Failed to load';
+                setTimeout(() => { toggleBtn.textContent = 'Compare to prior period'; }, 2000);
+            } finally {
+                toggleBtn.disabled = false;
+            }
+        });
+    }
+})();
+</script>
+{% endif %}
+
+{% if breakdowns_available and has_breakdown_data %}
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    if (typeof Chart === 'undefined') return;
+    const labels = {{ labels|tojson }};
+    const sf = {{ solo_fleet_series|tojson }};
+    const np = {{ npc_player_series|tojson }};
+
+    const stackedAreaOpts = {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+            legend:{display:true, position:'top', align:'end',
+                    labels:{font:{size:9},color:'#bfbfbf',boxWidth:14,boxHeight:2}},
+            tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+': '+ctx.parsed.y.toLocaleString()}}
+        },
+        scales:{
+            x:{stacked:true, ticks:{color:'#7a7a7a',font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:10}, grid:{display:false}},
+            y:{stacked:true, beginAtZero:true,
+               ticks:{color:'#7a7a7a',font:{size:9}}, grid:{color:'rgba(255,255,255,0.05)'}}
+        }
+    };
+
+    const sfEl = document.getElementById('solo-fleet-chart-{{ window }}');
+    if (sfEl && sf && sf.solo) {
+        new Chart(sfEl, {
+            type:'line',
+            data:{
+                labels:labels,
+                datasets:[
+                    {label:'Solo (1)',     data:sf.solo,   borderColor:'rgba(94,177,255,0.9)',   backgroundColor:'rgba(94,177,255,0.35)',   borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Small (2–10)', data:sf.small,  borderColor:'rgba(120,200,140,0.9)',  backgroundColor:'rgba(120,200,140,0.35)',  borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Medium (11–50)', data:sf.medium, borderColor:'rgba(220,170,90,0.9)', backgroundColor:'rgba(220,170,90,0.35)',   borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'Large (51+)',  data:sf.large,  borderColor:'rgba(238,85,85,0.9)',    backgroundColor:'rgba(238,85,85,0.4)',     borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                ]
+            },
+            options: stackedAreaOpts
+        });
+    }
+
+    const npEl = document.getElementById('npc-player-chart-{{ window }}');
+    if (npEl && np && np.player) {
+        new Chart(npEl, {
+            type:'line',
+            data:{
+                labels:labels,
+                datasets:[
+                    {label:'Player kills', data:np.player, borderColor:'rgba(238,85,85,0.95)',   backgroundColor:'rgba(238,85,85,0.35)',  borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                    {label:'NPC kills',    data:np.npc,    borderColor:'rgba(140,140,140,0.85)', backgroundColor:'rgba(140,140,140,0.3)', borderWidth:1, pointRadius:0, fill:true, tension:0.25},
+                ]
+            },
+            options: stackedAreaOpts
+        });
+    }
+})();
+</script>
+{% endif %}
+
+{# ── History browser: full 2003→today timeline, pannable year viewport ──── #}
+<div class="b-section" style="margin-top:1rem;">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">History</span>
+        <span class="b-muted-sm">Daily averages since 2003 · drag the slider to travel</span>
+    </div>
+    <div id="history-panel" hx-get="/tools/activity/history-panel"
+         hx-trigger="revealed" hx-swap="innerHTML">
+        <div class="b-empty">Loading history…</div>
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,33 @@
+.env
+*.db
+*.db-journal
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+nginx/ssl/
+vigilant.pid
+vigilant.log
+.DS_Store
+repo/
+
+# Optional co-hosted Wanderer mapper — deployment-specific, not part of Vigilant
+wanderer-compose.yml
+wanderer-conf.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/tailwind-content/
+scripts/.sde_cache.zip
+
+# Host-specific values for scripts/health-check.sh and scripts/deploy.sh
+# (probe library path, public /healthz URL, ops maintenance script). Keeps
+# deployment identity out of the committed tree.
+.health-env

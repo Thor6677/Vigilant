@@ -1,0 +1,372 @@
+"""Player-count historical backfill orchestrator.
+
+Loads third-party archives into player_count_snapshots. Idempotent — the
+unique constraint on (source, recorded_at) makes re-runs safe.
+
+Sources implemented:
+- eve-offline-net (Chribba) via app/intel/eve_offline_net_scraper.py
+  Two modes: 'coarse' (one-shot embedded fulldata, ~800 rows) or
+  'fine' (chunked zoom-endpoint walk, ~8M rows at 1-min resolution).
+- eve-offline-com (Adminor) — placeholder; the JSON endpoint still needs to
+  be identified via browser DevTools before the parser can be written.
+
+Cross-validation: when both sources have rows for the same UTC date, we
+compute the relative delta and flag mismatches > 2%. The validation report
+is returned alongside insert counts so the admin endpoint can surface it.
+
+Fine backfill is long-running (~50 min for the full archive) — kicked off
+as a background asyncio task by the admin endpoint. Progress logs land in
+the app log, queryable via `docker logs`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections import defaultdict
+from datetime import date, datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from app.db.models import AsyncSessionLocal, PlayerCountSnapshot
+from app.intel.eve_offline_net_scraper import (
+    fetch_chribba_archive,
+    fetch_chribba_archive_fine,
+)
+from app.intel.eve_offline_com_scraper import (
+    fetch_adminor_archive,
+    fetch_adminor_recent,
+)
+
+log = logging.getLogger(__name__)
+
+# Module-level state for the fine backfill so the admin endpoint can poll
+# progress without juggling task handles.
+_fine_backfill_state: dict = {
+    "running": False,
+    "started_at": None,
+    "windows_done": 0,
+    "rows_inserted": 0,
+    "last_window_end": None,
+    "error": None,
+}
+
+
+async def _bulk_upsert_chunk(rows: list[dict]) -> int:
+    """Insert one batch with INSERT OR IGNORE. Returns the newly-inserted
+    row count via before/after diff (SQLite doesn't reliably report rowcount
+    for batched on-conflict-do-nothing)."""
+    if not rows:
+        return 0
+    async with AsyncSessionLocal() as db:
+        # Cheaper than scanning the whole table: use the (source,
+        # recorded_at) index range over the rows we're about to insert.
+        rows_min = min(r["recorded_at"] for r in rows)
+        rows_max = max(r["recorded_at"] for r in rows)
+        src = rows[0]["source"]
+        before = (
+            await db.execute(
+                select(func.count())
+                .where(PlayerCountSnapshot.source == src)
+                .where(PlayerCountSnapshot.recorded_at >= rows_min)
+                .where(PlayerCountSnapshot.recorded_at <= rows_max)
+            )
+        ).scalar() or 0
+        # SQLite has param-count limits; chunk the bulk insert
+        CHUNK = 500
+        for i in range(0, len(rows), CHUNK):
+            chunk = rows[i:i + CHUNK]
+            stmt = sqlite_insert(PlayerCountSnapshot).values(chunk)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["source", "recorded_at"]
+            )
+            await db.execute(stmt)
+        await db.commit()
+        after = (
+            await db.execute(
+                select(func.count())
+                .where(PlayerCountSnapshot.source == src)
+                .where(PlayerCountSnapshot.recorded_at >= rows_min)
+                .where(PlayerCountSnapshot.recorded_at <= rows_max)
+            )
+        ).scalar() or 0
+        return after - before
+
+
+async def _run_fine_backfill_inner() -> None:
+    """Long-running task body. Walks the archive day-by-day, batched-inserts
+    each window's rows, updates module-level progress state for /admin/...
+    polling.
+
+    Resumes from the latest minute-granularity row's recorded_at, so a
+    container restart mid-backfill doesn't redo the early sparse years.
+    """
+    from sqlalchemy import func as _func
+    state = _fine_backfill_state
+    state.update({
+        "running": True,
+        "started_at": datetime.utcnow(),
+        "windows_done": 0,
+        "rows_inserted": 0,
+        "last_window_end": None,
+        "error": None,
+    })
+
+    # Resume from the first uncovered day. Walking from ARCHIVE_START is
+    # wasteful (we re-fetch sparse early years on every restart). Walking
+    # from MAX(recorded_at) is wrong when prior runs left non-sequential
+    # rows (e.g. an earlier manual probe at a recent date). The right
+    # cursor is "first day with no minute coverage" — that fills from the
+    # leading edge of contiguous coverage.
+    from app.intel.eve_offline_net_scraper import ARCHIVE_START as _ARCHIVE_START
+    from datetime import datetime as _dt, timedelta as _td
+    async with AsyncSessionLocal() as db:
+        covered_rows = (
+            await db.execute(
+                select(_func.date(PlayerCountSnapshot.recorded_at))
+                .where(PlayerCountSnapshot.source == "eve-offline-net")
+                .where(PlayerCountSnapshot.granularity == "minute")
+                .distinct()
+            )
+        ).all()
+    covered_days = {r[0] for r in covered_rows if r[0]}
+    cursor = _ARCHIVE_START
+    today = _dt.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    while cursor < today and cursor.strftime("%Y-%m-%d") in covered_days:
+        cursor += _td(days=1)
+    if cursor >= today:
+        log.info(
+            "eve-offline-net fine backfill: archive fully covered (%d days), nothing to do",
+            len(covered_days),
+        )
+        state["running"] = False
+        return
+    resume_from = cursor
+    log.info(
+        "eve-offline-net fine backfill: resuming from %s (first uncovered day; %d days already covered)",
+        resume_from, len(covered_days),
+    )
+
+    try:
+        async for batch in fetch_chribba_archive_fine(start=resume_from):
+            inserted = await _bulk_upsert_chunk(batch)
+            state["windows_done"] += 1
+            state["rows_inserted"] += inserted
+            state["last_window_end"] = batch[-1]["recorded_at"] if batch else None
+            if state["windows_done"] % 50 == 0:
+                log.info(
+                    "eve-offline-net fine backfill: %d windows, %d rows, last=%s",
+                    state["windows_done"], state["rows_inserted"], state["last_window_end"],
+                )
+    except Exception as e:
+        log.exception("eve-offline-net fine backfill failed")
+        state["error"] = str(e)
+    finally:
+        state["running"] = False
+        log.info(
+            "eve-offline-net fine backfill: done. windows=%d rows=%d error=%s",
+            state["windows_done"], state["rows_inserted"], state["error"],
+        )
+
+
+async def validate_overlap() -> dict:
+    """Cross-validate eve-offline-net vs eve-offline-com on overlapping
+    UTC dates. Flags relative deltas > 2%. Returns a summary dict."""
+    async with AsyncSessionLocal() as db:
+        net_rows = (
+            await db.execute(
+                select(PlayerCountSnapshot.recorded_at, PlayerCountSnapshot.player_count)
+                .where(PlayerCountSnapshot.source == "eve-offline-net")
+            )
+        ).all()
+        com_rows = (
+            await db.execute(
+                select(PlayerCountSnapshot.recorded_at, PlayerCountSnapshot.player_count)
+                .where(PlayerCountSnapshot.source == "eve-offline-com")
+            )
+        ).all()
+
+    # Group by UTC date — multiple samples on the same day get averaged.
+    def group_by_date(rows):
+        out: dict[date, list[int]] = defaultdict(list)
+        for ra, pc in rows:
+            out[ra.date()].append(pc)
+        return {d: round(sum(v) / len(v)) for d, v in out.items()}
+
+    net_by_date = group_by_date(net_rows)
+    com_by_date = group_by_date(com_rows)
+    overlap = sorted(set(net_by_date) & set(com_by_date))
+
+    mismatches: list[dict] = []
+    for d in overlap:
+        n, c = net_by_date[d], com_by_date[d]
+        denom = max(n, c, 1)
+        delta_pct = abs(n - c) / denom * 100.0
+        if delta_pct > 2.0:
+            mismatches.append({
+                "date": d.isoformat(),
+                "net": n,
+                "com": c,
+                "delta_pct": round(delta_pct, 2),
+            })
+
+    return {
+        "net_rows": len(net_rows),
+        "com_rows": len(com_rows),
+        "overlap_dates": len(overlap),
+        "mismatches_gt_2pct_count": len(mismatches),
+        "mismatches_gt_2pct": mismatches[:50],  # cap so JSON response stays small
+    }
+
+
+async def run_backfill(source: str = "all", mode: str = "fine") -> dict:
+    """Triggered by the admin endpoint.
+
+    `mode='coarse'` runs the embedded-fulldata one-shot path (fast, ~800 rows).
+    `mode='fine'` kicks off the chunked zoom-endpoint walk as a background
+    task and returns immediately. Caller can poll fine_backfill_state().
+
+    Returns a summary dict.
+    """
+    summary: dict = {"sources_run": [], "errors": [], "mode": mode}
+
+    if source in ("all", "net"):
+        if mode == "coarse":
+            try:
+                net_rows = await fetch_chribba_archive()
+                inserted = await _bulk_upsert_chunk(net_rows)
+                summary["sources_run"].append({
+                    "source": "eve-offline-net",
+                    "fetched": len(net_rows),
+                    "newly_inserted": inserted,
+                    "mode": "coarse",
+                })
+            except Exception as e:
+                log.exception("backfill: eve-offline-net coarse failed")
+                summary["errors"].append({"source": "eve-offline-net", "error": str(e)})
+        else:
+            if _fine_backfill_state["running"]:
+                summary["errors"].append({
+                    "source": "eve-offline-net",
+                    "error": "fine backfill already running — see fine_backfill_state",
+                })
+            else:
+                asyncio.create_task(_run_fine_backfill_inner())
+                summary["sources_run"].append({
+                    "source": "eve-offline-net",
+                    "mode": "fine",
+                    "status": "started in background — poll /admin/player-count/status",
+                })
+
+    if source in ("all", "com"):
+        try:
+            # 'fine' mode pulls the full 'all' archive (daily-ish 110k rows
+            # for the historical depth) PLUS a fine-grained recent slice for
+            # the last month (~50k rows at 1-min resolution to cross-validate
+            # vs Chribba and our live ESI samples).
+            com_rows_all = await fetch_adminor_archive()
+            inserted_archive = await _bulk_upsert_chunk(com_rows_all)
+            inserted_recent = 0
+            recent_count = 0
+            if mode == "fine":
+                com_rows_recent = await fetch_adminor_recent("1m")
+                recent_count = len(com_rows_recent)
+                inserted_recent = await _bulk_upsert_chunk(com_rows_recent)
+            summary["sources_run"].append({
+                "source": "eve-offline-com",
+                "fetched_archive": len(com_rows_all),
+                "newly_inserted_archive": inserted_archive,
+                "fetched_recent_1m": recent_count,
+                "newly_inserted_recent_1m": inserted_recent,
+            })
+        except Exception as e:
+            log.exception("backfill: eve-offline-com failed")
+            summary["errors"].append({"source": "eve-offline-com", "error": str(e)})
+
+    summary["validation"] = await validate_overlap()
+    summary["fine_state"] = dict(_fine_backfill_state)
+    return summary
+
+
+def fine_backfill_state() -> dict:
+    """Public snapshot of the fine-backfill task state for /admin polling."""
+    return dict(_fine_backfill_state)
+
+
+# Heuristic completeness thresholds. The full Chribba archive at 1-min
+# resolution is ~8M rows; we accept a partial ride above 5M as "good
+# enough — already running or ran". Adminor's `all` endpoint returns
+# ~109k rows in one shot.
+_NET_COMPLETE_THRESHOLD = 5_000_000
+_COM_COMPLETE_THRESHOLD = 100_000
+
+
+async def auto_backfill_if_needed() -> dict:
+    """Triggered at app startup. Inspects per-source row counts; if either
+    archive is below its completeness threshold, fires the appropriate
+    backfill in the background. Idempotent across container restarts —
+    the (source, recorded_at) unique constraint handles overlap, and
+    the threshold check prevents re-running once an archive is loaded."""
+    from sqlalchemy import func as _func
+    async with AsyncSessionLocal() as db:
+        net_count = (
+            await db.execute(
+                select(_func.count())
+                .select_from(PlayerCountSnapshot)
+                .where(PlayerCountSnapshot.source == "eve-offline-net")
+            )
+        ).scalar() or 0
+        com_count = (
+            await db.execute(
+                select(_func.count())
+                .select_from(PlayerCountSnapshot)
+                .where(PlayerCountSnapshot.source == "eve-offline-com")
+            )
+        ).scalar() or 0
+
+    decisions: dict = {"net_count": net_count, "com_count": com_count, "actions": []}
+
+    # Adminor — single-shot fetch, no throttling needed (one HTTP call).
+    if com_count < _COM_COMPLETE_THRESHOLD:
+        log.info(
+            "auto-backfill: eve-offline-com has %d rows (< %d), fetching archive",
+            com_count, _COM_COMPLETE_THRESHOLD,
+        )
+        try:
+            com_rows = await fetch_adminor_archive()
+            inserted = await _bulk_upsert_chunk(com_rows)
+            decisions["actions"].append({
+                "source": "eve-offline-com",
+                "inserted": inserted,
+                "fetched": len(com_rows),
+            })
+        except Exception as e:
+            log.exception("auto-backfill: adminor fetch failed")
+            decisions["actions"].append({"source": "eve-offline-com", "error": str(e)})
+    else:
+        decisions["actions"].append({"source": "eve-offline-com", "skipped": "above threshold"})
+
+    # Chribba fine — long-running, polite, kicked off as background task so
+    # we don't block startup. Skip if already past threshold OR currently running.
+    if net_count < _NET_COMPLETE_THRESHOLD:
+        if _fine_backfill_state["running"]:
+            decisions["actions"].append({
+                "source": "eve-offline-net",
+                "skipped": "already running",
+            })
+        else:
+            log.info(
+                "auto-backfill: eve-offline-net has %d rows (< %d), starting "
+                "polite fine backfill in background (~5 hours at 2s/req)",
+                net_count, _NET_COMPLETE_THRESHOLD,
+            )
+            asyncio.create_task(_run_fine_backfill_inner())
+            decisions["actions"].append({
+                "source": "eve-offline-net",
+                "started": "background fine backfill",
+            })
+    else:
+        decisions["actions"].append({"source": "eve-offline-net", "skipped": "above threshold"})
+
+    return decisions

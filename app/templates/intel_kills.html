@@ -1,0 +1,808 @@
+{% extends "base.html" %}
+{% block title %}Kill Feed — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Kill Feed</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+  .kf-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
+  .kf-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; margin:0; }
+  .kf-live { font-size:9px; color:var(--accent); letter-spacing:0.18em; }
+  .kf-live::before { content:"● "; color:#4ade80; }
+  .kf-filters { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .kf-filter-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kf-glabel { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.12em; margin-right:4px; min-width:60px; }
+  .kf-chip { background:var(--surface); color:var(--text); padding:3px 9px; border:1px solid var(--border); font-size:10px; cursor:pointer; border-radius:3px; user-select:none; }
+  .kf-chip.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kf-chip.mod { border-style:dashed; }
+  .kf-chip.mod.on { background:rgba(167,139,250,0.15); color:#a78bfa; border-color:#a78bfa; }
+  /* .kf-row / .kf-ship-thumb / .kf-meta-* / .kf-isk / .kf-ago / .kf-sys-* /
+     .kf-npc-badge / .kf-detail* / .kf-slot* / .kf-attacker-compact* /
+     .kf-dmg-bar* / .kf-fb-badge / @keyframes kf-row-in — shared with
+     intel_kills_search.html, moved to static/css/site.css under
+     "Killfeed shared (.kf-*)" (T-039). */
+  .kf-ac { position:relative; }
+  .kf-ac-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:160px; }
+  .kf-ac-input:focus { outline:none; border-color:var(--accent); }
+  .kf-ac-results { position:absolute; top:100%; left:0; background:var(--surface); border:1px solid var(--border); margin-top:2px; min-width:200px; max-height:240px; overflow:auto; z-index:20; display:none; }
+  .kf-ac-results.show { display:block; }
+  .kf-ac-result { padding:4px 8px; font-size:10px; cursor:pointer; color:var(--text); }
+  .kf-ac-result:hover { background:rgba(94,177,255,0.1); }
+  .kf-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
+  .kf-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+  .kf-chip-removable .x { font-weight:700; }
+  /* Floating "N new" pill: appears when new kills land while the user is
+     scrolled below the top of the feed. Click to scroll back to the top. */
+  #kf-new-pill {
+    position:sticky; top:8px; z-index:30; margin:8px auto -28px; display:block;
+    background:var(--accent); color:#0a0c0f; border:none; border-radius:14px;
+    padding:5px 14px; font-size:11px; font-weight:600; letter-spacing:0.08em;
+    cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    width:fit-content; max-width:max-content;
+  }
+  #kf-new-pill:hover { background:#3a90df; }
+
+  /* ── Most Valuable last-7-days strip ──────────────────────────────── */
+  #kf-top-strip-wrap { margin-bottom:10px; }
+  .kf-top-header { padding:10px 0 6px; }
+  .kf-top-toggle { background:none; border:none; color:var(--text); font-size:13px; letter-spacing:0.16em; font-weight:600; padding:0; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .kf-top-toggle .kf-top-chev { display:inline-block; transition:transform 0.2s; }
+  .kf-top-toggle[aria-expanded="false"] .kf-top-chev { transform:rotate(-90deg); }
+  #kf-top-body { padding-bottom:10px; border-bottom:1px solid var(--border); }
+  #kf-top-body.collapsed { display:none; }
+  .kf-top-section { margin-bottom:10px; }
+  .kf-top-section-label { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.14em; margin-bottom:6px; }
+  .kf-top-grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
+  @media (max-width: 1000px) { .kf-top-grid { grid-template-columns:repeat(3, 1fr); } }
+  .kf-top-card { background:var(--surface); border:1px solid var(--border); padding:8px; text-align:center; cursor:pointer; transition:background-color 0.2s, border-color 0.2s; border-radius:3px; min-width:0; }
+  .kf-top-card:hover { background:rgba(94,177,255,0.06); border-color:var(--accent); }
+  .kf-top-card.open { background:rgba(94,177,255,0.08); border-color:var(--accent); }
+  .kf-top-img { width:96px; height:96px; object-fit:contain; }
+  .kf-top-type { font-size:10px; color:var(--accent); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .kf-top-isk { font-size:13px; color:#facc15; font-weight:600; margin:4px 0 2px; font-family:"SF Mono",Menlo,monospace; }
+  .kf-top-meta { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .kf-top-corp { font-size:9px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .kf-top-empty { color:var(--muted); font-size:11px; padding:8px 0; text-align:center; }
+  #kf-top-detail-slot { margin-bottom:10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-section">
+  <div class="b-section-head kf-head">
+    <h1 class="kf-title">KILL FEED</h1>
+    <a href="/intel/kills/search" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
+    <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
+  </div>
+
+  <div id="kf-top-strip-wrap"
+       hx-get="/intel/kills/top"
+       hx-trigger="load"
+       hx-swap="innerHTML"></div>
+
+  <div class="kf-filters">
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Space</span>
+      <span class="kf-chip" data-space="hs">HS</span>
+      <span class="kf-chip" data-space="ls">LS</span>
+      <span class="kf-chip" data-space="ns">NS</span>
+      <span class="kf-chip" data-space="wh">WH</span>
+    </div>
+    <div class="kf-filter-row" id="kf-wh-subclasses" style="display:none;">
+      <span class="kf-glabel">WH class</span>
+      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter','Pochven'] %}
+      <span class="kf-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
+      {% endfor %}
+      <span class="kf-chip mod" data-mod="shattered">Shattered only</span>
+    </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Ship</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-ship-input" class="kf-ac-input" placeholder="Vargur, Loki…" autocomplete="off">
+        <div id="kf-ship-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-ship-chips" class="kf-chips"></div>
+    </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Attacker</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-attacker-input" class="kf-ac-input" placeholder="char / corp / alli" autocomplete="off">
+        <div id="kf-attacker-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-attacker-chips" class="kf-chips"></div>
+    </div>
+    <div class="kf-filter-row">
+      <span class="kf-glabel">Victim</span>
+      <div class="kf-ac">
+        <input type="text" id="kf-victim-input" class="kf-ac-input" placeholder="char / corp / alli" autocomplete="off">
+        <div id="kf-victim-results" class="kf-ac-results"></div>
+      </div>
+      <div id="kf-victim-chips" class="kf-chips"></div>
+    </div>
+  </div>
+
+  <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
+  <button type="button" id="kf-new-pill" style="display:none;">↑ <span id="kf-new-pill-count">0</span> new</button>
+  <div id="kf-feed"
+       hx-get="/intel/kills/feed"
+       hx-trigger="load, every 15s"
+       hx-swap="afterbegin"></div>
+  <div id="kf-show-more-wrap" style="display:none;text-align:center;padding:8px;">
+    <button class="kf-chip" id="kf-show-more-btn" type="button">Show more (<span id="kf-show-more-count">0</span> hidden) &darr;</button>
+  </div>
+  <div id="kf-load-older" style="display:none;text-align:center;padding:12px;margin-top:8px;">
+    <button class="kf-chip" id="kf-load-older-btn" type="button">&darr; Load older kills (last 6h)</button>
+    <button class="kf-chip" id="kf-back-to-live-btn" type="button" style="display:none;">&larr; Back to live</button>
+  </div>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+  function refreshAgo() {
+    var now = Date.now();
+    document.querySelectorAll('.kf-ago[data-time]').forEach(function(el) {
+      var raw = el.getAttribute('data-time') || '';
+      // killmail.stream payloads already include the trailing Z; older-mode
+      // rows pass isoformat() with no offset. Normalize before parsing.
+      if (!/Z$/.test(raw)) raw += 'Z';
+      var t = new Date(raw).getTime();
+      if (isNaN(t)) { el.textContent = ''; return; }
+      var s = Math.max(0, Math.floor((now - t) / 1000));
+      if (s < 60) el.textContent = s + 's ago';
+      else if (s < 3600) el.textContent = Math.floor(s/60) + 'm ago';
+      else el.textContent = Math.floor(s/3600) + 'h ago';
+    });
+  }
+  setInterval(refreshAgo, 15000);
+  document.addEventListener('htmx:afterSwap', refreshAgo);
+  refreshAgo();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var STORAGE_KEY = 'vigilant:kf:filters';
+    var state;
+    try {
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{"space":[],"wh_class":[],"shattered":false,"ship_ids":[],"attacker_ids":[],"victim_ids":[]}');
+    } catch (e) {
+      state = {space: [], wh_class: [], shattered: false, ship_ids: [], attacker_ids: [], victim_ids: []};
+    }
+    if (!Array.isArray(state.space)) state.space = [];
+    if (!Array.isArray(state.wh_class)) state.wh_class = [];
+    if (!Array.isArray(state.ship_ids)) state.ship_ids = [];
+    if (!Array.isArray(state.attacker_ids)) state.attacker_ids = [];
+    if (!Array.isArray(state.victim_ids)) state.victim_ids = [];
+    state.shattered = !!state.shattered;
+
+    // Migrate Task 7's ship_ids ({id, name}) → ({id, name, kind:'ship', key:'ship:ID'})
+    // so the generic bindAutocomplete chip-removal works without special cases.
+    state.ship_ids.forEach(function(s) {
+      if (!s.kind) s.kind = 'ship';
+      if (!s.key) s.key = 'ship:' + s.id;
+    });
+
+    function applyToChips() {
+      document.querySelectorAll('.kf-chip[data-space]').forEach(function(el) {
+        el.classList.toggle('on', state.space.indexOf(el.dataset.space) !== -1);
+      });
+      document.querySelectorAll('.kf-chip[data-whclass]').forEach(function(el) {
+        el.classList.toggle('on', state.wh_class.indexOf(el.dataset.whclass) !== -1);
+      });
+      document.querySelectorAll('.kf-chip[data-mod="shattered"]').forEach(function(el) {
+        el.classList.toggle('on', !!state.shattered);
+      });
+      var whRow = document.getElementById('kf-wh-subclasses');
+      if (whRow) whRow.style.display = (state.space.indexOf('wh') !== -1) ? 'flex' : 'none';
+    }
+
+    function entitySplit(arr) {
+      var by = {character: [], corporation: [], alliance: []};
+      (arr || []).forEach(function(e) { if (by[e.kind]) by[e.kind].push(e.id); });
+      return by;
+    }
+
+    // ── Visible-row cap ────────────────────────────────────────────────
+    // Live polling accumulates unbounded .kf-row nodes over multi-hour
+    // sessions. Cap the visible window at KF_VISIBLE_CAP; surplus rows stay
+    // in DOM (display:none) so ctrl-F still finds them and a Show more
+    // button can reveal the next chunk. Cap bumps on reveal (otherwise the
+    // next swap re-hides what we just showed) and resets on filter change
+    // / Back-to-live so a fresh window starts at 100.
+    var KF_VISIBLE_CAP = 100;
+    var KF_SHOW_MORE_CHUNK = 100;
+
+    function trimVisibleRows() {
+      var rows = document.querySelectorAll('#kf-feed .kf-row');
+      for (var i = 0; i < rows.length; i++) {
+        if (i >= KF_VISIBLE_CAP) {
+          if (rows[i].style.display !== 'none') rows[i].style.display = 'none';
+        } else {
+          if (rows[i].style.display === 'none') rows[i].style.display = '';
+        }
+      }
+      // Detail panels follow their row's visibility (no orphan panels).
+      document.querySelectorAll('#kf-feed .kf-detail').forEach(function(p) {
+        var prev = p.previousElementSibling;
+        if (prev && prev.classList.contains('kf-row')) {
+          p.style.display = (prev.style.display === 'none') ? 'none' : '';
+        }
+      });
+    }
+
+    function updateShowMoreButton() {
+      var hidden = document.querySelectorAll('#kf-feed .kf-row[style*="display: none"]').length;
+      var wrap = document.getElementById('kf-show-more-wrap');
+      var count = document.getElementById('kf-show-more-count');
+      if (!wrap || !count) return;
+      if (hidden > 0) {
+        count.textContent = hidden;
+        wrap.style.display = '';
+      } else {
+        wrap.style.display = 'none';
+      }
+    }
+
+    function buildQS() {
+      var qs = [];
+      if (state.space.length) qs.push('space=' + state.space.join(','));
+      if (state.wh_class.length) qs.push('wh_class=' + state.wh_class.join(','));
+      if (state.shattered) qs.push('shattered=1');
+      if (state.ship_ids && state.ship_ids.length) {
+        qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
+      }
+      var aSplit = entitySplit(state.attacker_ids);
+      if (aSplit.character.length) qs.push('attacker_char=' + aSplit.character.join(','));
+      if (aSplit.corporation.length) qs.push('attacker_corp=' + aSplit.corporation.join(','));
+      if (aSplit.alliance.length) qs.push('attacker_alli=' + aSplit.alliance.join(','));
+      var vSplit = entitySplit(state.victim_ids);
+      if (vSplit.character.length) qs.push('victim_char=' + vSplit.character.join(','));
+      if (vSplit.corporation.length) qs.push('victim_corp=' + vSplit.corporation.join(','));
+      if (vSplit.alliance.length) qs.push('victim_alli=' + vSplit.alliance.join(','));
+      return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      var newQS = buildQS();
+      history.replaceState(null, '', '/intel/kills' + newQS);
+      var feed = document.getElementById('kf-feed');
+      if (feed) {
+        // Filter params reach the request via htmx:configRequest below
+        // (see comment there) — mutating hx-get here is a no-op for the
+        // polling timer and for htmx.trigger(elt, 'load').
+        feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
+        // Reset the cursor: a fresh filter wants the full top-100, not just
+        // kills newer than what the previous filter had seen.
+        kfSinceCursor = null;
+        KF_VISIBLE_CAP = 100;
+        if (window.htmx) htmx.trigger(feed, 'load');
+      }
+    }
+
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function bindAutocomplete(inputId, resultsId, chipsId, stateKey, kind) {
+      var input = document.getElementById(inputId);
+      var results = document.getElementById(resultsId);
+      var chips = document.getElementById(chipsId);
+      if (!input || !results || !chips) return;
+      var debounce;
+
+      function render() {
+        var items = (state[stateKey] || []);
+        chips.innerHTML = items.map(function(e) {
+          var label = e.kind && e.kind !== 'ship' ? (escAttr(e.name) + ' (' + escAttr(e.kind) + ')') : escAttr(e.name);
+          return '<span class="kf-chip-removable" data-rm-key="' + escAttr(e.key) + '">' + label + '<span class="x">×</span></span>';
+        }).join('');
+        chips.querySelectorAll('[data-rm-key]').forEach(function(el) {
+          el.addEventListener('click', function() {
+            state[stateKey] = (state[stateKey] || []).filter(function(e) { return e.key !== el.dataset.rmKey; });
+            render();
+            persist();
+          });
+        });
+      }
+
+      input.addEventListener('input', function() {
+        clearTimeout(debounce);
+        var q = input.value.trim();
+        if (q.length < 2) { results.classList.remove('show'); results.innerHTML = ''; return; }
+        debounce = setTimeout(function() {
+          fetch('/intel/kills/resolve?kind=' + encodeURIComponent(kind) + '&q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(items) {
+              results.innerHTML = items.map(function(it) {
+                var name = escAttr(it.name || '');
+                var k = escAttr(it.kind || '');
+                var label = it.kind && it.kind !== 'ship' ? (name + ' <span style="color:var(--muted);">(' + k + ')</span>') : name;
+                return '<div class="kf-ac-result" data-id="' + it.id + '" data-kind="' + k + '" data-name="' + name + '">' + label + '</div>';
+              }).join('');
+              results.classList.toggle('show', items.length > 0);
+              results.querySelectorAll('.kf-ac-result').forEach(function(el) {
+                el.addEventListener('click', function() {
+                  var entry = {
+                    id: parseInt(el.dataset.id, 10),
+                    kind: el.dataset.kind || 'ship',
+                    name: el.dataset.name,
+                  };
+                  entry.key = entry.kind + ':' + entry.id;
+                  if (!Array.isArray(state[stateKey])) state[stateKey] = [];
+                  if (!state[stateKey].some(function(e) { return e.key === entry.key; })) {
+                    state[stateKey].push(entry);
+                  }
+                  input.value = '';
+                  results.classList.remove('show');
+                  results.innerHTML = '';
+                  render();
+                  persist();
+                });
+              });
+            })
+            .catch(function() { results.classList.remove('show'); });
+        }, 250);
+      });
+      document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !results.contains(e.target)) {
+          results.classList.remove('show');
+        }
+      });
+      render();
+    }
+
+    function toggle(arr, v) {
+      var i = arr.indexOf(v);
+      if (i === -1) arr.push(v); else arr.splice(i, 1);
+    }
+
+    // Scope to FILTER chips only. The .kf-chip class is also reused on the
+    // Load older / Back to live / Show more action buttons for styling — a
+    // broad selector would attach persist() to them too, wiping the feed
+    // and triggering a blocked reload (Loading… stuck) when older-mode is
+    // active. Match the three data-* attrs the handler actually consumes.
+    document.querySelectorAll('.kf-chip[data-space], .kf-chip[data-whclass], .kf-chip[data-mod]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        if (el.dataset.space) toggle(state.space, el.dataset.space);
+        else if (el.dataset.whclass) toggle(state.wh_class, el.dataset.whclass);
+        else if (el.dataset.mod === 'shattered') state.shattered = !state.shattered;
+        applyToChips();
+        persist();
+      });
+    });
+
+    // Restore from URL if any filter param is present; otherwise keep localStorage state.
+    var url = new URL(window.location.href);
+    var qsSpace = url.searchParams.get('space');
+    var qsWh = url.searchParams.get('wh_class');
+    var qsShat = url.searchParams.get('shattered');
+    if (qsSpace !== null || qsWh !== null || qsShat !== null) {
+      state.space = qsSpace ? qsSpace.split(',').filter(Boolean) : [];
+      state.wh_class = qsWh ? qsWh.split(',').filter(Boolean) : [];
+      state.shattered = !!qsShat && qsShat !== '0';
+    }
+    applyToChips();
+    bindAutocomplete('kf-ship-input',     'kf-ship-results',     'kf-ship-chips',     'ship_ids',     'ship');
+    bindAutocomplete('kf-attacker-input', 'kf-attacker-results', 'kf-attacker-chips', 'attacker_ids', 'entity');
+    bindAutocomplete('kf-victim-input',   'kf-victim-results',   'kf-victim-chips',   'victim_ids',   'entity');
+    // Note: ship_id / attacker_* / victim_* from URL are intentionally not
+    // hydrated (no cheap name resolve by raw id); localStorage carries the
+    // labeled chips for personal-use persistence. Filter params reach the
+    // request via the htmx:configRequest handler below — htmx 1.9.x captures
+    // hx-get at processVerbs time so we can't propagate filters via attribute.
+
+    // ------ Task 9: Load older / Back to live ------
+    var olderContainer = document.getElementById('kf-load-older');
+    var olderBtn = document.getElementById('kf-load-older-btn');
+    var liveBtn = document.getElementById('kf-back-to-live-btn');
+    var olderMode = false;
+
+    function pauseLive() {
+      // htmx parses hx-trigger once at process time, so mutating the
+      // attribute is a no-op for an already-armed interval. We block the
+      // request itself via the htmx:beforeRequest filter installed below
+      // (gated by olderMode + an open .kf-detail panel). Keep this function
+      // as a no-op shim so older-mode callers still read clearly.
+    }
+
+    function resumeLive() {
+      olderMode = false;
+      if (liveBtn) liveBtn.style.display = 'none';
+      if (olderBtn) olderBtn.style.display = '';
+      var f = document.getElementById('kf-feed');
+      if (f) {
+        f.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
+        // hx-get/hx-trigger/hx-swap stay at their declared values; filter
+        // params are injected via htmx:configRequest below.
+        // Reset the cursor so the next fetch reloads the current top-N, not
+        // just whatever has come in since we entered older-mode.
+        kfSinceCursor = null;
+        KF_VISIBLE_CAP = 100;
+        if (window.htmx) htmx.trigger(f, 'load');
+      }
+    }
+
+    function fetchOlderChunk(beforeTs, windowHours) {
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      var url = '/intel/kills/older' + qs + sep
+        + 'before=' + encodeURIComponent(beforeTs)
+        + '&window_hours=' + windowHours;
+      return fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+        var f = document.getElementById('kf-feed');
+        if (!f) return;
+        f.insertAdjacentHTML('beforeend', html);
+        // Refresh "ago" labels on newly inserted rows
+        if (typeof refreshAgo === 'function') refreshAgo();
+        // Wire up "Load 24h?" expand link if the empty-fallback was injected
+        var empties = f.querySelectorAll('.kf-empty [data-expand]');
+        empties.forEach(function(expand) {
+          if (expand.dataset.wired) return;
+          expand.dataset.wired = '1';
+          expand.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            var emptyEl = expand.closest('.kf-empty');
+            if (emptyEl) emptyEl.remove();
+            fetchOlderChunk(beforeTs, 24);
+          });
+        });
+      });
+    }
+
+    function getOldestRowTs() {
+      var rows = document.querySelectorAll('#kf-feed .kf-row');
+      if (!rows.length) return new Date().toISOString();
+      var lastRow = rows[rows.length - 1];
+      var ago = lastRow.querySelector('.kf-ago[data-time]');
+      if (!ago) return new Date().toISOString();
+      // killmail_time is ISO without timezone — server expects that format back
+      return ago.getAttribute('data-time');
+    }
+
+    if (olderBtn) {
+      olderBtn.addEventListener('click', function() {
+        olderMode = true;
+        if (liveBtn) liveBtn.style.display = '';
+        pauseLive();
+        fetchOlderChunk(getOldestRowTs(), 6);
+      });
+    }
+    if (liveBtn) liveBtn.addEventListener('click', resumeLive);
+
+    // Reveal Load Older button after initial live feed renders
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (e.target && e.target.id === 'kf-feed' && !olderMode && olderContainer) {
+        olderContainer.style.display = 'block';
+      }
+    });
+
+    // ------ Click-to-expand detail panel + polling pause + animations ------
+
+    // Suppress the every-15s live-poll fetch only when older-mode is active
+    // (the user explicitly paused to browse history). Detail panels stay
+    // open during live polls — new kills prepend at the top, and the browser
+    // keeps existing content (including any open detail panel) anchored at
+    // its current scroll position. User scrolls up if they want to see the
+    // new arrivals.
+    document.addEventListener('htmx:beforeRequest', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      if (olderMode) e.preventDefault();
+    });
+    function updatePollingState() { /* no-op kept for call sites */ }
+
+    function bindRowClicks() {
+      document.querySelectorAll('#kf-feed .kf-row').forEach(function(row) {
+        if (row.dataset.bound === '1') return;
+        row.dataset.bound = '1';
+        row.addEventListener('click', function() {
+          var kid = row.dataset.kid;
+          var existing = document.querySelector('#kf-feed .kf-detail[data-kid="' + kid + '"]');
+          if (existing) {
+            // Animated collapse: drop .shown, remove after transition.
+            existing.classList.remove('shown');
+            row.classList.remove('open');
+            setTimeout(function() {
+              if (existing.parentNode) existing.parentNode.removeChild(existing);
+              updatePollingState();
+            }, 320);
+            return;
+          }
+          row.classList.add('open');
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              row.insertAdjacentHTML('afterend', html);
+              var panel = row.nextElementSibling;
+              if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                // Force reflow so the transition fires from the collapsed state.
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+              updatePollingState();
+            })
+            .catch(function() { row.classList.remove('open'); });
+        });
+      });
+    }
+
+    // ── Cursor + filter params injected via configRequest ──────────────
+    // htmx 1.9.x captures the hx-get path in a closure at processVerbs time
+    // (DOMContentLoaded), so later setAttribute('hx-get', ...) calls do NOT
+    // propagate to the polling timer or to htmx.trigger(elt, 'load'). The
+    // `since` cursor avoided that by going through configRequest; filter
+    // params (space/wh_class/shattered/ship_id/attacker_*/victim_*) need the
+    // same treatment, otherwise chip toggles never reach the server and the
+    // live feed appears unfiltered. Older-mode fetches use raw fetch(), not
+    // htmx, so they're unaffected.
+    var kfSinceCursor = null;
+    document.addEventListener('htmx:configRequest', function(e) {
+      if (!e.detail || !e.detail.elt || e.detail.elt.id !== 'kf-feed') return;
+      var params = e.detail.parameters;
+      if (state.space.length) params.space = state.space.join(',');
+      if (state.wh_class.length) params.wh_class = state.wh_class.join(',');
+      if (state.shattered) params.shattered = 1;
+      if (state.ship_ids && state.ship_ids.length) {
+        params.ship_id = state.ship_ids.map(function(s){return s.id;}).join(',');
+      }
+      var aSplit = entitySplit(state.attacker_ids);
+      if (aSplit.character.length) params.attacker_char = aSplit.character.join(',');
+      if (aSplit.corporation.length) params.attacker_corp = aSplit.corporation.join(',');
+      if (aSplit.alliance.length) params.attacker_alli = aSplit.alliance.join(',');
+      var vSplit = entitySplit(state.victim_ids);
+      if (vSplit.character.length) params.victim_char = vSplit.character.join(',');
+      if (vSplit.corporation.length) params.victim_corp = vSplit.corporation.join(',');
+      if (vSplit.alliance.length) params.victim_alli = vSplit.alliance.join(',');
+      if (kfSinceCursor) params.since = kfSinceCursor;
+    });
+
+    // ── Pre-swap dedupe so rows already in the DOM don't visibly flicker ─
+    // Parse the response HTML, drop any row whose data-kid is already in the
+    // feed, and rebuild the swap content. This way the user only ever sees
+    // genuinely-new rows arrive at the top.
+    document.addEventListener('htmx:beforeSwap', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      var xhr = e.detail && e.detail.xhr;
+      if (!xhr || !xhr.responseText) return;
+      var existing = {};
+      e.target.querySelectorAll('.kf-row').forEach(function(row) {
+        if (row.dataset.kid) existing[row.dataset.kid] = true;
+      });
+      // Parse the response in a detached container so we can prune.
+      var tmp = document.createElement('div');
+      tmp.innerHTML = xhr.responseText;
+      var removed = 0;
+      tmp.querySelectorAll('.kf-row').forEach(function(row) {
+        if (row.dataset.kid && existing[row.dataset.kid]) {
+          row.remove();
+          removed++;
+        }
+      });
+      if (removed > 0) {
+        // Replace the response body with the pruned HTML.
+        e.detail.serverResponse = tmp.innerHTML;
+      }
+    });
+
+    var kfInitialSwapDone = false;
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (!e.target || e.target.id !== 'kf-feed') return;
+      var feed = e.target;
+
+      // Consume the partial's marker to update the cursor + counter.
+      var markers = feed.querySelectorAll('[data-kf-marker]');
+      markers.forEach(function(marker) {
+        var newest = marker.getAttribute('data-kf-newest');
+        var total = marker.getAttribute('data-kf-total');
+        if (total) {
+          var status = document.getElementById('kf-status');
+          if (status) status.textContent = 'LIVE · 1h · ' + total + ' kills';
+        }
+        if (newest && newest !== '0') {
+          var asInt = parseInt(newest, 10);
+          if (!isNaN(asInt) && (!kfSinceCursor || asInt > kfSinceCursor)) {
+            kfSinceCursor = asInt;
+          }
+        }
+        marker.remove();
+      });
+
+      // Belt-and-suspenders dedupe (in case beforeSwap missed anything).
+      var seenKids = {};
+      feed.querySelectorAll('.kf-row').forEach(function(row) {
+        var kid = row.dataset.kid;
+        if (!kid) return;
+        if (seenKids[kid]) row.remove();
+        else seenKids[kid] = true;
+      });
+
+      // Remove the initial-load "Loading…" placeholder.
+      var loading = document.getElementById('kf-loading');
+      if (loading) loading.remove();
+
+      // Cap visible rows at KF_VISIBLE_CAP; surplus stays in DOM (display:none).
+      trimVisibleRows();
+      updateShowMoreButton();
+
+      if (kfInitialSwapDone) {
+        // Any row not yet bound is a freshly-prepended live row.
+        var newRowCount = 0;
+        feed.querySelectorAll('.kf-row:not([data-bound])').forEach(function(row) {
+          row.classList.add('kf-new');
+          setTimeout(function() { row.classList.remove('kf-new'); }, 650);
+          newRowCount++;
+        });
+        if (newRowCount > 0) noteNewRows(newRowCount);
+      }
+      kfInitialSwapDone = true;
+      bindRowClicks();
+    });
+    bindRowClicks();
+
+    // ── Floating "N new kills" pill ────────────────────────────────────
+    // Appears when new kills arrive while the user is scrolled past the top
+    // of the kill feed. Click to scroll back to the top and clear the count.
+    var pill = document.getElementById('kf-new-pill');
+    var pillCount = document.getElementById('kf-new-pill-count');
+    var pendingNew = 0;
+
+    function isFeedAtTop() {
+      var feedEl = document.getElementById('kf-feed');
+      if (!feedEl) return true;
+      var rect = feedEl.getBoundingClientRect();
+      // True if the first kill row is at-or-above the top of the viewport
+      // (i.e. user can see the top of the feed without scrolling up).
+      return rect.top >= 0;
+    }
+
+    function showPill() {
+      if (!pill) return;
+      if (pendingNew <= 0) { pill.style.display = 'none'; return; }
+      pillCount.textContent = pendingNew;
+      pill.style.display = 'block';
+    }
+
+    function noteNewRows(n) {
+      if (isFeedAtTop()) {
+        // User is already viewing the top — they see the new rows arrive,
+        // no need to nag with a pill.
+        pendingNew = 0;
+        showPill();
+        return;
+      }
+      pendingNew += n;
+      showPill();
+    }
+
+    if (pill) {
+      pill.addEventListener('click', function() {
+        var feedEl = document.getElementById('kf-feed');
+        if (feedEl) feedEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        pendingNew = 0;
+        showPill();
+      });
+    }
+
+    // When the user scrolls back to the top on their own, clear the pill.
+    window.addEventListener('scroll', function() {
+      if (pendingNew > 0 && isFeedAtTop()) {
+        pendingNew = 0;
+        showPill();
+      }
+    }, { passive: true });
+
+    // Older-mode rows come in via raw fetch (not htmx), so wire them here too.
+    var _fetchOlderChunk = fetchOlderChunk;
+    fetchOlderChunk = function(beforeTs, windowHours) {
+      return _fetchOlderChunk(beforeTs, windowHours).then(function() {
+        bindRowClicks();
+      });
+    };
+
+    var showMoreBtn = document.getElementById('kf-show-more-btn');
+    if (showMoreBtn) {
+      showMoreBtn.addEventListener('click', function() {
+        var hiddenRows = document.querySelectorAll('#kf-feed .kf-row[style*="display: none"]');
+        // DOM order is newest → oldest, so hiddenRows are the trailing slice
+        // past the cap. Reveal the first KF_SHOW_MORE_CHUNK — those are the
+        // rows closest to the visible boundary (oldest hidden first).
+        var toReveal = Array.prototype.slice.call(hiddenRows, 0, KF_SHOW_MORE_CHUNK);
+        toReveal.forEach(function(row) {
+          row.style.display = '';
+          var next = row.nextElementSibling;
+          if (next && next.classList.contains('kf-detail')) next.style.display = '';
+        });
+        // Bump the cap so the next afterSwap doesn't re-hide what we revealed.
+        KF_VISIBLE_CAP += toReveal.length;
+        updateShowMoreButton();
+      });
+    }
+  })();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var TOP_KEY = 'vigilant:kf:topstrip';
+    var pendingSlotClear = null;
+
+    function applyTopState() {
+      var collapsed = false;
+      try { collapsed = localStorage.getItem(TOP_KEY) === 'collapsed'; } catch (e) {}
+      var body = document.getElementById('kf-top-body');
+      var toggle = document.getElementById('kf-top-toggle');
+      if (body) body.classList.toggle('collapsed', collapsed);
+      if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+
+    function bindTopToggle() {
+      var toggle = document.getElementById('kf-top-toggle');
+      if (!toggle || toggle.dataset.bound === '1') return;
+      toggle.dataset.bound = '1';
+      toggle.addEventListener('click', function() {
+        var body = document.getElementById('kf-top-body');
+        if (!body) return;
+        var collapsed = body.classList.toggle('collapsed');
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        try { localStorage.setItem(TOP_KEY, collapsed ? 'collapsed' : 'expanded'); } catch (e) {}
+      });
+    }
+
+    function bindTopCards() {
+      var cards = document.querySelectorAll('#kf-top-strip-wrap .kf-top-card');
+      cards.forEach(function(card) {
+        if (card.dataset.bound === '1') return;
+        card.dataset.bound = '1';
+        card.addEventListener('click', function() {
+          var kid = card.dataset.kid;
+          var slot = document.getElementById('kf-top-detail-slot');
+          if (!slot) return;
+
+          if (card.classList.contains('open')) {
+            var openPanel = slot.querySelector('.kf-detail');
+            card.classList.remove('open');
+            if (openPanel) {
+              openPanel.classList.remove('shown');
+              if (pendingSlotClear) clearTimeout(pendingSlotClear);
+              pendingSlotClear = setTimeout(function() {
+                slot.innerHTML = '';
+                pendingSlotClear = null;
+              }, 320);
+            } else {
+              slot.innerHTML = '';
+            }
+            return;
+          }
+
+          document.querySelectorAll('#kf-top-strip-wrap .kf-top-card.open').forEach(function(c) {
+            c.classList.remove('open');
+          });
+          card.classList.add('open');
+
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              if (pendingSlotClear) { clearTimeout(pendingSlotClear); pendingSlotClear = null; }
+              slot.innerHTML = html;
+              var panel = slot.querySelector('.kf-detail');
+              if (panel) {
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+            })
+            .catch(function() { card.classList.remove('open'); });
+        });
+      });
+    }
+
+    function refreshTopWiring() {
+      applyTopState();
+      bindTopToggle();
+      bindTopCards();
+    }
+
+    refreshTopWiring();
+
+    document.addEventListener('htmx:afterSwap', function(e) {
+      if (e.target && e.target.id === 'kf-top-strip-wrap') {
+        refreshTopWiring();
+      }
+    });
+  })();
+</script>
+{% endblock %}

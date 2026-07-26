@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}WH Tracker — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/intel">Intel</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">WH Tracker</span>
+</div>
+{% endblock %}
+
+{% block head %}
+{# .ws-* mirrors wormhole_system.html's head block — the tracker panel reuses
+   its markup idioms. Candidate for a site.css promotion pass later. #}
+<style nonce="{{ request.state.csp_nonce }}">
+    .ws-header { display:flex; align-items:baseline; justify-content:flex-start; gap:0.75rem; margin-bottom:0.25rem; flex-wrap:wrap; }
+    .ws-name { font-size:28px; font-weight:700; color:var(--text); letter-spacing:-0.02em; }
+    .ws-class-badge { font-size:13px; font-weight:600; padding:0.15rem 0.5rem; border:1px solid; border-radius:2px; }
+    .ws-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+    .ws-section { margin-bottom:1rem; }
+    .ws-section-title { font-size:9px; text-transform:uppercase; letter-spacing:0.12em; color:var(--muted); margin-bottom:0.5rem; border-bottom:1px solid var(--border); padding-bottom:0.3rem; }
+    .ws-conn { display:inline-flex; align-items:center; gap:0.2rem; margin-right:0.75rem; margin-bottom:0.3rem; }
+    .ws-conn a { text-decoration:none; font-weight:600; }
+    .ws-conn-dest { font-size:10px; vertical-align:super; }
+    .ws-effect-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .ws-effect-table th { text-align:left; padding:0.3rem 0.5rem; color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid var(--border); }
+    .ws-effect-table td { padding:0.3rem 0.5rem; border-bottom:1px solid var(--border); }
+    @media(max-width:768px) { .ws-grid { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Wormhole Tracker</h1>
+    <span class="b-muted-sm">Second-monitor live view — auto-detects the tracked character's current J-system.</span>
+</div>
+
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head">
+        <span class="b-label">Tracked Characters</span>
+        <span class="b-muted-sm">first checked character in J-space wins</span>
+    </div>
+    <div style="padding:0.6rem 0.75rem;display:flex;gap:1.25rem;flex-wrap:wrap;align-items:center;">
+        {% for c in chars %}
+        <label style="display:flex;align-items:center;gap:0.4rem;font-size:11px;color:{{ 'var(--text)' if c.has_scope else 'var(--muted)' }};cursor:{{ 'pointer' if c.has_scope else 'not-allowed' }};">
+            <input type="checkbox" class="wht-char" value="{{ c.id }}" {{ 'disabled' if not c.has_scope }}>
+            {{ c.name }}{% if not c.has_scope %} <span style="font-size:9px;">(no location scope)</span>{% endif %}
+        </label>
+        {% endfor %}
+        {% if not chars %}
+        <span class="b-empty">No characters linked.</span>
+        {% endif %}
+        <button type="button" id="wht-refresh"
+                style="margin-left:auto;padding:0.25rem 0.7rem;background:transparent;border:1px solid var(--accent);color:var(--accent);font:inherit;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;"
+                title="Force refresh now (R)">Refresh now</button>
+    </div>
+</div>
+
+<input type="hidden" id="tracker-chars" name="chars" value="">
+
+<div id="wht-panel"
+     hx-get="/intel/tracker/poll"
+     hx-trigger="tracker-tick from:body, every 30s"
+     hx-include="#tracker-chars"
+     hx-swap="innerHTML">
+    <div class="b-panel" style="padding:1rem;text-align:center;">
+        <span class="b-muted-sm">Check a character above to start tracking.</span>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    var KEY = 'vigilant_wht_chars';
+
+    function selected() {
+        return Array.prototype.filter.call(
+            document.querySelectorAll('.wht-char'), function(cb) { return cb.checked; }
+        ).map(function(cb) { return cb.value; });
+    }
+
+    function tick() {
+        var sel = selected();
+        document.getElementById('tracker-chars').value = sel.join(',');
+        localStorage.setItem(KEY, sel.join(','));
+        if (sel.length) document.body.dispatchEvent(new Event('tracker-tick'));
+    }
+
+    /* Restore last selection */
+    var saved = (localStorage.getItem(KEY) || '').split(',');
+    Array.prototype.forEach.call(document.querySelectorAll('.wht-char'), function(cb) {
+        if (saved.indexOf(cb.value) !== -1 && !cb.disabled) cb.checked = true;
+        cb.addEventListener('change', tick);
+    });
+    document.getElementById('wht-refresh').addEventListener('click', tick);
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'r' && !e.ctrlKey && !e.metaKey &&
+            !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) tick();
+    });
+
+    /* Fire the initial poll once the saved selection is restored. */
+    if (selected().length) tick();
+
+    /* Stale-poll ticker: bump the "checked Xs ago" label every 5s. */
+    setInterval(function() {
+        var el = document.getElementById('wht-checked');
+        if (!el || !el.dataset.ts) return;
+        var secs = Math.max(0, Math.round((Date.now() - parseInt(el.dataset.ts, 10)) / 1000));
+        el.textContent = 'checked ' + secs + 's ago';
+        el.style.color = secs > 75 ? 'var(--danger)' : 'var(--muted)';
+    }, 5000);
+})();
+</script>
+{% endblock %}

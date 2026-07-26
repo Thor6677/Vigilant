@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}App Status — Vigilant{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Status</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+.st-table { width:100%; border-collapse:collapse; font-size:11px; }
+.st-table thead th {
+    text-align:left; padding:0.4rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+}
+.st-table tbody td {
+    padding:0.4rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text);
+    vertical-align:top;
+}
+.st-table tbody tr:last-child td { border-bottom:none; }
+.st-table tbody tr:hover { background:rgba(200,169,81,0.04); }
+.st-scroll { overflow-x:auto; overflow-y:auto; }
+.st-summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:0.35rem; width:fit-content; }
+.st-summary::-webkit-details-marker { display:none; }
+.st-detail-body { margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:0.4rem; }
+.st-detail-row { display:flex; align-items:flex-start; gap:0.5rem; }
+.st-detail-key { font-weight:600; white-space:nowrap; width:96px; flex-shrink:0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">App Status</h1>
+    {% if overall_status == "ok" %}
+      <span class="b-badge is-ok">● OK</span>
+    {% elif overall_status == "warning" %}
+      <span class="b-badge is-warn">⚠ WARNING</span>
+    {% else %}
+      <span class="b-badge is-danger">✕ CRITICAL</span>
+    {% endif %}
+</div>
+
+<!-- Request activity chart (managed by JS, not HTMX) -->
+<div class="b-section">
+  <div class="b-panel">
+    <div class="b-panel-head">
+      <span class="b-label">Request Activity</span>
+      <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(77,166,77,0.7);"></span>Fetched</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(100,160,220,0.7);"></span>Cached</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(204,60,60,0.7);"></span>Rejected</span>
+        <span style="opacity:0.6;">&middot; last 30 min</span>
+      </div>
+    </div>
+    <div style="position:relative;height:9rem;padding:0.75rem;">
+      <canvas id="request-chart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Live-refreshing data section (HTMX partial) -->
+{% include "status_data.html" %}
+
+<!-- Chart.js -->
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+  const initialData = {{ chart_data | safe }};
+  const EVE_GREEN  = 'rgba(77,166,77,0.75)';
+  const EVE_BLUE   = 'rgba(100,160,220,0.7)';
+  const EVE_RED    = 'rgba(204,60,60,0.75)';
+  const EVE_BORDER = 'rgba(255,255,255,0.06)';
+  const EVE_MUTED  = 'rgba(255,255,255,0.3)';
+
+  const cfg = (data) => ({
+    type: 'bar',
+    data: {
+      labels: data.labels,
+      datasets: [
+        {
+          label: 'Fetched',
+          data: data.fetched,
+          backgroundColor: EVE_GREEN,
+          borderRadius: 2,
+          stack: 'req',
+        },
+        {
+          label: 'Cached',
+          data: data.cached,
+          backgroundColor: EVE_BLUE,
+          borderRadius: 2,
+          stack: 'req',
+        },
+        {
+          label: 'Rejected',
+          data: data.rejected,
+          backgroundColor: EVE_RED,
+          borderRadius: 2,
+          stack: 'req',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1f2e',
+          borderColor: EVE_BORDER,
+          borderWidth: 1,
+          titleColor: EVE_MUTED,
+          bodyColor: '#fff',
+          callbacks: {
+            title: (items) => items[0].label,
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          grid: { color: EVE_BORDER },
+          ticks: {
+            color: EVE_MUTED,
+            font: { family: 'monospace', size: 10 },
+            maxTicksLimit: 10,
+          },
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          grid: { color: EVE_BORDER },
+          ticks: {
+            color: EVE_MUTED,
+            font: { family: 'monospace', size: 10 },
+            precision: 0,
+          },
+        },
+      },
+    },
+  });
+
+  const chart = new Chart(document.getElementById('request-chart'), cfg(initialData));
+
+  // Refresh chart data every 10s independently of the HTMX partial
+  setInterval(async () => {
+    try {
+      const resp = await fetch('/status/chart.json');
+      if (!resp.ok) return;
+      const d = await resp.json();
+      chart.data.labels = d.labels;
+      chart.data.datasets[0].data = d.fetched;
+      chart.data.datasets[1].data = d.cached;
+      chart.data.datasets[2].data = d.rejected;
+      chart.update('none');
+    } catch (_) {}
+  }, 10000);
+})();
+</script>
+{% endblock %}

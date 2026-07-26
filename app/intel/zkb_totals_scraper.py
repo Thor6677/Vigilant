@@ -1,0 +1,78 @@
+"""zKillboard daily totals scraper.
+
+Fetches the public bulk-history aggregate at
+https://r2z2.zkillboard.com/history/totals.json — a single 110 KB JSON file
+mapping `YYYYMMDD` → integer kill count for that day. Covers 2007-12-05
+through ~yesterday. (As of Jan 2026, the older /api/history/totals.json
+redirects to this Cloudflare R2 location.)
+
+This is the cheapest way to get a long-tail "destruction activity" line on
+the historical chart. Per-day kill detail (with ISK values) would require
+walking r2z2.zkillboard.com/history/<date>.json + ESI-fetching every kill —
+~110M ESI calls over the full archive, infeasible.
+
+Single-shot ingest. Idempotent — the (source='zkb-totals', date) unique
+constraint dedups across re-runs.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime
+
+import httpx
+
+from app.config import user_agent
+from app.db.models import KillmailDailyAggregate
+
+log = logging.getLogger(__name__)
+
+ZKB_TOTALS_URL = "https://r2z2.zkillboard.com/history/totals.json"
+# zKillboard requires a contactable UA. Built at request time via
+# user_agent("backfill") — the "backfill" token lets zKB tell bulk historical
+# fetches from interactive traffic, and the contact comes from CONTACT_EMAIL.
+
+
+async def fetch_zkb_totals() -> list[dict]:
+    """Single GET, returns rows shaped for KillmailDailyAggregate upsert.
+
+    Rows: {"date": date, "source": "zkb-totals", "kill_count": int,
+           "total_isk_destroyed": None}
+    """
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        follow_redirects=True,  # legacy URL still redirects; harmless on direct R2
+        headers={
+            "User-Agent": user_agent("backfill"),
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+        },
+    ) as client:
+        r = await client.get(ZKB_TOTALS_URL)
+        r.raise_for_status()
+        data = r.json()
+
+    rows: list[dict] = []
+    for k, v in data.items():
+        if not (isinstance(k, str) and len(k) == 8 and k.isdigit()):
+            continue
+        if not isinstance(v, (int, float)) or v <= 0:
+            continue
+        try:
+            d = datetime.strptime(k, "%Y%m%d").date()
+        except ValueError:
+            continue
+        rows.append({
+            "date": d,
+            "source": "zkb-totals",
+            "kill_count": int(v),
+            "total_isk_destroyed": None,
+        })
+
+    if rows:
+        rows.sort(key=lambda r: r["date"])
+        log.info(
+            "zkb-totals: parsed %d daily totals (range %s to %s)",
+            len(rows), rows[0]["date"], rows[-1]["date"],
+        )
+    return rows

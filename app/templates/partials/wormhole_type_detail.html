@@ -1,0 +1,49 @@
+<div class="b-panel" style="padding:1rem;max-width:480px;">
+    <div style="font-size:22px;font-weight:700;color:var(--text);margin-bottom:0.75rem;">{{ code }}</div>
+
+    {% if wh_type %}
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:0.3rem 1.25rem;font-size:12px;">
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Destination</span>
+        <span style="padding:0.3rem 0;font-weight:600;color:{{ class_color(wh_type['target_class']) }};">{{ class_label(wh_type['target_class']) }}</span>
+
+        {% if meta.get('appears_in') %}
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Appears In</span>
+        <span style="padding:0.3rem 0;font-weight:600;">
+            {% for a in meta['appears_in'] %}
+            <span style="color:{{ class_color({'c1':1,'c2':2,'c3':3,'c4':4,'c5':5,'c6':6,'hs':7,'ls':8,'ns':9,'thera':12,'?':None}.get(a)) }};">{{ a }}</span>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </span>
+        {% endif %}
+
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Lifetime</span>
+        <span style="padding:0.3rem 0;font-weight:600;">{{ format_time(wh_type['max_stable_time']) }}</span>
+
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Max Mass per Jump</span>
+        <span style="padding:0.3rem 0;font-weight:600;">
+            {{ format_mass(wh_type['max_jump_mass']) }}
+            {% if wh_type['max_jump_mass'] %}
+            <span style="font-size:10px;color:var(--muted);font-weight:400;">(&le; {{ ship_size_hint(wh_type['max_jump_mass']) }})</span>
+            {% endif %}
+        </span>
+
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Total Jump Mass</span>
+        <span style="padding:0.3rem 0;font-weight:600;">
+            {{ format_mass(wh_type['max_stable_mass']) }}
+            {% if wh_type['max_stable_mass'] %}
+            <span style="font-size:10px;color:var(--muted);font-weight:400;">&pm; 10%</span>
+            {% if wh_type['max_jump_mass'] and wh_type['max_jump_mass'] > 0 %}
+            <span style="font-size:10px;color:var(--muted);font-weight:400;">({{ '%.2f'|format(wh_type['max_stable_mass'] / wh_type['max_jump_mass']) }}&times; max jump)</span>
+            {% endif %}
+            {% endif %}
+        </span>
+
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Respawn</span>
+        <span style="padding:0.3rem 0;font-weight:600;">{{ (meta.get('respawn', 'Unknown'))|title }}</span>
+
+        <span style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.1em;padding:0.3rem 0;">Mass Regen</span>
+        <span style="padding:0.3rem 0;font-weight:600;">{{ format_mass(wh_type['mass_regen']) if wh_type['mass_regen'] and wh_type['mass_regen'] > 0 else '0 kg' }}</span>
+    </div>
+    {% else %}
+    <div style="font-size:11px;color:var(--muted);">No SDE data available for this wormhole type. It may be community-identified only.</div>
+    {% endif %}
+</div>

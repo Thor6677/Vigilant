@@ -1,0 +1,88 @@
+{% from "partials/_entity_links.html" import entity_links %}
+<div class="kf-detail" data-kid="{{ kid }}">
+  <div class="kf-detail-grid">
+
+    <div class="kf-detail-left">
+      <h4>Victim</h4>
+      <div class="kf-victim-card">
+        <img src="https://images.evetech.net/types/{{ km.victim_ship_type_id }}/render?size=128" width="80" height="80" alt="{{ victim_ship }}">
+        <div>
+          <div style="color:var(--text);font-weight:600;">{{ victim_pilot }}</div>
+          {% if victim_corp %}<div style="color:var(--muted);">[{{ victim_corp }}]</div>{% endif %}
+          <div style="color:var(--accent);">{{ victim_ship }}</div>
+          <div style="color:var(--muted);font-size:10px;">{{ system_name }} · {{ km.killmail_time.strftime('%Y-%m-%d %H:%M') }} EVE</div>
+        </div>
+      </div>
+      {% if km.victim_character_id %}
+      <div style="margin-top:0.5rem;">{{ entity_links("character", km.victim_character_id, victim_pilot) }}</div>
+      {% endif %}
+      {% if km.solar_system_id %}
+      <div style="margin-top:0.35rem;">{{ entity_links("system", km.solar_system_id, system_name) }}</div>
+      {% endif %}
+
+      <div class="kf-isk-block">
+        <h4>ISK destroyed</h4>
+        <div class="kf-isk-value">{{ "%.2f"|format(total_destroyed/1e6) }}M ISK</div>
+        <a class="kf-zkb-link" href="https://zkillboard.com/kill/{{ kid }}/" target="_blank" rel="noopener">View on zKillboard ↗</a>
+      </div>
+    </div>
+
+    <div class="kf-detail-middle">
+      <h4>Fitting</h4>
+      {% if not items_present %}
+        <p style="color:var(--muted);font-size:11px;">No fitting data available for kills that predate this feature. <a href="https://zkillboard.com/kill/{{ kid }}/" target="_blank" rel="noopener" style="color:var(--accent);">View on zKillboard ↗</a></p>
+      {% else %}
+        {% for group in slots %}
+        <div class="kf-slot-group">
+          <div class="kf-slot-label">{{ group.label }} ({{ group['items']|length }})</div>
+          {% for it in group['items'] %}
+          <div class="kf-slot">
+            <img src="https://images.evetech.net/types/{{ it.type_id }}/icon?size=32" width="18" height="18" alt="">
+            <span class="kf-slot-name {% if it.dropped %}dropped{% else %}destroyed{% endif %}">
+              {{ it.name }}{% if (it.qty_destroyed + it.qty_dropped) > 1 %} ×{{ it.qty_destroyed + it.qty_dropped }}{% endif %}
+            </span>
+            <span class="kf-slot-dot {% if it.dropped %}k{% else %}d{% endif %}"></span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+
+    <div class="kf-detail-right">
+      <h4>Attackers · {{ attacker_count }} · {{ total_damage }} dmg</h4>
+      {% for a in attackers %}
+      <div class="kf-attacker-compact {% if a.final_blow %}fb{% endif %}">
+        <img src="https://images.evetech.net/types/{{ a.ship_id or 670 }}/icon?size=64" width="28" height="28" alt="{{ a.ship }}">
+        <div class="info">
+          <div class="line1">
+            {% if a.pilot_id %}
+              {% if a.internal_link %}
+                <a href="/characters/{{ a.pilot_id }}">{{ a.pilot }}</a>
+              {% else %}
+                <a href="https://zkillboard.com/character/{{ a.pilot_id }}/" target="_blank" rel="noopener">{{ a.pilot }}</a>
+              {% endif %}
+            {% else %}
+              <span style="color:var(--muted);">{{ a.pilot }}</span>
+            {% endif %}
+            {% if a.final_blow %}<span class="kf-fb-badge">FINAL</span>{% endif %}
+          </div>
+          <div class="line2">
+            {% if a.corp %}[{{ a.corp }}]{% endif %}{% if a.corp and a.ship %} · {% endif %}<span class="ship">{{ a.ship }}</span>
+          </div>
+          <div class="line3">
+            {% if a.has_damage %}
+              <span>{{ a.damage }}</span>
+              <div class="kf-dmg-bar"><div class="fill" style="width:{{ a.damage_pct }}%;"></div></div>
+              <span class="pct">{{ a.share_pct }}%</span>
+            {% else %}
+              <span class="dmg-none">—</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+</div>

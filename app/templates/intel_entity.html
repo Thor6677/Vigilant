@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ entity_name }} — Combat Stats — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/intel">Intel</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ kind_label }} Stats</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .ent-ranges { display:flex; gap:0.25rem; flex-wrap:wrap; }
+    .ent-ranges .b-btn { padding:3px 12px; font-size:10px; }
+    .ent-ranges .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .ent-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0.75rem; }
+    @media (max-width:720px){ .ent-grid { grid-template-columns:1fr; } }
+    .ent-tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:0.5rem; }
+    @media (max-width:720px){ .ent-tiles { grid-template-columns:repeat(2,1fr); } }
+    .ent-tile { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .ent-tile-val { font-size:16px; color:var(--accent); font-weight:600; }
+    .ent-tile-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    .ent-list { list-style:none; margin:0; padding:0; }
+    .ent-list li { display:flex; justify-content:space-between; gap:0.5rem; padding:4px 0; border-bottom:1px solid var(--border); font-size:11px; }
+    .ent-list li:last-child { border-bottom:none; }
+    .ent-list .n { color:var(--muted); }
+    .ent-empty { color:var(--muted); font-size:10px; padding:6px 0; }
+    /* Activity heatmap: 7 rows (dow) × 24 cols (hour). */
+    .ent-hm { display:grid; grid-template-columns:34px repeat(24, 1fr); gap:2px; font-size:8px; }
+    .ent-hm-corner { }
+    .ent-hm-hh { color:var(--muted); text-align:center; }
+    .ent-hm-day { color:var(--muted); display:flex; align-items:center; }
+    .ent-hm-cell { aspect-ratio:1; background:var(--surface); border-radius:2px; }
+    .ent-hm-legend { display:flex; align-items:center; gap:4px; font-size:9px; color:var(--muted); margin-top:6px; }
+    .ent-hm-swatch { width:12px; height:12px; border-radius:2px; }
+    .ent-spin { color:var(--muted); font-size:10px; padding:8px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">{{ entity_name }}</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            {{ kind_label }} combat stats from the local killmail archive.
+            <a class="el-chip is-ext" href="https://zkillboard.com/{{ kind }}/{{ entity_id }}/" target="_blank" rel="noopener">zKillboard</a>
+        </p>
+    </div>
+    <div class="ent-ranges" id="ent-ranges">
+        {% for w in windows %}
+        <button type="button" class="b-btn {% if w == default_window %}is-active{% endif %}" data-window="{{ w }}">{{ w }}D</button>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="ent-panel" data-ent-url="/intel/entity/{{ kind }}/{{ entity_id }}/summary"
+     hx-get="/intel/entity/{{ kind }}/{{ entity_id }}/summary"
+     hx-trigger="load, ent:refresh from:body" hx-swap="innerHTML">
+    <div class="ent-spin">Loading summary…</div>
+</div>
+
+<div class="ent-grid" style="margin-top:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Top ships used (kills)</span></div>
+        <div style="padding:0.6rem 0.75rem;" class="ent-panel"
+             data-ent-url="/intel/entity/{{ kind }}/{{ entity_id }}/ships"
+             hx-get="/intel/entity/{{ kind }}/{{ entity_id }}/ships"
+             hx-trigger="load, ent:refresh from:body" hx-swap="innerHTML">
+            <div class="ent-spin">Loading…</div>
+        </div>
+    </div>
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Top systems (activity)</span></div>
+        <div style="padding:0.6rem 0.75rem;" class="ent-panel"
+             data-ent-url="/intel/entity/{{ kind }}/{{ entity_id }}/systems"
+             hx-get="/intel/entity/{{ kind }}/{{ entity_id }}/systems"
+             hx-trigger="load, ent:refresh from:body" hx-swap="innerHTML">
+            <div class="ent-spin">Loading…</div>
+        </div>
+    </div>
+</div>
+
+<div class="b-section" style="margin-top:0.75rem;">
+    <div class="b-section-head"><span class="b-label">Activity heatmap — hour of day × day of week (EVE / UTC)</span></div>
+    <div style="padding:0.75rem;overflow-x:auto;" class="ent-panel"
+         data-ent-url="/intel/entity/{{ kind }}/{{ entity_id }}/heatmap"
+         hx-get="/intel/entity/{{ kind }}/{{ entity_id }}/heatmap"
+         hx-trigger="load, ent:refresh from:body" hx-swap="innerHTML">
+        <div class="ent-spin">Loading…</div>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    // htmx reads hx-get once at process time; later param changes must go
+    // through htmx:configRequest (memory: hx-get captured in closure).
+    var win = {{ default_window }};
+
+    document.body.addEventListener('htmx:configRequest', function (evt) {
+        var el = evt.detail.elt;
+        if (el && el.getAttribute && el.getAttribute('data-ent-url')) {
+            evt.detail.parameters['window'] = win;
+        }
+    });
+
+    document.getElementById('ent-ranges').addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-window]');
+        if (!btn) return;
+        win = parseInt(btn.getAttribute('data-window'), 10);
+        Array.prototype.forEach.call(this.querySelectorAll('button'), function (b) {
+            b.classList.toggle('is-active', b === btn);
+        });
+        htmx.trigger(document.body, 'ent:refresh');
+    });
+})();
+</script>
+{% endblock %}

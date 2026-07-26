@@ -1,0 +1,342 @@
+{# ── Summary Bar ──────────────────────────────────────────────────────────── #}
+<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
+    <div style="display:flex;gap:1rem;font-size:10px;">
+        {% if stats.total_dps > 0 %}
+        <span><span class="b-muted">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %}<span style="color:var(--muted);font-weight:400;"> / </span>{{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}</span></span>
+        {% endif %}
+        <span><span class="b-muted">EHP</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_ehp) }}</span></span>
+        {% if stats.cap_drain_rate > 0 %}
+        <span><span class="b-muted">Cap</span>
+            {% if stats.cap_stable %}
+            <span style="color:var(--success);font-weight:600;">{{ stats.cap_stable_pct }}%</span>
+            {% else %}
+            <span style="color:var(--danger);font-weight:600;">{{ (stats.cap_lasts_s // 60)|int }}m{{ (stats.cap_lasts_s % 60)|int }}s</span>
+            {% endif %}
+        </span>
+        {% endif %}
+    </div>
+    <span style="font-size:9px;color:{{ 'var(--accent)' if character_name else 'var(--muted)' }};">
+        {% if character_name %}as {{ character_name }}{% else %}All V{% endif %}
+    </span>
+</div>
+
+{# ── Fitting Resources ─────────────────────────────────────────────────────── #}
+{% macro res_row(label, used, total, unit, value_pad=1) %}
+{% set pct = (used / total * 100) if total > 0 else 0 %}
+{% set over = used > total %}
+<div style="margin-bottom:0.5rem;">
+    <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;">
+        <span class="b-muted">{{ label }}</span>
+        <span class="fr-val" style="color:{{ 'var(--danger)' if over else 'var(--text)' }};"
+              data-val="{{ ('{:,.%df}' % value_pad).format(used) }} / {{ ('{:,.%df}' % value_pad).format(total) }}{% if unit %} {{ unit }}{% endif %}"
+              data-pct="{{ '{:.1f}'.format(pct) }}%">{{ ('{:,.%df}' % value_pad).format(used) }} / {{ ('{:,.%df}' % value_pad).format(total) }}{% if unit %} {{ unit }}{% endif %}</span>
+    </div>
+    <div style="height:4px;background:var(--bg);border:1px solid var(--border);">
+        <div style="height:100%;width:{{ [pct, 100] | min }}%;background:{{ 'var(--danger)' if over else 'var(--accent)' }};"></div>
+    </div>
+</div>
+{% endmacro %}
+
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="b-label">Fitting Resources</span>
+        <button id="fr-toggle"
+                onclick="var b=this,isPct=b.textContent.trim()==='%',next=isPct?'val':'pct';b.textContent=isPct?'VAL':'%';document.querySelectorAll('.fr-val').forEach(function(el){el.textContent=el.dataset[next]});"
+                style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">%</button>
+    </div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        {{ res_row('CPU',         stats.cpu_used,         stats.cpu_total,         'tf') }}
+        {{ res_row('Powergrid',   stats.pg_used,          stats.pg_total,          'MW') }}
+        {{ res_row('Calibration', stats.calibration_used, stats.calibration_total, '',  value_pad=0) }}
+
+        {# Hardpoints #}
+        <div style="display:flex;gap:1.5rem;font-size:10px;color:var(--text);">
+            <span><span class="b-muted">Turrets:</span> {{ stats.turrets_used }}/{{ stats.turrets_total }}</span>
+            <span><span class="b-muted">Launchers:</span> {{ stats.launchers_used }}/{{ stats.launchers_total }}</span>
+        </div>
+    </div>
+</div>
+
+{# ── Offense ──────────────────────────────────────────────────────────────── #}
+{% if stats.total_dps > 0 or stats.drone_dps > 0 %}
+{% set show_effective = stats.target_resist_profile and stats.target_resist_profile != "uniform" and stats.effective_total_dps != stats.total_dps %}
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="b-label">Offense</span>
+        {% if show_effective %}
+        <span style="font-size:9px;color:var(--muted);">vs <span style="color:var(--accent);">{{ stats.target_resist_profile }}</span> resists</span>
+        {% endif %}
+    </div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            {% if stats.weapon_dps > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Weapon DPS</td>
+                <td style="text-align:right;color:var(--text);">
+                    {{ "{:,.1f}".format(stats.weapon_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_weapon_dps) }}</span>{% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            {% if stats.drone_dps > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Drone DPS</td>
+                <td style="text-align:right;color:var(--text);">
+                    {{ "{:,.1f}".format(stats.drone_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_drone_dps) }}</span>{% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total DPS</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">
+                    {{ "{:,.1f}".format(stats.total_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;font-weight:400;">&rarr;</span> <span style="color:var(--accent);">{{ "{:,.1f}".format(stats.effective_total_dps) }}</span>{% endif %}
+                </td>
+            </tr>
+            {% if stats.spool_time_s > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Spool DPS</td>
+                <td style="text-align:right;color:var(--accent);font-weight:600;">
+                    {{ "{:,.1f}".format(stats.total_dps_max_spool) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;font-weight:400;">&rarr;</span> <span style="color:var(--accent);">{{ "{:,.1f}".format(stats.effective_total_dps_max_spool) }}</span>{% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Spool Time</td>
+                <td style="text-align:right;color:var(--text);">{{ (stats.spool_time_s // 60) }}m {{ (stats.spool_time_s % 60) }}s</td>
+            </tr>
+            {% endif %}
+            {% if stats.weapon_volley > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Alpha Strike</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.weapon_volley) }}</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── Defense ──────────────────────────────────────────────────────────────── #}
+{% set raw_total_hp = stats.shield_hp + stats.armor_hp + stats.hull_hp %}
+<div class="b-section">
+    <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="b-label">Defense
+            <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
+        </span>
+        <button id="def-toggle"
+                onclick="var b=this,e=b.textContent.trim()==='EHP',m=e?'hp':'ehp';b.textContent=e?'HP':'EHP';document.querySelectorAll('.def-hp-val').forEach(function(el){el.textContent=el.dataset[m]});var l=document.getElementById('def-header-label');if(l){var t=document.querySelectorAll('.def-hp-val'),v=t[t.length-1];l.textContent=e?'(Raw HP: '+v.dataset.hp+')':'(Effective HP: '+v.dataset.ehp+')'}document.querySelectorAll('.def-rep-val').forEach(function(el){el.textContent=(e?el.dataset.hp:el.dataset.ehp)+(e?' HP/s':' EHP/s')})"
+                style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
+    </div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Shield</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.shield_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.shield_ehp) }}">{{ "{:,.0f}".format(stats.shield_ehp) }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Armor</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.armor_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.armor_ehp) }}">{{ "{:,.0f}".format(stats.armor_ehp) }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Hull</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);"
+                    data-hp="{{ "{:,.0f}".format(stats.hull_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.hull_ehp) }}">{{ "{:,.0f}".format(stats.hull_ehp) }}</td>
+            </tr>
+            <tr style="border-top:1px solid var(--border);">
+                <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total</td>
+                <td class="def-hp-val" style="text-align:right;color:var(--accent);font-weight:600;"
+                    data-hp="{{ "{:,.0f}".format(raw_total_hp) }}" data-ehp="{{ "{:,.0f}".format(stats.total_ehp) }}">{{ "{:,.0f}".format(stats.total_ehp) }}</td>
+            </tr>
+        </table>
+
+        {# Resist table with filled bars #}
+        {% macro resist_cell(value, color) %}
+        <td style="padding:2px 1px;">
+            <div style="position:relative;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:2px;height:18px;overflow:hidden;">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:{{ value }}%;background:{{ color }};opacity:0.35;"></div>
+                <span style="position:relative;display:block;text-align:center;line-height:18px;font-size:9px;color:var(--text);font-weight:500;">{{ value }}%</span>
+            </div>
+        </td>
+        {% endmacro %}
+        <div style="margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.35rem;">
+            <table style="width:100%;border-collapse:separate;border-spacing:0 2px;text-align:center;">
+                <tr style="color:var(--muted);font-size:8px;">
+                    <td style="width:40px;"></td>
+                    <td style="color:#00bfff;">EM</td>
+                    <td style="color:#ff6347;">Therm</td>
+                    <td style="color:#999;">Kin</td>
+                    <td style="color:#ff8c00;">Expl</td>
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Shield</td>
+                    {{ resist_cell(stats.shield_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.shield_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.shield_kin_resist, '#999') }}
+                    {{ resist_cell(stats.shield_expl_resist, '#ff8c00') }}
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Armor</td>
+                    {{ resist_cell(stats.armor_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.armor_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.armor_kin_resist, '#999') }}
+                    {{ resist_cell(stats.armor_expl_resist, '#ff8c00') }}
+                </tr>
+                <tr>
+                    <td style="text-align:left;color:var(--muted);font-size:9px;">Hull</td>
+                    {{ resist_cell(stats.hull_em_resist, '#00bfff') }}
+                    {{ resist_cell(stats.hull_therm_resist, '#ff6347') }}
+                    {{ resist_cell(stats.hull_kin_resist, '#999') }}
+                    {{ resist_cell(stats.hull_expl_resist, '#ff8c00') }}
+                </tr>
+            </table>
+        </div>
+
+        {% if stats.peak_shield_recharge > 0 or stats.armor_rep_rate > 0 or stats.shield_rep_rate > 0 %}
+        <div style="margin-top:0.35rem;border-top:1px solid var(--border);padding-top:0.35rem;">
+            <table style="width:100%;font-size:10px;border-collapse:collapse;">
+                {% if stats.shield_rep_rate > 0 %}
+                <tr>
+                    <td style="color:var(--muted);padding:2px 0;">Shield Boost</td>
+                    <td class="def-rep-val" style="text-align:right;color:var(--text);"
+                        data-hp="{{ stats.shield_rep_rate }}" data-ehp="{{ (stats.shield_rep_rate * stats.shield_ehp_mult)|round(1) }}">{{ (stats.shield_rep_rate * stats.shield_ehp_mult)|round(1) }} EHP/s</td>
+                </tr>
+                {% endif %}
+                {% if stats.armor_rep_rate > 0 %}
+                <tr>
+                    <td style="color:var(--muted);padding:2px 0;">Armor Repair</td>
+                    <td class="def-rep-val" style="text-align:right;color:var(--text);"
+                        data-hp="{{ stats.armor_rep_rate }}" data-ehp="{{ (stats.armor_rep_rate * stats.armor_ehp_mult)|round(1) }}">{{ (stats.armor_rep_rate * stats.armor_ehp_mult)|round(1) }} EHP/s</td>
+                </tr>
+                {% endif %}
+                {% if stats.peak_shield_recharge > 0 %}
+                <tr>
+                    <td style="color:var(--muted);padding:2px 0;">Shield Recharge</td>
+                    <td class="def-rep-val" style="text-align:right;color:var(--text);"
+                        data-hp="{{ stats.peak_shield_recharge }}" data-ehp="{{ (stats.peak_shield_recharge * stats.shield_ehp_mult)|round(1) }}">{{ (stats.peak_shield_recharge * stats.shield_ehp_mult)|round(1) }} EHP/s</td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Navigation ───────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Navigation</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Velocity</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.max_velocity) }} m/s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Warp Speed</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:.2f}".format(stats.warp_speed_au_s) }} AU/s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Align Time</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.align_time }}s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Mass</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.0f}".format(stats.mass) }} kg</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Signature</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.sig_radius }} m</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+{# ── Capacitor ────────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Capacitor</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Capacity</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.capacitor) }} GJ</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Recharge</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.cap_recharge }}s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Peak Recharge</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.peak_cap_recharge }} GJ/s</td>
+            </tr>
+            {% if stats.cap_drain_rate > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Drain Rate</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.cap_drain_rate }} GJ/s</td>
+            </tr>
+            {% endif %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Stability</td>
+                {% if stats.cap_stable %}
+                <td style="text-align:right;color:var(--success);font-weight:600;">Stable at {{ stats.cap_stable_pct }}%</td>
+                {% elif stats.cap_drain_rate > 0 %}
+                <td style="text-align:right;color:var(--danger);font-weight:600;">
+                    {% if stats.cap_lasts_s >= 60 %}
+                        Lasts {{ (stats.cap_lasts_s // 60)|int }}m {{ (stats.cap_lasts_s % 60)|int }}s
+                    {% else %}
+                        Lasts {{ stats.cap_lasts_s }}s
+                    {% endif %}
+                </td>
+                {% else %}
+                <td style="text-align:right;color:var(--success);font-weight:600;">Stable at 100%</td>
+                {% endif %}
+            </tr>
+        </table>
+    </div>
+</div>
+
+{# ── Targeting ────────────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Targeting</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Range</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.max_target_range }} km</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Max Locked</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.max_locked_targets }}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Scan Resolution</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.scan_resolution }} mm</td>
+            </tr>
+            {% if stats.lock_time is defined and stats.lock_time > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Lock Time (self-sig)</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.lock_time }}s</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+{# ── Drones & Cargo ──────────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Drones & Cargo</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Drone Bay</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.drone_bay_used }} / {{ stats.drone_bay_total }} m&sup3;</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Bandwidth</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.drone_bw_used }} / {{ stats.drone_bw_total }} Mbit/s</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Cargo</td>
+                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.cargo_capacity) }} m&sup3;</td>
+            </tr>
+        </table>
+    </div>
+</div>

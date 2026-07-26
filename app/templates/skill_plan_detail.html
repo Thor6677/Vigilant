@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} — SKILL PLANS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/skill-plans">Skill Plans</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ plan.name }}</span>
+</div>
+{% endblock %}
+{% block content %}
+
+{% set vis = plan.visibility or 'personal' %}
+
+<div class="b-page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;">
+    <div>
+        <h1 class="b-page-title" id="plan-title">{{ plan.name }}</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <span>{{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}</span>
+            {# Scope badge #}
+            {% if vis == 'personal' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Personal</span>
+            {% elif vis == 'corporation' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(100,200,255,0.35);color:#7ec6ff;text-transform:uppercase;letter-spacing:0.04em;">Corp · {{ corp_names.get(plan.owner_corp_id, '?') }}</span>
+            {% elif vis == 'alliance' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(200,169,81,0.4);color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;">Alliance · {{ alliance_names.get(plan.owner_alliance_id, '?') }}</span>
+            {% elif vis == 'custom' %}
+            <span style="font-size:8px;padding:1px 4px;border:1px solid rgba(153,102,204,0.4);color:#b88ad4;text-transform:uppercase;letter-spacing:0.04em;">Custom ACL</span>
+            {% endif %}
+            {% if not can_edit %}<span style="color:var(--warn);">🔒 view-only</span>{% endif %}
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        {# Duplicate-to-personal: always available to any viewer #}
+        <form method="POST" action="/skill-plans/{{ plan.id }}/duplicate" style="display:inline;">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;"
+                    title="Fork into a personal copy owned by you">
+                Copy to Personal
+            </button>
+        </form>
+        {% if can_admin %}
+        <form method="POST" action="/skill-plans/{{ plan.id }}/share" style="display:inline;">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid {% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};color:{% if plan.share_token %}var(--success){% else %}var(--muted){% endif %};font-size:9px;">
+                {% if plan.share_token %}Shared{% else %}Share{% endif %}
+            </button>
+        </form>
+        {% endif %}
+        {% if can_edit and entries %}
+        <form method="POST" action="/skill-plans/{{ plan.id }}/clear"
+              data-confirm="Remove all skills from this plan?">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--warn);color:var(--warn);font-size:9px;">
+                Clear All
+            </button>
+        </form>
+        {% endif %}
+        {% if can_admin %}
+        <form method="POST" action="/skill-plans/{{ plan.id }}/delete"
+              data-confirm="Delete this plan?">
+            <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;">
+                Delete
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{# Promote / Demote scope controls — admin only #}
+{% if can_admin %}
+<div class="b-section">
+    <div class="b-panel" style="padding:0.4rem 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <span class="b-muted-sm">Scope:</span>
+        {% if vis == 'personal' %}
+            {% if eligible_corps %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+                <input type="hidden" name="visibility" value="corporation">
+                <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    {% for c in eligible_corps %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                </select>
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid #7ec6ff;color:#7ec6ff;font-size:9px;">Move to Corp →</button>
+            </form>
+            {% endif %}
+            {% if eligible_alliances %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+                <input type="hidden" name="visibility" value="alliance">
+                <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    {% for a in eligible_alliances %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+                </select>
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Move to Alliance →</button>
+            </form>
+            {% endif %}
+            {% if not eligible_corps and not eligible_alliances %}
+            <span style="font-size:9px;color:var(--muted);">No corp/alliance roles grant you share rights.</span>
+            {% endif %}
+        {% elif vis in ('corporation', 'alliance') %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/demote" style="display:inline;"
+                  data-confirm="Return this plan to personal scope? Other members will lose access.">
+                <button class="b-btn" style="padding:0.2rem 0.5rem;border:1px solid var(--muted);color:var(--muted);font-size:9px;">← Back to Personal</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# Read-only banner when the viewer can't edit #}
+{% if not can_edit %}
+<div class="b-section">
+    <div style="padding:0.5rem 0.75rem;background:rgba(200,169,81,0.08);border:1px solid rgba(200,169,81,0.3);color:var(--warn);font-size:10px;">
+        View-only — you don't have edit permission on this plan.
+        {% if vis == 'corporation' %}Editing requires Communications_Officer, Director, or CEO in this corporation.
+        {% elif vis == 'alliance' %}Editing requires Director or CEO in a corporation in this alliance.
+        {% elif vis == 'custom' %}Ask the plan owner for edit permission in the ACL.
+        {% endif %}
+        Use <strong>Copy to Personal</strong> to fork your own editable copy.
+    </div>
+</div>
+{% endif %}
+
+{# ── Custom ACL editor (admin only, visible on custom-scope plans) ──────── #}
+{% if vis == 'custom' and can_admin %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <span class="b-label">Access Control List</span>
+            <span style="font-size:9px;color:var(--muted);">
+                {{ (acl_entries or []) | length }} entr{{ 'ies' if (acl_entries or [])|length != 1 else 'y' }}
+                · owner always has admin
+            </span>
+        </div>
+
+        {% if acl_err %}
+        <div style="padding:0.4rem 0.75rem;background:rgba(204,51,51,0.08);border-bottom:1px solid var(--border);color:#e58080;font-size:10px;">
+            {% if acl_err == 'not_found' %}Couldn't resolve that name — check the spelling or use the exact EVE name.
+            {% elif acl_err == 'name_required' %}Enter a character / corporation / alliance name.
+            {% elif acl_err == 'invalid' %}Invalid subject type or permission.
+            {% else %}Couldn't add entry: {{ acl_err }}.
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if acl_entries %}
+        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.4rem 0.75rem;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border);">
+            <span>Type</span>
+            <span>Name</span>
+            <span>Permission</span>
+            <span></span>
+        </div>
+        {% for e in acl_entries %}
+        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.3rem 0.75rem;align-items:center;border-top:1px solid var(--border);font-size:10px;">
+            <span style="color:var(--muted);text-transform:capitalize;">{{ e.subject_type }}</span>
+            <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
+            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
+                <select name="permission" onchange="this.form.submit()"
+                        style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
+                    <option value="view"  {% if e.permission == 'view' %}selected{% endif %}>View</option>
+                    <option value="edit"  {% if e.permission == 'edit' %}selected{% endif %}>Edit</option>
+                    <option value="admin" {% if e.permission == 'admin' %}selected{% endif %}>Admin</option>
+                </select>
+            </form>
+            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
+                  data-confirm="Remove {{ e.subject_name | e }} from the ACL?">
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            </form>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="b-empty" style="padding:0.6rem 0.75rem;">
+            No entries yet. Add a character, corporation, or alliance below.
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add"
+              style="display:grid;grid-template-columns:110px 1fr 110px auto;gap:0.4rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);align-items:center;">
+            <select name="subject_type"
+                    style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="character">Character</option>
+                <option value="corporation">Corporation</option>
+                <option value="alliance">Alliance</option>
+            </select>
+            <input type="text" name="subject_name" placeholder="Exact EVE name…" required
+                   style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+            <select name="permission"
+                    style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="view">View</option>
+                <option value="edit">Edit</option>
+                <option value="admin">Admin</option>
+            </select>
+            <button class="b-btn" style="padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Add
+            </button>
+        </form>
+        <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
+            Names are resolved via EVE ESI so they must match exactly. Permissions:
+            <span class="b-text">View</span> = read-only,
+            <span class="b-text">Edit</span> = can modify skills,
+            <span class="b-text">Admin</span> = edit + manage this ACL + delete the plan.
+        </div>
+    </div>
+</div>
+{% elif vis == 'custom' and can_edit and not can_admin %}
+<div class="b-section">
+    <div style="padding:0.5rem 0.75rem;background:rgba(153,102,204,0.08);border:1px solid rgba(153,102,204,0.3);color:#b88ad4;font-size:10px;">
+        You have edit access on this plan via its custom ACL.
+    </div>
+</div>
+{% endif %}
+
+{% if plan.share_token %}
+<div class="b-section">
+    <div style="padding:0.4rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <span style="font-size:9px;color:var(--muted);">Share link:</span>
+        <input type="text" id="share-url" readonly
+               value="{{ request.url.scheme }}://{{ request.url.netloc }}/skill-plans/shared/{{ plan.share_token }}"
+               onclick="this.select()"
+               style="flex:1;min-width:200px;padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--accent);font-family:inherit;font-size:9px;">
+        <button class="b-btn" onclick="navigator.clipboard.writeText(document.getElementById('share-url').value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)"
+                style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Copy</button>
+    </div>
+</div>
+{% endif %}
+
+<div class="b-grid-2">
+
+{# ── Left Column: Skills in Plan ─────────────────────────────────────────── #}
+<div>
+
+{# Skill list #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.25rem;">
+            <span class="b-label">Skills</span>
+            <div style="display:flex;gap:0.5rem;font-size:9px;">
+                <a href="#" onclick="exportPlan(event)" style="color:var(--accent);text-decoration:none;">Export</a>
+                {% if can_edit and entries | length > 1 %}
+                <span style="color:var(--border);">|</span>
+                <span class="b-muted">Sort:</span>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="name">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
+                </form>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="optimal">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
+                </form>
+                <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
+                    <input type="hidden" name="mode" value="level">
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if entries %}
+        <div id="skill-list">
+        {% for e in entries %}
+        <div class="b-table-row skill-row" {% if can_edit %}draggable="true"{% endif %} data-id="{{ e.id }}"
+             style="cursor:{% if can_edit %}grab{% else %}default{% endif %};">
+            {% if can_edit %}
+            <span style="flex:0 0 16px;color:var(--border);font-size:10px;cursor:grab;" title="Drag to reorder">&#9776;</span>
+            {% else %}
+            <span style="flex:0 0 16px;"></span>
+            {% endif %}
+            <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
+                <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
+            </span>
+            <span style="flex:1;font-size:9px;color:var(--muted);">
+                {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
+                <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
+            </span>
+            {% if can_edit %}
+            <form method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="b-empty">No skills added yet.{% if can_edit %} Use the tools on the right to add skills.{% endif %}</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Export target #}
+<div id="export-area" class="b-section" style="display:none;"></div>
+
+{# Gap Analysis #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Gap Analysis</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+            <select id="gap-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <option value="">Select character…</option>
+                {% for c in characters %}
+                <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                {% endfor %}
+            </select>
+            <button class="b-btn" data-click="runGap"
+                    style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;white-space:nowrap;">
+                Analyze
+            </button>
+        </div>
+        <div id="gap-results"></div>
+    </div>
+</div>
+
+</div>
+
+{# ── Right Column: Add Skills (hidden for view-only users) ──────────────── #}
+<div>
+
+{% if can_edit %}
+
+{# Add individual skill #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Add Skill</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <div style="position:relative;">
+                <input type="text" id="skill-search" placeholder="Search skill name…" autocomplete="off"
+                       data-input="searchSkills"
+                       style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <div id="skill-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <input type="hidden" id="skill-id" value="">
+                <select id="skill-level" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="1">I</option>
+                    <option value="2">II</option>
+                    <option value="3">III</option>
+                    <option value="4">IV</option>
+                    <option value="5">V</option>
+                </select>
+                <button class="b-btn" data-click="addSkill"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Add
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Add from ship #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Add from Ship</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <div style="position:relative;">
+                <input type="text" id="ship-search" placeholder="Search ship name…" autocomplete="off"
+                       data-input="searchShips"
+                       style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                <div id="ship-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+            </div>
+            <input type="hidden" id="ship-id" value="">
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <select id="ship-mode" data-change="toggleMasteryLevel"
+                        style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="requirements">Skill Requirements</option>
+                    <option value="mastery">Mastery Level</option>
+                </select>
+                <select id="mastery-level" style="display:none;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
+                    <option value="0">I</option>
+                    <option value="1">II</option>
+                    <option value="2">III</option>
+                    <option value="3">IV</option>
+                    <option value="4">V</option>
+                </select>
+                <button class="b-btn" data-click="addFromShip"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Add
+                </button>
+                <a id="ship-link" href="#" style="display:none;font-size:9px;color:var(--accent);">View Ship</a>
+            </div>
+            <div id="ship-result"></div>
+        </div>
+    </div>
+</div>
+
+{# Import from Fitting (EFT) #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Import from Fitting</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea id="fitting-text" placeholder="Paste EFT fitting…&#10;[Loki, Shield Loki]&#10;Damage Control II&#10;Ballistic Control System II&#10;…"
+                      style="width:100%;height:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;padding:0.4rem;resize:vertical;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="b-btn" data-click="importFitting"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Import
+                </button>
+                <div id="fitting-result" style="flex:1;"></div>
+            </div>
+            <div style="font-size:9px;color:var(--muted);">
+                Adds all skill requirements for ship + every module, rig, drone, etc.
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Import from EVE #}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Import Skill List</span>
+        </div>
+        <div style="padding:0.5rem 0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea id="import-text" placeholder="Paste skill plan text from EVE…&#10;Example:&#10;Caldari Frigate III&#10;Shield Operation IV&#10;Afterburner III"
+                      style="width:100%;height:100px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;padding:0.4rem;resize:vertical;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="b-btn" data-click="importSkills"
+                        style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
+                    Import
+                </button>
+                <div id="import-result" style="flex:1;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="b-section">
+    <div class="b-empty">
+        You don't have edit permission on this plan. Use <strong>Copy to Personal</strong> above to make an editable copy.
+    </div>
+</div>
+{% endif %}
+
+</div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+var planId = {{ plan.id }};
+var _skillTimer = null, _shipTimer = null;
+
+/* ── Skill search ────────────────────────────────────────────────────────── */
+function searchSkills() {
+    clearTimeout(_skillTimer);
+    document.getElementById('skill-id').value = '';
+    var q = document.getElementById('skill-search').value.trim();
+    var r = document.getElementById('skill-results');
+    if (q.length < 2) { r.style.display = 'none'; r.innerHTML = ''; return; }
+    _skillTimer = setTimeout(function() {
+        fetch('/skill-plans/search/skills?q=' + encodeURIComponent(q))
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+    }, 250);
+}
+function selectSkill(id, name) {
+    document.getElementById('skill-id').value = id;
+    document.getElementById('skill-search').value = name;
+    document.getElementById('skill-results').style.display = 'none';
+}
+function addSkill() {
+    var id = document.getElementById('skill-id').value;
+    var level = document.getElementById('skill-level').value;
+    if (!id) { alert('Search and select a skill first.'); return; }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/skill-plans/' + planId + '/add-skill';
+    [{n:'skill_type_id',v:id},{n:'target_level',v:level}].forEach(function(f) {
+        var i = document.createElement('input'); i.type='hidden'; i.name=f.n; i.value=f.v; form.appendChild(i);
+    });
+    document.body.appendChild(form);
+    form.submit();
+}
+
+/* ── Ship search ─────────────────────────────────────────────────────────── */
+function searchShips() {
+    clearTimeout(_shipTimer);
+    document.getElementById('ship-id').value = '';
+    document.getElementById('ship-link').style.display = 'none';
+    var q = document.getElementById('ship-search').value.trim();
+    var r = document.getElementById('ship-results');
+    if (q.length < 2) { r.style.display = 'none'; r.innerHTML = ''; return; }
+    _shipTimer = setTimeout(function() {
+        fetch('/skill-plans/search/ships?q=' + encodeURIComponent(q))
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+    }, 250);
+}
+function selectShip(id, name) {
+    document.getElementById('ship-id').value = id;
+    document.getElementById('ship-search').value = name;
+    document.getElementById('ship-results').style.display = 'none';
+    var link = document.getElementById('ship-link');
+    link.href = '/skill-plans/ship/' + id;
+    link.style.display = '';
+}
+function toggleMasteryLevel() {
+    document.getElementById('mastery-level').style.display =
+        document.getElementById('ship-mode').value === 'mastery' ? '' : 'none';
+}
+function addFromShip() {
+    var id = document.getElementById('ship-id').value;
+    if (!id) { alert('Search and select a ship first.'); return; }
+    var mode = document.getElementById('ship-mode').value;
+    var masteryLvl = document.getElementById('mastery-level').value;
+    htmx.ajax('POST', '/skill-plans/' + planId + '/from-ship', {
+        target: '#ship-result', swap: 'innerHTML',
+        values: { ship_type_id: id, mode: mode, mastery_level: masteryLvl },
+    });
+    setTimeout(function() { location.reload(); }, 1500);
+}
+
+/* ── Import ──────────────────────────────────────────────────────────────── */
+function importSkills() {
+    var text = document.getElementById('import-text').value.trim();
+    if (!text) { alert('Paste skill plan text first.'); return; }
+    htmx.ajax('POST', '/skill-plans/' + planId + '/import', {
+        target: '#import-result', swap: 'innerHTML',
+        values: { skill_text: text },
+    });
+    setTimeout(function() { location.reload(); }, 1500);
+}
+
+/* ── Import fitting ──────────────────────────────────────────────────────── */
+function importFitting() {
+    var text = document.getElementById('fitting-text').value.trim();
+    if (!text) { alert('Paste a fitting first.'); return; }
+    htmx.ajax('POST', '/skill-plans/' + planId + '/from-fitting', {
+        target: '#fitting-result', swap: 'innerHTML',
+        values: { fitting_text: text },
+    });
+    setTimeout(function() { location.reload(); }, 2000);
+}
+
+/* ── Gap analysis ────────────────────────────────────────────────────────── */
+function runGap() {
+    var charId = document.getElementById('gap-char').value;
+    if (!charId) { alert('Select a character first.'); return; }
+    htmx.ajax('GET', '/skill-plans/' + planId + '/gap/' + charId, '#gap-results');
+}
+
+/* ── Export ───────────────────────────────────────────────────────────────── */
+function exportPlan(e) {
+    e.preventDefault();
+    var link = e.target;
+    var originalText = link.textContent;
+    var area = document.getElementById('export-area');
+
+    // If the panel is already open, close it (no copy).
+    if (area.style.display !== 'none') {
+        area.style.display = 'none';
+        return;
+    }
+
+    // Fetch the export HTML, render the panel, AND copy the plain text
+    // straight to the clipboard — the click itself is what the user expects
+    // to put the skills on their clipboard.
+    fetch('/skill-plans/' + planId + '/export')
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+            area.innerHTML = html;
+            area.style.display = '';
+            var ta = area.querySelector('#export-text');
+            if (!ta) { return; }
+            var text = ta.value;
+            var flash = function (msg) {
+                link.textContent = msg;
+                setTimeout(function () { link.textContent = originalText; }, 1500);
+            };
+            var onOk = function () { flash('Copied!'); };
+            var onFail = function () {
+                try { ta.select(); document.execCommand('copy'); flash('Copied!'); }
+                catch (err) { flash('Copy failed'); }
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(onOk).catch(onFail);
+            } else {
+                onFail();
+            }
+        })
+        .catch(function () { link.textContent = 'Export failed'; setTimeout(function(){ link.textContent = originalText; }, 2000); });
+}
+
+/* Copy the export textarea's contents to the clipboard. Lives on the parent
+   page because the export response is htmx-swapped as innerHTML, which does
+   not execute inline <script nonce="{{ request.state.csp_nonce }}"> tags reliably. */
+function copyExportText(btn) {
+    var ta = document.getElementById('export-text');
+    if (!ta) return;
+    ta.select();
+    var done = function () {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    };
+    var fail = function () {
+        btn.textContent = 'Copy failed';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(ta.value).then(done).catch(function () {
+            try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+        });
+    } else {
+        try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+    }
+}
+
+/* ── Drag and Drop ───────────────────────────────────────────────────────── */
+(function() {
+    var list = document.getElementById('skill-list');
+    if (!list) return;
+    var dragEl = null;
+
+    list.addEventListener('dragstart', function(e) {
+        dragEl = e.target.closest('.skill-row');
+        if (dragEl) {
+            dragEl.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+    });
+    list.addEventListener('dragend', function(e) {
+        if (dragEl) dragEl.style.opacity = '1';
+        dragEl = null;
+        list.querySelectorAll('.skill-row').forEach(function(r) { r.style.borderTop = ''; });
+    });
+    list.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var target = e.target.closest('.skill-row');
+        list.querySelectorAll('.skill-row').forEach(function(r) { r.style.borderTop = ''; });
+        if (target && target !== dragEl) {
+            target.style.borderTop = '2px solid var(--accent)';
+        }
+    });
+    list.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var target = e.target.closest('.skill-row');
+        if (target && dragEl && target !== dragEl) {
+            list.insertBefore(dragEl, target);
+            saveOrder();
+        }
+    });
+
+    function saveOrder() {
+        var ids = [];
+        list.querySelectorAll('.skill-row').forEach(function(r) { ids.push(+r.dataset.id); });
+        htmx.ajax('POST', '/skill-plans/' + planId + '/reorder', {
+            values: { order: JSON.stringify(ids) },
+        });
+    }
+})();
+</script>
+
+{% endblock %}

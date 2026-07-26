@@ -1,0 +1,769 @@
+{% extends "base.html" %}
+{% from "partials/_entity_links.html" import entity_links %}
+{% block title %}{{ char.character_name }} — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">{{ char.character_name }}</span></div>
+{% endblock %}
+
+{% block head %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style nonce="{{ request.state.csp_nonce }}">
+    /* .range-btn lives in static/css/site.css (T-039: identical across 3 templates) */
+    .tx-amount-pos { color: var(--success); }
+    .tx-amount-neg { color: var(--danger); }
+    .ref-type {
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        padding: 1px 4px;
+        white-space: nowrap;
+    }
+    #wallet-chart {
+        width: 100% !important;
+    }
+
+    /* Character Overview Styles */
+    .overview-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    @media (max-width: 1024px) {
+        .overview-grid { grid-template-columns: 1fr; }
+    }
+
+    .overview-card {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        padding: 1rem 0.75rem;
+    }
+
+    .card-title {
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 0.75rem;
+        display: block;
+    }
+
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        font-size: 10px;
+        border-bottom: 1px solid rgba(200, 169, 81, 0.1);
+    }
+    .stat-row:last-child { border-bottom: none; }
+
+    .stat-label { color: var(--muted); }
+    .stat-value { color: var(--text); font-weight: 500; }
+
+    .location-clickable {
+        cursor: pointer;
+        color: var(--accent);
+        text-decoration: underline;
+        transition: opacity 0.2s;
+    }
+    .location-clickable:hover { opacity: 0.8; }
+
+    .sec-status {
+        padding: 0.25rem 0.5rem;
+        border-radius: 2px;
+        font-weight: 500;
+        font-size: 9px;
+        display: inline-block;
+    }
+    .sec-status.positive { background: rgba(76, 175, 80, 0.2); color: #4CAF50; }
+    .sec-status.negative { background: rgba(244, 67, 54, 0.2); color: #F44336; }
+    .sec-status.neutral { background: rgba(200, 169, 81, 0.2); color: #C8A951; }
+
+    .skill-progress {
+        margin-top: 0.5rem;
+    }
+    .skill-name {
+        color: var(--accent);
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+    }
+    .skill-time { color: var(--muted); font-size: 9px; }
+
+    .assets-container {
+        margin-top: 1rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .asset-location {
+        border: 1px solid var(--border);
+        margin-bottom: 0.5rem;
+        background: rgba(200, 169, 81, 0.03);
+    }
+
+    .asset-location-header {
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+        transition: background 0.2s;
+    }
+    .asset-location-header:hover {
+        background: rgba(200, 169, 81, 0.07);
+    }
+
+    .asset-location-name { font-weight: 500; color: var(--accent); }
+    .asset-location-count { font-size: 9px; color: var(--muted); }
+    .expand-icon { transition: transform 0.2s; }
+    .expand-icon.open { transform: rotate(180deg); }
+
+    .asset-list {
+        display: none;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        max-height: 250px;
+        overflow-y: auto;
+    }
+    .asset-list.open { display: block; }
+
+    .asset-item {
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid rgba(200, 169, 81, 0.1);
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .asset-item:last-child { border-bottom: none; }
+    .asset-item-name { flex: 1; color: var(--text); }
+    .asset-item-qty { color: var(--muted); margin: 0 1rem; }
+
+    .kd-ratio {
+        font-weight: 600;
+        color: var(--accent);
+    }
+    .kd-good { color: #4CAF50; }
+    .kd-bad { color: #F44336; }
+
+    .skill-link {
+        color: var(--accent);
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .skill-link:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% macro format_isk(amount) %}
+  {%- if amount is none -%}—
+  {%- elif amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T ISK
+  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B ISK
+  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M ISK
+  {%- else -%}{{ "%.0f"|format(amount) }} ISK
+  {%- endif %}
+{% endmacro %}
+
+{% macro format_isk_signed(amount) %}
+  {%- if amount >= 0 -%}+{% endif %}
+  {%- if amount | abs >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+  {%- elif amount | abs >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+  {%- elif amount | abs >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+  {%- elif amount | abs >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+  {%- else -%}{{ "%.0f"|format(amount) }}
+  {%- endif %}
+{% endmacro %}
+
+{% macro format_duration(seconds) %}
+  {%- if seconds is none -%}—
+  {%- else %}
+    {%- set days = (seconds / 86400) | int %}
+    {%- set hours = ((seconds % 86400) / 3600) | int %}
+    {%- set mins = ((seconds % 3600) / 60) | int %}
+    {% if days > 0 -%}{{ days }}d {{ hours }}h
+    {%- elif hours > 0 -%}{{ hours }}h {{ mins }}m
+    {%- else -%}{{ mins }}m
+    {%- endif %}
+  {%- endif %}
+{% endmacro %}
+
+{% block content %}
+
+{# ── Header ──────────────────────────────────────────────────────────── #}
+<div class="b-page-header">
+    <div style="display:flex;align-items:center;gap:1rem;">
+        <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+             alt="{{ char.character_name }}"
+             style="width:48px;height:48px;object-fit:cover;object-position:top center;border:1px solid var(--border);filter:grayscale(15%) contrast(1.05);flex-shrink:0;">
+        <div>
+            <h1 class="b-page-title" style="font-size:16px;">{{ char.character_name }}</h1>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-top:2px;">
+                {% if char.corporation_name %}{{ char.corporation_name }}{% endif %}
+                {% if char.alliance_name %} · <span style="color:var(--accent)">{{ char.alliance_name }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div style="text-align:right;">
+        <div style="font-size:20px;font-weight:300;color:var(--accent);">{{ format_isk(current_wallet) }}</div>
+        <div class="b-label" style="margin-top:2px;">Current Balance</div>
+    </div>
+</div>
+
+{# ── Cross-links ─────────────────────────────────────────────────────────── #}
+<div style="margin-bottom:0.75rem;">{{ entity_links("character", char.character_id, char.character_name, current="overview") }}</div>
+
+{# ── Tab Strip ───────────────────────────────────────────────────────────── #}
+{% set _cid = char.character_id %}
+<div class="b-tab-strip">
+    <a href="/character/{{ _cid }}" class="is-active">Overview</a>
+    <a href="/character/{{ _cid }}/skills">Skills</a>
+    <a href="/character/{{ _cid }}/fittings">Fittings</a>
+    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
+    <a href="/character/{{ _cid }}/journal">Journal</a>
+    <a href="/character/{{ _cid }}/mining">Mining</a>
+</div>
+
+{# ── Character Overview ───────────────────────────────────────────────────────── #}
+<div class="overview-grid">
+
+    {# Left Column: Status Info #}
+    <div class="overview-card">
+        <span class="card-title">Character Info</span>
+
+        <div class="stat-row">
+            <span class="stat-label">Character Age</span>
+            <span class="stat-value">
+                {% if char.birthday %}
+                    {% set age_days = ((now - char.birthday).total_seconds() / 86400) | int %}
+                    {% if age_days > 365 %}
+                        {{ (age_days / 365) | int }}y
+                    {% else %}
+                        {{ age_days }}d
+                    {% endif %}
+                {% else %}—{% endif %}
+            </span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Total SP</span>
+            <span class="stat-value">
+                {% if total_trained_sp > 0 %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label">— missing scope</span>{% endif %}
+            </span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Security Status</span>
+            <span class="stat-value">
+                {% if char.security_status is not none %}
+                    {% set sec = char.security_status %}
+                    <span class="sec-status {% if sec >= 0 %}positive{% elif sec < -5 %}negative{% else %}neutral{% endif %}">
+                        {{ "%.2f"|format(sec) }}
+                    </span>
+                {% else %}—{% endif %}
+            </span>
+        </div>
+
+        {# Active Skill Training #}
+        {% if active_skill %}
+        {% set roman = ["I", "II", "III", "IV", "V"] %}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <div class="card-title">Skill Training</div>
+            <div class="skill-progress">
+                <div class="skill-name">{{ active_skill['skill_name'] }}</div>
+                <div class="skill-time">
+                    → Level {{ roman[(active_skill['finished_level'] or 1) - 1] if active_skill.get('finished_level') else '?' }}
+                    {% if active_skill.get('remaining_seconds') is not none %}
+                        &nbsp;·&nbsp;{{ format_duration(active_skill['remaining_seconds']) }} remaining
+                    {% else %}
+                        &nbsp;·&nbsp;<span style="color:var(--muted)">paused</span>
+                    {% endif %}
+                </div>
+                {% if queue_remaining %}
+                <div class="stat-row" style="margin-top: 0.5rem;">
+                    <span class="stat-label">Queue Total</span>
+                    <span class="stat-value">{{ format_duration(queue_remaining) }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {# Full skill queue list #}
+            {% if skillqueue|length > 1 %}
+            <div style="margin-top: 0.75rem;">
+                <div style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem;">
+                    Queue ({{ skillqueue|length }} skills)
+                </div>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
+                    {% for entry in skillqueue %}
+                    <div style="display: flex; justify-content: space-between; align-items: center;
+                                padding: 0.35rem 0.6rem; font-size: 10px;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);
+                                {% if loop.first %}background: rgba(200,169,81,0.07);{% endif %}">
+                        <span style="flex: 1; color: {% if loop.first %}var(--accent){% else %}var(--text){% endif %};">
+                            {% if loop.first %}▶ {% endif %}{{ entry['skill_name'] }}
+                        </span>
+                        <span style="color: var(--muted); margin: 0 0.75rem; white-space: nowrap;">
+                            → {{ roman[(entry['finished_level'] or 1) - 1] if entry.get('finished_level') else '?' }}
+                        </span>
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 6rem; text-align: right;">
+                            {% if entry.get('remaining_seconds') is not none %}
+                                {{ format_duration(entry['remaining_seconds']) }}
+                            {% else %}—{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {# Recently completed skills #}
+            {% if completed_skills %}
+            <details style="margin-top: 0.75rem;">
+                <summary style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                    &#10003; Recently Completed ({{ completed_skills|length }})
+                </summary>
+                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                    {% for entry in completed_skills %}
+                    <div style="display: flex; justify-content: space-between; align-items: center;
+                                padding: 0.35rem 0.6rem; font-size: 10px; opacity: 0.6;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);">
+                        <span style="flex: 1; color: var(--success);">
+                            &#10003; {{ entry['skill_name'] }}
+                        </span>
+                        <span style="color: var(--muted); margin: 0 0.75rem; white-space: nowrap;">
+                            {{ roman[(entry['finished_level'] or 1) - 1] if entry.get('finished_level') else '?' }}
+                        </span>
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 6rem; text-align: right;">
+                            {% set ago = entry.get('completed_ago', 0) %}
+                            {% if ago < 3600 %}{{ (ago // 60)|int }}m ago
+                            {% elif ago < 86400 %}{{ (ago // 3600)|int }}h ago
+                            {% else %}{{ (ago // 86400)|int }}d ago{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Corporation History #}
+        {% if corp_history %}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <details>
+                <summary style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                    Corporation History ({{ corp_history|length }})
+                </summary>
+                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                    {% for h in corp_history %}
+                    <div style="display: flex; align-items: center; gap: 0.5rem;
+                                padding: 0.35rem 0.6rem; font-size: 10px;
+                                border-bottom: 1px solid rgba(200,169,81,0.08);
+                                {% if h.is_current %}background: rgba(200,169,81,0.07);{% endif %}">
+                        <img src="https://images.evetech.net/corporations/{{ h.corporation_id }}/logo?size=32"
+                             style="width:18px;height:18px;border-radius:2px;flex-shrink:0;" data-on-error="hide">
+                        <span style="flex: 1; color: {% if h.is_current %}var(--accent){% else %}var(--text){% endif %};">
+                            {{ h.corporation_name }}
+                        </span>
+                        {% if h.days_in is not none %}
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 4rem; text-align: right;">
+                            {% if h.days_in >= 365 %}{{ (h.days_in / 365)|round(1) }}y
+                            {% elif h.days_in > 0 %}{{ h.days_in }}d
+                            {% else %}&lt;1d{% endif %}
+                        </span>
+                        {% endif %}
+                        <span style="color: var(--muted); white-space: nowrap; min-width: 5.5rem; text-align: right;">{{ h.start_date }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Right Column: Kills/Losses #}
+    <div class="overview-card">
+        <span class="card-title">Killboard Stats (30d)</span>
+
+        <div class="stat-row">
+            <span class="stat-label">Kills</span>
+            <span class="stat-value">{{ kills }}</span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Losses</span>
+            <span class="stat-value">{{ losses }}</span>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">K/D Ratio</span>
+            <span class="stat-value">
+                {% if kills + losses > 0 %}
+                    {% set ratio = kills / (kills + losses) %}
+                    <span class="kd-ratio {% if ratio > 0.5 %}kd-good{% else %}kd-bad{% endif %}">
+                        {{ "%.2f"|format(ratio * 100) }}%
+                    </span>
+                {% else %}
+                    —
+                {% endif %}
+            </span>
+        </div>
+
+        {# Implants #}
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <span class="card-title">Implants</span>
+            {% if implants %}
+                {% set attr_implants = implants | selectattr("is_attr") | list %}
+                {% set hardwirings  = implants | rejectattr("is_attr") | list %}
+
+                {% if attr_implants %}
+                <div style="margin: 0.4rem 0 0.25rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Attribute Enhancers</div>
+                {% for imp in attr_implants %}
+                <div class="stat-row" style="padding: 0.2rem 0; border-bottom: none;">
+                    <span class="stat-label" style="font-size: 10px;">{{ imp.label }}</span>
+                    <span style="font-size: 9px; color: var(--muted);">{{ imp.name }}</span>
+                </div>
+                {% endfor %}
+                {% endif %}
+
+                {% if hardwirings %}
+                <div style="margin: {% if attr_implants %}0.6rem{% else %}0.4rem{% endif %} 0 0.25rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Hardwirings</div>
+                {% for imp in hardwirings %}
+                <div style="font-size: 10px; color: var(--text); padding: 0.2rem 0; border-bottom: 1px solid rgba(200,169,81,0.07);">
+                    {{ imp.name }}
+                </div>
+                {% endfor %}
+                {% endif %}
+            {% else %}
+                <div style="font-size: 10px; color: var(--muted); padding: 0.25rem 0;">No implants fitted.</div>
+            {% endif %}
+        </div>
+
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
+            <span class="card-title">Location</span>
+            <div class="stat-row" style="border-bottom: none; padding: 0.25rem 0;">
+                <span class="stat-label">Current</span>
+                <span class="stat-value">
+                    {% if docked_at %}{{ docked_at }}
+                    {% elif current_system %}{{ current_system }} <span style="color:var(--muted);font-size:9px;">(in space)</span>
+                    {% else %}—{% endif %}
+                </span>
+            </div>
+
+            {# Assets Section — auto-loaded on page load #}
+            <div class="assets-container" id="assets-container">
+                <span class="card-title" style="margin: 0.75rem 0 0.5rem 0;">Assets by Location</span>
+                <div id="assets-inner"
+                     hx-get="/character/{{ char.character_id }}/assets-partial"
+                     hx-trigger="load"
+                     hx-swap="innerHTML">
+                    <div style="color: var(--muted); font-size: 10px; padding: 1rem 0.75rem;">Loading…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+{# ── Kill Stats (killmails feature; lazy-loaded) ───────────────────────────── #}
+{% if killmails_enabled %}
+<div id="kill-stats-panel"
+     hx-get="/character/{{ char.character_id }}/kill-stats"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Combat Profile</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
+</div>
+{% endif %}
+
+{# ── Jump Clones ──────────────────────────────────────────────────────────────── #}
+{% if jump_clones %}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Jump Clones</span>
+        <span class="b-label" style="color:var(--muted)">{{ jump_clones|length }} clone{% if jump_clones|length != 1 %}s{% endif %}</span>
+    </div>
+    <div style="padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;" id="jump-clones-list">
+        {% for clone in jump_clones %}
+        <div class="asset-location">
+            <div class="asset-location-header">
+                <span class="asset-location-name" style="font-size: 10px;">{{ clone.location }}</span>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    {% if clone.implants %}
+                        <span class="asset-location-count">{{ clone.implants|length }} implant{% if clone.implants|length != 1 %}s{% endif %}</span>
+                    {% else %}
+                        <span class="asset-location-count">Empty</span>
+                    {% endif %}
+                    <span class="expand-icon">▼</span>
+                </div>
+            </div>
+            <div class="asset-list">
+                {% if clone.implants %}
+                    {% set attr_imps  = clone.implants | selectattr("is_attr") | list %}
+                    {% set hard_imps  = clone.implants | rejectattr("is_attr") | list %}
+                    {% if attr_imps %}
+                    <div style="padding: 0.3rem 0.75rem 0.1rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Attribute Enhancers</div>
+                    {% for imp in attr_imps %}
+                    <div class="asset-item">
+                        <span class="asset-item-name">{{ imp.label }}</span>
+                        <span style="font-size:9px;color:var(--muted);">{{ imp.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                    {% if hard_imps %}
+                    <div style="padding: 0.3rem 0.75rem 0.1rem; font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;">Hardwirings</div>
+                    {% for imp in hard_imps %}
+                    <div class="asset-item">
+                        <span class="asset-item-name">{{ imp.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+                {% else %}
+                    <div class="asset-item"><span class="b-muted">Empty clone</span></div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+
+{# ── Mail ──────────────────────────────────────────────────────────────────── #}
+<div class="b-grid-2 b-section">
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Mail</span>
+        </div>
+        <div hx-get="/character/{{ char.character_id }}/mail-partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="b-empty b-muted">Loading mail...</div>
+        </div>
+    </div>
+
+    <div class="b-panel">
+        <div class="b-panel-head">
+            <span class="b-label">Notifications</span>
+        </div>
+        <div hx-get="/character/{{ char.character_id }}/notifications-partial"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="b-empty b-muted">Loading notifications...</div>
+        </div>
+    </div>
+</div>
+
+{# ── Wallet History Chart ───────────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Wallet History</span>
+        <div style="display:flex;gap:4px;" id="range-buttons">
+            {% for r in ranges %}
+            <button class="range-btn {% if r == active_range %}is-active{% endif %}"
+                    data-range="{{ r }}"
+                    onclick="setRange('{{ r }}', this)">{{ r }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div style="border:1px solid var(--border);border-top:none;background:var(--surface);padding:1rem 0.75rem;">
+        <div id="chart-empty" style="display:none;text-align:center;padding:2rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
+            No data for this period yet — data accumulates as the background sync runs.
+        </div>
+        <canvas id="wallet-chart" height="180"></canvas>
+    </div>
+</div>
+
+{# ── Last 20 Journal Entries ───────────────────────────────────────────────── #}
+<div class="b-section">
+    <div class="b-section-head">
+        <span class="b-label">Recent Transactions</span>
+        <a href="/character/{{ char.character_id }}/journal" class="b-link" style="font-size:10px;">Full Journal →</a>
+    </div>
+
+    {% if journal_error == "missing_scope" %}
+    <div class="b-empty">Wallet scope not available — re-auth required.</div>
+    {% elif journal_error %}
+    <div class="b-empty" style="color:var(--danger)">Failed to load journal: {{ journal_error }}</div>
+    {% elif not journal %}
+    <div class="b-empty">No journal entries found.</div>
+    {% else %}
+    <div class="b-panel" style="border-top:none;">
+
+        {# Header row #}
+        <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+            <span class="b-row-label" style="flex:0 0 110px;">Date</span>
+            <span class="b-row-label" style="flex:1;">Type / Description</span>
+            <span class="b-row-label" style="flex:0 0 90px;text-align:right;">Amount</span>
+            <span class="b-row-label" style="flex:0 0 110px;text-align:right;">Balance After</span>
+        </div>
+
+        {% for entry in journal %}
+        {% set amount = entry.get("amount", 0) or 0 %}
+        {% set balance = entry.get("balance") %}
+        {% set ref_type = entry.get("ref_type", "") %}
+        {% set desc = entry.get("description", "") %}
+        {% set date_raw = entry.get("date", "") %}
+        <div class="b-table-row">
+            <span style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
+                {{ date_raw[:16].replace("T", " ") if date_raw else "—" }}
+            </span>
+            <span style="flex:1;min-width:0;overflow:hidden;">
+                <span class="ref-type">{{ ref_type.replace("_", " ") }}</span>
+                {% if desc %}
+                <span style="font-size:10px;color:var(--muted);margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ desc[:60] }}{% if desc|length > 60 %}…{% endif %}
+                </span>
+                {% endif %}
+            </span>
+            <span style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
+                  class="{% if amount >= 0 %}tx-amount-pos{% else %}tx-amount-neg{% endif %}">
+                {{ format_isk_signed(amount) }}
+            </span>
+            <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+                {{ format_isk(balance) if balance is not none else "—" }}
+            </span>
+        </div>
+        {% endfor %}
+
+    </div>
+    {% endif %}
+</div>
+
+{# ── Chart JS ──────────────────────────────────────────────────────────────── #}
+<script nonce="{{ request.state.csp_nonce }}" id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    const initialData = JSON.parse(document.getElementById('chart-data').textContent);
+    let chart = null;
+
+    function formatISK(v) {
+        const abs = Math.abs(v);
+        if (abs >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+        if (abs >= 1e9)  return (v / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6)  return (v / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3)  return (v / 1e3).toFixed(1) + 'K';
+        return v.toFixed(0);
+    }
+
+    function buildChart(data) {
+        const canvas = document.getElementById('wallet-chart');
+        const empty  = document.getElementById('chart-empty');
+
+        if (!data.labels || data.labels.length === 0) {
+            canvas.style.display = 'none';
+            empty.style.display  = 'block';
+            if (chart) { chart.destroy(); chart = null; }
+            return;
+        }
+        canvas.style.display = 'block';
+        empty.style.display  = 'none';
+
+        const points = data.labels.map((l, i) => ({ x: new Date(l), y: data.values[i] }));
+
+        if (chart) {
+            chart.data.datasets[0].data = points;
+            chart.update('none');
+            return;
+        }
+
+        chart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    data: points,
+                    borderColor: '#c8a951',
+                    backgroundColor: 'rgba(200,169,81,0.06)',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    pointHoverBackgroundColor: '#c8a951',
+                    fill: true,
+                    tension: 0.3,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#0e0e0e',
+                        borderColor: '#1a1a1a',
+                        borderWidth: 1,
+                        titleColor: '#474747',
+                        bodyColor: '#c8a951',
+                        titleFont: { family: "'JetBrains Mono', monospace", size: 10 },
+                        bodyFont:  { family: "'JetBrains Mono', monospace", size: 11 },
+                        callbacks: {
+                            title: items => {
+                                const d = new Date(items[0].parsed.x);
+                                return d.toLocaleString('en-GB', {
+                                    year:'numeric', month:'short', day:'numeric',
+                                    hour:'2-digit', minute:'2-digit', timeZone:'UTC'
+                                }) + ' UTC';
+                            },
+                            label: item => ' ' + formatISK(item.parsed.y) + ' ISK',
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        grid: { color: '#191919' },
+                        ticks: {
+                            color: '#474747',
+                            font: { family: "'JetBrains Mono', monospace", size: 9 },
+                            maxTicksLimit: 8,
+                        },
+                        border: { color: '#191919' },
+                    },
+                    y: {
+                        grid: { color: '#191919' },
+                        ticks: {
+                            color: '#474747',
+                            font: { family: "'JetBrains Mono', monospace", size: 9 },
+                            callback: v => formatISK(v) + ' ISK',
+                            maxTicksLimit: 6,
+                        },
+                        border: { color: '#191919' },
+                    }
+                }
+            }
+        });
+    }
+
+    try { buildChart(initialData); } catch(e) { console.error('Chart init error:', e); }
+
+    window.setRange = function(range, btn) {
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+
+        fetch(`/character/{{ char.character_id }}/wallet/chart.json?range=${range}`)
+            .then(r => r.json())
+            .then(data => buildChart(data))
+            .catch(err => console.error('Chart fetch error:', err));
+    };
+
+})();
+</script>
+
+<script nonce="{{ request.state.csp_nonce }}">
+// Jump clone expand/collapse
+document.querySelectorAll('#jump-clones-list .asset-location-header').forEach(function(h) {
+    h.addEventListener('click', function() {
+        this.nextElementSibling.classList.toggle('open');
+        this.querySelector('.expand-icon').classList.toggle('open');
+    });
+});
+</script>
+
+{% endblock %}

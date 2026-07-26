@@ -1,0 +1,17 @@
+{# Type-search results for the stockpile add form. Unlike the market search
+   partial (whose rows are <a> links to the type page), these rows are buttons
+   that populate the add form's hidden type_id + label via the page's
+   data-click handler — no navigation. #}
+{% if q|length < 2 %}
+<div class="sp-hint">Type at least two characters to search.</div>
+{% elif not results %}
+<div class="sp-hint">No published items match &ldquo;{{ q }}&rdquo;.</div>
+{% else %}
+{% for r in results %}
+<button type="button" class="sp-srow" data-click="pickStockType"
+        data-type-id="{{ r.type_id }}" data-type-name="{{ r.type_name }}">
+    <span class="sp-srow-name">{{ r.type_name }}</span>
+    <span class="sp-srow-group">{{ r.group }}</span>
+</button>
+{% endfor %}
+{% endif %}

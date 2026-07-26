@@ -1,0 +1,1717 @@
+{% extends "base.html" %}
+{% block title %}SHIP FITTING — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Ship Fitting</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">Build and analyze ship fittings</div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <select id="skill-char-select" data-change="onSkillCharChange"
+                title="Check fit against a character's trained skills"
+                style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
+            <option value="">All V (default)</option>
+            {# populated via JS on init #}
+        </select>
+        <select id="dmg-profile-select" data-change="onProfileChange"
+                title="Drives BOTH defensive EHP (incoming damage type) and offensive resist-weighted DPS (target's resists)"
+                style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
+            <option value="uniform">Profile: Uniform (default)</option>
+            <option value="sansha">Sansha</option>
+            <option value="blood">Blood Raiders</option>
+            <option value="guristas">Guristas</option>
+            <option value="serpentis">Serpentis</option>
+            <option value="angel">Angel Cartel</option>
+            <option value="sleeper">Sleepers</option>
+            <option value="triglavian">Triglavians</option>
+            <option value="drifter">Drifters</option>
+            <option value="em">EM only</option>
+            <option value="thermal">Thermal only</option>
+            <option value="kinetic">Kinetic only</option>
+            <option value="explosive">Explosive only</option>
+            <option value="custom">Custom&hellip;</option>
+        </select>
+        <span id="dmg-custom-sliders" style="display:none;align-items:center;gap:0.4rem;font-size:9px;color:var(--muted);border:1px solid var(--border);background:var(--surface);padding:2px 8px;"
+              title="Custom incoming damage weights — normalized server-side, EHP display only">
+            <label style="display:flex;align-items:center;gap:2px;color:#00bfff;">EM
+                <input type="range" class="dmg-custom-w" data-dmg-idx="0" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#ff6347;">Th
+                <input type="range" class="dmg-custom-w" data-dmg-idx="1" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#999;">Kin
+                <input type="range" class="dmg-custom-w" data-dmg-idx="2" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+            <label style="display:flex;align-items:center;gap:2px;color:#ff8c00;">Exp
+                <input type="range" class="dmg-custom-w" data-dmg-idx="3" min="0" max="100" value="25" data-input="onCustomWeightInput" style="width:56px;">
+                <span class="dmg-custom-val">25</span></label>
+        </span>
+        <a href="/tools/fitting/saved" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;">Saved Fits</a>
+        <button data-click="showImportModal" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import EFT</button>
+        <button data-click="showCharImportModal" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;">Import from Character</button>
+        <button data-click="exportEFT" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);white-space:nowrap;" id="btn-export">Export EFT</button>
+        <button data-click="saveFitting" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);white-space:nowrap;" id="btn-save">Save</button>
+        <button data-click="clearFitting" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--danger);color:var(--danger);white-space:nowrap;">Clear</button>
+    </div>
+</div>
+<div id="ship-skill-banner" style="display:none;margin-bottom:0.5rem;padding:6px 12px;border:1px solid var(--danger);color:var(--danger);background:rgba(255,80,80,0.06);font-size:11px;">
+    <span class="ssb-icon">&#9888;</span>
+    <span class="ssb-text"></span>
+</div>
+
+<style nonce="{{ request.state.csp_nonce }}">
+/* Selected-row tint for the charge selector. Paired with .b-hover-accent on
+   the same element so :hover overlays correctly (specificity 0,1,0 base vs
+   0,1,1 hover). See ISS-020. */
+.charge-selected { background: rgba(200,169,81,0.1); }
+.fit-grid { display:grid; grid-template-columns:280px 1fr 1fr; gap:1rem; }
+.fit-stats-sticky { position:sticky; top:80px; }
+.skill-warn {
+    display:none;  /* shown only when the row is missing skills */
+    color:var(--danger);
+    font-size:12px;
+    cursor:help;
+    padding:0 0.2rem;
+    font-weight:700;
+}
+.fit-row-warn {
+    box-shadow:inset 3px 0 0 var(--danger);
+    background:rgba(255,80,80,0.04);
+}
+@media (max-width:1100px) {
+    .fit-grid { grid-template-columns:1fr 1fr; }
+    #browser-panel { display:none !important; }
+    #browser-toggle { display:inline-block !important; }
+    #browser-close { display:inline-block !important; }
+    /* When browser-panel is opened as an overlay, JS sets data-overlay="1";
+       restore display so the CSS hide above does not clobber it. */
+    #browser-panel[data-overlay="1"] { display:flex !important; }
+    #browser-backdrop[data-open="1"] { display:block !important; }
+}
+@media (max-width:768px) {
+    .fit-grid { grid-template-columns:1fr; }
+    .fit-stats-sticky { position:static; }
+}
+#browser-close { display:none; }
+#browser-backdrop {
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.55);
+    z-index:49;
+}
+/* Default (desktop) layout for the browser-panel. Moved out of the
+   element's inline style so closeModuleBrowser() can wipe inline styles
+   without destroying the sticky-positioned defaults. */
+#browser-panel {
+    border:1px solid var(--border);
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    min-height:500px;
+    max-height:calc(100vh - 120px);
+    position:sticky;
+    top:80px;
+}
+</style>
+<button id="browser-toggle" data-click="openModuleBrowser" style="display:none;margin-bottom:0.5rem;padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);background:none;cursor:pointer;">Browse Modules</button>
+<div id="browser-backdrop" data-click="closeModuleBrowser" aria-hidden="true"></div>
+<div class="fit-grid">
+
+{# ── Left: Module Browser (persistent) ──────────────────────────────────── #}
+<div id="browser-panel">
+    {# Browser header + breadcrumbs #}
+    <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.35rem;">
+            <div style="font-size:11px;font-weight:600;color:var(--text);">Module Browser</div>
+            <button id="browser-close" type="button" data-click="closeModuleBrowser" aria-label="Close module browser"
+                    style="background:none;border:1px solid var(--border);color:var(--muted);font-size:14px;line-height:1;padding:2px 8px;cursor:pointer;">×</button>
+        </div>
+        <div id="browse-breadcrumbs" style="font-size:9px;color:var(--muted);display:flex;gap:0.2rem;flex-wrap:wrap;min-height:14px;"></div>
+    </div>
+    {# Two-pane: tree + items #}
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        <div id="browse-tree" style="overflow-y:auto;border-bottom:1px solid var(--border);min-height:120px;max-height:65%;"></div>
+        <div id="browse-items" style="flex:1;overflow-y:auto;min-height:80px;">
+            <div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">Select a category above</div>
+        </div>
+    </div>
+</div>
+
+{# ── Center: Ship + Slots ───────────────────────────────────────────────── #}
+<div>
+
+{# Ship selector #}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Ship</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;overflow:visible;">
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+            <img id="ship-render" src="" style="width:64px;height:64px;border:1px solid var(--border);display:none;"
+                 data-on-error="hide">
+            <div style="flex:1;">
+                <div style="position:relative;">
+                    <input type="text" id="ship-search" placeholder="Search ships..."
+                           autocomplete="off"
+                           style="width:100%;padding:0.35rem 0.5rem;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;"
+                           oninput="searchShip(this.value)">
+                    <div id="ship-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
+                </div>
+                <div id="ship-name" style="font-size:12px;font-weight:600;color:var(--text);margin-top:0.25rem;display:none;"></div>
+                <div id="ship-group" style="font-size:10px;color:var(--muted);display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Fitting name #}
+<div class="b-section" id="fitting-name-section" style="display:none;">
+    <div class="b-panel" style="padding:0.35rem 0.75rem;">
+        <input type="text" id="fitting-name" placeholder="Fitting name..."
+               style="width:100%;padding:0.2rem 0;font-size:11px;background:transparent;border:none;color:var(--text);font-family:inherit;outline:none;">
+    </div>
+</div>
+
+{# Slot layout #}
+<div id="slot-layout" style="display:none;">
+
+{% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
+<div class="b-section" id="section-{{ slot_key }}" style="display:none;">
+    <div class="b-section-head">
+        <span class="b-label">{{ slot_label }}</span>
+        <span id="count-{{ slot_key }}" class="b-muted-sm"></span>
+    </div>
+    <div id="slots-{{ slot_key }}"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" class="module-search" data-slot="{{ slot_key }}"
+                   placeholder="+ Add {{ slot_label | lower | replace(' slots','') | replace('s','') }}..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   oninput="searchModule(this.value, '{{ slot_key }}', this)">
+            <div class="module-results" data-slot="{{ slot_key }}"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring) #}
+<div class="b-section" id="section-implant" style="display:none;">
+    <div class="b-section-head">
+        <span class="b-label">Implants</span>
+        <span style="font-size:9px;color:var(--muted);">slots 1-5 stat · 6-10 combat</span>
+    </div>
+    <div id="slots-implant" style="padding:0.25rem 0;"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" id="implant-search"
+                   placeholder="+ Search implants by name..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   oninput="searchImplant(this.value)">
+            <div id="implant-results"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
+        </div>
+        {# ISS-016: import the skill-character's currently-plugged implants #}
+        <button type="button" id="btn-clone-implants" onclick="loadCloneImplants()"
+                style="margin-top:0.35rem;padding:0.25rem 0.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;"
+                title="Fetch the selected skill character's active clone implants from ESI">
+            Load active clone
+        </button>
+    </div>
+</div>
+
+{# Drones #}
+<div class="b-section" id="section-drone">
+    <div class="b-section-head">
+        <span class="b-label">Drones</span>
+        <span id="drone-summary" class="b-muted-sm"></span>
+    </div>
+    <div id="slots-drone"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" class="module-search" data-slot="drone"
+                   placeholder="+ Add drone..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   oninput="searchDrone(this.value, this)">
+            <div class="module-results" data-slot="drone"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+
+</div>
+</div>
+
+{# ── Right: Stats Panel ─────────────────────────────────────────────────── #}
+<div>
+    <div id="stats-panel" class="fit-stats-sticky">
+        <div class="b-empty">Select a ship to see stats</div>
+    </div>
+</div>
+
+</div>
+
+{# Folder option list for the "Save to folder" picker (used by saveFitting()) #}
+<datalist id="fit-folder-options">
+    {% for fp in folder_paths %}
+    <option value="{{ fp.id }}">{{ fp.path }}</option>
+    {% endfor %}
+</datalist>
+
+{# ── Module Info Modal ───────────────────────────────────────────────────── #}
+<div id="info-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideInfoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:520px;width:90%;margin:auto;position:relative;top:12%;max-height:80vh;overflow-y:auto;">
+        <button data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <div id="info-modal-body">
+            <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
+        </div>
+    </div>
+</div>
+
+{# ── Character Fittings Import Modal ─────────────────────────────────────── #}
+<div id="charimport-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideCharImportModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:560px;width:92%;margin:auto;position:relative;top:10%;max-height:82vh;overflow-y:auto;">
+        <button data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import from Character</div>
+        <div id="charimport-body">
+            <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
+        </div>
+    </div>
+</div>
+
+{# ── EFT Import Modal ────────────────────────────────────────────────────── #}
+<div id="import-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.5rem;max-width:500px;width:90%;margin:auto;position:relative;top:20%;">
+        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import EFT Fitting</div>
+        <textarea id="eft-input" placeholder="Paste EFT format here...
+[Ship Name, Fitting Name]
+Module 1
+Module 2
+..."
+                  style="width:100%;height:200px;padding:0.5rem;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical;"></textarea>
+        <div id="import-error" style="font-size:10px;color:var(--danger);margin-top:0.25rem;display:none;"></div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end;">
+            <button data-click="hideImportModal" class="b-btn" style="padding:4px 12px;font-size:10px;border:1px solid var(--border);color:var(--muted);">Cancel</button>
+            <button data-click="doImportEFT" class="b-btn" style="padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Import</button>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* ── Fitting State ────────────────────────────────────────────────────────── */
+var FIT_KEY = 'vigilant_fit_state';
+var state = {
+    shipTypeId: null,
+    shipName: '',
+    fittingName: 'Unnamed',
+    fittingId: null,
+    items: [],
+    // Implants: sparse array indexed 1..10 → {type_id, name} per slot.
+    // Stored as an object keyed by slot string for JSON safety.
+    implants: {}
+};
+
+/* Ship slot limits — populated from stats response */
+var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0};
+var overheatCache = {};  // type_id -> bool
+
+function getSlotCount(slot) {
+    return state.items.filter(function(i) { return i.slot === slot; }).length;
+}
+
+function getSlotLimit(slot) {
+    return shipSlots[slot] || 0;
+}
+
+function isSlotFull(slot) {
+    if (slot === 'drone' || slot === 'cargo') return false;
+    return getSlotCount(slot) >= getSlotLimit(slot);
+}
+
+function saveState() {
+    localStorage.setItem(FIT_KEY, JSON.stringify(state));
+}
+
+function restoreState() {
+    var raw = localStorage.getItem(FIT_KEY);
+    if (!raw) return;
+    try {
+        var saved = JSON.parse(raw);
+        if (saved.shipTypeId) {
+            state = saved;
+            applyState();
+        }
+    } catch(e) {}
+}
+
+function applyState() {
+    if (!state.shipTypeId) return;
+
+    document.getElementById('ship-search').value = '';
+    document.getElementById('ship-search').style.display = 'none';
+    var shipNameEl = document.getElementById('ship-name');
+    shipNameEl.textContent = state.shipName;
+    shipNameEl.style.display = '';
+    var renderImg = document.getElementById('ship-render');
+    renderImg.src = 'https://images.evetech.net/types/' + state.shipTypeId + '/render?size=128';
+    renderImg.style.display = '';
+    document.getElementById('fitting-name-section').style.display = '';
+    document.getElementById('fitting-name').value = state.fittingName || 'Unnamed';
+    document.getElementById('slot-layout').style.display = '';
+    document.getElementById('section-implant').style.display = '';
+
+    fetchShipSlots(state.shipTypeId);
+    renderSlots();
+    renderImplantSlots();
+    recalcStats();
+}
+
+/* Friendly error HTML for fitting fetch failures. Keeps JSON error bodies
+   from being rendered as panel HTML when the server returns 4xx/5xx
+   (e.g. stale CSRF token after a long session). */
+function _fitErrorHtml(status) {
+    if (status === 403) {
+        return '<div style="padding:0.5rem;color:var(--warning);font-size:11px;">Session expired — refresh the page to continue. Your fit is saved locally.</div>';
+    }
+    return '<div style="padding:0.5rem;color:var(--danger);font-size:11px;">Request failed (HTTP ' + (status || 'network') + ').</div>';
+}
+function _fitCheckOk(r) {
+    if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    return r;
+}
+
+/* ── Mobile module-browser overlay (ISS-008) ────────────────────────────── */
+window.openModuleBrowser = function() {
+    var panel = document.getElementById('browser-panel');
+    var bd = document.getElementById('browser-backdrop');
+    if (!panel) return;
+    panel.setAttribute('data-overlay', '1');
+    panel.style.position = 'fixed';
+    panel.style.left = '0';
+    panel.style.top = '0';
+    panel.style.bottom = '0';
+    panel.style.zIndex = '50';
+    panel.style.width = '300px';
+    panel.style.maxHeight = '100vh';
+    if (bd) bd.setAttribute('data-open', '1');
+    document.body.style.overflow = 'hidden';
+};
+window.closeModuleBrowser = function() {
+    var panel = document.getElementById('browser-panel');
+    var bd = document.getElementById('browser-backdrop');
+    if (panel) {
+        panel.removeAttribute('data-overlay');
+        /* Wipe the inline styles the open path applied so the panel returns
+           to its CSS-defined desktop layout (sticky) and mobile state
+           (display:none via media query). */
+        panel.style.position = '';
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.bottom = '';
+        panel.style.zIndex = '';
+        panel.style.width = '';
+        panel.style.maxHeight = '';
+        panel.style.display = '';
+    }
+    if (bd) bd.removeAttribute('data-open');
+    document.body.style.overflow = '';
+};
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var panel = document.getElementById('browser-panel');
+        if (panel && panel.getAttribute('data-overlay') === '1') {
+            window.closeModuleBrowser();
+        }
+    }
+});
+
+/* ── Ship Search ──────────────────────────────────────────────────────────── */
+var shipSearchTimer = null;
+function searchShip(q) {
+    clearTimeout(shipSearchTimer);
+    var resultsEl = document.getElementById('ship-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    shipSearchTimer = setTimeout(function() {
+        fetch('/tools/fitting/search/ships?q=' + encodeURIComponent(q))
+            .then(_fitCheckOk)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                resultsEl.innerHTML = html;
+                resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+function selectShip(typeId, typeName) {
+    state.shipTypeId = typeId;
+    state.shipName = typeName;
+    state.items = [];
+    state.fittingId = null;
+    state.fittingName = 'Unnamed';
+    saveState();
+    fetchShipSlots(typeId);
+    applyState();
+    document.getElementById('ship-results').style.display = 'none';
+    if (currentBrowseGroup !== null) loadBrowseItems(currentBrowseGroup);
+}
+
+function fetchShipSlots(typeId) {
+    // Include subsystem type IDs so the server can apply slot modifiers
+    var subIds = state.items
+        .filter(function(i) { return i.slot === 'subsystem'; })
+        .map(function(i) { return i.type_id; })
+        .join(',');
+    var url = '/tools/fitting/ship-slots/' + typeId;
+    if (subIds) url += '?subsystems=' + subIds;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            shipSlots.high = data.high || 0;
+            shipSlots.med = data.med || 0;
+            shipSlots.low = data.low || 0;
+            shipSlots.rig = data.rig || 0;
+            shipSlots.subsystem = data.subsystem || 0;
+            shipSlots.turret = data.turret || 0;
+            shipSlots.launcher = data.launcher || 0;
+            renderSlots();
+        });
+}
+
+/* ── Module Search ────────────────────────────────────────────────────────── */
+var moduleSearchTimers = {};
+function searchModule(q, slot, inputEl) {
+    clearTimeout(moduleSearchTimers[slot]);
+    var resultsEl = inputEl.parentElement.querySelector('.module-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    moduleSearchTimers[slot] = setTimeout(function() {
+        fetch('/tools/fitting/search/modules?q=' + encodeURIComponent(q) + '&slot=' + slot)
+            .then(_fitCheckOk)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                resultsEl.innerHTML = html;
+                resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+function searchDrone(q, inputEl) {
+    clearTimeout(moduleSearchTimers['drone']);
+    var resultsEl = inputEl.parentElement.querySelector('.module-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    moduleSearchTimers['drone'] = setTimeout(function() {
+        fetch('/tools/fitting/search/drones?q=' + encodeURIComponent(q))
+            .then(_fitCheckOk)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                resultsEl.innerHTML = html;
+                resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+function addModule(typeId, typeName, slot) {
+    if (isSlotFull(slot)) return;
+    state.items.push({
+        type_id: typeId,
+        type_name: typeName,
+        slot: slot,
+        quantity: 1
+    });
+    saveState();
+    // Subsystem changes affect slot counts — re-fetch from server
+    if (slot === 'subsystem' && state.shipTypeId) {
+        fetchShipSlots(state.shipTypeId);
+    }
+    renderSlots();
+    recalcStats();
+    refreshOverheatCache();
+    // Clear search
+    var inputs = document.querySelectorAll('.module-search[data-slot="' + slot + '"]');
+    inputs.forEach(function(el) { el.value = ''; });
+    var results = document.querySelectorAll('.module-results[data-slot="' + slot + '"]');
+    results.forEach(function(el) { el.style.display = 'none'; });
+}
+
+function addDrone(typeId, typeName) {
+    // Check if drone already exists, increment quantity
+    for (var i = 0; i < state.items.length; i++) {
+        if (state.items[i].type_id === typeId && state.items[i].slot === 'drone') {
+            state.items[i].quantity++;
+            saveState();
+            renderSlots();
+            recalcStats();
+            return;
+        }
+    }
+    state.items.push({
+        type_id: typeId,
+        type_name: typeName,
+        slot: 'drone',
+        quantity: 1
+    });
+    saveState();
+    renderSlots();
+    recalcStats();
+    var inputs = document.querySelectorAll('.module-search[data-slot="drone"]');
+    inputs.forEach(function(el) { el.value = ''; });
+    var results = document.querySelectorAll('.module-results[data-slot="drone"]');
+    results.forEach(function(el) { el.style.display = 'none'; });
+}
+
+function removeItem(index) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
+    var removed = state.items[index];
+    state.items.splice(index, 1);
+    saveState();
+    // Subsystem removal affects slot counts — re-fetch from server
+    if (removed && removed.slot === 'subsystem' && state.shipTypeId) {
+        fetchShipSlots(state.shipTypeId);
+    }
+    renderSlots();
+    recalcStats();
+}
+
+function toggleOnline(index) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
+    var item = state.items[index];
+    if (!item) return;
+    var canOH = overheatCache[item.type_id] === true;
+    // Cycle: online → overheated (if capable) → offline → online
+    if (item.overheated) {
+        item.overheated = false;
+        item.online = false;
+    } else if (item.online === false) {
+        item.online = true;
+        item.overheated = false;
+    } else if (canOH) {
+        item.overheated = true;
+    } else {
+        item.online = false;
+    }
+    saveState();
+    renderSlots();
+    recalcStats();
+}
+
+function changeDroneQty(index, delta) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+        delta = parseInt(this.dataset.delta, 10);
+    }
+    state.items[index].quantity += delta;
+    if (state.items[index].quantity <= 0) {
+        state.items.splice(index, 1);
+    }
+    saveState();
+    renderSlots();
+    recalcStats();
+}
+
+/* ── Render Slots ─────────────────────────────────────────────────────────── */
+function renderSlots() {
+    var slotTypes = ['high', 'med', 'low', 'rig', 'subsystem'];
+    slotTypes.forEach(function(slot) {
+        var container = document.getElementById('slots-' + slot);
+        var section = document.getElementById('section-' + slot);
+        var countEl = document.getElementById('count-' + slot);
+        var items = state.items.filter(function(i) { return i.slot === slot; });
+        var limit = getSlotLimit(slot);
+
+        // Show slot count
+        if (countEl) countEl.textContent = items.length + ' / ' + limit;
+
+        container.innerHTML = '';
+        items.forEach(function(item, idx) {
+            var globalIdx = state.items.indexOf(item);
+            var isOnline = item.online !== false;
+            var isOverheated = item.overheated === true;
+            var opacity = isOnline ? '1' : '0.4';
+            var chargeInfo = '';
+            if (item.charge_type_id) {
+                chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" title="Change charge">' + escapeHtml(item.charge_name || 'loaded') + '</span>';
+            }
+            var chargeBtn = (slot === 'high' || slot === 'med') ?
+                '<button data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
+            // State toggle: green=online, red=overheated, grey=offline
+            var canOH = overheatCache[item.type_id] === true;
+            var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
+            var stateTitle = isOverheated ? 'Overheated (click: offline)' :
+                (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
+            var onlineBtn = slot !== 'rig' ?
+                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+            container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
+                onlineBtn +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + chargeInfo + '</span>' +
+                '<span class="skill-warn" title="">&#9888;</span>' +
+                '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+                chargeBtn +
+                '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+                '</div>';
+        });
+
+        // Hide section if ship has 0 of this slot type, show otherwise
+        section.style.display = (limit > 0 || slot === 'subsystem') ? '' : 'none';
+
+        // Hide search input when slots are full
+        var searchDiv = section.querySelector('.module-search');
+        if (searchDiv) {
+            searchDiv.parentElement.parentElement.style.display = items.length >= limit ? 'none' : '';
+        }
+    });
+
+    // Drones
+    var droneContainer = document.getElementById('slots-drone');
+    var droneItems = state.items.filter(function(i) { return i.slot === 'drone'; });
+    droneContainer.innerHTML = '';
+    droneItems.forEach(function(item) {
+        var globalIdx = state.items.indexOf(item);
+        droneContainer.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
+            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+            '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + '</span>' +
+            '<span class="skill-warn" title="">&#9888;</span>' +
+            '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+            '<div style="display:flex;align-items:center;gap:0.25rem;">' +
+            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="-1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
+            '<span style="font-size:10px;color:var(--accent);min-width:16px;text-align:center;">' + item.quantity + '</span>' +
+            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
+            '</div>' +
+            '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+            '</div>';
+    });
+}
+
+/* ── Implants (10 slots, auto-routed by implantness) ───────────────── */
+function getImplantTypeIds() {
+    if (!state.implants) return [];
+    var out = [];
+    for (var s = 1; s <= 10; s++) {
+        var rec = state.implants[String(s)];
+        if (rec && rec.type_id) out.push(rec.type_id);
+    }
+    return out;
+}
+
+function renderImplantSlots() {
+    var host = document.getElementById('slots-implant');
+    if (!host) return;
+    var html = '';
+    for (var s = 1; s <= 10; s++) {
+        var rec = (state.implants || {})[String(s)];
+        var cloneTag = (rec && rec.from_clone)
+            ? '<span style="font-size:8px;letter-spacing:0.1em;color:var(--accent);border:1px solid var(--accent);padding:0 3px;margin-left:0.4rem;" title="Imported from active jump clone">CLONE</span>'
+            : '';
+        var nameCell = rec
+            ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' + cloneTag +
+              '<button data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
+            : '<span style="color:var(--muted);font-style:italic;">empty</span>';
+        html +=
+            '<div style="display:flex;align-items:center;gap:0.5rem;font-size:10px;padding:2px 0.5rem;border-bottom:1px solid var(--border);">' +
+                '<span style="color:var(--muted);width:24px;">#' + s + '</span>' +
+                '<span style="flex:1;">' + nameCell + '</span>' +
+            '</div>';
+    }
+    host.innerHTML = html;
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+}
+
+var implantSearchTimer = null;
+function searchImplant(q) {
+    clearTimeout(implantSearchTimer);
+    var resultsEl = document.getElementById('implant-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    implantSearchTimer = setTimeout(function() {
+        fetch('/tools/fitting/search/implants?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(rows) {
+                if (!rows || !rows.length) {
+                    resultsEl.innerHTML = '<div style="padding:0.4rem 0.5rem;color:var(--muted);font-size:10px;">No matches</div>';
+                    resultsEl.style.display = '';
+                    return;
+                }
+                resultsEl.innerHTML = rows.map(function(r) {
+                    return '<div class="b-hover-bg" data-click="addImplant" data-type-id="' + r.type_id + '" data-slot="' + r.slot + '" data-implant-name="' + escapeHtml(r.name) + '" ' +
+                           'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);">' +
+                           '<span class="b-muted">#' + r.slot + '</span> ' + escapeHtml(r.name) +
+                           '</div>';
+                }).join('');
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+function addImplant(typeId, slot, name) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        slot = parseInt(this.dataset.slot, 10);
+        name = this.dataset.implantName;
+    }
+    if (!state.implants) state.implants = {};
+    state.implants[String(slot)] = {type_id: typeId, name: name};
+    saveState();
+    renderImplantSlots();
+    document.getElementById('implant-search').value = '';
+    document.getElementById('implant-results').style.display = 'none';
+    recalcStats();
+}
+
+function removeImplant(slot) {
+    if (this && this.dataset && this.dataset.slot !== undefined) {
+        slot = parseInt(this.dataset.slot, 10);
+    }
+    if (state.implants) delete state.implants[String(slot)];
+    saveState();
+    renderImplantSlots();
+    recalcStats();
+}
+
+/* ISS-016: import the selected skill character's active-clone implants.
+   Replaces the whole loadout (a clone IS a full loadout); imported slots
+   get from_clone=true so renderImplantSlots badges them. */
+function loadCloneImplants() {
+    var charId = getSelectedSkillCharId();
+    if (!charId) { alert('Select a skill character first (top of the stats panel).'); return; }
+    var btn = document.getElementById('btn-clone-implants');
+    btn.disabled = true; btn.textContent = 'Loading…';
+    fetch('/tools/fitting/clone-implants/' + charId)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        state.implants = data.implants || {};
+        saveState();
+        renderImplantSlots();
+        recalcStats();
+        var n = Object.keys(state.implants).length;
+        btn.textContent = n ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's')) : 'Clone is empty';
+        setTimeout(function() { btn.textContent = 'Load active clone'; }, 2500);
+    })
+    .catch(function() { alert('Clone implant fetch failed.'); })
+    .finally(function() {
+        btn.disabled = false;
+        if (btn.textContent === 'Loading…') btn.textContent = 'Load active clone';
+    });
+}
+
+/* ── Damage / target profile selector ─────────────────────────────── */
+var PROFILE_KEY = 'vigilant_fit_dmg_profile';
+var PROFILE_CUSTOM_KEY = 'vigilant_fit_dmg_custom';
+
+function getSelectedProfile() {
+    var sel = document.getElementById('dmg-profile-select');
+    return sel ? sel.value : 'uniform';
+}
+
+/* Custom EM/Th/Kin/Exp weights (0-100 each; server normalizes). Returns
+   null unless the "custom" profile is selected — presets send no weights. */
+function getCustomWeights() {
+    if (getSelectedProfile() !== 'custom') return null;
+    var out = [25, 25, 25, 25];
+    document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+        out[parseInt(inp.dataset.dmgIdx, 10)] = parseInt(inp.value, 10) || 0;
+    });
+    return out;
+}
+
+function _syncCustomSliderUI() {
+    var wrap = document.getElementById('dmg-custom-sliders');
+    if (!wrap) return;
+    wrap.style.display = getSelectedProfile() === 'custom' ? 'inline-flex' : 'none';
+    document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+        var val = inp.parentElement.querySelector('.dmg-custom-val');
+        if (val) val.textContent = inp.value;
+    });
+}
+
+var _customDebounce = null;
+function onCustomWeightInput() {
+    _syncCustomSliderUI();
+    try {
+        localStorage.setItem(PROFILE_CUSTOM_KEY, JSON.stringify(getCustomWeights()));
+    } catch (e) {}
+    /* Debounce — range inputs fire continuously while dragging. */
+    if (_customDebounce) clearTimeout(_customDebounce);
+    _customDebounce = setTimeout(recalcStats, 250);
+}
+
+function onProfileChange() {
+    var sel = document.getElementById('dmg-profile-select');
+    if (sel) {
+        try { localStorage.setItem(PROFILE_KEY, sel.value); } catch (e) {}
+    }
+    _syncCustomSliderUI();
+    recalcStats();
+}
+
+function restoreProfileSelection() {
+    var sel = document.getElementById('dmg-profile-select');
+    if (!sel) return;
+    try {
+        var saved = localStorage.getItem(PROFILE_KEY);
+        if (saved) sel.value = saved;
+        /* If a stale value no longer matches an option, fall back. */
+        if (sel.value !== saved && saved) sel.value = 'uniform';
+        var weights = JSON.parse(localStorage.getItem(PROFILE_CUSTOM_KEY) || 'null');
+        if (weights && weights.length === 4) {
+            document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
+                var w = weights[parseInt(inp.dataset.dmgIdx, 10)];
+                if (typeof w === 'number' && w >= 0 && w <= 100) inp.value = w;
+            });
+        }
+    } catch (e) {}
+    _syncCustomSliderUI();
+}
+
+/* ── Stats Recalculation ──────────────────────────────────────────────────── */
+function recalcStats() {
+    if (!state.shipTypeId) return;
+    var charId = getSelectedSkillCharId();
+    var profile = getSelectedProfile();
+    fetch('/tools/fitting/stats', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            ship_type_id: state.shipTypeId,
+            items: state.items,
+            character_id: charId,
+            damage_profile: profile,
+            /* "custom" isn't a target-resist preset — treat the target as
+               unresisted (uniform) when custom EHP weights are in play. */
+            target_resist_profile: profile === 'custom' ? 'uniform' : profile,
+            damage_profile_custom: getCustomWeights(),
+            implants: getImplantTypeIds(),
+        })
+    })
+    .then(_fitCheckOk)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+        document.getElementById('stats-panel').innerHTML = html;
+    })
+    .catch(function(e) {
+        document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
+    });
+    /* Skill check runs in parallel with the stats fetch — warnings don't
+       block stats from appearing. */
+    refreshSkillWarnings();
+}
+
+/* ── Character skill check (warnings) ────────────────────────────────── */
+var SKILL_CHAR_KEY = 'vigilant_fit_skill_char';
+
+function getSelectedSkillCharId() {
+    var sel = document.getElementById('skill-char-select');
+    if (!sel) return null;
+    var v = sel.value;
+    return v ? parseInt(v, 10) : null;
+}
+
+function loadSkillCharList() {
+    var sel = document.getElementById('skill-char-select');
+    if (!sel) return;
+    fetch('/tools/fitting/characters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
+            (data.characters || []).forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = String(c.id);
+                opt.textContent = c.name;
+                if (String(c.id) === saved) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            if (saved) onSkillCharChange(/*silent*/true);
+        });
+}
+
+function onSkillCharChange(silent) {
+    var id = getSelectedSkillCharId();
+    if (id) {
+        localStorage.setItem(SKILL_CHAR_KEY, String(id));
+    } else {
+        localStorage.removeItem(SKILL_CHAR_KEY);
+    }
+    /* Stats must re-run under the new skill set; warnings too. */
+    if (state.shipTypeId) {
+        recalcStats();  /* recalcStats also calls refreshSkillWarnings */
+    } else {
+        refreshSkillWarnings();
+    }
+}
+
+function _clearSkillWarnings() {
+    document.querySelectorAll('.b-table-row.fit-row-warn').forEach(function(r) {
+        r.classList.remove('fit-row-warn');
+    });
+    document.querySelectorAll('.skill-warn').forEach(function(w) {
+        w.style.display = 'none';
+        w.title = '';
+    });
+    var banner = document.getElementById('ship-skill-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function _formatMissing(entries) {
+    if (!entries || !entries.length) return '';
+    var lines = entries.map(function(m) {
+        return m.skill_name + ' ' + m.need + ' (you have ' + m.have + ')';
+    });
+    return 'Missing skill' + (lines.length === 1 ? '' : 's') + ':\n  • ' + lines.join('\n  • ');
+}
+
+function refreshSkillWarnings() {
+    _clearSkillWarnings();
+    var charId = getSelectedSkillCharId();
+    if (!charId || !state.shipTypeId) return;
+
+    fetch('/tools/fitting/skill-check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            character_id: charId,
+            ship_type_id: state.shipTypeId,
+            items: state.items,
+        }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { console.warn('skill-check:', data.error); return; }
+        var missing = data.missing || {};
+
+        /* Ship: show banner at top instead of a row highlight. */
+        var banner = document.getElementById('ship-skill-banner');
+        var shipMissing = missing[String(state.shipTypeId)];
+        if (banner && shipMissing && shipMissing.length) {
+            banner.querySelector('.ssb-text').textContent =
+                '  ' + state.shipName + ' — ' + _formatMissing(shipMissing).replace(/\n\s*•/g, ';').replace('Missing skills:', 'missing skills:').replace('Missing skill:', 'missing skill:');
+            banner.title = _formatMissing(shipMissing);
+            banner.style.display = '';
+        }
+
+        /* Module / drone rows. */
+        document.querySelectorAll('.b-table-row[data-type-id]').forEach(function(row) {
+            var tid = row.dataset.typeId;
+            var warn = row.querySelector('.skill-warn');
+            if (!tid || !warn) return;
+            var entries = missing[tid];
+            if (entries && entries.length) {
+                warn.style.display = 'inline';
+                warn.title = _formatMissing(entries);
+                row.classList.add('fit-row-warn');
+            } else {
+                warn.style.display = 'none';
+                row.classList.remove('fit-row-warn');
+            }
+        });
+    })
+    .catch(function(e) {
+        console.warn('skill-check failed:', e);
+    });
+}
+
+/* ── Module Info Modal ─────────────────────────────────────────────────── */
+function showModuleInfo(typeIdOrEvent) {
+    // ISS-021/022: dispatcher calls this as `fn.call(el, event)` so `this`
+    // is the element and the arg is the event. Legacy callers in this file
+    // (innerHTML string-concat sites in ISS-020) still call
+    // `showModuleInfo(typeId)` directly. Detect via dataset.
+    var typeId;
+    if (this && this.dataset && this.dataset.typeId) {
+        typeId = parseInt(this.dataset.typeId, 10);
+    } else {
+        typeId = typeIdOrEvent;
+    }
+    if (!typeId) return;
+    var modal = document.getElementById('info-modal');
+    var body = document.getElementById('info-modal-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>';
+    modal.style.display = 'block';
+    fetch('/tools/fitting/info/' + typeId)
+        .then(function(r) { return r.text(); })
+        .then(function(html) { body.innerHTML = html; })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--danger);">Failed to load info.</div>';
+        });
+}
+
+function hideInfoModal() {
+    document.getElementById('info-modal').style.display = 'none';
+}
+
+/* ── Character Fitting Import ─────────────────────────────────────────── */
+function showCharImportModal() {
+    var modal = document.getElementById('charimport-modal');
+    var body = document.getElementById('charimport-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading characters...</div>';
+    modal.style.display = 'block';
+    fetch('/tools/fitting/import-character/characters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--danger);">' + data.error + '</div>';
+                return;
+            }
+            if (!data.characters || !data.characters.length) {
+                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);">No characters with the <code>esi-fittings.read_fittings.v1</code> scope. Re-authorize a character from the <a href="/dashboard" style="color:var(--accent);">dashboard</a>.</div>';
+                return;
+            }
+            var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">Pick a character:</div>';
+            data.characters.forEach(function(c) {
+                html += '<button data-click="loadCharFittings" data-char-id="' + c.id + '" class="b-btn" style="display:block;width:100%;padding:6px 12px;margin-bottom:4px;font-size:11px;text-align:left;background:var(--bg);border:1px solid var(--border);color:var(--text);cursor:pointer;">' +
+                    '<img src="https://images.evetech.net/characters/' + c.id + '/portrait?size=32" style="width:20px;height:20px;vertical-align:middle;margin-right:0.5rem;border:1px solid var(--border);">' +
+                    escapeHtml(c.name) +
+                    '</button>';
+            });
+            body.innerHTML = html;
+        })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">Failed to load characters.</div>';
+        });
+}
+
+function hideCharImportModal() {
+    document.getElementById('charimport-modal').style.display = 'none';
+}
+
+function loadCharFittings(charId, btnEl) {
+    if (this && this.dataset && this.dataset.charId !== undefined) {
+        charId = parseInt(this.dataset.charId, 10);
+    }
+    var body = document.getElementById('charimport-body');
+    body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading fittings...</div>';
+    fetch('/tools/fitting/import-character/' + charId + '/fittings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">' + data.error + '</div>';
+                return;
+            }
+            if (!data.fittings || !data.fittings.length) {
+                body.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">No in-game fittings found for this character.</div>';
+                return;
+            }
+            var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">' + data.fittings.length + ' fitting(s). <b>Load</b> opens in builder; <b>Import</b> saves a copy.</div>';
+            /* Stash EFT text on window for per-row access to avoid monster inline JSON */
+            window._charFittings = {};
+            data.fittings.forEach(function(f, i) {
+                window._charFittings[i] = f;
+                var safeName = escapeHtml(f.name || 'Unnamed');
+                var safeShip = escapeHtml(f.ship_name || '');
+                html += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);">' +
+                    '<img src="https://images.evetech.net/types/' + f.ship_type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" data-on-error="hide">' +
+                    '<div style="flex:1;min-width:0;">' +
+                      '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + safeName + '</div>' +
+                      '<div style="font-size:9px;color:var(--muted);">' + safeShip + '</div>' +
+                    '</div>' +
+                    '<button data-click="charImportLoad" data-fit-idx="' + i + '" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Load</button>' +
+                    '<button data-click="charImportSave" data-fit-idx="' + i + '" class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--success);color:var(--success);">Import</button>' +
+                '</div>';
+            });
+            body.innerHTML = html;
+        })
+        .catch(function(e) {
+            body.innerHTML = '<div style="padding:1rem;color:var(--danger);font-size:11px;">Failed to load fittings.</div>';
+        });
+}
+
+function _parseEftForCharImport(idx, cb) {
+    var f = window._charFittings && window._charFittings[idx];
+    if (!f) return;
+    fetch('/tools/fitting/import-eft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({eft: f.eft})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        cb(f, data);
+    });
+}
+
+function charImportLoad(idx) {
+    if (this && this.dataset && this.dataset.fitIdx !== undefined) {
+        idx = parseInt(this.dataset.fitIdx, 10);
+    }
+    _parseEftForCharImport(idx, function(f, data) {
+        state.shipTypeId = data.ship_type_id;
+        state.shipName = data.ship_name;
+        state.fittingName = f.name || data.fitting_name || 'Unnamed';
+        state.fittingId = null;
+        state.items = data.items;
+        saveState();
+        applyState();
+        hideCharImportModal();
+    });
+}
+
+function charImportSave(idx) {
+    if (this && this.dataset && this.dataset.fitIdx !== undefined) {
+        idx = parseInt(this.dataset.fitIdx, 10);
+    }
+    var dl = document.getElementById('fit-folder-options');
+    var folderId = null;
+    if (dl && dl.querySelectorAll('option').length > 0) {
+        var options = [{id: '', label: '(Root)'}];
+        Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+            options.push({id: opt.value, label: opt.textContent});
+        });
+        var msg = 'Save to folder:\n0. (Root)';
+        for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+        msg += '\n\nEnter number:';
+        var choice = prompt(msg, '0');
+        if (choice === null) return;
+        var ix = parseInt(choice, 10);
+        if (isNaN(ix) || ix < 0 || ix >= options.length) { alert('Invalid choice'); return; }
+        if (options[ix].id) folderId = parseInt(options[ix].id, 10);
+    }
+    _parseEftForCharImport(idx, function(f, data) {
+        fetch('/tools/fitting/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                ship_type_id: data.ship_type_id,
+                name: f.name || data.fitting_name || 'Unnamed',
+                items: data.items,
+                folder_id: folderId
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(resp) {
+            if (resp.error) { alert(resp.error); return; }
+            hideCharImportModal();
+            window.location.reload();
+        });
+    });
+}
+
+/* ── EFT Import/Export ────────────────────────────────────────────────────── */
+function showImportModal() {
+    document.getElementById('import-modal').style.display = 'flex';
+    document.getElementById('eft-input').value = '';
+    document.getElementById('import-error').style.display = 'none';
+}
+
+function hideImportModal() {
+    document.getElementById('import-modal').style.display = 'none';
+}
+
+function doImportEFT() {
+    var eftText = document.getElementById('eft-input').value.trim();
+    if (!eftText) return;
+
+    fetch('/tools/fitting/import-eft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({eft: eftText})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) {
+            document.getElementById('import-error').textContent = data.error;
+            document.getElementById('import-error').style.display = '';
+            return;
+        }
+        state.shipTypeId = data.ship_type_id;
+        state.shipName = data.ship_name;
+        state.fittingName = data.fitting_name;
+        state.fittingId = null;
+        state.items = data.items;
+        saveState();
+        applyState();
+        hideImportModal();
+    });
+}
+
+function exportEFT() {
+    if (!state.shipTypeId) return;
+    fetch('/tools/fitting/export-eft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            ship_type_id: state.shipTypeId,
+            name: state.fittingName || document.getElementById('fitting-name').value || 'Unnamed',
+            items: state.items
+        })
+    })
+    .then(_fitCheckOk)
+    .then(function(r) { return r.text(); })
+    .then(function(text) {
+        navigator.clipboard.writeText(text).then(function() {
+            var btn = document.getElementById('btn-export');
+            btn.textContent = 'Copied!';
+            btn.style.color = 'var(--success)';
+            btn.style.borderColor = 'var(--success)';
+            setTimeout(function() {
+                btn.textContent = 'Export EFT';
+                btn.style.color = 'var(--accent)';
+                btn.style.borderColor = 'var(--accent)';
+            }, 2000);
+        });
+    })
+    .catch(function(e) {
+        var btn = document.getElementById('btn-export');
+        btn.textContent = e.status === 403 ? 'Refresh page' : 'Export failed';
+        btn.style.color = 'var(--danger)';
+        btn.style.borderColor = 'var(--danger)';
+        setTimeout(function() {
+            btn.textContent = 'Export EFT';
+            btn.style.color = 'var(--accent)';
+            btn.style.borderColor = 'var(--accent)';
+        }, 2500);
+    });
+}
+
+/* ── Save/Load/Delete ─────────────────────────────────────────────────────── */
+function saveFitting() {
+    if (!state.shipTypeId) return;
+    var name = document.getElementById('fitting-name').value.trim() || 'Unnamed';
+    state.fittingName = name;
+
+    var body = {
+        ship_type_id: state.shipTypeId,
+        name: name,
+        items: state.items,
+        implants_map: state.implants || {},
+        fitting_id: state.fittingId
+    };
+
+    /* For new fits only, let user pick a folder */
+    if (!state.fittingId) {
+        var dl = document.getElementById('fit-folder-options');
+        if (dl && dl.querySelectorAll('option').length > 0) {
+            var options = [{id: '', label: '(Root)'}];
+            Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
+                options.push({id: opt.value, label: opt.textContent});
+            });
+            var msg = 'Save in folder:\n0. (Root)';
+            for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
+            msg += '\n\nEnter number:';
+            var choice = prompt(msg, '0');
+            if (choice === null) return;
+            var idx = parseInt(choice, 10);
+            if (isNaN(idx) || idx < 0 || idx >= options.length) { alert('Invalid choice'); return; }
+            if (options[idx].id) body.folder_id = parseInt(options[idx].id, 10);
+        }
+    }
+
+    fetch('/tools/fitting/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        state.fittingId = data.id;
+        saveState();
+        var btn = document.getElementById('btn-save');
+        btn.textContent = 'Saved!';
+        setTimeout(function() { btn.textContent = 'Save'; }, 2000);
+        location.reload();
+    });
+}
+
+function loadFitting(id) {
+    fetch('/tools/fitting/load/' + id)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert(data.error); return; }
+        state.shipTypeId = data.ship_type_id;
+        state.shipName = data.ship_name;
+        state.fittingName = data.name;
+        state.fittingId = data.id;
+        state.items = data.items;
+        state.implants = data.implants || {};
+        saveState();
+        applyState();
+    });
+}
+
+function deleteFitting(id, btn) {
+    if (!confirm('Delete this fitting?')) return;
+    fetch('/tools/fitting/' + id, {method: 'DELETE'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.status === 'deleted') {
+            if (state.fittingId === id) {
+                state.fittingId = null;
+                saveState();
+            }
+            btn.closest('.b-panel').remove();
+        }
+    });
+}
+
+function clearFitting() {
+    state = {shipTypeId: null, shipName: '', fittingName: 'Unnamed', fittingId: null, items: [], implants: {}};
+    localStorage.removeItem(FIT_KEY);
+    location.reload();
+}
+
+/* ── Click-away handler for dropdowns ─────────────────────────────────────── */
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.module-search') && !e.target.closest('.module-results') &&
+        !e.target.closest('#ship-search') && !e.target.closest('#ship-results')) {
+        document.querySelectorAll('.module-results, #ship-results').forEach(function(el) {
+            el.style.display = 'none';
+        });
+    }
+});
+
+/* ── Fitting name change tracking ─────────────────────────────────────────── */
+var nameInput = document.getElementById('fitting-name');
+if (nameInput) {
+    nameInput.addEventListener('change', function() {
+        state.fittingName = this.value.trim() || 'Unnamed';
+        saveState();
+    });
+}
+
+/* ── Allow clicking ship name to re-search ────────────────────────────────── */
+document.getElementById('ship-name').addEventListener('click', function() {
+    this.style.display = 'none';
+    var searchInput = document.getElementById('ship-search');
+    searchInput.style.display = '';
+    searchInput.value = '';
+    searchInput.focus();
+});
+
+/* ── Charge Selector ──────────────────────────────────────────────────────── */
+var chargeModal = null;
+
+function openChargeSelector(itemIndex) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+    }
+    var item = state.items[itemIndex];
+    if (!item) return;
+    fetch('/tools/fitting/charges/' + item.type_id)
+        .then(function(r) { return r.json(); })
+        .then(function(charges) {
+            if (charges.length === 0) return;
+            showChargeDropdown(itemIndex, charges);
+        });
+}
+
+function showChargeDropdown(itemIndex, charges) {
+    closeChargeDropdown();
+    var item = state.items[itemIndex];
+    var overlay = document.createElement('div');
+    overlay.id = 'charge-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99;';
+    overlay.onclick = closeChargeDropdown;
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--surface);border:1px solid var(--border);max-height:400px;width:300px;display:flex;flex-direction:column;';
+
+    var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="font-size:11px;font-weight:600;color:var(--text);">Select Charge</span>' +
+        '<button data-click="clearCharge" data-item-idx="' + itemIndex + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:9px;">Clear</button></div>';
+
+    var list = '<div style="overflow-y:auto;flex:1;">';
+    for (var i = 0; i < charges.length; i++) {
+        var c = charges[i];
+        var isSelected = item.charge_type_id === c.type_id;
+        var rowClass = 'b-hover-accent' + (isSelected ? ' charge-selected' : '');
+        // ISS-020: dropped inline background:rgba(...) so :hover from .b-hover-accent
+        // overlays correctly. Selected state lives in the class (.charge-selected).
+        list += '<div class="' + rowClass + '" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);" ' +
+            'data-click="selectCharge" data-item-idx="' + itemIndex + '" data-type-id="' + c.type_id + '" data-type-name="' + escapeHtml(c.type_name) + '">' +
+            '<img src="https://images.evetech.net/types/' + c.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);" data-on-error="hide">' +
+            '<span style="font-size:11px;color:var(--text);">' + escapeHtml(c.type_name) + '</span></div>';
+    }
+    list += '</div>';
+
+    modal.innerHTML = header + list;
+    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
+    chargeModal = modal;
+}
+
+function closeChargeDropdown() {
+    var overlay = document.getElementById('charge-overlay');
+    if (overlay) overlay.remove();
+    if (chargeModal) { chargeModal.remove(); chargeModal = null; }
+}
+
+function selectCharge(itemIndex, chargeTypeId, chargeName) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+        chargeTypeId = parseInt(this.dataset.typeId, 10);
+        chargeName = this.dataset.typeName;
+    }
+    state.items[itemIndex].charge_type_id = chargeTypeId;
+    state.items[itemIndex].charge_name = chargeName;
+    saveState();
+    closeChargeDropdown();
+    renderSlots();
+    recalcStats();
+}
+
+function clearCharge(itemIndex) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        itemIndex = parseInt(this.dataset.itemIdx, 10);
+    }
+    delete state.items[itemIndex].charge_type_id;
+    delete state.items[itemIndex].charge_name;
+    saveState();
+    closeChargeDropdown();
+    renderSlots();
+    recalcStats();
+}
+
+/* ── Module Browser (persistent left panel) ──────────────────────────────── */
+var browseHistory = [];
+var currentBrowseGroup = null;
+
+function initBrowser() {
+    browseHistory = [];
+    currentBrowseGroup = null;
+    loadBrowseGroups(null);
+}
+
+function loadBrowseGroups(parentId) {
+    currentBrowseGroup = parentId;
+    var url = '/tools/fitting/browse/groups';
+    if (parentId !== null) url += '?parent=' + parentId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            renderBrowseTree(groups, parentId);
+        });
+    document.getElementById('browse-items').innerHTML =
+        '<div style="padding:0.75rem;font-size:10px;color:var(--muted);text-align:center;">Select a category above</div>';
+    updateBreadcrumbs();
+}
+
+function browseIntoGroup(groupId, groupName) {
+    if (this && this.dataset && this.dataset.groupId !== undefined) {
+        groupId = parseInt(this.dataset.groupId, 10);
+        groupName = this.dataset.groupName;
+    }
+    browseHistory.push({groupId: currentBrowseGroup, groupName: ''});
+    currentBrowseGroup = groupId;
+    var url = '/tools/fitting/browse/groups?parent=' + groupId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            if (groups.length === 0) {
+                loadBrowseItems(groupId);
+                renderBrowseTree([], groupId);
+            } else {
+                renderBrowseTree(groups, groupId);
+                loadBrowseItems(groupId);
+            }
+        });
+    updateBreadcrumbsAsync(groupId);
+}
+
+function browseBack() {
+    if (browseHistory.length === 0) return;
+    var prev = browseHistory.pop();
+    currentBrowseGroup = prev.groupId;
+    if (prev.groupId === null) {
+        loadBrowseGroups(null);
+    } else {
+        var url = '/tools/fitting/browse/groups?parent=' + prev.groupId;
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(groups) {
+                renderBrowseTree(groups, prev.groupId);
+                loadBrowseItems(prev.groupId);
+            });
+        updateBreadcrumbsAsync(prev.groupId);
+    }
+}
+
+function renderBrowseTree(groups, parentId) {
+    var tree = document.getElementById('browse-tree');
+    var html = '';
+    if (parentId !== null) {
+        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+                'data-click="browseBack">' +
+                '<span style="font-size:11px;color:var(--accent);">\u2190 Back</span></div>';
+    }
+    for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        var arrow = g.has_children ? '<span style="color:var(--muted);font-size:9px;">&#9656;</span>' : '';
+        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+                'data-click="browseIntoGroup" data-group-id="' + g.market_group_id + '" data-group-name="' + escapeHtml(g.market_group_name) + '">' +
+                '<span style="font-size:11px;color:var(--text);">' + escapeHtml(g.market_group_name) + '</span>' +
+                arrow + '</div>';
+    }
+    if (groups.length === 0 && parentId !== null) {
+        html += '<div style="padding:0.75rem;font-size:10px;color:var(--muted);text-align:center;">No subcategories</div>';
+    }
+    tree.innerHTML = html;
+}
+
+function loadBrowseItems(groupId) {
+    var url = '/tools/fitting/browse/items/' + groupId;
+    if (state.shipTypeId) url += '?ship_type_id=' + state.shipTypeId;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(items) { renderBrowseItems(items); });
+}
+
+function renderBrowseItems(items) {
+    var container = document.getElementById('browse-items');
+    if (items.length === 0) {
+        container.innerHTML = '<div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">No items in this category</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var canFit = item.can_fit !== false;
+        var opacity = canFit ? '1' : '0.35';
+        var cursor = canFit ? 'pointer' : 'not-allowed';
+        var slotBadge = item.slot_type
+            ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + item.slot_type + '</span>'
+            : '';
+        var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span>' : '';
+        // ISS-020: conditional hover collapses cleanly \u2014 only add the hover
+        // class when canFit. Click handler via data-* only when canFit.
+        var rowClass = canFit ? 'b-hover-accent' : '';
+        var clickAttrs = canFit
+            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '"'
+            : '';
+        html += '<div class="' + rowClass + '" style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';"' +
+                clickAttrs + '>' +
+                '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" data-on-error="hide">' +
+                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + restrictLabel + '</span>' +
+                slotBadge + '</div>';
+    }
+    container.innerHTML = html;
+}
+
+function addModuleFromBrowser(typeId, typeName, slotType) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        slotType = this.dataset.slotType;
+    }
+    if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) return;
+    // Browser already checked fit restrictions, skip the wrapper
+    if (slotType === 'drone') {
+        addDrone(typeId, typeName);
+    } else {
+        _origAddModule(typeId, typeName, slotType);
+    }
+}
+
+function updateBreadcrumbs() {
+    document.getElementById('browse-breadcrumbs').innerHTML = '';
+}
+
+function updateBreadcrumbsAsync(groupId) {
+    fetch('/tools/fitting/browse/path/' + groupId)
+        .then(function(r) { return r.json(); })
+        .then(function(path) {
+            var html = '';
+            for (var i = 0; i < path.length; i++) {
+                if (i > 0) html += '<span style="color:var(--border);margin:0 2px;">/</span>';
+                if (i < path.length - 1) {
+                    html += '<span style="cursor:pointer;color:var(--accent);" data-click="browseToPathIndex" data-path-idx="' + i + '" data-group-id="' + path[i].market_group_id + '">' + escapeHtml(path[i].market_group_name) + '</span>';
+                } else {
+                    html += '<span class="b-text">' + escapeHtml(path[i].market_group_name) + '</span>';
+                }
+            }
+            document.getElementById('browse-breadcrumbs').innerHTML = html;
+        });
+}
+
+function browseToPathIndex(idx, groupId) {
+    if (this && this.dataset && this.dataset.pathIdx !== undefined) {
+        idx = parseInt(this.dataset.pathIdx, 10);
+        groupId = parseInt(this.dataset.groupId, 10);
+    }
+    browseHistory = browseHistory.slice(0, idx + 1);
+    currentBrowseGroup = groupId;
+    fetch('/tools/fitting/browse/groups?parent=' + groupId)
+        .then(function(r) { return r.json(); })
+        .then(function(groups) {
+            renderBrowseTree(groups, groupId);
+            loadBrowseItems(groupId);
+        });
+    updateBreadcrumbsAsync(groupId);
+}
+
+/* ── Fit restriction check on search-based module add ────────────────────── */
+var _origAddModule = addModule;
+addModule = function(typeId, typeName, slot) {
+    if (!state.shipTypeId) { _origAddModule(typeId, typeName, slot); return; }
+    fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.can_fit) {
+                if (!confirm(typeName + ' may not be compatible with this ship. Add anyway?')) return;
+            }
+            _origAddModule(typeId, typeName, slot);
+        });
+};
+
+/* ── Overheat capability cache ────────────────────────────────────────────── */
+function refreshOverheatCache() {
+    var typeIds = [];
+    state.items.forEach(function(item) {
+        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig') {
+            if (overheatCache[item.type_id] === undefined) typeIds.push(item.type_id);
+        }
+    });
+    if (typeIds.length === 0) return;
+    fetch('/tools/fitting/can-overheat?type_ids=' + typeIds.join(','))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            for (var k in data) overheatCache[parseInt(k)] = data[k];
+            renderSlots();
+        });
+}
+
+/* ── Initialize ───────────────────────────────────────────────────────────── */
+(function init() {
+    /* Restore profile dropdown FIRST so the first recalcStats triggered
+       by restoreState/loadFitting uses the saved selection, not "uniform". */
+    restoreProfileSelection();
+    /* ?load=<fit_id> — opened from the saved-fits page. Takes precedence
+       over localStorage, and we strip it from the URL so refreshing the
+       builder doesn't keep force-loading the same fit. */
+    var params = new URLSearchParams(window.location.search);
+    var loadId = params.get('load');
+    if (loadId) {
+        history.replaceState(null, '', window.location.pathname);
+        loadFitting(parseInt(loadId, 10));
+    } else {
+        restoreState();
+    }
+    initBrowser();
+    refreshOverheatCache();
+    loadSkillCharList();
+})();
+</script>
+
+{% endblock %}

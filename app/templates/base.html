@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ request.session.get('csrf_token', '') }}">
+    <title>{% block title %}VIGILANT{% endblock %}</title>
+    <link rel=icon href=/static/favicon.ico type=image/x-icon>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#080808">
+    <link rel="stylesheet" href="/static/css/tailwind.css?v={{ css_v }}">
+    {# T-039: htmx is only used by logged-in chrome (nav status banners, alert
+       banners, command palette, and every authed page's hx-* panels) — the
+       anonymous landing page (index.html) has zero hx- attributes. Gating
+       here trims the anonymous payload without touching any authed page,
+       since every htmx consumer already lives inside a user_id-gated block
+       or an authed-only route/template. #}
+    {% if request.session.get('user_id') %}
+    <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
+    {% endif %}
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/ds/css/tokens.css?v={{ css_v }}">
+    <link rel="stylesheet" href="/static/ds/css/motion.css?v={{ css_v }}">
+    <link rel="stylesheet" href="/static/ds/css/components.css?v={{ css_v }}">
+    <link rel="stylesheet" href="/static/css/site.css?v={{ css_v }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+{% if request.session.get('user_id') %}
+<nav class="b-nav">
+    <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
+    {% set _path = request.url.path %}
+    <div class="b-nav-links">
+        {# Desktop nav — rendered from the app.nav registry (single source). #}
+        {% for group in nav_groups %}
+            {% if not group['admin'] or request.session.get('is_admin') %}
+                {% if not group['items'] %}
+        <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+                {% else %}
+        <span class="b-nav-dropdown">
+            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }} ▾</a>
+            <div class="b-nav-dropdown-menu">
+                {# Skip the item that duplicates the group's own destination
+                   (Overview / Star Map / Console…) — the group label link
+                   above already goes there. Mirrors the mobile suppression. #}
+                {% for item in group['items'] %}
+                {% if item['url'] != group['url'] %}
+                {% if item['divider_before'] %}<div style="border-top:1px solid var(--border);margin:0.2rem 0;"></div>{% endif %}
+                {% if item['external'] %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item" target="_blank" rel="noopener">{{ item['label'] }}</a>{% else %}<a href="{{ item['url'] }}" class="b-nav-dropdown-item {{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>{% endif %}
+                {% endif %}
+                {% endfor %}
+            </div>
+        </span>
+                {% endif %}
+            {% endif %}
+        {% endfor %}
+        <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
+            <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                <line id="notif-slash" x1="1" y1="1" x2="23" y2="23" stroke="var(--danger)" stroke-width="2"/>
+            </svg>
+            <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:0;background:var(--danger);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center;">0</span>
+            <div id="notif-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:8px;width:min(320px, calc(100vw - 2rem));max-height:400px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:var(--z-dropdown);">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
+                    <span class="b-eyebrow">Notifications</span>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button data-click="toggleNotifSettings" data-stop style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;" title="Settings">&#9881;</button>
+                        <button data-click="clearNotifBadge" data-stop style="background:none;border:none;color:var(--muted);font-size:9px;cursor:pointer;padding:2px 6px;">Clear All</button>
+                    </div>
+                </div>
+                <div id="notif-settings" style="display:none;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
+                    <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.4rem;">Show notifications for:</div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="skill_complete" data-change="saveNotifPrefs" checked> Skill Completion
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="job_ready" data-change="saveNotifPrefs" checked> Industry Jobs
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="new_mail" data-change="saveNotifPrefs" checked> New Mail
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="pi_expiring" data-change="saveNotifPrefs" checked> PI Alerts
+                    </label>
+                    <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin:0.3rem 0 0.2rem;">Structures</div>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_attack" data-change="saveNotifPrefs" checked> Structure Attacks
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_fuel" data-change="saveNotifPrefs" checked> Fuel / Services
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_change" data-change="saveNotifPrefs" checked> Anchoring / Online
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="sovereignty" data-change="saveNotifPrefs" checked> Sovereignty
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="moonmining" data-change="saveNotifPrefs" checked> Moonmining
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="poco" data-change="saveNotifPrefs" checked> POCO
+                    </label>
+                    <div style="border-top:1px solid var(--border);margin-top:0.3rem;padding-top:0.3rem;">
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="inventory_low" data-change="saveNotifPrefs" checked> Inventory Alerts
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="contract_low" data-change="saveNotifPrefs" checked> Contract Alerts
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="stockpile_low" data-change="saveNotifPrefs" checked> Stockpile Alerts
+                        </label>
+                    </div>
+                </div>
+                <div id="notif-list">
+                    <div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>
+                </div>
+            </div>
+        </span>
+        <a href="/auth/add-character" class="b-nav-link is-add">+ Add Character</a>
+        <form method="post" action="/auth/logout" style="display:inline;margin:0;">
+            <button type="submit" class="b-nav-link is-danger" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;padding:0;">Logout</button>
+        </form>
+    </div>
+    <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
+            aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        Menu
+    </button>
+</nav>
+<div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
+    {# Mobile menu — rendered from the app.nav registry (single source).
+       Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
+       link that stands in for the Overview item (so that item is skipped in the
+       loop). Non-landing groups whose url equals their first item's url
+       (Dashboard/Map/Admin) suppress the parent to avoid a duplicate link.
+       Mobile is a flat list: no in-group dividers (divider_before is desktop-only). #}
+    {% for group in nav_groups %}
+        {% if not group['admin'] or request.session.get('is_admin') %}
+            {% if not group['items'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+            {% else %}
+    <div class="b-mobile-sep"></div>
+                {% if group['landing'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
+                {% elif group['url'] != group['items'][0]['url'] %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+                {% endif %}
+                {% for item in group['items'] %}
+                    {% if not (group['landing'] and item['url'] == group['url']) %}
+                        {% if item['external'] %}
+    <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
+                        {% else %}
+    <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+    <div class="b-mobile-sep"></div>
+    <a href="/auth/add-character" style="color:var(--accent);">+ Add Character</a>
+    <form method="post" action="/auth/logout" style="margin:0;">
+        <button type="submit" style="background:none;border:none;cursor:pointer;font:inherit;color:var(--danger);padding:0;text-align:left;width:100%;">Logout</button>
+    </form>
+</div>
+<div id="esi-banner"
+     hx-get="/status/banner"
+     hx-trigger="load delay:200ms, every 30s"
+     hx-swap="outerHTML"></div>
+<div id="structure-alerts"
+     hx-get="/alerts/structure-banners"
+     hx-trigger="load delay:200ms, every 60s"
+     hx-swap="outerHTML"></div>
+<div id="inventory-alerts"
+     hx-get="/alerts/inventory-banners"
+     hx-trigger="load delay:200ms, every 60s"
+     hx-swap="outerHTML"></div>
+<div id="contract-alerts"
+     hx-get="/alerts/contract-banners"
+     hx-trigger="load delay:200ms, every 60s"
+     hx-swap="outerHTML"></div>
+<div id="timer-alerts"
+     hx-get="/alerts/timer-banners"
+     hx-trigger="load delay:200ms, every 60s"
+     hx-swap="outerHTML"></div>
+
+{# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────
+   MUST be a direct child of <body> (a backdrop-filter / transform ancestor
+   would trap the position:fixed top-layer). Results come from /nav/palette;
+   Pinned/Recent are localStorage-only, injected client-side into #cmdk-client
+   when the query is empty. #}
+<style nonce="{{ request.state.csp_nonce }}">
+#cmdk { padding:0; border:1px solid var(--border); background:var(--surface); color:var(--text); width:min(560px, calc(100vw - 2rem)); max-width:560px; box-shadow:0 12px 48px rgba(0,0,0,0.55); }
+#cmdk::backdrop { background:rgba(0,0,0,0.55); }
+#cmdk .cmdk-inp { width:100%; box-sizing:border-box; padding:0.7rem 0.9rem; background:var(--bg); border:none; border-bottom:1px solid var(--border); color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+#cmdk .cmdk-scroll { max-height:min(60vh, 440px); overflow-y:auto; }
+#cmdk .cmdk-section-head { font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); padding:0.4rem 0.9rem 0.2rem; }
+#cmdk .cmdk-rowwrap { display:flex; align-items:center; }
+#cmdk .cmdk-row { flex:1 1 auto; display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.4rem 0.9rem; color:var(--text); text-decoration:none; font-size:12px; min-width:0; }
+#cmdk .cmdk-row-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#cmdk .cmdk-row-ctx { flex:none; color:var(--muted); font-size:10px; }
+#cmdk .cmdk-row:hover { background:rgba(255,255,255,0.04); }
+#cmdk .cmdk-row[data-cmdk-selected] { background:rgba(255,255,255,0.08); box-shadow:inset 2px 0 0 var(--accent); }
+#cmdk .cmdk-star { flex:none; background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; line-height:1; padding:0 0.7rem; }
+#cmdk .cmdk-star.is-pinned { color:var(--accent); }
+#cmdk .cmdk-empty { padding:0.9rem; text-align:center; font-size:11px; color:var(--muted); }
+#cmdk .cmdk-hint { display:flex; gap:0.9rem; padding:0.4rem 0.9rem; border-top:1px solid var(--border); font-size:9px; color:var(--muted); }
+</style>
+<dialog id="cmdk" aria-label="Command palette">
+    <input id="cmdk-input" class="cmdk-inp" type="text" name="q" autocomplete="off" spellcheck="false"
+           placeholder="Search pages, characters, systems, items…"
+           hx-get="/nav/palette" hx-trigger="input changed delay:150ms"
+           hx-target="#cmdk-results" hx-swap="innerHTML">
+    <div class="cmdk-scroll">
+        <div id="cmdk-client"></div>
+        <div id="cmdk-results"></div>
+    </div>
+    <div class="cmdk-hint"><span>&uarr;&darr; navigate</span><span>&crarr; open</span><span>&#9734; pin</span><span>esc close</span></div>
+</dialog>
+{% endif %}
+
+{% block breadcrumbs %}{% endblock %}
+
+<main class="b-main">
+    {% block content %}{% endblock %}
+</main>
+
+{% if request.session.get('user_id') %}
+<footer class="b-footer">
+    <span class="b-footer-brand"><img src="/static/logo.png" alt="" style="height:16px;width:auto;opacity:0.5;">Vigilant</span>
+    <div class="b-footer-links">
+        {# Footer — one link per nav group, from the app.nav registry. #}
+        {% for group in nav_groups %}{% if not group['admin'] or request.session.get('is_admin') %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
+    </div>
+    <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
+</footer>
+{% endif %}
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* CSRF token wiring (paired with app/middleware/csrf.py).
+   - Adds X-CSRF-Token header to all htmx requests.
+   - Adds X-CSRF-Token header to same-origin non-safe fetch() calls.
+   - Adds a hidden csrf_token input to native HTML form submits (urlencoded).
+   - For multipart forms (image upload), intercepts and resubmits via fetch
+     because the server middleware does not parse multipart bodies. */
+(function() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    var token = meta ? meta.getAttribute('content') : '';
+    if (!token) return;
+    var SAFE = {GET:1, HEAD:1, OPTIONS:1};
+
+    document.addEventListener('htmx:configRequest', function(evt) {
+        var verb = (evt.detail.verb || 'get').toUpperCase();
+        if (!SAFE[verb]) evt.detail.headers['X-CSRF-Token'] = token;
+    });
+
+    var origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        init = init || {};
+        var method = (init.method || (typeof input === 'object' && input ? input.method : null) || 'GET').toUpperCase();
+        if (!SAFE[method]) {
+            try {
+                var urlStr = typeof input === 'string' ? input : input.url;
+                var u = new URL(urlStr, window.location.href);
+                if (u.origin === window.location.origin) {
+                    var h = new Headers(init.headers || (typeof input === 'object' && input ? input.headers : null) || {});
+                    if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', token);
+                    init.headers = h;
+                }
+            } catch(e) { /* not a parseable URL — leave alone */ }
+        }
+        return origFetch(input, init);
+    };
+
+    /* Programmatic form.submit() bypasses the submit event entirely, so a few
+       JS-built forms (skill_plans/skill_plan_detail/ship_mastery/structure_timers)
+       wouldn't get the auto-injected hidden input. Monkey-patch
+       HTMLFormElement.prototype.submit to add the input synchronously. */
+    var origFormSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+        var m = (this.method || 'GET').toUpperCase();
+        if (!SAFE[m] && !this.querySelector('input[name="csrf_token"]')) {
+            var i = document.createElement('input');
+            i.type = 'hidden';
+            i.name = 'csrf_token';
+            i.value = token;
+            this.appendChild(i);
+        }
+        return origFormSubmit.apply(this, arguments);
+    };
+
+    document.addEventListener('submit', function(evt) {
+        var form = evt.target;
+        if (!form || form.tagName !== 'FORM') return;
+        var method = (form.method || 'GET').toUpperCase();
+        if (SAFE[method]) return;
+        var enctype = (form.getAttribute('enctype') || 'application/x-www-form-urlencoded').toLowerCase();
+        if (enctype.indexOf('multipart/form-data') === 0) {
+            evt.preventDefault();
+            /* Patched fetch above will inject the header. */
+            fetch(form.action, {
+                method: method,
+                body: new FormData(form),
+                credentials: 'same-origin',
+            }).then(function(resp) {
+                if (resp.redirected) { window.location.href = resp.url; return; }
+                if (resp.ok) { window.location.reload(); return; }
+                return resp.text().then(function(html) {
+                    document.open(); document.write(html); document.close();
+                });
+            }).catch(function(err) {
+                console.error('Form submit failed:', err);
+                window.alert('Submit failed: ' + err);
+            });
+            return;
+        }
+        if (form.querySelector('input[name="csrf_token"]')) return;
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'csrf_token';
+        input.value = token;
+        form.appendChild(input);
+    }, true);
+})();
+</script>
+{# actions.js dispatches on data-click (nav notif bell/hamburger + authed-page
+   widgets) and notifications.js drives the nav notif bell/poller — both are
+   only ever wired to elements inside the user_id-gated nav or authed-only
+   page templates. Nothing on the anonymous landing page uses either. #}
+{% if request.session.get('user_id') %}
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=6"></script>
+{% endif %}
+<script nonce="{{ request.state.csp_nonce }}">
+/* Global dismiss handler for alert banners — runs after every htmx swap */
+(function() {
+    function applyDismissState() {
+        /* Structure alerts */
+        try {
+            var sa = JSON.parse(localStorage.getItem('vigilant_dismissed_alerts') || '{}');
+            document.querySelectorAll('.structure-alert-banner[data-alert-id]:not(.timer-alert-banner)').forEach(function(el) {
+                var aid = el.getAttribute('data-alert-id');
+                el.style.display = sa[aid] ? 'none' : '';
+            });
+        } catch(e) {}
+        /* Timer alerts */
+        try {
+            var ta = JSON.parse(localStorage.getItem('vigilant_dismissed_timer_alerts') || '{}');
+            document.querySelectorAll('.timer-alert-banner[data-alert-id]').forEach(function(el) {
+                var aid = el.getAttribute('data-alert-id');
+                if (ta[aid]) el.style.display = 'none';
+                else if (el.style.display === 'none') el.style.display = '';
+            });
+        } catch(e) {}
+    }
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        var id = evt.detail.target.id || '';
+        if (id === 'structure-alerts' || id === 'timer-alerts' || id === 'inventory-alerts') {
+            applyDismissState();
+        }
+    });
+    /* Also run on initial page load after htmx processes */
+    document.addEventListener('htmx:load', function() { applyDismissState(); });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* ISS-006: mobile menu lifecycle. Toggles is-open class, mirrors state into
+   aria-expanded on the trigger and aria-hidden on the menu, locks body
+   scroll while the menu is open, and listens for ESC to dismiss. */
+(function() {
+    function getMenu() { return document.getElementById('mobile-menu'); }
+    function getBtn() { return document.querySelector('.b-hamburger'); }
+    function setOpen(open) {
+        var menu = getMenu();
+        var btn = getBtn();
+        if (!menu) return;
+        menu.classList.toggle('is-open', open);
+        menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        document.body.style.overflow = open ? 'hidden' : '';
+    }
+    window.toggleMobileMenu = function() {
+        var menu = getMenu();
+        if (!menu) return;
+        setOpen(!menu.classList.contains('is-open'));
+    };
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        var menu = getMenu();
+        if (menu && menu.classList.contains('is-open')) setOpen(false);
+    });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* ISS-007: surface failed lazy-loaded panels. Default htmx behavior on
+   4xx/5xx is to log to console and leave the element untouched — so an
+   hx-trigger="load" panel sits in its loading-state filler forever
+   (e.g. dashboard corp-stats showing "…" with no indication anything
+   went wrong). This body-level listener replaces the failing element's
+   innerHTML with a small "couldn't load" pill so the user knows to
+   refresh. Opt-out via data-htmx-no-error="1" for panels where the
+   default is intentional (e.g. polling endpoints that retry on their
+   own). */
+(function() {
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.getAttribute('data-htmx-no-error') === '1') return;
+        var status = evt.detail.xhr ? evt.detail.xhr.status : '?';
+        el.innerHTML = '<div style="padding:0.3rem 0.6rem;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--surface);display:inline-block;">'
+            + 'couldn\'t load (HTTP ' + status + ') — refresh to retry'
+            + '</div>';
+    });
+    /* Network failure (no response at all) — same friendly fallback. */
+    document.body.addEventListener('htmx:sendError', function(evt) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.getAttribute('data-htmx-no-error') === '1') return;
+        el.innerHTML = '<div style="padding:0.3rem 0.6rem;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--surface);display:inline-block;">'
+            + 'network error — refresh to retry'
+            + '</div>';
+    });
+})();
+</script>
+{# The #cmdk dialog markup only renders in the user_id-gated block above, so
+   this script is fully inert for anonymous visitors (dlg() returns null and
+   every handler below no-ops). Gate it too — no point shipping/parsing it
+   on the landing page. #}
+{% if request.session.get('user_id') %}
+<script nonce="{{ request.state.csp_nonce }}">
+/* Command palette (Ctrl+K) — Phase 2 Task 1. Canonical JS lives here (never in
+   the partial — partial-override gotcha). Guarded so it initialises once.
+   Pins/recents are localStorage-only; the server never sees them. */
+(function() {
+    if (window.__cmdkInit) return;
+    window.__cmdkInit = true;
+
+    var RECENTS_KEY = 'cmdk_recents';
+    var PINS_KEY = 'cmdk_pins';
+    var RECENTS_CAP = 8;
+
+    function $(id) { return document.getElementById(id); }
+    function dlg() { return $('cmdk'); }
+
+    function readLS(key) {
+        try { var v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+    }
+    function writeLS(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {} }
+
+    function itemEls() { return Array.prototype.slice.call(dlg().querySelectorAll('[data-cmdk-item]')); }
+    function selected() { return dlg().querySelector('[data-cmdk-item][data-cmdk-selected]'); }
+    function selectFirst() {
+        var els = itemEls();
+        els.forEach(function (el) { el.removeAttribute('data-cmdk-selected'); });
+        if (els.length) els[0].setAttribute('data-cmdk-selected', '');
+    }
+    function move(delta) {
+        var els = itemEls();
+        if (!els.length) return;
+        var cur = selected();
+        var idx = cur ? els.indexOf(cur) : -1;
+        idx = (idx + delta + els.length) % els.length;
+        els.forEach(function (el) { el.removeAttribute('data-cmdk-selected'); });
+        els[idx].setAttribute('data-cmdk-selected', '');
+        els[idx].scrollIntoView({ block: 'nearest' });
+    }
+
+    function pushRecent(url, label) {
+        if (!url) return;
+        var recents = readLS(RECENTS_KEY).filter(function (r) { return r.url !== url; });
+        recents.unshift({ url: url, label: label, ts: Date.now() });
+        writeLS(RECENTS_KEY, recents.slice(0, RECENTS_CAP));
+    }
+    function isPinned(url) { return readLS(PINS_KEY).some(function (p) { return p.url === url; }); }
+    function togglePin(url, label) {
+        var pins = readLS(PINS_KEY);
+        if (pins.some(function (p) { return p.url === url; })) {
+            pins = pins.filter(function (p) { return p.url !== url; });
+        } else {
+            pins.unshift({ url: url, label: label });
+        }
+        writeLS(PINS_KEY, pins);
+    }
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function rowHTML(url, label, ctx) {
+        return '<div class="cmdk-rowwrap">'
+            + '<a class="cmdk-row" data-cmdk-item data-cmdk-url="' + esc(url) + '" data-cmdk-label="' + esc(label) + '" href="' + esc(url) + '">'
+            + '<span class="cmdk-row-label">' + esc(label) + '</span>'
+            + '<span class="cmdk-row-ctx">' + esc(ctx) + '</span></a>'
+            + '<button type="button" class="cmdk-star" data-cmdk-pin data-cmdk-url="' + esc(url) + '" data-cmdk-label="' + esc(label) + '" aria-label="Pin" title="Pin">&#9734;</button>'
+            + '</div>';
+    }
+    function sectionHTML(title, rows) {
+        if (!rows.length) return '';
+        var body = rows.map(function (r) { return rowHTML(r.url, r.label, r.ctx || ''); }).join('');
+        return '<div class="cmdk-section"><div class="cmdk-section-head">' + esc(title) + '</div>' + body + '</div>';
+    }
+    function renderClient() {
+        var client = $('cmdk-client');
+        if (!client) return;
+        var pins = readLS(PINS_KEY).map(function (p) { return { url: p.url, label: p.label, ctx: 'Pinned' }; });
+        var recents = readLS(RECENTS_KEY).map(function (r) { return { url: r.url, label: r.label, ctx: 'Recent' }; });
+        client.innerHTML = sectionHTML('Pinned', pins) + sectionHTML('Recent', recents);
+    }
+    function clearClient() { var c = $('cmdk-client'); if (c) c.innerHTML = ''; }
+    function applyStars() {
+        dlg().querySelectorAll('[data-cmdk-pin]').forEach(function (btn) {
+            var url = btn.getAttribute('data-cmdk-url');
+            if (isPinned(url)) { btn.classList.add('is-pinned'); btn.innerHTML = '&#9733;'; }
+            else { btn.classList.remove('is-pinned'); btn.innerHTML = '&#9734;'; }
+        });
+    }
+    function queryEmpty() { var i = $('cmdk-input'); return !i || !i.value.trim(); }
+
+    /* Re-apply pin state + selection after every palette results swap — same
+       discipline as the alert-banner dismiss re-apply. Scoped to #cmdk-results
+       so it never fights the banner handler above. */
+    function afterResults() {
+        if (queryEmpty()) renderClient(); else clearClient();
+        applyStars();
+        selectFirst();
+    }
+
+    function openPalette() {
+        var d = dlg();
+        if (!d || d.open) return;
+        var inp = $('cmdk-input');
+        if (inp) inp.value = '';
+        if (window.htmx) htmx.ajax('GET', '/nav/palette?q=', { target: '#cmdk-results', swap: 'innerHTML' });
+        d.showModal();
+        if (inp) setTimeout(function () { inp.focus(); }, 0);
+    }
+    function closePalette() { var d = dlg(); if (d && d.open) d.close(); }
+
+    document.addEventListener('keydown', function (e) {
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            var d = dlg();
+            if (d && d.open) closePalette(); else openPalette();
+        }
+    });
+
+    var d0 = dlg();
+    if (d0) {
+        d0.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+            else if (e.key === 'Enter') {
+                var sel = selected();
+                if (sel) {
+                    e.preventDefault();
+                    var url = sel.getAttribute('data-cmdk-url');
+                    pushRecent(url, sel.getAttribute('data-cmdk-label'));
+                    window.location.href = url;
+                }
+            }
+        });
+        d0.addEventListener('click', function (e) {
+            var star = e.target.closest ? e.target.closest('[data-cmdk-pin]') : null;
+            if (star) {
+                e.preventDefault();
+                e.stopPropagation();
+                togglePin(star.getAttribute('data-cmdk-url'), star.getAttribute('data-cmdk-label'));
+                if (queryEmpty()) renderClient();
+                applyStars();
+                selectFirst();
+                return;
+            }
+            var row = e.target.closest ? e.target.closest('[data-cmdk-item]') : null;
+            if (row) pushRecent(row.getAttribute('data-cmdk-url'), row.getAttribute('data-cmdk-label'));
+        });
+        /* Backdrop click (target is the dialog element itself) closes. */
+        d0.addEventListener('click', function (e) { if (e.target === d0) closePalette(); });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+        if (evt.detail && evt.detail.target && evt.detail.target.id === 'cmdk-results') {
+            afterResults();
+        }
+    });
+})();
+</script>
+{% endif %}
+</body>
+</html>

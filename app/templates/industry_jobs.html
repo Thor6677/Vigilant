@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% block title %}INDUSTRY JOBS — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Jobs</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+.ij-summary {
+    display:flex; flex-wrap:wrap; gap:0.5rem 1.25rem;
+    padding:0.6rem 0.9rem;
+    border:1px solid var(--border);
+    background:var(--surface);
+    margin-bottom:0.75rem;
+    font-size:11px;
+}
+.ij-stat { display:flex; align-items:baseline; gap:0.4rem; }
+.ij-stat-label { color:var(--muted); font-size:9px; letter-spacing:0.12em; text-transform:uppercase; }
+.ij-stat-value { color:var(--accent); font-weight:600; }
+
+.ij-filters { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem; font-size:10px; }
+.ij-chip {
+    padding:3px 10px; border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; background:var(--surface); font-family:inherit; font-size:10px;
+}
+.ij-chip:hover { color:var(--text); border-color:var(--muted); }
+.ij-chip.is-active { color:var(--accent); border-color:var(--accent); background:rgba(200,169,81,0.07); }
+
+.ij-table { width:100%; border-collapse:collapse; font-size:11px; }
+.ij-table thead th {
+    text-align:left; padding:0.4rem 0.6rem;
+    background:var(--surface); color:var(--muted);
+    font-size:9px; letter-spacing:0.12em; text-transform:uppercase;
+    border-bottom:1px solid var(--border);
+}
+.ij-table tbody td {
+    padding:0.4rem 0.6rem;
+    border-bottom:1px solid var(--border);
+    color:var(--text);
+    vertical-align:middle;
+}
+.ij-table tbody tr:hover { background:rgba(200,169,81,0.04); }
+.ij-row-product { display:flex; align-items:center; gap:0.5rem; min-width:0; }
+.ij-row-product img { width:24px; height:24px; border:1px solid var(--border); flex-shrink:0; }
+.ij-product-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ij-sub { font-size:9px; color:var(--muted); }
+
+.ij-time-ready { color:var(--success); font-weight:600; }
+.ij-time-soon  { color:var(--warning, #e5c07b); font-weight:600; }
+.ij-time-normal { color:var(--text); }
+
+.ij-status {
+    display:inline-block; padding:1px 6px; border:1px solid var(--border);
+    font-size:9px; letter-spacing:0.08em; text-transform:uppercase;
+}
+.ij-status.is-ready   { color:var(--success); border-color:var(--success); }
+.ij-status.is-active  { color:var(--accent);  border-color:var(--accent); }
+.ij-status.is-paused  { color:var(--muted);   border-color:var(--border); }
+.ij-status.is-cancelled, .ij-status.is-reverted, .ij-status.is-delivered { color:var(--muted); border-color:var(--border); }
+
+.ij-source-kind { font-size:9px; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; }
+.ij-source-name { font-size:11px; color:var(--text); }
+
+/* Dropdown-picker filter (for characters / corps). */
+.ij-picker { position:relative; display:inline-block; }
+.ij-picker > button {
+    padding:3px 10px; border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; background:var(--surface); font-family:inherit; font-size:10px;
+}
+.ij-picker > button:hover { color:var(--text); border-color:var(--muted); }
+.ij-picker.has-selection > button { color:var(--accent); border-color:var(--accent); }
+.ij-picker-panel {
+    display:none; position:absolute; top:calc(100% + 3px); left:0; z-index:10;
+    min-width:220px; max-height:320px; overflow-y:auto;
+    background:var(--surface); border:1px solid var(--accent);
+    padding:0.4rem; font-size:11px;
+}
+.ij-picker.is-open .ij-picker-panel { display:block; }
+.ij-picker-head {
+    display:flex; gap:0.25rem; padding-bottom:0.25rem;
+    border-bottom:1px solid var(--border); margin-bottom:0.25rem;
+}
+.ij-picker-head button {
+    flex:1; padding:2px 6px; font-size:9px; font-family:inherit;
+    background:var(--bg); border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; letter-spacing:0.08em; text-transform:uppercase;
+}
+.ij-picker-head button:hover { color:var(--text); border-color:var(--muted); }
+.ij-picker-row {
+    display:flex; align-items:center; gap:0.4rem; padding:3px 4px; cursor:pointer;
+}
+.ij-picker-row:hover { background:rgba(200,169,81,0.07); }
+.ij-picker-row input { accent-color:var(--accent); cursor:pointer; }
+.ij-picker-row .pcount { color:var(--muted); font-size:9px; margin-left:auto; }
+
+@media (max-width:900px) {
+    .ij-table thead th:nth-child(5), .ij-table tbody td:nth-child(5),  /* installer */
+    .ij-table thead th:nth-child(6), .ij-table tbody td:nth-child(6) { /* location */
+        display:none;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Industry Jobs</h1>
+        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
+            Active jobs across {{ char_count_with_scope }} character{{ '' if char_count_with_scope == 1 else 's' }}
+            and {{ corp_count_with_scope }} player corporation{{ '' if corp_count_with_scope == 1 else 's' }}
+            {% if npc_corps_skipped %}
+            <span title="{{ npc_corps_skipped | join(', ') }}" class="b-muted">
+                &middot; {{ npc_corps_skipped | length }} NPC corp{{ '' if npc_corps_skipped|length == 1 else 's' }} skipped
+            </span>
+            {% endif %}
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+        {% if include_completed %}
+        <a href="?" class="ij-chip is-active" style="text-decoration:none;">Including completed &times;</a>
+        {% else %}
+        <a href="?include_completed=1" class="ij-chip" style="text-decoration:none;">+ Include completed</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="ij-summary">
+    <div class="ij-stat"><span class="ij-stat-label">Total</span><span class="ij-stat-value">{{ total }}</span></div>
+    {% if counts_by_source.character %}
+    <div class="ij-stat"><span class="ij-stat-label">Characters</span><span class="ij-stat-value">{{ counts_by_source.character }}</span></div>
+    {% endif %}
+    {% if counts_by_source.corporation %}
+    <div class="ij-stat"><span class="ij-stat-label">Corporations</span><span class="ij-stat-value">{{ counts_by_source.corporation }}</span></div>
+    {% endif %}
+    {% for status_name, n in counts_by_status.items() %}
+    <div class="ij-stat"><span class="ij-stat-label">{{ status_name }}</span><span class="ij-stat-value">{{ n }}</span></div>
+    {% endfor %}
+</div>
+
+{% if counts_by_activity %}
+<div class="ij-filters">
+    <button class="ij-chip is-active" data-filter-activity="all">All activities ({{ total }})</button>
+    {% for label, n in counts_by_activity %}
+    <button class="ij-chip" data-filter-activity="{{ label }}">{{ label }} ({{ n }})</button>
+    {% endfor %}
+</div>
+
+<div class="ij-filters">
+    <button class="ij-chip is-active" data-filter-source="all">All sources</button>
+    <button class="ij-chip" data-filter-source="character">Characters only</button>
+    <button class="ij-chip" data-filter-source="corporation">Corps only</button>
+
+    {% if character_filters %}
+    <div class="ij-picker" id="picker-installer">
+        <button type="button" data-picker-toggle="installer">
+            Character <span class="picker-count">(all {{ character_filters|length }})</span> ▾
+        </button>
+        <div class="ij-picker-panel">
+            <div class="ij-picker-head">
+                <button type="button" data-picker-all="installer">All</button>
+                <button type="button" data-picker-none="installer">None</button>
+            </div>
+            {% for f in character_filters %}
+            <label class="ij-picker-row">
+                <input type="checkbox" data-filter-installer-id="{{ f.id }}" checked>
+                <span>{{ f.name }}</span>
+                <span class="pcount">{{ f.count }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if corp_filters %}
+    <div class="ij-picker" id="picker-corp">
+        <button type="button" data-picker-toggle="corp">
+            Corp <span class="picker-count">(all {{ corp_filters|length }})</span> ▾
+        </button>
+        <div class="ij-picker-panel">
+            <div class="ij-picker-head">
+                <button type="button" data-picker-all="corp">All</button>
+                <button type="button" data-picker-none="corp">None</button>
+            </div>
+            {% for f in corp_filters %}
+            <label class="ij-picker-row">
+                <input type="checkbox" data-filter-corp-id="{{ f.id }}" checked>
+                <span>{{ f.name }}</span>
+                <span class="pcount">{{ f.count }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <button class="ij-chip" id="ij-clear-filters">Reset</button>
+</div>
+{% endif %}
+
+{% if rows %}
+<div class="b-panel">
+    <table class="ij-table">
+        <thead>
+            <tr>
+                <th style="width:28%;">Product</th>
+                <th>Activity</th>
+                <th style="text-align:right;">Runs</th>
+                <th>Source</th>
+                <th>Installer</th>
+                <th>Location</th>
+                <th>Remaining</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr data-activity="{{ r.activity_label }}"
+                data-source="{{ r.source_kind }}"
+                data-installer-id="{{ r.installer_id or '' }}"
+                data-corp-id="{{ r.source_id if r.source_kind == 'corporation' else '' }}">
+                <td>
+                    <div class="ij-row-product">
+                        {% if r.product_id %}
+                        <img src="https://images.evetech.net/types/{{ r.product_id }}/icon?size=32"
+                             data-on-error="hide" alt="">
+                        {% endif %}
+                        <div style="min-width:0;">
+                            <div class="ij-product-name">{{ r.product_name }}</div>
+                            {% if r.blueprint_name and r.blueprint_name != r.product_name %}
+                            <div class="ij-sub">from {{ r.blueprint_name }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </td>
+                <td>{{ r.activity_short }}</td>
+                <td style="text-align:right;">{{ r.runs }}</td>
+                <td>
+                    <div class="ij-source-kind">{{ r.source_kind|capitalize }}</div>
+                    <div class="ij-source-name">{{ r.source_name }}</div>
+                </td>
+                <td>{{ r.installer_name or '—' }}</td>
+                <td title="{{ r.location_id or '' }}">{{ r.location_name or '—' }}</td>
+                <td class="ij-time-{{ r.urgency }}" title="{{ r.end_iso or '' }}">{{ r.time_remaining }}</td>
+                <td><span class="ij-status is-{{ r.status }}">{{ r.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="b-empty" style="padding:2rem;text-align:center;font-size:11px;color:var(--muted);">
+    {% if char_count_with_scope == 0 and corp_count_with_scope == 0 %}
+    No characters have the industry-jobs scope granted.
+    Authorize a character with <code>esi-industry.read_character_jobs.v1</code>
+    (and <code>esi-industry.read_corporation_jobs.v1</code> for corp jobs) to populate this page.
+    {% else %}
+    No {{ 'jobs' if include_completed else 'active jobs' }} found.
+    {% endif %}
+</div>
+{% endif %}
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function() {
+    /* Each picker has two state knobs:
+       - `all`: every box checked → filter disabled (treat as no-op)
+       - `Set` of ID strings: only rows whose matching attr is IN the set pass
+    */
+    var activity = 'all';
+    var sourceKind = 'all';
+    var installerSet = null;   // null = "all installers" (no filter)
+    var corpSet = null;        // null = "all corps" (no filter)
+    var rows = document.querySelectorAll('.ij-table tbody tr');
+
+    function applyFilters() {
+        rows.forEach(function(tr) {
+            var okA = activity === 'all' || tr.dataset.activity === activity;
+            var okS = sourceKind === 'all' || tr.dataset.source === sourceKind;
+            var okI = installerSet === null || installerSet.has(tr.dataset.installerId);
+            var okC = corpSet === null || (tr.dataset.corpId && corpSet.has(tr.dataset.corpId));
+            /* Corp-filter special case: if corpSet filters any corps, char-source rows
+               (no corpId) fall through — user probably wants them hidden too. */
+            if (corpSet !== null && !tr.dataset.corpId) okC = false;
+            tr.style.display = (okA && okS && okI && okC) ? '' : 'none';
+        });
+    }
+
+    /* --- Activity chips --- */
+    document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(c) {
+                c.classList.remove('is-active');
+            });
+            chip.classList.add('is-active');
+            activity = chip.dataset.filterActivity;
+            applyFilters();
+        });
+    });
+
+    /* --- Source-kind chips (All / Characters / Corps) --- */
+    document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
+                c.classList.remove('is-active');
+            });
+            chip.classList.add('is-active');
+            sourceKind = chip.dataset.filterSource;
+            applyFilters();
+        });
+    });
+
+    /* --- Picker dropdowns (installer + corp) --- */
+    function pickerEl(kind) { return document.getElementById('picker-' + kind); }
+    function pickerBoxes(kind) {
+        var el = pickerEl(kind);
+        if (!el) return [];
+        var attr = kind === 'installer' ? 'data-filter-installer-id' : 'data-filter-corp-id';
+        return el.querySelectorAll('input[' + attr + ']');
+    }
+
+    function refreshPickerLabel(kind) {
+        var el = pickerEl(kind);
+        if (!el) return;
+        var boxes = pickerBoxes(kind);
+        var checked = 0;
+        boxes.forEach(function(b) { if (b.checked) checked++; });
+        var total = boxes.length;
+        var label = el.querySelector('.picker-count');
+        if (!label) return;
+        if (checked === total) {
+            label.textContent = '(all ' + total + ')';
+            el.classList.remove('has-selection');
+        } else if (checked === 0) {
+            label.textContent = '(none)';
+            el.classList.add('has-selection');
+        } else {
+            label.textContent = '(' + checked + ' of ' + total + ')';
+            el.classList.add('has-selection');
+        }
+    }
+
+    function rebuildSets() {
+        /* Installer set */
+        var iBoxes = pickerBoxes('installer');
+        var iAll = iBoxes.length > 0;
+        var iSet = new Set();
+        iBoxes.forEach(function(b) {
+            if (b.checked) iSet.add(b.dataset.filterInstallerId);
+            else iAll = false;
+        });
+        installerSet = iAll ? null : iSet;
+
+        /* Corp set */
+        var cBoxes = pickerBoxes('corp');
+        var cAll = cBoxes.length > 0;
+        var cSet = new Set();
+        cBoxes.forEach(function(b) {
+            if (b.checked) cSet.add(b.dataset.filterCorpId);
+            else cAll = false;
+        });
+        corpSet = cAll ? null : cSet;
+    }
+
+    document.querySelectorAll('[data-picker-toggle]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            var kind = btn.dataset.pickerToggle;
+            var el = pickerEl(kind);
+            var wasOpen = el.classList.contains('is-open');
+            document.querySelectorAll('.ij-picker').forEach(function(p) { p.classList.remove('is-open'); });
+            if (!wasOpen) el.classList.add('is-open');
+            e.stopPropagation();
+        });
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.ij-picker')) {
+            document.querySelectorAll('.ij-picker').forEach(function(p) { p.classList.remove('is-open'); });
+        }
+    });
+
+    document.querySelectorAll('[data-picker-all]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var kind = btn.dataset.pickerAll;
+            pickerBoxes(kind).forEach(function(b) { b.checked = true; });
+            refreshPickerLabel(kind);
+            rebuildSets();
+            applyFilters();
+        });
+    });
+    document.querySelectorAll('[data-picker-none]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var kind = btn.dataset.pickerNone;
+            pickerBoxes(kind).forEach(function(b) { b.checked = false; });
+            refreshPickerLabel(kind);
+            rebuildSets();
+            applyFilters();
+        });
+    });
+    document.querySelectorAll('input[data-filter-installer-id], input[data-filter-corp-id]').forEach(function(b) {
+        b.addEventListener('change', function() {
+            var kind = b.hasAttribute('data-filter-installer-id') ? 'installer' : 'corp';
+            refreshPickerLabel(kind);
+            rebuildSets();
+            applyFilters();
+        });
+    });
+
+    /* --- Reset --- */
+    var reset = document.getElementById('ij-clear-filters');
+    if (reset) {
+        reset.addEventListener('click', function() {
+            activity = 'all';
+            sourceKind = 'all';
+            document.querySelectorAll('.ij-chip[data-filter-activity]').forEach(function(c) {
+                c.classList.toggle('is-active', c.dataset.filterActivity === 'all');
+            });
+            document.querySelectorAll('.ij-chip[data-filter-source]').forEach(function(c) {
+                c.classList.toggle('is-active', c.dataset.filterSource === 'all');
+            });
+            pickerBoxes('installer').forEach(function(b) { b.checked = true; });
+            pickerBoxes('corp').forEach(function(b) { b.checked = true; });
+            refreshPickerLabel('installer');
+            refreshPickerLabel('corp');
+            rebuildSets();
+            applyFilters();
+        });
+    }
+})();
+</script>
+{% endblock %}

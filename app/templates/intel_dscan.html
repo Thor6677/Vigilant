@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %} — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">D-Scan</span></div>
+{% endblock %}
+{% block content %}
+
+{# ── Header ───────────────────────────────────────────────────────────────── #}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title" style="margin-bottom:2px;">D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %}</h1>
+        <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
+            <span>{{ summary.ships }} ship{{ 's' if summary.ships != 1 else '' }}{% if non_ship_items %} · {{ non_ship_items | length }} other{% endif %}</span>
+            <span>·</span>
+            <span>Expires in {{ expires_str }}</span>
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+        <button data-click="copyShareUrl" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        <button data-click="toggleAddScan" id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
+        <button data-click="toggleRawPaste" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
+        <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
+    </div>
+</div>
+<input type="text" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+
+{# ── Raw Paste (hidden by default) ───────────────────────────────────────── #}
+<div id="raw-paste-section" style="display:none;margin-bottom:1rem;">
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Raw Paste</span>
+            <button data-click="copyRawPaste" id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+        </div>
+        <div style="padding:0.5rem 0.75rem;">
+            <textarea id="raw-paste-text" readonly rows="12"
+                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ dscan.paste_data }}</textarea>
+        </div>
+    </div>
+</div>
+
+{# ── Add Scan (hidden by default) ─────────────────────────────────────────── #}
+<div id="add-scan-section" style="display:none;margin-bottom:1rem;">
+    <form method="POST" action="/intel/{{ scan_id }}/merge">
+        <div class="b-panel">
+            <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="b-label">Merge Additional D-Scan</span>
+            </div>
+            <div style="padding:0.5rem 0.75rem;">
+                <textarea name="paste_text" rows="8" placeholder="Paste additional d-scan here..."
+                          style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;"></textarea>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;">
+                    <label style="display:flex;align-items:center;gap:0.5rem;font-size:11px;color:var(--muted);cursor:pointer;">
+                        <input type="checkbox" name="dedup" value="on" checked
+                               style="accent-color:var(--accent);">
+                        <span>Filter duplicates</span>
+                        <span style="font-size:10px;color:var(--muted);opacity:0.7;" title="When enabled, if a ship type already exists in the scan, only extras beyond the existing count are added. Disable if the same ship type in both scans represents different ships.">(keeps max count per type)</span>
+                    </label>
+                    <button type="submit" class="b-btn" style="padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Merge Scan</button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+{# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
+<div class="b-grid-2" style="gap:1rem;align-items:start;">
+
+    {# ── LEFT: Ships by Class ─────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">Ships</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+                <button onclick="copyShipClasses(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            </div>
+        </div>
+        {% for cls, count in summary.ship_classes.items() %}
+        <div class="b-table-row" style="padding:0.3rem 0.75rem;">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ cls }}</span>
+        </div>
+        {% endfor %}
+        {% if summary.ships == 0 %}
+        <div class="b-empty">No ships on scan</div>
+        {% endif %}
+    </div>
+
+    {# ── RIGHT: Ship Types ─────────────────────────────────────────────────── #}
+    <div class="b-panel">
+        <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="b-label">By Type</span>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
+                <button onclick="copyByType(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            </div>
+        </div>
+        {% for group in summary.ships_grouped %}
+        <div class="b-table-row" style="padding:0.3rem 0.75rem;border-bottom:1px solid var(--border);">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ group.total }}</span>
+            <span style="flex:1;font-size:12px;font-weight:600;color:var(--text);padding-left:0.75rem;">{{ group.group }}</span>
+        </div>
+        {% for ship in group.ships %}
+        <div class="b-table-row" style="padding:0.2rem 0.75rem;padding-left:2.5rem;">
+            <span style="font-size:12px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ ship.count }}</span>
+            <span style="flex:1;font-size:11px;color:var(--muted);padding-left:0.75rem;display:flex;align-items:center;gap:4px;">
+                <img src="https://images.evetech.net/types/{{ ship.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" data-on-error="hide">
+                {{ ship.name }}
+            </span>
+        </div>
+        {% endfor %}
+        {% endfor %}
+    </div>
+
+</div>
+
+{# ── Expiry / Extend ──────────────────────────────────────────────────────── #}
+<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:1.5rem;padding:0.5rem 0;">
+    <span class="b-eyebrow">Keep for:</span>
+    {% for key, delta in expiry_options.items() %}
+    <form method="POST" action="/intel/{{ scan_id }}/extend" style="display:inline;">
+        <input type="hidden" name="duration" value="{{ key }}">
+        <button type="submit" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">
+            {{ key.replace('1week', '1 Week').replace('1month', '1 Month').replace('1year', '1 Year').replace('24h', '24 Hours').replace('48h', '48 Hours') }}
+        </button>
+    </form>
+    {% endfor %}
+</div>
+
+{# ── Non-Ship Items (collapsed) ───────────────────────────────────────────── #}
+{% if non_ship_items %}
+<details style="margin-top:0.5rem;">
+    <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
+        <span class="b-eyebrow">Other on Scan ({{ non_ship_items | length }})</span>
+        <span class="b-muted-sm">▼</span>
+    </summary>
+    <div class="b-panel" style="margin-top:0.25rem;">
+        {% for item in non_ship_items %}
+        <div class="b-table-row" style="padding:0.25rem 0.75rem;">
+            <span style="flex:3;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;overflow:hidden;">
+                <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" data-on-error="hide">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.type_name }}</span>
+            </span>
+            <span style="flex:1;font-size:10px;color:var(--muted);text-align:right;">{{ item.distance_str }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
+<script nonce="{{ request.state.csp_nonce }}">
+function copyShareUrl() {
+    var url = document.getElementById('share-url').value;
+    navigator.clipboard.writeText(url).then(function() {
+        var btn = document.getElementById('copy-url-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
+    });
+}
+
+function toggleAddScan() {
+    var section = document.getElementById('add-scan-section');
+    var btn = document.getElementById('add-scan-btn');
+    if (section.style.display === 'none') {
+        section.style.display = '';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+    } else {
+        section.style.display = 'none';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+    }
+}
+
+function toggleRawPaste() {
+    var section = document.getElementById('raw-paste-section');
+    var btn = document.getElementById('raw-paste-btn');
+    if (section.style.display === 'none') {
+        section.style.display = '';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+    } else {
+        section.style.display = 'none';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+    }
+}
+
+function copyRawPaste() {
+    var text = document.getElementById('raw-paste-text').value;
+    navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('copy-raw-btn');
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+
+function copyShipClasses(btn) {
+    var lines = [];
+    {% for cls, count in summary.ship_classes.items() %}
+    lines.push('{{ count }}x {{ cls }}');
+    {% endfor %}
+    lines.push('');
+    lines.push('Total: {{ summary.ships }} ships');
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+
+function copyByType(btn) {
+    var lines = [];
+    {% for group in summary.ships_grouped %}
+    lines.push('{{ group.group }} ({{ group.total }}):');
+    {% for ship in group.ships %}
+    lines.push('  {{ ship.count }}x {{ ship.name }} [{{ ship.class }}]');
+    {% endfor %}
+    lines.push('');
+    {% endfor %}
+    lines.push('Total: {{ summary.ships }} ships');
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        btn.textContent = 'Copied!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    });
+}
+</script>
+
+{% endblock %}

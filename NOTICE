@@ -1,0 +1,25 @@
+Vigilant
+Copyright (c) 2026 Thor6677
+
+The MIT license in LICENSE covers the Vigilant source code only.
+
+It does not cover the EVE Online material this project consumes: the Static
+Data Export, type names and item data, ship and item artwork, and other
+recognizable features of the EVE Online intellectual property. Those belong to
+Fenris Creations — the studio formerly known as CCP Games, renamed on
+6 May 2026 — and their use is governed by that company's third-party developer
+terms rather than by the MIT license.
+
+EVE Online(R) and Fenris Creations(TM) and all related logos and other
+elements are trademarks of Fenris Creations. (c) 2026 Fenris Creations. All
+rights reserved. All artwork, screenshots, characters, vehicles, storylines,
+world facts and other recognizable features of the intellectual property
+relating to these trademarks are likewise the intellectual property of Fenris
+Creations. Fenris Creations does not endorse, and is in no way affiliated
+with, Vigilant. Fenris Creations is in no way responsible for the content on
+or functioning of this software, nor can it be liable for any damage arising
+from its use.
+
+Note: older EVE documentation, the ESI API reference, and much of the
+third-party tooling ecosystem still say "CCP" or "CCP hf." — they refer to the
+same company.

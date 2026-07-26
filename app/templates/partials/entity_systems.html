@@ -1,0 +1,9 @@
+{% if items %}
+<ul class="ent-list">
+    {% for it in items %}
+    <li><span>{{ it.name }}</span><span class="n">{{ "{:,}".format(it.count) }}</span></li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="ent-empty">No activity in the last {{ days }} days.</div>
+{% endif %}

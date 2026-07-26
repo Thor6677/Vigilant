@@ -1,0 +1,64 @@
+{# Mail list with inline expansion — loaded via htmx on character detail page #}
+{% if mail_error %}
+<div class="b-empty">{{ mail_error }}</div>
+{% elif not mail_headers %}
+<div class="b-empty">No recent mail</div>
+{% else %}
+<div id="mail-list">
+{% for m in mail_headers %}
+<div class="mail-item">
+    <div class="b-table-row mail-header" style="cursor:pointer;{% if not m.is_read %}border-left:2px solid var(--accent);{% endif %}"
+         onclick="toggleMail({{ m.mail_id }}, {{ character_id }}, this)">
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m.is_read %}font-weight:600;{% endif %}">
+                {{ m.subject }}
+            </div>
+            <div class="b-muted-sm">
+                {% if m.timestamp %}{{ m.timestamp[:16].replace('T', ' ') }}{% endif %}
+            </div>
+        </div>
+        {% if not m.is_read %}
+        <span class="b-badge is-accent" style="flex-shrink:0;">NEW</span>
+        {% endif %}
+    </div>
+    <div id="mail-body-{{ m.mail_id }}" class="mail-body-inline" style="display:none;"></div>
+</div>
+{% endfor %}
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+var _openMailId = null;
+function toggleMail(mailId, charId, headerEl) {
+    var bodyEl = document.getElementById('mail-body-' + mailId);
+
+    /* If clicking the already-open mail, close it */
+    if (_openMailId === mailId) {
+        bodyEl.style.display = 'none';
+        bodyEl.innerHTML = '';
+        _openMailId = null;
+        headerEl.style.background = '';
+        return;
+    }
+
+    /* Close any currently open mail */
+    if (_openMailId !== null) {
+        var oldBody = document.getElementById('mail-body-' + _openMailId);
+        if (oldBody) {
+            oldBody.style.display = 'none';
+            oldBody.innerHTML = '';
+        }
+        /* Reset old header background */
+        document.querySelectorAll('.mail-header').forEach(function(h) { h.style.background = ''; });
+    }
+
+    /* Open the clicked mail */
+    _openMailId = mailId;
+    headerEl.style.background = 'var(--border)';
+    bodyEl.style.display = '';
+    bodyEl.innerHTML = '<div style="padding:0.75rem;font-size:10px;color:var(--muted);">Loading...</div>';
+
+    /* Fetch mail body via htmx */
+    htmx.ajax('GET', '/character/' + charId + '/mail/' + mailId, {target: '#mail-body-' + mailId, swap: 'innerHTML'});
+}
+</script>
+{% endif %}

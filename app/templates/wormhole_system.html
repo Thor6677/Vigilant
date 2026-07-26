@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% from "partials/_entity_links.html" import entity_links %}
+{% block title %}{{ system['system_name'] }} — Wormhole Systems — VIGILANT{% endblock %}
+
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span>
+    <a href="/wormholes">Wormhole Systems</a><span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">{{ system['system_name'] }}</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .ws-header { display:flex; align-items:baseline; justify-content:flex-start; gap:0.75rem; margin-bottom:0.25rem; flex-wrap:wrap; }
+    .ws-name { font-size:28px; font-weight:700; color:var(--text); letter-spacing:-0.02em; }
+    .ws-class-badge { font-size:13px; font-weight:600; padding:0.15rem 0.5rem; border:1px solid; border-radius:2px; }
+    .ws-meta { font-size:10px; color:var(--muted); margin-bottom:1.5rem; }
+    .ws-meta a { color:var(--muted); text-decoration:none; }
+    .ws-meta a:hover { color:var(--text); }
+    .ws-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+    .ws-section { margin-bottom:1rem; }
+    .ws-section-title { font-size:9px; text-transform:uppercase; letter-spacing:0.12em; color:var(--muted); margin-bottom:0.5rem; border-bottom:1px solid var(--border); padding-bottom:0.3rem; }
+    .ws-conn { display:inline-flex; align-items:center; gap:0.2rem; margin-right:0.75rem; margin-bottom:0.3rem; }
+    .ws-conn a { text-decoration:none; font-weight:600; }
+    .ws-conn-dest { font-size:10px; vertical-align:super; }
+    .ws-celestial { display:grid; grid-template-columns:auto 55px 1fr auto; gap:0.5rem; align-items:center; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:11px; }
+    .ws-celestial:last-child { border-bottom:none; }
+    .ws-effect-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .ws-effect-table th { text-align:left; padding:0.3rem 0.5rem; color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid var(--border); }
+    .ws-effect-table td { padding:0.3rem 0.5rem; border-bottom:1px solid var(--border); }
+    .ws-links { display:flex; gap:0.75rem; flex-wrap:wrap; }
+    .ws-links a { font-size:11px; color:var(--accent); text-decoration:none; }
+    .ws-links a:hover { text-decoration:underline; }
+    .ws-diagram-wrap { position:relative; width:100%; max-width:360px; margin:0 auto; }
+    @media(max-width:768px) { .ws-grid { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ws-header b-page-header">
+    <span class="ws-name b-page-title">{{ system['system_name'] }}</span>
+    <span class="ws-class-badge" style="color:{{ class_color(wh_class) }};border-color:{{ class_color(wh_class) }};">{{ class_label(wh_class) }} System</span>
+    {% if effect %}
+    <span style="font-size:12px;color:var(--text);">{{ effect['name'] }}</span>
+    {% endif %}
+</div>
+<div class="ws-meta">
+    {% if system.get('region') %}
+    <a href="#">{{ system['region'] }}</a> &raquo;
+    {% endif %}
+    {% if system.get('constellation') %}
+    <a href="#">{{ system['constellation'] }}</a> &raquo;
+    {% endif %}
+    {{ system['system_name'] }}
+</div>
+<div style="margin-bottom:1.25rem;">{{ entity_links("system", system['system_id'], system['system_name'], current="wh", jspace=True) }}</div>
+
+<!-- Connections -->
+<div class="ws-section">
+    <div class="ws-section-title">Connections</div>
+    <div style="margin-bottom:0.5rem;">
+        {% if statics %}
+        <div style="margin-bottom:0.4rem;">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Static{{ 's' if statics|length > 1 }}</span>
+            {% for s in statics %}
+            <span class="ws-conn">
+                <a href="/wormholes/types/{{ s['code'] }}" style="color:{{ class_color(s['target_class']) }};">{{ s['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(s['target_class']) }};">&rarr;{{ class_label(s['target_class']) }}</span>
+            </span>
+            {% endfor %}
+        </div>
+        {% elif not statics_known %}
+        {# ISS-014: 37 J-systems are absent from the community-sourced static map.
+           Split the explanation by wh_class so it's actually useful:
+             - 14-18: drifter complexes (Sentinel MZ, Liberated Barbican, etc.) —
+               connect via special drifter-only wormhole types, not the
+               community-tracked statics.
+             - None: shattered / uncatalogued in the SDE — there are no statics,
+               only wandering connections.
+             - else (shouldn't happen for the current 37 but defensive): generic
+               "not catalogued" note. #}
+        <div style="margin-bottom:0.4rem;">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Statics</span>
+            {% if wh_class in [14, 15, 16, 17, 18] %}
+            <span class="b-muted-sm" style="font-style:italic;">Drifter complex — uses special wormhole types only</span>
+            {% elif wh_class is none %}
+            <span class="b-muted-sm" style="font-style:italic;">Shattered/uncatalogued system — connections appear as wandering only</span>
+            {% else %}
+            <span class="b-muted-sm" style="font-style:italic;">Not catalogued — community data does not cover this system</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if wandering %}
+        <div>
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Possible Wandering</span>
+            {% for w in wandering %}
+            <span class="ws-conn">
+                <a href="/wormholes/types/{{ w['code'] }}" style="color:{{ class_color(w['target_class']) }};">{{ w['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(w['target_class']) }};">&rarr;{{ class_label(w['target_class']) }}</span>
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="ws-grid">
+    <div>
+        <!-- Effect -->
+        {% if effect %}
+        <div class="ws-section">
+            <div class="ws-section-title">{{ effect['name'] }} Effect ({{ class_label(wh_class) }})</div>
+            <div class="b-panel" style="padding:0;">
+                <table class="ws-effect-table">
+                    <thead>
+                        <tr><th>Modifier</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for mod in effect.get('modifiers', []) %}
+                    {% set idx = (wh_class - 1) if wh_class and wh_class <= 6 else 0 %}
+                    {% set val = mod['values'][idx] if idx < mod['values']|length else mod['values'][0] %}
+                    <tr>
+                        <td>{{ mod['name'] }}</td>
+                        <td style="color:{% if mod['type'] == 'bonus' and val > 0 %}var(--success){% elif mod['type'] == 'penalty' and val < 0 %}var(--danger){% elif mod['type'] == 'penalty' and val > 0 %}var(--danger){% else %}var(--success){% endif %};">
+                            {{ '+' if val > 0 }}{{ val }}%
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- System Diagram -->
+        {% if celestials['planets'] %}
+        <div class="ws-section">
+            <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+                System Diagram
+                <div style="display:flex;gap:2px;">
+                    <button id="zoom-full" onclick="drawDiagram('full')" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
+                    <button id="zoom-dscan" onclick="drawDiagram('dscan')" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
+                </div>
+            </div>
+            <div class="ws-diagram-wrap">
+                <svg id="sys-diagram" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:400px;">
+                </svg>
+                <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
+                    <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(100,180,255,0.6);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
+                    <span>{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }}</span>
+                </div>
+            </div>
+        </div>
+        <script nonce="{{ request.state.csp_nonce }}">
+        var _diagramPlanets = {{ celestials['planets'] | tojson }};
+        function drawDiagram(mode) {
+            var planets = _diagramPlanets;
+            var colors = {Temperate:'#6db36d',Ice:'#a8d8ea',Gas:'#d4a06a',Oceanic:'#4a9eda',Lava:'#cc4433',Barren:'#8a7a6a',Storm:'#6a7a9a',Plasma:'#9a6acc',Shattered:'#aa8866'};
+            var svg = document.getElementById('sys-diagram');
+            var ns = 'http://www.w3.org/2000/svg';
+            svg.innerHTML = '';
+            var cx = 200, cy = 200, maxR = 175;
+            var dscanAU = 14.3;
+            var rom = ['','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV'];
+
+            // Toggle button styles
+            var bf = document.getElementById('zoom-full'), bd = document.getElementById('zoom-dscan');
+            if (mode === 'dscan') {
+                bd.style.background='var(--accent)'; bd.style.color='var(--bg)'; bd.style.borderColor='var(--accent)';
+                bf.style.background='var(--surface)'; bf.style.color='var(--muted)'; bf.style.borderColor='var(--border)';
+            } else {
+                bf.style.background='var(--accent)'; bf.style.color='var(--bg)'; bf.style.borderColor='var(--accent)';
+                bd.style.background='var(--surface)'; bd.style.color='var(--muted)'; bd.style.borderColor='var(--border)';
+            }
+
+            // Determine scale AU — linear
+            var scaleAU;
+            if (mode === 'dscan') {
+                scaleAU = dscanAU * 1.15;
+            } else {
+                scaleAU = 0;
+                planets.forEach(function(p) { if (p.distance_au > scaleAU) scaleAU = p.distance_au; });
+                scaleAU = scaleAU * 1.1 || 10;
+            }
+
+            function auToR(au) { return (au / scaleAU) * maxR; }
+
+            // Background
+            var bg = document.createElementNS(ns,'rect');
+            bg.setAttribute('width',400); bg.setAttribute('height',400); bg.setAttribute('fill','#080808'); bg.setAttribute('rx',4);
+            svg.appendChild(bg);
+
+            // D-scan circle (always shown)
+            var dsR = auToR(dscanAU);
+            if (dsR > 5) {
+                var fill = document.createElementNS(ns,'circle');
+                fill.setAttribute('cx',cx); fill.setAttribute('cy',cy); fill.setAttribute('r',dsR);
+                fill.setAttribute('fill','rgba(100,180,255,0.03)'); fill.setAttribute('stroke','rgba(100,180,255,0.3)');
+                fill.setAttribute('stroke-width','1.5'); fill.setAttribute('stroke-dasharray','8,5');
+                svg.appendChild(fill);
+                var t = document.createElementNS(ns,'text');
+                t.setAttribute('x', cx); t.setAttribute('y', cy - dsR - 5);
+                t.setAttribute('fill','rgba(100,180,255,0.5)'); t.setAttribute('font-size','9');
+                t.setAttribute('font-family','monospace'); t.setAttribute('text-anchor','middle');
+                t.textContent = '14.3 AU D-scan';
+                svg.appendChild(t);
+            }
+
+            // Planets
+            planets.forEach(function(p, i) {
+                if (!p.distance_au) return;
+                var r = auToR(p.distance_au);
+                if (r < 3) r = 3;
+                var outOfView = r > maxR + 15;
+
+                // Orbit ring
+                if (!outOfView) {
+                    var orb = document.createElementNS(ns,'circle');
+                    orb.setAttribute('cx',cx); orb.setAttribute('cy',cy); orb.setAttribute('r',r);
+                    orb.setAttribute('fill','none'); orb.setAttribute('stroke','rgba(255,255,255,0.08)');
+                    orb.setAttribute('stroke-width','0.5');
+                    svg.appendChild(orb);
+                }
+
+                // Planet dot
+                var angle = (i + 1) * 2.399963 + 0.5;
+                var drawR = outOfView ? maxR + 8 : r;
+                var px = cx + drawR * Math.cos(angle);
+                var py = cy + drawR * Math.sin(angle);
+                var col = colors[p.type_name] || '#888';
+                var pr = outOfView ? 3 : (p.moon_count >= 10 ? 6 : (p.moon_count >= 3 ? 5 : 4));
+                var dot = document.createElementNS(ns,'circle');
+                dot.setAttribute('cx',px); dot.setAttribute('cy',py); dot.setAttribute('r',pr);
+                dot.setAttribute('fill', outOfView ? 'rgba(255,255,255,0.15)' : col);
+                dot.setAttribute('stroke','rgba(255,255,255,0.25)'); dot.setAttribute('stroke-width','0.5');
+                if (outOfView) dot.setAttribute('stroke-dasharray','2,2');
+                var title = document.createElementNS(ns,'title');
+                title.textContent = p.planet_name + ' (' + p.type_name + ') — ' + p.distance_au + ' AU' + (p.moon_count > 0 ? ', ' + p.moon_count + ' moon' + (p.moon_count !== 1 ? 's' : '') : '');
+                dot.appendChild(title);
+                svg.appendChild(dot);
+
+                // Label
+                var idx = p.planet_index || (i + 1);
+                var label = rom[idx] || String(idx);
+                if (!outOfView) label += ' ' + p.distance_au;
+                var lbl = document.createElementNS(ns,'text');
+                var lx = px + (Math.cos(angle) > 0 ? pr + 3 : -pr - 3);
+                lbl.setAttribute('x', lx); lbl.setAttribute('y', py + 3);
+                lbl.setAttribute('fill', outOfView ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.45)');
+                lbl.setAttribute('font-size', outOfView ? '7' : '8'); lbl.setAttribute('font-family','monospace');
+                lbl.setAttribute('text-anchor', Math.cos(angle) > 0 ? 'start' : 'end');
+                lbl.textContent = label;
+                svg.appendChild(lbl);
+            });
+
+            // Star
+            var sg = document.createElementNS(ns,'circle');
+            sg.setAttribute('cx',cx); sg.setAttribute('cy',cy); sg.setAttribute('r','12');
+            sg.setAttribute('fill','none'); sg.setAttribute('stroke','rgba(240,208,96,0.15)'); sg.setAttribute('stroke-width','1');
+            svg.appendChild(sg);
+            var s = document.createElementNS(ns,'circle');
+            s.setAttribute('cx',cx); s.setAttribute('cy',cy); s.setAttribute('r','6');
+            s.setAttribute('fill','#f0d060'); s.setAttribute('opacity','0.9');
+            svg.appendChild(s);
+        }
+        drawDiagram('full');
+        </script>
+        {% endif %}
+
+        <!-- Celestials List -->
+        <div class="ws-section">
+            {% set total_moons = celestials['planets'] | sum(attribute='moon_count') %}
+            <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+                Celestials
+                <span style="font-size:9px;letter-spacing:0.1em;color:var(--muted);text-transform:none;">{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }} &middot; {{ total_moons }} moon{{ 's' if total_moons != 1 }}{% if celestials['star'] %} &middot; {{ celestials['star']['type_name'] or 'Star' }}{% endif %}</span>
+            </div>
+            <div class="b-panel" style="padding:0.5rem 0.75rem;">
+                {% for p in celestials['planets'] %}
+                <div class="ws-celestial">
+                    <span>{{ p['planet_name'] }}</span>
+                    <span style="color:var(--muted);text-align:right;font-size:10px;">{% if p['distance_au'] %}{{ p['distance_au'] }} AU{% endif %}</span>
+                    <span>Planet ({{ p['type_name'] }})</span>
+                    <span style="color:{% if p['moon_count'] > 0 %}var(--text){% else %}var(--muted){% endif %};font-size:10px;">
+                        {% if p['moon_count'] > 0 %}{{ p['moon_count'] }} moon{{ 's' if p['moon_count'] != 1 }}{% else %}no moons{% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+                {% if not celestials['planets'] and not celestials['star'] %}
+                <div class="b-empty">No celestial data available.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <!-- Kill Activity (lazy loaded) -->
+        <div class="ws-section">
+            <div class="ws-section-title">Kill Activity</div>
+            <div id="wh-kills"
+                 hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
+                 hx-trigger="load"
+                 hx-indicator="#kills-loading">
+                <div class="b-panel" style="padding:0.75rem;text-align:center;">
+                    <span id="kills-loading" class="htmx-indicator b-muted-sm">Loading kill data...</span>
+                    <span class="b-muted-sm">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Structure Age (paste a showinfo link from local) -->
+        <div class="ws-section">
+            <div class="ws-section-title">Structure Age</div>
+            <div class="b-panel" style="padding:0.75rem;">
+                <p class="b-muted-sm" style="margin-bottom:0.5rem;">
+                    Paste a structure showinfo link to estimate when it was anchored.
+                    <a href="/tools/structure-age" style="color:var(--accent);">Full tool →</a>
+                </p>
+                <form hx-get="/tools/structure-age/partial" hx-target="#ws-structure-age-result"
+                      hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.5rem;">
+                    <textarea name="paste" class="sa-input" style="min-height:44px;"
+                        placeholder="&lt;url=showinfo:35833//1234567890123&gt;{{ system['system_name'] }} - ...&lt;/url&gt;"></textarea>
+                    <div><button type="submit" class="sa-submit">Estimate Age</button></div>
+                </form>
+            </div>
+            <div id="ws-structure-age-result" style="margin-top:0.5rem;"></div>
+        </div>
+
+        <!-- External Links -->
+        <div class="ws-section">
+            <div class="ws-section-title">External Links</div>
+            <div class="ws-links">
+                <a href="https://zkillboard.com/system/{{ system['system_id'] }}/" target="_blank" rel="noopener">zKillboard</a>
+                <a href="https://evemaps.dotlan.net/system/{{ system['system_name'] }}" target="_blank" rel="noopener">DOTLAN</a>
+                <a href="https://anoik.is/systems/{{ system['system_name'] }}" target="_blank" rel="noopener">Anoik.is</a>
+                <a href="https://www.ellatha.com/eve/WormholeSystemview.asp?key={{ system['system_name'][1:] }}" target="_blank" rel="noopener">Ellatha</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

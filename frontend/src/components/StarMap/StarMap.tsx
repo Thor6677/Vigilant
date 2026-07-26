@@ -1,0 +1,1789 @@
+import {
+  useRef,
+  useEffect,
+  useCallback,
+  useState,
+  useMemo,
+  useImperativeHandle,
+  forwardRef,
+} from 'react';
+import { Application } from 'pixi.js';
+import { Viewport } from 'pixi-viewport';
+import { quadtree, type Quadtree } from 'd3-quadtree';
+import Graph from 'graphology';
+
+import type { SystemData, MapData, OverlayType, GroupMode, IndustryIndexKind, PlanetTypeId } from './types';
+import { LODTier } from './types';
+import { LOD_THRESHOLDS, MIN_ZOOM, MAX_ZOOM, CANVAS_SIZE, BG_COLOR } from './utils/constants';
+import {
+  heatmapColor, allianceColor, FACTION_COLORS,
+  industryColor, admColor, dominantPlanetColor, PLANET_TYPE_COLORS,
+  wormholeClassColor,
+} from './utils/colors';
+import { SystemRenderer } from './renderer/SystemRenderer';
+import { EdgeRenderer } from './renderer/EdgeRenderer';
+import { LabelRenderer } from './renderer/LabelRenderer';
+import { RouteRenderer } from './renderer/RouteRenderer';
+import { JumpRangeRenderer } from './renderer/JumpRangeRenderer';
+import { AllianceTerritoryRenderer } from './renderer/AllianceTerritoryRenderer';
+import { TheraRenderer } from './renderer/TheraRenderer';
+import { buildGraph } from './graph/buildGraph';
+import { useOverlayData, usePlanetTypes } from './useOverlayData';
+import { useKillHeatmap } from './useKillHeatmap';
+import type { KillHeatmapWindow } from './types';
+import type { TheraConnection } from './useOverlayData';
+import { useSovChanges, type SovTimeRange } from './useSovChanges';
+import { useCharacterLocations } from './useCharacterLocations';
+import { useJumpPlanner } from './useJumpPlanner';
+import { useGateRoutePlanner } from './useGateRoutePlanner';
+import { useBookmarks } from './useBookmarks';
+
+import { SystemInfoPanel } from './ui/SystemInfoPanel';
+import { SystemSearch } from './ui/SystemSearch';
+import { MapToolbar } from './ui/MapToolbar';
+import { OverlayControls } from './ui/OverlayControls';
+import { GroupModeControls } from './ui/GroupModeControls';
+import { JumpPlannerPanel } from './ui/JumpPlannerPanel';
+import { GateRoutePlannerPanel } from './ui/GateRoutePlannerPanel';
+import { SystemContextMenu } from './ui/SystemContextMenu';
+import { BottomSheet } from './ui/BottomSheet';
+import { useIsMobile } from './useIsMobile';
+import type { GroupData } from './renderer/LabelRenderer';
+
+export interface StarMapHandle {
+  focusSystem: (id: number) => void;
+  setRoute: (systemIds: number[]) => void;
+  getViewport: () => Viewport | null;
+}
+
+interface StarMapProps {
+  data: MapData;
+  onSystemClick?: (system: SystemData) => void;
+  space?: 'k' | 'w';
+  onSpaceChange?: (space: 'k' | 'w') => void;
+}
+
+export const StarMap = forwardRef<StarMapHandle, StarMapProps>(({ data, onSystemClick, space = 'k', onSpaceChange }, ref) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const appRef = useRef<Application | null>(null);
+  const viewportRef = useRef<Viewport | null>(null);
+  const graphRef = useRef<Graph | null>(null);
+  const adjacencyRef = useRef<Map<number, Set<number>> | null>(null);
+  const tooltipTimerRef = useRef<number | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const qtRef = useRef<Quadtree<SystemData> | null>(null);
+  // Set by the "Parse URL params" effect below when ?focus=<id> is present,
+  // consumed once the Pixi viewport for the *current* `data` is ready (Pixi
+  // init is async, so the viewport isn't guaranteed to exist yet when the
+  // URL is parsed on mount). Cleared after use so a later space toggle
+  // (which re-runs the Pixi-init effect with new `data`) doesn't re-pan.
+  const pendingFocusRef = useRef<number | null>(null);
+
+  const systemRendererRef = useRef<SystemRenderer | null>(null);
+  const edgeRendererRef = useRef<EdgeRenderer | null>(null);
+  const labelRendererRef = useRef<LabelRenderer | null>(null);
+  const routeRendererRef = useRef<RouteRenderer | null>(null);
+  const jumpRangeRendererRef = useRef<JumpRangeRenderer | null>(null);
+  const territoryRendererRef = useRef<AllianceTerritoryRenderer | null>(null);
+  const theraRendererRef = useRef<TheraRenderer | null>(null);
+
+  const [selectedSystem, setSelectedSystem] = useState<SystemData | null>(null);
+  const [hoveredSystem, setHoveredSystem] = useState<SystemData | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+  // Bumped on every pan/zoom so screen-space overlays (character markers) re-render.
+  const [vpVersion, setVpVersion] = useState(0);
+  const [contextMenu, setContextMenu] = useState<{
+    system: SystemData;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [activeOverlay, setActiveOverlay] = useState<OverlayType>('security');
+  const [industryKind, setIndustryKind] = useState<IndustryIndexKind>('manufacturing');
+  const [planetKind, setPlanetKind] = useState<PlanetTypeId | null>(null);
+  const [radarPivotId, setRadarPivotId] = useState<number | null>(null);
+  const [radarJumps, setRadarJumps] = useState<number>(3);
+  const [killHeatmapWindow, setKillHeatmapWindow] = useState<KillHeatmapWindow>('1d');
+  const [killHeatmapBucketIdx, setKillHeatmapBucketIdx] = useState<number>(0);
+  const [killHeatmapPlaying, setKillHeatmapPlaying] = useState<boolean>(false);
+  // Fractional progress 0..1 within the current bucket. Animated by RAF
+  // when playing so the map fades smoothly between hourly samples instead
+  // of stepping. The slider/label still snap to integer buckets.
+  const [killHeatmapPlayProgress, setKillHeatmapPlayProgress] = useState<number>(0);
+  const killHeatmap = useKillHeatmap(killHeatmapWindow, space, activeOverlay === 'killHeatmap');
+  // When the heatmap dataset arrives, jump to the most recent bucket so the
+  // map shows "now" by default. Resetting on window change too.
+  useEffect(() => {
+    if (!killHeatmap.data) return;
+    setKillHeatmapBucketIdx(Math.max(0, killHeatmap.data.buckets.length - 1));
+    setKillHeatmapPlayProgress(0);
+  }, [killHeatmap.data]);
+  // Auto-advance when playing — RAF loop, animating playProgress from
+  // 0→1 and incrementing bucketIdx on overflow. Tick rate scales with
+  // bucket count so the full window plays in roughly the same wall time
+  // regardless of granularity (1d=1440 minute buckets vs 7d=7 daily).
+  useEffect(() => {
+    if (!killHeatmapPlaying || !killHeatmap.data) return;
+    const numBuckets = killHeatmap.data.buckets.length;
+    // Target ~45s for a full playthrough.
+    const msPerBucket = Math.max(20, Math.floor(45000 / numBuckets));
+    let lastTs = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const dt = now - lastTs;
+      lastTs = now;
+      const step = dt / msPerBucket;
+      setKillHeatmapPlayProgress((p) => {
+        const next = p + step;
+        if (next < 1) return next;
+        // Crossed a bucket boundary — advance bucketIdx, reset progress.
+        let stop = false;
+        setKillHeatmapBucketIdx((i) => {
+          if (i >= numBuckets - 1) {
+            stop = true;
+            return numBuckets - 1;
+          }
+          return i + 1;
+        });
+        if (stop) {
+          setKillHeatmapPlaying(false);
+          return 1;
+        }
+        return next - 1;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [killHeatmapPlaying, killHeatmap.data]);
+  const [groupMode, setGroupMode] = useState<GroupMode>('systems');
+  const [overlayBarHeight, setOverlayBarHeight] = useState(36);
+  const overlayBarRef = useRef<HTMLDivElement>(null);
+  const currentLODRef = useRef<LODTier>(LODTier.Galaxy);
+  const panelHoverRef = useRef(false); // true when mouse is over an HTML panel
+  const selectedSystemRef = useRef<SystemData | null>(null);
+
+  // Keep ref in sync for use in Pixi callbacks
+  selectedSystemRef.current = selectedSystem;
+
+  const isMobile = useIsMobile();
+
+  // Fetch ESI overlay stats
+  const { stats, loading: statsLoading } = useOverlayData();
+  const { characters } = useCharacterLocations();
+  // Planet types — lazy-loaded when the planetType overlay is activated
+  const planetData = usePlanetTypes(activeOverlay === 'planetType');
+
+  // Radar reach: BFS from pivot up to radarJumps on the stargate graph.
+  const radarReach = useMemo(() => {
+    if (activeOverlay !== 'radar' || radarPivotId == null) return null;
+    const adj = adjacencyRef.current;
+    if (!adj) return null;
+    const depth = new Map<number, number>();
+    depth.set(radarPivotId, 0);
+    const queue: number[] = [radarPivotId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      const d = depth.get(cur)!;
+      if (d >= radarJumps) continue;
+      const nbrs = adj.get(cur);
+      if (!nbrs) continue;
+      for (const n of nbrs) {
+        if (!depth.has(n)) {
+          depth.set(n, d + 1);
+          queue.push(n);
+        }
+      }
+    }
+    return depth;
+  }, [activeOverlay, radarPivotId, radarJumps, adjacencyRef.current]);
+  const jumpPlanner = useJumpPlanner(data.systemMap, data.systems, adjacencyRef.current ?? undefined);
+  const getGraph = useCallback(() => graphRef.current, []);
+  const theraConnectionsRef = useRef<TheraConnection[] | null>(null);
+  const getThera = useCallback(() => theraConnectionsRef.current, []);
+  const gateRoutePlanner = useGateRoutePlanner(getGraph, getThera);
+  const [allianceNames, setAllianceNames] = useState<Map<string, string>>(new Map());
+  const [sovTimeRange, setSovTimeRange] = useState<SovTimeRange | null>(null);
+  const sovChanges = useSovChanges(activeOverlay === 'sovereignty', sovTimeRange);
+  const bookmarks = useBookmarks();
+
+  // Fetch alliance names for sovereignty data + sov changes.
+  //
+  // Ref-based dedupe rather than state dep: we track in-flight IDs so we
+  // don't re-fetch while a request is open, and we don't put allianceNames
+  // in the deps (which would cause a render loop — the effect's own
+  // setAllianceNames would re-trigger it).
+  const allianceFetchInFlightRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const ids = new Set<number>();
+    if (stats?.sovereignty) {
+      for (const sov of Object.values(stats.sovereignty)) {
+        if (sov.alliance_id) ids.add(sov.alliance_id);
+      }
+    }
+    if (sovChanges.data?.changes) {
+      for (const sc of Object.values(sovChanges.data.changes)) {
+        if (sc.old_alliance_id) ids.add(sc.old_alliance_id);
+        if (sc.new_alliance_id) ids.add(sc.new_alliance_id);
+      }
+    }
+    if (ids.size === 0) return;
+    // Skip already-resolved AND already-in-flight
+    const missing = [...ids].filter(id =>
+      !allianceNames.has(String(id)) && !allianceFetchInFlightRef.current.has(id)
+    );
+    if (missing.length === 0) return;
+
+    // The backend /api/map/alliances route uses ESI's bulk /universe/names/
+    // (up to 1,000 IDs per call), so sending all missing IDs in one request
+    // is fine. Earlier code sliced to 50, and because `allianceNames` isn't
+    // in the deps array the effect never re-fired to fetch the remaining
+    // IDs until the next 5-minute sov poll — leaving some systems showing
+    // "Alliance 99xxxxxx" until then.
+    for (const id of missing) allianceFetchInFlightRef.current.add(id);
+
+    fetch(`/api/map/alliances?ids=${missing.join(',')}`)
+      .then(r => r.ok ? r.json() : {})
+      .then((names: Record<string, string>) => {
+        setAllianceNames(prev => {
+          const next = new Map(prev);
+          for (const [id, name] of Object.entries(names)) next.set(id, name);
+          return next;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        for (const id of missing) allianceFetchInFlightRef.current.delete(id);
+      });
+  }, [stats?.sovereignty, sovChanges.data, allianceNames]);
+
+  // Compute overlay tints when overlay or stats change
+  const overlayTints = useMemo(() => {
+    if (activeOverlay === 'security' || !stats) return null;
+
+    const tints = new Map<number, number>();
+
+    if (activeOverlay === 'jumps') {
+      const values = Object.values(stats.jumps);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const v = stats.jumps[String(sys.id)] ?? 0;
+        tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+      }
+    } else if (activeOverlay === 'shipKills') {
+      const values = Object.values(stats.kills).map(k => k.ship);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.ship ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'podKills') {
+      const values = Object.values(stats.kills).map(k => k.pod);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.pod ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'npcKills') {
+      const values = Object.values(stats.kills).map(k => k.npc);
+      const max = Math.max(1, ...values);
+      for (const sys of data.systems) {
+        const k = stats.kills[String(sys.id)];
+        tints.set(sys.id, heatmapColor(Math.sqrt((k?.npc ?? 0) / max)));
+      }
+    } else if (activeOverlay === 'sovereignty') {
+      const changedIds = sovChanges.data ? new Set(Object.keys(sovChanges.data.changes)) : null;
+      const hasChanges = changedIds && changedIds.size > 0;
+      for (const sys of data.systems) {
+        const sov = stats.sovereignty[String(sys.id)];
+        let color = 0x222233;
+        if (sov?.alliance_id) {
+          color = allianceColor(sov.alliance_id);
+        } else if (sov?.faction_id) {
+          color = FACTION_COLORS[sov.faction_id] ?? 0x555577;
+        }
+        if (hasChanges) {
+          tints.set(sys.id, changedIds.has(String(sys.id)) ? brighten(color, 1.6) : brighten(color, 0.35));
+        } else {
+          tints.set(sys.id, color);
+        }
+      }
+    } else if (activeOverlay === 'incursions') {
+      // Build set of infested systems
+      const infested = new Set<number>();
+      const staging = new Set<number>();
+      for (const inc of stats.incursions) {
+        for (const sid of inc.systems) infested.add(sid);
+        if (inc.staging_system_id) staging.add(inc.staging_system_id);
+      }
+      for (const sys of data.systems) {
+        if (staging.has(sys.id)) {
+          tints.set(sys.id, 0xff8800);
+        } else if (infested.has(sys.id)) {
+          tints.set(sys.id, 0xff4444);
+        } else {
+          tints.set(sys.id, 0x1a1a2a);
+        }
+      }
+    } else if (activeOverlay === 'factionWarfare') {
+      for (const sys of data.systems) {
+        const fw = stats.fw[String(sys.id)];
+        if (fw?.occupier) {
+          const base = FACTION_COLORS[fw.occupier] ?? 0x555577;
+          // Brighten contested systems in proportion to VP%
+          const factor = fw.contested !== 'uncontested'
+            ? 1.2 + (fw.vp_pct ?? 0) / 100 * 0.8
+            : 1.0;
+          tints.set(sys.id, factor > 1.01 ? brighten(base, factor) : base);
+        } else {
+          tints.set(sys.id, 0x1a1a2a);
+        }
+      }
+    } else if (activeOverlay === 'industry') {
+      // Normalize against the P95 of seen values so Jita doesn't compress the scale.
+      const values = Object.values(stats.indices || {}).map(x => x[industryKind] ?? 0);
+      const sorted = [...values].sort((a, b) => a - b);
+      const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0.2;
+      for (const sys of data.systems) {
+        const row = stats.indices?.[String(sys.id)];
+        const v = row?.[industryKind] ?? 0;
+        tints.set(sys.id, industryColor(v, p95 || 0.2));
+      }
+    } else if (activeOverlay === 'adm') {
+      for (const sys of data.systems) {
+        const v = stats.adm?.[String(sys.id)];
+        if (typeof v === 'number') {
+          tints.set(sys.id, admColor(v));
+        } else {
+          tints.set(sys.id, 0x141414);
+        }
+      }
+    } else if (activeOverlay === 'planetType') {
+      // When a specific planet type is picked, paint ONLY systems that host
+      // that type and dim the rest — very useful for PI-site selection. When
+      // "All" is selected we fall back to the dominant-type color so the
+      // whole galaxy gets painted.
+      if (planetData?.systems) {
+        const selectedId = planetKind !== null ? String(planetKind) : null;
+        const selectedColor = planetKind !== null
+          ? PLANET_TYPE_COLORS[planetKind as number] ?? 0x141414
+          : 0;
+        for (const sys of data.systems) {
+          const counts = planetData.systems[String(sys.id)];
+          if (selectedId !== null) {
+            const n = counts?.[selectedId] ?? 0;
+            // Dim systems without this planet type; brighten those that host
+            // many (up to 5). Count rarely exceeds 5, so divide by 5 for a
+            // reasonable 0..1 intensity ramp.
+            if (n > 0) {
+              const intensity = Math.min(1, n / 5);
+              tints.set(sys.id, brighten(selectedColor, 0.6 + intensity * 0.6));
+            } else {
+              tints.set(sys.id, 0x0e0e0e);
+            }
+          } else {
+            tints.set(sys.id, counts ? dominantPlanetColor(counts) : 0x141414);
+          }
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
+    } else if (activeOverlay === 'radar') {
+      // Pivot = gold. 1 jump = bright green. 2 = yellow. 3+ = orange.
+      // Outside the reach radius: deep dim.
+      if (radarReach) {
+        for (const sys of data.systems) {
+          const d = radarReach.get(sys.id);
+          if (d == null) { tints.set(sys.id, 0x0f0f0f); continue; }
+          if (d === 0) { tints.set(sys.id, 0xc8a951); continue; }
+          if (d === 1) { tints.set(sys.id, 0x48f148); continue; }
+          if (d === 2) { tints.set(sys.id, 0xccaa33); continue; }
+          tints.set(sys.id, 0xef6f00);
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
+    } else if (activeOverlay === 'killHeatmap') {
+      // Per-system kill count at the currently scrubbed bucket. Sparse
+      // dataset — systems with no kills get the dim baseline. Reuse the
+      // existing heatmapColor ramp for visual consistency with the
+      // shipKills/podKills overlays.
+      //
+      // Paused view: lerp the kill *value* (not color) between bucket i
+      // and i+1 by playProgress. Lerping the color directly would give
+      // wrong intermediate hues since heatmapColor is non-linear.
+      //
+      // Playing at minute resolution (1d window): each bucket is on
+      // screen for ~31ms — too fast to spot a brief kill. Switch to a
+      // spark-and-decay model: the current bucket's value flashes at
+      // full intensity and decays exponentially over ~30 past buckets
+      // (~1s of playback time), so kills linger as a fading afterglow.
+      // Daily-resolution windows (7d/30d) already show each bucket for
+      // >1s, so they keep the simple lerp.
+      const hm = killHeatmap.data;
+      const max = hm?.max_value ?? 0;
+      if (hm && max > 0) {
+        const i = killHeatmapBucketIdx;
+        const p = killHeatmapPlaying ? killHeatmapPlayProgress : 0;
+        const useDecay = killHeatmapPlaying && hm.bucket_seconds === 60;
+        if (useDecay) {
+          const DECAY = 0.92;
+          const K = 30;
+          // Pre-compute per-frame weights so the inner loop is a single
+          // multiply per past bucket.
+          const weights = new Array<number>(K + 1);
+          weights[0] = Math.pow(DECAY, p);
+          for (let k = 1; k <= K; k++) weights[k] = weights[k - 1] * DECAY;
+          for (const sys of data.systems) {
+            const arr = hm.lookup.get(sys.id);
+            if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
+            let v = (arr[i] || 0) * weights[0];
+            const limit = Math.min(K, i);
+            for (let k = 1; k <= limit; k++) {
+              const past = (arr[i - k] || 0) * weights[k];
+              if (past > v) v = past;
+            }
+            if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
+            tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+          }
+        } else {
+          const j = Math.min(i + 1, hm.buckets.length - 1);
+          const oneMinusP = 1 - p;
+          for (const sys of data.systems) {
+            const arr = hm.lookup.get(sys.id);
+            if (!arr) { tints.set(sys.id, 0x1a1a40); continue; }
+            const v = (arr[i] || 0) * oneMinusP + (arr[j] || 0) * p;
+            if (v <= 0) { tints.set(sys.id, 0x1a1a40); continue; }
+            tints.set(sys.id, heatmapColor(Math.sqrt(v / max)));
+          }
+        }
+      } else {
+        for (const sys of data.systems) tints.set(sys.id, 0x141414);
+      }
+    } else if (activeOverlay === 'wormholeClass') {
+      // W-space-only overlay. Color each system by its wormhole class.
+      for (const sys of data.systems) {
+        tints.set(sys.id, wormholeClassColor(sys.whClass));
+      }
+    }
+
+    return tints;
+  }, [activeOverlay, stats, data.systems, sovChanges.data, industryKind, planetData, planetKind, radarReach, killHeatmap.data, killHeatmapBucketIdx, killHeatmapPlaying, killHeatmapPlayProgress]);
+
+  // Apply overlay tints to renderer
+  useEffect(() => {
+    systemRendererRef.current?.setOverlayTint(overlayTints);
+  }, [overlayTints]);
+
+  // Keep Thera connections up to date — used both for rendering (rings on the
+  // map) and as a feed for the gate route planner when 'Include Thera' is on.
+  useEffect(() => {
+    theraConnectionsRef.current = stats?.thera ?? null;
+    const tr = theraRendererRef.current;
+    if (tr && stats?.thera) {
+      tr.update(stats.thera, data.systemMap);
+    }
+  }, [stats?.thera, data.systemMap]);
+
+  // Update alliance territory shading when sovereignty overlay is active
+  useEffect(() => {
+    const tr = territoryRendererRef.current;
+    if (!tr) return;
+    if (activeOverlay === 'sovereignty' && stats?.sovereignty) {
+      // When sov changes active, dim unchanged territory and brighten changed
+      const changedIds = sovChanges.data
+        ? new Set(Object.keys(sovChanges.data.changes).map(Number))
+        : null;
+      const dimSet = changedIds && changedIds.size > 0
+        ? new Set(data.systems.filter(s => !changedIds.has(s.id)).map(s => s.id))
+        : null;
+      tr.update(data.systems, stats.sovereignty, dimSet);
+    } else {
+      tr.clear();
+    }
+  }, [activeOverlay, stats, data.systems, sovChanges.data]);
+
+  // Panel hover callbacks set this to preview an alternative path; null = no
+  // preview. The unified highlight resolver (below) gives it top priority over
+  // the active route/reachable highlights so previews always win.
+  const [previewHighlight, setPreviewHighlight] = useState<{ ids: Set<number>; origin: number | null } | null>(null);
+
+  // Apply jump-range overlay (the dotted reachability circles) — separate
+  // concern from the persistent system-alpha highlight, which is owned by the
+  // unified resolver below.
+  useEffect(() => {
+    const jr = jumpRangeRendererRef.current;
+    if (!jr) return;
+
+    if (!jumpPlanner.active) {
+      jr.setReachable(null, []);
+      panelHoverRef.current = false;
+      return;
+    }
+    if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+      jr.setReachable(null, []);
+    } else if (jumpPlanner.jumpOrigin !== null) {
+      const origin = data.systemMap.get(jumpPlanner.jumpOrigin);
+      if (origin) jr.setReachable(origin, jumpPlanner.reachableSystems);
+      else jr.setReachable(null, []);
+    } else {
+      jr.setReachable(null, []);
+    }
+  }, [jumpPlanner.active, jumpPlanner.jumpOrigin, jumpPlanner.jumpRoute, jumpPlanner.reachableSystems, data.systemMap]);
+
+  // Apply jump route visualization (only when planner is active)
+  useEffect(() => {
+    const jr = jumpRangeRendererRef.current;
+    if (!jr) return;
+    if (jumpPlanner.active && jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+      jr.setRoute(jumpPlanner.jumpRoute.map(wp => wp.system));
+    } else {
+      jr.clearAll();
+    }
+  }, [jumpPlanner.active, jumpPlanner.jumpRoute]);
+
+  // Apply group mode changes
+  useEffect(() => {
+    const lr = labelRendererRef.current;
+    const sr = systemRendererRef.current;
+    const er = edgeRendererRef.current;
+    if (!lr || !sr || !er) return;
+
+    lr.setGroupMode(groupMode);
+
+    const visibleIds = lr.getVisibleSystemIds();
+    sr.container.visible = true;
+    sr.setVisibleSystems(visibleIds);
+    er.setVisibleSystems(visibleIds);
+
+    // Re-trigger LOD update
+    if (viewportRef.current) {
+      lr.updateLOD(currentLODRef.current, viewportRef.current.scaled);
+      lr.updateViewport(viewportRef.current);
+    }
+  }, [groupMode]);
+
+  // Handle group expansion — called when a group is clicked
+  const handleExpandGroup = useCallback((groupId: number) => {
+    const lr = labelRendererRef.current;
+    const sr = systemRendererRef.current;
+    const er = edgeRendererRef.current;
+    if (!lr || !sr || !er) return;
+
+    // Toggle: clicking the already-expanded group collapses it
+    const newId = lr.getExpandedGroupId() === groupId ? null : groupId;
+    lr.setExpandedGroup(newId);
+
+    // Update system and edge visibility to match
+    const visibleIds = lr.getVisibleSystemIds();
+    sr.setVisibleSystems(visibleIds);
+    er.setVisibleSystems(visibleIds);
+
+    // Re-trigger viewport update for labels
+    if (viewportRef.current) {
+      lr.updateLOD(currentLODRef.current, viewportRef.current.scaled);
+      lr.updateViewport(viewportRef.current);
+    }
+
+    // If expanding, zoom to fit the group
+    if (newId !== null && viewportRef.current) {
+      const groups = lr.getCurrentGroupMode() === 'constellation'
+        ? lr.constellationGroups : lr.regionGroups;
+      const group = groups.find(g => g.id === newId);
+      if (group) {
+        const pad = 80;
+        const gw = group.maxX - group.minX + pad * 2;
+        const gh = group.maxY - group.minY + pad * 2;
+        const cx = (group.minX + group.maxX) / 2;
+        const cy = (group.minY + group.maxY) / 2;
+        const sx = viewportRef.current.screenWidth / gw;
+        const sy = viewportRef.current.screenHeight / gh;
+        const targetScale = Math.min(sx, sy, MAX_ZOOM);
+
+        viewportRef.current.animate({
+          position: { x: cx, y: cy },
+          scale: targetScale,
+          time: 600,
+          ease: 'easeInOutCubic',
+        });
+      }
+    }
+  }, []);
+
+  // Measure overlay bar height
+  useEffect(() => {
+    if (!overlayBarRef.current) return;
+    const obs = new ResizeObserver(([entry]) => {
+      setOverlayBarHeight(entry.contentRect.height);
+    });
+    obs.observe(overlayBarRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  // Expose imperative API
+  useImperativeHandle(ref, () => ({
+    focusSystem: (id: number) => {
+      const sys = data.systemMap.get(id);
+      if (sys && viewportRef.current) {
+        viewportRef.current.animate({
+          position: { x: sys.x, y: sys.y },
+          scale: 2,
+          time: 600,
+          ease: 'easeInOutCubic',
+        });
+        setSelectedSystem(sys);
+        systemRendererRef.current?.setSelected(id);
+      }
+    },
+    setRoute: (systemIds: number[]) => {
+      // Imperative escape hatch: push a path directly to the renderer
+      // without going through the gate route planner state. Used by
+      // external callers that want to display a specific pre-computed path.
+      routeRendererRef.current?.setRoute(systemIds);
+    },
+    getViewport: () => viewportRef.current,
+  }));
+
+  // LOD detection + scale update
+  const updateView = useCallback((vp: Viewport) => {
+    const scale = vp.scaled;
+    let tier: LODTier = LODTier.Galaxy;
+    if (scale >= LOD_THRESHOLDS[LODTier.System]) tier = LODTier.System;
+    else if (scale >= LOD_THRESHOLDS[LODTier.Constellation]) tier = LODTier.Constellation;
+    else if (scale >= LOD_THRESHOLDS[LODTier.Region]) tier = LODTier.Region;
+
+    if (tier !== currentLODRef.current) {
+      currentLODRef.current = tier;
+      systemRendererRef.current?.updateLOD(tier);
+      edgeRendererRef.current?.updateLOD(tier);
+      labelRendererRef.current?.updateLOD(tier, scale);
+    }
+
+    // Always update node scale for screen-space consistency
+    systemRendererRef.current?.updateScale(scale);
+    territoryRendererRef.current?.setLODAlpha(scale);
+
+    // Update label viewport culling
+    labelRendererRef.current?.updateViewport(vp);
+
+    // Update panel position if a system is selected
+    const sel = selectedSystemRef.current;
+    if (sel) {
+      const sp = vp.toScreen(sel.x, sel.y);
+      setPanelPos({ x: sp.x, y: sp.y });
+    }
+  }, []);
+
+  // Initialize Pixi
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const el = containerRef.current;
+    let destroyed = false;
+
+    async function init() {
+      const app = new Application();
+      await app.init({
+        background: BG_COLOR,
+        resizeTo: el,
+        antialias: true,
+        autoDensity: true,
+        resolution: window.devicePixelRatio || 1,
+      });
+
+      if (destroyed) {
+        app.destroy(true);
+        return;
+      }
+
+      el.appendChild(app.canvas as HTMLCanvasElement);
+      appRef.current = app;
+
+      const vp = new Viewport({
+        screenWidth: el.clientWidth,
+        screenHeight: el.clientHeight,
+        worldWidth: CANVAS_SIZE,
+        worldHeight: CANVAS_SIZE,
+        events: app.renderer.events,
+      });
+
+      vp.drag({ mouseButtons: 'left' })
+        .pinch()
+        .wheel({ smooth: 10 })
+        .decelerate({ friction: 0.92 })
+        .clampZoom({ minScale: MIN_ZOOM, maxScale: MAX_ZOOM })
+        .clamp({ direction: 'all', underflow: 'center' });
+
+      app.stage.addChild(vp);
+      viewportRef.current = vp;
+
+      // Resize viewport when container changes (orientation flip, window resize)
+      const vpResizeObserver = new ResizeObserver(() => {
+        if (viewportRef.current && el) {
+          const { clientWidth, clientHeight } = el;
+          viewportRef.current.resize(clientWidth, clientHeight);
+          app.renderer.resize(clientWidth, clientHeight);
+        }
+      });
+      vpResizeObserver.observe(el);
+      (el as any).__vpResizeObserver = vpResizeObserver;
+
+      // Build renderers
+      const systemRenderer = new SystemRenderer();
+      const edgeRenderer = new EdgeRenderer();
+      const labelRenderer = new LabelRenderer();
+      const routeRenderer = new RouteRenderer();
+      const jumpRangeRenderer = new JumpRangeRenderer();
+      const territoryRenderer = new AllianceTerritoryRenderer();
+      const theraRenderer = new TheraRenderer();
+
+      systemRendererRef.current = systemRenderer;
+      edgeRendererRef.current = edgeRenderer;
+      labelRendererRef.current = labelRenderer;
+      routeRendererRef.current = routeRenderer;
+      jumpRangeRendererRef.current = jumpRangeRenderer;
+      territoryRendererRef.current = territoryRenderer;
+      theraRendererRef.current = theraRenderer;
+
+      // Init renderers
+      edgeRenderer.init(data.systemMap, data.edges);
+      edgeRenderer.initHoverLayer();
+      systemRenderer.init(app, data.systems);
+      labelRenderer.init(data.systems, data.regions);
+      routeRenderer.init(data.systemMap);
+      jumpRangeRenderer.init();
+      theraRenderer.init();
+
+      // Add to viewport in draw order: territory → edges → region labels → group labels → systems → system labels → route
+      vp.addChild(territoryRenderer.container);
+      vp.addChild(edgeRenderer.container);
+      vp.addChild(labelRenderer.regionLabels);
+      vp.addChild(labelRenderer.groupLabels);
+      vp.addChild(systemRenderer.container);
+      vp.addChild(theraRenderer.container);   // rings sit above system sprites
+      vp.addChild(labelRenderer.systemLabels);
+      vp.addChild(jumpRangeRenderer.rangeGraphics);
+      vp.addChild(jumpRangeRenderer.routeGraphics);
+      vp.addChild(routeRenderer.graphics);
+
+      // Build quadtree
+      const qt = quadtree<SystemData>()
+        .x(d => d.x)
+        .y(d => d.y)
+        .addAll(data.systems);
+      qtRef.current = qt;
+
+      // Build graph + adjacency map
+      const { graph, adjacency } = buildGraph(data.systems, data.edges);
+      graphRef.current = graph;
+      adjacencyRef.current = adjacency;
+
+      // Initial view setup
+      vp.fit(true);
+      vp.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+      updateView(vp);
+
+      // Auto-pan to a system requested via ?focus=<id> (Ctrl+K palette and
+      // entity-link pages deep-link here). See pendingFocusRef declaration
+      // for why this is consumed here rather than in the URL-parsing effect.
+      if (pendingFocusRef.current !== null) {
+        const focusId = pendingFocusRef.current;
+        pendingFocusRef.current = null;
+        const focusSys = data.systemMap.get(focusId);
+        if (focusSys) {
+          vp.animate({
+            position: { x: focusSys.x, y: focusSys.y },
+            scale: 2,
+            time: 600,
+            ease: 'easeInOutCubic',
+          });
+          setSelectedSystem(focusSys);
+          systemRenderer.setSelected(focusId);
+        }
+      }
+
+      // Update on zoom/pan
+      vp.on('zoomed', () => {
+        updateView(vp);
+        setVpVersion(v => v + 1);
+      });
+      vp.on('moved', () => {
+        // Update labels and panel on pan
+        labelRendererRef.current?.updateViewport(vp);
+        const sel = selectedSystemRef.current;
+        if (sel) {
+          const sp = vp.toScreen(sel.x, sel.y);
+          setPanelPos({ x: sp.x, y: sp.y });
+        }
+        setVpVersion(v => v + 1);
+      });
+
+      // Note: no drag-start handler here — pixi-viewport fires drag-start on
+      // every mousedown (even for clean clicks), so closing the panel here
+      // caused a visible flash when the subsequent `clicked` event reopened
+      // it, and left the panel stuck closed when the release registered as
+      // a tiny drag instead of a click. The `moved` handler below keeps the
+      // panel anchored to the selected system during pans, so leaving it
+      // open is fine.
+
+      // Pointer events. We only update React state when the hovered system ID
+      // actually changes — quadtree.find returns a fresh object every call, so
+      // setHoveredSystem(found) would re-render every frame even on the same
+      // system. The renderer-level setHovered/setHoverHighlight are imperative
+      // and cheap; they fire every move.
+      let hoverThrottleId: number | null = null;
+      let lastHoveredId: number | null = null;
+
+      vp.on('pointermove', (e) => {
+        if (hoverThrottleId !== null) return;
+        hoverThrottleId = window.setTimeout(() => {
+          hoverThrottleId = null;
+        }, 16);
+
+        // Suppress hover when mouse is over an HTML panel
+        if (panelHoverRef.current) return;
+
+        const worldPos = vp.toWorld(e.global);
+        const hitRadius = 30 / vp.scaled;
+        const found = qt.find(worldPos.x, worldPos.y, hitRadius);
+
+        if (found) {
+          systemRenderer.setHovered(found.id);
+          el.style.cursor = 'pointer';
+          const neighbors = adjacencyRef.current?.get(found.id);
+          if (neighbors) {
+            systemRenderer.setHoverHighlight(found.id, neighbors);
+            edgeRenderer.setHoverHighlight(found.id, neighbors);
+          }
+          if (found.id !== lastHoveredId) {
+            lastHoveredId = found.id;
+            setHoveredSystem(found);
+            const screenPos = vp.toScreen(found.x, found.y);
+            setTooltipPos({ x: screenPos.x, y: screenPos.y });
+            setTooltipVisible(false);
+            if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+            tooltipTimerRef.current = window.setTimeout(() => setTooltipVisible(true), 150);
+          }
+        } else {
+          systemRenderer.setHovered(null);
+          systemRenderer.setHoverHighlight(null, null);
+          edgeRenderer.setHoverHighlight(null, null);
+          el.style.cursor = 'grab';
+          if (lastHoveredId !== null) {
+            lastHoveredId = null;
+            if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+            setTooltipVisible(false);
+            setHoveredSystem(null);
+            setTooltipPos(null);
+          }
+        }
+      });
+
+      vp.on('clicked', (e: any) => {
+        // pixi-viewport fires `clicked` for every mouse button, including
+        // right-click. We handle right-click via the DOM `contextmenu`
+        // listener below (which opens the context menu), so ignore it here —
+        // otherwise a single right-click both opens the menu and selects the
+        // system beneath it.
+        if (e.event?.button === 2) return;
+        // Any left-click closes a previously-open context menu. PixiJS's
+        // federated event pipeline swallows the native DOM click, so the
+        // context menu's document-level outside-click handler never fires
+        // on clicks over the canvas. Close it explicitly here.
+        setContextMenu(null);
+        const worldPos = e.world;
+        const hitRadius = 30 / vp.scaled;
+
+        // In group mode, check for group clicks
+        const currentGroupMode = labelRenderer.getCurrentGroupMode();
+        if (currentGroupMode !== 'systems') {
+          const groups = currentGroupMode === 'constellation'
+            ? labelRenderer.constellationGroups
+            : labelRenderer.regionGroups;
+
+          // Find nearest group centroid
+          let nearestGroup: GroupData | null = null;
+          let nearestDist = Infinity;
+          for (const g of groups) {
+            // Skip the expanded group — its systems are clickable individually
+            if (g.id === labelRenderer.getExpandedGroupId()) continue;
+            const dx = worldPos.x - g.cx;
+            const dy = worldPos.y - g.cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist && dist < hitRadius * 3) {
+              nearestDist = dist;
+              nearestGroup = g;
+            }
+          }
+
+          if (nearestGroup) {
+            handleExpandGroup(nearestGroup.id);
+            return;
+          }
+
+          // If inside the expanded group, allow normal system clicks
+          // (fall through to the system click logic below)
+        }
+
+        // Normal system click
+        const found = qt.find(worldPos.x, worldPos.y, hitRadius);
+
+        if (found) {
+          setSelectedSystem(found);
+          const screenPos = vp.toScreen(found.x, found.y);
+          setPanelPos({ x: screenPos.x, y: screenPos.y });
+          systemRenderer.setSelected(found.id);
+          onSystemClick?.(found);
+        } else {
+          setSelectedSystem(null);
+          setPanelPos(null);
+          systemRenderer.setSelected(null);
+        }
+      });
+
+      // Right-click context menu on systems (also triggered by touch long-press below)
+      const openContextMenuAt = (clientX: number, clientY: number) => {
+        const rect = el.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        const localY = clientY - rect.top;
+        const worldPos = vp.toWorld(localX, localY);
+        const hitRadius = 30 / vp.scaled;
+        const found = qt.find(worldPos.x, worldPos.y, hitRadius);
+        if (found) {
+          setContextMenu({
+            system: found,
+            position: { x: clientX, y: clientY },
+          });
+          // Subtle haptic tap on mobile
+          try { (navigator as any).vibrate?.(10); } catch {}
+        } else {
+          setContextMenu(null);
+        }
+      };
+      const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        openContextMenuAt(e.clientX, e.clientY);
+      };
+      el.addEventListener('contextmenu', handleContextMenu);
+
+      // Touch long-press → context menu. Fires after 500ms if the pointer
+      // hasn't moved more than 10px and hasn't been released. Cancelled by
+      // any drag > 10px (so the viewport can still pan).
+      let longPressTimer: number | null = null;
+      let longPressStart: { x: number; y: number } | null = null;
+      const CANCEL_DISTANCE = 10;
+      const LONG_PRESS_MS = 500;
+      const onTouchStart = (e: TouchEvent) => {
+        if (e.touches.length !== 1) { cancelLongPress(); return; }
+        const t = e.touches[0];
+        longPressStart = { x: t.clientX, y: t.clientY };
+        longPressTimer = window.setTimeout(() => {
+          if (longPressStart) {
+            openContextMenuAt(longPressStart.x, longPressStart.y);
+          }
+          longPressTimer = null;
+        }, LONG_PRESS_MS);
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        if (!longPressStart || !e.touches[0]) return;
+        const dx = e.touches[0].clientX - longPressStart.x;
+        const dy = e.touches[0].clientY - longPressStart.y;
+        if (Math.hypot(dx, dy) > CANCEL_DISTANCE) cancelLongPress();
+      };
+      const cancelLongPress = () => {
+        if (longPressTimer != null) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        longPressStart = null;
+      };
+      el.addEventListener('touchstart', onTouchStart, { passive: true });
+      el.addEventListener('touchmove', onTouchMove, { passive: true });
+      el.addEventListener('touchend', cancelLongPress);
+      el.addEventListener('touchcancel', cancelLongPress);
+
+      // Make the map canvas "own" pan/zoom gestures so Safari doesn't hijack
+      // them for page scroll. See MDN touch-action.
+      el.style.touchAction = 'none';
+
+      // Animation loop
+      app.ticker.add((ticker) => {
+        routeRenderer.tick(ticker.deltaTime);
+        systemRenderer.tick(ticker.deltaTime);
+        jumpRangeRenderer.tick(ticker.deltaTime);
+      });
+
+      // Respect prefers-reduced-motion: halt the idle animation loop when
+      // the user has asked for less motion. Selection pulse + transitions
+      // freeze to their resting state; pan/zoom still work.
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+      const applyMotionPref = () => {
+        if (reducedMotion?.matches) {
+          app.ticker.stop();
+        } else if (!app.ticker.started) {
+          app.ticker.start();
+        }
+      };
+      applyMotionPref();
+      reducedMotion?.addEventListener?.('change', applyMotionPref);
+
+      // Pause Pixi rendering when the browser tab is hidden — saves battery
+      // and GPU on mobile. Re-render one frame on resume so nothing looks
+      // stale.
+      const onVis = () => {
+        if (document.visibilityState === 'hidden') {
+          app.ticker.stop();
+        } else if (!reducedMotion?.matches) {
+          app.ticker.start();
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+
+      // ResizeObserver
+      const resizeObserver = new ResizeObserver(() => {
+        if (!destroyed) {
+          app.renderer.resize(el.clientWidth, el.clientHeight);
+          vp.resize(el.clientWidth, el.clientHeight);
+        }
+      });
+      resizeObserver.observe(el);
+
+      (el as any).__mapCleanup = () => {
+        resizeObserver.disconnect();
+        el.removeEventListener('contextmenu', handleContextMenu);
+        el.removeEventListener('touchstart', onTouchStart);
+        el.removeEventListener('touchmove', onTouchMove);
+        el.removeEventListener('touchend', cancelLongPress);
+        el.removeEventListener('touchcancel', cancelLongPress);
+        document.removeEventListener('visibilitychange', onVis);
+        reducedMotion?.removeEventListener?.('change', applyMotionPref);
+        cancelLongPress();
+        if (hoverThrottleId !== null) clearTimeout(hoverThrottleId);
+        if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+      };
+    }
+
+    init();
+
+    return () => {
+      destroyed = true;
+      (el as any).__mapCleanup?.();
+      (el as any).__vpResizeObserver?.disconnect();
+      systemRendererRef.current?.destroy();
+      edgeRendererRef.current?.destroy();
+      labelRendererRef.current?.destroy();
+      routeRendererRef.current?.destroy();
+      jumpRangeRendererRef.current?.destroy();
+      theraRendererRef.current?.destroy();
+      if (viewportRef.current) {
+        viewportRef.current.destroy();
+        viewportRef.current = null;
+      }
+      if (appRef.current) {
+        appRef.current.destroy(true, { children: true });
+        appRef.current = null;
+      }
+    };
+  }, [data, updateView, onSystemClick]);
+
+  // Sync the gate route planner's computed activeRoute → the Pixi renderer.
+  useEffect(() => {
+    const r = routeRendererRef.current;
+    const route = gateRoutePlanner.activeRoute;
+    if (route && route.length >= 2) {
+      r?.setRoute(route);
+    } else {
+      r?.clearRoute();
+    }
+  }, [gateRoutePlanner.activeRoute]);
+
+  // Reset panelHoverRef when the gate planner panel closes. onPointerLeave
+  // never fires when the panel DOM element is removed while the cursor is
+  // over it (the click on × destroys the element before the event can
+  // propagate), so without this the ref stays stuck at true and blocks all
+  // map hover processing.
+  useEffect(() => {
+    if (!gateRoutePlanner.active) panelHoverRef.current = false;
+  }, [gateRoutePlanner.active]);
+
+  // Single owner of the persistent system-alpha highlight slot. Resolved
+  // from state by priority — previously four call sites raced for this slot
+  // and order-dependent batches caused stale dim/highlight states.
+  //   1. previewHighlight  (panel-hovered alternative path)
+  //   2. gate route planner (active gate route)
+  //   3. jump planner route (multi-hop jumps)
+  //   4. jump planner reachable (range circle)
+  //   5. clear
+  useEffect(() => {
+    const sr = systemRendererRef.current;
+    if (!sr) return;
+
+    if (previewHighlight) {
+      sr.setJumpRangeHighlight(previewHighlight.origin, previewHighlight.ids);
+      return;
+    }
+    if (gateRoutePlanner.active && gateRoutePlanner.activeRoute && gateRoutePlanner.activeRoute.length >= 2) {
+      sr.setJumpRangeHighlight(gateRoutePlanner.origin, new Set(gateRoutePlanner.activeRoute));
+      return;
+    }
+    if (jumpPlanner.active) {
+      if (jumpPlanner.jumpRoute && jumpPlanner.jumpRoute.length > 1) {
+        const routeIds = new Set(jumpPlanner.jumpRoute.map(wp => wp.system.id));
+        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, routeIds);
+        return;
+      }
+      if (jumpPlanner.jumpOrigin !== null && jumpPlanner.reachableIds.size > 0) {
+        sr.setJumpRangeHighlight(jumpPlanner.jumpOrigin, jumpPlanner.reachableIds);
+        return;
+      }
+    }
+    sr.setJumpRangeHighlight(null, null);
+  }, [
+    previewHighlight,
+    gateRoutePlanner.active,
+    gateRoutePlanner.activeRoute,
+    gateRoutePlanner.origin,
+    jumpPlanner.active,
+    jumpPlanner.jumpOrigin,
+    jumpPlanner.jumpRoute,
+    jumpPlanner.reachableIds,
+  ]);
+
+  // Push the avoid set to the renderer so the red ❌ overlays appear/update.
+  useEffect(() => {
+    routeRendererRef.current?.setAvoidSystems(gateRoutePlanner.avoidSystems);
+  }, [gateRoutePlanner.avoidSystems]);
+
+  // Push per-hop threat levels to the renderer so the diamonds get tinted.
+  useEffect(() => {
+    const threats = new Map<number, string>();
+    for (const [sid, intel] of gateRoutePlanner.hopIntel) {
+      threats.set(sid, intel.threat);
+    }
+    routeRendererRef.current?.setHopThreats(threats);
+  }, [gateRoutePlanner.hopIntel]);
+
+  // Auto-trim: when the active character is in a system on the route,
+  // advance the route's origin to that system so the panel shows
+  // "remaining hops" rather than the full original route.
+  useEffect(() => {
+    if (!gateRoutePlanner.followCharacter) return;
+    if (gateRoutePlanner.activeCharacterId === null) return;
+    if (!gateRoutePlanner.activeRoute || gateRoutePlanner.activeRoute.length < 2) return;
+
+    const char = characters.find(c => c.character_id === gateRoutePlanner.activeCharacterId);
+    if (!char || char.system_id === null) return;
+
+    // If the active character is in a system on the route AFTER the
+    // current origin, advance the origin to it.
+    const idx = gateRoutePlanner.activeRoute.indexOf(char.system_id);
+    if (idx > 0 && char.system_id !== gateRoutePlanner.origin) {
+      // The character has reached a hop further along the route.
+      // Trim by setting the origin to the character's current system.
+      gateRoutePlanner.setOrigin(char.system_id);
+    }
+  }, [
+    characters,
+    gateRoutePlanner.followCharacter,
+    gateRoutePlanner.activeCharacterId,
+    gateRoutePlanner.activeRoute,
+    gateRoutePlanner.origin,
+    gateRoutePlanner,
+  ]);
+
+  // Default the active character to the user's main (or first) online
+  // character. If the current selection isn't online anymore, switch to
+  // whoever IS online so the dropdown isn't pointing at a stale entry.
+  useEffect(() => {
+    const online = characters.filter(c => c.system_id !== null);
+    if (online.length === 0) {
+      if (gateRoutePlanner.activeCharacterId !== null) {
+        gateRoutePlanner.setActiveCharacterId(null);
+      }
+      return;
+    }
+    const currentIsOnline = online.some(c => c.character_id === gateRoutePlanner.activeCharacterId);
+    if (!currentIsOnline) {
+      const main = online.find(c => c.is_main) || online[0];
+      gateRoutePlanner.setActiveCharacterId(main.character_id);
+    }
+  }, [characters, gateRoutePlanner.activeCharacterId, gateRoutePlanner]);
+
+  // Parse URL params on mount and pre-populate the gate route planner.
+  // Supports three forms:
+  //   /map?route=<share_token>          → fetch shared SavedGateRoute and load
+  //   /map?origin=X&dest=Y&waypoints=A,B&prefs=highsec → direct deep link
+  //   /map?focus=<system_id>            → pan/zoom to a system (Ctrl+K palette, entity links)
+  // After loading, clean the URL via history.replaceState so a refresh
+  // doesn't reload the same route.
+  const urlHandledRef = useRef(false);
+  useEffect(() => {
+    if (urlHandledRef.current) return;
+    urlHandledRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const shareToken = params.get('route');
+    const originParam = params.get('origin');
+    const destParam = params.get('dest');
+    const waypointsParam = params.get('waypoints');
+    const prefsParam = params.get('prefs');
+    const focusParam = params.get('focus');
+
+    const cleanUrl = () => {
+      window.history.replaceState({}, '', window.location.pathname);
+    };
+
+    if (shareToken) {
+      // Fetch the shared route from the public endpoint
+      fetch(`/api/map/routes/shared/${encodeURIComponent(shareToken)}`)
+        .then(resp => {
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return resp.json();
+        })
+        .then((route: {
+          origin_system_id: number;
+          dest_system_id: number;
+          waypoints: number[];
+          preference: 'shortest' | 'highsec' | 'lowsec' | 'nullsec';
+        }) => {
+          gateRoutePlanner.loadRouteData({
+            origin_system_id: route.origin_system_id,
+            dest_system_id: route.dest_system_id,
+            waypoints: route.waypoints || [],
+            preference: route.preference || 'shortest',
+          });
+          gateRoutePlanner.setActive(true);
+          cleanUrl();
+        })
+        .catch(() => {
+          // Silent — user can still use the planner manually
+          cleanUrl();
+        });
+    } else if (originParam && destParam) {
+      const origin = Number(originParam);
+      const dest = Number(destParam);
+      if (!Number.isNaN(origin) && !Number.isNaN(dest)) {
+        const waypoints = waypointsParam
+          ? waypointsParam.split(',').map(Number).filter(n => !Number.isNaN(n))
+          : [];
+        const validPrefs = new Set(['shortest', 'highsec', 'lowsec', 'nullsec']);
+        const preference = (prefsParam && validPrefs.has(prefsParam))
+          ? (prefsParam as 'shortest' | 'highsec' | 'lowsec' | 'nullsec')
+          : 'shortest';
+        gateRoutePlanner.loadRouteData({
+          origin_system_id: origin,
+          dest_system_id: dest,
+          waypoints,
+          preference,
+        });
+        gateRoutePlanner.setActive(true);
+        cleanUrl();
+      }
+    } else if (focusParam) {
+      const focusId = Number(focusParam);
+      if (!Number.isNaN(focusId)) {
+        // The Pixi viewport may not exist yet (async init) — stash the id
+        // and let the Pixi-init effect consume it once `vp` is ready.
+        pendingFocusRef.current = focusId;
+      }
+      cleanUrl();
+    }
+  }, [gateRoutePlanner]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+
+      switch (e.key) {
+        case 'Escape':
+          setSelectedSystem(null);
+          setPanelPos(null);
+          systemRendererRef.current?.setSelected(null);
+          break;
+        case 'Home':
+          if (viewportRef.current) {
+            viewportRef.current.fit(true);
+            viewportRef.current.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+          }
+          break;
+        case '+':
+        case '=':
+          viewportRef.current?.zoomPercent(0.3, true);
+          break;
+        case '-':
+          viewportRef.current?.zoomPercent(-0.3, true);
+          break;
+      }
+    }
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
+  const handleRadarPivot = useCallback((id: number) => {
+    setActiveOverlay('radar');
+    setRadarPivotId(id);
+    if (sovTimeRange !== null) setSovTimeRange(null);
+  }, [sovTimeRange]);
+
+  const handleToggleBookmark = useCallback((id: number) => {
+    bookmarks.toggleBookmark('system', id);
+  }, [bookmarks]);
+
+  const handleSetOrigin = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.setOrigin(id);
+  }, [gateRoutePlanner]);
+  const handleSetDest = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.setDest(id);
+  }, [gateRoutePlanner]);
+  const handleAddWaypoint = useCallback((id: number) => {
+    gateRoutePlanner.setActive(true);
+    gateRoutePlanner.addWaypoint(id);
+  }, [gateRoutePlanner]);
+  const handleAvoidSystem = useCallback((id: number) => {
+    // Don't auto-open the panel for avoid — user might just be marking a no-go
+    gateRoutePlanner.addAvoid(id);
+  }, [gateRoutePlanner]);
+
+  const handleSearchSelectSystem = useCallback((system: SystemData) => {
+    if (viewportRef.current) {
+      viewportRef.current.animate({
+        position: { x: system.x, y: system.y },
+        scale: 2,
+        time: 600,
+        ease: 'easeInOutCubic',
+      });
+    }
+    setSelectedSystem(system);
+    systemRendererRef.current?.setSelected(system.id);
+    const vp = viewportRef.current;
+    if (vp) {
+      const sp = vp.toScreen(system.x, system.y);
+      setPanelPos({ x: sp.x, y: sp.y });
+    }
+  }, []);
+
+  const handleSearchSelectArea = useCallback((type: 'constellation' | 'region', id: number) => {
+    const lr = labelRendererRef.current;
+    if (!lr || !viewportRef.current) return;
+
+    const groups = type === 'constellation' ? lr.constellationGroups : lr.regionGroups;
+    const group = groups.find(g => g.id === id);
+    if (!group) return;
+
+    // Zoom to fit the area
+    const pad = 80;
+    const gw = group.maxX - group.minX + pad * 2;
+    const gh = group.maxY - group.minY + pad * 2;
+    const cx = (group.minX + group.maxX) / 2;
+    const cy = (group.minY + group.maxY) / 2;
+    const sx = viewportRef.current.screenWidth / gw;
+    const sy = viewportRef.current.screenHeight / gh;
+    const targetScale = Math.min(sx, sy, MAX_ZOOM);
+
+    viewportRef.current.animate({
+      position: { x: cx, y: cy },
+      scale: targetScale,
+      time: 600,
+      ease: 'easeInOutCubic',
+    });
+
+    // Clear any system selection
+    setSelectedSystem(null);
+    setPanelPos(null);
+    systemRendererRef.current?.setSelected(null);
+  }, []);
+
+  // Tooltip stat info
+  const hoveredStatInfo = useMemo(() => {
+    if (!hoveredSystem || !stats) return null;
+    const sid = String(hoveredSystem.id);
+    const k = stats.kills[sid];
+    const j = stats.jumps[sid];
+    return { jumps: j ?? 0, shipKills: k?.ship ?? 0, npcKills: k?.npc ?? 0, podKills: k?.pod ?? 0 };
+  }, [hoveredSystem, stats]);
+
+  // Clamp tooltip to container bounds
+  const clampedTooltipPos = useMemo(() => {
+    if (!tooltipPos || !containerRef.current) return tooltipPos;
+    const cw = containerRef.current.clientWidth;
+    const ch = containerRef.current.clientHeight;
+    let x = tooltipPos.x + 16;
+    let y = tooltipPos.y - 12;
+    // Approximate tooltip size
+    if (x + 220 > cw) x = tooltipPos.x - 230;
+    if (y + 60 > ch) y = tooltipPos.y - 60;
+    if (x < 4) x = 4;
+    if (y < 4) y = 4;
+    return { x, y };
+  }, [tooltipPos]);
+
+  const mobilePlannerOpen = isMobile && (gateRoutePlanner.active || jumpPlanner.active);
+
+  return (
+    <div style={{
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      ...(mobilePlannerOpen ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
+    }}>
+      {/* Canvas container — height adjusts for overlay bar */}
+      <div ref={containerRef} style={{
+        width: '100%',
+        ...(mobilePlannerOpen
+          ? { height: '45%', flexShrink: 0 }
+          : { height: `calc(100% - ${overlayBarHeight}px)` }),
+      }} />
+
+      {/* Search bar */}
+      <SystemSearch
+        systems={data.systems}
+        characters={characters}
+        onSelectSystem={handleSearchSelectSystem}
+        onSelectArea={handleSearchSelectArea}
+        onSetRouteOrigin={handleSetOrigin}
+        onSetRouteDest={handleSetDest}
+        onAddRouteWaypoint={handleAddWaypoint}
+        onAvoidSystem={handleAvoidSystem}
+        isMobile={isMobile}
+      />
+
+      {/* Group mode selector */}
+      <GroupModeControls mode={groupMode} onModeChange={setGroupMode} isMobile={isMobile} />
+
+      {/* Character location markers — re-positioned on every pan/zoom via vpVersion */}
+      {characters.map(char => {
+        if (!char.system_id) return null;
+        const sys = data.systemMap.get(char.system_id);
+        if (!sys || !viewportRef.current) return null;
+        const sp = viewportRef.current.toScreen(sys.x, sys.y);
+        return (
+          <div
+            key={char.character_id}
+            data-vp={vpVersion}
+            style={{
+              position: 'absolute',
+              left: sp.x,
+              top: sp.y,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16,
+              border: '2px solid #c8a951',
+              borderRadius: '50%',
+              animation: 'charPulse 2s ease-in-out infinite',
+            }} />
+            <div style={{
+              position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)',
+              fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+              color: '#c8a951', whiteSpace: 'nowrap', letterSpacing: '0.05em',
+            }}>
+              {char.character_name}
+            </div>
+            <style>{`@keyframes charPulse { 0%,100% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 50% { opacity: 0.5; transform: translate(-50%,-50%) scale(1.3); } }`}</style>
+          </div>
+        );
+      })}
+
+      {/* Zoom toolbar */}
+      <MapToolbar
+        onZoomIn={() => viewportRef.current?.zoomPercent(0.3, true)}
+        onZoomOut={() => viewportRef.current?.zoomPercent(-0.3, true)}
+        onFitAll={() => {
+          viewportRef.current?.fit(true);
+          viewportRef.current?.moveCenter(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+        }}
+        onLocate={() => {
+          const main = characters.find(c => c.is_main) || characters[0];
+          if (main?.system_id) {
+            const sys = data.systemMap.get(main.system_id);
+            if (sys && viewportRef.current) {
+              viewportRef.current.animate({
+                position: { x: sys.x, y: sys.y },
+                scale: 2,
+                time: 600,
+                ease: 'easeInOutCubic',
+              });
+            }
+          }
+        }}
+        hasCharacterLocation={characters.some(c => c.system_id !== null)}
+        jumpPlannerActive={jumpPlanner.active}
+        onToggleJumpPlanner={() => jumpPlanner.setActive(!jumpPlanner.active)}
+        gatePlannerActive={gateRoutePlanner.active}
+        onToggleGatePlanner={() => gateRoutePlanner.setActive(!gateRoutePlanner.active)}
+        isMobile={isMobile}
+      />
+
+      {/* Gate route planner panel */}
+      {gateRoutePlanner.active && (
+        <div
+          onPointerEnter={() => { panelHoverRef.current = true; }}
+          onPointerLeave={() => { panelHoverRef.current = false; }}
+          {...(isMobile ? { style: { flex: 1, minHeight: 0, overflow: 'hidden' } } : {})}
+        >
+          <GateRoutePlannerPanel
+            planner={gateRoutePlanner}
+            systems={data.systems}
+            systemMap={data.systemMap}
+            systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+            characters={characters}
+            isMobile={isMobile}
+            onFocusSystem={(sys) => {
+              if (viewportRef.current) {
+                viewportRef.current.animate({
+                  position: { x: sys.x, y: sys.y },
+                  scale: 2,
+                  time: 600,
+                  ease: 'easeInOutCubic',
+                });
+              }
+            }}
+            onHighlightSystems={(ids) => {
+              setPreviewHighlight(ids && ids.size > 0 ? { ids, origin: null } : null);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Jump planner panel */}
+      {jumpPlanner.active && (
+        <div
+          onPointerEnter={() => { panelHoverRef.current = true; }}
+          onPointerLeave={() => { panelHoverRef.current = false; }}
+          {...(isMobile ? { style: { flex: 1, minHeight: 0, overflow: 'hidden' } } : {})}
+        >
+          <JumpPlannerPanel
+            planner={jumpPlanner}
+            systems={data.systems}
+            systemName={(id) => data.systemMap.get(id)?.name ?? `System ${id}`}
+            characters={characters}
+            stats={stats}
+            isMobile={isMobile}
+            onFocusSystem={(sys) => {
+              if (viewportRef.current) {
+                viewportRef.current.animate({
+                  position: { x: sys.x, y: sys.y },
+                  scale: 2,
+                  time: 600,
+                  ease: 'easeInOutCubic',
+                });
+              }
+            }}
+            onHighlightSystems={(ids) => {
+              setPreviewHighlight(ids && ids.size > 0 ? { ids, origin: null } : null);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <SystemContextMenu
+          system={contextMenu.system}
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+          onSetOrigin={handleSetOrigin}
+          onSetDestination={handleSetDest}
+          onAddWaypoint={handleAddWaypoint}
+          onAvoidSystem={handleAvoidSystem}
+          onSetRadarPivot={handleRadarPivot}
+          onToggleBookmark={handleToggleBookmark}
+          isBookmarked={bookmarks.isBookmarked('system', contextMenu.system.id)}
+        />
+      )}
+
+      {/* Hover tooltip */}
+      {hoveredSystem && clampedTooltipPos && !selectedSystem && (
+        <div
+          style={{
+            position: 'absolute',
+            left: clampedTooltipPos.x,
+            top: clampedTooltipPos.y,
+            pointerEvents: 'none',
+            background: 'rgba(8, 8, 8, 0.95)',
+            border: '1px solid #191919',
+            padding: '5px 10px',
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: '#dedede',
+            whiteSpace: 'nowrap',
+            zIndex: 10,
+            opacity: tooltipVisible ? 1 : 0,
+            transform: tooltipVisible ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'opacity 120ms ease-out, transform 120ms ease-out',
+          }}
+        >
+          <strong>{hoveredSystem.name}</strong>
+          <span style={{ marginLeft: 8, color: '#474747' }}>
+            {hoveredSystem.sec.toFixed(1)} · {hoveredSystem.regName}
+          </span>
+          {hoveredStatInfo && (hoveredStatInfo.jumps > 0 || hoveredStatInfo.shipKills > 0 || hoveredStatInfo.npcKills > 0) && (
+            <div style={{ fontSize: 9, color: '#5a5a5a', marginTop: 3, display: 'flex', gap: 8 }}>
+              {hoveredStatInfo.jumps > 0 && <span>JUMPS {hoveredStatInfo.jumps.toLocaleString()}</span>}
+              {hoveredStatInfo.shipKills > 0 && <span style={{ color: '#cc3333' }}>SK {hoveredStatInfo.shipKills.toLocaleString()}</span>}
+              {hoveredStatInfo.npcKills > 0 && <span>NK {hoveredStatInfo.npcKills.toLocaleString()}</span>}
+              {hoveredStatInfo.podKills > 0 && <span style={{ color: '#cc3333' }}>PK {hoveredStatInfo.podKills.toLocaleString()}</span>}
+            </div>
+          )}
+          {sovChanges.data?.changes[String(hoveredSystem.id)] && (() => {
+            const sc = sovChanges.data!.changes[String(hoveredSystem.id)];
+            const oldName = sc.old_alliance_id ? (allianceNames.get(String(sc.old_alliance_id)) ?? `Alliance ${sc.old_alliance_id}`) : 'Unclaimed';
+            return (
+              <div style={{ fontSize: 9, color: '#c8a951', marginTop: 3 }}>
+                SOV CHANGED · was {oldName}{sc.change_count > 1 ? ` · ${sc.change_count} flips` : ''}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* System info panel — desktop renders floating next to the system;
+          mobile wraps it in a bottom sheet with a drag handle. */}
+      {selectedSystem && panelPos && !isMobile && (
+        <SystemInfoPanel
+          system={selectedSystem}
+          position={panelPos}
+          stats={stats}
+          allianceNames={allianceNames}
+          routeOrigin={gateRoutePlanner.origin}
+          routeDest={gateRoutePlanner.dest}
+          activeRoute={gateRoutePlanner.activeRoute}
+          routePreference={gateRoutePlanner.preference}
+          onSetOrigin={handleSetOrigin}
+          onSetDestination={handleSetDest}
+          onSetRoutePreference={gateRoutePlanner.setPreference}
+          onClose={() => {
+            setSelectedSystem(null);
+            setPanelPos(null);
+            systemRendererRef.current?.setSelected(null);
+          }}
+          onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
+          onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
+          onSetRadarPivot={handleRadarPivot}
+          onToggleBookmark={handleToggleBookmark}
+          isBookmarked={bookmarks.isBookmarked('system', selectedSystem.id)}
+          sovChange={sovChanges.data?.changes[String(selectedSystem.id)] ?? null}
+        />
+      )}
+      {isMobile && (
+        <BottomSheet
+          open={!!selectedSystem}
+          initialSnap="half"
+          title={selectedSystem?.name}
+          onClose={() => {
+            setSelectedSystem(null);
+            setPanelPos(null);
+            systemRendererRef.current?.setSelected(null);
+          }}
+        >
+          {selectedSystem && (
+            <SystemInfoPanel
+              inSheet
+              system={selectedSystem}
+              position={{ x: 0, y: 0 }}  // unused inside sheet
+              stats={stats}
+              allianceNames={allianceNames}
+              routeOrigin={gateRoutePlanner.origin}
+              routeDest={gateRoutePlanner.dest}
+              activeRoute={gateRoutePlanner.activeRoute}
+              routePreference={gateRoutePlanner.preference}
+              onSetOrigin={handleSetOrigin}
+              onSetDestination={handleSetDest}
+              onSetRoutePreference={gateRoutePlanner.setPreference}
+              onClose={() => {
+                setSelectedSystem(null);
+                setPanelPos(null);
+                systemRendererRef.current?.setSelected(null);
+              }}
+              onSetJumpOrigin={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpOrigin(id); }}
+              onSetJumpDest={(id) => { jumpPlanner.setActive(true); jumpPlanner.setJumpDest(id); }}
+              onSetRadarPivot={handleRadarPivot}
+              onToggleBookmark={handleToggleBookmark}
+              isBookmarked={bookmarks.isBookmarked('system', selectedSystem.id)}
+              sovChange={sovChanges.data?.changes[String(selectedSystem.id)] ?? null}
+            />
+          )}
+        </BottomSheet>
+      )}
+
+      {/* Bottom overlay controls */}
+      <div ref={overlayBarRef}>
+        <OverlayControls
+          space={space}
+          onSpaceChange={onSpaceChange ? (s) => {
+            onSpaceChange(s);
+            // Snap the overlay to a sensible default for the new space so
+            // the user doesn't land on something that's hidden/empty.
+            if (s === 'w') setActiveOverlay('wormholeClass');
+            else setActiveOverlay('security');
+            setSovTimeRange(null);
+          } : undefined}
+          activeOverlay={activeOverlay}
+          onOverlayChange={(o) => {
+            setActiveOverlay(o === activeOverlay ? 'security' : o);
+            if (o !== 'sovereignty') setSovTimeRange(null);
+          }}
+          statsLoaded={!statsLoading && stats !== null}
+          sovTimeRange={sovTimeRange}
+          onSovTimeRangeChange={(r) => setSovTimeRange(r)}
+          sovChangesCount={sovChanges.data ? Object.keys(sovChanges.data.changes).length : 0}
+          sovChangesLoading={sovChanges.loading}
+          isMobile={isMobile}
+          industryKind={industryKind}
+          onIndustryKindChange={setIndustryKind}
+          planetKind={planetKind}
+          onPlanetKindChange={setPlanetKind}
+          radarPivotName={radarPivotId ? data.systemMap.get(radarPivotId)?.name ?? null : null}
+          radarJumps={radarJumps}
+          onRadarJumpsChange={setRadarJumps}
+          onRadarClear={() => setRadarPivotId(null)}
+          killHeatmapWindow={killHeatmapWindow}
+          onKillHeatmapWindowChange={(w) => {
+            setKillHeatmapWindow(w);
+            setKillHeatmapPlaying(false);
+          }}
+          killHeatmapBuckets={killHeatmap.data?.buckets ?? []}
+          killHeatmapBucketIdx={killHeatmapBucketIdx}
+          onKillHeatmapBucketIdxChange={(i) => {
+            // Manual scrub — snap to bucket and clear any in-flight
+            // interpolation residue from a play-pause cycle.
+            setKillHeatmapBucketIdx(i);
+            setKillHeatmapPlayProgress(0);
+          }}
+          killHeatmapPlaying={killHeatmapPlaying}
+          onKillHeatmapPlayPauseToggle={() => {
+            setKillHeatmapPlaying((playing) => {
+              if (playing) return false;
+              // Starting play. If we're parked at the last bucket, rewind
+              // so the user gets a fresh playthrough instead of a no-op.
+              const buckets = killHeatmap.data?.buckets ?? [];
+              if (buckets.length > 0 && killHeatmapBucketIdx >= buckets.length - 1) {
+                setKillHeatmapBucketIdx(0);
+                setKillHeatmapPlayProgress(0);
+              }
+              return true;
+            });
+          }}
+          killHeatmapLoading={killHeatmap.loading}
+          killHeatmapMaxValue={killHeatmap.data?.max_value ?? 0}
+        />
+      </div>
+    </div>
+  );
+});
+
+StarMap.displayName = 'StarMap';
+
+/** Brighten a hex color by a factor */
+function brighten(hex: number, factor: number): number {
+  const r = Math.min(255, Math.round(((hex >> 16) & 0xff) * factor));
+  const g = Math.min(255, Math.round(((hex >> 8) & 0xff) * factor));
+  const b = Math.min(255, Math.round((hex & 0xff) * factor));
+  return (r << 16) | (g << 8) | b;
+}

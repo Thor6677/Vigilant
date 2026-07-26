@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+/* Templates live outside this directory; Dockerfile copies them into
+   ./tailwind-content for the build stage so the scanner can see them. */
+@source "./tailwind-content";
+
+/* Class-based dark mode: <html class="dark"> in base.html */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    --color-eve-bg: #080808;
+    --color-eve-surface: #0e0e0e;
+    --color-eve-border: #1a1a1a;
+    --color-eve-accent: #c8a951;
+    --color-eve-gold: #c8a951;
+    --color-eve-danger: #cc3333;
+    --color-eve-success: #33aa55;
+    --color-eve-muted: #8a8a8a;
+
+    --font-mono: "JetBrains Mono", monospace;
+}

@@ -1,0 +1,44 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token: this workflow only needs the source. Narrowing it here means
+# a compromised dependency can't push commits or publish releases, regardless of
+# the repository's default workflow permissions.
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12 matches the runtime in Dockerfile, so a green run reflects the
+      # actual deployment target rather than whatever is newest.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # No secrets or .env needed: tests/conftest.py supplies dummy SSO
+      # credentials and points DATABASE_URL at a throwaway SQLite file.
+      - name: Run tests
+        run: pytest tests -q

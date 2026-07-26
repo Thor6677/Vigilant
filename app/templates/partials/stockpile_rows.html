@@ -1,0 +1,44 @@
+{# Watchlist table — the innerHTML of #sp-rows. Returned standalone by the
+   add (POST) and delete (DELETE) endpoints so the table refreshes in place.
+   Under-stocked rows carry `.is-under` (deficit highlight). #}
+{% if not rows %}
+<div class="b-empty">
+    No stockpile targets yet. Search for an item below and set a target quantity
+    to start watching it.
+</div>
+{% else %}
+<div style="overflow-x:auto;">
+<table class="sp-table">
+    <thead>
+        <tr>
+            <th style="text-align:left;">Item</th>
+            <th style="text-align:right;">Current</th>
+            <th style="text-align:right;">Target</th>
+            <th style="text-align:right;">Deficit</th>
+            <th style="text-align:left;">Note</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr class="{{ 'is-under' if r.under }}">
+            <td>{{ r.type_name }}</td>
+            <td style="text-align:right;">{{ '{:,}'.format(r.current) }}</td>
+            <td style="text-align:right;">{{ '{:,}'.format(r.target_qty) }}</td>
+            <td style="text-align:right;" class="sp-deficit">
+                {{ '{:,}'.format(r.deficit) if r.under else '—' }}
+            </td>
+            <td class="sp-note">{{ r.note }}</td>
+            <td style="text-align:right;">
+                <button type="button" class="b-btn sp-del"
+                        hx-delete="/tools/stockpiles/{{ r.id }}"
+                        hx-target="#sp-rows" hx-swap="innerHTML"
+                        hx-confirm="Remove this stockpile target?"
+                        title="Remove target">&times;</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

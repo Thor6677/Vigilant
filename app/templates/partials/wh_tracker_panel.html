@@ -1,0 +1,166 @@
+{# Live WH tracker panel (T-034). States: none / error / idle / active.
+   Active state reuses the wormhole system context (build_wh_system_context)
+   plus the killmail intel dict from app/routes/wh_tracker.py. #}
+
+<div style="display:flex;justify-content:flex-end;margin-bottom:0.4rem;">
+    <span id="wht-checked" class="b-muted-sm" data-ts="{{ (checked_at.timestamp() * 1000) | int }}">checked just now</span>
+</div>
+
+{% if state == 'none' %}
+<div class="b-panel" style="padding:1rem;text-align:center;">
+    <span class="b-muted-sm">Check a character above to start tracking.</span>
+</div>
+
+{% elif state == 'error' %}
+<div class="b-panel" style="padding:1rem;text-align:center;">
+    <span style="color:var(--danger);font-size:11px;">Location lookup failed for every tracked character — ESI may be unreachable. Retrying on the next poll.</span>
+</div>
+
+{% elif state == 'idle' %}
+<div class="b-panel" style="padding:1rem;">
+    <div class="b-muted-sm" style="margin-bottom:0.5rem;">No tracked character is in J-space right now.</div>
+    {% for l in locations %}
+    <div style="font-size:11px;padding:2px 0;">
+        <span style="color:var(--text);">{{ l.char_name }}</span>
+        <span style="color:var(--muted);"> — {{ l.system_name }}</span>
+    </div>
+    {% endfor %}
+</div>
+
+{% elif state == 'active' and system %}
+<div class="ws-header b-page-header" style="margin-bottom:0.25rem;">
+    <span class="ws-name b-page-title">{{ system['system_name'] }}</span>
+    <span class="ws-class-badge" style="color:{{ class_color(wh_class) }};border-color:{{ class_color(wh_class) }};">{{ class_label(wh_class) }} System</span>
+    {% if effect %}<span style="font-size:12px;color:var(--text);">{{ effect['name'] }}</span>{% endif %}
+    <a href="/wormholes/system/{{ system['system_name'] }}" style="font-size:10px;color:var(--accent);margin-left:auto;">full page →</a>
+</div>
+<div class="b-muted-sm" style="margin-bottom:0.75rem;">
+    {{ char_name }} is here{% if prev_system_name %} · came from <span style="color:var(--text);">{{ prev_system_name }}</span>{% endif %}
+    {% for o in others %} · {{ o.char_name }}: {{ o.system_name }}{% endfor %}
+</div>
+
+<div class="ws-grid">
+    <div>
+        <!-- Connections -->
+        <div class="ws-section">
+            <div class="ws-section-title">Connections</div>
+            <div style="margin-bottom:0.5rem;">
+                {% if statics %}
+                <div style="margin-bottom:0.4rem;">
+                    <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Static{{ 's' if statics|length > 1 }}</span>
+                    {% for s in statics %}
+                    <span class="ws-conn">
+                        <a href="/wormholes/types/{{ s['code'] }}" style="color:{{ class_color(s['target_class']) }};">{{ s['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(s['target_class']) }};">&rarr;{{ class_label(s['target_class']) }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+                {% elif not statics_known %}
+                <span class="b-muted-sm" style="font-style:italic;">Statics not catalogued for this system.</span>
+                {% endif %}
+                {% if wandering %}
+                <div>
+                    <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Possible Wandering</span>
+                    {% for w in wandering %}
+                    <span class="ws-conn">
+                        <a href="/wormholes/types/{{ w['code'] }}" style="color:{{ class_color(w['target_class']) }};">{{ w['code'] }}</a><span class="ws-conn-dest" style="color:{{ class_color(w['target_class']) }};">&rarr;{{ class_label(w['target_class']) }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Effect -->
+        {% if effect %}
+        <div class="ws-section">
+            <div class="ws-section-title">{{ effect['name'] }} Effect ({{ class_label(wh_class) }})</div>
+            <div class="b-panel" style="padding:0;">
+                <table class="ws-effect-table">
+                    <thead><tr><th>Modifier</th><th>Value</th></tr></thead>
+                    <tbody>
+                    {% for mod in effect.get('modifiers', []) %}
+                    {% set idx = (wh_class - 1) if wh_class and wh_class <= 6 else 0 %}
+                    {% set val = mod['values'][idx] if idx < mod['values']|length else mod['values'][0] %}
+                    <tr>
+                        <td>{{ mod['name'] }}</td>
+                        <td style="color:{% if val > 0 and mod['type'] == 'penalty' %}var(--danger){% elif val < 0 and mod['type'] == 'penalty' %}var(--danger){% else %}var(--success){% endif %};">{{ '+' if val > 0 }}{{ val }}%</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Structure age quick-check -->
+        <div class="ws-section">
+            <div class="ws-section-title">Structure Age</div>
+            <div class="b-panel" style="padding:0.6rem 0.75rem;">
+                <form hx-get="/tools/structure-age/partial" hx-target="#wht-sa-result"
+                      hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.4rem;">
+                    <textarea name="paste" class="sa-input" style="min-height:38px;"
+                        placeholder="paste structure showinfo link…"></textarea>
+                    <div><button type="submit" class="sa-submit">Estimate Age</button></div>
+                </form>
+                <div id="wht-sa-result" style="margin-top:0.4rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <!-- Killmail intelligence -->
+        <div class="ws-section">
+            <div class="ws-section-title">System Intelligence <span style="font-size:9px;color:var(--muted);text-transform:none;letter-spacing:0;">local killmail archive</span></div>
+            <div class="b-panel" style="padding:0.6rem 0.75rem;">
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.25rem;">Who lives here (90d)</div>
+                {% if intel.residents %}
+                {% for r in intel.residents %}
+                <div style="font-size:11px;padding:1px 0;">
+                    <a href="/intel/entity/corporation/{{ r.corp_id }}" style="color:var(--accent);">{{ r.corp_name }}</a>
+                    {% if r.alliance_name %}<span style="color:var(--muted);"> [{{ r.alliance_name }}]</span>{% endif %}
+                    <span style="color:var(--muted);"> — {{ r.kills }} kill{{ 's' if r.kills != 1 }}</span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="b-muted-sm" style="font-style:italic;">No kills in the last 90 days — likely unoccupied or very quiet.</div>
+                {% endif %}
+                <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">{{ intel.total_kills_90d }} total kill{{ 's' if intel.total_kills_90d != 1 }} in 90d</div>
+
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:0.7rem 0 0.25rem;">Capital activity (1y)</div>
+                {% if intel.capital_kills_1y %}
+                <div style="font-size:11px;color:var(--danger);">{{ intel.capital_kills_1y }} capital kill{{ 's' if intel.capital_kills_1y != 1 }}{% if intel.capital_latest %} · latest {{ intel.capital_latest.strftime('%d %b %Y') }}{% endif %}</div>
+                {% else %}
+                <div class="b-muted-sm" style="font-style:italic;">None recorded.</div>
+                {% endif %}
+
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:0.7rem 0 0.25rem;">Last structure kill</div>
+                {% if intel.last_structure_kill %}
+                <div style="font-size:11px;">
+                    <span style="color:var(--text);">{{ intel.last_structure_kill.type_name }}</span>
+                    <span style="color:var(--muted);"> — {{ intel.last_structure_kill.owner }} · {{ intel.last_structure_kill.time.strftime('%d %b %Y') }}</span>
+                </div>
+                {% else %}
+                <div class="b-muted-sm" style="font-style:italic;">None in the last 2 years.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Recent kills (reuses the system page's lazy endpoint) -->
+        <div class="ws-section">
+            <div class="ws-section-title">Kill Activity</div>
+            <div hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="b-panel" style="padding:0.75rem;text-align:center;">
+                    <span class="b-muted-sm">Loading kill data…</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="b-panel" style="padding:1rem;text-align:center;">
+    <span class="b-muted-sm">System reference unavailable for this location.</span>
+</div>
+{% endif %}

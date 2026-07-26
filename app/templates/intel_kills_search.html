@@ -1,0 +1,816 @@
+{% extends "base.html" %}
+{% block title %}Advanced Kill Search — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><a href="/intel/kills">Kill Feed</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Advanced Search</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+  /* ── filter card ──────────────────────────────────────────────── */
+  .kfs-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px; }
+  .kfs-title { font-size:13px; letter-spacing:0.16em; color:var(--text); font-weight:600; margin:0; }
+  .kfs-head-actions { display:flex; gap:6px; }
+  .kfs-btn { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:4px 10px; font-size:10px; cursor:pointer; border-radius:3px; }
+  .kfs-btn:hover { border-color:var(--accent); }
+  .kfs-btn.primary { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kfs-filters { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .kfs-filter-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kfs-glabel { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.12em; margin-right:4px; min-width:80px; }
+  .kfs-chip { background:var(--surface); color:var(--text); padding:3px 9px; border:1px solid var(--border); font-size:10px; cursor:pointer; border-radius:3px; user-select:none; }
+  .kfs-chip.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  .kfs-chip.mod { border-style:dashed; }
+  .kfs-chip.mod.on { background:rgba(167,139,250,0.15); color:#a78bfa; border-color:#a78bfa; }
+  .kfs-chip.disabled { opacity:0.4; cursor:not-allowed; }
+  .kfs-date-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:130px; font-family:"SF Mono",Menlo,monospace; }
+  .kfs-date-input::placeholder { color:var(--muted); }
+  /* autocomplete reuses Feature A's pattern */
+  .kfs-ac { position:relative; }
+  .kfs-ac-input { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:3px 9px; font-size:10px; border-radius:3px; width:180px; }
+  .kfs-ac-input:focus { outline:none; border-color:var(--accent); }
+  .kfs-ac-results { position:absolute; top:100%; left:0; background:var(--surface); border:1px solid var(--border); margin-top:2px; min-width:240px; max-height:240px; overflow:auto; z-index:20; display:none; }
+  .kfs-ac-results.show { display:block; }
+  .kfs-ac-result { padding:4px 8px; font-size:10px; cursor:pointer; color:var(--text); }
+  .kfs-ac-result:hover { background:rgba(94,177,255,0.1); }
+  .kfs-ac-result .kind { color:var(--muted); font-size:9px; margin-left:4px; }
+  .kfs-chips { display:inline-flex; gap:4px; flex-wrap:wrap; }
+  .kfs-chip-removable { background:rgba(94,177,255,0.15); color:var(--accent); padding:2px 6px 2px 8px; font-size:10px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+  .kfs-chip-removable .x { font-weight:700; }
+  .kfs-modes { display:inline-flex; gap:2px; }
+  .kfs-mode-btn { background:var(--surface); color:var(--muted); padding:2px 6px; border:1px solid var(--border); font-size:9px; cursor:pointer; text-transform:uppercase; letter-spacing:0.06em; }
+  .kfs-mode-btn.on { background:rgba(94,177,255,0.15); color:var(--accent); border-color:var(--accent); }
+  /* stats + results */
+  .kfs-stats { display:flex; justify-content:space-between; padding:6px 0; font-size:11px; color:var(--muted); border-bottom:1px solid var(--border); margin-bottom:6px; }
+  .kfs-stats strong { color:var(--text); }
+  .kfs-loading { color:var(--muted); font-size:11px; padding:10px 0; text-align:center; }
+  .kfs-show-more-wrap { text-align:center; padding:14px 0; }
+  /* .kf-row / .kf-ship-thumb / .kf-meta-* / .kf-isk / .kf-ago / .kf-sys-* /
+     .kf-npc-badge / .kf-detail* / .kf-slot* / .kf-attacker-compact* /
+     .kf-dmg-bar* / .kf-fb-badge / @keyframes kf-row-in — the kill row +
+     detail panel markup reused from intel_kills.html ("Feature A pattern").
+     Shared rules moved to static/css/site.css under "Killfeed shared
+     (.kf-*)" (T-039); this page previously carried its own verbatim copy. */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-section">
+  <div class="b-section-head kfs-head">
+    <h1 class="kfs-title">ADVANCED KILL SEARCH</h1>
+    <div class="kfs-head-actions">
+      <button type="button" class="kfs-btn" id="kfs-reset">Reset</button>
+      <a class="kfs-btn" href="/intel/kills" style="text-decoration:none;">← Back to live feed</a>
+    </div>
+  </div>
+
+  <div class="kfs-filters">
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Time</span>
+      <span class="kfs-chip" data-time="24h">24h</span>
+      <span class="kfs-chip" data-time="7d">7d</span>
+      <span class="kfs-chip" data-time="30d">30d</span>
+      <span class="kfs-chip" data-time="90d">90d</span>
+      <span style="color:var(--muted);font-size:10px;margin:0 6px;">or range:</span>
+      <input type="text" class="kfs-date-input" id="kfs-time-start" placeholder="YYYY-MM-DD HH:MM" autocomplete="off">
+      <input type="text" class="kfs-date-input" id="kfs-time-end" placeholder="YYYY-MM-DD HH:MM" autocomplete="off">
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Space</span>
+      <span class="kfs-chip" data-space="hs">HS</span>
+      <span class="kfs-chip" data-space="ls">LS</span>
+      <span class="kfs-chip" data-space="ns">NS</span>
+      <span class="kfs-chip" data-space="wh">WH</span>
+      <span class="kfs-chip" data-space="abyssal">Abyssal</span>
+      <span class="kfs-chip" data-space="pochven">Pochven</span>
+    </div>
+    <div class="kfs-filter-row" id="kfs-wh-subclasses" style="display:none;">
+      <span class="kfs-glabel">WH class</span>
+      {% for c in ['C1','C2','C3','C4','C5','C6','Thera','Drifter'] %}
+      <span class="kfs-chip" data-whclass="{{ c|lower }}">{{ c }}</span>
+      {% endfor %}
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Category</span>
+      <span class="kfs-chip" data-category="ship">Ship</span>
+      <span class="kfs-chip" data-category="structure">Structure</span>
+      <span class="kfs-chip" data-category="capital">Capital</span>
+      <span class="kfs-chip" data-category="at" title="Alliance Tournament prize ships (Utu, Adrestia, Malice, Caedes, Victor, Hydra, …)">AT Ships</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Count</span>
+      <span class="kfs-chip" data-count="solo">Solo</span>
+      <span class="kfs-chip" data-count="2-5">2-5</span>
+      <span class="kfs-chip" data-count="6-10">6-10</span>
+      <span class="kfs-chip" data-count="11-25">11-25</span>
+      <span class="kfs-chip" data-count="26-50">26-50</span>
+      <span class="kfs-chip" data-count="51-100">51-100</span>
+      <span class="kfs-chip" data-count="100+">100+</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">ISK</span>
+      <span class="kfs-chip" data-isk="100m">100m+</span>
+      <span class="kfs-chip" data-isk="1b">1b+</span>
+      <span class="kfs-chip" data-isk="5b">5b+</span>
+      <span class="kfs-chip" data-isk="10b">10b+</span>
+      <span class="kfs-chip" data-isk="100b">100b+</span>
+      <span class="kfs-chip" data-isk="1t">1t+</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Primetime</span>
+      <span class="kfs-chip" data-primetime="aus" title="10:00–18:00 UTC">Aus/CN (10–18 UTC)</span>
+      <span class="kfs-chip" data-primetime="eu" title="18:00–02:00 UTC">EU (18–02 UTC)</span>
+      <span class="kfs-chip" data-primetime="ru" title="14:00–22:00 UTC">RU (14–22 UTC)</span>
+      <span class="kfs-chip" data-primetime="use" title="23:00–07:00 UTC">USE (23–07 UTC)</span>
+      <span class="kfs-chip" data-primetime="usw" title="02:00–10:00 UTC">USW (02–10 UTC)</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Flags</span>
+      <span class="kfs-chip" data-flag="awox" title="Victim killed by ≥1 attacker in their own corp">Awox</span>
+      <span class="kfs-chip" data-flag="gank" title="HS kill with ≥1 negative-sec attacker">HS Gank</span>
+      <span class="kfs-chip" data-flag="padding" title="≥5 attackers and ≥50% contributed less than 1% of max damage. Damage data is sparse on older kills — those are excluded.">Padding</span>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Ship</span>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-ship-input" class="kfs-ac-input" placeholder="Vargur, Loki…" autocomplete="off">
+        <div id="kfs-ship-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-ship-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Attackers</span>
+      <div class="kfs-modes" data-side="attacker">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-attacker-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
+        <div id="kfs-attacker-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-attacker-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Either</span>
+      <div class="kfs-modes" data-side="either">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-either-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
+        <div id="kfs-either-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-either-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Victim</span>
+      <div class="kfs-modes" data-side="victim">
+        <button type="button" class="kfs-mode-btn on" data-mode="or">Or</button>
+        <button type="button" class="kfs-mode-btn" data-mode="and">And</button>
+        <button type="button" class="kfs-mode-btn" data-mode="in">In</button>
+      </div>
+      <div class="kfs-ac">
+        <input type="text" id="kfs-victim-input" class="kfs-ac-input" placeholder="type + click/Enter to add" autocomplete="off">
+        <div id="kfs-victim-results" class="kfs-ac-results"></div>
+      </div>
+      <div id="kfs-victim-chips" class="kfs-chips"></div>
+    </div>
+    <div class="kfs-filter-row">
+      <span class="kfs-glabel">Sort</span>
+      <span class="kfs-chip on" data-sort="date">Date</span>
+      <span class="kfs-chip" data-sort="isk">ISK</span>
+      <span class="kfs-chip" data-sort="involved">Involved</span>
+      <span style="margin-left:8px;"></span>
+      <span class="kfs-chip on" data-dir="desc">Desc</span>
+      <span class="kfs-chip" data-dir="asc">Asc</span>
+      <span style="margin-left:12px;"></span>
+      <button type="button" class="kfs-btn" id="kfs-live-toggle" title="Live polling — requires sort=Date Desc and open-ended time">☐ Live</button>
+    </div>
+  </div>
+
+  <div class="kfs-stats" id="kfs-stats">
+    <span><strong id="kfs-stats-showing">—</strong> of <strong id="kfs-stats-total">—</strong> kills</span>
+    <span>Total destroyed: <strong id="kfs-stats-isk">—</strong> ISK</span>
+  </div>
+
+  <p class="kfs-loading" id="kfs-loading">Loading…</p>
+  <div id="kfs-results"></div>
+  <div class="kfs-show-more-wrap" id="kfs-show-more-wrap" style="display:none;">
+    <button type="button" class="kfs-btn primary" id="kfs-show-more">↓ Show more (next 100)</button>
+  </div>
+</div>
+<script nonce="{{ request.state.csp_nonce }}">
+  (function() {
+    var STORAGE_KEY = 'vigilant:kfs:filters';
+
+    // Filter state — single source of truth for the page.
+    var state;
+    function defaultState() {
+      return {
+        time: '',                  // '' | '24h' | '7d' | '30d' | '90d'
+        time_start: '',
+        time_end: '',
+        space: [],
+        wh_class: [],
+        shattered: false,
+        category: [],
+        count: [],
+        isk: '',                   // string single-select
+        primetime: [],
+        flags: [],                 // multi-select OR within the row
+        ship_ids: [],              // [{id, name}]
+        attacker_mode: 'or',
+        attacker_items: [],        // [{id, name, kind}]   kind ∈ {character,corporation,alliance,ship}
+        either_mode: 'or',
+        either_items: [],
+        victim_mode: 'or',
+        victim_items: [],
+        sort: 'date',
+        direction: 'desc',
+        live: false,
+      };
+    }
+    try {
+      state = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || defaultState();
+    } catch (e) {
+      state = defaultState();
+    }
+    // Defensive: ensure all expected keys
+    var defaults = defaultState();
+    Object.keys(defaults).forEach(function(k) {
+      if (state[k] === undefined) state[k] = defaults[k];
+    });
+
+    // ── helpers ─────────────────────────────────────────────────
+    function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function splitItemsByKind(items) {
+      var by = { character: [], corporation: [], alliance: [], ship: [] };
+      (items || []).forEach(function(e) { if (by[e.kind]) by[e.kind].push(e.id); });
+      return by;
+    }
+
+    function buildQS() {
+      function encList(arr) { return arr.map(encodeURIComponent).join(','); }
+      var qs = [];
+      if (state.time) qs.push('time=' + state.time);
+      if (state.time_start) qs.push('time_start=' + encodeURIComponent(state.time_start));
+      if (state.time_end) qs.push('time_end=' + encodeURIComponent(state.time_end));
+      if (state.space.length) qs.push('space=' + encList(state.space));
+      if (state.wh_class.length) qs.push('wh_class=' + encList(state.wh_class));
+      if (state.shattered) qs.push('shattered=1');
+      if (state.category.length) qs.push('category=' + encList(state.category));
+      if (state.count.length) qs.push('count=' + encList(state.count));
+      if (state.isk) qs.push('isk=' + encodeURIComponent(state.isk));
+      if (state.primetime.length) qs.push('primetime=' + encList(state.primetime));
+      if (state.flags.length) qs.push('flags=' + encList(state.flags));
+      if (state.ship_ids.length) qs.push('ship_id=' + state.ship_ids.map(function(s){return s.id;}).join(','));
+      [['attacker_items','attacker'],['either_items','either'],['victim_items','victim']].forEach(function(pair) {
+        var items = state[pair[0]];
+        if (items.length) {
+          var by = splitItemsByKind(items);
+          qs.push(pair[1] + '_mode=' + state[pair[0].replace('items','mode')]);
+          if (by.character.length) qs.push(pair[1] + '_chars=' + by.character.join(','));
+          if (by.corporation.length) qs.push(pair[1] + '_corps=' + by.corporation.join(','));
+          if (by.alliance.length) qs.push(pair[1] + '_allis=' + by.alliance.join(','));
+          if (by.ship.length) qs.push(pair[1] + '_ships=' + by.ship.join(','));
+        }
+      });
+      qs.push('sort=' + state.sort);
+      qs.push('dir=' + state.direction);
+      return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      history.replaceState(null, '', '/intel/kills/search' + buildQS());
+    }
+
+    function applyChipsToDom() {
+      // Single-select rows
+      document.querySelectorAll('.kfs-chip[data-time]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.time === state.time);
+      });
+      document.querySelectorAll('.kfs-chip[data-isk]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.isk === state.isk);
+      });
+      document.querySelectorAll('.kfs-chip[data-sort]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.sort === state.sort);
+      });
+      document.querySelectorAll('.kfs-chip[data-dir]').forEach(function(el) {
+        el.classList.toggle('on', el.dataset.dir === state.direction);
+      });
+      // Multi-select rows
+      [['space','space'],['wh_class','whclass'],['category','category'],
+       ['count','count'],['primetime','primetime'],['flags','flag']].forEach(function(pair) {
+        document.querySelectorAll('.kfs-chip[data-' + pair[1] + ']').forEach(function(el) {
+          el.classList.toggle('on', state[pair[0]].indexOf(el.dataset[pair[1]]) !== -1);
+        });
+      });
+      // Shattered modifier
+      var sh = document.querySelector('.kfs-chip[data-mod="shattered"]');
+      if (sh) sh.classList.toggle('on', !!state.shattered);
+      // And/In/Or mode buttons for the three entity sides
+      ['attacker', 'either', 'victim'].forEach(function(side) {
+        var stateKey = side + '_mode';
+        var group = document.querySelector('.kfs-modes[data-side="' + side + '"]');
+        if (!group) return;
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          btn.classList.toggle('on', btn.dataset.mode === state[stateKey]);
+        });
+      });
+      // WH class row visibility
+      var whRow = document.getElementById('kfs-wh-subclasses');
+      if (whRow) whRow.style.display = state.space.indexOf('wh') !== -1 ? 'flex' : 'none';
+      // Date range
+      var dsi = document.getElementById('kfs-time-start');
+      var dei = document.getElementById('kfs-time-end');
+      if (dsi) dsi.value = state.time_start || '';
+      if (dei) dei.value = state.time_end || '';
+      // Live toggle button
+      var lt = document.getElementById('kfs-live-toggle');
+      var liveEnabled = state.sort === 'date' && state.direction === 'desc' && !state.time_end;
+      if (lt) {
+        lt.disabled = !liveEnabled;
+        lt.classList.toggle('primary', state.live && liveEnabled);
+        lt.textContent = (state.live && liveEnabled) ? '● Live' : '☐ Live';
+        if (!liveEnabled) state.live = false;
+      }
+    }
+
+    function toggleListMember(list, value) {
+      var i = list.indexOf(value);
+      if (i === -1) list.push(value); else list.splice(i, 1);
+    }
+
+    // ── chip click handlers (multi-select rows) ─────────────────
+    function bindChipClicks() {
+      document.querySelectorAll('.kfs-chip').forEach(function(el) {
+        if (el.dataset.bound === '1') return;
+        el.dataset.bound = '1';
+        el.addEventListener('click', function() {
+          if (el.dataset.time !== undefined) {
+            state.time = (state.time === el.dataset.time) ? '' : el.dataset.time;
+            state.time_start = '';
+            state.time_end = '';
+          } else if (el.dataset.space !== undefined) {
+            // Single-select: clicking the active chip clears, clicking another swaps.
+            if (state.space.length === 1 && state.space[0] === el.dataset.space) {
+              state.space = [];
+            } else {
+              state.space = [el.dataset.space];
+            }
+            if (state.space.indexOf('wh') === -1) { state.wh_class = []; state.shattered = false; }
+          } else if (el.dataset.whclass !== undefined) {
+            toggleListMember(state.wh_class, el.dataset.whclass);
+          } else if (el.dataset.mod === 'shattered') {
+            state.shattered = !state.shattered;
+          } else if (el.dataset.category !== undefined) {
+            toggleListMember(state.category, el.dataset.category);
+          } else if (el.dataset.count !== undefined) {
+            toggleListMember(state.count, el.dataset.count);
+          } else if (el.dataset.isk !== undefined) {
+            state.isk = (state.isk === el.dataset.isk) ? '' : el.dataset.isk;
+          } else if (el.dataset.primetime !== undefined) {
+            toggleListMember(state.primetime, el.dataset.primetime);
+          } else if (el.dataset.flag !== undefined) {
+            toggleListMember(state.flags, el.dataset.flag);
+          } else if (el.dataset.sort !== undefined) {
+            state.sort = el.dataset.sort;
+          } else if (el.dataset.dir !== undefined) {
+            state.direction = el.dataset.dir;
+          }
+          applyChipsToDom();
+          persist();
+          refetchResults();
+        });
+      });
+    }
+
+    // ── date range inputs ───────────────────────────────────────
+    function bindDateRangeInputs() {
+      ['kfs-time-start', 'kfs-time-end'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el || el.dataset.bound === '1') return;
+        el.dataset.bound = '1';
+        var dbn;
+        el.addEventListener('input', function() {
+          clearTimeout(dbn);
+          dbn = setTimeout(function() {
+            state[id.replace('kfs-', '').replace('-', '_')] = el.value.trim();
+            if (state.time_start || state.time_end) state.time = '';
+            persist();
+            refetchResults();
+          }, 600);
+        });
+      });
+    }
+
+    // ── reset button ────────────────────────────────────────────
+    document.getElementById('kfs-reset').addEventListener('click', function() {
+      state = defaultState();
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      history.replaceState(null, '', '/intel/kills/search');
+      // Clear chip removable lists
+      document.getElementById('kfs-ship-chips').innerHTML = '';
+      document.getElementById('kfs-attacker-chips').innerHTML = '';
+      document.getElementById('kfs-either-chips').innerHTML = '';
+      document.getElementById('kfs-victim-chips').innerHTML = '';
+      applyChipsToDom();
+      refetchResults();
+    });
+
+    // ── refetchResults: fires the /search/results fetch call ────
+    var currentOldestCursor = '';
+    var currentNewestCursor = '';
+    var fetchGeneration = 0;
+    function refetchResults() {
+      var feed = document.getElementById('kfs-results');
+      if (feed) feed.innerHTML = '';
+      currentOldestCursor = '';
+      currentNewestCursor = '';
+      var myGen = ++fetchGeneration;
+      var loading = document.getElementById('kfs-loading');
+      if (loading) { loading.style.display = ''; loading.textContent = 'Loading…'; }
+      var showMore = document.getElementById('kfs-show-more-wrap');
+      if (showMore) showMore.style.display = 'none';
+
+      fetch('/intel/kills/search/results' + buildQS())
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          if (myGen !== fetchGeneration) return;  // newer fetch in flight — bail
+          if (loading) loading.style.display = 'none';
+          if (feed) {
+            feed.innerHTML = html;
+            consumeMarker(feed);
+            bindRowClicks();
+            if (typeof refreshAgo === 'function') refreshAgo();
+          }
+        })
+        .catch(function(err) {
+          if (myGen !== fetchGeneration) return;  // newer in flight — don't show stale error
+          if (loading) loading.textContent = 'Error loading results.';
+          console.error(err);
+        });
+    }
+
+    function consumeMarker(container) {
+      var marker = container.querySelector('[data-kfs-marker]');
+      if (!marker) return;
+      var total = marker.getAttribute('data-total-count');
+      var totalIsk = marker.getAttribute('data-total-isk');
+      currentOldestCursor = marker.getAttribute('data-oldest-cursor') || '';
+      currentNewestCursor = marker.getAttribute('data-newest-cursor') || '';
+      // Restart live polling now that we have a fresh newest cursor.
+      if (state.live && liveEnabledCheck()) {
+        stopLivePoll();
+        startLivePoll();
+      }
+      var rowCount = container.querySelectorAll('.kf-row').length;
+
+      var showingEl = document.getElementById('kfs-stats-showing');
+      var totalEl = document.getElementById('kfs-stats-total');
+      var iskEl = document.getElementById('kfs-stats-isk');
+      if (showingEl) showingEl.textContent = '1-' + rowCount;
+      if (totalEl) totalEl.textContent = total || rowCount;
+      if (iskEl && totalIsk) {
+        var n = parseFloat(totalIsk);
+        if (!isNaN(n)) {
+          if (n >= 1e12) iskEl.textContent = (n/1e12).toFixed(2) + 't';
+          else if (n >= 1e9) iskEl.textContent = (n/1e9).toFixed(2) + 'b';
+          else if (n >= 1e6) iskEl.textContent = (n/1e6).toFixed(2) + 'm';
+          else iskEl.textContent = n.toFixed(0);
+        }
+      }
+      marker.remove();
+
+      var showMore = document.getElementById('kfs-show-more-wrap');
+      if (showMore) showMore.style.display = (currentOldestCursor && rowCount >= 100) ? 'block' : 'none';
+
+      if (rowCount === 0) {
+        var feed = document.getElementById('kfs-results');
+        if (feed && !feed.querySelector('.kfs-no-results')) {
+          var msg = document.createElement('div');
+          msg.className = 'kfs-no-results';
+          msg.style.cssText = 'color:var(--muted);font-size:11px;padding:30px 0;text-align:center;';
+          msg.textContent = 'No kills match these filters.';
+          feed.appendChild(msg);
+        }
+      }
+    }
+
+    // ── Show More ──────────────────────────────────────────────
+    document.getElementById('kfs-show-more').addEventListener('click', function() {
+      if (!currentOldestCursor) return;
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      var btn = this;
+      var myGen = fetchGeneration;  // snapshot, don't increment
+      btn.disabled = true;
+      btn.textContent = 'Loading…';
+      fetch('/intel/kills/search/results' + qs + sep + 'cursor=' + encodeURIComponent(currentOldestCursor))
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          if (myGen !== fetchGeneration) {
+            // A refetch happened while Show More was in flight — discard.
+            btn.disabled = false;
+            btn.textContent = '↓ Show more (next 100)';
+            return;
+          }
+          var feed = document.getElementById('kfs-results');
+          if (!feed) return;
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          // Consume + remove marker from the temp container, update cursor
+          var marker = tmp.querySelector('[data-kfs-marker]');
+          var newOldest = marker ? (marker.getAttribute('data-oldest-cursor') || '') : '';
+          if (marker) marker.remove();
+          // Append the new rows
+          while (tmp.firstChild) feed.appendChild(tmp.firstChild);
+          currentOldestCursor = newOldest;
+          // Update stats
+          var rowCount = feed.querySelectorAll('.kf-row').length;
+          document.getElementById('kfs-stats-showing').textContent = '1-' + rowCount;
+          // Re-bind row clicks for newly added rows
+          bindRowClicks();
+          if (typeof refreshAgo === 'function') refreshAgo();
+          btn.disabled = false;
+          btn.textContent = '↓ Show more (next 100)';
+          // Hide button if no more pages
+          var wrap = document.getElementById('kfs-show-more-wrap');
+          if (wrap) wrap.style.display = (currentOldestCursor && tmp.querySelectorAll('.kf-row').length >= 0) ? 'block' : 'none';
+          if (rowCount < 100 || !currentOldestCursor) wrap.style.display = 'none';
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+          btn.textContent = '↓ Show more (next 100)';
+          console.error('Show more failed:', err);
+        });
+    });
+
+    // Auto-trigger Show More when user scrolls within ~400px of the button.
+    var showMoreObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          var btn = document.getElementById('kfs-show-more');
+          if (btn && !btn.disabled && currentOldestCursor) {
+            btn.click();
+          }
+        }
+      });
+    }, { rootMargin: '400px' });
+    var showMoreBtn = document.getElementById('kfs-show-more');
+    if (showMoreBtn) showMoreObserver.observe(showMoreBtn);
+
+    // ── row click → detail panel (reuses Feature A pattern) ────
+    function bindRowClicks() {
+      document.querySelectorAll('#kfs-results .kf-row').forEach(function(row) {
+        if (row.dataset.bound === '1') return;
+        row.dataset.bound = '1';
+        row.addEventListener('click', function() {
+          var kid = row.dataset.kid;
+          var existing = document.querySelector('#kfs-results .kf-detail[data-kid="' + kid + '"]');
+          if (existing) {
+            existing.classList.remove('shown');
+            row.classList.remove('open');
+            setTimeout(function() { if (existing.parentNode) existing.parentNode.removeChild(existing); }, 320);
+            return;
+          }
+          row.classList.add('open');
+          fetch('/intel/kills/' + kid + '/detail')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+              row.insertAdjacentHTML('afterend', html);
+              var panel = row.nextElementSibling;
+              if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                void panel.offsetHeight;
+                requestAnimationFrame(function() { panel.classList.add('shown'); });
+              }
+            })
+            .catch(function() { row.classList.remove('open'); });
+        });
+      });
+    }
+
+    // ── Time-ago refresh (reuse the existing kill-feed pattern) ─
+    function refreshAgo() {
+      var now = Date.now();
+      document.querySelectorAll('.kf-ago[data-time]').forEach(function(el) {
+        var raw = el.getAttribute('data-time') || '';
+        if (!/Z$/.test(raw)) raw += 'Z';
+        var t = new Date(raw).getTime();
+        if (isNaN(t)) { el.textContent = ''; return; }
+        var s = Math.max(0, Math.floor((now - t) / 1000));
+        if (s < 60) el.textContent = s + 's ago';
+        else if (s < 3600) el.textContent = Math.floor(s/60) + 'm ago';
+        else if (s < 86400) el.textContent = Math.floor(s/3600) + 'h ago';
+        else el.textContent = Math.floor(s/86400) + 'd ago';
+      });
+    }
+    setInterval(refreshAgo, 30000);
+
+    // ── chip rendering for entity/ship multi-select chips ──────
+    function renderItemChips(sideKey, containerId) {
+      var c = document.getElementById(containerId);
+      if (!c) return;
+      var items = state[sideKey] || [];
+      c.innerHTML = items.map(function(e) {
+        var label = e.kind && e.kind !== 'ship'
+          ? escAttr(e.name) + ' (' + escAttr(e.kind) + ')'
+          : escAttr(e.name);
+        return '<span class="kfs-chip-removable" data-rm-key="' + escAttr((e.kind || 'ship') + ':' + e.id) + '">' + label + ' <span class="x">×</span></span>';
+      }).join('');
+      c.querySelectorAll('[data-rm-key]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var key = el.dataset.rmKey;
+          state[sideKey] = (state[sideKey] || []).filter(function(e) { return ((e.kind || 'ship') + ':' + e.id) !== key; });
+          renderItemChips(sideKey, containerId);
+          persist();
+          refetchResults();
+        });
+      });
+    }
+
+    // ── autocomplete (combined entity + ship, or ship-only) ────
+    function bindAutocomplete(rowId, inputId, resultsId, chipsId, sideStateKey, kindMode) {
+      // kindMode: 'ship' (ship only) or 'combined' (ship + entity).
+      var input = document.getElementById(inputId);
+      var results = document.getElementById(resultsId);
+      var chips = document.getElementById(chipsId);
+      if (!input || !results || !chips) return;
+      var debounce;
+
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var first = results.querySelector('.kfs-ac-result[data-id]');
+          if (first) first.click();
+        }
+      });
+      input.addEventListener('input', function() {
+        clearTimeout(debounce);
+        var q = input.value.trim();
+        if (q.length < 2) { results.classList.remove('show'); results.innerHTML = ''; return; }
+        debounce = setTimeout(function() {
+          var queries = [
+            fetch('/intel/kills/resolve?kind=ship&q=' + encodeURIComponent(q)).then(function(r) { return r.json(); }),
+          ];
+          if (kindMode === 'combined') {
+            queries.push(fetch('/intel/kills/resolve?kind=entity&q=' + encodeURIComponent(q)).then(function(r) { return r.json(); }));
+          }
+          Promise.all(queries).then(function(arr) {
+            var items = [];
+            (arr[0] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: 'ship' }); });
+            if (arr[1]) (arr[1] || []).forEach(function(it) { items.push({ id: it.id, name: it.name, kind: it.kind }); });
+            if (items.length === 0) {
+              results.innerHTML = '<div class="kfs-ac-result kfs-ac-empty" style="color:var(--muted);cursor:default;">No matches — type an exact character / corp / alliance / ship name.</div>';
+              results.classList.add('show');
+              return;
+            }
+            results.innerHTML = items.slice(0, 16).map(function(it) {
+              return '<div class="kfs-ac-result" data-id="' + it.id + '" data-kind="' + escAttr(it.kind) + '" data-name="' + escAttr(it.name) + '">'
+                + escAttr(it.name) + '<span class="kind">[' + escAttr(it.kind) + ']</span></div>';
+            }).join('');
+            results.classList.add('show');
+            results.querySelectorAll('.kfs-ac-result[data-id]').forEach(function(el) {
+              el.addEventListener('click', function() {
+                var entry = {
+                  id: parseInt(el.dataset.id, 10),
+                  name: el.dataset.name,
+                  kind: el.dataset.kind || 'ship',
+                };
+                var key = entry.kind + ':' + entry.id;
+                if (!Array.isArray(state[sideStateKey])) state[sideStateKey] = [];
+                if (!state[sideStateKey].some(function(e) { return (e.kind + ':' + e.id) === key; })) {
+                  state[sideStateKey].push(entry);
+                }
+                input.value = '';
+                results.classList.remove('show');
+                results.innerHTML = '';
+                renderItemChips(sideStateKey, chipsId);
+                persist();
+                refetchResults();
+              });
+            });
+          });
+        }, 250);
+      });
+      document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !results.contains(e.target)) {
+          results.classList.remove('show');
+        }
+      });
+      renderItemChips(sideStateKey, chipsId);
+    }
+
+    // ── mode buttons (And/In/Or per side) ──────────────────────
+    function bindModeButtons() {
+      document.querySelectorAll('.kfs-modes').forEach(function(group) {
+        var side = group.dataset.side;
+        if (!side) return;
+        // side ∈ {attacker, either, victim}; state key is <side>_mode
+        var stateKey = side + '_mode';
+        // Reflect current state
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          btn.classList.toggle('on', btn.dataset.mode === state[stateKey]);
+        });
+        group.querySelectorAll('.kfs-mode-btn').forEach(function(btn) {
+          if (btn.dataset.bound === '1') return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function() {
+            state[stateKey] = btn.dataset.mode;
+            group.querySelectorAll('.kfs-mode-btn').forEach(function(b) {
+              b.classList.toggle('on', b.dataset.mode === state[stateKey]);
+            });
+            persist();
+            refetchResults();
+          });
+        });
+      });
+    }
+
+    // ── Live polling ───────────────────────────────────────────
+    var livePollTimer = null;
+
+    function liveEnabledCheck() {
+      return state.sort === 'date' && state.direction === 'desc' && !state.time_end;
+    }
+
+    function startLivePoll() {
+      if (livePollTimer) return;
+      livePollTimer = setInterval(livePoll, 15000);
+    }
+
+    function stopLivePoll() {
+      if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+    }
+
+    function livePoll() {
+      if (!state.live || !liveEnabledCheck() || !currentNewestCursor) return;
+      var myGen = fetchGeneration;  // snapshot, don't increment
+      var qs = buildQS();
+      var sep = qs ? '&' : '?';
+      fetch('/intel/kills/search/results' + qs + sep + 'live=1&since=' + encodeURIComponent(currentNewestCursor))
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          if (myGen !== fetchGeneration) return;  // filter changed mid-flight — discard
+          var feed = document.getElementById('kfs-results');
+          if (!feed) return;
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          var marker = tmp.querySelector('[data-kfs-marker]');
+          var newNewest = marker ? (marker.getAttribute('data-newest-cursor') || '') : '';
+          if (marker) marker.remove();
+          var existing = {};
+          feed.querySelectorAll('.kf-row').forEach(function(r) { if (r.dataset.kid) existing[r.dataset.kid] = true; });
+          var newRows = [];
+          tmp.querySelectorAll('.kf-row').forEach(function(r) {
+            if (r.dataset.kid && !existing[r.dataset.kid]) newRows.push(r);
+          });
+          if (newRows.length) {
+            newRows.reverse().forEach(function(r) {
+              r.classList.add('kf-new');
+              feed.insertBefore(r, feed.firstChild);
+              setTimeout(function() { r.classList.remove('kf-new'); }, 650);
+            });
+            if (newNewest) currentNewestCursor = newNewest;
+            var rowCount = feed.querySelectorAll('.kf-row').length;
+            document.getElementById('kfs-stats-showing').textContent = '1-' + rowCount;
+            var totalAttr = marker ? marker.getAttribute('data-total-count') : '';
+            if (totalAttr) document.getElementById('kfs-stats-total').textContent = totalAttr;
+            bindRowClicks();
+            if (typeof refreshAgo === 'function') refreshAgo();
+          }
+        })
+        .catch(function() { /* swallow — next poll will retry */ });
+    }
+
+    // Live toggle button handler
+    document.getElementById('kfs-live-toggle').addEventListener('click', function() {
+      if (!liveEnabledCheck()) return;
+      state.live = !state.live;
+      applyChipsToDom();
+      persist();
+      if (state.live) startLivePoll(); else stopLivePoll();
+    });
+
+    // Wrap refetchResults so live polling pauses on filter change.
+    // Polling restarts inside consumeMarker once currentNewestCursor populates.
+    var _prev_refetchResults = refetchResults;
+    refetchResults = function() {
+      stopLivePoll();
+      _prev_refetchResults();
+    };
+
+    // ── init ───────────────────────────────────────────────────
+    applyChipsToDom();
+    bindChipClicks();
+    bindDateRangeInputs();
+    bindModeButtons();
+    bindAutocomplete('ship-row',      'kfs-ship-input',     'kfs-ship-results',     'kfs-ship-chips',     'ship_ids',       'ship');
+    bindAutocomplete('attacker-row',  'kfs-attacker-input', 'kfs-attacker-results', 'kfs-attacker-chips', 'attacker_items', 'combined');
+    bindAutocomplete('either-row',    'kfs-either-input',   'kfs-either-results',   'kfs-either-chips',   'either_items',   'combined');
+    bindAutocomplete('victim-row',    'kfs-victim-input',   'kfs-victim-results',   'kfs-victim-chips',   'victim_items',   'combined');
+    refetchResults();
+  })();
+</script>
+{% endblock %}

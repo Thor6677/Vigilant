@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Intel — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Intel</h1>
+</div>
+
+{% if error %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">{{ error }}</span>
+</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;">
+
+{# ── Paste Form ─────────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-bottom:0;">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Paste D-Scan or Local</span></div>
+        <form method="POST" action="/intel/parse">
+            <div class="b-pad-md">
+                <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;max-width:300px;">
+                    <label class="b-eyebrow">Label (optional)</label>
+                    <input type="text" name="label" placeholder="e.g. J123456 local"
+                           style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
+                </div>
+                <textarea name="paste_text" rows="12"
+                          placeholder="Paste here — auto-detects the type:&#10;&#10;D-Scan: Open d-scan (Alt+D), scan, Ctrl+A, Ctrl+V&#10;Local: Click in local chat member list, Ctrl+A, Ctrl+V"
+                          style="width:100%;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;"></textarea>
+                <button type="submit" class="b-btn"
+                        style="margin-top:0.5rem;width:100%;padding:0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:11px;">
+                    Parse & Share
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Scan History ───────────────────────────────────────────────────────── #}
+<div class="b-section" style="margin-bottom:0;">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">History</span></div>
+        <div style="padding:0.5rem 0.75rem;">
+        {% if history %}
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Type</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Label</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:left;">Detail</th>
+                        <th style="padding:0.35rem 0.5rem;text-align:right;">Expires</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for scan in history %}
+                    <tr class="b-hover-transparent" style="border-bottom:1px solid var(--border);cursor:pointer;"
+                        onclick="window.location='/intel/{{ scan.id }}'">
+                        <td style="padding:0.4rem 0.5rem;">
+                            {% if scan.scan_type == 'dscan' %}
+                                <span style="color:var(--accent);">D-Scan</span>
+                            {% else %}
+                                <span style="color:#a78bfa;">Local</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding:0.4rem 0.5rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            {{ scan.label or '—' }}
+                        </td>
+                        <td style="padding:0.4rem 0.5rem;color:var(--muted);">{{ scan.detail }}</td>
+                        <td style="padding:0.4rem 0.5rem;text-align:right;color:var(--muted);">{{ scan.expires_in }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <span style="color:var(--muted);font-size:11px;">No recent scans.</span>
+        {% endif %}
+        </div>
+    </div>
+</div>
+
+</div>
+
+{% endblock %}

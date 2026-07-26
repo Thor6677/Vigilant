@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Structure Age — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/tools">Tools</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Structure Age</span>
+</div>
+{% endblock %}
+
+{# .sa-* styles live in static/css/site.css — shared with the wormhole
+   system page's structure-age embed. #}
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Structure Age</h1>
+</div>
+
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head"><span class="b-label">Estimate</span></div>
+    <div style="padding:0.75rem;">
+        <p style="font-size:11px;color:var(--muted);margin-bottom:0.75rem;">
+            Paste an in-game showinfo link from chat or the structure window to estimate when it was anchored.
+            Uses {{ "{:,}".format(36403) }} local calibration points — no external API call needed.
+        </p>
+        <form method="GET" action="/tools/structure-age" style="display:flex;flex-direction:column;gap:0.5rem;">
+            <textarea
+                name="paste"
+                class="sa-input"
+                placeholder="&lt;url=showinfo:35833//1234567890123&gt;J123456 - Example Citadel (Example Corp)&lt;/url&gt;"
+                autofocus
+            >{{ paste }}</textarea>
+            <div>
+                <button type="submit" class="sa-submit">Estimate Age</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% include "structure_age_result.html" %}
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">How to get the showinfo link</span></div>
+    <div style="padding:0.75rem;font-size:11px;color:var(--muted);line-height:1.6;">
+        In-game: right-click any structure → <em>Show Info</em> → drag the title bar icon into a chat window.
+        The resulting link looks like:
+        <code style="font-family:monospace;background:var(--surface);padding:1px 4px;border:1px solid var(--border);">
+            &lt;url=showinfo:35833//1234567890123&gt;...&lt;/url&gt;
+        </code>
+        Paste the whole line here.
+    </div>
+</div>
+{% endblock %}

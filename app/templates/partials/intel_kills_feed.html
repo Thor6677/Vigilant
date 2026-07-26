@@ -1,0 +1,28 @@
+{% if not older_mode %}
+<div hidden data-kf-marker data-kf-newest="{{ newest_id }}" data-kf-total="{{ total_in_buffer }}"></div>
+{% endif %}
+{% for k in kills %}
+<div class="kf-row" data-kid="{{ k['killmail_id'] }}">
+  <img class="kf-ship-thumb" loading="lazy"
+       src="https://images.evetech.net/types/{{ k['victim_ship_type_id'] }}/icon?size=64"
+       alt="{{ k['victim_ship'] }}">
+  <div class="kf-meta">
+    <div class="kf-meta-top">
+      <strong>{{ k['victim_pilot'] }}</strong>
+      {% if k['victim_corp'] %}[{{ k['victim_corp'] }}]{% endif %}
+      · {{ k['victim_ship'] }}
+      {% if k.get('is_npc') %}<span class="kf-npc-badge">NPC</span>{% endif %}
+    </div>
+    <div class="kf-meta-bot">
+      <span class="kf-sys-{{ k['system_band'] }}">{{ k['system_name'] }}{% if k['system_class_label'] %} ({{ k['system_class_label'] }}){% endif %}</span>
+      · killed by <strong>{{ k['top_attacker_pilot'] }}</strong>
+      {% if k['top_attacker_corp'] %}[{{ k['top_attacker_corp'] }}]{% endif %}
+      · {% if k['gang_size'] == 1 %}solo{% else %}gang of {{ k['gang_size'] }}{% endif %}
+    </div>
+  </div>
+  <div class="kf-isk">
+    {{ "%.1f"|format(k['isk']/1e9) }}B
+    <span class="kf-ago" data-time="{{ k['killmail_time'] }}">just now</span>
+  </div>
+</div>
+{% endfor %}

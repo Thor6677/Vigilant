@@ -1,0 +1,12 @@
+{% if q|length < 2 %}
+<div class="mk-hint">Type at least two characters to search.</div>
+{% elif not results %}
+<div class="mk-hint">No published items match &ldquo;{{ q }}&rdquo;.</div>
+{% else %}
+{% for r in results %}
+<a class="mk-row" href="/market/type/{{ r.type_id }}">
+    <span class="mk-row-name">{{ r.type_name }}</span>
+    <span class="mk-row-group">{{ r.group }}</span>
+</a>
+{% endfor %}
+{% endif %}

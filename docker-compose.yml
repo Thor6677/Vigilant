@@ -1,0 +1,60 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/vigilant.db
+      - UPLOADS_DIR=/data/uploads
+      # ISS-013: persist vigilant.perf lines to a rotating file on the
+      # /data volume so perf measurements survive container recreates.
+      # Stdout is still written for `docker logs` visibility; this is
+      # additive. VIGILANT_PERF_LOG=1 lives in .env.
+      - VIGILANT_PERF_FILE=/data/logs/perf.log
+    volumes:
+      - app_data:/data
+    networks:
+      - web
+    expose:
+      - "8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Minimum caps the entrypoint needs to run as root, chown /data,
+    # and drop to the vigilant uid via gosu before exec'ing uvicorn.
+    # See docker-entrypoint.sh and VVP-2026-003 / T-004. Once the
+    # entrypoint has handed off, the running uvicorn process holds no
+    # capabilities (gosu drops them along with the uid).
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2560M
+          cpus: "2.0"
+          pids: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  app_data:
+
+networks:
+  # Shared external bridge. Edge nginx (separate stack at /opt/edge/ on
+  # the VPS, or whatever reverse proxy you're running) attaches here and
+  # upstreams vigilant by container name (`vigilant-app-1:8000`).
+  # Bring vigilant up alongside other apps with:
+  #   docker network create web   # one-time, host-level
+  # See docs/nginx-sample.conf for a single-app vhost example.
+  web:
+    external: true
+    name: web
