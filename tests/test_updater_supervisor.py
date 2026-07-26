@@ -11,7 +11,7 @@ from updater.supervisor import (
     clamp_log_tail,
     eligible_rollback_targets,
     is_stale_lock,
-    parse_deployed,
+    parse_deployed_tags,
     step_for_line,
     validate_tag,
 )
@@ -19,7 +19,7 @@ from updater.supervisor import (
 
 # ── Tag validation ───────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("tag", ["v1.0.0", "v0.0.1", "v10.20.30", "v1.2.3"])
+@pytest.mark.parametrize("tag", ["v1.0.0", "v0.0.1", "v10.20.30", "v1.2.3", "v0.0.0", "v0.9.9"])
 def test_valid_tags_accepted(tag):
     assert validate_tag(tag) is True
 
@@ -41,6 +41,9 @@ def test_valid_tags_accepted(tag):
     "",
     "   ",
     None,
+    "v01.0.0",                   # leading zero: same distinct-ref/same-tuple
+    "v1.00.0",                   # collision class as the homoglyph case
+    "v1.0.00",
 ])
 def test_hostile_and_malformed_tags_rejected(tag):
     assert validate_tag(tag) is False
@@ -80,11 +83,11 @@ def test_parse_deployed_extracts_tags_in_order():
         "2026-07-27T09:00:00Z v1.1.0\n"
         "2026-07-27T10:00:00Z v1.0.0\n"
     )
-    assert parse_deployed(text) == ["v1.0.0", "v1.1.0", "v1.0.0"]
+    assert parse_deployed_tags(text) == ["v1.0.0", "v1.1.0", "v1.0.0"]
 
 
 def test_parse_deployed_ignores_junk_lines():
-    assert parse_deployed("\ngarbage\n2026-07-26T18:54:28Z v1.0.0\n") == ["v1.0.0"]
+    assert parse_deployed_tags("\ngarbage\n2026-07-26T18:54:28Z v1.0.0\n") == ["v1.0.0"]
 
 
 def test_eligible_targets_excludes_the_running_tag():
@@ -147,6 +150,15 @@ def test_eligible_targets_fail_closed_on_an_unparseable_current_tag():
     assert eligible_rollback_targets(lines, current_tag="dev") == []
 
 
+def test_eligible_targets_reject_what_parse_version_would_accept():
+    """parse_version is the LAXER regex — it happily parses "v1.3.0-rc1" and
+    "v١.٠.٠". validate_tag must therefore run FIRST. A prerelease in .deployed
+    is normal operation, not hypothetical: deploy.sh --tag v1.3.0-rc1 is the
+    documented escape hatch and [3/5] records whatever it deployed."""
+    lines = "t v1.1.0\nt v1.3.0-rc1\nt v١.٠.٠\nt v1.4.0\n"
+    assert eligible_rollback_targets(lines, current_tag="v1.4.0") == ["v1.1.0"]
+
+
 # ── Lock staleness ───────────────────────────────────────────────────────────
 
 def test_lock_held_by_a_live_recent_process_is_not_stale():
@@ -171,6 +183,18 @@ def test_unparseable_lock_is_stale():
     assert is_stale_lock(None, now=1.0, pid_alive=lambda p: True) is True
 
 
+@pytest.mark.parametrize("pid", [True, False, 0, -1, "123", None, 1.5])
+def test_lock_with_an_out_of_range_or_wrong_type_pid_is_stale(pid):
+    """isinstance(True, int) is True since bool subclasses int, so a bare type
+    check alone would accept True/False as pids. pid=0 signals the entire
+    process group via os.kill and pid=-1 signals every process the caller's
+    uid can reach — both would report "alive" via a real side effect rather
+    than a lookup, so treating them as valid pids is unsafe even before
+    considering whether the callback is well-behaved."""
+    lock = {"pid": pid, "started_at": 1000.0}
+    assert is_stale_lock(lock, now=1010.0, pid_alive=lambda p: True) is True
+
+
 # ── deploy.sh output → step ──────────────────────────────────────────────────
 
 @pytest.mark.parametrize("line,step", [
@@ -190,6 +214,15 @@ def test_step_markers_recognised(line, step):
 
 def test_unrecognised_output_does_not_change_the_step():
     assert step_for_line("     resolved latest release: v1.1.0") is None
+
+
+def test_app_log_output_cannot_walk_progress_backwards():
+    """[4/5] echoes raw `docker logs` into the same stream, so an application
+    log line mentioning a marker must not be mistaken for one. Real markers are
+    always at column 0."""
+    assert step_for_line("2026-07-26 INFO worker [1/5] starting batch") is None
+    assert step_for_line("  WARNING: Automatically reverting cache entry") is None
+    assert step_for_line("[1/5] Deploy v1.1.0 (checkout + pull + recreate)") == "deploying"
 
 
 # ── Log clamping ─────────────────────────────────────────────────────────────
@@ -216,7 +249,20 @@ def test_log_tail_never_empties_on_a_single_oversized_line():
     out = clamp_log_tail(["x" * 100_000])
     assert len(out) == 1
     assert sum(len(l.encode()) for l in out) <= 8192
-    assert out[0].endswith("...")
+    assert out[0].startswith("...")
+
+
+def test_log_tail_truncation_keeps_the_end_not_the_beginning():
+    """A traceback's exception line and a progress dump's final state are both
+    at the END. Keeping the head threw away the only line that says what went
+    wrong, on the exact path where the log tail is all the operator has."""
+    tb = ("Traceback (most recent call last):\n"
+          + '  File "x.py", line 1, in f\n' * 4000
+          + "ValueError: THE ACTUAL ERROR MESSAGE\n")
+    out = clamp_log_tail([tb])
+    assert "ValueError: THE ACTUAL ERROR MESSAGE" in out[0]
+    assert out[0].startswith("...")
+    assert len(out[0].encode()) <= 8192
 
 
 def test_log_tail_of_empty_input_is_empty():
@@ -239,4 +285,4 @@ def test_log_tail_truncation_never_splits_a_codepoint():
     out = clamp_log_tail(["🚀" * 9000])
     assert len(out) == 1
     out[0].encode("utf-8")            # must not raise
-    assert out[0].endswith("...")
+    assert out[0].startswith("...")
