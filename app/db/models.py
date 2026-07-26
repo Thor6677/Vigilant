@@ -974,6 +974,26 @@ class MarketHistoryMeta(Base):
     fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class UpdateStatus(Base):
+    """Single-row record of what the update checker has seen and announced.
+
+    Persisted rather than held in memory so `notified_tag` survives restarts —
+    otherwise every container recreate would re-announce the current release to
+    Discord. It is written in the SAME transaction as the send decision, so a
+    crash between the two cannot produce a duplicate announcement.
+    """
+    __tablename__ = "update_status"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    latest_tag = Column(String(64), nullable=True)
+    latest_url = Column(String(512), nullable=True)
+    latest_published_at = Column(DateTime, nullable=True)
+    latest_body = Column(Text, nullable=True)          # release notes, truncated
+    checked_at = Column(DateTime, nullable=True)       # last SUCCESSFUL poll
+    notified_tag = Column(String(64), nullable=True)   # last tag announced
+    last_error = Column(String(512), nullable=True)
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never

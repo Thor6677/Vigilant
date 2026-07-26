@@ -124,6 +124,9 @@ COPY_ALL = (
     'system_activity_snapshots',
     'timer_acl_entries',
     'timer_acl_groups',
+    # Copied whole (it is one row). Harmless in dev: the checker never notifies
+    # from a "dev" build, so a copied notified_tag is inert there.
+    'update_status',
     'user_avoid_entries',
     'user_fitting_folders',
     'user_fittings',
