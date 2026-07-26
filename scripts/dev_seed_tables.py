@@ -8,7 +8,9 @@ against Base.metadata, so the two can never drift.
 
 SLICE    — bounded to a recent window (see SLICE_DAYS). These three tables are
            essentially the entire 180 GiB of production data.
-SKIP     — copied not at all.
+SKIP     — the table IS created, but no rows are copied. It never means "omit
+           the table": a missing table makes the dev app throw `no such table`
+           on the first query, which is far worse than an empty one.
 COPY_ALL — copied whole. Everything else, including the SDE tables and BOTH
            killmail aggregate tables: those aggregates are small and are exactly
            what the activity/history pages read for day-and-longer windows, so
@@ -34,7 +36,15 @@ SLICE_CHILDREN = ("killmail_attackers", "killmail_items")
 
 SLICE = (SLICE_PARENT,) + SLICE_CHILDREN
 
-SKIP = ()
+# Created empty. esi_cache is a pure response cache keyed to production's own
+# ESI calls: it regenerates itself on demand, it is one of the tables that grows
+# continuously, and copying it would have a dev instance serving stale
+# production-cached ESI responses. Registered by app.db.cache rather than
+# app.db.models, which is why it is easy to miss when enumerating models by hand
+# — the coverage test is what caught it.
+SKIP = (
+    'esi_cache',
+)
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).
 COPY_ALL = (

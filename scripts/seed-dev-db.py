@@ -82,14 +82,17 @@ def copy_schema(prod, out):
 
     Building indexes after the bulk insert rather than during it is
     substantially faster and produces a tighter B-tree.
+
+    EVERY table is created, including those in SKIP. SKIP means "copy no ROWS",
+    not "omit the table" -- a missing table would make the dev app throw
+    `no such table` on the first query, which is a far worse outcome than an
+    empty one.
     """
     tables, indexes = [], []
     for typ, name, sql in prod.execute(
         "SELECT type, name, sql FROM sqlite_master "
         "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
     ):
-        if name in cls.SKIP:
-            continue
         (tables if typ == "table" else indexes).append((name, sql))
     for name, sql in tables:
         out.execute(sql)
