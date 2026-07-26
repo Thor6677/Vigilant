@@ -163,6 +163,21 @@ def scrub(out):
     client_id, so they are useless in dev -- a dev instance uses its own EVE
     application and you log in fresh there. Both columns are nullable=False,
     hence empty string rather than NULL.
+
+    VERIFYING THIS LATER: do NOT check `WHERE access_token = ''`. On first boot
+    the dev app's startup migration re-encrypts anything that does not look like
+    ciphertext, so a scrubbed token becomes a ~100-character ENCRYPTED EMPTY
+    STRING. That looks alarming next to a raw-length check and is not a leak --
+    real production tokens are ~3100-3350 characters. Decrypt to confirm:
+
+        docker exec -u 10001 vigilant-dev-app-1 python3 -c "
+        import sqlite3, sys; sys.path.insert(0, '/app')
+        from app.db.encryption import EncryptedText
+        raw = sqlite3.connect('/data/vigilant.db').execute(
+            'SELECT access_token FROM characters LIMIT 1').fetchone()[0]
+        print(repr(EncryptedText().process_result_value(raw, None)))"
+
+    ...which prints '' for a correctly scrubbed database.
     """
     out.execute("UPDATE characters SET access_token = '', refresh_token = ''")
     out.commit()
