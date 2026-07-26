@@ -57,6 +57,14 @@ def test_validation_rejects_a_trailing_newline():
     assert validate_tag("v1.0.0\n") is False
 
 
+def test_validation_rejects_unicode_digits():
+    """`\\d` is Unicode-aware in Python, so it accepts Arabic-Indic digits.
+    "v١.٠.٠" is a DIFFERENT git ref that parse_version() reads as the same
+    (1, 0, 0) tuple as "v1.0.0" — a homoglyph collision in the one function
+    whose job is to pin an exact release."""
+    assert validate_tag("v١.٠.٠") is False
+
+
 # ── .deployed parsing and rollback eligibility ───────────────────────────────
 
 def test_parse_deployed_extracts_tags_in_order():
@@ -182,3 +190,17 @@ def test_log_tail_capped_at_eight_kilobytes():
     """A chatty failure must not be able to fill the control volume."""
     out = clamp_log_tail(["x" * 1000] * 100)
     assert sum(len(l) for l in out) <= 8192
+
+
+def test_log_tail_never_empties_on_a_single_oversized_line():
+    """A docker pull dump or a traceback arrives as ONE long line. Popping
+    until it fits would leave the operator staring at nothing on the exact
+    path where the log is all they have."""
+    out = clamp_log_tail(["x" * 100_000])
+    assert len(out) == 1
+    assert sum(len(l) for l in out) <= 8192
+    assert out[0].endswith("...")
+
+
+def test_log_tail_of_empty_input_is_empty():
+    assert clamp_log_tail([]) == []

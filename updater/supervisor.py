@@ -30,7 +30,12 @@ from app.ops.version import parse_version
 #
 # \Z, not $: in Python `$` ALSO matches just before a trailing newline, so
 # `^v\d+\.\d+\.\d+$` accepts "v1.0.0\n". \Z anchors to the true end of string.
-_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+\Z")
+#
+# [0-9] and not \d: Python's \d is Unicode-aware, so \d+ accepts Arabic-Indic
+# digits — "v١.٠.٠" passed validation AND parsed to the same (1, 0, 0) tuple as
+# "v1.0.0" while being an entirely different git ref. A validator whose whole
+# job is "exactly a release tag" must not admit homoglyphs.
+_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+\Z")
 
 # The first release that ships the updater. Rolling back below this checks out
 # a docker-compose.yml with no /control mount on the app service and then
@@ -148,8 +153,16 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
 
     Both caps matter: 100 lines of ordinary output is small, but 100 lines of a
     docker pull progress dump is not, and this file lives on a shared volume.
+
+    Never returns [] for a non-empty input. Popping until the total fits would
+    do exactly that for a single oversized line — routine here, since a docker
+    pull progress dump or a traceback arrives as one long line — and an empty
+    log is the worst possible rendering of a failed deploy, which is precisely
+    when this is the only thing the operator has.
     """
     out = list(lines)[-_LOG_MAX_LINES:]
-    while out and sum(len(l) for l in out) > _LOG_MAX_BYTES:
+    while len(out) > 1 and sum(len(l) for l in out) > _LOG_MAX_BYTES:
         out.pop(0)
+    if out and len(out[0]) > _LOG_MAX_BYTES:
+        out[0] = out[0][:_LOG_MAX_BYTES - 3] + "..."
     return out
