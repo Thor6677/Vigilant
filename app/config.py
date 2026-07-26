@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # the env var instead (tests/test_version_identity.py documents this).
     version: str = Field(default="dev", validation_alias="VIGILANT_VERSION")
 
+    # Master switch for every recurring/ingest background task started in
+    # app.main.startup(). True everywhere in production; a dev instance sets it
+    # False so it renders pages against seeded data without re-doing
+    # production's ESI/zKB polling or competing for the shared disk. Per-job
+    # opt-in on top of this comes from the existing killmail_*/everef_* flags,
+    # so this stays one switch rather than growing a flag per task.
+    background_jobs_enabled: bool = True
+
     # EVE character id of the owner. On a fresh deploy with no admin yet, ONLY
     # the account that owns this character is auto-promoted to admin at startup.
     # Unset (None) means no one is auto-promoted (fail closed) — see app/main.py.
