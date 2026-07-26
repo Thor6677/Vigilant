@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # so this stays one switch rather than growing a flag per task.
     background_jobs_enabled: bool = True
 
+    # In-app update checker: polls the GitHub Releases API for this repo and
+    # announces a newer release once, via Discord and an admin banner. It NEVER
+    # auto-updates — the operator always chooses when to deploy. A build
+    # reporting version "dev" never notifies, so a dev instance is silent
+    # without needing a flag of its own.
+    update_check_enabled: bool = True
+    update_check_repo: str = "Thor6677/Vigilant"
+
     # EVE character id of the owner. On a fresh deploy with no admin yet, ONLY
     # the account that owns this character is auto-promoted to admin at startup.
     # Unset (None) means no one is auto-promoted (fail closed) — see app/main.py.

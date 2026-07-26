@@ -521,3 +521,9 @@ async def startup():
         # once complete). Enables the aggregate-based 5y/all reads below.
         from app.intel.killmail_isk_backfill import run_backfill
         asyncio.create_task(run_backfill())
+
+        # Hourly "is there a newer release?" poll. Inside the jobs gate so a dev
+        # instance does not also poll GitHub — though it would be silent anyway,
+        # since a "dev" version can never compare as older than a release.
+        from app.ops.update_check import run_update_check
+        asyncio.create_task(run_update_check())
