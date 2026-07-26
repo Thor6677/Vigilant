@@ -413,3 +413,65 @@ def test_every_marker_matches_a_line_the_real_scripts_actually_print():
     for marker, _step in _STEP_MARKERS:
         assert any(line.startswith(marker) for line in emitted), \
             f"no line in deploy.sh/rollback.sh starts with {marker!r}"
+
+
+# ── Watchdog: the wall-clock ceiling must actually fire ──────────────────────
+
+def test_a_hang_that_keeps_printing_is_still_killed(tmp_path, monkeypatch):
+    """The original design put the ceiling on wait(timeout=...), which is only
+    reached after EOF — so a stalled `docker pull` that keeps printing progress
+    never closed the pipe and ran forever. Reproduced before this was fixed."""
+    import updater.supervisor as sup
+
+    script = tmp_path / "chatty.sh"
+    script.write_text('#!/usr/bin/env bash\nwhile true; do echo "[1/5] x"; sleep 0.05; done\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(sup, "_RUN_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+    monkeypatch.setattr(sup, "eligible_rollback_targets", lambda *a, **k: ["v1.1.0"])
+
+    import time as _t
+    t0 = _t.monotonic()
+    sup.run_action({"id": "x", "action": "update", "tag": "v1.1.0"})
+    assert _t.monotonic() - t0 < 20, "watchdog did not fire"
+
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["state"] == "failed"
+    assert "exceeded" in status["error"]
+
+
+def test_a_silent_hang_is_killed(tmp_path, monkeypatch):
+    """The other hang shape: blocked with no output at all, so the blocking
+    readline never returns either."""
+    import updater.supervisor as sup
+
+    script = tmp_path / "silent.sh"
+    script.write_text('#!/usr/bin/env bash\necho "[1/5] Deploy"\nsleep 300\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(sup, "_RUN_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+    monkeypatch.setattr(sup, "eligible_rollback_targets", lambda *a, **k: ["v1.1.0"])
+
+    import time as _t
+    t0 = _t.monotonic()
+    sup.run_action({"id": "y", "action": "update", "tag": "v1.1.0"})
+    assert _t.monotonic() - t0 < 20, "watchdog did not fire"
+    assert json.loads((tmp_path / "status.json").read_text())["state"] == "failed"
+
+
+# ── Silent-drop paths must publish a refusal ──────────────────────────────────
+
+def test_a_request_with_no_id_is_recorded_not_silently_dropped(tmp_path, monkeypatch):
+    """claim_request() consumes the file, so a bare `continue` would make the
+    click vanish while the app kept showing the previous run's status."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    sup._publish_refusal({"action": "update", "tag": "v1.1.0"}, "Request had no id and was refused.")
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["state"] == "failed"
+    assert "no id" in status["error"]

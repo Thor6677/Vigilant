@@ -25,6 +25,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -364,11 +365,6 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _max_seconds_remaining(deadline: float) -> float:
-    """Seconds left before `deadline`, never negative (wait(timeout=-1) raises)."""
-    return max(0.0, deadline - time.monotonic())
-
-
 def _kill_group(proc) -> None:
     """SIGTERM then SIGKILL the process GROUP, so docker/git children die too."""
     for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -381,6 +377,7 @@ def _kill_group(proc) -> None:
             return
         except subprocess.TimeoutExpired:
             continue
+    log.error("process group for pid %s survived SIGTERM and SIGKILL", proc.pid)
 
 
 def _current_tag() -> str | None:
@@ -464,6 +461,29 @@ def _publish(status: dict) -> None:
         log.warning("status write failed: %s", e)
 
 
+def _publish_refusal(request: dict, error: str) -> None:
+    """Record a request the loop consumed but never ran.
+
+    claim_request() renames request.json away, so a bare `continue` here would
+    make the operator's click vanish with only a log line — and the app would go
+    on showing the PREVIOUS run's status, which may well read "success".
+    """
+    _publish({
+        "id": request.get("id"),
+        "action": request.get("action"),
+        "state": "failed",
+        "step": "failed",
+        "from_tag": _current_tag(),
+        "to_tag": request.get("tag"),
+        "message": "",
+        "error": error,
+        "reverted_to": None,
+        "log_tail": [],
+        "started_at": _now_iso(),
+        "finished_at": _now_iso(),
+    })
+
+
 def run_action(request: dict) -> None:
     """Execute one claimed request, streaming progress into status.json."""
     action = request.get("action")
@@ -510,65 +530,81 @@ def run_action(request: dict) -> None:
     _publish(status)
 
     lines: list[str] = []
-    deadline = time.monotonic() + _RUN_TIMEOUT_SECONDS
+    timed_out = threading.Event()
+    proc = None
     try:
         proc = subprocess.Popen(
             build_command(action, tag),
             cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1,
             env={**os.environ, "VIGILANT_ROOT": ROOT},
-            # Own process group, so a timeout can kill deploy.sh AND the docker
-            # and git children it spawned. Killing only the shell leaves an
-            # orphaned `docker pull` holding the daemon.
+            # Own process group, so the watchdog can kill deploy.sh AND the
+            # docker and git children it spawned. Killing only the shell leaves
+            # an orphaned `docker pull` holding the daemon.
             start_new_session=True,
         )
-        for line in proc.stdout:
-            # RAW line — step_for_line matches with startswith(), so prepending
-            # a timestamp or prefix here would silently stop progress advancing.
-            line = line.rstrip("\n")
-            lines.append(line)
-            step = step_for_line(line)
-            if step:
-                status["step"] = step
-            # Parse the tag out with a regex, NOT line.split()[-1]: deploy.sh
-            # prints "✓ Reverted to v1.0.0; the site is serving." and the naive
-            # version extracts "serving." — rendering "Reverted to serving." in
-            # the UI on the failure path, which is the one that matters.
-            m = _REVERT_OK_RE.match(line)
-            if m:
-                status["reverted_to"] = m.group(1)
-            m = _REVERT_FAILED_RE.match(line)
-            if m:
-                # Both the deploy AND its revert failed. Nothing automatic is
-                # left; say so as loudly as the status schema allows.
-                status["reverted_to"] = None
-                status["message"] = (
-                    f"Revert to {m.group(1)} ALSO failed — the site may be down. "
-                    f"Manual intervention required on the host."
-                )
-            status["log_tail"] = clamp_log_tail(lines)
-            _publish(status)
-        rc = proc.wait(timeout=_max_seconds_remaining(deadline))
-    except subprocess.TimeoutExpired:
-        # A hung `docker pull` is NOT the same failure as a crashed updater: the
-        # process is alive, so the lock never goes stale and the UI would show
-        # "running" forever. Kill the whole process group — deploy.sh spawns
-        # docker/git children that outlive a bare proc.kill().
-        _kill_group(proc)
-        status.update(state="failed", step="failed", finished_at=_now_iso(),
-                      error=(f"{action} exceeded {_RUN_TIMEOUT_SECONDS // 60} minutes "
-                             f"and was killed. The host may be mid-deploy — check "
-                             f"`docker ps` before retrying."),
-                      log_tail=clamp_log_tail(lines))
-        _publish(status)
-        return
+
+        # A watchdog THREAD, not a timeout on wait(). `for line in proc.stdout`
+        # blocks with no deadline of its own, and wait(timeout=...) is only
+        # reached after EOF — so a hang that keeps printing (a stalled docker
+        # pull progress bar) never closes the pipe and the ceiling is never
+        # evaluated. Verified: a script echoing every 0.2s ran indefinitely past
+        # a 2s ceiling. Killing the group here closes the pipe, which ends the
+        # read loop, which lets wait() return.
+        def _on_timeout():
+            timed_out.set()
+            _kill_group(proc)
+
+        watchdog = threading.Timer(_RUN_TIMEOUT_SECONDS, _on_timeout)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for line in proc.stdout:
+                # RAW line — step_for_line matches with startswith(), so
+                # prepending a timestamp or prefix here would silently stop
+                # progress advancing.
+                line = line.rstrip("\n")
+                lines.append(line)
+                step = step_for_line(line)
+                if step:
+                    status["step"] = step
+                # Parse the tag out with a regex, NOT line.split()[-1]:
+                # deploy.sh prints "✓ Reverted to v1.0.0; the site is serving."
+                # and the naive version extracts "serving." — rendering
+                # "Reverted to serving." in the UI on the failure path, which is
+                # the one that matters.
+                m = _REVERT_OK_RE.match(line)
+                if m:
+                    status["reverted_to"] = m.group(1)
+                m = _REVERT_FAILED_RE.match(line)
+                if m:
+                    # Both the deploy AND its revert failed. Nothing automatic
+                    # is left; say so as loudly as the status schema allows.
+                    status["reverted_to"] = None
+                    status["message"] = (
+                        f"Revert to {m.group(1)} ALSO failed — the site may be "
+                        f"down. Manual intervention required on the host."
+                    )
+                status["log_tail"] = clamp_log_tail(lines)
+                _publish(status)
+            rc = proc.wait()
+        finally:
+            watchdog.cancel()
     except Exception as e:
+        if proc is not None:
+            _kill_group(proc)
         status.update(state="failed", step="failed", finished_at=_now_iso(),
                       error=str(e)[:512], log_tail=clamp_log_tail(lines))
         _publish(status)
         return
 
-    if rc == 0:
+    if timed_out.is_set():
+        status.update(
+            state="failed", step="failed", finished_at=_now_iso(),
+            error=(f"{action} exceeded {_RUN_TIMEOUT_SECONDS // 60} minutes and "
+                   f"was killed. The host may be mid-deploy — check `docker ps` "
+                   f"before retrying."))
+    elif rc == 0:
         status.update(state="success", step="done", finished_at=_now_iso(),
                       message=f"{action} to {tag} completed")
     else:
@@ -613,15 +649,29 @@ def run() -> None:
             continue
 
         rid = str(request.get("id") or "")
-        if not rid or seen_request(rid, seen):
-            log.info("ignoring replayed or unidentified request: %r", rid)
+        if not rid:
+            log.warning("request has no id — refusing")
+            _publish_refusal(request, "Request had no id and was refused.")
+            continue
+        if seen_request(rid, seen):
+            # A genuine replay: the original run already published its outcome,
+            # so leave status.json alone rather than overwriting it.
+            log.info("ignoring replayed request: %s", rid)
             continue
 
         try:
-            write_json_atomic(lock_path, {"pid": os.getpid(), "started_at": time.time()})
+            write_json_atomic(lock_path, {"pid": os.getpid(),
+                                          "started_at": time.time()})
+        except OSError as e:
+            log.error("could not take the update lock: %s", e)
+            _publish_refusal(request, f"Could not take the update lock: {e}")
+            continue
+
+        try:
             run_action(request)
         except Exception as e:
             log.exception("run_action crashed: %s", e)
+            _publish_refusal(request, f"The updater crashed mid-run: {e}")
         finally:
             try:
                 os.unlink(lock_path)
