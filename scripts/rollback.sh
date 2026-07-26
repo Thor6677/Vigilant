@@ -28,14 +28,18 @@ if [ -z "${VIGILANT_ROLLBACK_REEXEC:-}" ]; then
     exec bash "$_tmp/rollback.sh" "$@"
 fi
 
-cd /opt/vigilant
+VIGILANT_ROOT="${VIGILANT_ROOT:-/opt/vigilant}"
+VIGILANT_IMAGE="${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}"
+VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
+
+cd "$VIGILANT_ROOT"
 
 # shellcheck disable=SC1091
-[ -r /opt/vigilant/.health-env ] && source /opt/vigilant/.health-env
+[ -r "$VIGILANT_ROOT/.health-env" ] && source "$VIGILANT_ROOT/.health-env"
 APP_CONTAINER="${APP_CONTAINER:-vigilant-app-1}"
 
-IMAGE=ghcr.io/thor6677/vigilant
-DEPLOY_LOG=/opt/vigilant/.deployed
+IMAGE="$VIGILANT_IMAGE"
+DEPLOY_LOG="$VIGILANT_ROOT/.deployed"
 
 TARGET=""
 while [[ $# -gt 0 ]]; do
@@ -96,7 +100,7 @@ mv .env.tmp .env
 # --no-deps: only the app container cycles. TLS termination and routing live in
 # a separate edge stack that this compose file does not own, so a rollback must
 # leave it alone.
-VIGILANT_TAG="$TARGET" docker compose up -d --no-deps --force-recreate app
+VIGILANT_TAG="$TARGET" docker compose -f "$VIGILANT_COMPOSE_FILE" up -d --no-deps --force-recreate app
 
 echo "[4/4] Health check"
 ok=0
@@ -120,7 +124,7 @@ docker logs --since 30s "$APP_CONTAINER" 2>&1 | tail -20
 if [[ $ok -ne 1 ]]; then
     echo ""
     echo "✗ $TARGET is not serving either. Try an older release:"
-    echo "    /opt/vigilant/scripts/rollback.sh --to <tag>"
+    echo "    $VIGILANT_ROOT/scripts/rollback.sh --to <tag>"
     exit 1
 fi
 
