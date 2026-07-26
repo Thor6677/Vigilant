@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -10,8 +11,10 @@ from functools import lru_cache
 # to their own address so remote operators can reach them directly.
 DEFAULT_CONTACT = "https://github.com/Thor6677/Vigilant"
 
-# Product token shared by every outbound User-Agent (see user_agent() below).
-UA_PRODUCT = "Vigilant/1.0"
+# Product name shared by every outbound User-Agent. The version half comes from
+# Settings.version (baked into the image at build time), so remote API operators
+# can tell which build is generating traffic. See user_agent() below.
+UA_PRODUCT_NAME = "Vigilant"
 
 
 class Settings(BaseSettings):
@@ -22,6 +25,32 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./vigilant.db"
     uploads_dir: str = "./uploads"
     debug: bool = False
+
+    # Build version, injected by CI as a Docker build-arg and surfaced as the
+    # VIGILANT_VERSION env var (see Dockerfile). Source builds leave it at
+    # "dev", which the update checker treats as "never notify" — that is what
+    # keeps a dev instance silent without needing its own flag.
+    # validation_alias: pydantic-settings would otherwise look for `VERSION`,
+    # far too generic a name to claim in a container's environment. Note that
+    # because of the alias, `Settings(version=...)` is silently ignored — set
+    # the env var instead (tests/test_version_identity.py documents this).
+    version: str = Field(default="dev", validation_alias="VIGILANT_VERSION")
+
+    # Master switch for every recurring/ingest background task started in
+    # app.main.startup(). True everywhere in production; a dev instance sets it
+    # False so it renders pages against seeded data without re-doing
+    # production's ESI/zKB polling or competing for the shared disk. Per-job
+    # opt-in on top of this comes from the existing killmail_*/everef_* flags,
+    # so this stays one switch rather than growing a flag per task.
+    background_jobs_enabled: bool = True
+
+    # In-app update checker: polls the GitHub Releases API for this repo and
+    # announces a newer release once, via Discord and an admin banner. It NEVER
+    # auto-updates — the operator always chooses when to deploy. A build
+    # reporting version "dev" never notifies, so a dev instance is silent
+    # without needing a flag of its own.
+    update_check_enabled: bool = True
+    update_check_repo: str = "Thor6677/Vigilant"
 
     # EVE character id of the owner. On a fresh deploy with no admin yet, ONLY
     # the account that owns this character is auto-promoted to admin at startup.
@@ -78,7 +107,10 @@ def get_settings() -> Settings:
 
 
 def user_agent(suffix: str = "") -> str:
-    """Build the outbound HTTP User-Agent, e.g. ``Vigilant/1.0 (you@example.com)``.
+    """Build the outbound HTTP User-Agent, e.g. ``Vigilant/1.2.3 (you@example.com)``.
+
+    The version half comes from ``Settings.version`` — the build tag baked into
+    the image by release CI, or ``dev`` for a source build.
 
     Pass ``suffix="backfill"`` for bulk historical fetches so remote operators
     can tell one-shot backfill traffic apart from interactive requests:
@@ -90,5 +122,6 @@ def user_agent(suffix: str = "") -> str:
     to config availability.
     """
     contact = (get_settings().contact_email or "").strip() or DEFAULT_CONTACT
-    product = f"{UA_PRODUCT} {suffix}".rstrip()
+    version = (get_settings().version or "dev").strip().lstrip("v") or "dev"
+    product = f"{UA_PRODUCT_NAME}/{version} {suffix}".rstrip()
     return f"{product} ({contact})"

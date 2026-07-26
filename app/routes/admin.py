@@ -129,7 +129,19 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
 
     esi_status = rate_limit_tracker.overall_status()
 
+    # Update checker state (app/ops/update_check.py). None until the first poll.
+    from app.db.models import UpdateStatus
+    upd = (await db.execute(
+        select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+
     return templates.TemplateResponse(request, "partials/admin_overview.html", {"uptime": _format_duration(uptime_secs),
+        # Build tag baked into the image by release CI, or "dev" for a source
+        # build. Shown here rather than on /healthz, which is public.
+        "app_version": settings.version,
+        "update_latest": upd.latest_tag if upd else None,
+        "update_url": upd.latest_url if upd else None,
+        "update_checked_at": _format_age(upd.checked_at) if upd else "never",
+        "update_error": upd.last_error if upd else None,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "db_size": _format_bytes(db_size),
         "sde_age_days": sde_age,

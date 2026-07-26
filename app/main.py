@@ -214,6 +214,15 @@ app.include_router(stockpiles_router)
 app.include_router(pnl_router)
 
 
+def _background_jobs_enabled() -> bool:
+    """Whether startup() should launch recurring/ingest tasks.
+
+    Split out of startup() so it is unit-testable without booting the app —
+    see tests/test_background_jobs_switch.py.
+    """
+    return get_settings().background_jobs_enabled
+
+
 @app.on_event("startup")
 async def startup():
     from sqlalchemy import text
@@ -444,61 +453,77 @@ async def startup():
             await db.commit()
             logging.info("Encrypted tokens for %d characters.", migrated)
     import asyncio
+    # NOT gated by BACKGROUND_JOBS_ENABLED: every page that renders a type or
+    # system name needs the SDE tables, and on a seeded dev DB this no-ops
+    # immediately because the tables are already populated.
     asyncio.create_task(ensure_sde_loaded())
-    asyncio.create_task(_background_scheduler())
-    start_map_poller()
 
-    from app.config import get_settings as _gs
-    _cfg = _gs()
-    if (
-        _cfg.killmails_enabled
-        and _cfg.killmail_battles_enabled
-        and _cfg.killmail_stream_enabled
-    ):
-        from app.intel.killmail_stream import run_consumer, run_sweeper
-        asyncio.create_task(run_consumer())
-        asyncio.create_task(run_sweeper())
+    if not _background_jobs_enabled():
+        logging.info(
+            "BACKGROUND_JOBS_ENABLED=false — skipping scheduler, map poller, "
+            "killmail stream, and all backfill/warm tasks."
+        )
+    else:
+        asyncio.create_task(_background_scheduler())
+        start_map_poller()
 
-    # Player-count historical backfill — fires once per startup, no-ops if
-    # archives are already loaded. Polite throttling + background task so it
-    # never blocks startup. See app/intel/player_count_backfill.py.
-    async def _kick_backfill():
-        try:
-            from app.intel.player_count_backfill import auto_backfill_if_needed
-            decisions = await auto_backfill_if_needed()
-            logging.getLogger(__name__).info(
-                "player-count auto-backfill decisions: %s", decisions
-            )
-        except Exception as e:
-            logging.getLogger(__name__).warning(
-                "player-count auto-backfill bootstrap error: %s", e
-            )
-    asyncio.create_task(_kick_backfill())
+        from app.config import get_settings as _gs
+        _cfg = _gs()
+        if (
+            _cfg.killmails_enabled
+            and _cfg.killmail_battles_enabled
+            and _cfg.killmail_stream_enabled
+        ):
+            from app.intel.killmail_stream import run_consumer, run_sweeper
+            asyncio.create_task(run_consumer())
+            asyncio.create_task(run_sweeper())
 
-    async def _kick_zkb_totals():
-        try:
-            from app.intel.killmail_daily_rollup import auto_zkb_totals_if_needed
-            res = await auto_zkb_totals_if_needed()
-            logging.getLogger(__name__).info("zkb-totals auto-ingest: %s", res)
-        except Exception as e:
-            logging.getLogger(__name__).warning("zkb-totals auto-ingest error: %s", e)
-    asyncio.create_task(_kick_zkb_totals())
+        # Player-count historical backfill — fires once per startup, no-ops if
+        # archives are already loaded. Polite throttling + background task so it
+        # never blocks startup. See app/intel/player_count_backfill.py.
+        async def _kick_backfill():
+            try:
+                from app.intel.player_count_backfill import auto_backfill_if_needed
+                decisions = await auto_backfill_if_needed()
+                logging.getLogger(__name__).info(
+                    "player-count auto-backfill decisions: %s", decisions
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "player-count auto-backfill bootstrap error: %s", e
+                )
+        asyncio.create_task(_kick_backfill())
 
-    async def _kick_pcu_rollup():
-        try:
-            from app.intel.pcu_daily_rollup import auto_backfill_if_empty
-            res = await auto_backfill_if_empty()
-            logging.getLogger(__name__).info("pcu daily rollup bootstrap: %s", res)
-        except Exception as e:
-            logging.getLogger(__name__).warning("pcu daily rollup bootstrap error: %s", e)
-    asyncio.create_task(_kick_pcu_rollup())
+        async def _kick_zkb_totals():
+            try:
+                from app.intel.killmail_daily_rollup import auto_zkb_totals_if_needed
+                res = await auto_zkb_totals_if_needed()
+                logging.getLogger(__name__).info("zkb-totals auto-ingest: %s", res)
+            except Exception as e:
+                logging.getLogger(__name__).warning("zkb-totals auto-ingest error: %s", e)
+        asyncio.create_task(_kick_zkb_totals())
 
-    # /tools/activity SWR cache pre-warm — the long windows cost 10-60s
-    # cold (1y raw ISK scan); warming them here means no user ever pays it.
-    from app.routes.player_stats import warm_activity_cache
-    asyncio.create_task(warm_activity_cache())
+        async def _kick_pcu_rollup():
+            try:
+                from app.intel.pcu_daily_rollup import auto_backfill_if_empty
+                res = await auto_backfill_if_empty()
+                logging.getLogger(__name__).info("pcu daily rollup bootstrap: %s", res)
+            except Exception as e:
+                logging.getLogger(__name__).warning("pcu daily rollup bootstrap error: %s", e)
+        asyncio.create_task(_kick_pcu_rollup())
 
-    # T-040: one-time resumable ISK backfill (month-chunked, self-skipping
-    # once complete). Enables the aggregate-based 5y/all reads below.
-    from app.intel.killmail_isk_backfill import run_backfill
-    asyncio.create_task(run_backfill())
+        # /tools/activity SWR cache pre-warm — the long windows cost 10-60s
+        # cold (1y raw ISK scan); warming them here means no user ever pays it.
+        from app.routes.player_stats import warm_activity_cache
+        asyncio.create_task(warm_activity_cache())
+
+        # T-040: one-time resumable ISK backfill (month-chunked, self-skipping
+        # once complete). Enables the aggregate-based 5y/all reads below.
+        from app.intel.killmail_isk_backfill import run_backfill
+        asyncio.create_task(run_backfill())
+
+        # Hourly "is there a newer release?" poll. Inside the jobs gate so a dev
+        # instance does not also poll GitHub — though it would be silent anyway,
+        # since a "dev" version can never compare as older than a release.
+        from app.ops.update_check import run_update_check
+        asyncio.create_task(run_update_check())

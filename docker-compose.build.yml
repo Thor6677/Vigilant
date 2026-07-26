@@ -1,0 +1,19 @@
+# Build-from-source overlay. Compose it with the base file when you want to
+# build the image locally rather than pull the released one:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Production never loads this — it pulls a released tag via scripts/deploy.sh.
+# The dev instance does not load it either: dev has its own standalone
+# docker-compose.dev.yml, because an overlay cannot remove the shared `web`
+# network (verified 2026-07-26 — `networks: []` in a later file still renders
+# `networks: {web: null}`).
+#
+# NOTE: this builds into the tag named by the base file, i.e.
+# ghcr.io/thor6677/vigilant:${VIGILANT_TAG:-latest}. That is intentional for a
+# local "build and run what I just built" loop, but it means a build here
+# overwrites the locally cached copy of that released tag. On the production
+# host, re-pull before deploying if you have ever used this overlay there.
+services:
+  app:
+    build: .
