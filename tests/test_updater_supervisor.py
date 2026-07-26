@@ -286,3 +286,130 @@ def test_log_tail_truncation_never_splits_a_codepoint():
     assert len(out) == 1
     out[0].encode("utf-8")            # must not raise
     assert out[0].startswith("...")
+
+
+# ── Run loop (filesystem, still no Docker) ───────────────────────────────────
+
+import json
+import os
+
+from updater.supervisor import (
+    build_command,
+    claim_request,
+    read_json,
+    seen_request,
+    write_json_atomic,
+)
+
+
+def test_write_json_atomic_leaves_no_tmp_behind(tmp_path):
+    target = tmp_path / "status.json"
+    write_json_atomic(target, {"state": "running"})
+    assert json.loads(target.read_text())["state"] == "running"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_write_json_atomic_overwrites_cleanly(tmp_path):
+    target = tmp_path / "status.json"
+    write_json_atomic(target, {"n": 1})
+    write_json_atomic(target, {"n": 2})
+    assert json.loads(target.read_text())["n"] == 2
+
+
+def test_claim_request_renames_so_a_second_claim_finds_nothing(tmp_path):
+    """Read-then-unlink races a second writer; rename() is atomic within a
+    filesystem, so the loser simply has nothing to claim."""
+    req = tmp_path / "request.json"
+    req.write_text(json.dumps({"id": "abc", "action": "update", "tag": "v1.1.0"}))
+    first = claim_request(tmp_path)
+    second = claim_request(tmp_path)
+    assert first["id"] == "abc"
+    assert second is None
+    assert not req.exists()
+    assert (tmp_path / "request.json.claimed").exists()
+
+
+def test_claim_request_returns_none_when_absent(tmp_path):
+    assert claim_request(tmp_path) is None
+
+
+def test_claim_request_returns_none_on_malformed_json(tmp_path):
+    (tmp_path / "request.json").write_text("{not json")
+    assert claim_request(tmp_path) is None
+
+
+def test_replayed_request_id_is_ignored():
+    seen = []
+    assert seen_request("abc", seen) is False
+    assert seen_request("abc", seen) is True
+
+
+def test_seen_ids_are_bounded_to_fifty():
+    seen = []
+    for i in range(120):
+        seen_request(f"id-{i}", seen)
+    assert len(seen) == 50
+    assert seen_request("id-119", seen) is True    # recent one still remembered
+    assert seen_request("id-0", seen) is False     # oldest has aged out
+
+
+def test_build_command_for_update_uses_argv_not_a_shell_string():
+    cmd = build_command("update", "v1.1.0", root="/opt/vigilant")
+    assert isinstance(cmd, list)
+    assert cmd == ["/opt/vigilant/scripts/deploy.sh", "--tag", "v1.1.0"]
+
+
+def test_build_command_for_rollback():
+    cmd = build_command("rollback", "v1.1.0", root="/opt/vigilant")
+    assert cmd == ["/opt/vigilant/scripts/rollback.sh", "--to", "v1.1.0"]
+
+
+def test_build_command_refuses_an_unknown_action():
+    with pytest.raises(ValueError):
+        build_command("rm-rf", "v1.1.0", root="/opt/vigilant")
+
+
+def test_read_json_returns_none_for_missing_or_broken(tmp_path):
+    assert read_json(tmp_path / "nope.json") is None
+    bad = tmp_path / "bad.json"
+    bad.write_text("{{{")
+    assert read_json(bad) is None
+
+
+from updater.supervisor import _REVERT_OK_RE, _REVERT_FAILED_RE
+
+
+def test_revert_tag_parsed_from_the_real_deploy_sh_wording():
+    """deploy.sh:207 prints "✓ Reverted to v1.0.0; the site is serving." — the
+    tag is NOT the last whitespace-separated token, and line.split()[-1] yields
+    "serving.", which would render "Reverted to serving." in the UI on the
+    failure path."""
+    ok = _REVERT_OK_RE.match("✓ Reverted to v1.0.0; the site is serving.")
+    assert ok and ok.group(1) == "v1.0.0"
+    bad = _REVERT_FAILED_RE.match(
+        "✗ Revert to v1.0.0 ALSO failed — manual intervention needed.")
+    assert bad and bad.group(1) == "v1.0.0"
+
+
+def test_revert_regexes_ignore_the_revert_start_line():
+    """"→ Automatically reverting to v1.0.0" announces the START of a revert;
+    treating it as the outcome would report success before it happened."""
+    line = "→ Automatically reverting to v1.0.0"
+    assert _REVERT_OK_RE.match(line) is None
+    assert _REVERT_FAILED_RE.match(line) is None
+
+
+def test_every_marker_matches_a_line_the_real_scripts_actually_print():
+    """The markers are substrings of live production scripts. If someone edits
+    an echo in deploy.sh, progress silently stops advancing — this fails first."""
+    import re as _re
+    from updater.supervisor import _STEP_MARKERS
+    emitted = []
+    for path in ("scripts/deploy.sh", "scripts/rollback.sh"):
+        with open(path) as fh:
+            src = fh.read()
+        for m in _re.finditer(r'^\s*echo\s+"([^"]*)"', src, _re.M):
+            emitted.append(_re.sub(r"\$\{?\w+\}?", "X", m.group(1)))
+    for marker, _step in _STEP_MARKERS:
+        assert any(line.startswith(marker) for line in emitted), \
+            f"no line in deploy.sh/rollback.sh starts with {marker!r}"

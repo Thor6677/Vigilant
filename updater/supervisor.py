@@ -18,8 +18,17 @@ Everything above `run()` is pure: no filesystem, no subprocess, no clock. That
 is what lets the security-critical part — tag validation — be tested in the
 main pytest suite with no Docker daemon anywhere near it.
 """
+import json
+import logging
+import os
 import re
+import signal
+import subprocess
+import sys
+import time
 from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 
 from app.ops.version import parse_version
 
@@ -248,3 +257,380 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
         kept = out[0].encode()[-(_LOG_MAX_BYTES - 3):].decode(errors="ignore")
         out[0] = "..." + kept
     return out
+
+
+# ── Impure half: filesystem, subprocess, clock ───────────────────────────────
+
+log = logging.getLogger("updater")
+
+CONTROL = Path(os.environ.get("VIGILANT_CONTROL_DIR", "/control"))
+ROOT = os.environ.get("VIGILANT_ROOT", "/opt/vigilant")
+POLL_SECONDS = 1.0
+HEARTBEAT_SECONDS = 10.0
+_SEEN_LIMIT = 50
+
+# deploy.sh's two revert outcomes, verified against scripts/deploy.sh:207 and
+# :209 rather than assumed. Anchored, and capturing the tag explicitly — the
+# tag is NOT the last whitespace-separated token on either line.
+_REVERT_OK_RE = re.compile(r"^✓ Reverted to (v\S+?);")
+_REVERT_FAILED_RE = re.compile(r"^✗ Revert to (v\S+?) ALSO failed")
+
+# Wall-clock ceiling on one deploy. Slightly under the lock's 30-minute
+# staleness so a timed-out run always releases its own lock before another
+# process would judge it abandoned.
+_RUN_TIMEOUT_SECONDS = 25 * 60
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def read_json(path: Path):
+    """Parse a JSON file, or None if it is missing, unreadable or malformed.
+
+    Never raises: this runs in a loop that must outlive any single bad file,
+    including one half-written by a crash.
+    """
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def write_json_atomic(path: Path, payload: dict) -> None:
+    """Write via a sibling .tmp then rename, so a reader never sees a partial
+    file. The app polls status.json roughly every 2s; without this it would
+    eventually read one mid-write and render a parse error as a failure."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as fh:
+        json.dump(payload, fh)
+    os.replace(tmp, path)
+
+
+def claim_request(control: Path):
+    """Atomically take ownership of a pending request, or None.
+
+    rename() is atomic within a filesystem. Read-then-unlink is not: two
+    claimants could both read before either unlinked. Here the loser's rename
+    fails and it simply has nothing to claim.
+    """
+    src = control / "request.json"
+    dst = control / "request.json.claimed"
+    try:
+        os.replace(src, dst)
+    except OSError:
+        return None
+    return read_json(dst)
+
+
+def seen_request(request_id: str, seen: list) -> bool:
+    """Whether this id has already been handled. Appends it if not.
+
+    Bounded to the last 50 so a long-lived updater cannot grow this without
+    limit; replays that old are not a threat model anyone has.
+    """
+    if request_id in seen:
+        return True
+    seen.append(request_id)
+    del seen[:-_SEEN_LIMIT]
+    return False
+
+
+def build_command(action: str, tag: str, root: str = ROOT) -> list[str]:
+    """The argv for one action. A LIST, never a shell string — the tag has
+    already passed validate_tag(), but defence in depth is free here."""
+    if action == "update":
+        return [f"{root}/scripts/deploy.sh", "--tag", tag]
+    if action == "rollback":
+        return [f"{root}/scripts/rollback.sh", "--to", tag]
+    raise ValueError(f"unknown action: {action!r}")
+
+
+def _pid_alive(pid: int) -> bool:
+    """Does this process EXIST — not "can I signal it".
+
+    `except OSError: return False` is the obvious version and it is wrong:
+    os.kill raises PermissionError for a process that exists but is owned by
+    another uid, so a live lock holder would be reported dead and its lock
+    reclaimed out from under it. Only ProcessLookupError means gone.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _max_seconds_remaining(deadline: float) -> float:
+    """Seconds left before `deadline`, never negative (wait(timeout=-1) raises)."""
+    return max(0.0, deadline - time.monotonic())
+
+
+def _kill_group(proc) -> None:
+    """SIGTERM then SIGKILL the process GROUP, so docker/git children die too."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except OSError:
+            return
+        try:
+            proc.wait(timeout=10)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _current_tag() -> str | None:
+    """The running release, from the last line of .deployed."""
+    try:
+        with open(f"{ROOT}/.deployed") as fh:
+            tags = parse_deployed_tags(fh.read())
+        return tags[-1] if tags else None
+    except Exception:
+        return None
+
+
+def _deployed_text() -> str:
+    try:
+        with open(f"{ROOT}/.deployed") as fh:
+            return fh.read()
+    except Exception:
+        return ""
+
+
+def _self_checks() -> dict:
+    """One-time environment checks, published so the two most likely
+    self-hoster failures show up as a disabled button with a readable reason
+    instead of a mid-deploy explosion.
+
+    The socket gid varies by distro and compose in this image is older than the
+    host's, so a file the host parses might not parse here.
+    """
+    checks = {}
+    try:
+        subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                       check=True, capture_output=True, timeout=15)
+        checks["socket"] = "ok"
+    except Exception as e:
+        checks["socket"] = f"FAIL: {e}"
+    try:
+        subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],
+                       check=True, capture_output=True, timeout=15)
+        checks["git"] = "ok"
+    except Exception as e:
+        checks["git"] = f"FAIL: {e}"
+    try:
+        subprocess.run(["docker", "compose", "-f",
+                        os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml"),
+                        "config", "--quiet"],
+                       cwd=ROOT, check=True, capture_output=True, timeout=30)
+        checks["compose"] = "ok"
+    except Exception as e:
+        checks["compose"] = f"FAIL: {e}"
+    return checks
+
+
+def write_heartbeat(checks: dict) -> None:
+    """Publish liveness plus the rollback targets the app cannot see for itself.
+
+    The app mounts only /control, so it cannot read /opt/vigilant/.deployed.
+    This list is UX only — every target is re-validated on pickup.
+    """
+    current = _current_tag()
+    payload = {
+        "version": os.environ.get("VIGILANT_UPDATER_VERSION", "dev"),
+        "written_at": _now_iso(),
+        "current_tag": current,
+        "targets": eligible_rollback_targets(_deployed_text(), current),
+        "min_rollback_tag": MIN_ROLLBACK_TAG,
+        "checks": checks,
+    }
+    try:
+        write_json_atomic(CONTROL / "updater.json", payload)
+    except OSError as e:
+        # A fresh named volume is root-owned 0755 until the app's entrypoint
+        # chowns it. Retrying is the actual fix; depends_on only orders START,
+        # not the entrypoint's chown.
+        log.warning("heartbeat write failed (retrying next tick): %s", e)
+
+
+def _publish(status: dict) -> None:
+    try:
+        write_json_atomic(CONTROL / "status.json", status)
+    except OSError as e:
+        log.warning("status write failed: %s", e)
+
+
+def run_action(request: dict) -> None:
+    """Execute one claimed request, streaming progress into status.json."""
+    action = request.get("action")
+    tag = request.get("tag")
+    started = _now_iso()
+    status = {
+        "id": request.get("id"),
+        "action": action,
+        "state": "running",
+        "step": "validating",
+        "from_tag": _current_tag(),
+        "to_tag": tag,
+        "message": "",
+        "error": None,
+        "reverted_to": None,
+        "log_tail": [],
+        "started_at": started,
+        "finished_at": None,
+    }
+    _publish(status)
+
+    # Re-validate on pickup. The heartbeat's target list is UX; this is the
+    # authority, and it must not trust anything the app wrote.
+    if not validate_tag(tag):
+        status.update(state="failed", step="failed", finished_at=_now_iso(),
+                      error=f"rejected tag: {tag!r}")
+        _publish(status)
+        return
+    if action not in ("update", "rollback"):
+        status.update(state="failed", step="failed", finished_at=_now_iso(),
+                      error=f"unknown action: {action!r}")
+        _publish(status)
+        return
+    if action == "rollback" and tag not in eligible_rollback_targets(
+            _deployed_text(), _current_tag()):
+        status.update(
+            state="failed", step="failed", finished_at=_now_iso(),
+            error=(f"{tag} is not an eligible rollback target — it must be a "
+                   f"release this host has run, at or above {MIN_ROLLBACK_TAG}"))
+        _publish(status)
+        return
+
+    status["step"] = "preflight"
+    _publish(status)
+
+    lines: list[str] = []
+    deadline = time.monotonic() + _RUN_TIMEOUT_SECONDS
+    try:
+        proc = subprocess.Popen(
+            build_command(action, tag),
+            cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            env={**os.environ, "VIGILANT_ROOT": ROOT},
+            # Own process group, so a timeout can kill deploy.sh AND the docker
+            # and git children it spawned. Killing only the shell leaves an
+            # orphaned `docker pull` holding the daemon.
+            start_new_session=True,
+        )
+        for line in proc.stdout:
+            # RAW line — step_for_line matches with startswith(), so prepending
+            # a timestamp or prefix here would silently stop progress advancing.
+            line = line.rstrip("\n")
+            lines.append(line)
+            step = step_for_line(line)
+            if step:
+                status["step"] = step
+            # Parse the tag out with a regex, NOT line.split()[-1]: deploy.sh
+            # prints "✓ Reverted to v1.0.0; the site is serving." and the naive
+            # version extracts "serving." — rendering "Reverted to serving." in
+            # the UI on the failure path, which is the one that matters.
+            m = _REVERT_OK_RE.match(line)
+            if m:
+                status["reverted_to"] = m.group(1)
+            m = _REVERT_FAILED_RE.match(line)
+            if m:
+                # Both the deploy AND its revert failed. Nothing automatic is
+                # left; say so as loudly as the status schema allows.
+                status["reverted_to"] = None
+                status["message"] = (
+                    f"Revert to {m.group(1)} ALSO failed — the site may be down. "
+                    f"Manual intervention required on the host."
+                )
+            status["log_tail"] = clamp_log_tail(lines)
+            _publish(status)
+        rc = proc.wait(timeout=_max_seconds_remaining(deadline))
+    except subprocess.TimeoutExpired:
+        # A hung `docker pull` is NOT the same failure as a crashed updater: the
+        # process is alive, so the lock never goes stale and the UI would show
+        # "running" forever. Kill the whole process group — deploy.sh spawns
+        # docker/git children that outlive a bare proc.kill().
+        _kill_group(proc)
+        status.update(state="failed", step="failed", finished_at=_now_iso(),
+                      error=(f"{action} exceeded {_RUN_TIMEOUT_SECONDS // 60} minutes "
+                             f"and was killed. The host may be mid-deploy — check "
+                             f"`docker ps` before retrying."),
+                      log_tail=clamp_log_tail(lines))
+        _publish(status)
+        return
+    except Exception as e:
+        status.update(state="failed", step="failed", finished_at=_now_iso(),
+                      error=str(e)[:512], log_tail=clamp_log_tail(lines))
+        _publish(status)
+        return
+
+    if rc == 0:
+        status.update(state="success", step="done", finished_at=_now_iso(),
+                      message=f"{action} to {tag} completed")
+    else:
+        status.update(state="failed", step="failed", finished_at=_now_iso(),
+                      error=f"{action} exited {rc}")
+    status["log_tail"] = clamp_log_tail(lines)
+    _publish(status)
+
+
+def run() -> None:
+    """Poll for requests forever. Never exits on a per-request failure."""
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    checks = _self_checks()
+    log.info("updater starting: checks=%s root=%s control=%s", checks, ROOT, CONTROL)
+
+    seen: list[str] = []
+    last_beat = 0.0
+    lock_path = CONTROL / "update.lock"
+
+    while True:
+        now = time.time()
+        if now - last_beat >= HEARTBEAT_SECONDS:
+            write_heartbeat(checks)
+            last_beat = now
+
+        # Check the lock BEFORE claiming. Claiming first would rename
+        # request.json away and then drop it on the floor when the lock turned
+        # out to be held — the operator's click would vanish with nothing but a
+        # log line, and the app would sit on a stale status forever. Leaving the
+        # request in place instead means it is simply picked up on a later tick.
+        held = read_json(lock_path)
+        if held is not None and not is_stale_lock(held, time.time(), _pid_alive):
+            time.sleep(POLL_SECONDS)
+            continue
+        if held is not None:
+            log.warning("reclaiming stale lock held by pid %s", held.get("pid"))
+
+        request = claim_request(CONTROL)
+        if request is None:
+            time.sleep(POLL_SECONDS)
+            continue
+
+        rid = str(request.get("id") or "")
+        if not rid or seen_request(rid, seen):
+            log.info("ignoring replayed or unidentified request: %r", rid)
+            continue
+
+        try:
+            write_json_atomic(lock_path, {"pid": os.getpid(), "started_at": time.time()})
+            run_action(request)
+        except Exception as e:
+            log.exception("run_action crashed: %s", e)
+        finally:
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
+            write_heartbeat(checks)
+            last_beat = time.time()
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    run()
