@@ -130,6 +130,9 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
     esi_status = rate_limit_tracker.overall_status()
 
     return templates.TemplateResponse(request, "partials/admin_overview.html", {"uptime": _format_duration(uptime_secs),
+        # Build tag baked into the image by release CI, or "dev" for a source
+        # build. Shown here rather than on /healthz, which is public.
+        "app_version": settings.version,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "db_size": _format_bytes(db_size),
         "sde_age_days": sde_age,
