@@ -1,0 +1,103 @@
+name: release
+
+# Tags only. `tests.yml` still covers pushes to main and pull requests; this
+# workflow exists to turn a version tag into a published, immutable artifact
+# that both the dev instance and production can run byte-for-byte.
+on:
+  push:
+    tags: ['v*']
+
+# Narrow on purpose: contents:write to publish the Release object,
+# packages:write to push to GHCR. Nothing else.
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12 matches the runtime in Dockerfile, so a green run reflects the
+      # actual deployment target rather than whatever is newest.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  build:
+    name: build and push
+    # A tag on a commit with failing tests must produce NO image, so there is
+    # nothing for production to be notified about.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR paths must be lowercase; the owner/repo casing is not guaranteed
+      # to be, so normalise rather than hardcoding. This also means a fork
+      # publishes to its own namespace with no edit.
+      #
+      # `tr` rather than bash's ${VAR,,}: that operator needs bash 4+, and is a
+      # silent "bad substitution" on bash 3.2 — which is what a maintainer on
+      # macOS gets when testing this line locally. tr works everywhere.
+      # $GITHUB_REPOSITORY (env var), not ${{ github.repository }}, so nothing
+      # is interpolated into the shell command itself.
+      - name: Resolve image name
+        id: img
+        run: |
+          echo "name=ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # linux/amd64 only: the deployment host is amd64 and multi-arch
+          # roughly doubles build time for no benefit here.
+          platforms: linux/amd64
+          build-args: |
+            VIGILANT_VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.img.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          # The npm ci + pip install stages are expensive; reuse layers.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The in-app update checker polls /releases/latest, NOT the tag list.
+      # A tag with no published Release is therefore invisible to production —
+      # the deliberate escape hatch for building an image you do not want to
+      # advertise yet.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          # Tags containing a hyphen (v1.0.0-rc1, -beta, ...) publish as
+          # prereleases, and GitHub's /releases/latest excludes prereleases —
+          # so a release-candidate never triggers an update notification.
+          prerelease: ${{ contains(github.ref_name, '-') }}
