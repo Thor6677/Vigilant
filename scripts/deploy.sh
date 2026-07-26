@@ -126,6 +126,28 @@ except Exception:
     return 1
 }
 
+# Persist the deployed tag into .env, which compose reads for interpolation.
+#
+# WITHOUT this, VIGILANT_TAG would only be set for the single `docker compose`
+# invocation below, and any LATER bare `docker compose up -d` in /opt/vigilant —
+# yours, or an ops script's — would resolve the service image to
+# ghcr.io/thor6677/vigilant:latest, see a changed config hash, and silently
+# recreate production onto :latest. That would quietly destroy the entire
+# point of pinning a release.
+#
+# .env is also the service's env_file, so VIGILANT_TAG additionally lands inside
+# the container. That is harmless (Settings ignores unknown keys) — do not
+# "clean it up" by moving this elsewhere.
+_pin_tag_in_env() {
+    local tag="$1"
+    touch .env
+    grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
+    echo "VIGILANT_TAG=$tag" >> .env.tmp
+    # Set the mode BEFORE the rename so the file is never briefly world-readable.
+    chmod 600 .env.tmp
+    mv .env.tmp .env
+}
+
 _deploy_tag() {
     local tag="$1"
     # Detached HEAD at the release tag, so the compose file, entrypoint and
@@ -137,6 +159,7 @@ _deploy_tag() {
     # also retro-tightens an install whose .env was created world-readable.
     [ -f .env ] && chmod 600 .env
     docker pull "$IMAGE:$tag"
+    _pin_tag_in_env "$tag"
     VIGILANT_TAG="$tag" docker compose up -d --no-deps --force-recreate app
 }
 

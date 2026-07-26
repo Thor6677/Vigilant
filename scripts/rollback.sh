@@ -45,13 +45,29 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+current=$(tail -1 "$DEPLOY_LOG" 2>/dev/null | awk '{print $2}' || true)
+
 if [ -z "$TARGET" ]; then
-    # Second-most-recent entry: the last line is the release currently running.
-    TARGET=$(tail -2 "$DEPLOY_LOG" 2>/dev/null | head -1 | awk '{print $2}' || true)
-    current=$(tail -1 "$DEPLOY_LOG" 2>/dev/null | awk '{print $2}' || true)
-    if [ -z "$TARGET" ] || [ "$TARGET" = "$current" ]; then
-        echo "ERROR: no distinct previous release recorded in $DEPLOY_LOG." >&2
-        echo "       (fewer than two deploys logged — nothing to roll back to)" >&2
+    # The newest previously-deployed release that is strictly OLDER than what is
+    # running, by VERSION order — not by line position.
+    #
+    # Line position is wrong because rollbacks are themselves logged, so the
+    # history is not monotonic. After deploy 1.0.0 → deploy 1.1.0 → rollback,
+    # the log reads 1.0.0, 1.1.0, 1.0.0; "second-most-recent line" is 1.1.0 —
+    # the broken release we just escaped — and a second bare rollback would
+    # redeploy it. Sorting by version instead makes repeated bare rollbacks walk
+    # steadily backwards and never forwards.
+    #
+    # `sort -u -V` orders tags naturally (v1.9.0 < v1.10.0); the awk stops at
+    # the running tag and prints the entry just before it, or nothing when the
+    # running tag is already the oldest one deployed.
+    TARGET=$(awk '{print $2}' "$DEPLOY_LOG" 2>/dev/null \
+             | sort -u -V \
+             | awk -v c="$current" '$0 == c {exit} {last=$0} END {print last}' || true)
+    if [ -z "$TARGET" ]; then
+        echo "ERROR: no earlier release than ${current:-<none>} in $DEPLOY_LOG." >&2
+        echo "       Either fewer than two releases have been deployed, or you" >&2
+        echo "       have already rolled back to the oldest one on record." >&2
         echo "Pass one explicitly:  rollback.sh --to v1.2.3" >&2
         echo "Available releases:   gh release list" >&2
         exit 1
@@ -67,6 +83,16 @@ echo "[2/4] Pull $IMAGE:$TARGET"
 docker pull "$IMAGE:$TARGET"
 
 echo "[3/4] Recreate app"
+# Persist the tag into .env (compose reads it for interpolation) for the same
+# reason deploy.sh does: otherwise a later bare `docker compose up -d` would
+# resolve the image to :latest and silently undo this rollback. See
+# _pin_tag_in_env in deploy.sh for the full explanation.
+touch .env
+grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
+echo "VIGILANT_TAG=$TARGET" >> .env.tmp
+chmod 600 .env.tmp
+mv .env.tmp .env
+
 # --no-deps: only the app container cycles. TLS termination and routing live in
 # a separate edge stack that this compose file does not own, so a rollback must
 # leave it alone.
