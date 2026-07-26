@@ -57,6 +57,27 @@ def test_dev_publishes_only_to_loopback():
             f"dev port {p!r} must bind loopback only"
 
 
+def test_prod_and_dev_never_share_an_image_tag():
+    """Same Docker daemon, so a shared tag means a dev build overwrites prod's
+    cached image and a later prod `up` without a pull runs dev code."""
+    with open("docker-compose.yml") as fh:
+        prod = yaml.safe_load(fh)
+    prod_app = prod["services"]["app"]
+    assert "build" not in prod_app, \
+        "prod compose must pull, not build — build lives in docker-compose.build.yml"
+    assert prod_app["image"].startswith("ghcr.io/")
+    assert prod_app["image"] != _app(_dev())["image"]
+
+
+def test_prod_still_declares_the_external_web_network():
+    """deploy.sh greps docker-compose.yml for these two lines as a preflight; a
+    non-external network would silently detach vigilant from edge nginx."""
+    with open("docker-compose.yml") as fh:
+        prod = yaml.safe_load(fh)
+    assert prod["networks"]["web"]["external"] is True
+    assert prod["networks"]["web"]["name"] == "web"
+
+
 def test_dev_keeps_prod_hardening_and_smaller_limits():
     app = _app(_dev())
     assert app["read_only"] is True

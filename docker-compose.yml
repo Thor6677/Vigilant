@@ -1,6 +1,15 @@
 services:
   app:
-    build: .
+    # Pulled, not built. Release CI builds this image from a version tag (see
+    # .github/workflows/release.yml) so what runs here is byte-identical to what
+    # was tested on the dev instance — a rebuild could resolve different base
+    # layers, since the Dockerfile deliberately tracks floating python/node tags.
+    #
+    # scripts/deploy.sh sets VIGILANT_TAG; the :latest default exists only so a
+    # bare `docker compose up` outside the script still works. To build from
+    # source instead, add the overlay:
+    #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+    image: ghcr.io/thor6677/vigilant:${VIGILANT_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:

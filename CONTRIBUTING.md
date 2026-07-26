@@ -29,7 +29,9 @@ cd Vigilant
 - **Python 3.12+** is required.
 - **`.env` is gitignored and must stay that way.** Never commit real credentials, and don't paste them into issues or PRs.
 - The star map at `/map` needs the frontend built: `cd frontend && npm ci && npm run build` (Node 22+). The Docker image does this for you.
-- Docker path, if you prefer it: `docker compose up -d --build`. Code changes require a **rebuild** — `docker compose restart` alone does not pick them up.
+- Docker path, if you prefer it. The base compose file *pulls* a released image, so add the build overlay to run your own code:
+  `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+  Code changes require a **rebuild** — `docker compose restart` alone does not pick them up.
 
 ---
 

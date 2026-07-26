@@ -378,7 +378,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 
 ```bash
 cd /opt/vigilant
-docker compose up -d --build
+docker compose up -d
+```
+
+That **pulls a published image** (`ghcr.io/thor6677/vigilant:latest`) rather than
+building one — no build toolchain needed and it starts in seconds. Pin a specific
+release instead with `VIGILANT_TAG=v1.0.0 docker compose up -d`.
+
+Prefer to build from source? Add the build overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 The first build takes a few minutes (it installs Python dependencies and builds the React frontend). Subsequent builds are faster thanks to Docker's layer cache.
@@ -409,14 +419,17 @@ docker compose logs -f app
 # Restart (does NOT apply code changes)
 docker compose restart
 
-# Rebuild and redeploy (REQUIRED for code changes)
-docker compose down && docker compose up -d --build
+# Pull and redeploy the newest published release
+docker compose pull && docker compose up -d --force-recreate
+
+# Rebuild from local source instead (REQUIRED for your own code changes)
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build --force-recreate
 
 # Stop everything
 docker compose down
 ```
 
-> **Important:** `docker compose restart` does NOT apply code or template changes. Always use `docker compose down && docker compose up -d --build` after pulling new code.
+> **Important:** `docker compose restart` does NOT apply code or template changes. Use `docker compose pull && docker compose up -d --force-recreate` to move to a newer release, or the build-overlay command above to run local source changes.
 
 **A note on `scripts/`:** the `docker compose` commands above are the supported way to run Vigilant, and they are all you need. The repo also ships `scripts/deploy.sh`, `scripts/rollback.sh`, and `scripts/health-check.sh` — maintainer convenience wrappers, written for one specific host. They assume the repo lives at `/opt/vigilant` and the container is named `vigilant-app-1`, so they will not work unmodified on your machine. Both read host-specific settings from an untracked `.health-env` at the repo root: `deploy.sh` uses `MAINTENANCE` to point at an ops toolkit's maintenance script (skipped cleanly when unset), and `health-check.sh` needs `PROBES` (a shared probe library providing `probe_container` / `probe_http` / `probe_log_errors`) plus a `HEALTHZ_URL`. `health-check.sh` exits `0` when healthy, `1` when a probe genuinely fails, and `78` (`EX_CONFIG`) when those settings are missing — automation that restarts or restores on failure should treat `78` as "could not assess", not as "down".
 
@@ -424,13 +437,20 @@ None of them are required to run or update Vigilant. Use the `docker compose` co
 
 ### Updating to a New Version
 
+Releases are tagged and published as container images, so updating is a pull:
+
 ```bash
 cd /opt/vigilant
-git pull origin main
-docker compose down && docker compose up -d --build
+git fetch --tags && git checkout v1.0.0   # keeps compose/scripts in step with the image
+VIGILANT_TAG=v1.0.0 docker compose up -d --force-recreate
 ```
 
-The app automatically migrates the database schema on startup.
+Omit `VIGILANT_TAG` to track `:latest`. The app automatically migrates the
+database schema on startup.
+
+When signed in as an admin, Vigilant tells you when a newer release exists — a
+banner in the UI and, if you opt in via `DISCORD_ALERT_TYPES`, one Discord
+message per release. It never updates itself; you choose when to deploy.
 
 ### Dev Instance
 
@@ -686,7 +706,7 @@ rm vigilant.db && ./start.sh
 # Docker
 docker compose down
 docker volume rm vigilant_app_data
-docker compose up -d --build
+docker compose up -d
 ```
 
 ---
