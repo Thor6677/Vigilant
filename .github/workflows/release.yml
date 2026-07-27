@@ -89,6 +89,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Second image, same job so it inherits `needs: test` — a tag whose tests
+      # fail must publish NOTHING, updater included. Reuses steps.img.outputs.name
+      # (already lowercased from $GITHUB_REPOSITORY) rather than recomputing, so
+      # a fork publishes to its own namespace with no edit.
+      - name: Build and push updater
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: updater/Dockerfile
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            VIGILANT_VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ steps.img.outputs.name }}-updater:${{ github.ref_name }}
+            ${{ steps.img.outputs.name }}-updater:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       # The in-app update checker polls /releases/latest, NOT the tag list.
       # A tag with no published Release is therefore invisible to production —
       # the deliberate escape hatch for building an image you do not want to
