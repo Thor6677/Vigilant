@@ -562,3 +562,112 @@ def test_tick_survives_a_request_that_would_have_killed_the_loop(tmp_path, monke
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["state"] == "failed"
     assert "unreadable" in status["error"]
+
+
+# ── Orphaned status reconciliation (a killed sidecar must not lie forever) ───
+
+def test_an_orphaned_running_status_is_closed_out_on_restart(tmp_path, monkeypatch):
+    """A SIGKILLed or OOM-killed sidecar leaves status.json saying "running"
+    with nobody left to finish it, and the panel spins forever."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    (tmp_path / "status.json").write_text(json.dumps({
+        "id": "abc", "action": "update", "state": "running", "step": "deploying",
+        "to_tag": "v1.1.0", "error": None, "finished_at": None}))
+    sup._reconcile_orphaned_status()
+    st = json.loads((tmp_path / "status.json").read_text())
+    assert st["state"] == "failed"
+    assert st["finished_at"]
+    assert "outcome is unknown" in st["error"]
+
+
+def test_reconcile_leaves_a_finished_status_alone(tmp_path, monkeypatch):
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    (tmp_path / "status.json").write_text(json.dumps({"state": "success", "step": "done"}))
+    sup._reconcile_orphaned_status()
+    assert json.loads((tmp_path / "status.json").read_text())["state"] == "success"
+
+
+# ── Auto-revert, end to end ───────────────────────────────────────────────────
+
+def _fake_deploy(tmp_path, name, body):
+    s = tmp_path / name
+    s.write_text("#!/usr/bin/env bash\n" + body)
+    s.chmod(0o755)
+    return s
+
+
+def test_auto_revert_is_reported_end_to_end(tmp_path, monkeypatch):
+    """deploy.sh's own auto-revert path, from raw output to status.json."""
+    import updater.supervisor as sup
+    script = _fake_deploy(tmp_path, "d.sh",
+        'echo "[1/5] Deploy v1.1.0 (checkout + pull + recreate)"\n'
+        'echo "[2/5] Health check"\n'
+        'echo "→ Automatically reverting to v1.0.0"\n'
+        'echo "✓ Reverted to v1.0.0; the site is serving."\n'
+        'exit 1\n')
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+    sup.run_action({"id": "r", "action": "update", "tag": "v1.1.0"})
+    st = json.loads((tmp_path / "status.json").read_text())
+    assert st["state"] == "failed"
+    assert st["reverted_to"] == "v1.0.0"      # NOT "serving."
+
+
+def test_a_failed_revert_is_reported_as_needing_a_human(tmp_path, monkeypatch):
+    """Deploy failed AND its revert failed — nothing automatic is left."""
+    import updater.supervisor as sup
+    script = _fake_deploy(tmp_path, "d.sh",
+        'echo "[2/5] Health check"\n'
+        'echo "→ Automatically reverting to v1.0.0"\n'
+        'echo "✗ Revert to v1.0.0 ALSO failed — manual intervention needed."\n'
+        'exit 1\n')
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+    sup.run_action({"id": "r2", "action": "update", "tag": "v1.1.0"})
+    st = json.loads((tmp_path / "status.json").read_text())
+    assert st["state"] == "failed"
+    assert st["reverted_to"] is None
+    assert "Manual intervention required" in st["message"]
+
+
+# ── Stale lock: removed, not just logged ─────────────────────────────────────
+
+def test_a_stale_lock_is_removed_not_just_logged(tmp_path, monkeypatch):
+    """It was logged as "reclaiming" on every tick while staying on disk —
+    ~86,400 identical warnings a day, and the message was not even true."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    lock = tmp_path / "update.lock"
+    lock.write_text(json.dumps({"pid": 999_999, "started_at": 1.0}))
+    sup._tick([], lock)
+    assert not lock.exists()
+
+
+# ── Status schema defined once ────────────────────────────────────────────────
+
+def test_status_schema_has_exactly_the_keys_the_app_expects(tmp_path, monkeypatch):
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    expected = {"id", "action", "state", "step", "from_tag", "to_tag", "message",
+                "error", "reverted_to", "log_tail", "started_at", "finished_at"}
+    assert set(sup._new_status()) == expected
+    sup._publish_refusal({"id": "x"}, "nope")
+    assert set(json.loads((tmp_path / "status.json").read_text())) == expected
+
+
+# ── Self-checks key set is part of the app-facing contract ───────────────────
+
+def test_self_checks_key_set(monkeypatch):
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(sup, "ROOT", "/tmp")
+    # .deployed does not need to exist for the key SET assertion — a FAIL value
+    # is still a value, and this test is about which keys are published, not
+    # whether the checks pass.
+    assert set(sup._self_checks()) == {"socket", "git", "compose", "deployed"}

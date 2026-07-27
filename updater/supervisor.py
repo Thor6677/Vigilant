@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -270,6 +271,12 @@ POLL_SECONDS = 1.0
 HEARTBEAT_SECONDS = 10.0
 _SEEN_LIMIT = 50
 
+# Tracks the most recent _tick() failure message so run() can log a persistent
+# failure (e.g. an unmounted /control) once with a traceback instead of once a
+# second forever — at POLL_SECONDS=1.0 an unlogged rate limit would mean
+# ~86,400 identical tracebacks a day.
+_last_tick_error: str | None = None
+
 # deploy.sh's two revert outcomes, verified against scripts/deploy.sh:207 and
 # :209 rather than assumed. Anchored, and capturing the tag explicitly — the
 # tag is NOT the last whitespace-separated token on either line.
@@ -301,8 +308,10 @@ def read_json(path: Path):
 
 def write_json_atomic(path: Path, payload: dict) -> None:
     """Write via a sibling .tmp then rename, so a reader never sees a partial
-    file. The app polls status.json roughly every 2s; without this it would
-    eventually read one mid-write and render a parse error as a failure."""
+    file. The app (Task 4) polls status.json roughly every 2s; without this it
+    would eventually read one mid-write and render a parse error as a failure.
+    That polling interval is Task 4's design, not yet built — verify it there
+    rather than assuming this number stays accurate."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w") as fh:
         json.dump(payload, fh)
@@ -329,6 +338,9 @@ def claim_request(control: Path) -> tuple[bool, dict | None]:
     fails and it simply has nothing to claim.
     """
     src = control / "request.json"
+    # request.json.claimed is deliberately never deleted — it is the only
+    # post-mortem record of the last request's raw payload if something later
+    # goes wrong. Do not "clean it up"; it is a leak of exactly one file.
     dst = control / "request.json.claimed"
     try:
         os.replace(src, dst)
@@ -353,9 +365,16 @@ def seen_request(request_id: str, seen: list) -> bool:
     return False
 
 
-def build_command(action: str, tag: str, root: str = ROOT) -> list[str]:
+def build_command(action: str, tag: str, root: str | None = None) -> list[str]:
     """The argv for one action. A LIST, never a shell string — the tag has
-    already passed validate_tag(), but defence in depth is free here."""
+    already passed validate_tag(), but defence in depth is free here.
+
+    `root` defaults to None, not the ROOT constant, so it is read at CALL time
+    rather than bound once at import: `root: str = ROOT` would freeze whatever
+    ROOT was when the module first loaded, and a test monkeypatching ROOT later
+    would silently have no effect on this function's default.
+    """
+    root = root or ROOT
     if action == "update":
         return [f"{root}/scripts/deploy.sh", "--tag", tag]
     if action == "rollback":
@@ -401,7 +420,12 @@ def _current_tag() -> str | None:
         with open(f"{ROOT}/.deployed") as fh:
             tags = parse_deployed_tags(fh.read())
         return tags[-1] if tags else None
-    except Exception:
+    except Exception as e:
+        # Logged, not just swallowed: a silent failure here makes
+        # eligible_rollback_targets() return [], and the operator sees "not an
+        # eligible rollback target" — a message that blames THEIR choice for
+        # what is actually a mis-mounted /opt/vigilant.
+        log.warning("could not read %s/.deployed: %s", ROOT, e)
         return None
 
 
@@ -409,14 +433,15 @@ def _deployed_text() -> str:
     try:
         with open(f"{ROOT}/.deployed") as fh:
             return fh.read()
-    except Exception:
+    except Exception as e:
+        log.warning("could not read %s/.deployed: %s", ROOT, e)
         return ""
 
 
 def _self_checks() -> dict:
-    """One-time environment checks, published so the two most likely
-    self-hoster failures show up as a disabled button with a readable reason
-    instead of a mid-deploy explosion.
+    """One-time environment checks, published so self-hoster environment
+    failures show up as a disabled button with a readable reason instead of a
+    mid-deploy explosion.
 
     The socket gid varies by distro and compose in this image is older than the
     host's, so a file the host parses might not parse here.
@@ -442,6 +467,15 @@ def _self_checks() -> dict:
         checks["compose"] = "ok"
     except Exception as e:
         checks["compose"] = f"FAIL: {e}"
+    try:
+        # .deployed is the file the entire rollback list depends on
+        # (eligible_rollback_targets reads it fresh on every pickup) — the one
+        # thing the checks above did not cover.
+        with open(f"{ROOT}/.deployed") as fh:
+            fh.read()
+        checks["deployed"] = "ok"
+    except Exception as e:
+        checks["deployed"] = f"FAIL: {e}"
     return checks
 
 
@@ -476,6 +510,24 @@ def _publish(status: dict) -> None:
         log.warning("status write failed: %s", e)
 
 
+def _new_status(**overrides) -> dict:
+    """The status.json schema, defined ONCE.
+
+    This is a contract between two containers — the app (Task 4) reads it —
+    and it was previously spelled out verbatim in two places (here and
+    run_action's initial publish), so the next field added would have landed
+    in only one of them.
+    """
+    status = {
+        "id": None, "action": None, "state": "running", "step": "validating",
+        "from_tag": None, "to_tag": None, "message": "", "error": None,
+        "reverted_to": None, "log_tail": [],
+        "started_at": _now_iso(), "finished_at": None,
+    }
+    status.update(overrides)
+    return status
+
+
 def _publish_refusal(request: dict, error: str) -> None:
     """Record a request the loop consumed but never ran.
 
@@ -483,53 +535,44 @@ def _publish_refusal(request: dict, error: str) -> None:
     make the operator's click vanish with only a log line — and the app would go
     on showing the PREVIOUS run's status, which may well read "success".
     """
-    _publish({
-        "id": request.get("id"),
-        "action": request.get("action"),
-        "state": "failed",
-        "step": "failed",
-        "from_tag": _current_tag(),
-        "to_tag": request.get("tag"),
-        "message": "",
-        "error": error,
-        "reverted_to": None,
-        "log_tail": [],
-        "started_at": _now_iso(),
-        "finished_at": _now_iso(),
-    })
+    _publish(_new_status(
+        id=request.get("id"),
+        action=request.get("action"),
+        state="failed",
+        step="failed",
+        from_tag=_current_tag(),
+        to_tag=request.get("tag"),
+        error=error,
+        finished_at=_now_iso(),
+    ))
 
 
 def run_action(request: dict) -> None:
     """Execute one claimed request, streaming progress into status.json."""
     action = request.get("action")
     tag = request.get("tag")
-    started = _now_iso()
-    status = {
-        "id": request.get("id"),
-        "action": action,
-        "state": "running",
-        "step": "validating",
-        "from_tag": _current_tag(),
-        "to_tag": tag,
-        "message": "",
-        "error": None,
-        "reverted_to": None,
-        "log_tail": [],
-        "started_at": started,
-        "finished_at": None,
-    }
+    status = _new_status(
+        id=request.get("id"),
+        action=action,
+        from_tag=_current_tag(),
+        to_tag=tag,
+    )
     _publish(status)
 
     # Re-validate on pickup. The heartbeat's target list is UX; this is the
     # authority, and it must not trust anything the app wrote.
     if not validate_tag(tag):
-        status.update(state="failed", step="failed", finished_at=_now_iso(),
-                      error=f"rejected tag: {tag!r}")
+        status.update(
+            state="failed", step="failed", finished_at=_now_iso(),
+            error=(f"{tag!r} is not a deployable release tag — only exact "
+                   f"versions like v1.2.3 (prereleases are excluded)."))
         _publish(status)
         return
     if action not in ("update", "rollback"):
-        status.update(state="failed", step="failed", finished_at=_now_iso(),
-                      error=f"unknown action: {action!r}")
+        status.update(
+            state="failed", step="failed", finished_at=_now_iso(),
+            error=(f"unknown action: {action!r}. This is a bug in Vigilant, "
+                   f"not something you can fix from here."))
         _publish(status)
         return
     if action == "rollback" and tag not in eligible_rollback_targets(
@@ -544,7 +587,13 @@ def run_action(request: dict) -> None:
     status["step"] = "preflight"
     _publish(status)
 
-    lines: list[str] = []
+    # Bounded, not a plain list: clamp_log_tail() keeps only the last 100
+    # entries regardless, but list(lines)[-100:] on an unbounded list still
+    # copies the WHOLE list on every call — one per output line — making the
+    # accumulate-then-clamp pattern O(N^2) in total output over a long-running
+    # deploy. maxlen=200 (double clamp_log_tail's own cap, for headroom) bounds
+    # that copy to a constant size.
+    lines: deque = deque(maxlen=200)
     timed_out = threading.Event()
     proc = None
     try:
@@ -571,10 +620,20 @@ def run_action(request: dict) -> None:
         # blocks with no deadline of its own, and wait(timeout=...) is only
         # reached after EOF — so a hang that keeps printing (a stalled docker
         # pull progress bar) never closes the pipe and the ceiling is never
-        # evaluated. Verified: a script echoing every 0.2s ran indefinitely past
-        # a 2s ceiling. Killing the group here closes the pipe, which ends the
-        # read loop, which lets wait() return.
+        # evaluated. Manually reproduced before this was fixed: a script
+        # echoing in a loop ran indefinitely past its ceiling. Killing the
+        # group here closes the pipe, which ends the read loop, which lets
+        # wait() return.
         def _on_timeout():
+            # The Timer thread and the main thread race: by the time this
+            # fires, proc may already have exited on its own (rc published,
+            # lock released) a moment earlier. poll() returning non-None means
+            # it is gone — killing an already-reaped pid is a no-op, but
+            # setting timed_out here would still overwrite a real success with
+            # a false "exceeded N minutes" a moment after the true outcome was
+            # already published.
+            if proc.poll() is not None:
+                return
             timed_out.set()
             _kill_group(proc)
 
@@ -608,7 +667,7 @@ def run_action(request: dict) -> None:
                         f"Revert to {m.group(1)} ALSO failed — the site may be "
                         f"down. Manual intervention required on the host."
                     )
-                status["log_tail"] = clamp_log_tail(lines)
+                status["log_tail"] = clamp_log_tail(list(lines))
                 _publish(status)
             rc = proc.wait()
         finally:
@@ -617,7 +676,7 @@ def run_action(request: dict) -> None:
         if proc is not None:
             _kill_group(proc)
         status.update(state="failed", step="failed", finished_at=_now_iso(),
-                      error=str(e)[:512], log_tail=clamp_log_tail(lines))
+                      error=str(e)[:512], log_tail=clamp_log_tail(list(lines)))
         _publish(status)
         return
 
@@ -631,9 +690,15 @@ def run_action(request: dict) -> None:
         status.update(state="success", step="done", finished_at=_now_iso(),
                       message=f"{action} to {tag} completed")
     else:
+        # Popen.returncode is negative for a signal kill (e.g. -9 for SIGKILL),
+        # so a bare f"exited {rc}" would render as "exited -9" — technically
+        # true and useless to an operator who does not know POSIX exit codes.
+        error = (f"{action} was killed by signal {-rc} — see the log below."
+                 if rc < 0 else
+                 f"{action} failed (exit {rc}) — see the log below.")
         status.update(state="failed", step="failed", finished_at=_now_iso(),
-                      error=f"{action} exited {rc}")
-    status["log_tail"] = clamp_log_tail(lines)
+                      error=error)
+    status["log_tail"] = clamp_log_tail(list(lines))
     _publish(status)
 
 
@@ -658,7 +723,15 @@ def _tick(seen: list, lock_path: Path) -> None:
     if held is not None and not is_stale_lock(held, time.time(), _pid_alive):
         return
     if held is not None:
-        log.warning("reclaiming stale lock held by pid %s", held.get("pid"))
+        # Unlink it here, not just log it: at POLL_SECONDS=1.0 leaving the file
+        # in place made this fire on EVERY tick — ~86,400 identical warnings a
+        # day — and "reclaiming" was false at the point it was logged, since
+        # nothing is actually reclaimed unless a request happens to follow.
+        log.warning("removing a stale update lock held by pid %s", held.get("pid"))
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
 
     claimed, request = claim_request(CONTROL)
     if not claimed:
@@ -673,7 +746,9 @@ def _tick(seen: list, lock_path: Path) -> None:
     rid = str(request.get("id") or "")
     if not rid:
         log.warning("request has no id — refusing")
-        _publish_refusal(request, "Request had no id and was refused.")
+        _publish_refusal(
+            request, "Request had no id and was refused. This is a bug in "
+                     "Vigilant, not something you can fix from here.")
         return
     if seen_request(rid, seen):
         # A genuine replay: the original run already published its outcome, so
@@ -686,7 +761,10 @@ def _tick(seen: list, lock_path: Path) -> None:
                                       "started_at": time.time()})
     except OSError as e:
         log.error("could not take the update lock: %s", e)
-        _publish_refusal(request, f"Could not take the update lock: {e}")
+        _publish_refusal(
+            request, f"Could not take the update lock: {e} The /control "
+                     f"volume may be root-owned; see the updater "
+                     f"troubleshooting section.")
         return
 
     try:
@@ -701,17 +779,43 @@ def _tick(seen: list, lock_path: Path) -> None:
             pass
 
 
+def _reconcile_orphaned_status() -> None:
+    """Close out a run that was interrupted by our own death.
+
+    status.json is written by this process and read by the app. If we are
+    SIGKILLed, OOM-killed or the host reboots mid-deploy, it is left saying
+    "running" with nobody left to finish it — and nothing else ever corrects
+    it, so the panel shows a spinner forever. This repo's own notes flag OOM
+    (ExitCode 137) as a live hazard on this box, so it is not exotic. We
+    cannot know the outcome (the deploy may well have completed), so say
+    exactly that rather than guessing.
+    """
+    status = read_json(CONTROL / "status.json")
+    if not isinstance(status, dict) or status.get("state") != "running":
+        return
+    log.warning("found an orphaned 'running' status from a previous process; "
+                "marking it interrupted")
+    status.update(
+        state="failed", step="failed", finished_at=_now_iso(),
+        error=("The updater restarted while this deploy was running, so its "
+               "outcome is unknown. Check the version shown above and "
+               "`docker ps` on the host before retrying."))
+    _publish(status)
+
+
 def run() -> None:
     """Poll for requests forever. Never exits on a per-request failure."""
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(message)s")
     checks = _self_checks()
     log.info("updater starting: checks=%s root=%s control=%s", checks, ROOT, CONTROL)
+    _reconcile_orphaned_status()
 
     seen: list[str] = []
     last_beat = 0.0
     lock_path = CONTROL / "update.lock"
 
+    global _last_tick_error
     while True:
         if time.time() - last_beat >= HEARTBEAT_SECONDS:
             write_heartbeat(checks)
@@ -723,7 +827,17 @@ def run() -> None:
             # exists so an UNKNOWN one cannot kill the loop and take the whole
             # feature down until someone SSHes in to restart the container —
             # exactly what a non-dict payload used to do.
-            log.exception("tick failed: %s", e)
+            #
+            # Rate-limited: a PERSISTENT failure (e.g. /control unmounted)
+            # would otherwise log a full traceback once a second forever.
+            # Log the first occurrence loudly, then repeats at debug level
+            # until the message changes.
+            msg = str(e)
+            if msg != _last_tick_error:
+                log.exception("tick failed: %s", e)
+                _last_tick_error = msg
+            else:
+                log.debug("tick failed (repeat): %s", e)
         time.sleep(POLL_SECONDS)
 
 
