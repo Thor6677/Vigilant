@@ -14,9 +14,10 @@ preflights, the dirty-tree refusal, .env pinning, the health loop, the
 auto-revert and the .deployed append all come along for free — and a CLI deploy
 and an in-app deploy share one history, so either can roll back the other.
 
-Everything above `run()` is pure: no filesystem, no subprocess, no clock. That
-is what lets the security-critical part — tag validation — be tested in the
-main pytest suite with no Docker daemon anywhere near it.
+Everything above the `# ── Impure half` banner is pure: no filesystem, no
+subprocess, no clock. That is what lets the security-critical part — tag
+validation — be tested in the main pytest suite with no Docker daemon anywhere
+near it. Below the banner is the run loop, which is none of those things.
 """
 import json
 import logging
@@ -73,11 +74,18 @@ _LOCK_MAX_AGE_SECONDS = 30 * 60
 _LOG_MAX_LINES = 100
 _LOG_MAX_BYTES = 8192
 
-# Markers scripts/deploy.sh and scripts/rollback.sh actually print. Deliberately
-# coarser than the design's draft vocabulary: those scripts do not emit separate
-# fetch/pull/recreate markers — all three happen inside their [1/N] block — and
-# inventing finer ones would mean forking the scripts, which defeats the point
-# of reusing them.
+# Markers scripts/deploy.sh and scripts/rollback.sh actually print, mapped to a
+# deliberately coarse step vocabulary.
+#
+# Two different reasons for the coarseness, and they are not the same reason:
+#   - deploy.sh genuinely bundles checkout, pull and recreate into one [1/5]
+#     block, so finer steps do not exist to be read. Inventing them would mean
+#     forking the script, which defeats the point of reusing it unmodified.
+#   - rollback.sh DOES emit [1/4] Roll back, [2/4] Pull and [3/4] Recreate as
+#     three distinct markers. Those are collapsed to "deploying" ON PURPOSE:
+#     three UI steps for what the operator experiences as one recreate is noise,
+#     and it keeps both scripts presenting the same vocabulary. Do not "fix"
+#     this by expanding them.
 #
 # Every entry here is matched with startswith(), not substring `in` — deploy.sh's
 # "[4/5] Startup log scan" step echoes raw `docker logs` output into the same
