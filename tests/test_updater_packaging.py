@@ -46,15 +46,35 @@ def test_files_copied_into_the_sidecar_import_only_stdlib():
             )
 
 
+def _copy_sources(line):
+    """Source paths from one COPY line, skipping any --flags.
+
+    `COPY --chown=1000:1000 app/foo.py /dst` would otherwise put the flag at
+    index 1 and let app/foo.py slip past the guard below unnoticed.
+    """
+    parts = line.split()[1:]
+    parts = [p for p in parts if not p.startswith("--")]
+    return parts[:-1]          # everything but the destination
+
+
 def test_dockerfile_copies_exactly_the_files_this_test_guards():
     """If someone adds a COPY of another app/ file, the guard above silently
     stops covering it."""
     with open("updater/Dockerfile") as fh:
         lines = [l.strip() for l in fh if l.strip().startswith("COPY ")]
     copied_app_files = sorted(
-        l.split()[1] for l in lines if l.split()[1].startswith("app/")
+        src for line in lines for src in _copy_sources(line)
+        if src.startswith("app/")
     )
-    assert copied_app_files == sorted(p for p in COPIED), copied_app_files
+    assert copied_app_files == sorted(COPIED), copied_app_files
+
+
+def test_copy_source_parser_survives_a_chown_flag():
+    """Pins the parser itself: the naive split()[1] version silently stopped
+    guarding any file copied with a --chown or --from flag."""
+    assert _copy_sources("COPY --chown=1000:1000 app/x.py /dst/x.py") == ["app/x.py"]
+    assert _copy_sources("COPY app/x.py /dst/x.py") == ["app/x.py"]
+    assert _copy_sources("COPY a.py b.py /dst/") == ["a.py", "b.py"]
 
 
 def test_dockerfile_declares_no_user_directive():

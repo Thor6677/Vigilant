@@ -12,6 +12,14 @@ FROM alpine:3.20
 # docker-cli-compose here is v2.27.0 while the host's is newer. The supervisor's
 # startup self-check runs `docker compose config` against the real file so that
 # skew surfaces as a readable reason, not a mid-deploy failure.
+#
+# curl is UNREACHABLE on the supervisor's own path and is here deliberately:
+# scripts/deploy.sh curls the GitHub releases API to resolve "latest" when no
+# --tag is given, and build_command() always passes one. It stays so that a
+# human running `docker exec ... deploy.sh` inside this container — the natural
+# thing to try when debugging a stuck update — does not hit a bare
+# "curl: not found" on the fallback branch. Roughly 200 KB for a debugging
+# affordance on the day the UI is already broken.
 RUN apk add --no-cache \
         bash \
         curl \
