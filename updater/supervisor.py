@@ -309,8 +309,20 @@ def write_json_atomic(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
-def claim_request(control: Path):
-    """Atomically take ownership of a pending request, or None.
+def claim_request(control: Path) -> tuple[bool, dict | None]:
+    """Atomically take ownership of a pending request.
+
+    Returns (claimed, payload):
+      (False, None)  nothing was there
+      (True,  None)  a request WAS consumed but is unusable — malformed JSON, or
+                     valid JSON that is not an object
+      (True,  {...}) a usable request
+
+    The two-value return exists because collapsing the middle case into None
+    lost it: the rename had already happened, so the operator's click was
+    consumed while the app went on showing the PREVIOUS run's status — which may
+    read "success". A non-dict payload was worse still, reaching request.get()
+    and killing the poll loop outright.
 
     rename() is atomic within a filesystem. Read-then-unlink is not: two
     claimants could both read before either unlinked. Here the loser's rename
@@ -321,8 +333,11 @@ def claim_request(control: Path):
     try:
         os.replace(src, dst)
     except OSError:
-        return None
-    return read_json(dst)
+        return (False, None)
+    data = read_json(dst)
+    if not isinstance(data, dict):
+        return (True, None)
+    return (True, data)
 
 
 def seen_request(request_id: str, seen: list) -> bool:
@@ -542,6 +557,14 @@ def run_action(request: dict) -> None:
             # docker and git children it spawned. Killing only the shell leaves
             # an orphaned `docker pull` holding the daemon.
             start_new_session=True,
+            # Pin the codec instead of inheriting the container's locale.
+            # deploy.sh emits ✓ → ✗ ⚠ (3-byte UTF-8), and text=True otherwise
+            # decodes with locale.getpreferredencoding(). Alpine happens to give
+            # UTF-8 today (verified in the real image), but a base-image change
+            # would turn that into a UnicodeDecodeError MID-DEPLOY. errors=
+            # "replace" means a stray byte from docker's output degrades one
+            # character rather than killing a running deploy.
+            encoding="utf-8", errors="replace",
         )
 
         # A watchdog THREAD, not a timeout on wait(). `for line in proc.stdout`
@@ -614,6 +637,70 @@ def run_action(request: dict) -> None:
     _publish(status)
 
 
+def _tick(seen: list, lock_path: Path) -> None:
+    """One pass of the poll loop.
+
+    Extracted from run() purely so it can be tested: run() never returns, so
+    nothing could exercise its body, and a named design constraint (pid_alive
+    semantics) sat with zero coverage as a result.
+
+    There is a narrow window between claim_request() succeeding and the lock
+    write below where a SECOND supervisor process could claim a new request and
+    run concurrently. Not closed: os.replace() on request.json is the mutex
+    that actually matters — it guarantees the same request can never double-run
+    — and the deployment model is one sidecar container, so a second supervisor
+    is not a scenario this needs to defend against. The lock file's job is
+    staleness/reclamation across restarts, not mutual exclusion within a single
+    poll; writing it on every idle tick to close a window that cannot occur in
+    the real deployment would just be needless I/O on a shared volume.
+    """
+    held = read_json(lock_path)
+    if held is not None and not is_stale_lock(held, time.time(), _pid_alive):
+        return
+    if held is not None:
+        log.warning("reclaiming stale lock held by pid %s", held.get("pid"))
+
+    claimed, request = claim_request(CONTROL)
+    if not claimed:
+        return
+    if request is None:
+        log.warning("consumed an unusable request (malformed or not an object)")
+        _publish_refusal(
+            {}, "The update request was unreadable and has been discarded. "
+                "Please try again.")
+        return
+
+    rid = str(request.get("id") or "")
+    if not rid:
+        log.warning("request has no id — refusing")
+        _publish_refusal(request, "Request had no id and was refused.")
+        return
+    if seen_request(rid, seen):
+        # A genuine replay: the original run already published its outcome, so
+        # leave status.json alone rather than overwriting it.
+        log.info("ignoring replayed request: %s", rid)
+        return
+
+    try:
+        write_json_atomic(lock_path, {"pid": os.getpid(),
+                                      "started_at": time.time()})
+    except OSError as e:
+        log.error("could not take the update lock: %s", e)
+        _publish_refusal(request, f"Could not take the update lock: {e}")
+        return
+
+    try:
+        run_action(request)
+    except Exception as e:
+        log.exception("run_action crashed: %s", e)
+        _publish_refusal(request, f"The updater crashed mid-run: {e}")
+    finally:
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
+
+
 def run() -> None:
     """Poll for requests forever. Never exits on a per-request failure."""
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
@@ -626,59 +713,18 @@ def run() -> None:
     lock_path = CONTROL / "update.lock"
 
     while True:
-        now = time.time()
-        if now - last_beat >= HEARTBEAT_SECONDS:
-            write_heartbeat(checks)
-            last_beat = now
-
-        # Check the lock BEFORE claiming. Claiming first would rename
-        # request.json away and then drop it on the floor when the lock turned
-        # out to be held — the operator's click would vanish with nothing but a
-        # log line, and the app would sit on a stale status forever. Leaving the
-        # request in place instead means it is simply picked up on a later tick.
-        held = read_json(lock_path)
-        if held is not None and not is_stale_lock(held, time.time(), _pid_alive):
-            time.sleep(POLL_SECONDS)
-            continue
-        if held is not None:
-            log.warning("reclaiming stale lock held by pid %s", held.get("pid"))
-
-        request = claim_request(CONTROL)
-        if request is None:
-            time.sleep(POLL_SECONDS)
-            continue
-
-        rid = str(request.get("id") or "")
-        if not rid:
-            log.warning("request has no id — refusing")
-            _publish_refusal(request, "Request had no id and was refused.")
-            continue
-        if seen_request(rid, seen):
-            # A genuine replay: the original run already published its outcome,
-            # so leave status.json alone rather than overwriting it.
-            log.info("ignoring replayed request: %s", rid)
-            continue
-
-        try:
-            write_json_atomic(lock_path, {"pid": os.getpid(),
-                                          "started_at": time.time()})
-        except OSError as e:
-            log.error("could not take the update lock: %s", e)
-            _publish_refusal(request, f"Could not take the update lock: {e}")
-            continue
-
-        try:
-            run_action(request)
-        except Exception as e:
-            log.exception("run_action crashed: %s", e)
-            _publish_refusal(request, f"The updater crashed mid-run: {e}")
-        finally:
-            try:
-                os.unlink(lock_path)
-            except OSError:
-                pass
+        if time.time() - last_beat >= HEARTBEAT_SECONDS:
             write_heartbeat(checks)
             last_beat = time.time()
+        try:
+            _tick(seen, lock_path)
+        except Exception as e:
+            # Belt and braces. _tick guards its own known failure modes; this
+            # exists so an UNKNOWN one cannot kill the loop and take the whole
+            # feature down until someone SSHes in to restart the container —
+            # exactly what a non-dict payload used to do.
+            log.exception("tick failed: %s", e)
+        time.sleep(POLL_SECONDS)
 
 
 if __name__ == "__main__":

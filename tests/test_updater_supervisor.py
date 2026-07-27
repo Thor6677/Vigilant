@@ -321,21 +321,41 @@ def test_claim_request_renames_so_a_second_claim_finds_nothing(tmp_path):
     filesystem, so the loser simply has nothing to claim."""
     req = tmp_path / "request.json"
     req.write_text(json.dumps({"id": "abc", "action": "update", "tag": "v1.1.0"}))
-    first = claim_request(tmp_path)
-    second = claim_request(tmp_path)
+    claimed1, first = claim_request(tmp_path)
+    claimed2, second = claim_request(tmp_path)
+    assert claimed1 is True
     assert first["id"] == "abc"
+    assert claimed2 is False
     assert second is None
     assert not req.exists()
     assert (tmp_path / "request.json.claimed").exists()
 
 
 def test_claim_request_returns_none_when_absent(tmp_path):
-    assert claim_request(tmp_path) is None
+    assert claim_request(tmp_path) == (False, None)
 
 
 def test_claim_request_returns_none_on_malformed_json(tmp_path):
     (tmp_path / "request.json").write_text("{not json")
-    assert claim_request(tmp_path) is None
+    assert claim_request(tmp_path) == (True, None)
+
+
+def test_claim_request_distinguishes_nothing_from_unusable(tmp_path):
+    """Collapsing these into None consumed the operator's click silently: the
+    rename had already happened, so the request was gone while the app went on
+    showing the previous run's status."""
+    assert claim_request(tmp_path) == (False, None)
+
+    (tmp_path / "request.json").write_text('{"id": "abc", "action": "upda')
+    assert claim_request(tmp_path) == (True, None)
+    assert not (tmp_path / "request.json").exists()
+
+
+def test_claim_request_rejects_a_non_dict_payload(tmp_path):
+    """A JSON array reached request.get() and raised AttributeError OUTSIDE any
+    try, killing the poll loop — the sidecar died until container restart."""
+    (tmp_path / "request.json").write_text("[1, 2]")
+    assert claim_request(tmp_path) == (True, None)
 
 
 def test_replayed_request_id_is_ignored():
@@ -475,3 +495,70 @@ def test_a_request_with_no_id_is_recorded_not_silently_dropped(tmp_path, monkeyp
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["state"] == "failed"
     assert "no id" in status["error"]
+
+
+# ── Loop-body coverage (was previously untestable: run() never returns) ──────
+
+def test_pid_alive_treats_permission_denied_as_alive():
+    """os.kill(1, 0) raises PermissionError for a process we may not signal.
+    The obvious `except OSError: return False` would call it dead and reclaim a
+    lock still in use. This constraint had zero coverage — reverting it passed
+    all 93 tests."""
+    from updater.supervisor import _pid_alive
+    assert _pid_alive(1) is True            # exists, not ours
+    assert _pid_alive(999_999) is False     # does not exist
+
+
+def test_a_tick_that_runs_an_action_advances_the_step(tmp_path, monkeypatch):
+    """Nothing asserted status["step"] ever moved, so prefixing the line before
+    step_for_line — which breaks startswith matching — passed the whole suite."""
+    import updater.supervisor as sup
+    script = tmp_path / "fake-deploy.sh"
+    script.write_text(
+        '#!/usr/bin/env bash\n'
+        'echo "[0/5] preflight: external \'web\' network"\n'
+        'echo "[2/5] Health check"\n'
+        'echo "[5/5] Done"\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+
+    sup.run_action({"id": "s1", "action": "update", "tag": "v1.1.0"})
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["state"] == "success"
+    assert status["step"] == "done"
+
+
+def test_rollback_eligibility_is_read_fresh_not_from_the_heartbeat(tmp_path, monkeypatch):
+    """AC5's headline requirement had no test. The heartbeat's list is UX; the
+    authority is a fresh read of .deployed at pickup time."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    (tmp_path / ".deployed").write_text(
+        "t v1.1.0\nt v1.2.0\nt v1.3.0\n")
+    sup.write_heartbeat({"socket": "ok"})
+    assert "v1.1.0" in json.loads((tmp_path / "updater.json").read_text())["targets"]
+
+    # .deployed changes underneath — the cached heartbeat is now stale.
+    (tmp_path / ".deployed").write_text("t v1.3.0\n")
+    monkeypatch.setattr(sup, "build_command",
+                        lambda a, t, root=None: ["/bin/false"])
+    sup.run_action({"id": "r1", "action": "rollback", "tag": "v1.1.0"})
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["state"] == "failed"
+    assert "not an eligible rollback target" in status["error"]
+
+
+def test_tick_survives_a_request_that_would_have_killed_the_loop(tmp_path, monkeypatch):
+    """A JSON array used to reach request.get() and raise AttributeError outside
+    any try, exiting run() and taking the feature down until container restart."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    (tmp_path / "request.json").write_text("[1, 2]")
+    sup._tick([], tmp_path / "update.lock")      # must not raise
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["state"] == "failed"
+    assert "unreadable" in status["error"]
