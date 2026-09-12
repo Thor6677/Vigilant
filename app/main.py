@@ -130,10 +130,10 @@ class _RequestTimingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_RequestTimingMiddleware)
 
-# CSP nonce middleware (T-012 Step 1). Stamps a per-request nonce on
-# request.state.csp_nonce and emits Content-Security-Policy-Report-Only
-# with the nonce inlined. Outermost-ish so the nonce is available for
-# every handler that renders a template.
+# CSP nonce middleware (T-012). Stamps a per-request nonce on
+# request.state.csp_nonce and emits an enforcing Content-Security-Policy
+# with the nonce inlined (T-033). Outermost-ish so the nonce is available
+# for every handler that renders a template.
 app.add_middleware(CSPNonceMiddleware)
 
 # CSRF must be added BEFORE SessionMiddleware so that the latter wraps it —

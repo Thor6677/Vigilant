@@ -6,12 +6,12 @@ templates can render `<script nonce="{{ request.state.csp_nonce }}">`,
 and sets a `Content-Security-Policy-Report-Only` header whose
 script-src includes both the nonce and `'unsafe-inline'`.
 
-Why both nonce + unsafe-inline in Report-Only (script-src only):
+Why the nonce, and why style-src is shaped differently:
 - Per CSP Level 3, when a nonce is present in script-src, `'unsafe-inline'`
-  is IGNORED by modern browsers. So nonced inline runs; un-nonced inline
-  is *reported* (Report-Only = no enforcement, just CSP violation events).
-- Legacy browsers without CSP3 nonce support fall back to `'unsafe-inline'`
-  and execute everything as before.
+  is IGNORED by modern browsers. Until T-033 the directive carried both: the
+  nonce did the real work, and `'unsafe-inline'` was a fallback for browsers
+  too old to understand nonces. It is gone as of T-033, so un-nonced inline
+  script is blocked everywhere rather than reported.
 - style-src carries NO nonce for exactly the same spec rule: a nonce there
   would neuter `'unsafe-inline'` and make every un-nonceable `style=""`
   attribute fire a report — the 2026-07-03 report-flood incident (see the
@@ -20,10 +20,14 @@ Why both nonce + unsafe-inline in Report-Only (script-src only):
 ## T-012 roadmap status (updated 2026-05-19 per T-032 decision)
 
 - **Step 1 (T-012):** ✅ nonce middleware + nonced inline blocks (commit 6d1d9de).
-- **Step 2 (T-031):** in-progress — inline event handlers (`onclick=` etc.)
-  being migrated to delegated `data-<event>="fn"` attributes via
-  `static/js/actions.js`. Round 3 closed bulk patterns (~75 handlers); the
-  remaining ~184 arg-bearing handlers are tracked under ISS-020/021/022.
+- **Step 2 (T-031):** ✅ done — inline event handlers (`onclick=` etc.)
+  migrated to delegated `data-<event>="fn"` attributes via
+  `static/js/actions.js`. The tail of arg-bearing handlers (ISS-020/021/022)
+  went with the ISS-021 dataset convention, and the last round also took the
+  handlers that five route modules were emitting inside hand-built HTML
+  strings — invisible to a templates-only search, and the reason to keep
+  `tests/test_csp_inline_handlers.py` pointed at `app/**/*.py` as well. That
+  test now holds the line at zero.
 - **Step 3 (T-032):** ✅ DECISION — `style-src` keeps `'unsafe-inline'`
   permanently. Refactoring 3,296 inline `style="..."` declarations across
   101 templates to JS-driven `setProperty` calls would be a months-long
@@ -39,15 +43,28 @@ Why both nonce + unsafe-inline in Report-Only (script-src only):
   it's the natural next step — that scope was explicitly killed in T-032.
   Design-system hygiene for the most-repeated inline patterns is a
   separate concern, tracked under ISS-028.
-- **Step 4 (T-033):** drops `'unsafe-inline'` from `script-src` only
-  (style-src untouched) and flips the header from `Report-Only` to
-  enforcing.
+- **Step 4 (T-033):** ✅ done — `'unsafe-inline'` dropped from `script-src`
+  (style-src untouched, per T-032) and the header flipped from `Report-Only`
+  to enforcing.
+
+  What this now blocks, rather than reports: any `<script>` without the
+  request's nonce, any `on*=` attribute, and any `javascript:` URL. Nonced
+  blocks, `/static/js/*`, and the nonced htmx tag are unaffected. Note the
+  loss of the legacy fallback described above: a browser too old for CSP3
+  nonces now blocks every inline block rather than running it, because
+  `'unsafe-inline'` is no longer there to catch it. That is the point of the
+  step, and those browsers are far outside what this app targets.
+
+  If something inline has to run again, it needs the nonce
+  (`<script nonce="{{ request.state.csp_nonce }}">`), never a policy
+  loosening.
 
 The edge nginx config at /opt/edge/nginx/conf.d/vigilant.conf:47 still
-sends its own static Content-Security-Policy-Report-Only header. That's
-harmless — browsers accept multiple Report-Only headers and fire reports
-against each independently. The cleanup (removing the nginx-side header)
-happens in Step 4 alongside the unsafe-inline drop.
+sends its own static Content-Security-Policy-Report-Only header. That was
+harmless while this header was Report-Only too, and it still is — a
+Report-Only header cannot relax an enforcing one, and the two are evaluated
+independently. It is now pure noise in the violation sink, though, and
+removing it is the one piece of T-033 that lives outside this repo.
 """
 from __future__ import annotations
 
@@ -76,7 +93,7 @@ from starlette.requests import Request
 # requests. A nonce here defeats the T-032 decision above; do not re-add.
 _CSP_TEMPLATE = (
     "default-src 'self'; "
-    "script-src 'self' 'nonce-{nonce}' 'unsafe-inline'; "
+    "script-src 'self' 'nonce-{nonce}'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: blob: https:; "
@@ -93,7 +110,7 @@ _CSP_TEMPLATE = (
 
 class CSPNonceMiddleware(BaseHTTPMiddleware):
     """Stamps a per-request nonce on request.state and emits a matching
-    Content-Security-Policy-Report-Only header on the response."""
+    Content-Security-Policy header on the response."""
 
     async def dispatch(self, request: Request, call_next):
         nonce = secrets.token_urlsafe(16)
@@ -101,11 +118,11 @@ class CSPNonceMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         # Don't override the header if a downstream handler already set
         # one — gives individual routes an escape hatch if they need a
-        # tighter policy without unsafe-inline.
-        if "content-security-policy-report-only" not in {
+        # tighter policy of their own.
+        if "content-security-policy" not in {
             k.lower() for k in response.headers.keys()
         }:
-            response.headers["Content-Security-Policy-Report-Only"] = (
+            response.headers["Content-Security-Policy"] = (
                 _CSP_TEMPLATE.format(nonce=nonce)
             )
         return response

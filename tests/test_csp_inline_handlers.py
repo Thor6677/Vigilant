@@ -146,3 +146,49 @@ def test_every_data_binding_resolves():
         "data-* bindings with no matching window.<name> — these are dead "
         f"controls in the browser: { {k: sorted(v) for k, v in missing.items()} }"
     )
+
+
+# ── the policy the conversion work was for ──────────────────────────────────
+
+def test_policy_is_enforcing_and_script_src_has_no_unsafe_inline():
+    """T-033's payload. `script-src` keeps the nonce and drops
+    `'unsafe-inline'`, and the header enforces rather than reports.
+
+    `style-src` deliberately keeps `'unsafe-inline'` — that is the T-032
+    decision, not an oversight, and a nonce must never be added there (it
+    would make browsers ignore `'unsafe-inline'` for styles and fire a report
+    for every inline style attribute in the app; see the 2026-07-03 incident
+    note in the middleware).
+    """
+    from starlette.testclient import TestClient
+
+    import app.main as main
+
+    with TestClient(main.app) as client:
+        response = client.get("/", follow_redirects=False)
+    header = response.headers.get("content-security-policy")
+    assert header, "no enforcing CSP header"
+    assert "content-security-policy-report-only" not in response.headers
+
+    script_src = next(d for d in header.split(";") if d.strip().startswith("script-src"))
+    assert "'unsafe-inline'" not in script_src, script_src
+    assert "'nonce-" in script_src, script_src
+
+    style_src = next(d for d in header.split(";") if d.strip().startswith("style-src"))
+    assert "'unsafe-inline'" in style_src, style_src
+    assert "'nonce-" not in style_src, style_src
+
+
+def test_every_template_script_block_carries_the_nonce():
+    """With `'unsafe-inline'` gone, a `<script>` without the nonce no longer
+    runs. Catch a missing one here rather than in a browser."""
+    bare = {}
+    for path in _templates():
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        for tag in re.findall(r"<script\b[^>]*>", body):
+            # Both inline blocks and src= tags need it: the nonce is what
+            # script-src matches on now, for either shape.
+            if "nonce=" not in tag:
+                bare.setdefault(_rel(path), []).append(tag[:80])
+    assert not bare, f"<script> tags with no nonce — these will not run: {bare}"
