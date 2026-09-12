@@ -33,6 +33,11 @@ body {
 }
 .b-nav-logo:hover { text-shadow: 0 0 8px rgba(200, 169, 81, 0.6); }
 .b-nav-links { display: flex; align-items: center; gap: 1.5rem; }
+/* Search / notifications / account / hamburger. A sibling of .b-nav-links so
+   it survives the nav breakpoint that collapses the group row — the bell is
+   how structure, fuel and timer alerts reach the user, and it used to
+   disappear on every screen narrower than a laptop. */
+.b-nav-actions { display: flex; align-items: center; gap: 1.25rem; flex-shrink: 0; }
 /* white-space + flex-shrink:0 are load-bearing, not cosmetic: .b-nav-links is
    a non-wrapping flex row in a fixed 46px bar, so a multi-word link (a label
    plus its caret, "+ Add Character") has a min-content width of its longest
@@ -65,6 +70,13 @@ body {
     transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
 }
 .b-nav-search:hover { color: var(--text); border-color: var(--accent); background: rgba(200, 169, 81, 0.08); }
+/* Bell. Styling lives here rather than inline so the mobile breakpoint can
+   grow the tap target; position:relative anchors #notif-badge and
+   #notif-dropdown. */
+.b-nav-bell {
+    display: flex; align-items: center; position: relative;
+    padding: 0 0.4rem; cursor: pointer; flex-shrink: 0;
+}
 .b-nav-kbd {
     font-family: inherit; font-size: 9px; letter-spacing: var(--ls-tight);
     color: var(--muted); border: 1px solid var(--border); padding: 0 0.25rem;

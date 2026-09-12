@@ -137,24 +137,6 @@
     border-top: 1px solid var(--border);
     margin: 0.25rem 1.5rem;
 }
-/* Search handle at the top of the mobile menu — opens the same Ctrl+K
-   palette the desktop bar's search button does. */
-.b-mobile-search {
-    display: block;
-    width: calc(100% - 3rem);
-    margin: 0.25rem 1.5rem 0.5rem;
-    padding: 0.7rem 0.75rem;
-    text-align: left;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    font-family: inherit;
-    font-size: 13px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    cursor: pointer;
-}
-.b-mobile-search:hover { color: var(--text); border-color: var(--accent); }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1000px) {
@@ -177,6 +159,23 @@
 @media (max-width: 1000px) {
     .b-nav-links { display: none; }
     .b-hamburger { display: flex; }
+    /* .b-nav-actions stays. Search keeps its icon only, and the account menu
+       stands down — Add Character, Admin and Logout are all in the mobile
+       menu, and its hover-to-open dropdown is a poor fit for touch anyway.
+       That leaves logo + search + bell + Menu, which fits a 360px phone. */
+    .b-nav-actions { gap: 0.9rem; }
+    .b-nav-search span, .b-nav-kbd { display: none; }
+    .b-nav-account { display: none; }
+    /* Icon-only, and sized here rather than by the 38px/44px touch rules
+       further down, which would burst the 46px bar. A class beats their bare
+       `button` selector on specificity whatever the source order, so this one
+       rule covers both of those blocks. 32px is the most a 46px bar affords;
+       the bell matches it. */
+    .b-nav-search {
+        padding: 0.3rem; min-height: 32px; min-width: 32px;
+        justify-content: center;
+    }
+    .b-nav-bell { padding: 0.5rem 0.6rem; }
 }
 @media (max-width: 768px) {
     .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }

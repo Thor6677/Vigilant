@@ -26,6 +26,9 @@ _BASE_HTML = os.path.join(_TEMPLATES, "base.html")
 _COMPONENTS_CSS = os.path.join(
     os.path.dirname(__file__), "..", "design-system", "css", "components.css"
 )
+_SITE_CSS = os.path.join(
+    os.path.dirname(__file__), "..", "static", "css", "site.css"
+)
 
 
 def _base_html_source():
@@ -388,23 +391,71 @@ def test_footer_omits_account_groups():
 
 
 def test_mobile_menu_still_lists_account_groups():
-    """The account menu lives in .b-nav-links, which is display:none below the
-    nav breakpoint — so the mobile menu must keep listing Admin inline or an
-    admin on a phone loses the console entirely."""
+    """The bar's account menu is display:none below the nav breakpoint, so the
+    mobile menu must keep listing Admin inline or an admin on a phone loses
+    the console entirely."""
     html = _render_base(is_admin=True)
     mobile = html.split('id="mobile-menu"')[1].split("<div id=\"esi-banner\"")[0]
     assert "/admin" in mobile
     assert "/auth/logout" in mobile
 
 
-def test_palette_has_a_visible_handle_on_both_surfaces():
-    """Ctrl+K shipped without any visible affordance; the bar button and the
-    mobile menu entry are it. Both dispatch through actions.js."""
+def test_palette_has_a_visible_handle():
+    """Ctrl+K shipped without any visible affordance; the bar's search button
+    is it. It dispatches through actions.js, which resolves window[name]."""
     html = _render_base()
     assert 'class="b-nav-search"' in html
     assert 'data-click="openPalette"' in html
-    assert 'data-click="openPaletteFromMobile"' in html
-    assert "window.openPalette = openPalette;" in html
+    assert "window.openPalette = openPaletteFromChrome;" in html
+
+
+def _nav_links_row(html):
+    """The collapsing group row: .b-nav-links up to its sibling cluster."""
+    return html.split('<div class="b-nav-links">')[1].split('class="b-nav-actions"')[0]
+
+
+def test_actions_cluster_is_outside_the_collapsing_group_row():
+    """.b-nav-links is display:none below the nav breakpoint. The bell is how
+    structure / fuel / timer alerts reach the user, so it — and search, and
+    the account menu — must sit in the sibling cluster that survives it.
+    Regression guard: the bell was unreachable on every screen under 1120px
+    before the cluster existed."""
+    html = _render_base()
+    row = _nav_links_row(html)
+    for marker in ('id="notif-btn"', 'class="b-nav-search"', 'b-nav-account'):
+        assert marker not in row, f"{marker} is back inside the collapsing row"
+    cluster = html.split('class="b-nav-actions"')[1].split("</nav>")[0]
+    for marker in ('id="notif-btn"', 'class="b-nav-search"',
+                   'b-nav-account', 'class="b-hamburger"'):
+        assert marker in cluster
+
+
+def test_bell_is_class_styled_so_the_breakpoint_can_size_it():
+    """The bell carried its layout in a style attribute, which no media query
+    can override. It needs a bigger tap target at mobile widths now that it
+    is reachable there."""
+    html = _render_base()
+    bell = html.split('id="notif-btn"')[1].split(">")[0]
+    assert 'class="b-nav-bell"' in bell
+    assert "style=" not in bell
+
+
+def test_nav_breakpoint_hides_only_the_group_row():
+    """The breakpoint block must not take the action cluster down with it."""
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        css = fh.read()
+    # An unrelated grid block shares this media query by coincidence, so pick
+    # the one that actually governs the nav.
+    blocks = [b.split("\n}")[0]
+              for b in css.split("@media (max-width: 1000px) {")[1:]]
+    nav_blocks = [b for b in blocks if ".b-nav-links" in b]
+    assert len(nav_blocks) == 1, "expected exactly one nav breakpoint block"
+    block = nav_blocks[0]
+    assert ".b-nav-links { display: none; }" in block
+    assert ".b-nav-actions { display: none" not in block
+    # The account menu is the one action that stands down — its items are all
+    # in the mobile menu, and hover-to-open is a poor fit for touch.
+    assert ".b-nav-account { display: none; }" in block
 
 
 def test_nav_caret_is_its_own_element_not_part_of_the_label():

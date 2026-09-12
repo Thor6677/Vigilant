@@ -62,6 +62,13 @@
                 {% endif %}
             {% endif %}
         {% endfor %}
+    </div>
+    {# Persistent action cluster. Deliberately a sibling of .b-nav-links,
+       not a child: that row is display:none below the nav breakpoint, and
+       notifications (structure attacks, fuel, timers) must not vanish with
+       it. Below the breakpoint the search button collapses to its icon and
+       the account menu hides — its items are in the mobile menu. #}
+    <div class="b-nav-actions">
         {# The Ctrl+K palette has been keyboard-only since it shipped; this is
            its visible handle. openPalette is exposed on window by the palette
            script at the bottom of this file. #}
@@ -71,7 +78,7 @@
             <span>Search</span>
             <kbd class="b-nav-kbd" data-cmdk-hint>Ctrl K</kbd>
         </button>
-        <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
+        <span id="notif-btn" class="b-nav-bell" data-click="onBellClick" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -165,18 +172,14 @@
                 </form>
             </div>
         </span>
+        <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
+                aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            Menu
+        </button>
     </div>
-    <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
-            aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        Menu
-    </button>
 </nav>
 <div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
-    {# The bar's search button lives in .b-nav-links, which is display:none
-       below the nav breakpoint — without this the palette would be desktop
-       (and keyboard) only. #}
-    <button type="button" class="b-mobile-search" data-click="openPaletteFromMobile">Search…</button>
     {# Mobile menu — rendered from the app.nav registry (single source).
        Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
        link that stands in for the Overview item (so that item is skipped in the
@@ -451,6 +454,17 @@
         if (!menu) return;
         setOpen(!menu.classList.contains('is-open'));
     };
+    /* The bell now lives in .b-nav-actions, which stays visible at mobile
+       widths — so it can be tapped while this menu is open. Its dropdown
+       (z-dropdown 60) would render over the menu (z 49); close the menu
+       instead of stacking the two. */
+    var bell = document.getElementById('notif-btn');
+    if (bell) {
+        bell.addEventListener('click', function() {
+            var menu = getMenu();
+            if (menu && menu.classList.contains('is-open')) setOpen(false);
+        });
+    }
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;
         var menu = getMenu();
@@ -603,13 +617,18 @@
     }
     function closePalette() { var d = dlg(); if (d && d.open) d.close(); }
 
-    /* The nav search button and the mobile menu's search entry both dispatch
-       through actions.js, which resolves handlers via window[name]. */
-    window.openPalette = openPalette;
-    window.openPaletteFromMobile = function () {
-        if (window.toggleMobileMenu) window.toggleMobileMenu();
+    /* The bar's search button dispatches through actions.js, which resolves
+       handlers via window[name]. The button sits in .b-nav-actions, so it is
+       reachable at every width — including with the mobile menu open, hence
+       the close below. */
+    function openPaletteFromChrome() {
+        var menu = document.getElementById('mobile-menu');
+        if (menu && menu.classList.contains('is-open') && window.toggleMobileMenu) {
+            window.toggleMobileMenu();
+        }
         openPalette();
-    };
+    }
+    window.openPalette = openPaletteFromChrome;
 
     /* Mac reports Cmd, everyone else Ctrl — the markup ships the Ctrl label so
        the button is correct with JS disabled, and this corrects it on Mac. */
@@ -623,7 +642,7 @@
         if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
             e.preventDefault();
             var d = dlg();
-            if (d && d.open) closePalette(); else openPalette();
+            if (d && d.open) closePalette(); else openPaletteFromChrome();
         }
     });
 
