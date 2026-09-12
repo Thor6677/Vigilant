@@ -74,6 +74,7 @@
 }
 /* Inline-text affordances get a thin gold underline instead of a box */
 .b-link:focus-visible,
+.b-link-btn:focus-visible,
 .b-nav-link:focus-visible,
 .b-nav-dropdown-item:focus-visible,
 .b-tab-strip a:focus-visible,

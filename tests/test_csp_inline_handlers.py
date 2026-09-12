@@ -33,8 +33,6 @@ REMAINING = {
     "app/templates/character_detail.html": 1,
     "app/templates/compression.html": 1,
     "app/templates/corp_inventory.html": 1,
-    "app/templates/fitting_saved.html": 4,
-    "app/templates/fitting_tool.html": 5,
     "app/templates/fittings.html": 2,
     "app/templates/hauling.html": 3,
     "app/templates/industry.html": 2,
@@ -65,9 +63,7 @@ REMAINING = {
     "app/templates/planetary_chain.html": 1,
     "app/templates/planetary_lookup.html": 3,
     "app/templates/ship_mastery.html": 1,
-    "app/templates/skill_plan_detail.html": 4,
     "app/templates/skills.html": 1,
-    "app/templates/structure_timers.html": 5,
     "app/templates/tools_image_view.html": 2,
     "app/templates/wormhole_system.html": 2,
 }

@@ -154,7 +154,7 @@
                     <input type="text" id="ship-search" placeholder="Search ships..."
                            autocomplete="off"
                            style="width:100%;padding:0.35rem 0.5rem;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;"
-                           oninput="searchShip(this.value)">
+                           data-input="searchShip">
                     <div id="ship-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
                 </div>
                 <div id="ship-name" style="font-size:12px;font-weight:600;color:var(--text);margin-top:0.25rem;display:none;"></div>
@@ -188,7 +188,7 @@
                    placeholder="+ Add {{ slot_label | lower | replace(' slots','') | replace('s','') }}..."
                    autocomplete="off"
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
-                   oninput="searchModule(this.value, '{{ slot_key }}', this)">
+                   data-input="searchModule" data-slot="{{ slot_key }}">
             <div class="module-results" data-slot="{{ slot_key }}"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
         </div>
@@ -209,12 +209,12 @@
                    placeholder="+ Search implants by name..."
                    autocomplete="off"
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
-                   oninput="searchImplant(this.value)">
+                   data-input="searchImplant">
             <div id="implant-results"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
         </div>
         {# ISS-016: import the skill-character's currently-plugged implants #}
-        <button type="button" id="btn-clone-implants" onclick="loadCloneImplants()"
+        <button type="button" id="btn-clone-implants" data-click="loadCloneImplants"
                 style="margin-top:0.35rem;padding:0.25rem 0.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;"
                 title="Fetch the selected skill character's active clone implants from ESI">
             Load active clone
@@ -235,7 +235,7 @@
                    placeholder="+ Add drone..."
                    autocomplete="off"
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
-                   oninput="searchDrone(this.value, this)">
+                   data-input="searchDrone">
             <div class="module-results" data-slot="drone"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
         </div>
@@ -430,7 +430,8 @@ document.addEventListener('keydown', function(e) {
 
 /* ── Ship Search ──────────────────────────────────────────────────────────── */
 var shipSearchTimer = null;
-function searchShip(q) {
+function searchShip() {
+    var q = this.value;
     clearTimeout(shipSearchTimer);
     var resultsEl = document.getElementById('ship-results');
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
@@ -486,7 +487,10 @@ function fetchShipSlots(typeId) {
 
 /* ── Module Search ────────────────────────────────────────────────────────── */
 var moduleSearchTimers = {};
-function searchModule(q, slot, inputEl) {
+function searchModule() {
+    var q = this.value;
+    var slot = this.dataset.slot;
+    var inputEl = this;
     clearTimeout(moduleSearchTimers[slot]);
     var resultsEl = inputEl.parentElement.querySelector('.module-results');
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
@@ -505,7 +509,9 @@ function searchModule(q, slot, inputEl) {
     }, 200);
 }
 
-function searchDrone(q, inputEl) {
+function searchDrone() {
+    var q = this.value;
+    var inputEl = this;
     clearTimeout(moduleSearchTimers['drone']);
     var resultsEl = inputEl.parentElement.querySelector('.module-results');
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
@@ -741,7 +747,8 @@ function escapeHtml(s) {
 }
 
 var implantSearchTimer = null;
-function searchImplant(q) {
+function searchImplant() {
+    var q = this.value;
     clearTimeout(implantSearchTimer);
     var resultsEl = document.getElementById('implant-results');
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }

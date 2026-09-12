@@ -148,7 +148,7 @@
             <span style="color:var(--muted);text-transform:capitalize;">{{ e.subject_type }}</span>
             <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
             <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
-                <select name="permission" onchange="this.form.submit()"
+                <select name="permission" data-change="submitForm"
                         style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                     <option value="view"  {% if e.permission == 'view' %}selected{% endif %}>View</option>
                     <option value="edit"  {% if e.permission == 'edit' %}selected{% endif %}>Edit</option>
@@ -209,9 +209,9 @@
         <span style="font-size:9px;color:var(--muted);">Share link:</span>
         <input type="text" id="share-url" readonly
                value="{{ request.url.scheme }}://{{ request.url.netloc }}/skill-plans/shared/{{ plan.share_token }}"
-               onclick="this.select()"
+               data-click="selectAll"
                style="flex:1;min-width:200px;padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--accent);font-family:inherit;font-size:9px;">
-        <button class="b-btn" onclick="navigator.clipboard.writeText(document.getElementById('share-url').value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)"
+        <button class="b-btn" data-click="copyShareUrl"
                 style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Copy</button>
     </div>
 </div>
@@ -228,7 +228,7 @@
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.25rem;">
             <span class="b-label">Skills</span>
             <div style="display:flex;gap:0.5rem;font-size:9px;">
-                <a href="#" onclick="exportPlan(event)" style="color:var(--accent);text-decoration:none;">Export</a>
+                <button type="button" data-click="exportPlan" class="b-link-btn" style="color:var(--accent);">Export</button>
                 {% if can_edit and entries | length > 1 %}
                 <span style="color:var(--border);">|</span>
                 <span class="b-muted">Sort:</span>
@@ -542,10 +542,17 @@ function runGap() {
     htmx.ajax('GET', '/skill-plans/' + planId + '/gap/' + charId, '#gap-results');
 }
 
+/* Was an inline three-statement onclick on the Copy button. */
+function copyShareUrl() {
+    var btn = this;
+    navigator.clipboard.writeText(document.getElementById('share-url').value);
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+}
+
 /* ── Export ───────────────────────────────────────────────────────────────── */
-function exportPlan(e) {
-    e.preventDefault();
-    var link = e.target;
+function exportPlan() {
+    var link = this;
     var originalText = link.textContent;
     var area = document.getElementById('export-area');
 

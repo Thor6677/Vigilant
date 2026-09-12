@@ -48,19 +48,19 @@
             <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="system_name" id="system-search" placeholder="System" required autocomplete="off"
-                           oninput="searchField('systems', 'system')"
+                           data-input="searchField" data-endpoint="systems" data-field="system"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <div id="system-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="region_name" id="region-search" placeholder="Region (optional)" autocomplete="off"
-                           oninput="searchField('regions', 'region')"
+                           data-input="searchField" data-endpoint="regions" data-field="region"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <div id="region-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="owner_name" id="owner-search" placeholder="Owner (corp/alliance)" required autocomplete="off"
-                           oninput="searchField('owners', 'owner')"
+                           data-input="searchField" data-endpoint="owners" data-field="owner"
                            style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <div id="owner-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
@@ -172,14 +172,14 @@
             {# Add entry #}
             <div style="margin-top:0.35rem;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
                 <select id="acl-type-{{ group.id }}" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;"
-                        onchange="document.getElementById('acl-search-{{ group.id }}').value='';document.getElementById('acl-id-{{ group.id }}').value='';">
+                        data-change="clearACLSelection" data-group-id="{{ group.id }}">
                     <option value="corporation">Corporation</option>
                     <option value="alliance">Alliance</option>
                     <option value="character">Character</option>
                 </select>
                 <div style="flex:1;min-width:120px;position:relative;">
                     <input type="text" id="acl-search-{{ group.id }}" placeholder="Search…" autocomplete="off"
-                           oninput="searchACL({{ group.id }})"
+                           data-input="searchACL" data-group-id="{{ group.id }}"
                            style="width:100%;padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                     <div id="acl-results-{{ group.id }}" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
                 </div>
@@ -400,7 +400,9 @@ function toggleTimerMode() {
 
 /* Typeahead search for system, region, owner */
 var _searchTimers = {};
-function searchField(endpoint, field) {
+function searchField() {
+    var endpoint = this.dataset.endpoint;
+    var field = this.dataset.field;
     clearTimeout(_searchTimers[field]);
     var input = document.getElementById(field + '-search');
     var results = document.getElementById(field + '-results');
@@ -443,7 +445,17 @@ document.addEventListener('click', function(e) {
 
 /* ACL search and add */
 var _aclTimers = {};
-function searchACL(groupId) {
+/* Changing the ACL group's type clears whatever entry was picked, so a
+   stale id can't be submitted against the new type. Was two inline
+   getElementById assignments. */
+function clearACLSelection() {
+    var groupId = this.dataset.groupId;
+    document.getElementById('acl-search-' + groupId).value = '';
+    document.getElementById('acl-id-' + groupId).value = '';
+}
+
+function searchACL() {
+    var groupId = this.dataset.groupId;
     clearTimeout(_aclTimers[groupId]);
     var input = document.getElementById('acl-search-' + groupId);
     var results = document.getElementById('acl-results-' + groupId);
