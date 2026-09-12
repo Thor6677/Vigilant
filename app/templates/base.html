@@ -33,14 +33,20 @@
     <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
     {% set _path = request.url.path %}
     <div class="b-nav-links">
-        {# Desktop nav — rendered from the app.nav registry (single source). #}
+        {# Desktop nav — rendered from the app.nav registry (single source).
+           `account` groups (Admin) are skipped here: they render in the account
+           menu at the right end of the bar instead. The caret is its own
+           element, never a space + glyph inside the link text — a two-word
+           label can shrink below its own width, so it used to wrap out of the
+           46px bar and knock every dropdown group out of line with the plain
+           links (see .b-nav-link white-space in components.css). #}
         {% for group in nav_groups %}
-            {% if not group['admin'] or request.session.get('is_admin') %}
+            {% if not group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
                 {% if not group['items'] %}
         <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
                 {% else %}
         <span class="b-nav-dropdown">
-            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }} ▾</a>
+            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}<span class="b-nav-caret" aria-hidden="true">▾</span></a>
             <div class="b-nav-dropdown-menu">
                 {# Skip the item that duplicates the group's own destination
                    (Overview / Star Map / Console…) — the group label link
@@ -56,6 +62,15 @@
                 {% endif %}
             {% endif %}
         {% endfor %}
+        {# The Ctrl+K palette has been keyboard-only since it shipped; this is
+           its visible handle. openPalette is exposed on window by the palette
+           script at the bottom of this file. #}
+        <button type="button" class="b-nav-search" data-click="openPalette"
+                title="Search pages, characters, systems, items (Ctrl+K)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+            <kbd class="b-nav-kbd" data-cmdk-hint>Ctrl K</kbd>
+        </button>
         <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -121,10 +136,35 @@
                 </div>
             </div>
         </span>
-        <a href="/auth/add-character" class="b-nav-link is-add">+ Add Character</a>
-        <form method="post" action="/auth/logout" style="display:inline;margin:0;">
-            <button type="submit" class="b-nav-link is-danger" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;padding:0;">Logout</button>
-        </form>
+        {# Account menu — Add Character, every `account` nav group (Admin), and
+           Logout. Same hover/focus-within dropdown as the group menus, so it
+           needs no JS; is-right flips it to the bar's right edge. #}
+        <span class="b-nav-dropdown">
+            <button type="button" class="b-nav-link b-nav-account" aria-haspopup="true"
+                    title="Account">
+                {% if request.session.get('active_character_id') %}
+                <img class="b-nav-avatar" alt=""
+                     src="https://images.evetech.net/characters/{{ request.session.get('active_character_id') }}/portrait?size=64"
+                     data-on-error="hide">
+                {% endif %}
+                <span>Account</span><span class="b-nav-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="b-nav-dropdown-menu is-right">
+                <a href="/auth/add-character" class="b-nav-dropdown-item is-add">+ Add Character</a>
+                {% for group in nav_groups %}
+                    {% if group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
+                <div class="b-nav-menu-sep"></div>
+                        {% for item in group['items'] %}
+                <a href="{{ item['url'] }}" class="b-nav-dropdown-item {{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+                        {% endfor %}
+                    {% endif %}
+                {% endfor %}
+                <div class="b-nav-menu-sep"></div>
+                <form method="post" action="/auth/logout" style="margin:0;">
+                    <button type="submit" class="b-nav-dropdown-item is-danger">Logout</button>
+                </form>
+            </div>
+        </span>
     </div>
     <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
             aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
@@ -133,6 +173,10 @@
     </button>
 </nav>
 <div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
+    {# The bar's search button lives in .b-nav-links, which is display:none
+       below the nav breakpoint — without this the palette would be desktop
+       (and keyboard) only. #}
+    <button type="button" class="b-mobile-search" data-click="openPaletteFromMobile">Search…</button>
     {# Mobile menu — rendered from the app.nav registry (single source).
        Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
        link that stands in for the Overview item (so that item is skipped in the
@@ -241,8 +285,9 @@
 <footer class="b-footer">
     <span class="b-footer-brand"><img src="/static/logo.png" alt="" style="height:16px;width:auto;opacity:0.5;">Vigilant</span>
     <div class="b-footer-links">
-        {# Footer — one link per nav group, from the app.nav registry. #}
-        {% for group in nav_groups %}{% if not group['admin'] or request.session.get('is_admin') %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
+        {# Footer — one link per top-level nav group, from the app.nav registry.
+           `account` groups (Admin) are reachable from the account menu. #}
+        {% for group in nav_groups %}{% if not group['account'] and (not group['admin'] or request.session.get('is_admin')) %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
     </div>
     <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
 </footer>
@@ -557,6 +602,22 @@
         if (inp) setTimeout(function () { inp.focus(); }, 0);
     }
     function closePalette() { var d = dlg(); if (d && d.open) d.close(); }
+
+    /* The nav search button and the mobile menu's search entry both dispatch
+       through actions.js, which resolves handlers via window[name]. */
+    window.openPalette = openPalette;
+    window.openPaletteFromMobile = function () {
+        if (window.toggleMobileMenu) window.toggleMobileMenu();
+        openPalette();
+    };
+
+    /* Mac reports Cmd, everyone else Ctrl — the markup ships the Ctrl label so
+       the button is correct with JS disabled, and this corrects it on Mac. */
+    if (/Mac|iPhone|iPad|iPod/.test(navigator.platform || '')) {
+        document.querySelectorAll('[data-cmdk-hint]').forEach(function (el) {
+            el.textContent = '\u2318 K';
+        });
+    }
 
     document.addEventListener('keydown', function (e) {
         if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {

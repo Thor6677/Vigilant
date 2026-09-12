@@ -56,9 +56,10 @@ def _flatten_pages(is_admin: bool) -> list[dict]:
     """Flatten NAV_GROUPS into navigable page rows.
 
     Each row: {"label", "url", "group"}. Skips external links (zKillboard,
-    Wanderer) and admin-only entries unless `is_admin`. Plain-link groups
-    with no items (Corporations) contribute their own group row.
-    De-duplicated by url, preserving first-seen order.
+    Wanderer) and admin-only entries unless `is_admin`. A group with no
+    dropdown items contributes its own group row (the registry allows that
+    shape; no group currently uses it). De-duplicated by url, preserving
+    first-seen order.
     """
     pages: list[dict] = []
     seen: set[str] = set()

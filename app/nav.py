@@ -26,7 +26,16 @@ Data shape (plain dicts, no classes):
            "admin", "external", "divider_before",
            "in_dropdown", "in_landing"}         # flags, sensible defaults
   group = {"label", "url", "match": [...extra group-level rules...],
-           "items": [...], "admin", "landing"}
+           "items": [...], "admin", "landing",
+           "account"}                            # render in the account menu,
+                                                 # not the top-level bar
+
+`account` groups (currently just Admin) are deliberately kept out of the
+top-level bar and the footer: they render inside the account menu at the right
+end of the nav instead. The bar is a fixed-width surface and every group in it
+costs horizontal room, so anything that is not a primary destination belongs in
+the account menu. The mobile menu still lists them inline — it is a scrolling
+list with no width budget.
 
 Active-state is data, not template logic: an item is active iff any of its
 `match` rules matches the current path AND none of its `exclude` prefixes match;
@@ -81,24 +90,20 @@ NAV_GROUPS = [
         "match": [("prefix", "/character/")],
         "admin": False,
         "landing": False,
+        "account": False,
         "items": [
             _item("Overview", "/dashboard", [("exact", "/dashboard")],
                   in_landing=False),
             _item("Characters", "/characters", [("prefix", "/characters")],
                   in_landing=False),
+            # Corporations used to be its own top-level group. It is a
+            # "my stuff" destination like Characters, so it lives here
+            # instead of spending a slot in the bar.
+            _item("Corporations", "/corporations",
+                  [("prefix", "/corporations")], in_landing=False),
             _item("Skill Plans", "/skill-plans", [("prefix", "/skill-plans")],
                   in_landing=False),
         ],
-    },
-
-    # ── Corporations (plain link) ──────────────────────────────────────────
-    {
-        "label": "Corporations",
-        "url": "/corporations",
-        "match": [("prefix", "/corporations")],
-        "admin": False,
-        "landing": False,
-        "items": [],
     },
 
     # ── Industry ───────────────────────────────────────────────────────────
@@ -108,6 +113,7 @@ NAV_GROUPS = [
         "match": [],
         "admin": False,
         "landing": True,
+        "account": False,
         "items": [
             _item("Overview", "/industry", [("exact", "/industry")],
                   in_landing=False),
@@ -211,6 +217,7 @@ NAV_GROUPS = [
         "match": [],
         "admin": False,
         "landing": False,
+        "account": False,
         "items": [
             _item(
                 "Prices", "/market",
@@ -274,10 +281,13 @@ NAV_GROUPS = [
         "label": "Intel",
         "url": "/intel",
         # Group also lights up on pages no single item owns: shared scan views
-        # (/intel/<scan_id>) and entity combat-stats pages (/intel/entity/...).
-        "match": [("prefix", "/intel/")],
+        # (/intel/<scan_id>), entity combat-stats pages (/intel/entity/...),
+        # and — since the Map group folded in here — alliance detail pages
+        # (/alliance/<id>, linked from Trending).
+        "match": [("prefix", "/intel/"), ("prefix", "/alliance/")],
         "admin": False,
         "landing": True,
+        "account": False,
         "items": [
             _item("Overview", "/intel", [("exact", "/intel")],
                   in_landing=False),
@@ -350,6 +360,40 @@ NAV_GROUPS = [
                     "Structure-age paste box and live kill feed",
                 ],
             ),
+            # Live maps — formerly their own top-level "Map" group, folded in
+            # here: a star map and a trending-activity map are intel surfaces,
+            # and three of the four items were already wormhole-adjacent.
+            _item(
+                "Star Map", "/map", [("exact", "/map")],
+                divider_before=True,
+                desc="Interactive map of New Eden — jump in on any region or constellation and read current activity, security bands, and routes at a glance.",
+                features=[
+                    "Region / constellation / system drill-down",
+                    "Security-band shading",
+                    "Live activity overlay",
+                ],
+            ),
+            _item(
+                "Wormhole Map", "/map/wormholes",
+                [("exact", "/map/wormholes")],
+                desc="J-space counterpart to the star map — every wormhole system plotted by class and effect, with statics and recent activity.",
+                features=[
+                    "Plotted by class C1-C6, shattered, and Drifter",
+                    "Effect and static filters",
+                    "Jumps through to per-system reference",
+                ],
+            ),
+            _item(
+                "Trending", "/trending", [("prefix", "/trending")],
+                desc="Who is fighting where, right now — the corporations, alliances, and systems with the sharpest activity spikes in the recent kill record.",
+                features=[
+                    "Trending entities and systems",
+                    "Activity deltas against the trailing window",
+                    "Drill-through to alliance and entity detail pages",
+                ],
+            ),
+            _item("Wanderer", _WANDERER_URL,
+                  external=True, in_landing=False),
             # Wormhole reference — recon you do before a scan or a fight.
             # Nav home and landing cards both live here (no landing_group).
             _item(
@@ -386,27 +430,6 @@ NAV_GROUPS = [
         ],
     },
 
-    # ── Map (live maps only; parent url is the map itself, no landing page) ─
-    {
-        "label": "Map",
-        "url": "/map",
-        # Alliance detail pages (/alliance/<id>, linked from Trending) have no
-        # owning item; light the group there like Dashboard does /character/.
-        "match": [("prefix", "/alliance/")],
-        "admin": False,
-        "landing": False,
-        "items": [
-            _item("Star Map", "/map", [("exact", "/map")],
-                  in_landing=False),
-            _item("Wormhole Map", "/map/wormholes",
-                  [("exact", "/map/wormholes")], in_landing=False),
-            _item("Trending", "/trending", [("prefix", "/trending")],
-                  in_landing=False),
-            _item("Wanderer", _WANDERER_URL,
-                  external=True, in_landing=False),
-        ],
-    },
-
     # ── Tools ──────────────────────────────────────────────────────────────
     {
         "label": "Tools",
@@ -414,6 +437,7 @@ NAV_GROUPS = [
         "match": [],
         "admin": False,
         "landing": True,
+        "account": False,
         "items": [
             _item("Overview", "/tools", [("exact", "/tools")],
                   in_landing=False),
@@ -515,6 +539,7 @@ NAV_GROUPS = [
         "match": [],
         "admin": True,
         "landing": False,
+        "account": True,
         "items": [
             _item("Console", "/admin", [("prefix", "/admin")],
                   admin=True, in_landing=False),

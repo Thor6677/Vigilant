@@ -13,20 +13,53 @@ importing it is the most faithful source of "what paths actually exist".
 """
 
 import os
+import re
+import types
 
-from jinja2 import Environment
+from jinja2 import Environment, FileSystemLoader
 
 import app.main as main
 from app.nav import NAV_GROUPS, item_active, group_active
 
-_BASE_HTML = os.path.join(
-    os.path.dirname(__file__), "..", "app", "templates", "base.html"
+_TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
+_BASE_HTML = os.path.join(_TEMPLATES, "base.html")
+_COMPONENTS_CSS = os.path.join(
+    os.path.dirname(__file__), "..", "design-system", "css", "components.css"
 )
 
 
 def _base_html_source():
     with open(_BASE_HTML, encoding="utf-8") as fh:
         return fh.read()
+
+
+def _render_base(is_admin=True, path="/dashboard"):
+    """Render base.html's chrome with the real registry globals.
+
+    Cheaper and more direct than a TestClient round-trip, and it asserts on
+    what the browser actually receives rather than on template source.
+    """
+    env = Environment(loader=FileSystemLoader(_TEMPLATES))
+    env.globals.update(nav_groups=NAV_GROUPS, nav_item_active=item_active,
+                       nav_group_active=group_active)
+    request = types.SimpleNamespace(
+        url=types.SimpleNamespace(path=path),
+        state=types.SimpleNamespace(csp_nonce="test-nonce"),
+        session={"user_id": 1, "is_admin": is_admin,
+                 "active_character_id": 90000001, "csrf_token": "t"},
+    )
+    return env.get_template("base.html").render(request=request, css_v="1")
+
+
+def _bar_group_labels(html):
+    """Labels of the top-level groups rendered in the desktop bar.
+
+    Group triggers are the only links that carry a caret element directly
+    after their label text; the account menu's own trigger wraps its label in
+    a span, so it is excluded by construction.
+    """
+    return re.findall(r'class="b-nav-link[^"]*"[^>]*>([A-Za-z ]+)'
+                      r'<span class="b-nav-caret"', html)
 
 
 # ── helpers to walk the registry ───────────────────────────────────────────
@@ -172,12 +205,33 @@ def test_intel_group_catchall_covers_shared_and_entity_pages():
     assert group_active(intel, "/industry") is False
 
 
-def test_map_group_catchall_covers_alliance_pages():
-    # /alliance/<id> detail pages are linked from Trending (a Map item).
-    map_grp = _group("Map")
-    assert group_active(map_grp, "/alliance/99000001") is True
-    assert group_active(map_grp, "/map") is True
-    assert group_active(map_grp, "/intel") is False
+def test_map_items_folded_into_intel_group():
+    """The Map group merged into Intel: a star map and a trending-activity
+    map are intel surfaces, and the group was costing a slot in a bar that
+    had run out of room."""
+    assert not any(g["label"] == "Map" for g in NAV_GROUPS)
+    intel = _group("Intel")
+    labels = [i["label"] for i in intel["items"]]
+    for expected in ("Star Map", "Wormhole Map", "Trending"):
+        assert expected in labels
+    assert group_active(intel, "/map") is True
+    assert group_active(intel, "/map/wormholes") is True
+    assert group_active(intel, "/trending") is True
+    # /alliance/<id> detail pages are linked from Trending and have no owning
+    # item; the group-level catch-all came across with the items.
+    assert group_active(intel, "/alliance/99000001") is True
+    assert group_active(intel, "/industry") is False
+
+
+def test_star_map_starts_a_divided_block_in_the_intel_menu():
+    """Intel's dropdown is long enough to need visual grouping: live intel
+    tools, then the maps, then the wormhole reference."""
+    intel = _group("Intel")
+    assert _find("Star Map")["divider_before"] is True
+    assert _find("Wormhole Systems")["divider_before"] is True
+    labels = [i["label"] for i in intel["items"]]
+    assert labels.index("Star Map") > labels.index("WH Tracker")
+    assert labels.index("Star Map") < labels.index("Wormhole Systems")
 
 
 def test_skill_plans_lives_in_dashboard_group():
@@ -205,12 +259,39 @@ def test_market_group_shape():
     assert item_active(prices, "/market/pnl") is False
 
 
-def test_plain_link_group_has_no_items_but_matches_by_group_rule():
-    corps = _group("Corporations")
-    assert corps["items"] == []
-    assert group_active(corps, "/corporations") is True
-    assert group_active(corps, "/corporations/98000001") is True
-    assert group_active(corps, "/intel") is False
+def test_corporations_lives_in_dashboard_group():
+    """Corporations used to be its own top-level group (the only one with no
+    dropdown). It is a "my stuff" destination like Characters, so it moved
+    into Dashboard rather than spending a slot in the bar."""
+    dash = _group("Dashboard")
+    assert "Corporations" in [i["label"] for i in dash["items"]]
+    assert not any(g["label"] == "Corporations" for g in NAV_GROUPS)
+    assert group_active(dash, "/corporations") is True
+    assert group_active(dash, "/corporations/98000001") is True
+    assert group_active(dash, "/intel") is False
+
+
+def test_every_group_declares_account_placement():
+    """`account` decides whether a group renders in the top-level bar or in
+    the account menu. base.html reads it on every group, so every group must
+    declare it."""
+    missing = [g["label"] for g in NAV_GROUPS if "account" not in g]
+    assert not missing, f"Groups missing the 'account' key: {missing}"
+
+
+def test_admin_is_the_only_account_group():
+    """The bar holds primary destinations only; Admin is reachable from the
+    account menu at the right end of the nav."""
+    account = [g["label"] for g in NAV_GROUPS if g["account"]]
+    assert account == ["Admin"]
+
+
+def test_top_level_bar_is_five_groups():
+    """The bar is a fixed-width surface — every group in it costs horizontal
+    room, and the hamburger breakpoint in site.css is measured against this
+    count. Adding a sixth group means re-measuring that breakpoint."""
+    bar = [g["label"] for g in NAV_GROUPS if not g["account"]]
+    assert bar == ["Dashboard", "Industry", "Market", "Intel", "Tools"]
 
 
 def test_admin_group_and_items_flagged_admin():
@@ -268,6 +349,81 @@ def test_desktop_dropdown_suppresses_group_url_duplicate():
     own url (Overview / Star Map / Console…) — otherwise the group label link
     and the first dropdown row are two visible links to the same page."""
     assert "item['url'] != group['url']" in _base_html_source()
+
+
+def test_desktop_bar_renders_only_non_account_groups():
+    """Rendered for an admin — the bar must still be the five primary groups;
+    Admin belongs to the account menu."""
+    labels = _bar_group_labels(_render_base(is_admin=True))
+    assert labels == ["Dashboard", "Industry", "Market", "Intel", "Tools"]
+    assert _bar_group_labels(_render_base(is_admin=False)) == labels
+
+
+def _account_menu(html):
+    """The account dropdown's menu, up to the close of its .b-nav-dropdown."""
+    return html.split('class="b-nav-dropdown-menu is-right"')[1].split("</span>")[0]
+
+
+def test_account_menu_carries_admin_add_character_and_logout():
+    menu = _account_menu(_render_base(is_admin=True))
+    assert 'href="/auth/add-character"' in menu
+    assert 'href="/admin"' in menu       # Admin group's Console item
+    assert 'href="/status"' in menu      # Admin group's Status item
+    assert 'action="/auth/logout"' in menu
+
+
+def test_account_menu_hides_admin_items_from_non_admins():
+    html = _render_base(is_admin=False)
+    assert 'href="/auth/add-character"' in html    # everyone gets this
+    # Neither the account menu nor the mobile menu may leak the console.
+    # (Matched as hrefs: /status/banner is an unrelated hx-get in the chrome.)
+    assert 'href="/admin"' not in html
+    assert 'href="/status"' not in html
+
+
+def test_footer_omits_account_groups():
+    footer = _render_base(is_admin=True).split("<footer")[1].split("</footer>")[0]
+    assert ">Dashboard<" in footer
+    assert ">Admin<" not in footer
+
+
+def test_mobile_menu_still_lists_account_groups():
+    """The account menu lives in .b-nav-links, which is display:none below the
+    nav breakpoint — so the mobile menu must keep listing Admin inline or an
+    admin on a phone loses the console entirely."""
+    html = _render_base(is_admin=True)
+    mobile = html.split('id="mobile-menu"')[1].split("<div id=\"esi-banner\"")[0]
+    assert "/admin" in mobile
+    assert "/auth/logout" in mobile
+
+
+def test_palette_has_a_visible_handle_on_both_surfaces():
+    """Ctrl+K shipped without any visible affordance; the bar button and the
+    mobile menu entry are it. Both dispatch through actions.js."""
+    html = _render_base()
+    assert 'class="b-nav-search"' in html
+    assert 'data-click="openPalette"' in html
+    assert 'data-click="openPaletteFromMobile"' in html
+    assert "window.openPalette = openPalette;" in html
+
+
+def test_nav_caret_is_its_own_element_not_part_of_the_label():
+    """A label + space + caret is shrinkable, so it wrapped out of the 46px
+    bar once the row was over-full — which is what knocked the dropdown groups
+    out of line with the plain links."""
+    source = _base_html_source()
+    assert '<span class="b-nav-caret"' in source
+    assert " \u25be" not in source, "caret is back inside the link text"
+
+
+def test_nav_links_cannot_wrap_or_shrink():
+    """The other half of that fix: without these the row deforms instead of
+    staying on one line (see the nav breakpoint comment in site.css)."""
+    with open(_COMPONENTS_CSS, encoding="utf-8") as fh:
+        css = fh.read()
+    block = css.split(".b-nav-link {")[1].split("}")[0]
+    assert "white-space: nowrap" in block
+    assert "flex-shrink: 0" in block
 
 
 def test_base_html_is_valid_jinja():

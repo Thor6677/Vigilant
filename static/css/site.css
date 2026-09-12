@@ -137,19 +137,44 @@
     border-top: 1px solid var(--border);
     margin: 0.25rem 1.5rem;
 }
+/* Search handle at the top of the mobile menu — opens the same Ctrl+K
+   palette the desktop bar's search button does. */
+.b-mobile-search {
+    display: block;
+    width: calc(100% - 3rem);
+    margin: 0.25rem 1.5rem 0.5rem;
+    padding: 0.7rem 0.75rem;
+    text-align: left;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.b-mobile-search:hover { color: var(--text); border-color: var(--accent); }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1000px) {
     .b-grid-3 { grid-template-columns: repeat(2, 1fr); }
 }
-/* Nav-only breakpoint, deliberately separate from the general 768px tablet
-   block below: with 8 top-level groups (see app/nav.py) plus the notif
-   bell / Add Character / Logout links, .b-nav-links (display:flex, no
-   flex-wrap) starts overflowing the sticky nav well above 768px — the
-   hamburger needs to take over earlier than the rest of the tablet layout
-   does. Measured against the current registry; bump this if groups are
-   added. */
-@media (max-width: 1120px) {
+/* Nav-only breakpoint. It happens to coincide with the grid block above —
+   that is a coincidence of the current measurement, not a shared rule, so
+   keep the two separate. Deliberately separate from the general 768px tablet
+   block below, too: .b-nav-links is a non-wrapping flex row in a fixed-height bar,
+   so the hamburger has to take over well above 768px — as soon as the row no
+   longer fits beside the logo.
+   The number is measured, not guessed: logo + the 5 top-level groups (see
+   app/nav.py) + search + bell + account menu render at 947px, so the row is
+   swapped out below 1000px, leaving ~50px of slack at the boundary. The old
+   1120px was tuned for a bar that actually needed ~1270px (8 groups plus
+   loose Add Character / Logout links), which is why labels used to wrap out
+   of the bar between the two figures. Re-measure and bump this if the bar
+   grows: it must stay above the rendered width of .b-nav-links + .b-nav-logo
+   + the nav's 2rem side padding. */
+@media (max-width: 1000px) {
     .b-nav-links { display: none; }
     .b-hamburger { display: flex; }
 }
