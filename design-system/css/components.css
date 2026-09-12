@@ -111,11 +111,21 @@ body {
     box-shadow: var(--shadow-2), var(--glow-accent-soft);
     transform-origin: top;
 }
+/* Three ways in: pointer, keyboard (Tab lands on the trigger), and an
+   explicit click/tap on a trigger that has nowhere to navigate — the account
+   button. `is-open` is set by the nav script, which also mirrors the real
+   open state into aria-expanded; hover and focus-within stay pure CSS so the
+   menus still work with no JS at all. */
 .b-nav-dropdown:hover .b-nav-dropdown-menu,
-.b-nav-dropdown:focus-within .b-nav-dropdown-menu {
+.b-nav-dropdown:focus-within .b-nav-dropdown-menu,
+.b-nav-dropdown.is-open .b-nav-dropdown-menu {
     display: block;
     animation: vg-menu-in var(--dur-menu) var(--ease-pop);
 }
+/* Escape sets this: the menu must stay shut while its trigger still holds
+   focus, which :focus-within above would otherwise reopen. Same specificity
+   as those rules, so it wins on source order — keep it below them. */
+.b-nav-dropdown.is-dismissed .b-nav-dropdown-menu { display: none; }
 .b-nav-dropdown-menu::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
     background: linear-gradient(90deg, transparent, var(--accent), transparent);

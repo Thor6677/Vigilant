@@ -45,9 +45,11 @@
                 {% if not group['items'] %}
         <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
                 {% else %}
+        {% set _menu_id = 'nav-menu-' ~ group['label']|lower|replace(' ', '-') %}
         <span class="b-nav-dropdown">
-            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}<span class="b-nav-caret" aria-hidden="true">▾</span></a>
-            <div class="b-nav-dropdown-menu">
+            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}"
+               aria-haspopup="true" aria-expanded="false" aria-controls="{{ _menu_id }}">{{ group['label'] }}<span class="b-nav-caret" aria-hidden="true">▾</span></a>
+            <div class="b-nav-dropdown-menu" id="{{ _menu_id }}">
                 {# Skip the item that duplicates the group's own destination
                    (Overview / Star Map / Console…) — the group label link
                    above already goes there. Mirrors the mobile suppression. #}
@@ -148,7 +150,7 @@
            needs no JS; is-right flips it to the bar's right edge. #}
         <span class="b-nav-dropdown">
             <button type="button" class="b-nav-link b-nav-account" aria-haspopup="true"
-                    title="Account">
+                    aria-expanded="false" aria-controls="nav-menu-account" title="Account">
                 {% if request.session.get('active_character_id') %}
                 <img class="b-nav-avatar" alt=""
                      src="https://images.evetech.net/characters/{{ request.session.get('active_character_id') }}/portrait?size=64"
@@ -156,7 +158,7 @@
                 {% endif %}
                 <span>Account</span><span class="b-nav-caret" aria-hidden="true">▾</span>
             </button>
-            <div class="b-nav-dropdown-menu is-right">
+            <div class="b-nav-dropdown-menu is-right" id="nav-menu-account">
                 <a href="/auth/add-character" class="b-nav-dropdown-item is-add">+ Add Character</a>
                 {% for group in nav_groups %}
                     {% if group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
@@ -431,6 +433,103 @@
     });
     /* Also run on initial page load after htmx processes */
     document.addEventListener('htmx:load', function() { applyDismissState(); });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
+/* Nav dropdown state. The menus open on :hover and :focus-within in pure CSS
+   (so they work with JS off); this adds the parts CSS cannot do:
+
+     * aria-expanded that reflects the real state, for screen readers,
+     * click/tap toggling for the account trigger — the one trigger that is a
+       button rather than a link to a section, so a click had no effect and a
+       second click could not close it,
+     * Escape to close, and an outside click to close a clicked-open menu.
+
+   Escape is the awkward one: the accessible behaviour is to close the menu
+   and leave focus on its trigger, but focus on the trigger is exactly what
+   :focus-within opens on. Hence `is-dismissed`, which overrides the open
+   rules until focus or the pointer actually leaves. */
+(function() {
+    var dropdowns = Array.prototype.slice.call(
+        document.querySelectorAll('.b-nav-dropdown'));
+    if (!dropdowns.length) return;
+
+    function trigger(dd) { return dd.querySelector('.b-nav-link'); }
+
+    function isOpen(dd) {
+        if (dd.classList.contains('is-dismissed')) return false;
+        return dd.classList.contains('is-open')
+            || dd.contains(document.activeElement)
+            || (dd.matches && dd.matches(':hover'));
+    }
+
+    function sync(dd) {
+        var btn = trigger(dd);
+        if (btn) btn.setAttribute('aria-expanded', isOpen(dd) ? 'true' : 'false');
+    }
+
+    function reset(dd, except) {
+        if (dd !== except) dd.classList.remove('is-open');
+        sync(dd);
+    }
+    function closeAll(except) {
+        dropdowns.forEach(function(dd) { reset(dd, except); });
+    }
+
+    dropdowns.forEach(function(dd) {
+        /* A deliberate new hover, or focus arriving from elsewhere, clears a
+           dismissal — so a dismissed menu is never stuck shut. Note this is
+           mouseENTER, not mouseleave: after a click-to-close the pointer is
+           still sitting on the trigger, and clearing on the way out would let
+           :focus-within pop the menu back open with the pointer gone. */
+        ['mouseenter', 'focusin'].forEach(function(evt) {
+            dd.addEventListener(evt, function() {
+                dd.classList.remove('is-dismissed');
+                sync(dd);
+            });
+        });
+        dd.addEventListener('mouseleave', function() { sync(dd); });
+        /* Focus leaving the dropdown entirely ends the dismissal with it. */
+        dd.addEventListener('focusout', function() {
+            dd.classList.remove('is-dismissed');
+            sync(dd);
+        });
+        var btn = trigger(dd);
+        /* Links navigate on click; only a trigger with nowhere to go toggles. */
+        if (btn && btn.tagName === 'BUTTON') {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var willOpen = !dd.classList.contains('is-open');
+                closeAll(dd);
+                dd.classList.toggle('is-open', willOpen);
+                /* Closing leaves focus on the trigger, which :focus-within
+                   would read as open — same reason Escape needs this. */
+                dd.classList.toggle('is-dismissed', !willOpen);
+                sync(dd);
+            });
+        }
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        var focused = document.activeElement;
+        var owner = focused && focused.closest
+            ? focused.closest('.b-nav-dropdown') : null;
+        closeAll(null);
+        if (owner) {
+            owner.classList.add('is-dismissed');
+            var btn = trigger(owner);
+            if (btn) btn.focus();   /* focusout above would clear the dismissal,
+                                       but focus stays inside, so it holds */
+            sync(owner);
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        var inside = e.target.closest ? e.target.closest('.b-nav-dropdown') : null;
+        if (!inside) closeAll(null);
+    });
 })();
 </script>
 <script nonce="{{ request.state.csp_nonce }}">

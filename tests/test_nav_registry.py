@@ -440,6 +440,85 @@ def test_bell_is_class_styled_so_the_breakpoint_can_size_it():
     assert "style=" not in bell
 
 
+# ── the bar must keep fitting the breakpoint it claims ──────────────────────
+#
+# Constants measured in Chromium against the rendered chrome (the procedure is
+# in test_nav_bar_fits_its_breakpoint). Re-measure if the bar's fixed parts
+# change; the test below fails loudly if the action cluster grows, which is the
+# change most likely to invalidate them.
+_MONO_ADVANCE = 0.6        # JetBrains Mono glyph advance, in em
+_CARET_PX = 13.0           # .b-nav-caret: margin-left + glyph + letter-spacing
+_FIXED_CHROME_PX = 469.5   # logo (93.5) + action cluster (312) + 2rem padding
+_ACTION_CLUSTER = ("b-nav-search", "b-nav-bell", "b-nav-dropdown", "b-hamburger")
+
+
+def _css_px(css, selector, prop):
+    """First `prop` value inside `selector`'s block, in px (rem → px at 16)."""
+    block = css.split(selector + " {")[1].split("}")[0]
+    match = re.search(prop + r":\s*([0-9.]+)(px|rem)", block)
+    assert match, f"{prop} not found in {selector}"
+    value = float(match.group(1))
+    return value * 16 if match.group(2) == "rem" else value
+
+
+def _nav_breakpoint_px(css):
+    blocks = re.findall(r"@media \(max-width: (\d+)px\) \{(.*?)\n\}", css, re.S)
+    nav = [int(px) for px, body in blocks if ".b-nav-links" in body]
+    assert len(nav) == 1, "expected exactly one nav breakpoint block"
+    return nav[0]
+
+
+def test_nav_bar_fits_its_breakpoint():
+    """The bar must still fit above the width at which it hands over to the
+    hamburger. Nothing enforced this before: the breakpoint was set for a
+    bar that later grew two groups past it, and the row silently wrapped its
+    links out of the 46px bar at every width in between.
+
+    The estimate is browser-free so it runs in CI. The label term tracks the
+    CSS (font-size and letter-spacing are read from components.css; the font
+    is monospace, so a label's width is just its character count); the caret
+    and fixed-chrome terms are measured constants. To re-measure: render the
+    nav, then sum .b-nav-logo + .b-nav-actions + the nav's horizontal padding
+    for the fixed term, and fit `width = c * len(label) + k` across two group
+    triggers for the label terms.
+    """
+    with open(_COMPONENTS_CSS, encoding="utf-8") as fh:
+        components = fh.read()
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        site = fh.read()
+
+    font_px = _css_px(components, ".b-nav-link", "font-size")
+    tokens_ls = 0.18          # --ls-wider, the .b-nav-link letter-spacing
+    per_char = font_px * (_MONO_ADVANCE + tokens_ls)
+    gap_px = _css_px(components, ".b-nav-links", "gap")
+
+    labels = [g["label"] for g in NAV_GROUPS if not g["account"]]
+    row = sum(per_char * len(label) + _CARET_PX for label in labels)
+    row += gap_px * (len(labels) - 1)
+    needed = _FIXED_CHROME_PX + row
+
+    breakpoint_px = _nav_breakpoint_px(site)
+    assert needed <= breakpoint_px - 40, (
+        f"the nav bar needs ~{needed:.0f}px but hands over to the hamburger "
+        f"at {breakpoint_px}px — the row will deform in between. Either trim "
+        f"the bar or raise the breakpoint (and re-measure, see this test)."
+    )
+
+
+def test_action_cluster_composition_is_pinned():
+    """_FIXED_CHROME_PX above is measured against exactly these four children.
+    Adding a fifth invalidates it, so fail here rather than let the fit test
+    pass on a stale constant."""
+    cluster = _render_base().split('class="b-nav-actions"')[1].split("</nav>")[0]
+    for name in _ACTION_CLUSTER:
+        assert name in cluster
+    # Direct children of the cluster, by their opening tag's class/id.
+    assert cluster.count('data-click="openPalette"') == 1
+    assert cluster.count('id="notif-btn"') == 1
+    assert cluster.count('class="b-hamburger"') == 1
+    assert cluster.count('b-nav-account') == 1
+
+
 def test_nav_breakpoint_hides_only_the_group_row():
     """The breakpoint block must not take the action cluster down with it."""
     with open(_SITE_CSS, encoding="utf-8") as fh:
@@ -475,6 +554,51 @@ def test_nav_links_cannot_wrap_or_shrink():
     block = css.split(".b-nav-link {")[1].split("}")[0]
     assert "white-space: nowrap" in block
     assert "flex-shrink: 0" in block
+
+
+# ── dropdown accessibility ──────────────────────────────────────────────────
+
+def test_every_dropdown_trigger_is_a_labelled_disclosure():
+    """Each trigger must advertise its menu and its state. The menus opened on
+    hover/focus with nothing announcing them before."""
+    html = _render_base(is_admin=True)
+    # The hamburger is a disclosure too, but for the mobile panel rather than
+    # a menu — scope this to the popup triggers.
+    triggers = re.findall(r'<(?:a|button)\b[^>]*aria-haspopup="true"[^>]*>', html)
+    assert len(triggers) == 6, f"expected 5 groups + account, got {len(triggers)}"
+    menu_ids = []
+    for tag in triggers:
+        # Every trigger ships closed; the nav script keeps it honest from there.
+        assert 'aria-expanded="false"' in tag, tag
+        match = re.search(r'aria-controls="([^"]+)"', tag)
+        assert match, f"trigger with no aria-controls: {tag}"
+        menu_id = match.group(1)
+        assert f'id="{menu_id}"' in html, f"aria-controls={menu_id} has no menu"
+        menu_ids.append(menu_id)
+    assert len(set(menu_ids)) == len(menu_ids), f"duplicate menu ids: {menu_ids}"
+
+
+def test_escape_dismissal_rule_follows_the_open_rules():
+    """`.is-dismissed` and `:focus-within` have equal specificity, so the
+    dismissal only wins on source order. If someone moves it above the open
+    rules, Escape silently stops closing keyboard-opened menus."""
+    with open(_COMPONENTS_CSS, encoding="utf-8") as fh:
+        css = fh.read()
+    open_rule = css.index(".b-nav-dropdown:focus-within .b-nav-dropdown-menu")
+    dismissed = css.index(".b-nav-dropdown.is-dismissed .b-nav-dropdown-menu")
+    assert dismissed > open_rule, (
+        "the is-dismissed rule must come after the hover/focus-within rules"
+    )
+
+
+def test_nav_script_handles_escape_and_click_toggling():
+    """The behaviours CSS cannot provide, pinned so they are not dropped in a
+    refactor: Escape, click toggling for the account trigger, and the
+    aria-expanded mirror."""
+    html = _render_base()
+    for marker in ("is-dismissed", "aria-expanded", "'Escape'",
+                   "btn.tagName === 'BUTTON'"):
+        assert marker in html, marker
 
 
 def test_base_html_is_valid_jinja():
