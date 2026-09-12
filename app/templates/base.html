@@ -456,6 +456,25 @@
 
     function trigger(dd) { return dd.querySelector('.b-nav-link'); }
 
+    /* Which pointer is driving. A group trigger is a link to its section, so
+       on a touch screen a tap navigates and its menu can never be seen —
+       there is no hover to open it with, and at these widths the hamburger
+       has not taken over. Touch therefore gets tap-to-open / tap-again-to-
+       follow, while a mouse click keeps navigating on the first click.
+       `click` carries pointerType in Chromium and WebKit but not in Firefox,
+       hence the pointerdown fallback, and the media query behind that for
+       anything reporting neither. */
+    var lastPointerType = '';
+    document.addEventListener('pointerdown', function(e) {
+        lastPointerType = e.pointerType || '';
+    }, true);
+
+    function isTouch(e) {
+        var kind = e.pointerType || lastPointerType;
+        if (kind) return kind === 'touch' || kind === 'pen';
+        return !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+    }
+
     function isOpen(dd) {
         if (dd.classList.contains('is-dismissed')) return false;
         return dd.classList.contains('is-open')
@@ -495,7 +514,21 @@
             sync(dd);
         });
         var btn = trigger(dd);
-        /* Links navigate on click; only a trigger with nowhere to go toggles. */
+        /* A link trigger navigates on a mouse click, exactly as before. Under
+           touch the first tap opens its menu instead; the second tap, with
+           the menu already open, follows the link. */
+        if (btn && btn.tagName === 'A') {
+            btn.addEventListener('click', function(e) {
+                if (!isTouch(e)) return;
+                if (dd.classList.contains('is-open')) return;
+                e.preventDefault();
+                closeAll(dd);
+                dd.classList.remove('is-dismissed');
+                dd.classList.add('is-open');
+                sync(dd);
+            });
+        }
+        /* Only a trigger with nowhere to go toggles on every click. */
         if (btn && btn.tagName === 'BUTTON') {
             btn.addEventListener('click', function(e) {
                 e.preventDefault();

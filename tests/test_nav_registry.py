@@ -591,6 +591,30 @@ def test_escape_dismissal_rule_follows_the_open_rules():
     )
 
 
+def test_group_triggers_stay_links():
+    """Tap-to-open must not turn the group triggers into buttons: they are
+    links to their section, which is what makes middle-click, open-in-new-tab
+    and a plain mouse click work."""
+    html = _render_base()
+    row = _nav_links_row(html)
+    bar_groups = [g for g in NAV_GROUPS if not g["account"]]
+    # One trigger per bar group. (The row also holds each menu's item links,
+    # so match the trigger class rather than counting anchors.)
+    assert row.count('class="b-nav-link ') == len(bar_groups)
+    assert "<button" not in row
+
+
+def test_nav_script_opens_menus_on_a_first_tap():
+    """A group trigger is a link, so on a touch screen a tap navigates and its
+    menu can never be seen — there is no hover, and at these widths the
+    hamburger has not taken over. Touch gets tap-to-open / tap-again-to-follow;
+    a mouse click must still navigate immediately."""
+    html = _render_base()
+    for marker in ("pointerType", "lastPointerType", "(hover: none)",
+                   "btn.tagName === 'A'", "if (!isTouch(e)) return;"):
+        assert marker in html, marker
+
+
 def test_nav_script_handles_escape_and_click_toggling():
     """The behaviours CSS cannot provide, pinned so they are not dropped in a
     refactor: Escape, click toggling for the account trigger, and the
