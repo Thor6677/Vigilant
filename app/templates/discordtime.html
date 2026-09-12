@@ -97,9 +97,9 @@
 
             {# Mode tabs #}
             <div class="dt-tabs">
-                <button class="dt-tab is-active" onclick="dtSetMode('utc', this)">EVE Time (UTC)</button>
-                <button class="dt-tab" onclick="dtSetMode('local', this)">Local Time</button>
-                <button class="dt-tab" onclick="dtSetMode('offset', this)">From Now</button>
+                <button class="dt-tab is-active" data-click="dtSetMode" data-mode="utc">EVE Time (UTC)</button>
+                <button class="dt-tab" data-click="dtSetMode" data-mode="local">Local Time</button>
+                <button class="dt-tab" data-click="dtSetMode" data-mode="offset">From Now</button>
             </div>
 
             {# ── UTC mode ────────────────────────────────────────────────── #}
@@ -175,12 +175,12 @@
         <div class="b-panel-head"><span class="b-label">Quick Actions</span></div>
         <div class="b-pad-md">
             <div class="dt-quick-grid">
-                <button class="dt-quick-btn" onclick="dtQuick('now')">Now</button>
-                <button class="dt-quick-btn" onclick="dtQuick('1h')">+ 1 Hour</button>
-                <button class="dt-quick-btn" onclick="dtQuick('2h')">+ 2 Hours</button>
-                <button class="dt-quick-btn" onclick="dtQuick('1d')">+ 1 Day</button>
-                <button class="dt-quick-btn" onclick="dtQuick('2d')">+ 2 Days</button>
-                <button class="dt-quick-btn" onclick="dtQuick('downtime')">Next Downtime</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="now">Now</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="1h">+ 1 Hour</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="2h">+ 2 Hours</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="1d">+ 1 Day</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="2d">+ 2 Days</button>
+                <button class="dt-quick-btn" data-click="dtQuick" data-preset="downtime">Next Downtime</button>
             </div>
             <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid var(--border);">
                 <a href="/structure-timers" style="font-size:10px;color:var(--muted);text-decoration:none;">Have a timer? View <span style="color:var(--accent);">Structure Timers</span></a>
@@ -247,7 +247,9 @@ var DT_FORMATS = [
 })();
 
 /* ── Mode switching ──────────────────────────────────────────────────────── */
-function dtSetMode(mode, btn) {
+function dtSetMode() {
+    var mode = this.dataset.mode;
+    var btn = this;
     dtCurrentMode = mode;
     document.querySelectorAll('.dt-tab').forEach(function(t) { t.classList.remove('is-active'); });
     btn.classList.add('is-active');
@@ -367,7 +369,7 @@ function dtRenderOutput(ts, dateObj) {
             '<span class="dt-fmt-label">' + f.label + ' (' + f.key + ')</span>' +
             '<span class="dt-tag" id="dt-tag-' + f.key + '">&lt;t:' + ts + ':' + f.key + '&gt;</span>' +
             '<span class="dt-preview" id="dt-prev-' + f.key + '">' + preview + '</span>' +
-            '<button class="dt-copy-btn" onclick="dtCopy(\'' + f.key + '\')">Copy</button>' +
+            '<button class="dt-copy-btn" data-click="dtCopy" data-fmt="' + f.key + '">Copy</button>' +
             '</div>';
     });
     container.innerHTML = html;
@@ -414,7 +416,8 @@ function dtUpdate() {
 }
 
 /* ── Copy helpers ────────────────────────────────────────────────────────── */
-function dtCopy(fmt) {
+function dtCopy() {
+    var fmt = this.dataset.fmt;
     if (dtCurrentTs === null) return;
     var text = '<t:' + dtCurrentTs + ':' + fmt + '>';
     navigator.clipboard.writeText(text).then(function() {
@@ -468,7 +471,8 @@ function dtShareLink() {
 }
 
 /* ── Quick presets ────────────────────────────────────────────────────────── */
-function dtQuick(preset) {
+function dtQuick() {
+    var preset = this.dataset.preset;
     /* Switch to offset mode for relative presets */
     if (preset !== 'downtime') {
         dtCurrentMode = 'offset';

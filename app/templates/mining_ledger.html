@@ -63,12 +63,12 @@
         <div class="b-panel-head">
             <span class="b-label">Mining Activity</span>
             <div id="range-buttons" style="display:flex;gap:4px;">
-                <button class="range-btn" onclick="filterRange(7, this)">7d</button>
-                <button class="range-btn" onclick="filterRange(14, this)">14d</button>
-                <button class="range-btn is-active" onclick="filterRange(30, this)">30d</button>
-                <button class="range-btn" onclick="filterRange(90, this)">90d</button>
-                <button class="range-btn" onclick="filterRange(180, this)">6m</button>
-                <button class="range-btn" onclick="filterRange(365, this)">1y</button>
+                <button class="range-btn" data-click="filterRange" data-days="7">7d</button>
+                <button class="range-btn" data-click="filterRange" data-days="14">14d</button>
+                <button class="range-btn is-active" data-click="filterRange" data-days="30">30d</button>
+                <button class="range-btn" data-click="filterRange" data-days="90">90d</button>
+                <button class="range-btn" data-click="filterRange" data-days="180">6m</button>
+                <button class="range-btn" data-click="filterRange" data-days="365">1y</button>
             </div>
         </div>
         <div style="padding:0.5rem;">
@@ -102,7 +102,7 @@
                  hx-target="#corp-chars-{{ corp.corp_id }}"
                  hx-swap="innerHTML"
                  hx-indicator="#corp-loader-{{ corp.corp_id }}"
-                 onclick="this.closest('.ml-corp-card').classList.toggle('is-expanded')">
+                 data-click="mlToggleCorpCard">
                 {% if corp.corp_id > 0 %}
                 <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
                      class="ml-corp-logo" alt=""
@@ -386,7 +386,16 @@
         });
     }
 
-    window.filterRange = function(days, btn) {
+    /* Card header toggles its own card open. Was an inline
+       this.closest(...).classList.toggle() — the hx-get on the same element
+       still fires independently. */
+    window.mlToggleCorpCard = function() {
+        this.closest('.ml-corp-card').classList.toggle('is-expanded');
+    };
+
+    window.filterRange = function() {
+        var days = parseInt(this.dataset.days, 10);
+        var btn = this;
         document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
         if (btn) btn.classList.add('is-active');
         if (fullChartData) {

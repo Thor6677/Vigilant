@@ -26,23 +26,19 @@ STATIC_JS = os.path.join(os.path.dirname(__file__), "..", "static", "js")
 # Inline handler attributes still to convert, by template. MUST only shrink.
 # Empty dict = T-033 unblocked on the template side.
 REMAINING = {
-    "app/templates/admin.html": 7,
     "app/templates/blueprints.html": 1,
     "app/templates/character_detail.html": 1,
     "app/templates/compression.html": 1,
     "app/templates/corp_inventory.html": 1,
-    "app/templates/discordtime.html": 10,
     "app/templates/fitting_saved.html": 4,
     "app/templates/fitting_tool.html": 5,
     "app/templates/fittings.html": 2,
-    "app/templates/gatecheck.html": 17,
     "app/templates/hauling.html": 3,
     "app/templates/industry.html": 2,
     "app/templates/intel.html": 1,
     "app/templates/intel_dscan.html": 2,
     "app/templates/intel_local.html": 2,
     "app/templates/mining.html": 1,
-    "app/templates/mining_ledger.html": 7,
     "app/templates/partials/admin_audit.html": 1,
     "app/templates/partials/admin_users.html": 2,
     "app/templates/partials/calc_results.html": 1,
@@ -74,13 +70,10 @@ REMAINING = {
     "app/templates/structure_timers.html": 5,
     "app/templates/tools_image_view.html": 2,
     "app/templates/wormhole_system.html": 2,
-    "app/templates/wormholes.html": 10,
 }
 
 # `javascript:` URLs still to convert. MUST only shrink.
-REMAINING_JS_URLS = {
-    "app/templates/admin.html": 7,
-}
+REMAINING_JS_URLS = {}
 
 _HANDLER = re.compile(r'\bon([a-z]+)\s*=\s*"')
 _JS_URL = re.compile(r'(?:href|src)\s*=\s*"javascript:')

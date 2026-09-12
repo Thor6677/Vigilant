@@ -10,13 +10,13 @@
 </div>
 
 <div class="b-tab-strip" id="admin-tabs">
-    <a href="javascript:void(0)" class="is-active" onclick="switchTab('overview', this)">Overview</a>
-    <a href="javascript:void(0)" onclick="switchTab('users', this)">Users</a>
-    <a href="javascript:void(0)" onclick="switchTab('esi', this)">ESI Health</a>
-    <a href="javascript:void(0)" onclick="switchTab('scheduler', this)">Scheduler</a>
-    <a href="javascript:void(0)" onclick="switchTab('database', this)">Database</a>
-    <a href="javascript:void(0)" onclick="switchTab('sde', this)">SDE</a>
-    <a href="javascript:void(0)" onclick="switchTab('audit', this)">Audit Log</a>
+    <button type="button" class="is-active" data-click="switchTab" data-section="overview">Overview</button>
+    <button type="button" data-click="switchTab" data-section="users">Users</button>
+    <button type="button" data-click="switchTab" data-section="esi">ESI Health</button>
+    <button type="button" data-click="switchTab" data-section="scheduler">Scheduler</button>
+    <button type="button" data-click="switchTab" data-section="database">Database</button>
+    <button type="button" data-click="switchTab" data-section="sde">SDE</button>
+    <button type="button" data-click="switchTab" data-section="audit">Audit Log</button>
 </div>
 
 <div id="admin-content"
@@ -30,9 +30,11 @@
 var currentSection = 'overview';
 var refreshTimer = null;
 
-function switchTab(section, el) {
+function switchTab() {
+    var section = this.dataset.section;
+    var el = this;
     currentSection = section;
-    document.querySelectorAll('#admin-tabs a').forEach(function(a) { a.classList.remove('is-active'); });
+    document.querySelectorAll('#admin-tabs button').forEach(function(b) { b.classList.remove('is-active'); });
     el.classList.add('is-active');
     htmx.ajax('GET', '/admin/section/' + section, '#admin-content');
 
