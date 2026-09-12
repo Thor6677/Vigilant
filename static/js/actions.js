@@ -12,6 +12,9 @@
  *   <select onchange="bar()">    →  <select data-change="bar">
  *   <input  oninput="baz()">     →  <input  data-input="baz">
  *   <form   onsubmit="qux()">    →  <form   data-submit="qux">
+ *   <input  onkeydown="k()">     →  <input  data-keydown="k">
+ *   <li     onmousedown="m()">   →  <li     data-mousedown="m">
+ *   <input  onfocus="f()">       →  <input  data-focus="f">
  *   <img    onerror="this.style.display='none'">
  *                                →  <img    data-on-error="hide">
  *
@@ -112,7 +115,13 @@
     };
 
     // Bubbling events — single document-level listener catches via bubble phase.
-    var BUBBLE_EVENTS = ['click', 'change', 'input', 'submit'];
+    var BUBBLE_EVENTS = ['click', 'change', 'input', 'submit', 'keydown',
+                         'mousedown'];
+
+    // 'focus' does not bubble, so it needs the capture phase (same treatment
+    // as 'error' below). Kept separate from BUBBLE_EVENTS rather than using
+    // focusin, so the attribute name still matches the event name.
+    var CAPTURE_EVENTS = ['focus'];
 
     function dispatch(eventType, e) {
         // Walk up from e.target to find the nearest element carrying our
@@ -140,6 +149,9 @@
 
     BUBBLE_EVENTS.forEach(function (evt) {
         document.addEventListener(evt, dispatch.bind(null, evt));
+    });
+    CAPTURE_EVENTS.forEach(function (evt) {
+        document.addEventListener(evt, dispatch.bind(null, evt), true);
     });
 
     // data-confirm: a separate, simpler dispatch for the "confirm before
