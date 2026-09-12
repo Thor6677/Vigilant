@@ -8,7 +8,7 @@
     {% for u in users %}
     <div style="border-bottom:1px solid var(--border);">
         {# User header row — click to expand #}
-        <div class="b-row" style="cursor:pointer;gap:0.5rem;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? '' : 'none'; this.querySelector('.expand-arrow').textContent = this.nextElementSibling.style.display === 'none' ? '▸' : '▾';">
+        <div class="b-row" style="cursor:pointer;gap:0.5rem;" data-click="togglePanel" data-toggle-arrow=".expand-arrow">
             <span style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
                 {% if u.main_character_id %}
                 <img src="https://images.evetech.net/characters/{{ u.main_character_id }}/portrait?size=32"
@@ -24,7 +24,7 @@
                 {% if u.user.id != admin_id %}
                     {% set can_modify = (admin_role == 'admin') or (admin_role == 'manager' and u.user.role != 'admin') %}
                     {% if can_modify %}
-                    <select onchange="htmx.ajax('POST', '/admin/action/set-role/{{ u.user.id }}/' + this.value, {target:'#admin-content', swap:'innerHTML'})"
+                    <select data-change="adminSetRole" data-user-id="{{ u.user.id }}"
                             style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                         <option value="user" {% if u.user.role == 'user' %}selected{% endif %}>User</option>
                         <option value="manager" {% if u.user.role == 'manager' %}selected{% endif %}>Manager</option>
@@ -133,6 +133,11 @@
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Was an inline htmx.ajax in each role select's onchange. */
+window.adminSetRole = window.adminSetRole || function() {
+    htmx.ajax('POST', '/admin/action/set-role/' + this.dataset.userId + '/' + this.value,
+              {target: '#admin-content', swap: 'innerHTML'});
+};
 var _allowSearchTimer = null;
 function searchAllowlist() {
     clearTimeout(_allowSearchTimer);

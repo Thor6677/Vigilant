@@ -22,7 +22,7 @@
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">Character (skills)</label>
                 <select id="inp-character"
-                        onchange="if(this.value){htmx.ajax('GET','/industry/compression/skills/'+this.value,'#skill-display')}"
+                        data-change="loadCompressionSkills"
                         style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                     <option value="">Manual skills</option>
                     {% for c in characters %}
@@ -144,6 +144,11 @@
 <div id="compression-results"></div>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Was an inline htmx.ajax guarded by a truthiness check on the select. */
+window.loadCompressionSkills = function() {
+    if (!this.value) return;
+    htmx.ajax('GET', '/industry/compression/skills/' + this.value, '#skill-display');
+};
 // When character skill data loads, update the hidden ore_skills input
 document.body.addEventListener('htmx:afterSwap', function(evt) {
     if (evt.detail.target.id === 'skill-display') {

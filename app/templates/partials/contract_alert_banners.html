@@ -12,7 +12,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:0.5rem;">
         <a href="/corporations/{{ alert.corp_id }}/contracts" style="font-size:9px;color:var(--accent);text-decoration:none;">View</a>
-        <button class="alert-dismiss" onclick="dismissContractAlert('contract-{{ alert.id }}')" title="Dismiss">&times;</button>
+        <button class="alert-dismiss" data-click="dismissContractAlert" data-alert-key="contract-{{ alert.id }}" title="Dismiss">&times;</button>
     </div>
 </div>
 {% endfor %}
@@ -25,7 +25,8 @@
     function setDismissed(d) {
         try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
     }
-    window.dismissContractAlert = function(id) {
+    window.dismissContractAlert = function() {
+        var id = this.dataset.alertKey;
         var d = getDismissed();
         d[id] = Date.now();
         setDismissed(d);

@@ -139,7 +139,7 @@
                 </label>
                 <input type="range" id="remap-{{ i }}" value="{{ attributes[i] }}" min="17" max="27" step="1"
                        class="remap-slider"
-                       oninput="updateRemapSlider({{ i }})"
+                       data-input="updateRemapSlider" data-idx="{{ i }}"
                        style="width:100%;accent-color:var(--accent);">
             </div>
             {% endfor %}
@@ -203,7 +203,8 @@ var optimalAttrs = {{ optimal_attrs | tojson if optimal_attrs else '[17,17,17,17
 var charId = {{ char.character_id }};
 var remapTimer = null;
 
-function updateRemapSlider(idx) {
+function updateRemapSlider() {
+    var idx = this.dataset.idx;
     var el = document.getElementById('remap-' + idx);
     document.getElementById('remap-val-' + idx).textContent = el.value;
     updatePointsDisplay();

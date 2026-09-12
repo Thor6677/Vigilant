@@ -128,6 +128,40 @@
         if (target) target.classList.toggle('is-expanded');
     };
 
+    // Was: onclick="window.location='/somewhere'" — a whole row acting as a
+    // link. The destination comes from data-href.
+    window.goTo = window.goTo || function () {
+        var href = this.dataset && this.dataset.href;
+        if (href) window.location = href;
+    };
+
+    // Was: onclick="document.getElementById('x').style.display = ... ? '' :
+    // 'none'; this.querySelector('.fit-arrow').textContent = ..." — a panel
+    // header that shows/hides its body and flips a caret. The body is named
+    // by data-toggle-panel (an element id); with the attribute absent it is
+    // the header's next sibling, which is the other shape this took inline.
+    // The caret selector defaults to .fit-arrow, the common case.
+    window.togglePanel = window.togglePanel || function () {
+        var id = this.dataset && this.dataset.togglePanel;
+        var panel = id ? document.getElementById(id) : this.nextElementSibling;
+        if (!panel) return;
+        var wasHidden = panel.style.display === 'none';
+        panel.style.display = wasHidden ? '' : 'none';
+        var arrow = this.querySelector(
+            (this.dataset && this.dataset.toggleArrow) || '.fit-arrow');
+        if (arrow) arrow.textContent = wasHidden ? '\u25BE' : '\u25B8';
+    };
+
+    // Was: onerror="this.src='...'; this.onerror=null;" — swap in a fallback
+    // image once, and do not loop if the fallback 404s too. Dispatched by
+    // name through data-on-error, alongside the built-in "hide".
+    window.imgFallback = window.imgFallback || function () {
+        var src = this.dataset && this.dataset.fallbackSrc;
+        // Drop the binding first: the fallback failing would re-enter here.
+        this.removeAttribute('data-on-error');
+        if (src) this.src = src;
+    };
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it

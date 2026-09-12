@@ -18,7 +18,7 @@
         <summary style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;cursor:pointer;list-style:none;font-size:11px;">
             <span style="color:{{ c.sec_color }};font-size:10px;min-width:30px;">{{ "%.1f"|format(c.security) }}</span>
             <a href="https://zkillboard.com/system/{{ c.system_id }}/" target="_blank" rel="noopener"
-               style="flex:1;color:var(--text);text-decoration:none;font-size:12px;" onmousedown="event.stopPropagation();">
+               style="flex:1;color:var(--text);text-decoration:none;font-size:12px;" data-mousedown="noop" data-stop>
                 {{ c.system_name }}
             </a>
             <span style="color:var(--muted);font-size:10px;">{{ c.region }}</span>

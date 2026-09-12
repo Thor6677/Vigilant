@@ -20,8 +20,8 @@
         </label>
         <div style="position:relative;max-width:360px;">
             <input type="text" id="sys-input" placeholder="e.g. Jita" autocomplete="off"
-                   oninput="piSysSearch(this)"
-                   onkeydown="if(event.key==='Enter'){event.preventDefault();piSysSubmit();}"
+                   data-input="piSysSearch"
+                   data-keydown="piSysKey"
                    style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
             <div id="sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:20;max-height:240px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
         </div>
@@ -57,7 +57,26 @@
 <script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var _tmr;
-    window.piSysSearch = function(input) {
+
+    /* Rows are built as an HTML string, so interpolated names are escaped for
+       attribute context — the inline handlers they replace only needed the
+       apostrophe escaped for a JS string literal. */
+    function _attrEsc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    /* Enter submits rather than picking a suggestion. */
+    window.piSysKey = function(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        piSysSubmit();
+    };
+
+    window.piSysSearch = function() {
+        var input = this;
         clearTimeout(_tmr);
         var dd = document.getElementById('sys-dd');
         var q = input.value.trim();
@@ -71,7 +90,7 @@
                         var sec = s.security;
                         var col = sec >= 0.5 ? 'var(--success)' : sec >= 0 ? 'var(--warn)' : 'var(--danger)';
                         return '<div class="sys-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
-                            + ' onmousedown="piSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
+                            + ' data-mousedown="piSysPick" data-name="' + _attrEsc(s.system_name) + '">'
                             + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
                             + '<span class="b-text">' + s.system_name + '</span>'
                             + '</div>';
@@ -81,7 +100,8 @@
                 .catch(function(){ dd.style.display = 'none'; });
         }, 200);
     };
-    window.piSysPick = function(name) {
+    window.piSysPick = function() {
+        var name = this.dataset.name;
         document.getElementById('sys-input').value = name;
         document.getElementById('sys-dd').style.display = 'none';
         piSysSubmit();

@@ -181,7 +181,9 @@
         bar.style.display = count > 0 ? 'flex' : 'none';
     }
 
-    window.toggleChar = function(charId, el) {
+    window.toggleChar = function() {
+        var charId = this.dataset.charId;
+        var el = this;
         charId = parseInt(charId);
         if (el.checked) {
             selectedChars.add(charId);

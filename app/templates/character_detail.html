@@ -567,7 +567,7 @@
             {% for r in ranges %}
             <button class="range-btn {% if r == active_range %}is-active{% endif %}"
                     data-range="{{ r }}"
-                    onclick="setRange('{{ r }}', this)">{{ r }}</button>
+                    data-click="setRange" data-range="{{ r }}">{{ r }}</button>
             {% endfor %}
         </div>
     </div>
@@ -743,7 +743,9 @@
 
     try { buildChart(initialData); } catch(e) { console.error('Chart init error:', e); }
 
-    window.setRange = function(range, btn) {
+    window.setRange = function() {
+        var range = this.dataset.range;
+        var btn = this;
         document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('is-active'));
         btn.classList.add('is-active');
 

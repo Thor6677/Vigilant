@@ -8,7 +8,7 @@
 {% for m in mail_headers %}
 <div class="mail-item">
     <div class="b-table-row mail-header" style="cursor:pointer;{% if not m.is_read %}border-left:2px solid var(--accent);{% endif %}"
-         onclick="toggleMail({{ m.mail_id }}, {{ character_id }}, this)">
+         data-click="toggleMail" data-mail-id="{{ m.mail_id }}" data-char-id="{{ character_id }}">
         <div style="flex:1;min-width:0;">
             <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m.is_read %}font-weight:600;{% endif %}">
                 {{ m.subject }}
@@ -28,7 +28,10 @@
 
 <script nonce="{{ request.state.csp_nonce }}">
 var _openMailId = null;
-function toggleMail(mailId, charId, headerEl) {
+function toggleMail() {
+    var mailId = this.dataset.mailId;
+    var charId = this.dataset.charId;
+    var headerEl = this;
     var bodyEl = document.getElementById('mail-body-' + mailId);
 
     /* If clicking the already-open mail, close it */

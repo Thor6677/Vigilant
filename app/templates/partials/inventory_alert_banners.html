@@ -13,7 +13,7 @@
         </span>
     </div>
     <a href="/corporations/{{ alert.corp_id }}/inventory" class="b-muted" style="font-size:9px;text-decoration:none;flex-shrink:0;margin-right:0.5rem;">View</a>
-    <button class="alert-dismiss" onclick="dismissStructureAlert('inv-{{ alert.id }}-{{ alert.alert_state }}')" title="Dismiss">&times;</button>
+    <button class="alert-dismiss" data-click="dismissStructureAlert" data-alert-key="inv-{{ alert.id }}-{{ alert.alert_state }}" title="Dismiss">&times;</button>
 </div>
 {% endfor %}
 <script nonce="{{ request.state.csp_nonce }}">

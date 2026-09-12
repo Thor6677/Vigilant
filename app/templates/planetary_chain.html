@@ -41,7 +41,7 @@
                      hx-get="/industry/planetary/chain/node/{{ item.type_id }}"
                      hx-target="#chain-detail"
                      hx-swap="innerHTML"
-                     onclick="document.querySelectorAll('.chain-item').forEach(function(el){el.classList.remove('is-active');});this.classList.add('is-active');"
+                     data-click="selectChainItem"
                      style="padding:0.45rem 0.6rem;border-top:1px solid var(--border);border-right:1px solid var(--border);cursor:pointer;">
                     <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                         {{ item.name }}
@@ -93,6 +93,13 @@
 </style>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Clicking a chain tile makes it the active one. */
+function selectChainItem() {
+    document.querySelectorAll('.chain-item').forEach(function(el) {
+        el.classList.remove('is-active');
+    });
+    this.classList.add('is-active');
+}
 // Deep-linking from other PI pages: /industry/planetary/chain#12345 preloads
 // the node panel and scrolls the tile into view.
 (function() {

@@ -137,8 +137,8 @@
             <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
                 System Diagram
                 <div style="display:flex;gap:2px;">
-                    <button id="zoom-full" onclick="drawDiagram('full')" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
-                    <button id="zoom-dscan" onclick="drawDiagram('dscan')" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
+                    <button id="zoom-full" data-click="drawDiagramFromEl" data-mode="full" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
+                    <button id="zoom-dscan" data-click="drawDiagramFromEl" data-mode="dscan" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
                 </div>
             </div>
             <div class="ws-diagram-wrap">
@@ -152,6 +152,9 @@
         </div>
         <script nonce="{{ request.state.csp_nonce }}">
         var _diagramPlanets = {{ celestials['planets'] | tojson }};
+        /* Also called directly on load, below, to draw the initial view. */
+        window.drawDiagramFromEl = function() { drawDiagram(this.dataset.mode); };
+
         function drawDiagram(mode) {
             var planets = _diagramPlanets;
             var colors = {Temperate:'#6db36d',Ice:'#a8d8ea',Gas:'#d4a06a',Oceanic:'#4a9eda',Lava:'#cc4433',Barren:'#8a7a6a',Storm:'#6a7a9a',Plasma:'#9a6acc',Shattered:'#aa8866'};

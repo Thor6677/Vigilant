@@ -27,51 +27,21 @@ STATIC_JS = os.path.join(ROOT, "static", "js")
 
 # Inline handler attributes still to convert, by template. MUST only shrink.
 # Empty dict = T-033 unblocked on the template side.
-REMAINING = {
-    "app/db/models.py": 5,
-    "app/templates/blueprints.html": 1,
-    "app/templates/character_detail.html": 1,
-    "app/templates/compression.html": 1,
-    "app/templates/corp_inventory.html": 1,
-    "app/templates/fittings.html": 2,
-    "app/templates/hauling.html": 3,
-    "app/templates/industry.html": 2,
-    "app/templates/intel.html": 1,
-    "app/templates/intel_dscan.html": 2,
-    "app/templates/intel_local.html": 2,
-    "app/templates/mining.html": 1,
-    "app/templates/partials/admin_audit.html": 1,
-    "app/templates/partials/admin_users.html": 2,
-    "app/templates/partials/calc_results.html": 1,
-    "app/templates/partials/compression_results.html": 1,
-    "app/templates/partials/contract_alert_banners.html": 1,
-    "app/templates/partials/corp_inventory_scan.html": 1,
-    "app/templates/partials/fitting_info.html": 1,
-    "app/templates/partials/fitting_stats.html": 2,
-    "app/templates/partials/gatecheck_finder.html": 1,
-    "app/templates/partials/gatecheck_route.html": 1,
-    "app/templates/partials/gatecheck_wartarget.html": 1,
-    "app/templates/partials/inventory_alert_banners.html": 1,
-    "app/templates/partials/mail_panel.html": 1,
-    "app/templates/partials/mining_ledger_corp.html": 1,
-    "app/templates/partials/mining_ledger_data.html": 1,
-    "app/templates/partials/planetary_chain_node.html": 2,
-    "app/templates/partials/shopping_list.html": 1,
-    "app/templates/partials/structure_alert_banners.html": 1,
-    "app/templates/partials/timer_alert_banners.html": 1,
-    "app/templates/planetary_calculator.html": 2,
-    "app/templates/planetary_chain.html": 1,
-    "app/templates/planetary_lookup.html": 3,
-    "app/templates/ship_mastery.html": 1,
-    "app/templates/skills.html": 1,
-    "app/templates/tools_image_view.html": 2,
-    "app/templates/wormhole_system.html": 2,
-}
+REMAINING = {}
 
 # `javascript:` URLs still to convert. MUST only shrink.
 REMAINING_JS_URLS = {}
 
 _HANDLER = re.compile(r'\bon([a-z]+)\s*=\s*\\?["\']')
+# `ondelete` / `onupdate` are SQLAlchemy ForeignKey keywords, not DOM events.
+# Denylisting the two beats allowlisting event names: an inline handler for
+# an event nobody thought to list would otherwise pass unnoticed, which is
+# exactly the failure this test exists to prevent.
+_NOT_EVENTS = {"delete", "update"}
+
+
+def _handlers(body):
+    return [name for name in _HANDLER.findall(body) if name not in _NOT_EVENTS]
 _JS_URL = re.compile(r'(?:href|src)\s*=\s*\\?["\']javascript:')
 # data-<event>="name" bindings that actions.js dispatches by looking up
 # window[name]. data-on-error also accepts the literal "hide".
@@ -113,7 +83,7 @@ def test_no_inline_event_handlers_remain():
     found = {}
     for path in _html_sources():
         with open(path, encoding="utf-8") as fh:
-            count = len(_HANDLER.findall(fh.read()))
+            count = len(_handlers(fh.read()))
         if count:
             found[_rel(path)] = count
 

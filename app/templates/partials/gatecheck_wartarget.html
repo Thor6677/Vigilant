@@ -34,7 +34,7 @@
         <summary style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;cursor:pointer;list-style:none;font-size:11px;">
             <span style="color:{{ s.sec_color }};font-size:10px;min-width:30px;">{{ "%.1f"|format(s.security) }}</span>
             <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener"
-               style="flex:1;color:var(--text);text-decoration:none;" onmousedown="event.stopPropagation();">
+               style="flex:1;color:var(--text);text-decoration:none;" data-mousedown="noop" data-stop>
                 {{ s.system_name }}
             </a>
             <span style="color:var(--muted);font-size:10px;">{{ s.region }}</span>

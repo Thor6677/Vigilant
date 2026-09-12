@@ -91,7 +91,7 @@
             {# Build/Buy toggle for buildable materials #}
             {% if row.buildable %}
             <div style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
-                <button onclick="toggleComponent({{ row.type_id }}, {{ row.adjusted_qty }}, this)"
+                <button data-click="toggleComponentFromEl" data-type-id="{{ row.type_id }}" data-qty="{{ row.adjusted_qty }}"
                         class="b-btn build-toggle-btn" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
                         style="padding:1px 6px;font-size:9px;border:1px solid var(--border);flex:none;">
                     Build ▸
@@ -198,6 +198,13 @@ function closeComponent(typeId, btn) {
         delete buildComponents[typeId];
     }
 }
+
+/* industry.html defines its own toggleComponent of the same name for the
+   parent build page; whichever page this partial lands on supplies it. The
+   element-bound entry point stays separate so neither signature changes. */
+window.toggleComponentFromEl = function() {
+    toggleComponent(this.dataset.typeId, this.dataset.qty, this);
+};
 
 function toggleComponent(typeId, needed, btn) {
     var panel = document.getElementById('component-' + typeId);

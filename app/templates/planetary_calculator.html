@@ -26,7 +26,7 @@
             <div style="position:relative;">
                 <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:0.25rem;">System (optional)</label>
                 <input type="text" id="calc-sys" name="system" value="{{ system or '' }}" placeholder="e.g. Jita" autocomplete="off"
-                       oninput="calcSysSearch(this)"
+                       data-input="calcSysSearch"
                        style="width:100%;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:12px;outline:none;">
                 <div id="calc-sys-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#161616;border:1px solid var(--border);z-index:20;max-height:220px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.7);"></div>
             </div>
@@ -773,7 +773,19 @@
 
     // System autocomplete (same pattern as planetary_lookup.html)
     var _tmr;
-    window.calcSysSearch = function(input) {
+
+    /* Rows are built as an HTML string, so interpolated names are escaped for
+       attribute context — the inline handlers they replace only needed the
+       apostrophe escaped for a JS string literal. */
+    function _attrEsc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    window.calcSysSearch = function() {
+        var input = this;
         clearTimeout(_tmr);
         var dd = document.getElementById('calc-sys-dd');
         var q = input.value.trim();
@@ -787,7 +799,7 @@
                         var sec = s.security;
                         var col = sec >= 0.5 ? 'var(--success)' : sec >= 0 ? 'var(--warn)' : 'var(--danger)';
                         return '<div class="calc-dd-item" style="padding:0.45rem 0.7rem;cursor:pointer;display:flex;gap:0.5rem;font-size:12px;border-bottom:1px solid var(--border);"'
-                            + ' onmousedown="calcSysPick(\'' + s.system_name.replace(/\\'/g,"\\\\'") + '\')">'
+                            + ' data-mousedown="calcSysPick" data-name="' + _attrEsc(s.system_name) + '">'
                             + '<span style="color:' + col + ';min-width:32px;">' + sec.toFixed(1) + '</span>'
                             + '<span class="b-text">' + s.system_name + '</span>'
                             + '</div>';
@@ -796,7 +808,8 @@
                 }).catch(function(){ dd.style.display = 'none'; });
         }, 200);
     };
-    window.calcSysPick = function(name) {
+    window.calcSysPick = function() {
+        var name = this.dataset.name;
         document.getElementById('calc-sys').value = name;
         document.getElementById('calc-sys-dd').style.display = 'none';
     };

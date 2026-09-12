@@ -75,7 +75,7 @@
         {% if level in mastery_data %}
         <div style="border-bottom:1px solid var(--border);padding:0.5rem 0.75rem;">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;cursor:pointer;"
-                 onclick="this.parentElement.querySelector('.mastery-details').classList.toggle('is-hidden')">
+                 data-click="toggleMasteryDetails">
                 <span style="font-size:10px;font-weight:600;color:var(--accent);min-width:20px;">{{ mastery_names[level] }}</span>
                 <span class="b-muted-sm">
                     {{ mastery_data[level] | length }} certificate{{ 's' if mastery_data[level] | length != 1 else '' }}
@@ -208,6 +208,11 @@
 
 <script nonce="{{ request.state.csp_nonce }}">
 var shipTypeId = {{ ship_type_id }};
+
+/* Mastery row header shows/hides its own detail list. */
+function toggleMasteryDetails() {
+    this.parentElement.querySelector('.mastery-details').classList.toggle('is-hidden');
+}
 
 function checkMastery() {
     var charId = document.getElementById('check-char').value;

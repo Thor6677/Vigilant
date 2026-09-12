@@ -2,7 +2,7 @@
 <div style="display:flex;gap:1rem;margin-bottom:1rem;">
     <img src="https://images.evetech.net/types/{{ type_id }}/render?size=128"
          style="width:96px;height:96px;border:1px solid var(--border);flex-shrink:0;"
-         onerror="this.onerror=null;this.src='https://images.evetech.net/types/{{ type_id }}/icon?size=128'">
+         data-on-error="imgFallback" data-fallback-src="https://images.evetech.net/types/{{ type_id }}/icon?size=128">
     <div style="flex:1;min-width:0;">
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:0.25rem;">{{ type_name }}</div>
         <div style="font-size:10px;color:var(--muted);margin-bottom:0.25rem;">

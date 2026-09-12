@@ -44,7 +44,7 @@
                 <div style="display:flex;gap:0.4rem;">
                     <input type="text" id="share-url" value="{{ share_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
-                    <button type="button" onclick="copyField('share-url', this)" class="b-btn"
+                    <button type="button" data-click="copyField" data-field-id="share-url" class="b-btn"
                             style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
                 </div>
             </div>
@@ -54,7 +54,7 @@
                 <div style="display:flex;gap:0.4rem;">
                     <input type="text" id="raw-url" value="{{ raw_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
-                    <button type="button" onclick="copyField('raw-url', this)" class="b-btn"
+                    <button type="button" data-click="copyField" data-field-id="raw-url" class="b-btn"
                             style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
                 </div>
             </div>
@@ -90,7 +90,9 @@
 {% endif %}
 
 <script nonce="{{ request.state.csp_nonce }}">
-function copyField(id, btn) {
+function copyField() {
+    var id = this.dataset.fieldId;
+    var btn = this;
     var el = document.getElementById(id);
     el.select();
     el.setSelectionRange(0, 99999);

@@ -90,7 +90,7 @@
     {# Copyable text area (hidden, used by clipboard API) #}
     <textarea id="multibuy-text" readonly
               style="width:100%;margin-top:0.5rem;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;font-size:11px;line-height:1.6;resize:vertical;min-height:60px;max-height:300px;"
-              onclick="this.select()">{{ multibuy_text }}</textarea>
+              data-click="selectAll">{{ multibuy_text }}</textarea>
     <div style="font-size:9px;color:var(--muted);margin-top:3px;">
         Copy the text above and paste into EVE's Multibuy window (Alt+M → paste). Format: <code>Item Name x{qty}</code>
     </div>

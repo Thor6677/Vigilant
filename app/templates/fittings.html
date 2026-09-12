@@ -64,7 +64,7 @@
     <div class="b-panel" style="margin-bottom:0.5rem;">
         {# Fitting header — click to expand #}
         <div class="b-panel-head" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;"
-             onclick="toggleFit('fit-{{ fit.fitting_id }}', this)">
+             data-click="toggleFit" data-fit-target="fit-{{ fit.fitting_id }}">
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ fit.name }}</span>
                 <span class="b-muted-sm">{{ fit.total_modules }} modules</span>
@@ -121,7 +121,7 @@
 
             {# Actions #}
             <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;">
-                <button onclick="copyEFT({{ char.character_id }}, {{ fit.fitting_id }}, this)"
+                <button data-click="copyEFT" data-char-id="{{ char.character_id }}" data-fit-id="{{ fit.fitting_id }}"
                         class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">
                     Copy EFT
                 </button>
@@ -134,7 +134,9 @@
 {% endif %}
 
 <script nonce="{{ request.state.csp_nonce }}">
-function toggleFit(id, header) {
+function toggleFit() {
+    var id = this.dataset.fitTarget;
+    var header = this;
     var el = document.getElementById(id);
     var arrow = header.querySelector('.fit-arrow');
     if (el.style.display === 'none') {
@@ -146,7 +148,10 @@ function toggleFit(id, header) {
     }
 }
 
-function copyEFT(charId, fitId, btn) {
+function copyEFT() {
+    var charId = this.dataset.charId;
+    var fitId = this.dataset.fitId;
+    var btn = this;
     fetch('/character/' + charId + '/fittings/' + fitId + '/eft')
         .then(function(r) { return r.text(); })
         .then(function(text) {
