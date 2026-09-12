@@ -53,21 +53,21 @@
 <div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
     <form method="get" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">
         <label class="b-muted-sm">Sort</label>
-        <select name="sort" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+        <select name="sort" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="expiry" {% if sort == 'expiry' %}selected{% endif %}>Expiry (soonest)</option>
             <option value="character" {% if sort == 'character' %}selected{% endif %}>Character</option>
             <option value="system" {% if sort == 'system' %}selected{% endif %}>System</option>
             <option value="type" {% if sort == 'type' %}selected{% endif %}>Planet type</option>
         </select>
         <label class="b-muted-sm">Type</label>
-        <select name="filter_type" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+        <select name="filter_type" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
             {% for t in all_types %}
             <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ t | capitalize }}</option>
             {% endfor %}
         </select>
         <label class="b-muted-sm">Expiry</label>
-        <select name="filter_warn" onchange="this.form.submit()" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
+        <select name="filter_warn" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
             <option value="expiring" {% if filter_warn == 'expiring' %}selected{% endif %}>Expiring / &lt; 24h</option>
             <option value="expired" {% if filter_warn == 'expired' %}selected{% endif %}>Expired only</option>
@@ -97,7 +97,7 @@
              hx-trigger="click once"
              hx-target="#pi-detail-{{ char.character_id }}-{{ planet.planet_id }}"
              hx-swap="innerHTML"
-             onclick="this.closest('.pi-row').classList.toggle('is-expanded')">
+             data-click="toggleExpanded" data-toggle-target=".pi-row">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
                  class="b-portrait-sm" alt="" style="width:28px;height:28px;border-radius:2px;">
             <span style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.character_name }}</span>

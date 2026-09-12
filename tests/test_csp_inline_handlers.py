@@ -20,12 +20,15 @@ Two tests here, pulling in opposite directions:
 import os
 import re
 
-TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
-STATIC_JS = os.path.join(os.path.dirname(__file__), "..", "static", "js")
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+TEMPLATES = os.path.join(ROOT, "app", "templates")
+APP = os.path.join(ROOT, "app")
+STATIC_JS = os.path.join(ROOT, "static", "js")
 
 # Inline handler attributes still to convert, by template. MUST only shrink.
 # Empty dict = T-033 unblocked on the template side.
 REMAINING = {
+    "app/db/models.py": 5,
     "app/templates/blueprints.html": 1,
     "app/templates/character_detail.html": 1,
     "app/templates/compression.html": 1,
@@ -42,12 +45,10 @@ REMAINING = {
     "app/templates/partials/admin_audit.html": 1,
     "app/templates/partials/admin_users.html": 2,
     "app/templates/partials/calc_results.html": 1,
-    "app/templates/partials/component_panel.html": 6,
     "app/templates/partials/compression_results.html": 1,
     "app/templates/partials/contract_alert_banners.html": 1,
     "app/templates/partials/corp_inventory_scan.html": 1,
     "app/templates/partials/fitting_info.html": 1,
-    "app/templates/partials/fitting_search_results.html": 4,
     "app/templates/partials/fitting_stats.html": 2,
     "app/templates/partials/gatecheck_finder.html": 1,
     "app/templates/partials/gatecheck_route.html": 1,
@@ -60,7 +61,6 @@ REMAINING = {
     "app/templates/partials/shopping_list.html": 1,
     "app/templates/partials/structure_alert_banners.html": 1,
     "app/templates/partials/timer_alert_banners.html": 1,
-    "app/templates/planetary.html": 4,
     "app/templates/planetary_calculator.html": 2,
     "app/templates/planetary_chain.html": 1,
     "app/templates/planetary_lookup.html": 3,
@@ -75,8 +75,8 @@ REMAINING = {
 # `javascript:` URLs still to convert. MUST only shrink.
 REMAINING_JS_URLS = {}
 
-_HANDLER = re.compile(r'\bon([a-z]+)\s*=\s*"')
-_JS_URL = re.compile(r'(?:href|src)\s*=\s*"javascript:')
+_HANDLER = re.compile(r'\bon([a-z]+)\s*=\s*\\?["\']')
+_JS_URL = re.compile(r'(?:href|src)\s*=\s*\\?["\']javascript:')
 # data-<event>="name" bindings that actions.js dispatches by looking up
 # window[name]. data-on-error also accepts the literal "hide".
 _BINDING = re.compile(
@@ -92,15 +92,30 @@ def _templates():
                 yield os.path.join(dirpath, name)
 
 
+def _html_sources():
+    """Templates, plus the route modules that build HTML fragments in Python.
+
+    Several search-dropdown endpoints return hand-assembled HTML strings
+    carrying their own onclick/onmouseover attributes. They are invisible to
+    a templates-only scan and would have survived the migration to break in
+    production the moment the policy started enforcing — so they are scanned
+    with the same eyes.
+    """
+    yield from _templates()
+    for dirpath, dirs, files in os.walk(APP):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for name in sorted(files):
+            if name.endswith(".py"):
+                yield os.path.join(dirpath, name)
+
+
 def _rel(path):
-    return os.path.relpath(path, os.path.join(TEMPLATES, "..", "..")).replace(
-        os.sep, "/"
-    )
+    return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
 def test_no_inline_event_handlers_remain():
     found = {}
-    for path in _templates():
+    for path in _html_sources():
         with open(path, encoding="utf-8") as fh:
             count = len(_HANDLER.findall(fh.read()))
         if count:
@@ -127,7 +142,7 @@ def test_no_inline_event_handlers_remain():
 def test_no_javascript_urls_remain():
     """`javascript:` URLs are inline script too, and equally un-nonceable."""
     offenders = {}
-    for path in _templates():
+    for path in _html_sources():
         with open(path, encoding="utf-8") as fh:
             count = len(_JS_URL.findall(fh.read()))
         if count > REMAINING_JS_URLS.get(_rel(path), 0):
@@ -156,7 +171,7 @@ def test_every_data_binding_resolves():
         defined |= set(re.findall(r'\bfunction\s+([A-Za-z_$][\w$]*)\s*\(', body))
 
     missing = {}
-    for path in _templates():
+    for path in _html_sources():
         with open(path, encoding="utf-8") as fh:
             for name in set(_BINDING.findall(fh.read())):
                 if name != "hide" and name not in defined:

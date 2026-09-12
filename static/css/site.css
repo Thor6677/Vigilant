@@ -265,6 +265,12 @@
    dropdown where the panel surface is var(--surface) and rows want
    to deepen on hover rather than lighten. ISS-020. */
 .b-hover-bg:hover        { background: var(--bg); }
+/* Hover to var(--border) — the search-result rows that the route modules
+   build as HTML strings (admin allowlist, skill/ship pickers, ACL, system
+   and owner lookups). They used to carry an onmouseover/onmouseout pair
+   each, which is inline script and blocked T-033. Rest state is
+   transparent, matching what onmouseout set. */
+.b-hover-border:hover    { background: var(--border); }
 .b-hover-underline       { text-decoration: none; }
 .b-hover-underline:hover { text-decoration: underline; }
 

@@ -111,6 +111,13 @@ var recalcTimer = null;
 /* Track which components are being built (expanded) and their settings */
 var buildComponents = {};
 
+/* Two entry points: the search-result rows (bound by data-click, via the
+   wrapper below) and restore-from-state / deep-link calls further down that
+   pass a type id directly. The wrapper keeps this signature intact for them. */
+window.selectBlueprintFromEl = function() {
+    selectBlueprint(parseInt(this.dataset.typeId, 10));
+};
+
 function selectBlueprint(typeId) {
     selectedTypeId = typeId;
     buildComponents = {};

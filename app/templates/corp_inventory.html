@@ -128,7 +128,9 @@ window.scanLocation = function(locationId) {
 };
 
 /* Search result selection */
-window.selectSearchItem = function(typeId, typeName) {
+window.selectSearchItem = function() {
+    var typeId = this.dataset.typeId;
+    var typeName = this.dataset.typeName;
     document.getElementById('add-type-id').value = typeId;
     document.getElementById('add-type-name').value = typeName;
     document.getElementById('add-search').value = typeName;

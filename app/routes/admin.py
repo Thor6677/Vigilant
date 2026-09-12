@@ -881,12 +881,10 @@ async def admin_allowlist_search(request: Request, db: AsyncSession = Depends(ge
     for r in results:
         safe_name = escape(r["name"], quote=True)
         html_parts.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
             f'data-id="{r["id"]}" data-name="{safe_name}" '
-            f'onclick="selectAllowlistResult(+this.dataset.id, this.dataset.name)">'
+            f'data-click="selectAllowlistResult">'
             f'{safe_name} <span style="color:var(--muted);">({r["id"]})</span></div>'
         )
     return HTMLResponse("".join(html_parts))

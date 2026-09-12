@@ -416,7 +416,8 @@ function searchField(endpoint, field) {
             });
     }, 250);
 }
-function selectSystem(name) {
+function selectSystem() {
+    var name = this.dataset.name;
     document.getElementById('system-search').value = name;
     document.getElementById('system-results').style.display = 'none';
 }
@@ -424,7 +425,8 @@ function selectRegion(name) {
     document.getElementById('region-search').value = name;
     document.getElementById('region-results').style.display = 'none';
 }
-function selectOwner(name) {
+function selectOwner() {
+    var name = this.dataset.name;
     document.getElementById('owner-search').value = name;
     document.getElementById('owner-results').style.display = 'none';
 }
@@ -459,7 +461,9 @@ function searchACL(groupId) {
 }
 /* Global handler called from search result onclick */
 var _activeACLGroup = null;
-window.selectACLEntry = function(id, name) {
+window.selectACLEntry = function() {
+    var id = this.dataset.id;
+    var name = this.dataset.name;
     if (_activeACLGroup !== null) {
         document.getElementById('acl-id-' + _activeACLGroup).value = id;
         document.getElementById('acl-name-' + _activeACLGroup).value = name;

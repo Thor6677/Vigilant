@@ -452,7 +452,9 @@ function searchSkills() {
             .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
     }, 250);
 }
-function selectSkill(id, name) {
+function selectSkill() {
+    var id = this.dataset.id;
+    var name = this.dataset.name;
     document.getElementById('skill-id').value = id;
     document.getElementById('skill-search').value = name;
     document.getElementById('skill-results').style.display = 'none';
@@ -485,7 +487,9 @@ function searchShips() {
             .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
     }, 250);
 }
-function selectShip(id, name) {
+function selectShip() {
+    var id = this.dataset.id;
+    var name = this.dataset.name;
     document.getElementById('ship-id').value = id;
     document.getElementById('ship-search').value = name;
     document.getElementById('ship-results').style.display = 'none';
@@ -583,7 +587,8 @@ function exportPlan(e) {
 /* Copy the export textarea's contents to the clipboard. Lives on the parent
    page because the export response is htmx-swapped as innerHTML, which does
    not execute inline <script nonce="{{ request.state.csp_nonce }}"> tags reliably. */
-function copyExportText(btn) {
+function copyExportText() {
+    var btn = this;
     var ta = document.getElementById('export-text');
     if (!ta) return;
     ta.select();

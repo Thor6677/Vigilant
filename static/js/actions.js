@@ -100,6 +100,34 @@
     // to swallow a click without doing anything else). Pair with data-stop.
     window.noop = window.noop || function () {};
 
+    // ── Shared handlers for patterns that were repeated inline ──────────
+    //
+    // Each of these replaces a one-liner that appeared in several templates.
+    // They live here rather than being re-declared per page so there is one
+    // definition to fix.
+
+    // Was: onchange="this.form.submit()" — a select that re-submits its own
+    // filter form.
+    window.submitForm = window.submitForm || function () {
+        if (this.form) this.form.submit();
+    };
+
+    // Was: onclick="this.select()" — click a readonly input, select its text.
+    window.selectAll = window.selectAll || function () {
+        if (this.select) this.select();
+    };
+
+    // Was: onclick="this.closest('.row').classList.toggle('is-expanded')" —
+    // a header that expands its own card. The ancestor to toggle comes from
+    // data-toggle-target; it defaults to the element itself so a missing
+    // attribute degrades to a visible no-op rather than a thrown error on
+    // closest(null).
+    window.toggleExpanded = window.toggleExpanded || function () {
+        var selector = this.dataset && this.dataset.toggleTarget;
+        var target = selector ? this.closest(selector) : this;
+        if (target) target.classList.toggle('is-expanded');
+    };
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it

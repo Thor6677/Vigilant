@@ -632,7 +632,8 @@ async def corp_inventory_type_search(corp_id: int, q: str = "", db: AsyncSession
     for r in results:
         html += (
             f'<div class="b-row" style="cursor:pointer;" '
-            f'onclick="selectSearchItem({r["type_id"]}, \'{r["type_name"].replace(chr(39), "&#39;")}\')">'
+            f'data-type-id="{r["type_id"]}" data-type-name="{html_escape(r["type_name"], quote=True)}" '
+            f'data-click="selectSearchItem">'
             f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
             f'style="width:24px;height:24px;border:1px solid var(--border);">'
             f'<span class="b-row-val" style="text-align:left;flex:1;">{r["type_name"]}</span>'
