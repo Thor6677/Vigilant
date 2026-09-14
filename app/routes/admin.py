@@ -1073,6 +1073,8 @@ async def _updater_context(request: Request, db: AsyncSession,
     latest = await _latest_known_tag(db)
     current = (beat or {}).get("current_tag")
     state = updater_client.run_state(status, datetime.now(timezone.utc))
+    # Queued but not yet claimed: status.json still describes the PREVIOUS run.
+    awaiting = beat is not None and updater_client.has_pending_request()
     return {
         "request": request,
         "available": beat is not None,
@@ -1084,7 +1086,8 @@ async def _updater_context(request: Request, db: AsyncSession,
         # second or two in which run_state is still idle, and a panel that only
         # polled on BUSY would sit motionless right after the operator clicked —
         # looking exactly like a button that did nothing.
-        "polling": polling or state == updater_client.BUSY,
+        "awaiting_pickup": awaiting,
+        "polling": polling or awaiting or state == updater_client.BUSY,
         "targets": (beat or {}).get("targets") or [],
         "current_tag": current,
         "latest_tag": latest,

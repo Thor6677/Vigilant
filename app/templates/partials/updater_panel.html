@@ -69,14 +69,16 @@
       </div>
     {% endif %}
 
-    {% if run_state == BUSY or (polling and not status) %}
+    {% if run_state == BUSY or awaiting_pickup or (polling and not status) %}
       <div class="updater-progress">
         <p>
-          <b>{{ (status.action if status else 'update') | capitalize }} in progress</b>
-          {% if status %}— {{ status.from_tag or '?' }} &rarr; {{ status.to_tag or '?' }}{% endif %}
+          <b>{{ ((status.action if status and not awaiting_pickup else 'update')) | capitalize }} in progress</b>
+          {% if status and not awaiting_pickup %}— {{ status.from_tag or '?' }} &rarr; {{ status.to_tag or '?' }}{% endif %}
         </p>
-        <p class="mono">{{ (status.step if status else None) or 'queued' }}</p>
-        {% if status and status.log_tail %}
+        {# While awaiting pickup, status.json still describes the PREVIOUS run —
+           show "queued", never its step or outcome. #}
+        <p class="mono">{{ 'queued' if awaiting_pickup else ((status.step if status else None) or 'queued') }}</p>
+        {% if status and status.log_tail and not awaiting_pickup %}
           <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
         {% endif %}
       </div>

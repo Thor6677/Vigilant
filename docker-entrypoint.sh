@@ -37,8 +37,24 @@ fi
 # Guarded on the directory existing, so the default install — where no /control
 # is mounted at all — skips this silently rather than failing to boot.
 if [ -d /control ]; then
-    chown vigilant:vigilant /control
-    chmod 0770 /control
+    # ORDER MATTERS, and it is not the obvious one.
+    #
+    # chmod on a file you do not own requires CAP_FOWNER, which this container
+    # deliberately does not have (cap_drop: ALL, cap_add: CHOWN/SETUID/SETGID).
+    # A fresh named volume is root-owned, so root may chmod it *before* the
+    # chown and may not after. Doing it the natural way round — chown then
+    # chmod — fails with "Operation not permitted", and set -e turns that into
+    # an app that CRASH-LOOPS the moment the updater profile is first enabled.
+    # Found on the throwaway stack, 2026-09-14.
+    #
+    # Both steps are guarded so the second boot, where the directory is already
+    # vigilant-owned and root can no longer chmod it, skips rather than dies.
+    if [ "$(stat -c %a /control)" != "770" ]; then
+        chmod 0770 /control || echo "entrypoint: could not set /control mode; the updater may be unable to write its heartbeat" >&2
+    fi
+    if [ "$(stat -c %u /control)" != "$(id -u vigilant)" ]; then
+        chown vigilant:vigilant /control
+    fi
 fi
 
 # Hand off to the real process as the vigilant user.

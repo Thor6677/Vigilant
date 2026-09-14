@@ -84,20 +84,71 @@ def test_updater_joins_the_apps_group_for_the_shared_volume(updater_svc):
 
 # ── The path that must not move ──────────────────────────────────────────────
 
-def test_repo_is_mounted_at_exactly_opt_vigilant(updater_svc):
-    """compose derives its project identity from the working directory and
-    deploy.sh hardcodes this path. Mounted anywhere else, compose treats it as a
-    new project and CREATES A SECOND app container instead of recreating the
-    running one — with both bound to the same data volume.
+def _repo_mount(updater_svc):
+    return [str(v) for v in updater_svc["volumes"] if "docker.sock" not in str(v)
+            and not str(v).startswith("control:")][0]
+
+
+def _split_mount(spec: str) -> tuple[str, str]:
+    """Split host:container on the separator colon only.
+
+    A naive partition(":") splits inside ${VIGILANT_ROOT:-/opt/vigilant} — the
+    default-value syntax contains its own colon — and would compare two halves
+    of the same variable reference. Track brace depth and cut at the first colon
+    outside one.
     """
-    mounts = [str(v) for v in updater_svc["volumes"]]
-    assert "/opt/vigilant:/opt/vigilant" in mounts
+    depth = 0
+    for i, ch in enumerate(spec):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == ":" and depth == 0:
+            return spec[:i], spec[i + 1:]
+    raise AssertionError(f"not a bind mount: {spec}")
+
+
+def test_repo_mount_is_identical_on_both_sides(updater_svc):
+    """The path INSIDE the container decides which stack gets recreated, because
+    compose derives its project identity from the working directory. If the two
+    sides ever diverge, compose treats it as a new project and creates a SECOND
+    app container bound to the same data volume instead of recreating the
+    running one.
+    """
+    host, container = _split_mount(_repo_mount(updater_svc))
+    assert host == container, f"repo mount sides differ: {host} != {container}"
 
 
 def test_updater_root_env_matches_the_mount(updater_svc):
+    """The sidecar's idea of its root and the path it is mounted at must be the
+    same string, or deploy.sh cd's somewhere the bind mount does not cover."""
     env = updater_svc["environment"]
     joined = " ".join(env) if isinstance(env, list) else str(env)
-    assert "VIGILANT_ROOT=/opt/vigilant" in joined
+    host = _split_mount(_repo_mount(updater_svc))[0]
+    assert f"VIGILANT_ROOT={host}" in joined
+
+
+def test_repo_path_defaults_to_opt_vigilant(updater_svc):
+    """Parameterised, but a stock install must be unchanged."""
+    assert "${VIGILANT_ROOT:-/opt/vigilant}" in _repo_mount(updater_svc)
+
+
+def test_updater_image_registry_is_passed_through(updater_svc):
+    """deploy.sh resolves its own VIGILANT_IMAGE default independently of
+    compose. If it is not passed in, the sidecar pulls from ghcr.io while
+    compose runs whatever the file says — the two disagree about what a tag
+    means, and it surfaces as a "not found" at pull time. Caught on the
+    throwaway stack, 2026-09-14."""
+    env = updater_svc["environment"]
+    joined = " ".join(env) if isinstance(env, list) else str(env)
+    assert "VIGILANT_IMAGE=" in joined
+
+
+def test_repo_path_is_not_hardcoded(updater_svc):
+    """Hardcoding it is a foot-gun, not a safety measure: a second stack
+    enabling this profile would silently bind PRODUCTION's repo and deploy the
+    wrong site. Observed on the throwaway stack, 2026-09-14."""
+    assert _repo_mount(updater_svc) != "/opt/vigilant:/opt/vigilant"
 
 
 # ── No network surface ───────────────────────────────────────────────────────
@@ -128,6 +179,36 @@ def test_entrypoint_prepares_the_control_volume():
     assert "/control" in src
     assert "chown vigilant:vigilant /control" in src
     assert "0770" in src
+
+
+def test_entrypoint_chmods_before_it_chowns():
+    """Order is load-bearing and is not the obvious one.
+
+    chmod on a file you do not own needs CAP_FOWNER, which this container
+    deliberately drops. A fresh named volume is root-owned, so root may chmod it
+    BEFORE the chown and may not after. Written the natural way round the
+    entrypoint fails with "Operation not permitted" and set -e turns that into
+    an app that crash-loops the moment the updater profile is first enabled —
+    observed on the throwaway stack before this ordering was adopted.
+    """
+    src = ENTRYPOINT.read_text()
+    block = src[src.index("if [ -d /control ]"):]
+    assert block.index("chmod 0770 /control") < block.index("chown vigilant:vigilant /control")
+
+
+def test_entrypoint_does_not_require_cap_fowner(compose):
+    """If FOWNER is ever added to buy the naive ordering, this fails — the
+    ordering above is the cheaper fix and keeps the capability set minimal."""
+    assert "FOWNER" not in [c.upper() for c in compose["services"]["app"]["cap_add"]]
+
+
+def test_control_chmod_failure_is_not_fatal():
+    """Degrade visibly — a hidden panel and a logged warning — rather than
+    taking the whole app down over a directory mode."""
+    src = ENTRYPOINT.read_text()
+    block = src[src.index("if [ -d /control ]"):]
+    line = [l for l in block.splitlines() if "chmod 0770 /control" in l][0]
+    assert "||" in line
 
 
 def test_entrypoint_tolerates_a_missing_control_dir():

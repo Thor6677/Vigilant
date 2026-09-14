@@ -229,6 +229,24 @@ def is_available() -> bool:
     return heartbeat_is_fresh(_mtime(control_dir() / "updater.json"), time.time())
 
 
+def has_pending_request() -> bool:
+    """Whether a request is written but not yet claimed by the sidecar.
+
+    The window is short — the supervisor polls about once a second — but it is
+    exactly the window right after the operator clicks, and status.json still
+    holds the PREVIOUS run's outcome throughout it. Without this the panel
+    answers a click by re-displaying the last run, which may well read
+    "succeeded": the supervisor's own _publish_refusal docstring flags the same
+    trap on its side.
+
+    Stateless on purpose. claim_request() renames request.json away as its first
+    act, so the file's existence IS the "queued but not yet picked up" signal,
+    and every poll can ask independently without the app having to remember
+    anything across its own restart.
+    """
+    return (control_dir() / "request.json").exists()
+
+
 def current_run_state() -> str:
     return run_state(read_status(), datetime.now(timezone.utc))
 

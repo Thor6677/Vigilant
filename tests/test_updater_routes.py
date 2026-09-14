@@ -323,3 +323,42 @@ def test_panel_has_no_inline_event_handlers(env):
     _beat(env.control)
     body = env.admin().get("/admin/update/status").text
     assert not re.search(r"\son(click|change|submit|input|load)=", body)
+
+
+# ── The gap between submit and pickup ────────────────────────────────────────
+
+def test_panel_shows_queued_while_a_request_awaits_pickup(env):
+    """status.json still describes the PREVIOUS run until the sidecar claims.
+
+    That window is exactly when the operator has just clicked, so re-displaying
+    the last run there answers a click with a stale outcome — which may well
+    read "succeeded". Observed on the throwaway stack, 2026-09-14.
+    """
+    _beat(env.control)
+    (env.control / "status.json").write_text(json.dumps({
+        "state": "success", "action": "update", "to_tag": "v1.2.0",
+        "log_tail": ["PREVIOUS RUN OUTPUT"],
+    }))
+    r = env.admin().post("/admin/update", data={"tag": "v1.3.0"})
+    assert r.status_code == 200
+    assert "queued" in r.text
+    assert "PREVIOUS RUN OUTPUT" not in r.text
+    assert "succeeded" not in r.text
+
+
+def test_queued_state_is_derived_from_the_request_file(env):
+    """Stateless: claim_request() renames request.json away as its first act, so
+    the file's existence IS the signal — no cross-restart bookkeeping needed."""
+    _beat(env.control)
+    (env.control / "request.json").write_text(json.dumps({"id": "x", "action": "update"}))
+    body = env.admin().get("/admin/update/status").text
+    assert "queued" in body
+
+
+def test_no_queued_state_once_the_request_is_claimed(env):
+    _beat(env.control)
+    (env.control / "status.json").write_text(json.dumps({
+        "state": "success", "action": "update", "to_tag": "v1.2.0",
+    }))
+    body = env.admin().get("/admin/update/status").text
+    assert "succeeded" in body

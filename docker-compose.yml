@@ -86,16 +86,31 @@ services:
       - "10001"                # the app's gid, for the shared /control volume
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # MUST be /opt/vigilant on BOTH sides. compose derives its project
-      # identity from the working directory, and deploy.sh hardcodes this path:
-      # mount it anywhere else and compose treats it as a new project and
-      # CREATES A SECOND app container rather than recreating the running one —
-      # with both bound to the same data volume.
-      - /opt/vigilant:/opt/vigilant
+      # The two sides MUST be identical, which is why one variable fills both.
+      # compose derives its project identity from the working directory, so the
+      # path inside the container decides WHICH STACK gets recreated: mount the
+      # repo at a different path than the sidecar reports as its root and
+      # compose treats it as a new project, creating a SECOND app container
+      # bound to the same data volume instead of recreating the running one.
+      #
+      # Parameterised rather than hardcoded because hardcoding it is a
+      # foot-gun, not a safety measure: a second stack that enables this profile
+      # would silently bind PRODUCTION's repo and deploy the wrong site.
+      # Observed on the throwaway verification stack, 2026-09-14 — the sidecar
+      # came up reporting root=/opt/vigilant and production's current_tag while
+      # running under a completely different compose project. Default is
+      # unchanged, so a normal install behaves exactly as before.
+      - ${VIGILANT_ROOT:-/opt/vigilant}:${VIGILANT_ROOT:-/opt/vigilant}
       - control:/control
     environment:
-      - VIGILANT_ROOT=/opt/vigilant
+      - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
       - VIGILANT_CONTROL_DIR=/control
+      # Passed through so the sidecar's `docker pull` resolves the same registry
+      # the compose file does. Without it deploy.sh falls back to its own
+      # ghcr.io default while compose uses this one, and the two disagree about
+      # what "v1.2.3" means — which surfaces as a "not found" at pull time, on a
+      # throwaway or mirrored stack only. Default is unchanged.
+      - VIGILANT_IMAGE=${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}
     # Deliberately NOT on the `web` bridge: it publishes no ports and has no
     # listener, so nothing should be able to reach it. It still needs outbound
     # for `git fetch`, which the project's default network provides. The image
