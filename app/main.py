@@ -527,3 +527,10 @@ async def startup():
         # since a "dev" version can never compare as older than a release.
         from app.ops.update_check import run_update_check
         asyncio.create_task(run_update_check())
+
+        # Deferred and automatic updates. Ticks every 60s but does nothing at
+        # all unless an updater sidecar is running AND the operator has either
+        # scheduled something or enabled the policy — both of which ship off.
+        # Inside the same jobs gate: only one instance may drive deployment.
+        from app.ops.update_schedule import run_scheduler
+        asyncio.create_task(run_scheduler())

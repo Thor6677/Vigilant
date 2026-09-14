@@ -135,15 +135,41 @@ def test_base_error_handler_still_honours_the_opt_out():
 
 # ── Confirmation ─────────────────────────────────────────────────────────────
 
-def test_both_destructive_forms_confirm(panel):
-    """The spec requires stating plainly that this restarts the app. Two forms,
-    two confirmations."""
-    assert panel.count("hx-confirm=") == 2
+def _form_for(panel: str, action: str) -> str:
+    """The markup of the form posting to `action`."""
+    i = panel.index(f'hx-post="{action}"')
+    start = panel.rindex("<form", 0, i)
+    return panel[start:panel.index("</form>", i)]
 
 
-def test_confirmations_mention_the_outage(panel):
-    for m in re.findall(r'hx-confirm="([^"]+)"', panel):
-        assert "unavailable" in m.lower(), m
+DESTRUCTIVE = ["/admin/update", "/admin/rollback", "/admin/update/policy"]
+
+
+@pytest.mark.parametrize("action", DESTRUCTIVE)
+def test_every_destructive_form_confirms(action, panel):
+    """Anything that can restart the app — now or on a schedule — asks first."""
+    assert "hx-confirm=" in _form_for(panel, action)
+
+
+@pytest.mark.parametrize("action", ["/admin/update", "/admin/rollback"])
+def test_immediate_actions_mention_the_outage(action, panel):
+    """The spec requires stating plainly that this restarts the app."""
+    msg = re.search(r'hx-confirm="([^"]+)"', _form_for(panel, action)).group(1)
+    assert "unavailable" in msg.lower(), msg
+
+
+def test_the_policy_confirmation_names_what_is_actually_being_agreed(panel):
+    """Enabling a policy is not an outage now — it is consenting to unattended
+    ones later, including the case the health check cannot catch. Saying "the
+    site will be unavailable for 30-60 seconds" here would be wrong."""
+    msg = re.search(r'hx-confirm="([^"]+)"', _form_for(panel, "/admin/update/policy")).group(1)
+    assert "automatically" in msg.lower()
+    assert "health check" in msg.lower()
+
+
+def test_cancelling_a_schedule_needs_no_confirmation(panel):
+    """Cancelling is the safe direction. A confirmation there is just friction."""
+    assert "hx-confirm=" not in _form_for(panel, "/admin/update/schedule/cancel")
 
 
 def test_confirm_uses_htmx_not_the_native_submit_dispatcher(panel):
@@ -246,9 +272,20 @@ def test_overview_section_still_auto_refreshes():
 
 def test_rollback_targets_are_a_closed_list(panel):
     """A free-text tag field would invite typing any ref; the select can only
-    offer releases this host has actually run."""
-    assert "<select" in panel
-    assert 'type="text"' not in panel
+    offer releases this host has actually run. Scoped to the rollback form —
+    the schedule form legitimately takes typed text for a time and a zone."""
+    form = _form_for(panel, "/admin/rollback")
+    assert "<select" in form
+    assert 'type="text"' not in form
+
+
+def test_no_form_lets_a_tag_be_typed(panel):
+    """Applies to the schedule form too: it carries the tag as a hidden field
+    taken from the release the operator was shown, never as free text."""
+    for action in ["/admin/update", "/admin/rollback", "/admin/update/schedule"]:
+        form = _form_for(panel, action)
+        assert not re.search(r'<input[^>]*name="tag"[^>]*type="text"', form), action
+        assert not re.search(r'type="text"[^>]*name="tag"', form), action
 
 
 # ── The ancestor that can defeat all of the above ────────────────────────────

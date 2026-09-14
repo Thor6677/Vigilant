@@ -44,6 +44,13 @@ SLICE = (SLICE_PARENT,) + SLICE_CHILDREN
 # — the coverage test is what caught it.
 SKIP = (
     'esi_cache',
+    # Deployment control state, deliberately not inherited. A dev instance that
+    # copied production's policy would carry its enabled flag, its window and
+    # its last_fired_window — and while a "dev" build can never satisfy
+    # is_newer() and so can never actually fire, seeding one instance's
+    # deployment schedule into another is not a thing to leave to a fail-safe.
+    'update_policy',
+    'update_schedule',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).

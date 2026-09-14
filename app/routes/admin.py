@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,12 +19,14 @@ from app.db.models import (
     get_db, User, Character, CharacterDashboardCache, WalletSnapshot,
     MiningLedgerEntry, DScanResult, CharacterAssetCache, CorpInventoryThreshold,
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
+    UpdateSchedule,
 )
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
 from app.esi.rate_limit import rate_limit_tracker
 from app.config import get_settings
 from app.ops import updater as updater_client
+from app.ops import update_schedule
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1075,7 +1078,17 @@ async def _latest_known_tag(db: AsyncSession) -> str | None:
 
 async def _updater_context(request: Request, db: AsyncSession,
                            error: str | None = None,
-                           polling: bool = False) -> dict:
+                           polling: bool = False,
+                           schedule_error: str | None = None,
+                           schedule_notice: str | None = None) -> dict:
+    """Everything partials/updater_panel.html needs — update state AND schedule
+    state, always together.
+
+    One template renders both halves, so building them separately invites a
+    render that has one and not the other: saving a policy would blank the
+    update controls above it, or a POST to /admin/update would drop the schedule
+    form. Merging here makes that impossible by construction.
+    """
     beat = updater_client.read_heartbeat()
     status = updater_client.read_status()
     latest = await _latest_known_tag(db)
@@ -1096,6 +1109,7 @@ async def _updater_context(request: Request, db: AsyncSession,
         # looking exactly like a button that did nothing.
         "awaiting_pickup": awaiting,
         "polling": polling or awaiting or state == updater_client.BUSY,
+        **(await _schedule_context(request, db, schedule_error, schedule_notice)),
         "targets": (beat or {}).get("targets") or [],
         "current_tag": current,
         "latest_tag": latest,
@@ -1194,3 +1208,168 @@ async def updater_rollback(request: Request, tag: str = Form(...),
             status_code=400,
         )
     return await _submit(request, db, admin, "rollback", tag, "admin_rollback_requested")
+
+
+# ── Scheduled and automatic updates (Tasks 11–13) ────────────────────────────
+#
+# The scheduler itself lives in app/ops/update_schedule.py and runs in the
+# background; these routes only read and write the two rows it consults. They
+# never submit a request themselves — that would give the operator two ways to
+# start a deploy with different guard rails.
+
+
+async def _schedule_context(request: Request, db: AsyncSession,
+                            error: str | None = None,
+                            notice: str | None = None) -> dict:
+    policy = await update_schedule.get_policy(db)
+    pending = await update_schedule.pending_schedule(db)
+    now = datetime.now(timezone.utc)
+    nxt = update_schedule.next_window(
+        policy.weekday, policy.local_time, policy.timezone, now)
+    return {
+        "policy": policy,
+        "pending_schedule": pending,
+        "next_window": nxt,
+        "weekdays": list(enumerate(update_schedule.WEEKDAYS)),
+        "schedule_error": error,
+        "schedule_notice": notice,
+        "grace_hours": update_schedule.GRACE_SECONDS // 3600,
+    }
+
+
+async def _overview_after_schedule_change(request: Request, db: AsyncSession,
+                                          error=None, notice=None,
+                                          status_code: int = 200):
+    return templates.TemplateResponse(
+        request, "partials/updater_panel.html",
+        await _updater_context(request, db, schedule_error=error,
+                               schedule_notice=notice),
+        status_code=status_code)
+
+
+@router.post("/update/schedule", response_class=HTMLResponse)
+async def updater_schedule_create(request: Request,
+                                  tag: str = Form(...),
+                                  run_at: str = Form(...),
+                                  tz: str = Form("UTC"),
+                                  db: AsyncSession = Depends(get_db),
+                                  admin: User = Depends(require_admin)):
+    """Defer one update to a specific moment.
+
+    `run_at` is plain text "YYYY-MM-DD HH:MM" and NOT <input type="datetime-local">
+    — the repo's existing gotcha: datetime-local forces browser-timezone
+    conversion, which is the last thing wanted on a field whose zone is chosen
+    explicitly next to it.
+    """
+    _require_updater()
+    if not updater_client.validate_tag_advisory(tag):
+        return await _overview_after_schedule_change(
+            request, db, error=f"not a release tag: {tag}", status_code=400)
+    if not update_schedule.valid_timezone(tz):
+        return await _overview_after_schedule_change(
+            request, db, error=f"unknown timezone: {tz}", status_code=400)
+    try:
+        naive = datetime.strptime(run_at.strip(), "%Y-%m-%d %H:%M")
+    except ValueError:
+        return await _overview_after_schedule_change(
+            request, db, error="time must look like 2026-09-20 04:00",
+            status_code=400)
+
+    local = naive.replace(tzinfo=ZoneInfo(tz))
+    run_at_utc = local.astimezone(timezone.utc)
+    if run_at_utc <= datetime.now(timezone.utc):
+        return await _overview_after_schedule_change(
+            request, db, error="that time is in the past", status_code=400)
+
+    # At most one pending schedule. Asking again replaces the previous one
+    # rather than queueing two updates nobody is tracking.
+    existing = await update_schedule.pending_schedule(db)
+    if existing is not None:
+        existing.state = "superseded"
+
+    db.add(UpdateSchedule(
+        target_tag=tag, run_at=run_at_utc.replace(tzinfo=None), timezone=tz,
+        state="pending", created_by=admin.id,
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    ))
+    await db.commit()
+    await _log_audit(db, "admin_update_scheduled", admin.id,
+                     detail=f"update to {tag} scheduled for {run_at} {tz}",
+                     ip=request.client.host if request.client else None)
+    return await _overview_after_schedule_change(
+        request, db, notice=f"{tag} scheduled for {run_at} ({tz}).")
+
+
+@router.post("/update/schedule/cancel", response_class=HTMLResponse)
+async def updater_schedule_cancel(request: Request,
+                                  db: AsyncSession = Depends(get_db),
+                                  admin: User = Depends(require_admin)):
+    pending = await update_schedule.pending_schedule(db)
+    if pending is None:
+        return await _overview_after_schedule_change(
+            request, db, error="nothing is scheduled", status_code=400)
+    pending.state = "cancelled"
+    await db.commit()
+    await _log_audit(db, "admin_update_schedule_cancelled", admin.id,
+                     detail=f"cancelled scheduled update to {pending.target_tag}",
+                     ip=request.client.host if request.client else None)
+    return await _overview_after_schedule_change(request, db, notice="Schedule cancelled.")
+
+
+@router.post("/update/policy", response_class=HTMLResponse)
+async def updater_policy_save(request: Request,
+                              enabled: str = Form(None),
+                              weekday: int = Form(6),
+                              local_time: str = Form("04:00"),
+                              tz: str = Form("UTC"),
+                              patch_only: str = Form(None),
+                              db: AsyncSession = Depends(get_db),
+                              admin: User = Depends(require_admin)):
+    """Save the standing auto-update policy.
+
+    Saving always clears `paused_reason`: the operator has just looked at this
+    form, so an explicit save IS the acknowledgement that a previous automatic
+    failure has been seen. Leaving it set would make a re-enable silently
+    ineffective.
+    """
+    _require_updater()
+    if not update_schedule.valid_timezone(tz):
+        return await _overview_after_schedule_change(
+            request, db, error=f"unknown timezone: {tz}", status_code=400)
+    if update_schedule.parse_local_time(local_time) is None:
+        return await _overview_after_schedule_change(
+            request, db, error="time must look like 04:00", status_code=400)
+    if not (0 <= weekday <= 6):
+        return await _overview_after_schedule_change(
+            request, db, error="invalid day", status_code=400)
+
+    policy = await update_schedule.get_policy(db)
+    was_enabled = policy.enabled
+    policy.enabled = enabled is not None
+    policy.weekday = weekday
+    policy.local_time = local_time.strip()
+    policy.timezone = tz
+    policy.patch_only = patch_only is not None
+    policy.paused_reason = None
+    # Turning the policy ON must not immediately fire for a window that already
+    # passed today. Claim the current window as already handled so the first
+    # automatic run is the NEXT one — enabling a schedule should never be
+    # indistinguishable from pressing Update.
+    if policy.enabled and not was_enabled:
+        window = update_schedule.most_recent_window(
+            policy.weekday, policy.local_time, policy.timezone,
+            datetime.now(timezone.utc))
+        policy.last_fired_window = update_schedule.window_key(window) if window else None
+    policy.updated_by = admin.id
+    policy.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.commit()
+
+    await _log_audit(db, "admin_update_policy", admin.id,
+                     detail=(f"auto-update {'enabled' if policy.enabled else 'disabled'}"
+                             f" ({update_schedule.WEEKDAYS[policy.weekday]} "
+                             f"{policy.local_time} {policy.timezone}, "
+                             f"patch_only={policy.patch_only})"),
+                     ip=request.client.host if request.client else None)
+    return await _overview_after_schedule_change(
+        request, db,
+        notice="Automatic updates enabled." if policy.enabled else "Automatic updates off.")

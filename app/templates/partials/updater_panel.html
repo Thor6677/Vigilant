@@ -169,6 +169,111 @@
           </form>
         {% endif %}
       </div>
+
+      {# ── Deferred and automatic updates ─────────────────────────────────── #}
+      <div class="updater-schedule">
+        {% if schedule_error %}
+          <p class="b-empty" style="color:var(--danger);">{{ schedule_error }}</p>
+        {% elif schedule_notice %}
+          <p class="b-empty">{{ schedule_notice }}</p>
+        {% endif %}
+
+        {% if pending_schedule %}
+          <div class="updater-pending">
+            <p>
+              <b>Scheduled:</b> update to
+              <b class="mono">{{ pending_schedule.target_tag }}</b>
+              at <b class="mono">{{ pending_schedule.run_at.strftime('%Y-%m-%d %H:%M') }} UTC</b>
+              <span class="b-muted">(entered as {{ pending_schedule.timezone }})</span>
+            </p>
+            <form hx-post="/admin/update/schedule/cancel"
+                  hx-target="#updater-panel" hx-swap="outerHTML">
+              <button type="submit" class="b-btn b-btn-secondary">Cancel schedule</button>
+            </form>
+          </div>
+        {% elif update_available %}
+          <details class="updater-schedule-form">
+            <summary>Schedule this update instead</summary>
+            <form hx-post="/admin/update/schedule"
+                  hx-target="#updater-panel" hx-swap="outerHTML">
+              <input type="hidden" name="tag" value="{{ latest_tag }}">
+              {# Plain text, NOT datetime-local: that control forces
+                 browser-timezone conversion, which is the last thing wanted on a
+                 field whose zone is chosen explicitly beside it. #}
+              <label for="sched-at">Apply {{ latest_tag }} at</label>
+              <input id="sched-at" name="run_at" type="text"
+                     placeholder="YYYY-MM-DD HH:MM" required>
+              <label for="sched-tz">Timezone</label>
+              <input id="sched-tz" name="tz" type="text" value="{{ policy.timezone }}"
+                     placeholder="Europe/London">
+              <button type="submit" class="b-btn b-btn-secondary">Schedule</button>
+            </form>
+            <p class="b-muted">
+              Fires within {{ grace_hours }}h of the chosen time; if Vigilant is
+              down for longer than that, the schedule is abandoned rather than
+              applied at a surprising hour.
+            </p>
+          </details>
+        {% endif %}
+
+        <details class="updater-policy" {% if policy.enabled %}open{% endif %}>
+          <summary>
+            Automatic updates &mdash;
+            {% if policy.enabled %}
+              on, {{ weekdays[policy.weekday][1] }} {{ policy.local_time }} {{ policy.timezone }}
+            {% else %}off{% endif %}
+          </summary>
+
+          {% if policy.paused_reason %}
+            <p class="b-empty" style="color:var(--danger);">
+              Paused: {{ policy.paused_reason }}. Saving this form re-enables it.
+            </p>
+          {% endif %}
+
+          <form hx-post="/admin/update/policy"
+                hx-target="#updater-panel" hx-swap="outerHTML"
+                hx-confirm="Apply updates automatically, without anyone watching? Vigilant restarts each time and a release that starts cleanly but misbehaves will not be caught by the health check.">
+            <label>
+              <input type="checkbox" name="enabled" {% if policy.enabled %}checked{% endif %}>
+              Apply updates automatically
+            </label>
+
+            <label for="pol-day">Day</label>
+            <select id="pol-day" name="weekday">
+              {% for i, name in weekdays %}
+                <option value="{{ i }}" {% if i == policy.weekday %}selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="pol-time">Time</label>
+            <input id="pol-time" name="local_time" type="text"
+                   value="{{ policy.local_time }}" placeholder="04:00">
+
+            <label for="pol-tz">Timezone</label>
+            <input id="pol-tz" name="tz" type="text" value="{{ policy.timezone }}"
+                   placeholder="Europe/London">
+
+            <label>
+              <input type="checkbox" name="patch_only" {% if policy.patch_only %}checked{% endif %}>
+              Patch releases only (x.y.<b>Z</b>)
+            </label>
+
+            <button type="submit" class="b-btn b-btn-secondary">Save</button>
+          </form>
+
+          {% if next_window %}
+            <p class="b-muted">
+              Next run: <span class="mono">{{ next_window.strftime('%Y-%m-%d %H:%M %Z') }}</span>
+              &mdash; <span class="mono">{{ next_window.astimezone(None).strftime('%H:%M') }}</span> local to the server
+            </p>
+          {% endif %}
+          <p class="b-muted">
+            Unattended runs report to Discord, and a failed one pauses automatic
+            updates until you re-enable them. Prereleases are never applied
+            automatically.
+          </p>
+        </details>
+      </div>
     {% endif %}
   {% endif %}
 </div>

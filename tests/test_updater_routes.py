@@ -81,6 +81,7 @@ def env(tmp_path, monkeypatch):
 
     class Env:
         control = tmp_path
+        _sessionmaker = SessionLocal
         admin = staticmethod(lambda: client(ADMIN_ID))
         plain = staticmethod(lambda: client(PLAIN_ID))
         anon = staticmethod(
@@ -407,3 +408,201 @@ def test_overview_section_survives_a_missing_updater(env):
     r = env.admin().get("/admin/section/overview")
     assert r.status_code == 200
     assert "No updater is running" in r.text
+
+
+# ── Scheduling and the auto-update policy ────────────────────────────────────
+
+def _future(hours=24):
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+
+
+def _policy_row(env_):
+    from app.db.models import UpdatePolicy
+
+    async def q():
+        async with env_._sessionmaker() as db:
+            return (await db.execute(select(UpdatePolicy))).scalars().first()
+    return _run(q())
+
+
+def _schedules(env_):
+    from app.db.models import UpdateSchedule
+
+    async def q():
+        async with env_._sessionmaker() as db:
+            rows = (await db.execute(select(UpdateSchedule))).scalars().all()
+            return [(r.target_tag, r.state) for r in rows]
+    return _run(q())
+
+
+def test_schedule_requires_an_updater(env):
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert r.status_code == 404
+
+
+def test_schedule_is_created(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert r.status_code == 200
+    assert ("v1.3.0", "pending") in _schedules(env)
+
+
+def test_scheduling_does_not_submit_a_request(env):
+    """Scheduling defers; only the background loop submits. Two ways to start a
+    deploy would mean two sets of guard rails."""
+    _beat(env.control)
+    env.admin().post("/admin/update/schedule",
+                     data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert _request_file(env.control) is None
+
+
+def test_schedule_rejects_a_past_time(env):
+    _beat(env.control)
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": past, "tz": "UTC"})
+    assert r.status_code == 400
+    assert "in the past" in r.text
+
+
+def test_schedule_rejects_an_unknown_timezone(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": _future(), "tz": "Mars/Olympus"})
+    assert r.status_code == 400
+    assert "unknown timezone" in r.text
+
+
+def test_schedule_rejects_a_malformed_time(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": "next tuesday", "tz": "UTC"})
+    assert r.status_code == 400
+
+
+def test_schedule_rejects_a_bad_tag(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.2.3; rm -rf /", "run_at": _future(), "tz": "UTC"})
+    assert r.status_code == 400
+    assert _schedules(env) == []
+
+
+def test_a_second_schedule_supersedes_the_first(env):
+    """At most one pending schedule — two updates nobody is tracking is worse
+    than replacing the one that was asked for."""
+    _beat(env.control)
+    c = env.admin()
+    c.post("/admin/update/schedule", data={"tag": "v1.3.0", "run_at": _future(24), "tz": "UTC"})
+    c.post("/admin/update/schedule", data={"tag": "v1.4.0", "run_at": _future(48), "tz": "UTC"})
+    rows = dict(_schedules(env))
+    assert rows["v1.3.0"] == "superseded"
+    assert rows["v1.4.0"] == "pending"
+
+
+def test_schedule_can_be_cancelled(env):
+    _beat(env.control)
+    c = env.admin()
+    c.post("/admin/update/schedule", data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    r = c.post("/admin/update/schedule/cancel")
+    assert r.status_code == 200
+    assert dict(_schedules(env))["v1.3.0"] == "cancelled"
+
+
+def test_schedule_is_audit_logged(env):
+    _beat(env.control)
+    env.admin().post("/admin/update/schedule",
+                     data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert any(e == "admin_update_scheduled" for e, _ in env.audit_events())
+
+
+@pytest.mark.parametrize("path", ["/admin/update/schedule", "/admin/update/policy"])
+def test_schedule_endpoints_are_admin_gated(env, path):
+    _beat(env.control)
+    r = env.plain().post(path, data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert r.status_code == 403
+
+
+# ── Policy ───────────────────────────────────────────────────────────────────
+
+def test_policy_saves_and_enables(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00",
+        "tz": "America/New_York", "patch_only": "on"})
+    assert r.status_code == 200
+    p = _policy_row(env)
+    assert p.enabled is True and p.weekday == 6
+    assert p.local_time == "04:00" and p.timezone == "America/New_York"
+    assert p.patch_only is True
+
+
+def test_unchecked_boxes_turn_features_off(env):
+    """An HTML checkbox sends nothing when unchecked — a handler that only reads
+    present fields can never turn anything off."""
+    _beat(env.control)
+    c = env.admin()
+    c.post("/admin/update/policy", data={"enabled": "on", "weekday": "6",
+                                         "local_time": "04:00", "tz": "UTC",
+                                         "patch_only": "on"})
+    c.post("/admin/update/policy", data={"weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    p = _policy_row(env)
+    assert p.enabled is False and p.patch_only is False
+
+
+def test_enabling_claims_the_current_window(env):
+    """Turning the policy on must not instantly deploy because today's window
+    already passed. Enabling a schedule should never be indistinguishable from
+    pressing Update."""
+    _beat(env.control)
+    env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": str(datetime.now(timezone.utc).weekday()),
+        "local_time": "00:00", "tz": "UTC", "patch_only": "on"})
+    assert _policy_row(env).last_fired_window is not None
+
+
+def test_saving_the_policy_clears_a_pause(env):
+    """The operator is looking at the form; an explicit save IS the
+    acknowledgement. Otherwise re-enabling would be silently ineffective."""
+    _beat(env.control)
+    c = env.admin()
+    c.post("/admin/update/policy", data={"enabled": "on", "weekday": "6",
+                                         "local_time": "04:00", "tz": "UTC"})
+
+    from app.db.models import UpdatePolicy
+
+    async def pause():
+        async with env._sessionmaker() as db:
+            p = (await db.execute(select(UpdatePolicy))).scalars().first()
+            p.paused_reason = "automatic update to v1.3.0 failed"
+            p.enabled = False
+            await db.commit()
+    _run(pause())
+
+    c.post("/admin/update/policy", data={"enabled": "on", "weekday": "6",
+                                         "local_time": "04:00", "tz": "UTC"})
+    p = _policy_row(env)
+    assert p.paused_reason is None and p.enabled is True
+
+
+def test_policy_rejects_a_bad_timezone(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "Mars/Olympus"})
+    assert r.status_code == 400
+
+
+def test_policy_rejects_a_bad_time(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "25:99", "tz": "UTC"})
+    assert r.status_code == 400
+
+
+def test_policy_is_audit_logged(env):
+    _beat(env.control)
+    env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    assert any(e == "admin_update_policy" for e, _ in env.audit_events())

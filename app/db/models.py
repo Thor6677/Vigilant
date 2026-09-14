@@ -994,6 +994,72 @@ class UpdateStatus(Base):
     last_error = Column(String(512), nullable=True)
 
 
+class UpdateSchedule(Base):
+    """One deferred update the operator asked for: "apply v1.2.3 on Saturday".
+
+    At most one row is ever `pending`; asking again supersedes the previous one
+    rather than queueing two. Distinct from UpdatePolicy because the two answer
+    different questions — this pins the exact tag the operator saw and approved,
+    while a standing policy deliberately cannot, since the whole point there is
+    to apply whatever is latest when the window arrives.
+    """
+    __tablename__ = "update_schedule"
+
+    id = Column(Integer, primary_key=True)
+    target_tag = Column(String(64), nullable=False)
+    # Stored in UTC, which is what the whole host runs on. `timezone` keeps the
+    # zone the operator actually chose so the UI can show the time they typed
+    # back to them rather than a translated one they never entered.
+    run_at = Column(DateTime, nullable=False)
+    timezone = Column(String(64), nullable=False, default="UTC")
+    state = Column(String(16), nullable=False, default="pending")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    fired_at = Column(DateTime, nullable=True)
+    fired_request_id = Column(String(64), nullable=True)
+
+
+class UpdatePolicy(Base):
+    """Standing auto-update policy. Single row, id always 1.
+
+    Ships DISABLED. Roadmap phase 8 said "never auto-updates", and this reverses
+    that deliberately — so the reversal is opt-in, on top of an updater profile
+    that is itself off by default. Two separate acts, not one.
+
+    The local weekday/time plus an IANA zone are stored rather than a UTC hour:
+    resolving through zoneinfo at evaluation time is what keeps "Sunday 4am"
+    meaning 4am after a DST change instead of silently drifting an hour twice a
+    year, in the direction nobody notices until an update runs at 3am.
+    """
+    __tablename__ = "update_policy"
+
+    id = Column(Integer, primary_key=True)             # always 1
+    enabled = Column(Boolean, nullable=False, default=False)
+    weekday = Column(Integer, nullable=False, default=6)      # 0=Mon .. 6=Sun
+    local_time = Column(String(5), nullable=False, default="04:00")
+    timezone = Column(String(64), nullable=False, default="UTC")
+    # Limits unattended changes to x.y.Z. On by default: the health gate that
+    # makes auto-update defensible is a LIVENESS check, so a release that boots
+    # fine and breaks the UI passes it. Smaller blast radius is the compensation.
+    patch_only = Column(Boolean, nullable=False, default=True)
+    # The resolved LOCAL DATE of the window this policy last fired for. The
+    # idempotency key, and the guard against the worst failure mode in the
+    # feature: the app triggers an update, the update recreates the app, the app
+    # comes back, re-evaluates, finds the window still open, and fires again.
+    # Written in the same transaction as the decision to submit — the pattern
+    # update_status.notified_tag already uses for the same class of problem.
+    last_fired_window = Column(String(10), nullable=True)
+    last_fired_tag = Column(String(64), nullable=True)
+    # Set while an automatic run is in flight so its outcome can be reported
+    # after the restart that loses all in-memory state.
+    awaiting_request_id = Column(String(64), nullable=True)
+    # Why the policy disabled itself. An automatic run that auto-reverted must
+    # not retry the same bad release every week unattended.
+    paused_reason = Column(String(255), nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never
