@@ -130,3 +130,36 @@ def test_rollback_targets_are_a_closed_list(panel):
     offer releases this host has actually run."""
     assert "<select" in panel
     assert 'type="text"' not in panel
+
+
+# ── The ancestor that can defeat all of the above ────────────────────────────
+
+ADMIN = Path("app/templates/admin.html")
+
+
+def test_admin_content_container_is_also_opted_out():
+    """The panel's own opt-out is not sufficient.
+
+    #admin-content re-fetches itself every 10s and the panel is swapped INSIDE
+    it. During an update the app is down for 30-60s by design, so that refresh
+    fails too — and without this opt-out ISS-007 replaces the container's
+    innerHTML with a "couldn't load" pill, destroying #updater-panel, its
+    hx-trigger and its restart banner. The page then never notices the app
+    coming back: the exact failure Task 6 exists to prevent, defeated one DOM
+    level up.
+
+    The panel tests above read the panel file in isolation and structurally
+    cannot see this, which is why it gets its own assertion here.
+    """
+    src = ADMIN.read_text()
+    container = src[src.index('<div id="admin-content"'):]
+    container = container[:container.index(">") + 1]
+    assert 'data-htmx-no-error="1"' in container
+
+
+def test_admin_content_still_auto_refreshes():
+    """The opt-out is only justified because the container retries on its own —
+    if the refresh loop is ever removed, the pill should come back."""
+    src = ADMIN.read_text()
+    assert "refreshSections" in src
+    assert "setInterval" in src
