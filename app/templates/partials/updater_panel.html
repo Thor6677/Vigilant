@@ -1,0 +1,128 @@
+{#
+  In-app updater panel. Rendered by /admin/update/status and returned by both
+  POSTs, so one template covers the idle, running, finished and error views.
+
+  Task 5 ships the structure and the controls; Task 6 adds the restart-gap
+  handling, which is the part a casual test on a fast machine will not catch.
+
+  No inline event handlers anywhere: v1.1.0 enforces CSP with a nonce and no
+  'unsafe-inline' in script-src, and tests/test_csp_inline_handlers.py fails the
+  build if one reappears. Behaviour hangs off data-action in static/js/actions.js.
+#}
+<div id="updater-panel" class="b-card">
+  <div class="b-card-head">
+    <h3>Updates</h3>
+    {% if current_tag %}<span class="b-chip mono">{{ current_tag }}</span>{% endif %}
+  </div>
+
+  {% if not available %}
+    {# No heartbeat: the compose profile is off, or the sidecar has died. Say
+       which is indistinguishable from here, and name the fallback. #}
+    <p class="b-empty">
+      No updater is running. Deploy from the host with
+      <code>scripts/deploy.sh</code>, or start the updater profile to enable
+      in-app updates.
+    </p>
+  {% else %}
+
+    {% if error %}
+      <p class="b-empty" style="color:var(--danger);">{{ error }}</p>
+    {% endif %}
+
+    {% set failed_checks = checks.items() | rejectattr('1', 'equalto', 'ok') | list %}
+    {% if failed_checks %}
+      {# Environment problems surface as a disabled button with a readable
+         reason rather than a mid-deploy explosion. #}
+      <div class="b-empty" style="color:var(--danger);">
+        The updater cannot run:
+        <ul>
+          {% for name, result in failed_checks %}<li><b>{{ name }}</b>: {{ result }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% if run_state == BUSY %}
+      <div class="updater-progress"
+           hx-get="/admin/update/status"
+           hx-trigger="every 2s"
+           hx-target="#updater-panel"
+           hx-swap="outerHTML"
+           data-htmx-no-error="1">
+        <p>
+          <b>{{ status.action | default('update') | capitalize }} in progress</b>
+          — {{ status.from_tag or '?' }} &rarr; {{ status.to_tag or '?' }}
+        </p>
+        <p class="mono">{{ status.step or 'starting' }}</p>
+        {% if status.log_tail %}
+          <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
+        {% endif %}
+      </div>
+
+    {% elif run_state == INTERRUPTED %}
+      <p class="b-empty" style="color:var(--danger);">
+        The last run started at {{ status.started_at }} and never reported a
+        result. The updater may have been killed mid-deploy — check the host
+        before retrying.
+      </p>
+
+    {% else %}
+      {% if status and status.state %}
+        <div class="updater-outcome">
+          {% if status.state == 'success' %}
+            <p>Last run: <b>{{ status.action }}</b> to
+               <b class="mono">{{ status.to_tag }}</b> succeeded.</p>
+          {% else %}
+            <p style="color:var(--danger);">
+              Last run: <b>{{ status.action }}</b> to
+              <b class="mono">{{ status.to_tag }}</b> failed.
+              {% if status.error %}<br>{{ status.error }}{% endif %}
+              {% if status.reverted_to %}
+                <br>Automatically reverted to
+                <b class="mono">{{ status.reverted_to }}</b>.
+              {% endif %}
+            </p>
+          {% endif %}
+          {% if status.log_tail %}
+            <details>
+              <summary>Output</summary>
+              <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
+            </details>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="updater-actions">
+        {% if update_available %}
+          <form hx-post="/admin/update" hx-target="#updater-panel" hx-swap="outerHTML">
+            <input type="hidden" name="tag" value="{{ latest_tag }}">
+            <button type="submit" class="b-btn"
+                    data-action="updater-confirm"
+                    data-confirm="This updates Vigilant to {{ latest_tag }} and restarts it. The site will be briefly unavailable."
+                    {% if failed_checks %}disabled{% endif %}>
+              Update to {{ latest_tag }}
+            </button>
+          </form>
+        {% else %}
+          <p class="b-empty">
+            {% if latest_tag %}Up to date.{% else %}No release information yet — the checker polls hourly.{% endif %}
+          </p>
+        {% endif %}
+
+        {% if targets %}
+          <form hx-post="/admin/rollback" hx-target="#updater-panel" hx-swap="outerHTML">
+            <label for="updater-rollback-tag">Roll back to</label>
+            <select id="updater-rollback-tag" name="tag">
+              {% for t in targets %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="b-btn b-btn-secondary"
+                    data-action="updater-confirm"
+                    data-confirm="This restarts Vigilant and returns it to an older release."
+                    {% if failed_checks %}disabled{% endif %}>
+              Roll back
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+</div>
