@@ -67,7 +67,14 @@ _TAG_RE = re.compile(
 # THIS CONSTANT NEVER MOVES. It names the earliest release that is safe to roll
 # back to, not the release currently being shipped. Bumping it to today's
 # version would make eligible_rollback_targets() return nothing, permanently.
-MIN_ROLLBACK_TAG = "v1.1.0"
+#
+# It was v1.1.0 until 2026-09-14. That was not a bump: v1.1.0 shipped as a
+# CSP/nav release WITHOUT the updater, so the constant named a release with no
+# /control mount — precisely the one-way door it exists to prevent. v1.2.0 is
+# the release that actually introduces /control. Correcting a value whose
+# premise turned out to be false is not the same as moving it; from here it
+# does not move.
+MIN_ROLLBACK_TAG = "v1.2.0"
 
 _LOCK_MAX_AGE_SECONDS = 30 * 60
 

@@ -5,7 +5,9 @@ supervisor calling `python3 -c` for JSON — would put tag validation, the
 security-critical part, outside any test the suite can run.
 """
 import pytest
+from pathlib import Path
 
+from app.ops.version import parse_version
 from updater.supervisor import (
     MIN_ROLLBACK_TAG,
     clamp_log_tail,
@@ -90,19 +92,51 @@ def test_parse_deployed_ignores_junk_lines():
     assert parse_deployed_tags("\ngarbage\n2026-07-26T18:54:28Z v1.0.0\n") == ["v1.0.0"]
 
 
+def _rel_to_floor(major_delta=0, minor_delta=0, patch_delta=0) -> str:
+    """A release tag positioned relative to MIN_ROLLBACK_TAG.
+
+    These tests used to hardcode v1.0.0/v1.1.0/v1.2.0 around a floor that
+    happened to be v1.1.0. That made them assertions about *the constant's
+    current value* rather than about the rule — so they kept passing when the
+    floor turned out to name a release that never shipped /control, which is the
+    exact failure mode Task 10 warns about. Deriving the fixtures from the floor
+    means these exercise the behaviour at whatever the floor is.
+    """
+    major, minor, patch, _ = parse_version(MIN_ROLLBACK_TAG)
+    return f"v{major + major_delta}.{minor + minor_delta}.{patch + patch_delta}"
+
+
 def test_eligible_targets_excludes_the_running_tag():
-    lines = "t v1.1.0\nt v1.2.0\n"
-    assert eligible_rollback_targets(lines, current_tag="v1.2.0") == ["v1.1.0"]
+    at_floor = MIN_ROLLBACK_TAG
+    above = _rel_to_floor(minor_delta=1)
+    lines = f"t {at_floor}\nt {above}\n"
+    assert eligible_rollback_targets(lines, current_tag=above) == [at_floor]
 
 
 def test_eligible_targets_refuses_below_the_updater_floor():
     """Rolling back past the release that introduced the updater checks out a
     compose file with no /control mount, so the app returns unable to submit
     OR read requests. That is a one-way door back to SSH, not a degraded mode."""
-    lines = "t v1.0.0\nt v1.1.0\nt v1.2.0\n"
-    targets = eligible_rollback_targets(lines, current_tag="v1.2.0")
-    assert "v1.0.0" not in targets
-    assert targets == ["v1.1.0"]
+    below = _rel_to_floor(minor_delta=-1)
+    at_floor = MIN_ROLLBACK_TAG
+    above = _rel_to_floor(minor_delta=1)
+    lines = f"t {below}\nt {at_floor}\nt {above}\n"
+    targets = eligible_rollback_targets(lines, current_tag=above)
+    assert below not in targets
+    assert targets == [at_floor]
+
+
+def test_this_tree_actually_ships_the_control_mount():
+    """The floor's premise, checked against the tree rather than trusted.
+
+    MIN_ROLLBACK_TAG claims to name the first release that ships /control. A
+    unit test cannot know the release number, but it CAN refuse to let the
+    constant sit in a tree that does not ship /control at all — which is how the
+    previous value (v1.1.0, a CSP/nav release) came to name a release with no
+    control mount.
+    """
+    compose = Path("docker-compose.yml").read_text()
+    assert ":/control" in compose, "MIN_ROLLBACK_TAG names a /control release, but this tree has no /control mount"
 
 
 def test_min_rollback_tag_is_itself_eligible():
@@ -111,15 +145,19 @@ def test_min_rollback_tag_is_itself_eligible():
 
 
 def test_eligible_targets_are_deduped_and_version_ordered_newest_first():
-    lines = "t v1.1.0\nt v1.10.0\nt v1.2.0\nt v1.1.0\nt v2.0.0\n"
-    assert eligible_rollback_targets(lines, current_tag="v2.0.0") == [
-        "v1.10.0", "v1.2.0", "v1.1.0",
-    ]
+    a = MIN_ROLLBACK_TAG                      # the floor itself
+    b = _rel_to_floor(minor_delta=1)
+    c = _rel_to_floor(minor_delta=8)          # two-digit minor: sorts by value, not string
+    current = _rel_to_floor(major_delta=1)
+    lines = f"t {a}\nt {c}\nt {b}\nt {a}\nt {current}\n"
+    assert eligible_rollback_targets(lines, current_tag=current) == [c, b, a]
 
 
 def test_eligible_targets_drops_malformed_entries():
-    lines = "t v1.1.0\nt not-a-tag\nt v1.2.0\n"
-    assert eligible_rollback_targets(lines, current_tag="v1.2.0") == ["v1.1.0"]
+    at_floor = MIN_ROLLBACK_TAG
+    current = _rel_to_floor(minor_delta=1)
+    lines = f"t {at_floor}\nt not-a-tag\nt {current}\n"
+    assert eligible_rollback_targets(lines, current_tag=current) == [at_floor]
 
 
 def test_eligible_targets_empty_when_only_one_release_recorded():
@@ -131,8 +169,11 @@ def test_eligible_targets_excludes_releases_newer_than_the_running_one():
     """A control labelled "Roll back" must not offer to move forward. Going
     forward is what the tag field is for, and rollback.sh's own bare mode
     already means "the newest release strictly older than the running one"."""
-    lines = "t v1.1.0\nt v1.2.0\nt v1.3.0\nt v1.2.0\n"
-    assert eligible_rollback_targets(lines, current_tag="v1.2.0") == ["v1.1.0"]
+    at_floor = MIN_ROLLBACK_TAG
+    current = _rel_to_floor(minor_delta=1)
+    newer = _rel_to_floor(minor_delta=2)
+    lines = f"t {at_floor}\nt {current}\nt {newer}\nt {current}\n"
+    assert eligible_rollback_targets(lines, current_tag=current) == [at_floor]
 
 
 def test_eligible_targets_empty_when_running_the_oldest_recorded_release():
@@ -155,8 +196,11 @@ def test_eligible_targets_reject_what_parse_version_would_accept():
     "v١.٠.٠". validate_tag must therefore run FIRST. A prerelease in .deployed
     is normal operation, not hypothetical: deploy.sh --tag v1.3.0-rc1 is the
     documented escape hatch and [3/5] records whatever it deployed."""
-    lines = "t v1.1.0\nt v1.3.0-rc1\nt v١.٠.٠\nt v1.4.0\n"
-    assert eligible_rollback_targets(lines, current_tag="v1.4.0") == ["v1.1.0"]
+    at_floor = MIN_ROLLBACK_TAG
+    prerelease = _rel_to_floor(minor_delta=1) + "-rc1"
+    current = _rel_to_floor(minor_delta=2)
+    lines = f"t {at_floor}\nt {prerelease}\nt v١.٠.٠\nt {current}\n"
+    assert eligible_rollback_targets(lines, current_tag=current) == [at_floor]
 
 
 # ── Lock staleness ───────────────────────────────────────────────────────────
@@ -536,16 +580,18 @@ def test_rollback_eligibility_is_read_fresh_not_from_the_heartbeat(tmp_path, mon
     import updater.supervisor as sup
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
-    (tmp_path / ".deployed").write_text(
-        "t v1.1.0\nt v1.2.0\nt v1.3.0\n")
+    at_floor = MIN_ROLLBACK_TAG
+    mid = _rel_to_floor(minor_delta=1)
+    newest = _rel_to_floor(minor_delta=2)
+    (tmp_path / ".deployed").write_text(f"t {at_floor}\nt {mid}\nt {newest}\n")
     sup.write_heartbeat({"socket": "ok"})
-    assert "v1.1.0" in json.loads((tmp_path / "updater.json").read_text())["targets"]
+    assert at_floor in json.loads((tmp_path / "updater.json").read_text())["targets"]
 
     # .deployed changes underneath — the cached heartbeat is now stale.
-    (tmp_path / ".deployed").write_text("t v1.3.0\n")
+    (tmp_path / ".deployed").write_text(f"t {newest}\n")
     monkeypatch.setattr(sup, "build_command",
                         lambda a, t, root=None: ["/bin/false"])
-    sup.run_action({"id": "r1", "action": "rollback", "tag": "v1.1.0"})
+    sup.run_action({"id": "r1", "action": "rollback", "tag": at_floor})
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["state"] == "failed"
     assert "not an eligible rollback target" in status["error"]
