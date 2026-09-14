@@ -251,6 +251,13 @@ async def _reconcile_outcome(db, policy) -> None:
     very update it triggers: whatever was in memory when the request was written
     is gone by the time there is an outcome to report. awaiting_request_id is in
     the database precisely so this survives that restart.
+
+    KNOWN GAP: if someone deploys manually before this reconciles, status.json
+    is overwritten with the manual run's id and the automatic run's outcome is
+    never reported — awaiting_request_id then stays set until the next automatic
+    fire replaces it. Narrow (it needs a manual deploy inside the minute after
+    an automatic one finishes) and it fails toward silence rather than toward a
+    wrong report, so it is recorded rather than fixed with more bookkeeping.
     """
     if not policy.awaiting_request_id:
         return
@@ -389,6 +396,12 @@ async def tick(now_utc: datetime | None = None) -> str:
                                sched.target_tag)
                 return "schedule missed its window"
 
+        # What the hourly checker last saw, so up to an hour stale — and
+        # staler than that if the checker has been failing (see
+        # update_status.last_error). Acceptable against a WEEKLY window, and
+        # re-polling GitHub here would double the API traffic to make a
+        # once-a-week decision marginally fresher. The tag is re-validated on
+        # the privileged side at pickup either way.
         row = (await db.execute(
             select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
         latest_tag = row.latest_tag if row else None
