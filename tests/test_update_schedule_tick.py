@@ -304,3 +304,77 @@ def test_a_notification_failure_does_not_break_the_loop(control, monkeypatch):
     _finish(control, rid, "success")
     _run(us.tick(SUNDAY_0430 + timedelta(minutes=5)))     # must not raise
     assert _policy().awaiting_request_id is None
+
+
+# ── The compensating controls for unattended deploys ─────────────────────────
+
+def test_the_discord_call_matches_the_real_signature(control, monkeypatch):
+    """Binds the actual call against the real function's signature.
+
+    Every other test here stubs Discord with `*a, **k`, which accepts anything —
+    so an argument-order mistake is invisible. It nearly shipped: the signature
+    is (title, body, alert_type, key), and passing "type first" positionally
+    made alert_type the message body. That matches nothing in
+    DISCORD_ALERT_TYPES, so it is dropped with no error at all.
+    """
+    import inspect
+    from app.notify import discord as real
+
+    # Snapshot the signature BEFORE patching. Reading it inside the spy looks up
+    # the module attribute, which by then IS the spy — so it would bind against
+    # (*args, **kwargs), accept literally anything, and prove nothing.
+    real_sig = inspect.signature(real.send_discord_alert)
+    captured = {}
+
+    async def spy(*args, **kwargs):
+        bound = real_sig.bind(*args, **kwargs)   # raises TypeError on bad arity
+        bound.apply_defaults()
+        captured.update(bound.arguments)
+
+    monkeypatch.setattr("app.notify.discord.send_discord_alert", spy)
+
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    _run(us.tick(SUNDAY_0430))
+    rid = _request(control)["id"]
+    (control / "request.json").unlink()
+    _finish(control, rid, "failed", reverted_to="v1.2.0")
+    _run(us.tick(SUNDAY_0430 + timedelta(minutes=5)))
+
+    assert captured, "no notification was attempted"
+    assert captured["alert_type"] == us.ALERT_TYPE
+    assert "v1.3.0" in captured["body"]
+    assert "FAILED" in captured["title"]
+
+
+def _audit_rows():
+    from app.db.models import AdminAuditLog
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(select(AdminAuditLog))).scalars().all()
+            return [(r.event_type, r.user_id, r.detail) for r in rows]
+    return _run(go())
+
+
+def test_an_automatic_fire_is_audit_logged(control):
+    """Discord is gated on an opt-in type and may not be configured at all, so
+    the audit log is the only guaranteed record that an unattended deploy
+    happened. Null user id because nobody asked — that is the fact recorded."""
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    _run(us.tick(SUNDAY_0430))
+
+    rows = [r for r in _audit_rows() if r[0] == "auto_update_requested"]
+    assert rows, "an unattended deploy left no audit trail"
+    assert rows[0][1] is None
+    assert "v1.3.0" in rows[0][2] and "2026-09-13" in rows[0][2]
+
+
+def test_a_scheduled_fire_is_audit_logged_distinctly(control):
+    _beat(control, current_tag="v1.2.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    _run(us.tick())
+    assert any(r[0] == "scheduled_update_requested" for r in _audit_rows())

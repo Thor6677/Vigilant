@@ -267,10 +267,21 @@
               &mdash; <span class="mono">{{ next_window.astimezone(None).strftime('%H:%M') }}</span> local to the server
             </p>
           {% endif %}
+          {% if policy.enabled and not notify_configured %}
+            <p class="b-empty" style="color:var(--danger);">
+              <b>No Discord notification is configured</b>, so an unattended
+              update will complete with nothing to tell you — successful or not.
+              The admin audit log still records every automatic run, but you
+              have to go and look. Set <code>DISCORD_WEBHOOK_URL</code> and
+              include <code>update_available</code> in
+              <code>DISCORD_ALERT_TYPES</code> to be told instead.
+            </p>
+          {% endif %}
           <p class="b-muted">
-            Unattended runs report to Discord, and a failed one pauses automatic
-            updates until you re-enable them. Prereleases are never applied
-            automatically.
+            {% if notify_configured %}Unattended runs report to Discord, and a{% else %}A{% endif %}
+            failed run pauses automatic updates until you re-enable them.
+            Prereleases are never applied automatically, and every automatic run
+            is written to the admin audit log.
           </p>
         </details>
       </div>

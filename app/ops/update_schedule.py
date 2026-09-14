@@ -26,7 +26,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 
-from app.db.models import AsyncSessionLocal, UpdatePolicy, UpdateSchedule, UpdateStatus
+from app.db.models import (AdminAuditLog, AsyncSessionLocal, UpdatePolicy,
+                           UpdateSchedule, UpdateStatus)
 from app.ops import updater as updater_client
 from app.ops.version import parse_version
 
@@ -34,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday",
             "Friday", "Saturday", "Sunday")
+
+# Shared with app/ops/update_check.py. NOTE for the operator: this means an
+# admin who opts OUT of "a new release exists" notices also opts out of
+# auto-update FAILURE reports — the compensating control for unattended
+# deploys. Documented in README rather than silently split into a second type,
+# because a second type nobody knows to enable is worse.
+ALERT_TYPE = "update_available"
 
 # How late a window may be honoured. The app is BOTH the scheduler and the thing
 # being recreated, so it will sometimes be down when a window passes. Firing
@@ -279,7 +287,18 @@ async def _reconcile_outcome(db, policy) -> None:
     logger.info("updater: %s", message)
     try:
         from app.notify.discord import send_discord_alert
-        await send_discord_alert("update_available", "Vigilant auto-update", message)
+        # KEYWORDS, not positional. The signature is
+        # (title, body, alert_type, key=None) — passing these positionally in
+        # the obvious "type first" order silently makes alert_type the message
+        # body, which then matches nothing in DISCORD_ALERT_TYPES and is dropped
+        # without an error. Caught in review before this shipped; the test binds
+        # against the real signature so an argument-order change breaks loudly.
+        await send_discord_alert(
+            title=f"Vigilant auto-update {'succeeded' if ok else 'FAILED'}",
+            body=message,
+            alert_type=ALERT_TYPE,
+            key="auto-update",
+        )
     except Exception as e:
         # An unattended change with no human-visible trail is the real hazard
         # here, so a failure to notify is worth a loud log line — but it must
@@ -305,6 +324,16 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
         return False
 
     now = datetime.now(timezone.utc)
+    # An unattended deploy needs a durable record. Discord is the notification,
+    # but it is gated on an opt-in type and may not be configured at all, so the
+    # audit log is the one place this is guaranteed to be written down. Null
+    # user id: nobody asked — that IS the fact being recorded.
+    db.add(AdminAuditLog(
+        user_id=None,
+        event_type="auto_update_requested" if policy is not None else "scheduled_update_requested",
+        detail=(f"{action} to {tag} (request {request_id}"
+                + (f", window {key}" if key else "") + ")"),
+    ))
     if schedule is not None:
         schedule.state = "fired"
         schedule.fired_at = now

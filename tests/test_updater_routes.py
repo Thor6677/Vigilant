@@ -606,3 +606,15 @@ def test_policy_is_audit_logged(env):
     env.admin().post("/admin/update/policy", data={
         "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
     assert any(e == "admin_update_policy" for e, _ in env.audit_events())
+
+
+def test_enabled_policy_warns_when_no_notification_is_configured(env):
+    """Discord is the compensating control for unattended deploys. This host has
+    no webhook at all (verified 2026-09-14), so enabling auto-update without
+    saying so would mean silent unattended deploys."""
+    _beat(env.control)
+    env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    body = env.admin().get("/admin/update/status").text
+    assert "No Discord notification is configured" in body
+    assert "audit log" in body

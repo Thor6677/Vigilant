@@ -1234,6 +1234,14 @@ async def _schedule_context(request: Request, db: AsyncSession,
         "schedule_error": error,
         "schedule_notice": notice,
         "grace_hours": update_schedule.GRACE_SECONDS // 3600,
+        # Surfaced where the decision is made, not buried in the docs. Discord
+        # is the compensating control for unattended deploys — a run nobody
+        # watched, with no push notification, leaves only an audit row somebody
+        # has to think to go and read. Verified on this host 2026-09-14: the
+        # app has no webhook configured at all, so the notification would be a
+        # silent no-op.
+        "notify_configured": bool(settings.discord_webhook_url)
+        and update_schedule.ALERT_TYPE in settings.discord_alert_types,
     }
 
 
