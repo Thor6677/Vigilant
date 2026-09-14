@@ -13,6 +13,7 @@ PANEL = Path("app/templates/partials/updater_panel.html")
 ACTIONS = Path("static/js/actions.js")
 BASE = Path("app/templates/base.html")
 OVERVIEW = Path("app/templates/partials/admin_overview.html")
+ADMIN_TPL = Path("app/templates/admin.html")
 
 
 @pytest.fixture(scope="module")
@@ -120,9 +121,26 @@ def test_every_data_handler_resolves_to_a_real_function(panel, actions):
 
 # ── Wiring ───────────────────────────────────────────────────────────────────
 
-def test_panel_is_reachable_from_the_overview_section():
-    """Admin > Overview is where the operator was told to look for this."""
-    assert "/admin/update/status" in OVERVIEW.read_text()
+def test_panel_is_rendered_inline_not_lazily_fetched():
+    """A placeholder with hx-trigger="load" flashes, because this section
+    re-fetches itself every 10s.
+
+    Each refresh swaps in an EMPTY placeholder and the panel only reappears a
+    round-trip later, so the operator sees it pop in and out every few seconds.
+    Reported from the browser 2026-09-14. Rendering the include inline means the
+    panel arrives already built, with the section.
+    """
+    src = OVERVIEW.read_text()
+    assert 'include "partials/updater_panel.html"' in src
+    assert 'hx-get="/admin/update/status"' not in src, \
+        "lazily fetching the panel here makes it flash on every section refresh"
+
+
+def test_overview_section_still_auto_refreshes():
+    """The inline rendering above is only necessary because this section
+    re-fetches itself. If that ever stops, revisit the reasoning rather than
+    assuming it still holds."""
+    assert "setInterval" in ADMIN_TPL.read_text()
 
 
 def test_rollback_targets_are_a_closed_list(panel):

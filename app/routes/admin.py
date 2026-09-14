@@ -135,7 +135,15 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
     upd = (await db.execute(
         select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
 
-    return templates.TemplateResponse(request, "partials/admin_overview.html", {"uptime": _format_duration(uptime_secs),
+    # Rendered INLINE, not lazily fetched. This section re-fetches itself every
+    # 10s (admin.html), so a placeholder with hx-trigger="load" arrives EMPTY on
+    # every refresh and the panel only reappears a round-trip later — which
+    # reads as the panel flashing in and out every few seconds. Reported from
+    # the browser 2026-09-14. Building the context here costs two file reads and
+    # one row, and the panel now arrives already rendered.
+    updater_ctx = await _updater_context(request, db)
+
+    return templates.TemplateResponse(request, "partials/admin_overview.html", {**updater_ctx, "uptime": _format_duration(uptime_secs),
         # Build tag baked into the image by release CI, or "dev" for a source
         # build. Shown here rather than on /healthz, which is public.
         "app_version": settings.version,

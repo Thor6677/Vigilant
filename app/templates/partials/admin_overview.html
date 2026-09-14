@@ -27,14 +27,13 @@
     </div>
 </div>
 
-{# In-app updater (Task 6). Lazily fetched so this section needs no updater
-   context of its own, and self-gating: with no sidecar running the endpoint
-   renders the "no updater" note and the controls never appear. The wrapper is
-   replaced by #updater-panel on load, which is what carries the poll. #}
-<div hx-get="/admin/update/status"
-     hx-trigger="load"
-     hx-swap="outerHTML"
-     data-htmx-no-error="1"></div>
+{# In-app updater. Rendered INLINE rather than lazily fetched: this section
+   re-fetches itself every 10s, so a placeholder with hx-trigger="load" arrives
+   empty on every refresh and the panel only reappears a round-trip later —
+   which reads as the panel flashing in and out. Still self-gating: with no
+   sidecar running, `available` is false and the panel renders the "no updater"
+   note with no controls. #}
+{% include "partials/updater_panel.html" %}
 
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
