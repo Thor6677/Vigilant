@@ -1066,17 +1066,25 @@ async def _latest_known_tag(db: AsyncSession) -> str | None:
 
 
 async def _updater_context(request: Request, db: AsyncSession,
-                           error: str | None = None) -> dict:
+                           error: str | None = None,
+                           polling: bool = False) -> dict:
     beat = updater_client.read_heartbeat()
     status = updater_client.read_status()
     latest = await _latest_known_tag(db)
     current = (beat or {}).get("current_tag")
+    state = updater_client.run_state(status, datetime.now(timezone.utc))
     return {
         "request": request,
         "available": beat is not None,
         "heartbeat": beat,
         "status": status,
-        "run_state": updater_client.run_state(status, datetime.now(timezone.utc)),
+        "run_state": state,
+        # Poll while a run is in flight, and ALSO for the response to a submit:
+        # between the click and the sidecar's first status.json write there is a
+        # second or two in which run_state is still idle, and a panel that only
+        # polled on BUSY would sit motionless right after the operator clicked —
+        # looking exactly like a button that did nothing.
+        "polling": polling or state == updater_client.BUSY,
         "targets": (beat or {}).get("targets") or [],
         "current_tag": current,
         "latest_tag": latest,
@@ -1090,10 +1098,11 @@ async def _updater_context(request: Request, db: AsyncSession,
 
 
 async def _panel(request: Request, db: AsyncSession, error: str | None = None,
-                 status_code: int = 200):
+                 status_code: int = 200, polling: bool = False):
     return templates.TemplateResponse(
         request, "partials/updater_panel.html",
-        await _updater_context(request, db, error), status_code=status_code,
+        await _updater_context(request, db, error, polling),
+        status_code=status_code,
     )
 
 
@@ -1134,7 +1143,7 @@ async def _submit(request: Request, db: AsyncSession, admin: User,
                      detail=f"{action} to {tag} (request {request_id})",
                      ip=request.client.host if request.client else None)
     logger.info("updater: %s %s requested by user %s", action, tag, admin.id)
-    return await _panel(request, db)
+    return await _panel(request, db, polling=True)
 
 
 @router.post("/update", response_class=HTMLResponse)
