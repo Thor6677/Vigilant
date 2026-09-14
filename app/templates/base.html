@@ -33,15 +33,23 @@
     <a href="/dashboard" class="b-nav-logo" style="display:flex;align-items:center;gap:0.5rem;"><img src="/static/logo.png" alt="" style="height:28px;width:auto;">Vigilant</a>
     {% set _path = request.url.path %}
     <div class="b-nav-links">
-        {# Desktop nav — rendered from the app.nav registry (single source). #}
+        {# Desktop nav — rendered from the app.nav registry (single source).
+           `account` groups (Admin) are skipped here: they render in the account
+           menu at the right end of the bar instead. The caret is its own
+           element, never a space + glyph inside the link text — a two-word
+           label can shrink below its own width, so it used to wrap out of the
+           46px bar and knock every dropdown group out of line with the plain
+           links (see .b-nav-link white-space in components.css). #}
         {% for group in nav_groups %}
-            {% if not group['admin'] or request.session.get('is_admin') %}
+            {% if not group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
                 {% if not group['items'] %}
         <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
                 {% else %}
+        {% set _menu_id = 'nav-menu-' ~ group['label']|lower|replace(' ', '-') %}
         <span class="b-nav-dropdown">
-            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }} ▾</a>
-            <div class="b-nav-dropdown-menu">
+            <a href="{{ group['url'] }}" class="b-nav-link {{ 'is-active' if nav_group_active(group, _path) }}"
+               aria-haspopup="true" aria-expanded="false" aria-controls="{{ _menu_id }}">{{ group['label'] }}<span class="b-nav-caret" aria-hidden="true">▾</span></a>
+            <div class="b-nav-dropdown-menu" id="{{ _menu_id }}">
                 {# Skip the item that duplicates the group's own destination
                    (Overview / Star Map / Console…) — the group label link
                    above already goes there. Mirrors the mobile suppression. #}
@@ -56,7 +64,23 @@
                 {% endif %}
             {% endif %}
         {% endfor %}
-        <span id="notif-btn" data-click="onBellClick" style="cursor:pointer;padding:0 0.4rem;display:flex;align-items:center;position:relative;" title="Toggle notifications">
+    </div>
+    {# Persistent action cluster. Deliberately a sibling of .b-nav-links,
+       not a child: that row is display:none below the nav breakpoint, and
+       notifications (structure attacks, fuel, timers) must not vanish with
+       it. Below the breakpoint the search button collapses to its icon and
+       the account menu hides — its items are in the mobile menu. #}
+    <div class="b-nav-actions">
+        {# The Ctrl+K palette has been keyboard-only since it shipped; this is
+           its visible handle. openPalette is exposed on window by the palette
+           script at the bottom of this file. #}
+        <button type="button" class="b-nav-search" data-click="openPalette"
+                title="Search pages, characters, systems, items (Ctrl+K)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+            <kbd class="b-nav-kbd" data-cmdk-hint>Ctrl K</kbd>
+        </button>
+        <span id="notif-btn" class="b-nav-bell" data-click="onBellClick" title="Toggle notifications">
             <svg id="notif-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -121,16 +145,41 @@
                 </div>
             </div>
         </span>
-        <a href="/auth/add-character" class="b-nav-link is-add">+ Add Character</a>
-        <form method="post" action="/auth/logout" style="display:inline;margin:0;">
-            <button type="submit" class="b-nav-link is-danger" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;padding:0;">Logout</button>
-        </form>
+        {# Account menu — Add Character, every `account` nav group (Admin), and
+           Logout. Same hover/focus-within dropdown as the group menus, so it
+           needs no JS; is-right flips it to the bar's right edge. #}
+        <span class="b-nav-dropdown">
+            <button type="button" class="b-nav-link b-nav-account" aria-haspopup="true"
+                    aria-expanded="false" aria-controls="nav-menu-account" title="Account">
+                {% if request.session.get('active_character_id') %}
+                <img class="b-nav-avatar" alt=""
+                     src="https://images.evetech.net/characters/{{ request.session.get('active_character_id') }}/portrait?size=64"
+                     data-on-error="hide">
+                {% endif %}
+                <span>Account</span><span class="b-nav-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="b-nav-dropdown-menu is-right" id="nav-menu-account">
+                <a href="/auth/add-character" class="b-nav-dropdown-item is-add">+ Add Character</a>
+                {% for group in nav_groups %}
+                    {% if group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
+                <div class="b-nav-menu-sep"></div>
+                        {% for item in group['items'] %}
+                <a href="{{ item['url'] }}" class="b-nav-dropdown-item {{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+                        {% endfor %}
+                    {% endif %}
+                {% endfor %}
+                <div class="b-nav-menu-sep"></div>
+                <form method="post" action="/auth/logout" style="margin:0;">
+                    <button type="submit" class="b-nav-dropdown-item is-danger">Logout</button>
+                </form>
+            </div>
+        </span>
+        <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
+                aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            Menu
+        </button>
     </div>
-    <button class="b-hamburger" type="button" data-click="toggleMobileMenu"
-            aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-menu">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        Menu
-    </button>
 </nav>
 <div id="mobile-menu" class="b-mobile-menu" aria-hidden="true">
     {# Mobile menu — rendered from the app.nav registry (single source).
@@ -241,8 +290,9 @@
 <footer class="b-footer">
     <span class="b-footer-brand"><img src="/static/logo.png" alt="" style="height:16px;width:auto;opacity:0.5;">Vigilant</span>
     <div class="b-footer-links">
-        {# Footer — one link per nav group, from the app.nav registry. #}
-        {% for group in nav_groups %}{% if not group['admin'] or request.session.get('is_admin') %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
+        {# Footer — one link per top-level nav group, from the app.nav registry.
+           `account` groups (Admin) are reachable from the account menu. #}
+        {% for group in nav_groups %}{% if not group['account'] and (not group['admin'] or request.session.get('is_admin')) %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
     </div>
     <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
 </footer>
@@ -386,6 +436,136 @@
 })();
 </script>
 <script nonce="{{ request.state.csp_nonce }}">
+/* Nav dropdown state. The menus open on :hover and :focus-within in pure CSS
+   (so they work with JS off); this adds the parts CSS cannot do:
+
+     * aria-expanded that reflects the real state, for screen readers,
+     * click/tap toggling for the account trigger — the one trigger that is a
+       button rather than a link to a section, so a click had no effect and a
+       second click could not close it,
+     * Escape to close, and an outside click to close a clicked-open menu.
+
+   Escape is the awkward one: the accessible behaviour is to close the menu
+   and leave focus on its trigger, but focus on the trigger is exactly what
+   :focus-within opens on. Hence `is-dismissed`, which overrides the open
+   rules until focus or the pointer actually leaves. */
+(function() {
+    var dropdowns = Array.prototype.slice.call(
+        document.querySelectorAll('.b-nav-dropdown'));
+    if (!dropdowns.length) return;
+
+    function trigger(dd) { return dd.querySelector('.b-nav-link'); }
+
+    /* Which pointer is driving. A group trigger is a link to its section, so
+       on a touch screen a tap navigates and its menu can never be seen —
+       there is no hover to open it with, and at these widths the hamburger
+       has not taken over. Touch therefore gets tap-to-open / tap-again-to-
+       follow, while a mouse click keeps navigating on the first click.
+       `click` carries pointerType in Chromium and WebKit but not in Firefox,
+       hence the pointerdown fallback, and the media query behind that for
+       anything reporting neither. */
+    var lastPointerType = '';
+    document.addEventListener('pointerdown', function(e) {
+        lastPointerType = e.pointerType || '';
+    }, true);
+
+    function isTouch(e) {
+        var kind = e.pointerType || lastPointerType;
+        if (kind) return kind === 'touch' || kind === 'pen';
+        return !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+    }
+
+    function isOpen(dd) {
+        if (dd.classList.contains('is-dismissed')) return false;
+        return dd.classList.contains('is-open')
+            || dd.contains(document.activeElement)
+            || (dd.matches && dd.matches(':hover'));
+    }
+
+    function sync(dd) {
+        var btn = trigger(dd);
+        if (btn) btn.setAttribute('aria-expanded', isOpen(dd) ? 'true' : 'false');
+    }
+
+    function reset(dd, except) {
+        if (dd !== except) dd.classList.remove('is-open');
+        sync(dd);
+    }
+    function closeAll(except) {
+        dropdowns.forEach(function(dd) { reset(dd, except); });
+    }
+
+    dropdowns.forEach(function(dd) {
+        /* A deliberate new hover, or focus arriving from elsewhere, clears a
+           dismissal — so a dismissed menu is never stuck shut. Note this is
+           mouseENTER, not mouseleave: after a click-to-close the pointer is
+           still sitting on the trigger, and clearing on the way out would let
+           :focus-within pop the menu back open with the pointer gone. */
+        ['mouseenter', 'focusin'].forEach(function(evt) {
+            dd.addEventListener(evt, function() {
+                dd.classList.remove('is-dismissed');
+                sync(dd);
+            });
+        });
+        dd.addEventListener('mouseleave', function() { sync(dd); });
+        /* Focus leaving the dropdown entirely ends the dismissal with it. */
+        dd.addEventListener('focusout', function() {
+            dd.classList.remove('is-dismissed');
+            sync(dd);
+        });
+        var btn = trigger(dd);
+        /* A link trigger navigates on a mouse click, exactly as before. Under
+           touch the first tap opens its menu instead; the second tap, with
+           the menu already open, follows the link. */
+        if (btn && btn.tagName === 'A') {
+            btn.addEventListener('click', function(e) {
+                if (!isTouch(e)) return;
+                if (dd.classList.contains('is-open')) return;
+                e.preventDefault();
+                closeAll(dd);
+                dd.classList.remove('is-dismissed');
+                dd.classList.add('is-open');
+                sync(dd);
+            });
+        }
+        /* Only a trigger with nowhere to go toggles on every click. */
+        if (btn && btn.tagName === 'BUTTON') {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var willOpen = !dd.classList.contains('is-open');
+                closeAll(dd);
+                dd.classList.toggle('is-open', willOpen);
+                /* Closing leaves focus on the trigger, which :focus-within
+                   would read as open — same reason Escape needs this. */
+                dd.classList.toggle('is-dismissed', !willOpen);
+                sync(dd);
+            });
+        }
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        var focused = document.activeElement;
+        var owner = focused && focused.closest
+            ? focused.closest('.b-nav-dropdown') : null;
+        closeAll(null);
+        if (owner) {
+            owner.classList.add('is-dismissed');
+            var btn = trigger(owner);
+            if (btn) btn.focus();   /* focusout above would clear the dismissal,
+                                       but focus stays inside, so it holds */
+            sync(owner);
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        var inside = e.target.closest ? e.target.closest('.b-nav-dropdown') : null;
+        if (!inside) closeAll(null);
+    });
+})();
+</script>
+<script nonce="{{ request.state.csp_nonce }}">
 /* ISS-006: mobile menu lifecycle. Toggles is-open class, mirrors state into
    aria-expanded on the trigger and aria-hidden on the menu, locks body
    scroll while the menu is open, and listens for ESC to dismiss. */
@@ -406,6 +586,17 @@
         if (!menu) return;
         setOpen(!menu.classList.contains('is-open'));
     };
+    /* The bell now lives in .b-nav-actions, which stays visible at mobile
+       widths — so it can be tapped while this menu is open. Its dropdown
+       (z-dropdown 60) would render over the menu (z 49); close the menu
+       instead of stacking the two. */
+    var bell = document.getElementById('notif-btn');
+    if (bell) {
+        bell.addEventListener('click', function() {
+            var menu = getMenu();
+            if (menu && menu.classList.contains('is-open')) setOpen(false);
+        });
+    }
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;
         var menu = getMenu();
@@ -558,11 +749,32 @@
     }
     function closePalette() { var d = dlg(); if (d && d.open) d.close(); }
 
+    /* The bar's search button dispatches through actions.js, which resolves
+       handlers via window[name]. The button sits in .b-nav-actions, so it is
+       reachable at every width — including with the mobile menu open, hence
+       the close below. */
+    function openPaletteFromChrome() {
+        var menu = document.getElementById('mobile-menu');
+        if (menu && menu.classList.contains('is-open') && window.toggleMobileMenu) {
+            window.toggleMobileMenu();
+        }
+        openPalette();
+    }
+    window.openPalette = openPaletteFromChrome;
+
+    /* Mac reports Cmd, everyone else Ctrl — the markup ships the Ctrl label so
+       the button is correct with JS disabled, and this corrects it on Mac. */
+    if (/Mac|iPhone|iPad|iPod/.test(navigator.platform || '')) {
+        document.querySelectorAll('[data-cmdk-hint]').forEach(function (el) {
+            el.textContent = '\u2318 K';
+        });
+    }
+
     document.addEventListener('keydown', function (e) {
         if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
             e.preventDefault();
             var d = dlg();
-            if (d && d.open) closePalette(); else openPalette();
+            if (d && d.open) closePalette(); else openPaletteFromChrome();
         }
     });
 

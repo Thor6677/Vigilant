@@ -45,14 +45,14 @@
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">ME <span id="me-val" class="b-text">0</span></label>
                 <input type="range" id="inp-me" value="0" min="0" max="10" step="1"
-                       oninput="document.getElementById('me-val').textContent=this.value; recalculate()"
+                       data-input="slideBonus" data-label-id="me-val"
                        style="width:120px;accent-color:var(--accent);">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">TE <span id="te-val" class="b-text">0</span></label>
                 <input type="range" id="inp-te" value="0" min="0" max="20" step="2"
-                       oninput="document.getElementById('te-val').textContent=this.value; recalculate()"
+                       data-input="slideBonus" data-label-id="te-val"
                        style="width:120px;accent-color:var(--accent);">
             </div>
 
@@ -110,6 +110,19 @@ var recalcTimer = null;
 
 /* Track which components are being built (expanded) and their settings */
 var buildComponents = {};
+
+/* Two entry points: the search-result rows (bound by data-click, via the
+   wrapper below) and restore-from-state / deep-link calls further down that
+   pass a type id directly. The wrapper keeps this signature intact for them. */
+window.selectBlueprintFromEl = function() {
+    selectBlueprint(parseInt(this.dataset.typeId, 10));
+};
+
+/* ME / TE sliders: mirror the value into their label, then recalculate. */
+window.slideBonus = function() {
+    document.getElementById(this.dataset.labelId).textContent = this.value;
+    recalculate();
+};
 
 function selectBlueprint(typeId) {
     selectedTypeId = typeId;

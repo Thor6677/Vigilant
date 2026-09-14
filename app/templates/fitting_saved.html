@@ -118,7 +118,7 @@
                 data-folder="{{ r.folder_path | lower }}"
                 data-dps="{{ r.dps if r.dps is not none else '' }}"
                 data-cost="{{ r.cost }}"
-                onclick="if(!event.target.closest('button,.sf-actions'))window.location='/tools/fitting?load={{ r.id }}'">
+                data-click="openSavedFit" data-fit-id="{{ r.id }}">
                 <td>
                     <div class="sf-ship">
                         <img src="https://images.evetech.net/types/{{ r.ship_type_id }}/icon?size=32"
@@ -132,9 +132,9 @@
                 <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>
                 <td class="sf-actions">
                     <input type="checkbox" class="sf-compare-check" value="{{ r.id }}"
-                           onclick="event.stopPropagation()" title="Select for compare">
-                    <button onclick="event.stopPropagation();moveFit({{ r.id }})" title="Move to folder">&#8644;</button>
-                    <button onclick="event.stopPropagation();deleteFit({{ r.id }}, this)" title="Delete">&times;</button>
+                           data-click="noop" data-stop title="Select for compare">
+                    <button data-click="moveFit" data-fit-id="{{ r.id }}" data-stop title="Move to folder">&#8644;</button>
+                    <button data-click="deleteFit" data-fit-id="{{ r.id }}" data-stop title="Delete">&times;</button>
                 </td>
             </tr>
             {% endfor %}
@@ -263,7 +263,18 @@ function _folderPickPrompt(message) {
     return options[idx].id ? parseInt(options[idx].id, 10) : null;
 }
 
-function moveFit(fitId) {
+/* Row click opens the fit. The dispatcher only ever invokes the nearest
+   ancestor carrying data-click, so a click on one of the row's own controls
+   never reaches this handler. The guard is still needed for clicks that land
+   on the actions cell itself — its padding around the buttons is part of the
+   row and carries no binding of its own. */
+function openSavedFit(e) {
+    if (e.target.closest('button, .sf-actions')) return;
+    window.location = '/tools/fitting?load=' + this.dataset.fitId;
+}
+
+function moveFit() {
+    var fitId = this.dataset.fitId;
     var folderId = _folderPickPrompt('Move to folder:');
     if (folderId === undefined) return;
     fetch('/tools/fitting/' + fitId + '/folder', {
@@ -278,7 +289,9 @@ function moveFit(fitId) {
     });
 }
 
-function deleteFit(fitId, btn) {
+function deleteFit() {
+    var fitId = this.dataset.fitId;
+    var btn = this;
     if (!confirm('Delete this fitting?')) return;
     fetch('/tools/fitting/' + fitId, {method: 'DELETE'})
         .then(function(r) { return r.json(); })

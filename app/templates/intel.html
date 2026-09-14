@@ -55,7 +55,7 @@
                 <tbody>
                 {% for scan in history %}
                     <tr class="b-hover-transparent" style="border-bottom:1px solid var(--border);cursor:pointer;"
-                        onclick="window.location='/intel/{{ scan.id }}'">
+                        data-click="goTo" data-href="/intel/{{ scan.id }}">
                         <td style="padding:0.4rem 0.5rem;">
                             {% if scan.scan_type == 'dscan' %}
                                 <span style="color:var(--accent);">D-Scan</span>

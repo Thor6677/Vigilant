@@ -81,7 +81,7 @@
         </div>
         <div id="corp-list">
         {% for corp_name, count in summary.by_corp.items() %}
-        <div class="b-table-row intel-corp-row" data-corp="{{ corp_name | lower }}" data-alliance="{{ (summary.corp_to_alliance.get(corp_name) or '') | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" onclick="filterByCorp('{{ corp_name | e }}')">
+        <div class="b-table-row intel-corp-row" data-corp="{{ corp_name | lower }}" data-alliance="{{ (summary.corp_to_alliance.get(corp_name) or '') | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" data-click="filterByCorp" data-corp-name="{{ corp_name }}">
             <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
             <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ corp_name }}</span>
             {% if summary.corp_to_alliance.get(corp_name) %}
@@ -101,7 +101,7 @@
         <div id="alliance-list">
         {% if summary.by_alliance %}
         {% for alliance_name, count in summary.by_alliance.items() %}
-        <div class="b-table-row intel-alliance-row" data-alliance="{{ alliance_name | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" onclick="filterByAlliance('{{ alliance_name | e }}')">
+        <div class="b-table-row intel-alliance-row" data-alliance="{{ alliance_name | lower }}" style="padding:0.3rem 0.75rem;cursor:pointer;" data-click="filterByAlliance" data-alliance-name="{{ alliance_name }}">
             <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ count }}</span>
             <span style="flex:1;font-size:12px;color:var(--text);padding-left:0.75rem;">{{ alliance_name }}</span>
         </div>
@@ -164,7 +164,8 @@ function filterIntel() {
     applyFilter();
 }
 
-function filterByCorp(corpName) {
+function filterByCorp() {
+    var corpName = this.dataset.corpName;
     var input = document.getElementById('intel-search');
     if (input.value === corpName) {
         input.value = '';
@@ -176,7 +177,8 @@ function filterByCorp(corpName) {
     applyFilter();
 }
 
-function filterByAlliance(allianceName) {
+function filterByAlliance() {
+    var allianceName = this.dataset.allianceName;
     var input = document.getElementById('intel-search');
     if (input.value === allianceName) {
         input.value = '';

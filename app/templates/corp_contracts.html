@@ -100,7 +100,9 @@ function toggleContractMatchType() {
 }
 
 /* Item search result selection — reuse the same onclick pattern as inventory */
-window.selectSearchItem = function(typeId, typeName) {
+window.selectSearchItem = function() {
+    var typeId = this.dataset.typeId;
+    var typeName = this.dataset.typeName;
     var invSearch = document.getElementById('add-search');
     var ctSearch = document.getElementById('ct-item-search');
     if (ctSearch && document.getElementById('ct-item-field').style.display !== 'none') {

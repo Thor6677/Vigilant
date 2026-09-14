@@ -50,7 +50,7 @@
                 <span style="color:var(--muted);min-width:22px;text-align:right;font-size:10px;">{{ s.waypoint }}</span>
                 <span style="color:{{ s.sec_color }};min-width:30px;font-size:10px;">{{ "%.1f"|format(s.security) }}</span>
                 <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener"
-                   style="flex:1;color:var(--text);text-decoration:none;" onmousedown="event.stopPropagation();">
+                   style="flex:1;color:var(--text);text-decoration:none;" data-mousedown="noop" data-stop>
                     {{ s.system_name }}
                 </a>
                 <span style="color:var(--muted);font-size:10px;min-width:80px;">{{ s.region }}</span>

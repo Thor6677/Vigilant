@@ -32,12 +32,26 @@ body {
     transition: text-shadow var(--dur-fast);
 }
 .b-nav-logo:hover { text-shadow: 0 0 8px rgba(200, 169, 81, 0.6); }
-.b-nav-links { display: flex; align-items: center; gap: 1.75rem; }
+.b-nav-links { display: flex; align-items: center; gap: 1.5rem; }
+/* Search / notifications / account / hamburger. A sibling of .b-nav-links so
+   it survives the nav breakpoint that collapses the group row — the bell is
+   how structure, fuel and timer alerts reach the user, and it used to
+   disappear on every screen narrower than a laptop. */
+.b-nav-actions { display: flex; align-items: center; gap: 1.25rem; flex-shrink: 0; }
+/* white-space + flex-shrink:0 are load-bearing, not cosmetic: .b-nav-links is
+   a non-wrapping flex row in a fixed 46px bar, so a multi-word link (a label
+   plus its caret, "+ Add Character") has a min-content width of its longest
+   word and WILL shrink and wrap its text out of the bar once the row is
+   over-full — which also breaks vertical alignment against single-word links
+   that cannot shrink. Keep both; the nav breakpoint in site.css decides when
+   the row is replaced by the hamburger. */
 .b-nav-link {
     font-size: 11px; letter-spacing: var(--ls-wider); text-transform: uppercase;
     color: var(--muted); text-decoration: none; position: relative; padding-bottom: 3px;
+    white-space: nowrap; flex-shrink: 0;
     transition: color var(--dur-fast), text-shadow var(--dur-fast);
 }
+.b-nav-caret { margin-left: 0.35rem; font-size: 9px; opacity: 0.55; }
 .b-nav-link::after {
     content: ''; position: absolute; left: 0; bottom: 0; width: 0; height: 1px;
     background: var(--accent); transition: width var(--dur-menu) var(--ease-std);
@@ -45,8 +59,42 @@ body {
 .b-nav-link:hover { color: var(--text); }
 .b-nav-link:hover::after { width: 100%; }
 .b-nav-link.is-active { color: var(--accent); font-weight: 500; }
-.b-nav-link.is-danger:hover { color: var(--danger); }
-.b-nav-link.is-add { color: var(--text); }
+
+/* ── Nav search handle (opens the Ctrl+K palette) ─────────────────── */
+.b-nav-search {
+    display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;
+    padding: 0.25rem 0.5rem; font-family: inherit; font-size: 10px;
+    letter-spacing: var(--ls-wide); text-transform: uppercase;
+    color: var(--muted); background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border); cursor: pointer; white-space: nowrap;
+    transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+}
+.b-nav-search:hover { color: var(--text); border-color: var(--accent); background: rgba(200, 169, 81, 0.08); }
+/* Bell. Styling lives here rather than inline so the mobile breakpoint can
+   grow the tap target; position:relative anchors #notif-badge and
+   #notif-dropdown. */
+.b-nav-bell {
+    display: flex; align-items: center; position: relative;
+    padding: 0 0.4rem; cursor: pointer; flex-shrink: 0;
+}
+.b-nav-kbd {
+    font-family: inherit; font-size: 9px; letter-spacing: var(--ls-tight);
+    color: var(--muted); border: 1px solid var(--border); padding: 0 0.25rem;
+}
+
+/* ── Account menu (right end of the bar) ──────────────────────────── */
+.b-nav-account {
+    display: flex; align-items: center; gap: 0.45rem;
+    background: none; border: none; padding: 0 0 3px; cursor: pointer;
+    font: inherit; font-size: 11px; letter-spacing: var(--ls-wider);
+    text-transform: uppercase; color: var(--muted);
+}
+.b-nav-avatar {
+    width: 22px; height: 22px; object-fit: cover;
+    border: 1px solid var(--border); flex-shrink: 0;
+}
+.b-nav-dropdown-menu.is-right { left: auto; right: 0; }
+.b-nav-menu-sep { border-top: 1px solid var(--border); margin: 0.2rem 0; }
 
 /* ── Nav dropdown (expressive) ───────────────────────────────────── */
 .b-nav-dropdown { position: relative; }
@@ -63,18 +111,30 @@ body {
     box-shadow: var(--shadow-2), var(--glow-accent-soft);
     transform-origin: top;
 }
+/* Three ways in: pointer, keyboard (Tab lands on the trigger), and an
+   explicit click/tap on a trigger that has nowhere to navigate — the account
+   button. `is-open` is set by the nav script, which also mirrors the real
+   open state into aria-expanded; hover and focus-within stay pure CSS so the
+   menus still work with no JS at all. */
 .b-nav-dropdown:hover .b-nav-dropdown-menu,
-.b-nav-dropdown:focus-within .b-nav-dropdown-menu {
+.b-nav-dropdown:focus-within .b-nav-dropdown-menu,
+.b-nav-dropdown.is-open .b-nav-dropdown-menu {
     display: block;
     animation: vg-menu-in var(--dur-menu) var(--ease-pop);
 }
+/* Escape sets this: the menu must stay shut while its trigger still holds
+   focus, which :focus-within above would otherwise reopen. Same specificity
+   as those rules, so it wins on source order — keep it below them. */
+.b-nav-dropdown.is-dismissed .b-nav-dropdown-menu { display: none; }
 .b-nav-dropdown-menu::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
     background: linear-gradient(90deg, transparent, var(--accent), transparent);
     animation: vg-sweep 2.2s linear infinite;
 }
 .b-nav-dropdown-item {
-    display: block; padding: 0.4rem 0.75rem; font-size: 11px;
+    display: block; width: 100%; box-sizing: border-box; text-align: left;
+    background: none; border: none; cursor: pointer; font-family: inherit;
+    padding: 0.4rem 0.75rem; font-size: 11px;
     letter-spacing: var(--ls-wide); text-transform: uppercase;
     color: var(--muted); text-decoration: none; white-space: nowrap;
     transition: color var(--dur-fast), background var(--dur-fast), padding-left var(--dur-fast);
@@ -85,6 +145,14 @@ body {
     padding-left: 1rem;
 }
 .b-nav-dropdown-item.is-active { color: var(--accent); font-weight: 500; }
+.b-nav-dropdown-item.is-add { color: var(--text); }
+/* Resting color comes from the global `.is-danger` utility further down this
+   file (it is !important, so restating it here would be dead CSS) — this only
+   adds the row-hover wash the other menu items get. */
+.b-nav-dropdown-item.is-danger:hover {
+    color: var(--danger);
+    background: linear-gradient(90deg, rgba(214, 69, 69, 0.14), transparent);
+}
 
 /* ── Breadcrumbs ─────────────────────────────────────────────────── */
 .b-breadcrumbs { padding: 0.5rem 2rem; font-size: var(--fs-sm); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); }
@@ -126,6 +194,16 @@ body {
 .b-label { font-size: 11px; font-weight: 600; letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--muted); }
 .b-link { font-size: 11px; letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); text-decoration: none; transition: color var(--dur-fast); }
 .b-link:hover { color: var(--accent-bright); }
+/* A button that reads as inline text. For actions that were <a href="#">
+   with an onclick — inline script, and a navigation the handler had to
+   cancel. A button needs no cancelling and announces itself correctly to
+   assistive tech, but must be stripped of its native chrome to sit in a
+   line of links. */
+.b-link-btn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font: inherit; color: inherit; text-decoration: none;
+}
+.b-link-btn:hover { text-decoration: underline; }
 .b-eyebrow { font-size: var(--fs-xs); letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--accent); }
 
 /* ── Text utilities (kept from base.html) ────────────────────────── */

@@ -101,10 +101,10 @@ async def industry_search(request: Request, q: str = Query(""), db: AsyncSession
     for r in valid:
         html_parts.append(
             f'<div class="b-table-row" style="cursor:pointer;" '
-            f'onclick="selectBlueprint({r["type_id"]})">'
+            f'data-type-id="{r["type_id"]}" data-click="selectBlueprintFromEl">'
             f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
             f'style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" '
-            f'onerror="this.style.display=\'none\'">'
+            f'data-on-error="hide">'
             f'<span style="font-size:11px;color:var(--text);">{r["type_name"]}</span>'
             f'</div>'
         )

@@ -58,20 +58,20 @@
         <span class="wf-label">Show systems of class:</span>
         <div class="wf-toggles" id="filter-class">
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
-            <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
+            <button class="wf-btn" data-filter="class" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" data-click="toggleFilter">{{ label }}</button>
             {% endfor %}
             {# ISS-014 follow-up: Drifter and Uncatalogued are class sets — they
                OR with the standard C1-C13 buttons. Shattered is a property
                (modifier) and lives in its own row below so it ANDs with class. #}
-            <button class="wf-btn" data-filter="class" data-val="drifter" style="color:{{ class_colors['14'] }};" onclick="toggleFilter(this)" title="Sentinel MZ, Liberated Barbican, Sanctified Vidette, Conflux Eyrie, Azdaja Redoubt (classes 14-18)">Drifter</button>
-            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" onclick="toggleFilter(this)" title="32 J-numbered systems missing from community static-data">Uncatalogued</button>
+            <button class="wf-btn" data-filter="class" data-val="drifter" style="color:{{ class_colors['14'] }};" data-click="toggleFilter" title="Sentinel MZ, Liberated Barbican, Sanctified Vidette, Conflux Eyrie, Azdaja Redoubt (classes 14-18)">Drifter</button>
+            <button class="wf-btn" data-filter="class" data-val="uncatalogued" style="color:var(--muted);" data-click="toggleFilter" title="32 J-numbered systems missing from community static-data">Uncatalogued</button>
         </div>
     </div>
 
     <div class="wf-row">
         <span class="wf-label">Modifiers:</span>
         <div class="wf-toggles" id="filter-modifiers">
-            <button class="wf-btn" data-filter="shattered" data-val="1" style="color:{{ class_colors['13'] }};" onclick="toggleFilter(this)" title="System is shattered (every planet is the Shattered type). 100 systems total. ANDs with the class filter above — e.g. C6 + Shattered returns the 5 shattered C6 systems.">Shattered</button>
+            <button class="wf-btn" data-filter="shattered" data-val="1" style="color:{{ class_colors['13'] }};" data-click="toggleFilter" title="System is shattered (every planet is the Shattered type). 100 systems total. ANDs with the class filter above — e.g. C6 + Shattered returns the 5 shattered C6 systems.">Shattered</button>
         </div>
     </div>
 
@@ -79,7 +79,7 @@
         <span class="wf-label">Require statics to:</span>
         <div class="wf-toggles" id="filter-static">
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("7","HS"),("8","LS"),("9","NS")] %}
-            <button class="wf-btn" data-filter="static_dest" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" onclick="toggleFilter(this)">{{ label }}</button>
+            <button class="wf-btn" data-filter="static_dest" data-val="{{ cls }}" style="color:{{ class_colors[cls] }};" data-click="toggleFilter">{{ label }}</button>
             {% endfor %}
         </div>
     </div>
@@ -89,19 +89,19 @@
         <div class="wf-toggles" id="filter-planets">
             {% for ptype in ["Barren","Gas","Ice","Lava","Oceanic","Plasma","Storm","Temperate"] %}
             {% set pcolors = {"Barren":"#8a7a6a","Gas":"#d4a06a","Ice":"#a8d8ea","Lava":"#cc4433","Oceanic":"#4a9eda","Plasma":"#9a6acc","Storm":"#6a7a9a","Temperate":"#6db36d"} %}
-            <button class="wf-btn" data-filter="planet" data-val="{{ ptype }}" style="color:{{ pcolors[ptype] }};" onclick="toggleFilter(this)">{{ ptype }}</button>
+            <button class="wf-btn" data-filter="planet" data-val="{{ ptype }}" style="color:{{ pcolors[ptype] }};" data-click="toggleFilter">{{ ptype }}</button>
             {% endfor %}
-            <button class="wf-btn" data-filter="perfect_pi" data-val="1" style="color:var(--accent);border-style:dashed;" onclick="toggleFilter(this)" title="System has all planet types needed for all P4 PI materials">Perfect PI</button>
+            <button class="wf-btn" data-filter="perfect_pi" data-val="1" style="color:var(--accent);border-style:dashed;" data-click="toggleFilter" title="System has all planet types needed for all P4 PI materials">Perfect PI</button>
         </div>
     </div>
 
     <div class="wf-row">
         <span class="wf-label">Require effect:</span>
         <div class="wf-toggles" id="filter-effect">
-            <button class="wf-btn is-on b-text" data-filter="effect" data-val="" onclick="setExclusive(this,'effect')">Unfiltered</button>
-            <button class="wf-btn" data-filter="effect" data-val="none" onclick="setExclusive(this,'effect')">No Effect</button>
+            <button class="wf-btn is-on b-text" data-filter="effect" data-val="" data-click="setExclusive" data-group="effect">Unfiltered</button>
+            <button class="wf-btn" data-filter="effect" data-val="none" data-click="setExclusive" data-group="effect">No Effect</button>
             {% for key in effects_list %}
-            <button class="wf-btn" data-filter="effect" data-val="{{ key }}" onclick="setExclusive(this,'effect')" style="color:{{ effect_colors.get(key, 'var(--text)') }};">{{ effects_labels[key] }}</button>
+            <button class="wf-btn" data-filter="effect" data-val="{{ key }}" data-click="setExclusive" data-group="effect" style="color:{{ effect_colors.get(key, 'var(--text)') }};">{{ effects_labels[key] }}</button>
             {% endfor %}
         </div>
     </div>
@@ -122,7 +122,8 @@ function getFilterValues(filterName) {
     return vals.join(',');
 }
 
-function toggleFilter(btn) {
+function toggleFilter() {
+    var btn = this;
     btn.classList.toggle('is-on');
     if (btn.classList.contains('is-on')) {
         btn.style.borderColor = 'currentColor';
@@ -134,7 +135,9 @@ function toggleFilter(btn) {
     doSearch();
 }
 
-function setExclusive(btn, group) {
+function setExclusive() {
+    var btn = this;
+    var group = this.dataset.group;
     document.querySelectorAll('.wf-btn[data-filter="' + group + '"]').forEach(function(b) {
         b.classList.remove('is-on');
         b.style.borderColor = '';

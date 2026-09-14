@@ -74,9 +74,11 @@
 }
 /* Inline-text affordances get a thin gold underline instead of a box */
 .b-link:focus-visible,
+.b-link-btn:focus-visible,
 .b-nav-link:focus-visible,
 .b-nav-dropdown-item:focus-visible,
 .b-tab-strip a:focus-visible,
+.b-tab-strip button:focus-visible,
 .b-footer-link:focus-visible,
 .b-breadcrumbs a:focus-visible,
 .b-mobile-menu a:focus-visible {
@@ -142,16 +144,42 @@
 @media (max-width: 1000px) {
     .b-grid-3 { grid-template-columns: repeat(2, 1fr); }
 }
-/* Nav-only breakpoint, deliberately separate from the general 768px tablet
-   block below: with 8 top-level groups (see app/nav.py) plus the notif
-   bell / Add Character / Logout links, .b-nav-links (display:flex, no
-   flex-wrap) starts overflowing the sticky nav well above 768px — the
-   hamburger needs to take over earlier than the rest of the tablet layout
-   does. Measured against the current registry; bump this if groups are
-   added. */
-@media (max-width: 1120px) {
+/* Nav-only breakpoint. It happens to coincide with the grid block above —
+   that is a coincidence of the current measurement, not a shared rule, so
+   keep the two separate. Deliberately separate from the general 768px tablet
+   block below, too: .b-nav-links is a non-wrapping flex row in a fixed-height bar,
+   so the hamburger has to take over well above 768px — as soon as the row no
+   longer fits beside the logo.
+   The number is measured, not guessed: logo + the 5 top-level groups (see
+   app/nav.py) + the action cluster render at 914px, so the row is swapped
+   out below 1000px, leaving ~85px of slack at the boundary. That fit is
+   pinned by test_nav_bar_fits_its_breakpoint, which recomputes the width
+   from the registry and fails if the bar outgrows this number. The old
+   1120px was tuned for a bar that actually needed ~1270px (8 groups plus
+   loose Add Character / Logout links), which is why labels used to wrap out
+   of the bar between the two figures. Re-measure and bump this if the bar
+   grows: it must stay above the rendered width of .b-nav-links + .b-nav-logo
+   + the nav's 2rem side padding. */
+@media (max-width: 1000px) {
     .b-nav-links { display: none; }
     .b-hamburger { display: flex; }
+    /* .b-nav-actions stays. Search keeps its icon only, and the account menu
+       stands down — Add Character, Admin and Logout are all in the mobile
+       menu, and its hover-to-open dropdown is a poor fit for touch anyway.
+       That leaves logo + search + bell + Menu, which fits a 360px phone. */
+    .b-nav-actions { gap: 0.9rem; }
+    .b-nav-search span, .b-nav-kbd { display: none; }
+    .b-nav-account { display: none; }
+    /* Icon-only, and sized here rather than by the 38px/44px touch rules
+       further down, which would burst the 46px bar. A class beats their bare
+       `button` selector on specificity whatever the source order, so this one
+       rule covers both of those blocks. 32px is the most a 46px bar affords;
+       the bell matches it. */
+    .b-nav-search {
+        padding: 0.3rem; min-height: 32px; min-width: 32px;
+        justify-content: center;
+    }
+    .b-nav-bell { padding: 0.5rem 0.6rem; }
 }
 @media (max-width: 768px) {
     .b-footer { flex-direction: column; gap: 0.75rem; text-align: center; }
@@ -238,6 +266,12 @@
    dropdown where the panel surface is var(--surface) and rows want
    to deepen on hover rather than lighten. ISS-020. */
 .b-hover-bg:hover        { background: var(--bg); }
+/* Hover to var(--border) — the search-result rows that the route modules
+   build as HTML strings (admin allowlist, skill/ship pickers, ACL, system
+   and owner lookups). They used to carry an onmouseover/onmouseout pair
+   each, which is inline script and blocked T-033. Rest state is
+   transparent, matching what onmouseout set. */
+.b-hover-border:hover    { background: var(--border); }
 .b-hover-underline       { text-decoration: none; }
 .b-hover-underline:hover { text-decoration: underline; }
 

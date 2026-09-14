@@ -12,6 +12,9 @@
  *   <select onchange="bar()">    →  <select data-change="bar">
  *   <input  oninput="baz()">     →  <input  data-input="baz">
  *   <form   onsubmit="qux()">    →  <form   data-submit="qux">
+ *   <input  onkeydown="k()">     →  <input  data-keydown="k">
+ *   <li     onmousedown="m()">   →  <li     data-mousedown="m">
+ *   <input  onfocus="f()">       →  <input  data-focus="f">
  *   <img    onerror="this.style.display='none'">
  *                                →  <img    data-on-error="hide">
  *
@@ -97,6 +100,68 @@
     // to swallow a click without doing anything else). Pair with data-stop.
     window.noop = window.noop || function () {};
 
+    // ── Shared handlers for patterns that were repeated inline ──────────
+    //
+    // Each of these replaces a one-liner that appeared in several templates.
+    // They live here rather than being re-declared per page so there is one
+    // definition to fix.
+
+    // Was: onchange="this.form.submit()" — a select that re-submits its own
+    // filter form.
+    window.submitForm = window.submitForm || function () {
+        if (this.form) this.form.submit();
+    };
+
+    // Was: onclick="this.select()" — click a readonly input, select its text.
+    window.selectAll = window.selectAll || function () {
+        if (this.select) this.select();
+    };
+
+    // Was: onclick="this.closest('.row').classList.toggle('is-expanded')" —
+    // a header that expands its own card. The ancestor to toggle comes from
+    // data-toggle-target; it defaults to the element itself so a missing
+    // attribute degrades to a visible no-op rather than a thrown error on
+    // closest(null).
+    window.toggleExpanded = window.toggleExpanded || function () {
+        var selector = this.dataset && this.dataset.toggleTarget;
+        var target = selector ? this.closest(selector) : this;
+        if (target) target.classList.toggle('is-expanded');
+    };
+
+    // Was: onclick="window.location='/somewhere'" — a whole row acting as a
+    // link. The destination comes from data-href.
+    window.goTo = window.goTo || function () {
+        var href = this.dataset && this.dataset.href;
+        if (href) window.location = href;
+    };
+
+    // Was: onclick="document.getElementById('x').style.display = ... ? '' :
+    // 'none'; this.querySelector('.fit-arrow').textContent = ..." — a panel
+    // header that shows/hides its body and flips a caret. The body is named
+    // by data-toggle-panel (an element id); with the attribute absent it is
+    // the header's next sibling, which is the other shape this took inline.
+    // The caret selector defaults to .fit-arrow, the common case.
+    window.togglePanel = window.togglePanel || function () {
+        var id = this.dataset && this.dataset.togglePanel;
+        var panel = id ? document.getElementById(id) : this.nextElementSibling;
+        if (!panel) return;
+        var wasHidden = panel.style.display === 'none';
+        panel.style.display = wasHidden ? '' : 'none';
+        var arrow = this.querySelector(
+            (this.dataset && this.dataset.toggleArrow) || '.fit-arrow');
+        if (arrow) arrow.textContent = wasHidden ? '\u25BE' : '\u25B8';
+    };
+
+    // Was: onerror="this.src='...'; this.onerror=null;" — swap in a fallback
+    // image once, and do not loop if the fallback 404s too. Dispatched by
+    // name through data-on-error, alongside the built-in "hide".
+    window.imgFallback = window.imgFallback || function () {
+        var src = this.dataset && this.dataset.fallbackSrc;
+        // Drop the binding first: the fallback failing would re-enter here.
+        this.removeAttribute('data-on-error');
+        if (src) this.src = src;
+    };
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it
@@ -112,7 +177,13 @@
     };
 
     // Bubbling events — single document-level listener catches via bubble phase.
-    var BUBBLE_EVENTS = ['click', 'change', 'input', 'submit'];
+    var BUBBLE_EVENTS = ['click', 'change', 'input', 'submit', 'keydown',
+                         'mousedown'];
+
+    // 'focus' does not bubble, so it needs the capture phase (same treatment
+    // as 'error' below). Kept separate from BUBBLE_EVENTS rather than using
+    // focusin, so the attribute name still matches the event name.
+    var CAPTURE_EVENTS = ['focus'];
 
     function dispatch(eventType, e) {
         // Walk up from e.target to find the nearest element carrying our
@@ -140,6 +211,9 @@
 
     BUBBLE_EVENTS.forEach(function (evt) {
         document.addEventListener(evt, dispatch.bind(null, evt));
+    });
+    CAPTURE_EVENTS.forEach(function (evt) {
+        document.addEventListener(evt, dispatch.bind(null, evt), true);
     });
 
     // data-confirm: a separate, simpler dispatch for the "confirm before

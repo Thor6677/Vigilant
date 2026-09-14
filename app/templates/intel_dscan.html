@@ -71,7 +71,7 @@
             <span class="b-label">Ships</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
-                <button onclick="copyShipClasses(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+                <button data-click="copyShipClasses" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
             </div>
         </div>
         {% for cls, count in summary.ship_classes.items() %}
@@ -91,7 +91,7 @@
             <span class="b-label">By Type</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
-                <button onclick="copyByType(this)" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+                <button data-click="copyByType" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
             </div>
         </div>
         {% for group in summary.ships_grouped %}
@@ -198,7 +198,8 @@ function copyRawPaste() {
     });
 }
 
-function copyShipClasses(btn) {
+function copyShipClasses() {
+    var btn = this;
     var lines = [];
     {% for cls, count in summary.ship_classes.items() %}
     lines.push('{{ count }}x {{ cls }}');
@@ -213,7 +214,8 @@ function copyShipClasses(btn) {
     });
 }
 
-function copyByType(btn) {
+function copyByType() {
+    var btn = this;
     var lines = [];
     {% for group in summary.ships_grouped %}
     lines.push('{{ group.group }} ({{ group.total }}):');

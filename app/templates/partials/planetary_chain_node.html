@@ -78,7 +78,7 @@
         {% for inp in inputs %}
         <div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:11px;border-bottom:1px dashed var(--border);">
             <span class="b-text">
-                <a href="#" onclick="piLoadNode({{ inp.type_id }});return false;" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
+                <a href="#" data-click="piLoadNode" data-type-id="{{ inp.type_id }}" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
                     {{ inp.name }}
                 </a>
             </span>
@@ -94,7 +94,7 @@
         <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Used to produce</div>
         <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
             {% for u in uses %}
-            <a href="#" onclick="piLoadNode({{ u.type_id }});return false;"
+            <a href="#" data-click="piLoadNode" data-type-id="{{ u.type_id }}"
                style="font-size:11px;padding:0.2rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;">
                 {{ u.name }}
             </a>
@@ -117,7 +117,11 @@
 <script nonce="{{ request.state.csp_nonce }}">
     // Helper for intra-partial navigation between commodity nodes.
     if (typeof piLoadNode === 'undefined') {
-        window.piLoadNode = function(typeId) {
+        window.piLoadNode = function(e) {
+            /* These sit on <a href="#"> links whose inline handler ended in
+               `return false` to cancel the navigation. */
+            if (e && e.preventDefault) e.preventDefault();
+            var typeId = this.dataset.typeId;
             var el = document.getElementById('chain-detail');
             if (!el) return;
             el.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">Loading…</div>';

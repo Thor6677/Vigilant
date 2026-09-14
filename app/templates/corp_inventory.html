@@ -45,7 +45,7 @@
                 hx-get="/corporations/{{ corp_id }}/inventory/structures"
                 hx-trigger="load"
                 hx-swap="innerHTML"
-                onchange="scanLocation(this.value)"
+                data-change="scanLocation"
                 style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
             <option value="">Loading structures...</option>
         </select>
@@ -115,7 +115,8 @@
 
 <script nonce="{{ request.state.csp_nonce }}">
 /* Scan a specific structure */
-window.scanLocation = function(locationId) {
+window.scanLocation = function() {
+    var locationId = this.value;
     if (!locationId) {
         document.getElementById('scan-results').innerHTML = '<div class="b-empty">Select a structure to scan its hangars.</div>';
         return;
@@ -128,7 +129,9 @@ window.scanLocation = function(locationId) {
 };
 
 /* Search result selection */
-window.selectSearchItem = function(typeId, typeName) {
+window.selectSearchItem = function() {
+    var typeId = this.dataset.typeId;
+    var typeName = this.dataset.typeName;
     document.getElementById('add-type-id').value = typeId;
     document.getElementById('add-type-name').value = typeName;
     document.getElementById('add-search').value = typeName;
@@ -183,7 +186,8 @@ window.addManualItem = function() {
 };
 
 /* Add from scan results */
-window.addScanItem = function(btn) {
+window.addScanItem = function() {
+    var btn = this;
     var row = btn.closest('[data-scan-item]');
     var fd = new FormData();
     fd.append('type_id', row.dataset.typeId);

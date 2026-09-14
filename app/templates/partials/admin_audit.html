@@ -1,7 +1,7 @@
 <div class="b-panel">
     <div class="b-panel-head">
         <span class="b-label">Audit Log</span>
-        <select onchange="htmx.ajax('GET', '/admin/section/audit?filter=' + this.value, '#admin-content')"
+        <select data-change="adminAuditFilter"
                 style="padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <option value="" {% if not filter %}selected{% endif %}>All Events</option>
             <option value="login" {% if filter == 'login' %}selected{% endif %}>Logins</option>
@@ -45,3 +45,10 @@
     {% endfor %}
     {% endif %}
 </div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Was an inline htmx.ajax in the select's onchange. */
+window.adminAuditFilter = window.adminAuditFilter || function() {
+    htmx.ajax('GET', '/admin/section/audit?filter=' + this.value, '#admin-content');
+};
+</script>

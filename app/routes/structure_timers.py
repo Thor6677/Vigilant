@@ -550,13 +550,11 @@ async def acl_search(request: Request, db: AsyncSession = Depends(get_db)):
         safe = escape(r["name"], quote=True)
         img_url = img_base.get(category, "").format(r["id"])
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
             f'data-id="{r["id"]}" data-name="{safe}" '
-            f'onclick="selectACLEntry({r["id"]}, \'{safe}\')">'
-            f'<img src="{img_url}" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display=\'none\'">'
+            f'data-click="selectACLEntry">'
+            f'<img src="{img_url}" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">'
             f'{safe}</div>'
         )
     return HTMLResponse("".join(html))
@@ -573,11 +571,9 @@ def _render_search_results(results: list[dict], name_key: str, id_key: str, js_f
     for r in results:
         safe_name = escape(r[name_key], quote=True)
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
-            f'onclick="{js_fn}(\'{safe_name}\')">{safe_name}</div>'
+            f'data-name="{safe_name}" data-click="{js_fn}">{safe_name}</div>'
         )
     return "".join(html)
 
@@ -604,11 +600,9 @@ async def search_systems(request: Request, db: AsyncSession = Depends(get_db)):
         sec = r["security"]
         sec_color = "var(--success)" if sec >= 0.5 else "var(--accent)" if sec > 0.0 else "var(--danger)"
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
-            f'onclick="selectSystem(\'{safe}\')">'
+            f'data-name="{safe}" data-click="selectSystem">'
             f'{safe} <span style="color:{sec_color};">{sec:.1f}</span></div>'
         )
     return HTMLResponse("".join(html))
@@ -697,12 +691,10 @@ async def search_owners(request: Request, db: AsyncSession = Depends(get_db)):
         img_url = img_base.get(r["type"], "").format(r["id"])
         label = cat_labels.get(r["type"], "")
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
-            f'onclick="selectOwner(\'{safe}\')">'
-            f'<img src="{img_url}" style="width:16px;height:16px;border-radius:2px;" onerror="this.style.display=\'none\'">'
+            f'data-name="{safe}" data-click="selectOwner">'
+            f'<img src="{img_url}" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">'
             f'{safe} <span style="color:var(--muted);font-size:8px;">{label}</span></div>'
         )
     return HTMLResponse("".join(html))

@@ -1215,12 +1215,10 @@ async def search_skills_api(request: Request, db: AsyncSession = Depends(get_db)
     for r in results:
         safe_name = escape(r["type_name"], quote=True)
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
             f'data-id="{r["type_id"]}" data-name="{safe_name}" '
-            f'onclick="selectSkill(+this.dataset.id, this.dataset.name)">'
+            f'data-click="selectSkill">'
             f'{safe_name}</div>'
         )
     return HTMLResponse("".join(html))
@@ -1254,12 +1252,10 @@ async def search_ships_api(request: Request, db: AsyncSession = Depends(get_db))
     for r in rows:
         safe_name = escape(r.type_name, quote=True)
         html.append(
-            f'<div style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
-            f'onmouseover="this.style.background=\'var(--border)\'" '
-            f'onmouseout="this.style.background=\'none\'" '
             f'data-id="{r.type_id}" data-name="{safe_name}" '
-            f'onclick="selectShip(+this.dataset.id, this.dataset.name)">'
+            f'data-click="selectShip">'
             f'{safe_name}</div>'
         )
     return HTMLResponse("".join(html))
@@ -1417,8 +1413,8 @@ async def export_plan(plan_id: int, request: Request, db: AsyncSession = Depends
         '<div style="display:flex;gap:0.4rem;align-items:flex-start;">'
         f'<textarea id="export-text" readonly style="flex:1;width:100%;height:150px;background:var(--bg);color:var(--text);'
         f'border:1px solid var(--border);font-family:inherit;font-size:10px;padding:0.5rem;"'
-        f' onclick="this.select()">{text}</textarea>'
-        '<button type="button" onclick="copyExportText(this)" class="b-btn"'
+        f' data-click="selectAll">{text}</textarea>'
+        '<button type="button" data-click="copyExportText" class="b-btn"'
         ' style="padding:0.4rem 0.8rem;border:1px solid var(--accent);background:var(--bg);color:var(--accent);font-size:11px;cursor:pointer;white-space:nowrap;">'
         'Copy'
         '</button>'

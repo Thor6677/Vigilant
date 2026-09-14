@@ -41,7 +41,7 @@
     <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Fitting Resources</span>
         <button id="fr-toggle"
-                onclick="var b=this,isPct=b.textContent.trim()==='%',next=isPct?'val':'pct';b.textContent=isPct?'VAL':'%';document.querySelectorAll('.fr-val').forEach(function(el){el.textContent=el.dataset[next]});"
+                data-click="toggleResourceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">%</button>
     </div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
@@ -122,7 +122,7 @@
             <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
         </span>
         <button id="def-toggle"
-                onclick="var b=this,e=b.textContent.trim()==='EHP',m=e?'hp':'ehp';b.textContent=e?'HP':'EHP';document.querySelectorAll('.def-hp-val').forEach(function(el){el.textContent=el.dataset[m]});var l=document.getElementById('def-header-label');if(l){var t=document.querySelectorAll('.def-hp-val'),v=t[t.length-1];l.textContent=e?'(Raw HP: '+v.dataset.hp+')':'(Effective HP: '+v.dataset.ehp+')'}document.querySelectorAll('.def-rep-val').forEach(function(el){el.textContent=(e?el.dataset.hp:el.dataset.ehp)+(e?' HP/s':' EHP/s')})"
+                data-click="toggleDefenceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
     </div>
     <div class="b-panel" style="padding:0.5rem 0.75rem;">
@@ -340,3 +340,39 @@
         </table>
     </div>
 </div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Both of these were single-line onclick expressions. Each toggle flips its
+   own button label and rewrites every value cell from the dataset the server
+   rendered onto it, so no refetch is needed. Guarded: this partial is swapped
+   in on every stats refresh. */
+window.toggleResourceUnits = window.toggleResourceUnits || function() {
+    var showingPct = this.textContent.trim() === '%';
+    var next = showingPct ? 'val' : 'pct';
+    this.textContent = showingPct ? 'VAL' : '%';
+    document.querySelectorAll('.fr-val').forEach(function(el) {
+        el.textContent = el.dataset[next];
+    });
+};
+
+window.toggleDefenceUnits = window.toggleDefenceUnits || function() {
+    var showingEhp = this.textContent.trim() === 'EHP';
+    var key = showingEhp ? 'hp' : 'ehp';
+    this.textContent = showingEhp ? 'HP' : 'EHP';
+    document.querySelectorAll('.def-hp-val').forEach(function(el) {
+        el.textContent = el.dataset[key];
+    });
+    var label = document.getElementById('def-header-label');
+    if (label) {
+        var cells = document.querySelectorAll('.def-hp-val');
+        var last = cells[cells.length - 1];
+        label.textContent = showingEhp
+            ? '(Raw HP: ' + last.dataset.hp + ')'
+            : '(Effective HP: ' + last.dataset.ehp + ')';
+    }
+    document.querySelectorAll('.def-rep-val').forEach(function(el) {
+        el.textContent = (showingEhp ? el.dataset.hp : el.dataset.ehp)
+            + (showingEhp ? ' HP/s' : ' EHP/s');
+    });
+};
+</script>

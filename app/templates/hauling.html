@@ -53,8 +53,8 @@
         <div class="b-panel-head">
             <span class="b-label">Volume to Haul</span>
             <div style="display:flex;gap:0.5rem;">
-                <button type="button" onclick="showTab('manual')" id="tab-manual" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Manual m³</button>
-                <button type="button" onclick="showTab('paste')" id="tab-paste" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);">Paste Items</button>
+                <button type="button" data-click="showTabFromEl" data-tab="manual" id="tab-manual" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Manual m³</button>
+                <button type="button" data-click="showTabFromEl" data-tab="paste" id="tab-paste" class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--border);color:var(--muted);">Paste Items</button>
             </div>
         </div>
 
@@ -138,7 +138,7 @@
             </div>
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">&nbsp;</label>
-                <button onclick="removeShipEntry(this)" class="b-btn" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
+                <button data-click="removeShipEntry" class="b-btn" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
             </div>
         </div>
         <div class="ship-capacity" style="padding-top:0.5rem;display:none;">
@@ -165,6 +165,9 @@ function formatNumber(n) {
 }
 
 /* ── Tab switching ────────────────────────────────────────────────────────── */
+/* Also called directly further down, when a saved paste is restored. */
+window.showTabFromEl = function() { showTab(this.dataset.tab); };
+
 function showTab(tab) {
     document.getElementById('panel-manual').style.display = tab === 'manual' ? 'block' : 'none';
     document.getElementById('panel-paste').style.display = tab === 'paste' ? 'block' : 'none';
@@ -194,7 +197,8 @@ function addShipEntry(config) {
     recalcAll();
 }
 
-function removeShipEntry(btn) {
+function removeShipEntry() {
+    var btn = this;
     var entries = document.querySelectorAll('.ship-entry');
     if (entries.length <= 1) return;
     btn.closest('.ship-entry').remove();

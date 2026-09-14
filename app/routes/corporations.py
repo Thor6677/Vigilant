@@ -132,11 +132,14 @@ async def _try_api_call_with_fallback(
 
 
 async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
-    from app.esi.client import get_client_safe
+    from app.esi.client import get_client_safe, TokenRevoked
     try:
         client = await get_client_safe(char)
         client.cache_enabled = True
         return client
+    except TokenRevoked as e:
+        logger.warning("Token revoked for char %s (%s) — user must re-authenticate: %s", char.character_name, char.character_id, e)
+        return None
     except Exception as e:
         logger.error("Token refresh failed for char %s (%s): %s", char.character_name, char.character_id, e, exc_info=True)
         return None
@@ -629,7 +632,8 @@ async def corp_inventory_type_search(corp_id: int, q: str = "", db: AsyncSession
     for r in results:
         html += (
             f'<div class="b-row" style="cursor:pointer;" '
-            f'onclick="selectSearchItem({r["type_id"]}, \'{r["type_name"].replace(chr(39), "&#39;")}\')">'
+            f'data-type-id="{r["type_id"]}" data-type-name="{html_escape(r["type_name"], quote=True)}" '
+            f'data-click="selectSearchItem">'
             f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
             f'style="width:24px;height:24px;border:1px solid var(--border);">'
             f'<span class="b-row-val" style="text-align:left;flex:1;">{r["type_name"]}</span>'

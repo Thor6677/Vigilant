@@ -25,7 +25,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:0.5rem;">
         <a href="/structure-timers" style="font-size:9px;color:var(--accent);text-decoration:none;">View</a>
-        <button class="alert-dismiss" onclick="dismissTimerAlert('timer-{{ timer.id }}')" title="Dismiss">&times;</button>
+        <button class="alert-dismiss" data-click="dismissTimerAlert" data-alert-key="timer-{{ timer.id }}" title="Dismiss">&times;</button>
     </div>
 </div>
 {% endfor %}
@@ -45,7 +45,8 @@
     function setNotified(d) {
         try { localStorage.setItem(NOTIFIED_KEY, JSON.stringify(d)); } catch(e) {}
     }
-    window.dismissTimerAlert = function(id) {
+    window.dismissTimerAlert = function() {
+        var id = this.dataset.alertKey;
         var d = getDismissed();
         d[id] = Date.now();
         setDismissed(d);

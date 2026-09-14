@@ -120,7 +120,7 @@
 {# ── Full Detail ───────────────────────────────────────────────────────────── #}
 <div class="b-section">
     <div class="b-panel">
-        <div class="b-panel-head" style="cursor:pointer;" onclick="document.getElementById('ml-detail-table').style.display = document.getElementById('ml-detail-table').style.display === 'none' ? '' : 'none'; this.querySelector('.fit-arrow').textContent = document.getElementById('ml-detail-table').style.display === 'none' ? '▸' : '▾';">
+        <div class="b-panel-head" style="cursor:pointer;" data-click="togglePanel" data-toggle-panel="ml-detail-table">
             <span class="b-label">Full Detail</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span class="b-muted-sm">{{ data.entries | length }} entries</span>

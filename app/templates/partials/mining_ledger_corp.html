@@ -30,7 +30,7 @@
 <div class="b-table-row" style="padding:0.4rem 0.75rem;align-items:center;">
     <span style="flex:0 0 20px;">
         <input type="checkbox" class="ml-check" data-charid="{{ c.character_id }}"
-               onclick="toggleChar('{{ c.character_id }}', this)"
+               data-click="toggleChar" data-char-id="{{ c.character_id }}"
                style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
     </span>
     <span style="flex:0 0 24px;">

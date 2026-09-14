@@ -126,7 +126,7 @@
         <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
             <img src="https://images.evetech.net/types/{{ bp.type_id }}/{% if bp.is_bpo %}bp{% else %}bpc{% endif %}?size=32"
                  style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
-                 onerror="this.src='https://images.evetech.net/types/{{ bp.type_id }}/icon?size=32'; this.onerror=null;">
+                 data-on-error="imgFallback" data-fallback-src="https://images.evetech.net/types/{{ bp.type_id }}/icon?size=32">
             <span style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 {{ bp.name }}
             </span>
