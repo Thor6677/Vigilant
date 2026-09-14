@@ -362,3 +362,23 @@ def test_no_queued_state_once_the_request_is_claimed(env):
     }))
     body = env.admin().get("/admin/update/status").text
     assert "succeeded" in body
+
+
+# ── The overview section renders the panel itself ────────────────────────────
+
+def test_overview_section_contains_the_rendered_panel(env):
+    """End-to-end version of the inline-rendering rule: the section's own HTML
+    must already contain the panel, not a placeholder that fetches it."""
+    _beat(env.control, current_tag="v1.2.0")
+    r = env.admin().get("/admin/section/overview")
+    assert r.status_code == 200
+    assert 'id="updater-panel"' in r.text
+    assert 'hx-get="/admin/update/status"' not in r.text
+
+
+def test_overview_section_survives_a_missing_updater(env):
+    """With no sidecar the section must still render — the panel degrades to the
+    'no updater' note rather than 500ing the whole Overview tab."""
+    r = env.admin().get("/admin/section/overview")
+    assert r.status_code == 200
+    assert "No updater is running" in r.text
