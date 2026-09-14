@@ -8,7 +8,7 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +17,13 @@ from sqlalchemy import select, func, text
 from app.db.models import (
     get_db, User, Character, CharacterDashboardCache, WalletSnapshot,
     MiningLedgerEntry, DScanResult, CharacterAssetCache, CorpInventoryThreshold,
-    AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal,
+    AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
 )
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
 from app.esi.rate_limit import rate_limit_tracker
 from app.config import get_settings
+from app.ops import updater as updater_client
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1024,3 +1025,164 @@ async def admin_allowlist_remove(entry_id: int, request: Request,
                          ip=request.client.host if request.client else None)
 
     return await admin_users(request, db, admin)
+
+
+# ── In-app updater (Task 5) ──────────────────────────────────────────────────
+#
+# These endpoints exist only while a sidecar is actually beating. That is the
+# feature flag: no compose profile means no updater container, means no
+# heartbeat, means 404 here and no panel in the UI. There is deliberately no
+# setting to keep in sync, and the gate self-corrects the moment the sidecar
+# dies rather than leaving a button that would hang.
+#
+# Everything these routes do is write one JSON file. The validation that matters
+# runs on the privileged side against input it does not trust — see
+# app/ops/updater.py on why the tag rule is duplicated rather than shared.
+
+
+def _require_updater() -> dict:
+    """The current heartbeat, or 404.
+
+    404 rather than 503: with the profile off this endpoint genuinely does not
+    exist, and an admin poking at /admin/update on a stock install should learn
+    that, not that something is temporarily down.
+    """
+    beat = updater_client.read_heartbeat()
+    if beat is None:
+        raise HTTPException(status_code=404, detail="No updater is running")
+    return beat
+
+
+async def _latest_known_tag(db: AsyncSession) -> str | None:
+    """The newest release the update checker has seen.
+
+    Comes from update_status, NOT from the heartbeat: the sidecar reports what
+    is deployed, while polling GitHub for what is available is the app's job and
+    already runs hourly in app/ops/update_check.py. Asking the privileged side
+    for it would duplicate that poll and widen what the sidecar knows about.
+    """
+    row = (await db.execute(select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+    return row.latest_tag if row else None
+
+
+async def _updater_context(request: Request, db: AsyncSession,
+                           error: str | None = None,
+                           polling: bool = False) -> dict:
+    beat = updater_client.read_heartbeat()
+    status = updater_client.read_status()
+    latest = await _latest_known_tag(db)
+    current = (beat or {}).get("current_tag")
+    state = updater_client.run_state(status, datetime.now(timezone.utc))
+    # Queued but not yet claimed: status.json still describes the PREVIOUS run.
+    awaiting = beat is not None and updater_client.has_pending_request()
+    return {
+        "request": request,
+        "available": beat is not None,
+        "heartbeat": beat,
+        "status": status,
+        "run_state": state,
+        # Poll while a run is in flight, and ALSO for the response to a submit:
+        # between the click and the sidecar's first status.json write there is a
+        # second or two in which run_state is still idle, and a panel that only
+        # polled on BUSY would sit motionless right after the operator clicked —
+        # looking exactly like a button that did nothing.
+        "awaiting_pickup": awaiting,
+        "polling": polling or awaiting or state == updater_client.BUSY,
+        "targets": (beat or {}).get("targets") or [],
+        "current_tag": current,
+        "latest_tag": latest,
+        "update_available": bool(latest and current and latest != current),
+        "checks": (beat or {}).get("checks") or {},
+        "error": error,
+        "IDLE": updater_client.IDLE,
+        "BUSY": updater_client.BUSY,
+        "INTERRUPTED": updater_client.INTERRUPTED,
+    }
+
+
+async def _panel(request: Request, db: AsyncSession, error: str | None = None,
+                 status_code: int = 200, polling: bool = False):
+    return templates.TemplateResponse(
+        request, "partials/updater_panel.html",
+        await _updater_context(request, db, error, polling),
+        status_code=status_code,
+    )
+
+
+@router.get("/update/status", response_class=HTMLResponse)
+async def updater_status(request: Request,
+                         db: AsyncSession = Depends(get_db),
+                         admin: User = Depends(require_admin)):
+    """The panel. Polled every ~2s while a run is in flight.
+
+    Unlike the two POSTs this does NOT 404 without a heartbeat: the panel has to
+    survive the app's own restart, during which the sidecar may miss a beat.
+    Returning 404 there would replace a live progress view with an error at
+    exactly the moment the operator is watching it.
+    """
+    return await _panel(request, db)
+
+
+async def _submit(request: Request, db: AsyncSession, admin: User,
+                  action: str, tag: str, event: str):
+    """Shared body of the two POSTs: queue, audit, re-render."""
+    try:
+        request_id = updater_client.submit(action, tag, admin.id)
+    except updater_client.UpdaterBusy as e:
+        msg = ("An update is already running."
+               if e.state == updater_client.BUSY else
+               "The last run was interrupted — check the host before retrying.")
+        return await _panel(request, db, error=msg, status_code=409)
+    except updater_client.InvalidRequest as e:
+        return await _panel(request, db, error=str(e), status_code=400)
+    except updater_client.UpdaterUnavailable as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    # Audited when the run is REQUESTED, and deliberately not amended when it
+    # finishes: this row answers "who asked", which is the question an audit log
+    # exists to answer. What happened is status.json's job, and that file
+    # outlives the container that wrote this row.
+    await _log_audit(db, event, admin.id,
+                     detail=f"{action} to {tag} (request {request_id})",
+                     ip=request.client.host if request.client else None)
+    logger.info("updater: %s %s requested by user %s", action, tag, admin.id)
+    return await _panel(request, db, polling=True)
+
+
+@router.post("/update", response_class=HTMLResponse)
+async def updater_update(request: Request, tag: str = Form(...),
+                         db: AsyncSession = Depends(get_db),
+                         admin: User = Depends(require_admin)):
+    """Deploy a release.
+
+    Refuses a no-op, but deliberately does NOT require the target to be newer:
+    re-deploying the running release is a legitimate way to recover a container
+    that came up wrong.
+    """
+    beat = _require_updater()
+    if tag and tag == beat.get("current_tag"):
+        return await _panel(request, db, error=f"{tag} is already running.",
+                            status_code=400)
+    return await _submit(request, db, admin, "update", tag, "admin_update_requested")
+
+
+@router.post("/rollback", response_class=HTMLResponse)
+async def updater_rollback(request: Request, tag: str = Form(...),
+                           db: AsyncSession = Depends(get_db),
+                           admin: User = Depends(require_admin)):
+    """Roll back to a release this host has actually run.
+
+    Restricted to the heartbeat's `targets`, which the sidecar derives from
+    .deployed — a file the app cannot read, since it mounts only /control. This
+    is UX and defence in depth, not the gate: eligible_rollback_targets() is
+    recomputed on the privileged side at pickup, so a request that raced a
+    change to .deployed is refused there.
+    """
+    beat = _require_updater()
+    if tag not in (beat.get("targets") or []):
+        return await _panel(
+            request, db,
+            error=f"{tag} is not a release this host has previously run.",
+            status_code=400,
+        )
+    return await _submit(request, db, admin, "rollback", tag, "admin_rollback_requested")

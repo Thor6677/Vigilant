@@ -34,19 +34,37 @@ if [ -z "${VIGILANT_DEPLOY_REEXEC:-}" ]; then
     exec bash "$_tmp/deploy.sh" "$@"
 fi
 
-cd /opt/vigilant
+# Which stack this run targets. Defaults reproduce production exactly; the
+# in-app updater and the throwaway verification stack override them.
+#
+# readonly, and resolved BEFORE .health-env is sourced, on purpose. .health-env
+# lives INSIDE the root it describes, so a stale or copied one naming a different
+# stack must not be able to retarget the run. Verified 2026-07-26: without this,
+# a .health-env setting VIGILANT_ROOT produced a split-brain deploy — the
+# checkout and .env pin landed in the caller's root while .deployed was appended
+# to the OTHER stack's ledger, which is exactly the file rollback.sh reads to
+# choose a target. Aborting on "readonly variable" beats that.
+readonly VIGILANT_ROOT="${VIGILANT_ROOT:-/opt/vigilant}"
+readonly VIGILANT_IMAGE="${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}"
+readonly VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
+
+cd "$VIGILANT_ROOT"
 
 # Optional: set MAINTENANCE in an untracked `.health-env` beside the repo root
 # to point at your ops toolkit's maintenance script, silencing the host service
 # monitor for the duration of the deploy. Unset, or not executable, and the step
 # is skipped cleanly.
 # shellcheck disable=SC1091
-[ -r /opt/vigilant/.health-env ] && source /opt/vigilant/.health-env
+[ -r "$VIGILANT_ROOT/.health-env" ] && source "$VIGILANT_ROOT/.health-env"
 MAINTENANCE="${MAINTENANCE:-}"
-APP_CONTAINER="${APP_CONTAINER:-vigilant-app-1}"
+# Tracks compose's own basename(cwd) project-name derivation (verified against
+# production 2026-07-26: no top-level `name:`, no COMPOSE_PROJECT_NAME, no
+# override file, so /opt/vigilant -> project "vigilant" -> container
+# vigilant-app-1). .health-env may still override this because that file
+# legitimately describes the stack it lives in.
+APP_CONTAINER="${APP_CONTAINER:-$(basename "$VIGILANT_ROOT")-app-1}"
 
-IMAGE=ghcr.io/thor6677/vigilant
-DEPLOY_LOG=/opt/vigilant/.deployed
+DEPLOY_LOG="$VIGILANT_ROOT/.deployed"
 REPO_SLUG="${VIGILANT_REPO:-Thor6677/Vigilant}"
 
 TARGET_TAG=""
@@ -92,9 +110,9 @@ fi
 # Defensive: confirm the compose file still declares the network as external
 # with the right name. A silent edit removing `external: true` would cause
 # compose to create a NEW per-project network and detach the app from edge nginx.
-if ! grep -qE '^[[:space:]]+external:[[:space:]]+true' docker-compose.yml \
-    || ! grep -qE '^[[:space:]]+name:[[:space:]]+web' docker-compose.yml; then
-    echo "ERROR: docker-compose.yml no longer declares the 'web' network"
+if ! grep -qE '^[[:space:]]+external:[[:space:]]+true' "$VIGILANT_COMPOSE_FILE" \
+    || ! grep -qE '^[[:space:]]+name:[[:space:]]+web' "$VIGILANT_COMPOSE_FILE"; then
+    echo "ERROR: $VIGILANT_COMPOSE_FILE no longer declares the 'web' network"
     echo "       as 'external: true, name: web'. Refusing to deploy."
     exit 1
 fi
@@ -103,7 +121,7 @@ echo "     'web' network present; compose declaration intact"
 # Refuse to overwrite local edits silently — surface them so the operator can
 # decide what to do (commit, stash, or discard).
 if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "ERROR: working tree at /opt/vigilant has uncommitted changes."
+    echo "ERROR: working tree at $VIGILANT_ROOT has uncommitted changes."
     git status --short
     echo "Either commit/stash these or run 'git checkout .' before deploying."
     exit 1
@@ -158,9 +176,13 @@ _deploy_tag() {
     # account cannot read SECRET_KEY or the EVE client secret. Idempotent, so it
     # also retro-tightens an install whose .env was created world-readable.
     [ -f .env ] && chmod 600 .env
-    docker pull "$IMAGE:$tag"
+    docker pull "$VIGILANT_IMAGE:$tag"
     _pin_tag_in_env "$tag"
-    VIGILANT_TAG="$tag" docker compose up -d --no-deps --force-recreate app
+    # Explicit -f suppresses compose's automatic merge of docker-compose.override.yml.
+    # Intentional: the app recreate must use the checked-out compose file verbatim,
+    # not silently blended with whatever override happens to sit on disk. This is a
+    # real behaviour change from the previous bare `docker compose up`.
+    VIGILANT_TAG="$tag" docker compose -f "$VIGILANT_COMPOSE_FILE" up -d --no-deps --force-recreate app
 }
 
 echo "[1/5] Deploy $TARGET_TAG (checkout + pull + recreate)"
@@ -212,4 +234,4 @@ echo "[5/5] Done"
 running=$(docker exec "$APP_CONTAINER" printenv VIGILANT_VERSION 2>/dev/null || echo '?')
 echo ""
 echo "✓ Deployed $TARGET_TAG (container reports: $running)"
-echo "  To roll back: /opt/vigilant/scripts/rollback.sh"
+echo "  To roll back: $VIGILANT_ROOT/scripts/rollback.sh"

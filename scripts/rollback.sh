@@ -28,14 +28,25 @@ if [ -z "${VIGILANT_ROLLBACK_REEXEC:-}" ]; then
     exec bash "$_tmp/rollback.sh" "$@"
 fi
 
-cd /opt/vigilant
+# readonly, resolved BEFORE .health-env is sourced: see deploy.sh for the full
+# explanation of the split-brain hazard a stale/copied .health-env would
+# otherwise open. Here it's worse than in deploy.sh — DEPLOY_LOG drives which
+# TAG gets selected as the rollback target, so a retargeted ledger would pick a
+# tag from the wrong stack's history, not just write state to the wrong place.
+readonly VIGILANT_ROOT="${VIGILANT_ROOT:-/opt/vigilant}"
+readonly VIGILANT_IMAGE="${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}"
+readonly VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
+
+cd "$VIGILANT_ROOT"
 
 # shellcheck disable=SC1091
-[ -r /opt/vigilant/.health-env ] && source /opt/vigilant/.health-env
-APP_CONTAINER="${APP_CONTAINER:-vigilant-app-1}"
+[ -r "$VIGILANT_ROOT/.health-env" ] && source "$VIGILANT_ROOT/.health-env"
+# Tracks compose's own basename(cwd) project-name derivation; see deploy.sh for
+# the verification against production. .health-env may still override this
+# because that file legitimately describes the stack it lives in.
+APP_CONTAINER="${APP_CONTAINER:-$(basename "$VIGILANT_ROOT")-app-1}"
 
-IMAGE=ghcr.io/thor6677/vigilant
-DEPLOY_LOG=/opt/vigilant/.deployed
+DEPLOY_LOG="$VIGILANT_ROOT/.deployed"
 
 TARGET=""
 while [[ $# -gt 0 ]]; do
@@ -79,8 +90,8 @@ git fetch --tags --prune
 git checkout --detach "$TARGET"
 [ -f .env ] && chmod 600 .env
 
-echo "[2/4] Pull $IMAGE:$TARGET"
-docker pull "$IMAGE:$TARGET"
+echo "[2/4] Pull $VIGILANT_IMAGE:$TARGET"
+docker pull "$VIGILANT_IMAGE:$TARGET"
 
 echo "[3/4] Recreate app"
 # Persist the tag into .env (compose reads it for interpolation) for the same
@@ -96,7 +107,12 @@ mv .env.tmp .env
 # --no-deps: only the app container cycles. TLS termination and routing live in
 # a separate edge stack that this compose file does not own, so a rollback must
 # leave it alone.
-VIGILANT_TAG="$TARGET" docker compose up -d --no-deps --force-recreate app
+#
+# Explicit -f suppresses compose's automatic merge of docker-compose.override.yml.
+# Intentional: the app recreate must use the checked-out compose file verbatim.
+# Real behaviour change from the previous bare `docker compose up` — don't
+# "simplify" it away.
+VIGILANT_TAG="$TARGET" docker compose -f "$VIGILANT_COMPOSE_FILE" up -d --no-deps --force-recreate app
 
 echo "[4/4] Health check"
 ok=0
@@ -120,7 +136,7 @@ docker logs --since 30s "$APP_CONTAINER" 2>&1 | tail -20
 if [[ $ok -ne 1 ]]; then
     echo ""
     echo "✗ $TARGET is not serving either. Try an older release:"
-    echo "    /opt/vigilant/scripts/rollback.sh --to <tag>"
+    echo "    $VIGILANT_ROOT/scripts/rollback.sh --to <tag>"
     exit 1
 fi
 

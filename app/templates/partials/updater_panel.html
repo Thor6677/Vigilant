@@ -1,0 +1,151 @@
+{#
+  In-app updater panel. Rendered by /admin/update/status and returned by both
+  POSTs, so one template covers the idle, running, finished and error views.
+
+  Two things here are load-bearing and easy to undo by accident:
+
+  1. The poll lives on #updater-panel ITSELF, which is also hx-swap's target.
+     htmx re-initialises the replacement, so the loop continues across swaps.
+     Putting it on an inner element instead would work until the first swap
+     replaced that element mid-flight.
+
+  2. data-htmx-no-error="1" sits on the polling element because base.html's
+     ISS-007 handler reads evt.detail.elt — the element that TRIGGERED the
+     request. Without it, every failed poll during the app's own restart would
+     overwrite the panel with a "couldn't load" pill, destroying the poll and
+     stranding the operator on an error ~20 times over a 30-60s restart.
+
+  Confirmation uses htmx's own hx-confirm rather than the repo's data-confirm
+  dispatcher: data-confirm listens for the native submit event, and racing
+  htmx's own submit handling for the same event is a coin flip. hx-confirm is
+  evaluated by htmx before it issues the request.
+
+  No inline event handlers: v1.1.0 enforces CSP with a nonce and no
+  'unsafe-inline' in script-src, and tests/test_csp_inline_handlers.py fails the
+  build if one reappears.
+#}
+<div id="updater-panel" class="b-card"
+     {% if polling %}
+     hx-get="/admin/update/status"
+     hx-trigger="every 2s"
+     hx-target="#updater-panel"
+     hx-swap="outerHTML"
+     data-htmx-no-error="1"
+     {% endif %}>
+
+  <div class="b-card-head">
+    <h3>Updates</h3>
+    {% if current_tag %}<span class="b-chip mono">{{ current_tag }}</span>{% endif %}
+  </div>
+
+  {# Unhidden by updaterRestartWatch() in actions.js when a poll fails, and
+     gone again on the next successful swap. Toggled via the hidden property
+     rather than innerHTML so the polling element above survives untouched. #}
+  <p id="updater-restarting" class="b-empty" hidden>
+    Vigilant is restarting — this page will update itself when it comes back.
+  </p>
+
+  {% if not available %}
+    <p class="b-empty">
+      No updater is running. Deploy from the host with
+      <code>scripts/deploy.sh</code>, or start the updater compose profile to
+      enable in-app updates.
+    </p>
+  {% else %}
+
+    {% if error %}
+      <p class="b-empty" style="color:var(--danger);">{{ error }}</p>
+    {% endif %}
+
+    {% set failed_checks = checks.items() | rejectattr('1', 'equalto', 'ok') | list %}
+    {% if failed_checks %}
+      {# Environment problems surface as a disabled button with a readable
+         reason rather than a mid-deploy explosion. #}
+      <div class="b-empty" style="color:var(--danger);">
+        The updater cannot run:
+        <ul>
+          {% for name, result in failed_checks %}<li><b>{{ name }}</b>: {{ result }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% if run_state == BUSY or awaiting_pickup or (polling and not status) %}
+      <div class="updater-progress">
+        <p>
+          <b>{{ ((status.action if status and not awaiting_pickup else 'update')) | capitalize }} in progress</b>
+          {% if status and not awaiting_pickup %}— {{ status.from_tag or '?' }} &rarr; {{ status.to_tag or '?' }}{% endif %}
+        </p>
+        {# While awaiting pickup, status.json still describes the PREVIOUS run —
+           show "queued", never its step or outcome. #}
+        <p class="mono">{{ 'queued' if awaiting_pickup else ((status.step if status else None) or 'queued') }}</p>
+        {% if status and status.log_tail and not awaiting_pickup %}
+          <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
+        {% endif %}
+      </div>
+
+    {% elif run_state == INTERRUPTED %}
+      <p class="b-empty" style="color:var(--danger);">
+        The last run started at {{ status.started_at }} and never reported a
+        result. The updater may have been killed mid-deploy — check the host
+        before retrying.
+      </p>
+
+    {% else %}
+      {% if status and status.state %}
+        <div class="updater-outcome">
+          {% if status.state == 'success' %}
+            <p>Last run: <b>{{ status.action }}</b> to
+               <b class="mono">{{ status.to_tag }}</b> succeeded.</p>
+          {% else %}
+            <p style="color:var(--danger);">
+              Last run: <b>{{ status.action }}</b> to
+              <b class="mono">{{ status.to_tag }}</b> failed.
+              {% if status.error %}<br>{{ status.error }}{% endif %}
+              {% if status.reverted_to %}
+                <br>Automatically reverted to
+                <b class="mono">{{ status.reverted_to }}</b>.
+              {% endif %}
+            </p>
+          {% endif %}
+          {% if status.log_tail %}
+            <details>
+              <summary>Output</summary>
+              <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
+            </details>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="updater-actions">
+        {% if update_available %}
+          <form hx-post="/admin/update" hx-target="#updater-panel" hx-swap="outerHTML"
+                hx-confirm="Update Vigilant to {{ latest_tag }}? This restarts the app and the site will be unavailable for 30-60 seconds.">
+            <input type="hidden" name="tag" value="{{ latest_tag }}">
+            <button type="submit" class="b-btn"
+                    {% if failed_checks %}disabled{% endif %}>
+              Update to {{ latest_tag }}
+            </button>
+          </form>
+        {% else %}
+          <p class="b-empty">
+            {% if latest_tag %}Up to date.{% else %}No release information yet — the checker polls hourly.{% endif %}
+          </p>
+        {% endif %}
+
+        {% if targets %}
+          <form hx-post="/admin/rollback" hx-target="#updater-panel" hx-swap="outerHTML"
+                hx-confirm="Roll Vigilant back to an earlier release? This restarts the app and the site will be unavailable for 30-60 seconds.">
+            <label for="updater-rollback-tag">Roll back to</label>
+            <select id="updater-rollback-tag" name="tag">
+              {% for t in targets %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="b-btn b-btn-secondary"
+                    {% if failed_checks %}disabled{% endif %}>
+              Roll back
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+</div>

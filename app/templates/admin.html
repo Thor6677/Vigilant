@@ -19,10 +19,19 @@
     <button type="button" data-click="switchTab" data-section="audit">Audit Log</button>
 </div>
 
+{# data-htmx-no-error: this container re-fetches itself every 10s (see
+   refreshSections below), so ISS-007's "couldn't load" pill is both unnecessary
+   — the next tick retries on its own — and actively harmful. During an in-app
+   update the app is DOWN for 30-60s by design; without this opt-out the failing
+   refresh would replace this element's innerHTML, destroying #updater-panel,
+   its hx-trigger and its restart banner. The page would then never notice the
+   app coming back, which is exactly what the updater panel's own opt-out exists
+   to prevent — defeated one level up. See tests/test_updater_panel.py. #}
 <div id="admin-content"
      hx-get="/admin/section/overview"
      hx-trigger="load"
-     hx-swap="innerHTML">
+     hx-swap="innerHTML"
+     data-htmx-no-error="1">
     <div class="b-empty">Loading...</div>
 </div>
 

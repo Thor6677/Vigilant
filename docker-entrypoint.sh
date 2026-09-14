@@ -25,5 +25,37 @@ if [ -d /data ]; then
     fi
 fi
 
+# The updater IPC volume, when the profile is enabled. A fresh named volume is
+# root-owned 0755, so the app — uid 10001 with a read_only rootfs — could read
+# it but not write, and the operator's first click would fail on permissions
+# with nothing in the logs to explain it.
+#
+# 0770 rather than 0755: the updater joins gid 10001 (see compose group_add) so
+# both sides need group write, and nothing else on the host has any business
+# reading a channel that names releases and requesters.
+#
+# Guarded on the directory existing, so the default install — where no /control
+# is mounted at all — skips this silently rather than failing to boot.
+if [ -d /control ]; then
+    # ORDER MATTERS, and it is not the obvious one.
+    #
+    # chmod on a file you do not own requires CAP_FOWNER, which this container
+    # deliberately does not have (cap_drop: ALL, cap_add: CHOWN/SETUID/SETGID).
+    # A fresh named volume is root-owned, so root may chmod it *before* the
+    # chown and may not after. Doing it the natural way round — chown then
+    # chmod — fails with "Operation not permitted", and set -e turns that into
+    # an app that CRASH-LOOPS the moment the updater profile is first enabled.
+    # Found on the throwaway stack, 2026-09-14.
+    #
+    # Both steps are guarded so the second boot, where the directory is already
+    # vigilant-owned and root can no longer chmod it, skips rather than dies.
+    if [ "$(stat -c %a /control)" != "770" ]; then
+        chmod 0770 /control || echo "entrypoint: could not set /control mode; the updater may be unable to write its heartbeat" >&2
+    fi
+    if [ "$(stat -c %u /control)" != "$(id -u vigilant)" ]; then
+        chown vigilant:vigilant /control
+    fi
+fi
+
 # Hand off to the real process as the vigilant user.
 exec gosu vigilant "$@"

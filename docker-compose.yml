@@ -22,6 +22,11 @@ services:
       - VIGILANT_PERF_FILE=/data/logs/perf.log
     volumes:
       - app_data:/data
+      # The updater IPC channel. Writable even though the rootfs is read_only —
+      # /control is the one place the app may write besides /data and /tmp. The
+      # app never gets the Docker socket; writing one JSON file here is the
+      # entire capability it has over deployment.
+      - control:/control
     networks:
       - web
     expose:
@@ -54,8 +59,76 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── In-app updater (profile-gated, off by default) ────────────────────────
+  #
+  # ABSENT unless explicitly asked for:
+  #   docker compose --profile updater up -d
+  # No profile means no container, which means no heartbeat, which means the
+  # app hides the button and 404s the routes. A default install is
+  # byte-identical to one without this block.
+  #
+  # This container holds the Docker socket, which is root-equivalent on the host
+  # by construction — anything that can create containers can create a
+  # privileged one. The design does not pretend otherwise; it narrows the
+  # capability to two operations, gives it no network listener, and keeps the
+  # app itself unprivileged.
+  updater:
+    profiles: ["updater"]
+    image: ghcr.io/thor6677/vigilant-updater:${VIGILANT_TAG:-latest}
+    restart: unless-stopped
+    # NOT root. Everything this writes into the host repo — .git objects, the
+    # .deployed log — must stay owned by the repo owner, or the SSH fallback
+    # this feature keeps as its escape hatch stops working. Socket access comes
+    # from the supplementary group instead of from uid 0.
+    user: "${VIGILANT_UID:-1000}:${VIGILANT_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-983}"   # getent group docker | cut -d: -f3
+      - "10001"                # the app's gid, for the shared /control volume
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The two sides MUST be identical, which is why one variable fills both.
+      # compose derives its project identity from the working directory, so the
+      # path inside the container decides WHICH STACK gets recreated: mount the
+      # repo at a different path than the sidecar reports as its root and
+      # compose treats it as a new project, creating a SECOND app container
+      # bound to the same data volume instead of recreating the running one.
+      #
+      # Parameterised rather than hardcoded because hardcoding it is a
+      # foot-gun, not a safety measure: a second stack that enables this profile
+      # would silently bind PRODUCTION's repo and deploy the wrong site.
+      # Observed on the throwaway verification stack, 2026-09-14 — the sidecar
+      # came up reporting root=/opt/vigilant and production's current_tag while
+      # running under a completely different compose project. Default is
+      # unchanged, so a normal install behaves exactly as before.
+      - ${VIGILANT_ROOT:-/opt/vigilant}:${VIGILANT_ROOT:-/opt/vigilant}
+      - control:/control
+    environment:
+      - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
+      - VIGILANT_CONTROL_DIR=/control
+      # Passed through so the sidecar's `docker pull` resolves the same registry
+      # the compose file does. Without it deploy.sh falls back to its own
+      # ghcr.io default while compose uses this one, and the two disagree about
+      # what "v1.2.3" means — which surfaces as a "not found" at pull time, on a
+      # throwaway or mirrored stack only. Default is unchanged.
+      - VIGILANT_IMAGE=${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}
+    # Deliberately NOT on the `web` bridge: it publishes no ports and has no
+    # listener, so nothing should be able to reach it. It still needs outbound
+    # for `git fetch`, which the project's default network provides. The image
+    # pull is performed by the daemon, not by this process.
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   app_data:
+  # 0770 vigilant:vigilant, established by the app's entrypoint — a fresh named
+  # volume is root-owned 0755, which would leave the app able to read but not
+  # write, and the first click failing on permissions.
+  control:
 
 networks:
   # Shared external bridge. Edge nginx (separate stack at /opt/edge/ on

@@ -450,7 +450,108 @@ database schema on startup.
 
 When signed in as an admin, Vigilant tells you when a newer release exists — a
 banner in the UI and, if you opt in via `DISCORD_ALERT_TYPES`, one Discord
-message per release. It never updates itself; you choose when to deploy.
+message per release. It never updates itself; you choose when to deploy — from
+the command line above, or from the browser if you enable the optional updater
+below.
+
+### In-App Updates (optional, off by default)
+
+Deploy a release from Admin › Overview instead of over SSH. **Off unless you
+explicitly turn it on**, and a default install behaves exactly as if this
+section did not exist.
+
+#### Read this before enabling it
+
+**The updater is root-equivalent on the host, by construction.** It holds the
+Docker socket, and anything that can create containers can create a privileged
+one that mounts your whole filesystem. No arrangement of flags makes that
+untrue, and this feature does not claim a sandbox.
+
+What it does instead:
+
+- **Narrow capability.** It performs exactly two operations — deploy a release,
+  roll back to a release — by running the same `scripts/deploy.sh` and
+  `scripts/rollback.sh` you would run yourself. It is not a general Docker
+  gateway.
+- **No network surface.** There is no listener, no API and no shared secret. The
+  two containers talk by writing files to a shared volume, so there is nothing
+  to authenticate and nothing reachable from the network.
+- **Vigilant itself stays unprivileged.** The app keeps `cap_drop: ALL`,
+  `read_only: true`, uid 10001, and never touches the Docker socket. A
+  remote-code-execution bug in Vigilant gets an attacker the ability to write
+  one JSON file, whose contents the privileged side validates before acting on.
+
+A compromised admin session can restart your app and roll it back to any release
+this host has previously run. Rollback targets are restricted to that list, but
+an older release with a known bug is still reachable. If that trade is not worth
+it to you, leave this off and keep using SSH — nothing else depends on it.
+
+#### Enabling it
+
+**Order matters: the updater cannot install itself.** The compose file comes
+from the repo checkout, so the release that first adds the updater has to be
+deployed the normal way before the profile can start.
+
+```bash
+cd /opt/vigilant
+
+# 1. Deploy a release that includes the updater, the usual way.
+scripts/deploy.sh --tag vX.Y.Z
+
+# 2. Tell compose who to run as. Run these ON THE HOST, not in a container.
+id -u                                # -> VIGILANT_UID
+id -g                                # -> VIGILANT_GID
+getent group docker | cut -d: -f3    # -> DOCKER_GID
+$EDITOR .env                         # set all three
+
+# 3. Start the sidecar. `up -d` alone will NOT create it — the profile is
+#    what makes it exist at all.
+docker compose --profile updater up -d
+```
+
+Then reload Admin › Overview. The panel appears once the sidecar's heartbeat is
+less than 60 seconds old; if it stays hidden, the sidecar is not running.
+
+#### Two compose gotchas
+
+**A bare `docker compose down` does not stop the updater.** Without the profile
+compose does not know the service exists, so it stops the app, removes the
+network — and leaves the sidecar running, now detached. Always pass the profile
+when bringing the stack down:
+
+```bash
+docker compose --profile updater down
+```
+
+**`--remove-orphans` is version-dependent.** On Compose v5.5.1 a
+profile-disabled service is not treated as an orphan and survives the flag
+(verified). Older Compose versions did remove profile-disabled services. If you
+are not on a recent Compose, check before combining that flag with a bare
+`up -d`.
+
+Neither affects `scripts/deploy.sh`: it recreates only the `app` service
+(`up -d --no-deps --force-recreate app`) and never passes `--remove-orphans`, so
+an in-app update cannot delete the sidecar out from under itself mid-run.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| No panel in Admin › Overview | Sidecar not running, or its heartbeat is stale | `docker compose --profile updater ps`; check `docker logs vigilant-updater-1` |
+| Panel says "socket: FAIL" | `DOCKER_GID` does not match this host | `getent group docker \| cut -d: -f3`, correct `.env`, recreate the sidecar |
+| Panel says "git: FAIL" | `/opt/vigilant` not mounted, or not owned by `VIGILANT_UID` | Check the bind mount is `/opt/vigilant:/opt/vigilant` on both sides |
+| Panel says "deployed: FAIL" | `.deployed` missing — no release has been deployed by the scripts yet | Deploy once with `scripts/deploy.sh` |
+| Buttons are disabled | One of the self-checks above is failing | Fix the named check; the panel lists which |
+| "The last run was interrupted" | The sidecar died mid-deploy | Check the host and `docker logs`; the app will not queue another run until it is resolved |
+| Update button never appears | Already on the latest release, or the hourly checker has not polled yet | Compare the version chip against the newest release |
+| A second app container appeared | The repo was bind-mounted somewhere other than `/opt/vigilant` | compose derives its project identity from that path — it must be identical on both sides |
+
+#### Rolling back
+
+The panel offers only releases this host has actually run, read from
+`.deployed`. Because code and image are pinned to the same tag, a rollback needs
+no follow-up `git revert`. If the app fails its health check after an update,
+`deploy.sh` reverts automatically and the panel reports what it reverted to.
 
 ### Dev Instance
 

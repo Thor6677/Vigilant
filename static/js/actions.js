@@ -253,4 +253,36 @@
             console.warn('vigilant.actions: no global function named "' + spec + '" for error');
         }
     }, true);
+
+    /* Updater restart gap (Task 6).
+     *
+     * A deploy recreates this very app, so the panel's 2s poll WILL fail for
+     * 30-60s in the middle of a normal, successful run. base.html's ISS-007
+     * handler is opted out of via data-htmx-no-error on the panel, which stops
+     * it overwriting the poll — but something still has to tell the operator
+     * that the silence is expected rather than a hang.
+     *
+     * Toggling `hidden` on a sibling, never innerHTML on the panel: replacing
+     * the panel's markup would destroy the hx-trigger and end the poll, so the
+     * page would never notice the app coming back. That is the actual bug this
+     * whole arrangement exists to avoid, and it is invisible on a fast machine
+     * where the restart looks instantaneous.
+     */
+    function updaterRestartBanner(show) {
+        var panel = document.getElementById('updater-panel');
+        if (!panel) return;
+        var note = document.getElementById('updater-restarting');
+        if (note) note.hidden = !show;
+    }
+
+    document.addEventListener('htmx:sendError', function (e) {
+        var el = e.detail && e.detail.elt;
+        if (el && el.id === 'updater-panel') updaterRestartBanner(true);
+    });
+    document.addEventListener('htmx:responseError', function (e) {
+        var el = e.detail && e.detail.elt;
+        /* 502/503/504 are the edge proxy answering while the container is
+         * down — the same restart, not a different failure. */
+        if (el && el.id === 'updater-panel') updaterRestartBanner(true);
+    });
 })();
