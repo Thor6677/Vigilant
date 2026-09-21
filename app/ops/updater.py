@@ -24,6 +24,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.ops.version import is_newer
+
 logger = logging.getLogger(__name__)
 
 # The supervisor writes its heartbeat every 10s. 60s tolerates five missed
@@ -57,6 +59,29 @@ _ACTIONS = ("update", "rollback")
 IDLE = "idle"
 BUSY = "busy"
 INTERRUPTED = "interrupted"
+
+# The sidecar's self-update states, as it writes them into the heartbeat's
+# `self_update` record.
+#
+# Spelled out again here rather than imported from updater.supervisor, for the
+# same reason the tag regex above is: the app image does not ship `updater/`, so
+# such an import would pass in the test suite — where both packages are on the
+# path — and fail at runtime in the container. Both sides are pinned to these
+# literals by tests instead.
+SELF_UPDATE_PULLING = "pulling"
+SELF_UPDATE_HANDED_OFF = "handed_off"
+SELF_UPDATE_DONE = "done"
+SELF_UPDATE_FAILED = "failed"
+
+# States that mean a handoff is happening right now. While one is, the panel
+# says so neutrally and says nothing about lag: the skew is about to fix itself,
+# and a warning telling the operator to run a command by hand would be wrong.
+SELF_UPDATE_IN_FLIGHT = (SELF_UPDATE_PULLING, SELF_UPDATE_HANDED_OFF)
+
+_SELF_UPDATE_STATES = (
+    SELF_UPDATE_PULLING, SELF_UPDATE_HANDED_OFF,
+    SELF_UPDATE_DONE, SELF_UPDATE_FAILED,
+)
 
 
 class UpdaterUnavailable(RuntimeError):
@@ -157,6 +182,55 @@ def run_state(status: dict | None, now: datetime) -> str:
     if age > (_RUN_TIMEOUT_SECONDS + _RUN_TIMEOUT_GRACE_SECONDS):
         return INTERRUPTED
     return BUSY
+
+
+def updater_lagging(updater_version, current_tag) -> bool:
+    """Whether the sidecar is running an OLDER release than the app.
+
+    Both values come out of the heartbeat the sidecar already writes, so this
+    costs no extra I/O and no new IPC channel.
+
+    Why this needs saying at all: scripts/deploy.sh and scripts/rollback.sh
+    recreate only the `app` service, so a deploy run from the command line
+    leaves the sidecar on its old image. The sidecar upgrades itself after an
+    in-app update, but it deliberately does not do so on a timer or at startup
+    — two compose operations against one project at once is a worse failure
+    than a lagging sidecar — so the CLI path still produces skew. Skew that
+    nobody is told about is how a sidecar fix sat undelivered in production.
+
+    `is_newer` fails closed on anything it cannot parse, in both directions.
+    That is what keeps a source build quiet: a sidecar reporting "dev" is never
+    lagging, and never makes the panel nag a developer about a release number
+    that does not exist.
+
+    Strictly older, so the post-rollback case — app moved BACK, sidecar
+    deliberately stayed forward — produces no warning. A newer sidecar with an
+    older app is a supported, already-shipped combination.
+    """
+    return is_newer(current_tag, updater_version)
+
+
+def self_update_record(heartbeat) -> dict | None:
+    """The sidecar's self-update record from a heartbeat, or None.
+
+    None covers three different things on purpose, because the panel renders
+    them identically: no heartbeat, a heartbeat from a sidecar too old to have
+    the field, and a heartbeat that has it set to null. An older sidecar must
+    keep rendering exactly as it did before this feature existed.
+
+    An unrecognised state is also None. The sidecar owns this vocabulary and may
+    be NEWER than the app by construction — that is the whole point of
+    forward-only self-update — so a state this version has never heard of must
+    render as "nothing to say", not as a broken panel.
+    """
+    if not isinstance(heartbeat, dict):
+        return None
+    record = heartbeat.get("self_update")
+    if not isinstance(record, dict):
+        return None
+    if record.get("state") not in _SELF_UPDATE_STATES:
+        return None
+    return record
 
 
 def build_request(action: str, tag: str, requested_by: int | None) -> dict:

@@ -341,6 +341,108 @@ def test_panel_disables_the_button_on_a_failed_remote_check(env):
     assert "disabled" in body
 
 
+# ── Sidecar version skew, end to end through the real route ─────────────────
+#
+# The panel tests render the template standalone with a hand-built context.
+# These drive the real _updater_context off a real heartbeat file, so a context
+# key that was never wired up fails here rather than passing there.
+
+_MANUAL_RECREATE = "docker compose --profile updater up -d updater"
+
+
+def _beat_with(control, version, current_tag, self_update="absent"):
+    """A heartbeat as the sidecar writes it, optionally without `self_update`.
+
+    "absent" rather than None is the default because those are different
+    heartbeats: a sidecar too old to have the field, versus one that has
+    nothing to report. Both must render identically, and only one of them can
+    be written by omitting the key.
+    """
+    payload = {
+        "version": version,
+        "current_tag": current_tag,
+        "targets": [],
+        "checks": {"socket": "ok", "git": "ok", "compose": "ok",
+                   "remote": "ok", "deployed": "ok"},
+    }
+    if self_update != "absent":
+        payload["self_update"] = self_update
+    (control / "updater.json").write_text(json.dumps(payload))
+
+
+def test_panel_warns_when_the_sidecar_trails_the_app(env):
+    _beat_with(env.control, version="v1.2.2", current_tag="v1.2.3")
+    body = env.admin().get("/admin/update/status").text
+    assert "v1.2.2" in body
+    assert _MANUAL_RECREATE in body
+
+
+def test_a_lagging_sidecar_keeps_its_buttons(env):
+    """Updating is how a lagging sidecar heals itself — the panel must not
+    disable the one path out of the skew."""
+    _beat_with(env.control, version="v1.1.0", current_tag="v1.2.0")
+    body = env.admin().get("/admin/update/status").text
+    assert _MANUAL_RECREATE in body
+    assert "Update to v1.3.0" in body
+    assert "disabled" not in body
+
+
+def test_panel_is_quiet_when_the_sidecar_is_in_step(env):
+    _beat_with(env.control, version="v1.2.0", current_tag="v1.2.0")
+    body = env.admin().get("/admin/update/status").text
+    assert _MANUAL_RECREATE not in body
+
+
+def test_panel_is_quiet_when_the_sidecar_is_ahead_of_the_app(env):
+    """Forward-only self-update leaves the sidecar ahead after a rollback. That
+    is the intended state, not a problem to report."""
+    _beat_with(env.control, version="v1.3.0", current_tag="v1.2.0")
+    body = env.admin().get("/admin/update/status").text
+    assert _MANUAL_RECREATE not in body
+    assert "still running" not in body
+
+
+def test_panel_reports_a_self_update_in_progress_neutrally(env):
+    _beat_with(env.control, version="v1.2.2", current_tag="v1.2.3",
+               self_update={"state": "handed_off", "target": "v1.2.3",
+                            "error": None, "at": "2026-09-21T10:00:00Z"})
+    body = env.admin().get("/admin/update/status").text
+    assert "upgrading itself" in body
+    # The skew is about to fix itself; telling the operator to run a command by
+    # hand at that moment would be wrong.
+    assert _MANUAL_RECREATE not in body
+
+
+def test_panel_reports_why_a_self_update_failed(env):
+    _beat_with(env.control, version="v1.2.2", current_tag="v1.2.3",
+               self_update={"state": "failed", "target": "v1.2.3",
+                            "error": "could not pull: manifest unknown",
+                            "at": "2026-09-21T10:00:00Z"})
+    body = env.admin().get("/admin/update/status").text
+    assert "manifest unknown" in body
+    assert _MANUAL_RECREATE in body
+
+
+def test_a_heartbeat_without_the_field_renders_as_it_always_did(env):
+    """The bootstrap case: every sidecar from v1.2.2 and earlier."""
+    _beat_with(env.control, version="v1.2.0", current_tag="v1.2.0")
+    body = env.admin().get("/admin/update/status").text
+    assert "upgrading itself" not in body
+    assert _MANUAL_RECREATE not in body
+    assert "Update to v1.3.0" in body
+
+
+def test_a_self_update_state_this_app_has_never_heard_of_is_ignored(env):
+    """The sidecar is NEWER than the app by construction, so it can publish a
+    state this version does not know. That must render as nothing, not as a
+    broken panel."""
+    _beat_with(env.control, version="v1.3.0", current_tag="v1.3.0",
+               self_update={"state": "reticulating", "target": "v1.4.0"})
+    resp = env.admin().get("/admin/update/status")
+    assert resp.status_code == 200
+    assert "reticulating" not in resp.text
+
+
 def test_panel_has_no_inline_event_handlers(env):
     """v1.1.0 enforces CSP with no 'unsafe-inline' in script-src — an onclick
     here would be silently dead in production."""
