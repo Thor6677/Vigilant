@@ -97,6 +97,24 @@ def test_dockerfile_declares_no_user_directive():
                 "uid must come from compose, not the image"
 
 
+def test_dockerfile_declares_no_entrypoint():
+    """The self-update helper is this image run with a `docker compose …`
+    command appended after the image reference. That overrides CMD; it does NOT
+    override an ENTRYPOINT, which would instead receive the compose argv as
+    arguments and try to run the supervisor with them.
+
+    It matters across versions, which is the whole point of the helper: the
+    image launched may be NEWER than the sidecar that launched it. An ENTRYPOINT
+    added in some future release would break a self-update FROM every release
+    before it, discovered only in production. Also note the helper needs nothing
+    from this image but docker-cli-compose, which every updater image has.
+    """
+    with open(DOCKERFILE) as fh:
+        for line in fh:
+            assert not line.strip().upper().startswith("ENTRYPOINT"), \
+                "the self-update helper overrides CMD; an ENTRYPOINT defeats it"
+
+
 def test_dockerfile_sets_home_and_unbuffered_output():
     with open("updater/Dockerfile") as fh:
         src = fh.read()
