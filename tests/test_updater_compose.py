@@ -109,14 +109,26 @@ def test_updater_tmp_is_a_capped_tmpfs(updater_svc):
     assert size not in (None, "", 0), size
 
 
-def test_updater_tmp_mode_is_world_writable_sticky(updater_svc):
-    """The sidecar's uid comes from VIGILANT_UID per install (not baked into
-    the image like the app's uid 10001), so whichever uid that turns out to be
-    must be able to write here — hence the explicit sticky world-writable
-    mode, matching /tmp's usual semantics, rather than trusting an unstated
-    default that varies by Compose version."""
+def test_updater_tmp_has_no_mode_key(updater_svc):
+    """A real daemon caught what code review did not: YAML `mode: 1777` is the
+    DECIMAL integer 1777, which is octal 3361 (`drwxrwS--t`) — NOT the
+    world-writable sticky bit the sidecar's arbitrary non-root uid needs.
+    `docker compose config` echoes that value back as `mode: 1777`, which
+    looks correct and is not; a sidecar built with it started cleanly, passed
+    every self-check that existed at the time, and then failed its first
+    update with nothing but `mktemp: Permission denied` in the log, because
+    /tmp itself was not writable by its own uid.
+
+    Compose's own tmpfs default mode is ALREADY 1777 octal — the same default
+    that has always made the app's plain `- /tmp` (no options at all) work for
+    its own non-root uid — so the fix is to omit the key entirely rather than
+    restate a number a YAML parser reads differently than a human does. A
+    `mode` key reappearing here with ANY value, correct-looking or not, is the
+    regression to catch: the last one looked entirely reasonable at a glance
+    and was wrong by a factor even a careful reviewer would not spot without a
+    real daemon."""
     mount = _tmpfs_mounts(updater_svc["volumes"])[0]
-    assert mount["tmpfs"]["mode"] == 1777
+    assert "mode" not in mount["tmpfs"], mount["tmpfs"]
 
 
 def test_app_and_updater_agree_the_stack_is_hardened(app_svc, updater_svc):

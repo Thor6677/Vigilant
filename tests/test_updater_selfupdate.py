@@ -826,14 +826,16 @@ def test_the_heartbeat_publishes_the_record(sup):
 def test_self_checks_beat_after_every_check(sup, monkeypatch):
     """_self_checks' own timeouts sum to 15 + 15 + 20 + 30 = 80 seconds, which
     is beyond the app's 60s staleness window on its own. Beating after each
-    check bounds the gap to the single longest timeout instead of their sum."""
+    check bounds the gap to the single longest timeout instead of their sum.
+    `tmp` adds a sixth check but no timeout of its own — it's a bare
+    filesystem call — so it does not change that arithmetic."""
     monkeypatch.setattr(sup.subprocess, "run",
                         lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
     seen = []
     checks = sup._self_checks(seen.append)
-    assert len(seen) == len(checks) == 5
+    assert len(seen) == len(checks) == 6
     # Each call sees strictly more than the last, and the last sees them all.
-    assert [len(s) for s in seen] == [1, 2, 3, 4, 5]
+    assert [len(s) for s in seen] == [1, 2, 3, 4, 5, 6]
     assert seen[-1] == checks
     # A copy, not the live dict — the caller publishes what it was handed.
     assert seen[0] is not checks

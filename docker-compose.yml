@@ -128,34 +128,47 @@ services:
         target: /tmp
         # Long form, not the short `tmpfs: [/tmp]` list the app service uses
         # below: the short list takes bare paths only, and this mount needs
-        # two options the app's /tmp does not.
+        # a size cap the app's /tmp does not.
         #
         # size caps it. Docker's own tmpfs default is UNBOUNDED — a tmpfs is
         # backed by RAM, not disk, so an unbounded one does not fail with
         # ENOSPC when something runs away, it eats host memory instead. 64m is
         # generous for what actually lands here: docker-cli-compose's own
-        # writes under HOME (see updater/Dockerfile) and nothing else, since
-        # deploy.sh/rollback.sh's own tmp usage is the bind-mounted ROOT copy
-        # of themselves (see the self-modification guard atop both scripts),
-        # not this mount.
+        # writes under HOME (see updater/Dockerfile), AND scripts/deploy.sh's
+        # and scripts/rollback.sh's own `mktemp -d` self-copy (see the
+        # self-modification guard atop both scripts) — that copy lands in
+        # THIS mount, not the bind-mounted repo root, since `mktemp -d` with
+        # no template resolves against TMPDIR/`/tmp` by default.
         #
-        # mode: 1777 (world-writable, sticky) is specified explicitly rather
-        # than left to rely on whatever this Compose version's own default
-        # turns out to be: unlike the app service's uid 10001 baked into its
-        # image, this container's uid comes from VIGILANT_UID per install (see
-        # `user:` above) and is not known at image-build time, so the mount
-        # must be writable by whichever uid that turns out to be.
+        # Deliberately NO `mode` key. This mount needs to be writable by an
+        # arbitrary non-root uid (VIGILANT_UID per install, not baked into the
+        # image like the app's uid 10001 — see `user:` above), which argued
+        # for spelling out `mode: 1777` explicitly rather than trusting a
+        # default. That reasoning was wrong in a way only a real daemon
+        # caught: YAML reads `1777` as the DECIMAL integer 1777, which is
+        # octal 3361 — `drwxrwS--t`, NOT world-writable — and Compose passes
+        # that value straight through uninterpreted (`docker compose config`
+        # even ECHOES it back as `mode: 1777`, which looks right and is not).
+        # A sidecar built with that line starts cleanly, reports all five
+        # self-checks ok, and then fails its first update or rollback in
+        # seconds with nothing but `mktemp: Permission denied` in the log,
+        # because /tmp itself was never writable by its own uid. Compose's
+        # own tmpfs default mode is ALREADY 1777 (octal) — the same default
+        # that has always made the app's plain `- /tmp` below writable for
+        # its non-root uid with no mode key at all — so the fix is to rely on
+        # that default rather than restate it as a number a YAML parser reads
+        # differently than a human does. See the `tmp` self-check in
+        # updater/supervisor.py's _self_checks(), added specifically because
+        # this class of failure passed every check that existed before it.
         #
         # Docker's tmpfs default also adds `noexec`, which is fine here: this
         # container never executes anything from /tmp. deploy.sh and
-        # rollback.sh re-exec themselves from a `mktemp -d` elsewhere on the
-        # HOST filesystem (the bind-mounted repo root, not this tmpfs) via
+        # rollback.sh copy themselves INTO this mount via `mktemp -d` and then
         # `exec bash "<file>"` — bash READS that file and interprets it, it
-        # does not execute it as a binary, so noexec on /tmp never enters into
-        # it either way.
+        # does not execute it as a binary, so noexec never enters into it
+        # either way.
         tmpfs:
           size: 64m
-          mode: 1777
     environment:
       - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
       - VIGILANT_CONTROL_DIR=/control
