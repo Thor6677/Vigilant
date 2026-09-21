@@ -205,9 +205,9 @@ def test_the_supervisor_never_string_builds_an_image_name():
     is how the overrides above reach the self-update at all. A reconstructed
     name would hardcode the default registry and quietly ignore them."""
     src = Path("updater/supervisor.py").read_text()
-    # No registry host, and no `name:tag` assembly. HELPER_CONTAINER_NAME is a
-    # CONTAINER name and is allowed to be a constant — it names nothing that
-    # gets pulled.
+    # No registry host anywhere in the file. helper_container_name() builds a
+    # CONTAINER name from the install directory, which names nothing that gets
+    # pulled.
     assert "ghcr.io" not in src
     assert '["services"]["updater"]["image"]' in src
 

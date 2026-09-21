@@ -483,13 +483,41 @@ SELF_UPDATE_HANDED_OFF = "handed_off"
 SELF_UPDATE_DONE = "done"
 SELF_UPDATE_FAILED = "failed"
 
-# Fixed, so a leftover from a previous attempt is found and removed rather than
-# accumulating one container per try. The prefix is a constant and not derived
-# from the live compose project name on purpose: this container must NOT carry
-# compose project labels (see build_helper_command), so nothing about it needs
-# to match the project, and reading the project name would be one more docker
-# call on the path where the old sidecar is about to be killed.
-HELPER_CONTAINER_NAME = "vigilant-updater-selfupdate"
+def helper_container_name(root: str) -> str:
+    """The self-update helper's container name for the stack rooted at `root`.
+
+    Fixed per stack, so a leftover from a previous attempt is found and removed
+    rather than accumulating one container per try — but PER STACK, not global.
+    Container names are unique per Docker daemon, and this repo runs a second
+    stack on the same daemon by design (the dev instance). A single hardcoded
+    name would mean one stack's sidecar `rm -f`ing another stack's helper
+    mid-recreate — precisely the "old container gone, new one never started"
+    outcome the helper exists to prevent — or simply failing to launch on a name
+    conflict. A second stack silently acting on the first is not hypothetical
+    here; it is a defect this project has already had once, with the sidecar's
+    repo mount.
+
+    Derived from the install directory, which is what both neighbours already
+    do: compose derives its project identity from the working directory, and
+    scripts/deploy.sh derives the app container as
+    `$(basename "$VIGILANT_ROOT")-app-1`. So /opt/vigilant gives
+    "vigilant-updater-selfupdate" and /opt/vigilant-dev gives
+    "vigilant-dev-updater-selfupdate", matching the containers beside them.
+
+    Deliberately NOT read from the live compose project name: that would be one
+    more docker call on the path where the old sidecar is about to be killed,
+    and this container must not carry compose project labels anyway (see
+    build_helper_command), so nothing about it needs to match the project.
+
+    A pure function of its argument, and callers pass ROOT at CALL time rather
+    than binding a module-level name at import — the same reasoning as
+    build_command's `root=None` default: a value frozen at import would ignore
+    a test (or an install) that sets ROOT afterwards.
+    """
+    base = os.path.basename((root or "").rstrip("/"))
+    # "/" and "" have no basename. Falling back keeps this from producing a
+    # container name that starts with a dash, which docker rejects outright.
+    return f"{base or 'vigilant'}-updater-selfupdate"
 
 
 def self_update_target(own_version, deployed_tag, run_state) -> str | None:
@@ -533,13 +561,15 @@ def self_update_target(own_version, deployed_tag, run_state) -> str | None:
 
 def build_helper_command(image_ref: str, root: str, compose_file: str,
                          uid: int, gid: int, groups,
-                         container_name: str = HELPER_CONTAINER_NAME) -> list[str]:
+                         container_name: str) -> list[str]:
     """argv for the throwaway container that recreates the `updater` service.
 
     A LIST, never a shell string. Every flag below is load-bearing:
 
-    --name <fixed>      so the next attempt can find and remove a leftover, and
-                        so its exit code and logs are findable afterwards.
+    --name <per stack>  so the next attempt can find and remove a leftover, and
+                        so its exit code and logs are findable afterwards. The
+                        caller derives it with helper_container_name(), which
+                        keeps two stacks on one daemon from colliding.
     (no compose labels) the helper must NOT look like part of the compose
                         project. If it did, the very `up -d` it is running could
                         reap it mid-recreate — and on Compose versions that do
@@ -1416,6 +1446,18 @@ def _image_id(image: str) -> tuple[str | None, str]:
     return image_id[0], ""
 
 
+def _helper_name() -> str:
+    """This stack's helper container name, derived from ROOT at call time.
+
+    Every site that names the helper — launch, remove, inspect, logs,
+    post-mortem, startup reconciliation — goes through here, so the name can
+    never be derived one way in one place and another way in another. Getting
+    that wrong would mean removing (or failing to find) a container belonging
+    to a different stack on the same daemon.
+    """
+    return helper_container_name(ROOT)
+
+
 def _remove_helper() -> None:
     """Delete a helper container left behind by a previous attempt.
 
@@ -1423,13 +1465,13 @@ def _remove_helper() -> None:
     is the normal case and is not an error — `docker rm` says "No such
     container" and returns non-zero, which is fine.
     """
-    _docker(["docker", "rm", "-f", HELPER_CONTAINER_NAME],
+    _docker(["docker", "rm", "-f", _helper_name()],
             _HELPER_INSPECT_TIMEOUT_SECONDS)
 
 
 def _helper_state() -> tuple[bool, int | None]:
     """(running, exit_code) for the helper, or (False, None) if it is gone."""
-    proc = _docker(["docker", "inspect", HELPER_CONTAINER_NAME, "--format",
+    proc = _docker(["docker", "inspect", _helper_name(), "--format",
                     "{{.State.Running}} {{.State.ExitCode}}"],
                    _HELPER_INSPECT_TIMEOUT_SECONDS)
     if proc.returncode != 0:
@@ -1444,7 +1486,7 @@ def _helper_state() -> tuple[bool, int | None]:
 
 
 def _helper_log_tail() -> str:
-    proc = _docker(["docker", "logs", "--tail", "20", HELPER_CONTAINER_NAME],
+    proc = _docker(["docker", "logs", "--tail", "20", _helper_name()],
                    _HELPER_INSPECT_TIMEOUT_SECONDS)
     if proc.returncode != 0:
         return ""
@@ -1466,7 +1508,7 @@ def _helper_postmortem() -> str:
     if code is None and not tail:
         return ""
     where = "still running" if running else f"exit {code}"
-    return _short(f"helper container {where}: {tail}".strip())
+    return _short(f"helper container {_helper_name()} {where}: {tail}".strip())
 
 
 def _persist_self_update(record: dict | None) -> dict | None:
@@ -1574,6 +1616,7 @@ def _maybe_self_update(status: dict | None,
     argv = build_helper_command(
         image_id, ROOT, _compose_file(),
         os.getuid(), os.getgid(), os.getgroups(),
+        _helper_name(),
     )
     proc = _docker(argv, _SELF_UPDATE_DOCKER_TIMEOUT_SECONDS)
     if proc.returncode != 0:

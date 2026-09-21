@@ -18,12 +18,12 @@ import subprocess
 import pytest
 
 from updater.supervisor import (
-    HELPER_CONTAINER_NAME,
     SELF_UPDATE_DONE,
     SELF_UPDATE_FAILED,
     SELF_UPDATE_HANDED_OFF,
     SELF_UPDATE_PULLING,
     build_helper_command,
+    helper_container_name,
     reconciled_self_update_state,
     self_update_target,
 )
@@ -82,6 +82,83 @@ def test_the_full_release_outranks_its_own_prerelease():
     assert self_update_target("v1.3.0", "v1.3.0-rc1", "success") is None
 
 
+# ── The helper's name is per stack, not per daemon ───────────────────────────
+#
+# Container names are unique per Docker DAEMON, and this repo runs a second
+# stack on the same daemon by design. _remove_helper() removes by name before
+# launching, so one hardcoded name would let one stack's sidecar `rm -f` another
+# stack's helper mid-recreate — exactly the "old container gone, new one never
+# started" outcome the helper exists to prevent — or fail to launch on a name
+# conflict. A second stack silently acting on the first is a defect this project
+# has already had once.
+
+def test_the_default_install_keeps_the_obvious_name():
+    assert helper_container_name("/opt/vigilant") == "vigilant-updater-selfupdate"
+
+
+def test_two_stacks_on_one_daemon_get_two_names():
+    assert helper_container_name("/opt/vigilant") != \
+        helper_container_name("/opt/vigilant-dev")
+    assert helper_container_name("/opt/vigilant-dev") == \
+        "vigilant-dev-updater-selfupdate"
+    assert helper_container_name("/srv/apps/vigilant-b") == \
+        "vigilant-b-updater-selfupdate"
+
+
+def test_a_trailing_slash_does_not_change_the_name():
+    """/opt/vigilant and /opt/vigilant/ are the same stack, and basename() on
+    the second returns "" — which would produce a name starting with a dash."""
+    assert helper_container_name("/opt/vigilant/") == \
+        helper_container_name("/opt/vigilant")
+
+
+@pytest.mark.parametrize("root", ["/", "", None, "///"])
+def test_a_rootless_root_still_yields_a_valid_container_name(root):
+    """Docker rejects a name starting with a dash outright, so the fallback is
+    not cosmetic."""
+    name = helper_container_name(root)
+    assert not name.startswith("-")
+    assert name == "vigilant-updater-selfupdate"
+
+
+def test_the_name_matches_the_convention_used_beside_it():
+    """compose derives its project from the working directory and
+    scripts/deploy.sh derives the app container as
+    `$(basename "$VIGILANT_ROOT")-app-1`. Same shape, so the helper sits next to
+    containers an operator recognises."""
+    for root in ("/opt/vigilant", "/opt/vigilant-dev"):
+        base = root.rsplit("/", 1)[-1]
+        assert helper_container_name(root).startswith(base + "-")
+
+
+def test_every_naming_site_goes_through_one_function(sup, monkeypatch):
+    """Launch, remove, inspect, logs and post-mortem must all agree. Deriving
+    the name one way in one place and another way in another means removing —
+    or failing to find — a container belonging to a different stack."""
+    monkeypatch.setattr(sup, "ROOT", "/srv/apps/vigilant-b")
+    expected = "vigilant-b-updater-selfupdate"
+    docker = FakeDocker({**_happy_responses(),
+                         ("docker", "inspect"): _ok("false 0\n"),
+                         ("docker", "logs"): _ok("done")})
+    monkeypatch.setattr(sup, "_docker", docker)
+    monkeypatch.setattr(sup, "_await_handoff", lambda target, rec, publish: rec)
+    monkeypatch.setattr(sup, "_current_tag", lambda: "v1.2.3")
+
+    sup._maybe_self_update({"state": "success"}, None)
+    sup._helper_postmortem()
+
+    # Everything that addresses a CONTAINER. `docker compose`, `docker pull`
+    # and `docker image inspect` address a compose project or an image and are
+    # correctly nameless here.
+    container_calls = [c for c in docker.calls
+                       if c[1] in ("run", "rm", "logs")
+                       or c[1:2] == ["inspect"]]
+    assert len(container_calls) >= 4, container_calls
+    for call in container_calls:
+        assert expected in call, call
+        assert "vigilant-updater-selfupdate" not in call
+
+
 # ── The helper's argv ────────────────────────────────────────────────────────
 
 ROOT = "/opt/vigilant"
@@ -90,7 +167,8 @@ IMAGE_ID = "sha256:ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221
 
 def _argv(**overrides):
     kwargs = dict(image_ref=IMAGE_ID, root=ROOT, compose_file="docker-compose.yml",
-                  uid=1000, gid=1000, groups=[983, 10001])
+                  uid=1000, gid=1000, groups=[983, 10001],
+                  container_name=helper_container_name(ROOT))
     kwargs.update(overrides)
     return build_helper_command(**kwargs)
 
@@ -112,7 +190,7 @@ def test_it_runs_detached():
 
 
 def test_it_uses_the_fixed_helper_name():
-    assert _pairs(_argv(), "--name") == [HELPER_CONTAINER_NAME]
+    assert _pairs(_argv(), "--name") == ["vigilant-updater-selfupdate"]
 
 
 def test_it_carries_no_compose_project_labels():
@@ -395,7 +473,7 @@ def test_a_leftover_helper_is_removed_before_the_new_one_is_launched(sup, monkey
 
     order = [c[:2] for c in docker.calls]
     assert order.index(["docker", "rm"]) < order.index(["docker", "run"])
-    assert docker.ran("docker", "rm")[0][-1] == HELPER_CONTAINER_NAME
+    assert docker.ran("docker", "rm")[0][-1] == helper_container_name(sup.ROOT)
 
 
 def test_the_helper_is_launched_from_the_pulled_image_id(sup, monkeypatch):
@@ -543,7 +621,7 @@ def test_startup_records_done_when_the_new_version_is_the_target(sup, monkeypatc
     assert _record(sup)["state"] == SELF_UPDATE_DONE
     # The finished helper is inspected, then removed.
     assert docker.ran("docker", "inspect")
-    assert docker.ran("docker", "rm")[0][-1] == HELPER_CONTAINER_NAME
+    assert docker.ran("docker", "rm")[0][-1] == helper_container_name(sup.ROOT)
 
 
 def test_startup_records_failed_when_the_old_version_came_back(sup, monkeypatch):
