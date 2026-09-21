@@ -108,7 +108,30 @@
             </p>
           {% endif %}
           {% if status.log_tail %}
-            <details>
+            {# hx-preserve keyed by run id: this <details> only ever exists once
+               the run has reached a terminal state (the BUSY branch above
+               renders a bare <pre>, no <details>), so the very first render of
+               updater-log-{id} already carries that run's final log_tail — a
+               preserved node's contents are frozen, which is correct here
+               because a finished run's log cannot change. Without this, the
+               10s #admin-content refresh (innerHTML swap) and this panel's own
+               2s poll (outerHTML swap) both re-render a fresh, CLOSED
+               <details> every time, so an operator who opens "Output" watches
+               it collapse a few seconds later and loses their place in the
+               log. htmx keys hx-preserve by id and swaps the OLD live element
+               back in verbatim (open state, scroll position, everything)
+               whenever an element with a matching id is already in the DOM —
+               see handlePreservedElements() in htmx.js, which runs on the
+               incoming fragment before either swap clears the target, so it
+               works for both swap paths here. A new run gets a new uuid, so a
+               different id renders fresh instead of showing a stale log.
+               status.id can be missing on an older status.json (pre-dates the
+               field) or null (the supervisor's schema default) — guard for
+               that rather than emit id="updater-log-" or id="updater-log-None"
+               and skip hx-preserve in that case; there is one fewer run's
+               worth of preserved state, not a broken page. #}
+            {% set log_id = ('updater-log-' ~ status.id) if status.id else None %}
+            <details{% if log_id %} id="{{ log_id }}" hx-preserve="true"{% endif %}>
               <summary>Output</summary>
               <pre class="updater-log">{{ status.log_tail | join('\n') }}</pre>
             </details>
