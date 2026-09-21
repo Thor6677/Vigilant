@@ -105,8 +105,11 @@ def _beat(control, current_tag="v1.2.0", targets=("v1.1.0",), checks=None):
         "version": "v1.2.0",
         "current_tag": current_tag,
         "targets": list(targets),
-        "checks": checks or {"socket": "ok", "git": "ok",
-                             "compose": "ok", "deployed": "ok"},
+        # Mirrors what the sidecar actually publishes, `remote` included. A
+        # default that lags the supervisor's real key set would let these tests
+        # keep passing for a heartbeat shape production never produces.
+        "checks": checks or {"socket": "ok", "git": "ok", "compose": "ok",
+                             "remote": "ok", "deployed": "ok"},
     }))
 
 
@@ -313,6 +316,28 @@ def test_panel_surfaces_failed_self_checks(env):
                                "compose": "ok", "deployed": "ok"})
     body = env.admin().get("/admin/update/status").text
     assert "permission denied" in body
+    assert "disabled" in body
+
+
+def test_panel_disables_the_button_on_a_failed_remote_check(env):
+    """The `remote` check is newer than this panel, so it is worth pinning that
+    the panel needs no knowledge of it.
+
+    The template rejects any check whose value is not "ok" rather than testing
+    four known names, which is what makes a new check disable the button with no
+    app-side change. If someone ever "simplifies" that into an explicit list,
+    this fails — and the failure mode it guards against is the one that shipped:
+    a panel showing an enabled Update button on a host where the update could
+    not possibly work.
+    """
+    _beat(env.control, checks={
+        "socket": "ok", "git": "ok", "compose": "ok", "deployed": "ok",
+        "remote": ("FAIL: origin resolves to git@example.org:team/repo.git, "
+                   "which git can only reach over SSH."),
+    })
+    body = env.admin().get("/admin/update/status").text
+    assert "remote" in body
+    assert "can only reach over SSH" in body
     assert "disabled" in body
 
 

@@ -10,12 +10,22 @@ raises ImportError at startup, IN PRODUCTION, after a release has shipped. The
 Dockerfile cannot express "this file must stay trivial", so this test does.
 """
 import ast
+import os
+import re
+import shlex
+import subprocess
 import sys
+
+import pytest
+
+from updater.supervisor import REWRITTEN_SSH_HOST
 
 # Files the sidecar image actually copies out of the app package.
 COPIED = ["app/__init__.py", "app/ops/__init__.py", "app/ops/version.py"]
 
 _STDLIB = set(sys.stdlib_module_names)
+
+DOCKERFILE = "updater/Dockerfile"
 
 
 def _imported_roots(path):
@@ -93,6 +103,175 @@ def test_dockerfile_sets_home_and_unbuffered_output():
     assert "HOME=" in src, "the container uid is not in /etc/passwd; git needs HOME"
     assert "PYTHONUNBUFFERED=1" in src, \
         "without this the deploy log appears only when the process exits"
+
+
+# ── The HTTPS rewrite that lets an SSH-cloned host repo fetch from here ──────
+#
+# The sidecar has no ssh client on purpose (it holds the Docker socket; giving
+# it the host's GitHub key too would make one compromise yield both root on the
+# box and push access to the source). The production clone's origin is an
+# scp-style SSH URL, so without a rewrite `git fetch` inside deploy.sh dies with
+# "cannot run ssh: No such file or directory" — which is exactly what the first
+# real in-app update did.
+
+
+def _dockerfile_env(path=DOCKERFILE):
+    """Every ENV key/value the image declares, continuations joined.
+
+    Parsed rather than substring-matched because the interesting part is the
+    VALUES: an assertion that the string "insteadOf" appears somewhere would
+    pass just as happily for a typo'd key or a rewrite pointing the wrong way.
+    shlex.split does the unquoting, so `KEY="a b"` and `KEY=a` both land as the
+    bare value git would actually see.
+    """
+    with open(path) as fh:
+        src = fh.read()
+    src = re.sub(r"\\\n\s*", " ", src)          # join line continuations
+    env = {}
+    for line in src.splitlines():
+        line = line.strip()
+        if not line.upper().startswith("ENV "):
+            continue
+        for token in shlex.split(line[4:]):
+            if "=" in token:
+                key, value = token.split("=", 1)
+                env[key] = value
+    return env
+
+
+def _image_git_config_env():
+    return {k: v for k, v in _dockerfile_env().items() if k.startswith("GIT_CONFIG")}
+
+
+def _hermetic_git_env(home, extra=None):
+    """A git environment that cannot see the developer's own config.
+
+    Without GIT_CONFIG_GLOBAL/SYSTEM pointed at /dev/null, a contributor with a
+    personal `url.*.insteadOf` rule (common on machines that push over SSH) or a
+    credential helper like osxkeychain gets a different result here than CI
+    does — the test passes locally and fails, or worse silently stops proving
+    anything, in the pipeline. PATH is carried over because git needs to find
+    its own helper binaries.
+    """
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(home),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        # Belt and braces for a test that must never touch the network: no
+        # terminal prompt, and an askpass that cannot block on a GUI.
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/echo",
+    }
+    env.update(extra or {})
+    return env
+
+
+def _repo_with_origin(tmp_path, url, env):
+    repo = tmp_path / "clone"
+    subprocess.run(["git", "init", "-q", str(repo)],
+                   check=True, capture_output=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", url],
+                   check=True, capture_output=True, env=env)
+    return repo
+
+
+def _rewrite_rules():
+    """The image's insteadOf rules as (https_prefix, ssh_prefix) pairs.
+
+    Everything below is driven off these rather than off copies of the URLs, so
+    the tests prove the values the image ACTUALLY ships. A hardcoded expectation
+    would keep passing after someone edited the Dockerfile — which is the one
+    failure these tests exist to prevent.
+    """
+    env = _image_git_config_env()
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    rules = []
+    for i in range(count):
+        key = env.get(f"GIT_CONFIG_KEY_{i}", "")
+        value = env.get(f"GIT_CONFIG_VALUE_{i}", "")
+        prefix = re.fullmatch(r"url\.(.+)\.insteadOf", key)
+        rules.append((prefix.group(1) if prefix else None, value))
+    return rules
+
+
+def test_dockerfile_declares_two_insteadof_rules_for_one_https_prefix():
+    """The two spellings of an SSH remote share no common prefix, and
+    `insteadOf` matches a literal prefix — so one entry cannot cover both.
+
+    Also pins the rewrite target against updater/supervisor.py's
+    REWRITTEN_SSH_HOST: the `remote` self-check uses that constant to decide
+    whether a still-SSH origin means "your origin is unsupported" or "this
+    image's environment is broken", and the two drifting apart would make it
+    give the wrong advice.
+    """
+    rules = _rewrite_rules()
+    assert len(rules) == 2, rules
+    https_prefixes = {https for https, _ in rules}
+    assert https_prefixes == {f"https://{REWRITTEN_SSH_HOST}/"}, https_prefixes
+    ssh_prefixes = {ssh for _, ssh in rules}
+    # One scp-style prefix and one ssh:// prefix, and they must differ.
+    assert len(ssh_prefixes) == 2, ssh_prefixes
+    assert any(s.startswith("ssh://") for s in ssh_prefixes), ssh_prefixes
+    assert any(not s.startswith("ssh://") and s.endswith(":")
+               for s in ssh_prefixes), ssh_prefixes
+    for ssh in ssh_prefixes:
+        assert REWRITTEN_SSH_HOST in ssh, ssh
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_image_git_config_env_really_rewrites_ssh_origins(tmp_path, index):
+    """Proves the mechanism against real git, using the values parsed out of the
+    Dockerfile rather than a copy of them.
+
+    `ls-remote --get-url` is the primitive on purpose: unlike `remote get-url`
+    it reports the url AFTER insteadOf expansion, and unlike a real fetch it
+    resolves the name locally and touches no network. If GIT_CONFIG_COUNT were
+    unsupported (git < 2.31) or a key were misspelled, this returns the original
+    SSH url and the assertion fails here — in CI, rather than on the one click
+    that matters.
+    """
+    https_prefix, ssh_prefix = _rewrite_rules()[index]
+    env = _hermetic_git_env(tmp_path, _image_git_config_env())
+    repo = _repo_with_origin(tmp_path, ssh_prefix + "OWNER/REPO.git", env)
+    out = subprocess.run(["git", "-C", str(repo), "ls-remote", "--get-url", "origin"],
+                         check=True, capture_output=True, text=True, env=env)
+    assert out.stdout.strip() == https_prefix + "OWNER/REPO.git"
+
+
+def test_image_git_config_env_leaves_other_hosts_alone(tmp_path):
+    """The rule covers one host only. Rewriting every host would silently point
+    a self-hoster's private GitLab or Gitea origin at an https:// URL that may
+    not exist; the `remote` self-check reporting it plainly is the better
+    failure."""
+    other = "git@example.org:team/repo.git"
+    env = _hermetic_git_env(tmp_path, _image_git_config_env())
+    repo = _repo_with_origin(tmp_path, other, env)
+    out = subprocess.run(["git", "-C", str(repo), "ls-remote", "--get-url", "origin"],
+                         check=True, capture_output=True, text=True, env=env)
+    assert out.stdout.strip() == other
+
+
+def test_dockerfile_installs_no_ssh_client():
+    """A GUARD, not an omission.
+
+    The obvious "fix" for the cannot-run-ssh failure is `apk add openssh` plus a
+    deploy key. That is rejected: this container holds the Docker socket, so it
+    is root-equivalent on the host, and adding the host's GitHub credentials
+    would mean one bug there yields both root on the box AND push access to the
+    source it deploys. The HTTPS rewrite above exists precisely so no credential
+    has to live here. If this assertion starts failing, the rewrite is no longer
+    the thing keeping keys out of the sidecar.
+    """
+    with open(DOCKERFILE) as fh:
+        # Comments are stripped first: the reason this rule exists is written
+        # out in the Dockerfile in prose, and matching that prose would make the
+        # guard fail on the very explanation of itself.
+        instructions = "\n".join(
+            l for l in fh if not l.lstrip().startswith("#")
+        )
+    assert "openssh" not in instructions, \
+        "the sidecar must stay credential-free; fetch anonymously over HTTPS instead"
 
 
 def test_release_workflow_publishes_the_updater_image():

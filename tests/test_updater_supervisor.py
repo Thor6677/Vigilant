@@ -4,17 +4,27 @@ Everything here is a pure function on purpose. The alternative — a bash
 supervisor calling `python3 -c` for JSON — would put tag validation, the
 security-critical part, outside any test the suite can run.
 """
+import os
+import subprocess
+
 import pytest
 from pathlib import Path
 
 from app.ops.version import parse_version
 from updater.supervisor import (
     MIN_ROLLBACK_TAG,
+    REWRITTEN_SSH_HOST,
+    _REMOTE_RECHECK_SECONDS,
     clamp_log_tail,
     eligible_rollback_targets,
     is_stale_lock,
+    looks_like_ssh_url,
     parse_deployed_tags,
+    redact_userinfo,
+    remote_failure_reason,
+    should_recheck_remote,
     step_for_line,
+    url_host,
     validate_tag,
 )
 
@@ -709,11 +719,335 @@ def test_status_schema_has_exactly_the_keys_the_app_expects(tmp_path, monkeypatc
 
 # ── Self-checks key set is part of the app-facing contract ───────────────────
 
-def test_self_checks_key_set(monkeypatch):
+def test_self_checks_key_set(monkeypatch, tmp_path):
     import updater.supervisor as sup
-    monkeypatch.setattr(sup.subprocess, "run", lambda *a, **k: None)
-    monkeypatch.setattr(sup, "ROOT", "/tmp")
-    # .deployed does not need to exist for the key SET assertion — a FAIL value
-    # is still a value, and this test is about which keys are published, not
-    # whether the checks pass.
-    assert set(sup._self_checks()) == {"socket", "git", "compose", "deployed"}
+
+    def fake_run(argv, **kwargs):
+        # A real CompletedProcess, not `lambda *a, **k: None`. _remote_check
+        # reads .returncode and .stderr off the result, so a None-returning
+        # wildcard stub would silently exercise its EXCEPTION path — the key set
+        # would still come out right, for entirely the wrong reason, and the
+        # test would keep passing if the success path stopped working.
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(sup.subprocess, "run", fake_run)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    (tmp_path / ".deployed").write_text("2026-01-01T00:00:00Z v1.2.0\n")
+    checks = sup._self_checks()
+    assert set(checks) == {"socket", "git", "compose", "remote", "deployed"}
+    assert checks["remote"] == "ok"
+
+
+# ── The `remote` check: can this container actually fetch from origin ────────
+#
+# The check that did not exist when the first real in-app update failed. The old
+# `git` check ran `git rev-parse HEAD` — purely local — so a sidecar with no ssh
+# client, no key and an SSH origin reported four green checks and an enabled
+# button, and the click died on
+# `error: cannot run ssh: No such file or directory`.
+#
+# Everything below runs offline. The success case uses a real local bare
+# repository as origin, the failure case a path that does not exist, and the
+# SSH-origin case is tested against the classifier as a pure function on
+# strings — shelling out to a real SSH host would need the network, and on a
+# developer machine (which HAS an ssh binary, unlike the image) it would behave
+# differently than in CI.
+
+
+@pytest.fixture
+def git_env(monkeypatch):
+    """Neutralise the developer's own git configuration for these tests.
+
+    A contributor who pushes over SSH commonly has a global
+    `url.*.insteadOf` rule, and macOS ships an osxkeychain credential helper.
+    Either one changes what these assertions see relative to CI. _git_env()
+    builds on os.environ, so setting these here reaches the subprocess.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
+
+def _git(*args, cwd=None):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _bare_origin(tmp_path):
+    """A real, non-empty bare repository usable as an offline `origin`."""
+    work = tmp_path / "work"
+    _git("init", "-q", "-b", "main", str(work))
+    (work / "README").write_text("x\n")
+    _git("-C", str(work), "add", "README")
+    _git("-C", str(work), "-c", "user.email=t@example.invalid",
+         "-c", "user.name=t", "commit", "-qm", "init")
+    bare = tmp_path / "origin.git"
+    _git("clone", "--bare", "-q", str(work), str(bare))
+    return bare
+
+
+def _clone_with_origin(tmp_path, url):
+    repo = tmp_path / "clone"
+    _git("init", "-q", "-b", "main", str(repo))
+    _git("-C", str(repo), "remote", "add", "origin", str(url))
+    return repo
+
+
+def test_remote_check_passes_against_a_reachable_origin(tmp_path, monkeypatch, git_env):
+    import updater.supervisor as sup
+    repo = _clone_with_origin(tmp_path, _bare_origin(tmp_path))
+    monkeypatch.setattr(sup, "ROOT", str(repo))
+    assert sup._remote_check() == "ok"
+
+
+def test_remote_check_fails_readably_when_origin_is_unreachable(tmp_path, monkeypatch, git_env):
+    """A failure must publish something an operator can act on.
+
+    The reason goes straight into /control/updater.json and is rendered in the
+    admin panel, so "returned non-zero exit status 128" — which is all
+    `check=True` plus `f"FAIL: {e}"` would have produced — is not good enough.
+    git's own stderr has to survive into the message.
+    """
+    import updater.supervisor as sup
+    repo = _clone_with_origin(tmp_path, tmp_path / "definitely-not-here.git")
+    monkeypatch.setattr(sup, "ROOT", str(repo))
+    result = sup._remote_check()
+    assert result.startswith("FAIL: ")
+    assert "definitely-not-here.git" in result
+    # git's own words, not just an exit code.
+    assert "git said:" in result
+    assert "exit status" not in result
+
+
+def test_remote_check_reports_a_missing_repo_without_crashing(tmp_path, monkeypatch, git_env):
+    """ROOT not being a git repository at all is a mounting mistake, not a
+    reason for the supervisor to die — the loop calls this on a timer."""
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    assert sup._remote_check().startswith("FAIL: ")
+
+
+# ── The classifier behind the message ────────────────────────────────────────
+
+@pytest.mark.parametrize("url", [
+    "git@example.org:team/repo.git",                  # scp-style
+    "ssh://git@example.net/team/repo.git",            # explicit scheme
+    "git+ssh://git@example.com/repo.git",
+    "user@host.example:path/repo.git",
+    f"git@{REWRITTEN_SSH_HOST}:OWNER/REPO.git",       # the rewritten host too
+    f"ssh://git@{REWRITTEN_SSH_HOST}/OWNER/REPO.git",
+])
+def test_ssh_urls_are_recognised(url):
+    assert looks_like_ssh_url(url) is True
+
+
+@pytest.mark.parametrize("url", [
+    f"https://{REWRITTEN_SSH_HOST}/OWNER/REPO.git",
+    "http://example.com/repo.git",
+    "file:///srv/mirror.git",
+    "/opt/vigilant",                 # a local path origin, used by the tests above
+    "../mirror.git",
+    "",
+    None,
+])
+def test_non_ssh_urls_are_not_mistaken_for_ssh(url):
+    assert looks_like_ssh_url(url) is False
+
+
+def test_scp_style_url_is_recognised_without_the_string_ssh():
+    """The spelling that actually broke production contains no scheme and no
+    "ssh" anywhere, and urlparse reads it as a scheme-less path. A colon before
+    the first slash is the only thing that distinguishes it."""
+    url = "git@example.org:team/repo.git"
+    assert "ssh" not in url
+    assert looks_like_ssh_url(url) is True
+
+
+@pytest.mark.parametrize("url,host", [
+    ("git@example.org:team/repo.git", "example.org"),
+    ("ssh://git@example.net/team/repo.git", "example.net"),
+    ("https://someone:s3cret@example.com/me/repo.git", "example.com"),
+    ("https://EXAMPLE.ORG/a/b.git", "example.org"),          # case-folded
+    (f"git@{REWRITTEN_SSH_HOST}:OWNER/REPO.git", REWRITTEN_SSH_HOST),
+    ("/srv/vigilant", ""),
+])
+def test_url_host_extraction(url, host):
+    assert url_host(url) == host
+
+
+def test_reason_for_an_unrewritable_ssh_origin_names_the_fix():
+    reason = remote_failure_reason(
+        "git@example.org:team/repo.git",
+        "fatal: unable to fork\nerror: cannot run ssh: No such file or directory\n")
+    assert "no SSH client" in reason
+    assert "https://" in reason
+    assert "not supported" in reason
+    # The escape hatch has to be named, or the message reads as "you are stuck".
+    assert "scripts/deploy.sh" in reason
+
+
+def test_reason_for_a_rewritable_ssh_origin_blames_the_environment():
+    """If an origin on the rewritten host is STILL ssh after rewriting, the
+    operator's origin is fine and the image's GIT_CONFIG_* variables are
+    missing — telling them to change their origin sends them to fix the wrong
+    thing."""
+    reason = remote_failure_reason(
+        f"git@{REWRITTEN_SSH_HOST}:OWNER/REPO.git",
+        "error: cannot run ssh: No such file or directory\n")
+    assert "GIT_CONFIG" in reason
+    assert "not supported" not in reason
+
+
+def test_reason_for_an_authenticated_origin_says_credentials():
+    reason = remote_failure_reason(
+        "https://example.com/OWNER/PRIVATE.git",
+        "fatal: could not read Username for 'https://example.com': "
+        "terminal prompts disabled\n")
+    assert "requires credentials" in reason
+    assert "private repository" in reason.lower()
+
+
+def test_reason_for_a_network_failure_is_generic_but_carries_stderr():
+    reason = remote_failure_reason(
+        "https://example.com/OWNER/REPO.git",
+        "fatal: unable to access '...': Could not resolve host: example.com\n")
+    assert "could not reach origin" in reason
+    assert "Could not resolve host" in reason
+
+
+# ── Credentials must never reach the published reason ────────────────────────
+
+def test_userinfo_is_stripped_from_the_url_in_the_reason():
+    """A self-hoster who cloned with a token in the origin URL must not have it
+    republished into /control/updater.json and an admin page."""
+    reason = remote_failure_reason(
+        "https://someone:s3cret@example.com/o/r.git", "boom")
+    assert "s3cret" not in reason
+    assert "***@example.com" in reason
+
+
+def test_userinfo_is_stripped_from_git_stderr_too():
+    """Redacting only the URL is the easy half-fix: git echoes the remote URL
+    back inside its own error text, so the secret arrives by the other door."""
+    reason = remote_failure_reason(
+        "https://example.com/o/r.git",
+        "fatal: unable to access "
+        "'https://someone:s3cret@example.com/o/r.git/': 403\n")
+    assert "s3cret" not in reason
+    assert "***@example.com" in reason
+
+
+def test_redaction_leaves_scp_style_urls_intact():
+    """An scp-style remote has no `://` and its "userinfo" is a well-known
+    service account name, not a secret. Blanking it would erase the clearest
+    clue on the failure path this whole check exists for."""
+    assert redact_userinfo("git@example.org:o/r.git") == "git@example.org:o/r.git"
+
+
+# ── Rate-limited re-evaluation of a FAILING remote check ─────────────────────
+#
+# The other self-checks run once at startup and that is correct for them. This
+# one depends on DNS and outbound network, and a sidecar that loses the race
+# after a host reboot would otherwise keep the Update button disabled — with a
+# transient network error as the stated reason — until someone SSHed in to
+# restart the container, which is the thing this feature exists to avoid.
+
+@pytest.mark.parametrize("result", ["ok", None])
+def test_a_passing_or_absent_remote_check_is_never_rerun(result):
+    checks = {"socket": "ok"}
+    if result is not None:
+        checks["remote"] = result
+    assert should_recheck_remote(checks, last_checked=0.0, now=10 ** 9) is False
+
+
+def test_a_failing_remote_check_is_rerun_only_after_the_interval():
+    checks = {"remote": "FAIL: nope"}
+    assert should_recheck_remote(checks, last_checked=1000.0, now=1001.0) is False
+    assert should_recheck_remote(checks, last_checked=1000.0,
+                                 now=1000.0 + _REMOTE_RECHECK_SECONDS) is True
+
+
+def test_the_interval_is_measured_from_the_attempt_not_the_failure():
+    """A check that keeps timing out must not accumulate back-to-back runs."""
+    checks = {"remote": "FAIL: timed out"}
+    assert should_recheck_remote(checks, last_checked=5000.0, now=5100.0) is False
+
+
+def test_remote_check_recovers_without_a_restart(tmp_path, monkeypatch, git_env):
+    """The whole point, exercised against real git rather than a stub.
+
+    Starts with an origin that does not exist (the check fails), then repairs
+    origin and advances the clock past the interval. The published `checks` dict
+    must flip to "ok" in place, with the one-shot checks left untouched.
+    """
+    import updater.supervisor as sup
+    repo = _clone_with_origin(tmp_path, tmp_path / "not-yet.git")
+    monkeypatch.setattr(sup, "ROOT", str(repo))
+
+    checks = {"socket": "ok", "git": "ok", "compose": "ok",
+              "remote": sup._remote_check(), "deployed": "ok"}
+    assert checks["remote"].startswith("FAIL: ")
+
+    # Origin becomes reachable — the reboot-race case, where the network arrives
+    # a moment after the sidecar did.
+    _git("-C", str(repo), "remote", "set-url", "origin", str(_bare_origin(tmp_path)))
+
+    # Still inside the rate limit: nothing is re-run, so the value must not move
+    # even though the underlying problem is already fixed.
+    unchanged = sup.refresh_remote_check(checks, last_checked=1000.0, now=1001.0)
+    assert unchanged == 1000.0
+    assert checks["remote"].startswith("FAIL: ")
+
+    # Past the interval: re-evaluated in place, and the timestamp advances.
+    now = 1000.0 + _REMOTE_RECHECK_SECONDS
+    assert sup.refresh_remote_check(checks, last_checked=1000.0, now=now) == now
+    assert checks["remote"] == "ok"
+    # The one-shot checks are NOT re-run: rebuilding the dict via _self_checks()
+    # would put a `docker version` and a `docker compose config` on a timer
+    # forever to recover from a network blip.
+    assert [k for k in checks] == ["socket", "git", "compose", "remote", "deployed"]
+    assert checks["socket"] == "ok" and checks["compose"] == "ok"
+
+
+def test_a_recovered_remote_check_is_not_rerun_again(tmp_path, monkeypatch, git_env):
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))     # would FAIL if re-run
+    checks = {"remote": "ok"}
+    assert sup.refresh_remote_check(checks, last_checked=0.0, now=10 ** 9) == 0.0
+    assert checks["remote"] == "ok"
+
+
+# ── The image's git configuration must survive into deploy.sh ────────────────
+
+def test_deploy_subprocess_inherits_the_images_git_environment(tmp_path, monkeypatch):
+    """The fix is an ENV in updater/Dockerfile, which only works because
+    run_action() spawns deploy.sh with `env={**os.environ, ...}`.
+
+    Scrubbing that environment down to an explicit allowlist is a plausible
+    future hardening change, and it would silently reintroduce the original
+    bug — deploy.sh's `git fetch` would go back to exec'ing an ssh client that
+    does not exist in this image. This runs a real deploy.sh stand-in and reads
+    the variables back out of its output.
+    """
+    import updater.supervisor as sup
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "url.https://github.com/.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "git@example.org:")
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    deploy = scripts / "deploy.sh"
+    deploy.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "COUNT=${GIT_CONFIG_COUNT:-unset}"\n'
+        'echo "KEY0=${GIT_CONFIG_KEY_0:-unset}"\n'
+        'echo "VALUE0=${GIT_CONFIG_VALUE_0:-unset}"\n'
+    )
+    deploy.chmod(0o755)
+
+    sup.run_action({"id": "r1", "action": "update", "tag": "v9.9.9"})
+    status = json.loads((tmp_path / "status.json").read_text())
+    log = "\n".join(status["log_tail"])
+    assert "COUNT=2" in log
+    assert "KEY0=url.https://github.com/.insteadOf" in log
+    assert "VALUE0=git@example.org:" in log
