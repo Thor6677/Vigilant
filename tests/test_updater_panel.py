@@ -7,10 +7,12 @@ confirmation that never fires, a handler name that resolves to nothing.
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
 
+from app.ops import update_schedule
 from app.ops.updater import BUSY, IDLE, INTERRUPTED
 
 PANEL = Path("app/templates/partials/updater_panel.html")
@@ -55,7 +57,49 @@ def _render_finished(status):
         IDLE=IDLE,
         BUSY=BUSY,
         INTERRUPTED=INTERRUPTED,
+        **_schedule_defaults(),
     )
+
+
+def _schedule_defaults():
+    """The scheduling half of the context, in its shipped-off state: policy
+    disabled, nothing pending. Mirrors the KEYS of app/routes/admin.py:
+    _schedule_context, with UpdatePolicy's column defaults as the values.
+
+    A plain namespace rather than an UpdatePolicy(): SQLAlchemy applies column
+    defaults at flush, so an unflushed instance reads None for every field and
+    would render a panel no real install can produce.
+
+    It lives here because the panel is ONE template. The scheduling section
+    dereferences `policy.enabled` unconditionally, so a standalone render that
+    omits it raises UndefinedError before reaching the markup under test — which
+    is how four log-preservation tests broke the moment scheduling landed on top
+    of them, with nothing wrong in either change.
+    """
+    return dict(
+        policy=SimpleNamespace(enabled=False, weekday=6, local_time="04:00",
+                               timezone="UTC", patch_only=True,
+                               paused_reason=None),
+        pending_schedule=None,
+        next_window=None,
+        weekdays=list(enumerate(update_schedule.WEEKDAYS)),
+        schedule_error=None,
+        schedule_notice=None,
+        grace_hours=update_schedule.GRACE_SECONDS // 3600,
+        notify_configured=False,
+    )
+
+
+def test_schedule_defaults_cover_every_key_the_route_supplies():
+    """The helper above is a hand-kept mirror, and a mirror drifts. If
+    _schedule_context grows a key the template then reads, the standalone
+    renders fail with an UndefinedError that names the variable but not the
+    cause; this names the cause."""
+    src = Path("app/routes/admin.py").read_text()
+    body = src.split("async def _schedule_context", 1)[1].split("\nasync def ", 1)[0]
+    returned = set(re.findall(r'^\s{8}"([a-z_]+)":', body, flags=re.M))
+    assert returned, "could not find _schedule_context's returned keys"
+    assert returned == set(_schedule_defaults())
 
 
 def _finished_status(**overrides):
