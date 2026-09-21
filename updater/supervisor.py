@@ -582,8 +582,31 @@ def build_helper_command(image_ref: str, root: str, compose_file: str,
                         while the old sidecar was still alive. compose needs no
                         network to recreate a service from a local image, so the
                         most privileged container in the stack gets none.
-    --security-opt no-new-privileges
-                        same posture as the sidecar it replaces.
+    --security-opt no-new-privileges / --read-only / --cap-drop ALL
+                        same posture as the sidecar service now declares in
+                        docker-compose.yml (see the `updater:` block there).
+                        compose hardening applies only to what compose itself
+                        launches, and this helper is launched by `docker run`
+                        from inside the OLD sidecar — never by compose — so
+                        without these flags the one moment this stack runs an
+                        extra privileged container would also be the one
+                        moment that container was unhardened. No --cap-add to
+                        go with the drop: like the sidecar it is replacing,
+                        this helper is never root and needs no capability
+                        back.
+    --tmpfs /tmp:size=64m,mode=1777
+                        required by --read-only: `docker compose`, which this
+                        helper's whole job is to run, writes under HOME (see
+                        updater/Dockerfile) and needs somewhere to do it. Same
+                        size cap and mode as the compose file's tmpfs for the
+                        same reasons — capped so a runaway write cannot eat
+                        host RAM, and mode 1777 because this helper inherits
+                        the sidecar's own arbitrary non-root uid via --user
+                        below, not a uid baked into the image. Passed as a
+                        single `docker run --tmpfs` option string, not the
+                        compose long-form mapping the compose file uses for
+                        the same mount — that mapping is compose YAML syntax,
+                        not a `docker run` flag.
     --user / --group-add
                         identical uid:gid and EVERY supplementary group of the
                         running sidecar. The docker-socket gid and the repo
@@ -619,6 +642,9 @@ def build_helper_command(image_ref: str, root: str, compose_file: str,
         "--name", container_name,
         "--network", "none",
         "--security-opt", "no-new-privileges",
+        "--read-only",
+        "--cap-drop", "ALL",
+        "--tmpfs", "/tmp:size=64m,mode=1777",
         "--user", f"{uid}:{gid}",
     ]
     for group in groups:

@@ -61,6 +61,74 @@ def test_app_gets_the_control_mount(app_svc):
     assert any(str(v).endswith(":/control") for v in app_svc["volumes"])
 
 
+# ── The updater is hardened too, and neither service loses this quietly ─────
+#
+# The sidecar holds the Docker socket, which makes it the MOST privileged
+# container in the stack, so it must never be the visibly LEAST hardened one —
+# the gap this whole change closes. Both services are asserted together in the
+# tests below so a future edit relaxing either one is caught by name, not by a
+# reviewer noticing an asymmetry.
+
+def _tmpfs_mounts(volumes):
+    """The long-form `{type: tmpfs, ...}` entries in a service's volumes list.
+
+    Distinct from the app service's short-form `tmpfs: [/tmp]` top-level key,
+    which is a different compose attribute entirely and carries no options.
+    """
+    return [v for v in volumes if isinstance(v, dict) and v.get("type") == "tmpfs"]
+
+
+def test_updater_keeps_its_hardening(updater_svc):
+    """Mirrors test_app_keeps_its_hardening above. Both are asserted so a
+    change that relaxes one in isolation fails by name."""
+    assert updater_svc["read_only"] is True
+    assert updater_svc["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in updater_svc["security_opt"]
+
+
+def test_updater_gets_no_cap_add(updater_svc):
+    """Unlike the app service, the updater is never root — no entrypoint
+    chown, no gosu drop — so nothing here legitimately needs a capability
+    handed back. A cap_add appearing here would be a regression, not a fix."""
+    assert "cap_add" not in updater_svc
+
+
+def test_updater_tmp_is_a_capped_tmpfs(updater_svc):
+    """The short `tmpfs: [/tmp]` list the app service uses (line 58-59) takes
+    bare paths only and cannot carry a size cap, so the updater's /tmp must use
+    the long volumes form instead — this asserts that form is actually there,
+    not just a bare path that happens to parse."""
+    mounts = _tmpfs_mounts(updater_svc["volumes"])
+    assert len(mounts) == 1, mounts
+    mount = mounts[0]
+    assert mount["target"] == "/tmp"
+    # A real cap, not merely present: Docker's own tmpfs default is unbounded,
+    # so an empty or zero size here would be indistinguishable from having no
+    # cap at all — a runaway write still eats host RAM either way.
+    size = mount["tmpfs"]["size"]
+    assert size not in (None, "", 0), size
+
+
+def test_updater_tmp_mode_is_world_writable_sticky(updater_svc):
+    """The sidecar's uid comes from VIGILANT_UID per install (not baked into
+    the image like the app's uid 10001), so whichever uid that turns out to be
+    must be able to write here — hence the explicit sticky world-writable
+    mode, matching /tmp's usual semantics, rather than trusting an unstated
+    default that varies by Compose version."""
+    mount = _tmpfs_mounts(updater_svc["volumes"])[0]
+    assert mount["tmpfs"]["mode"] == 1777
+
+
+def test_app_and_updater_agree_the_stack_is_hardened(app_svc, updater_svc):
+    """The property README.md and SECURITY.md actually describe: read_only +
+    cap_drop: ALL hold for BOTH services, not just the one that shipped first.
+    Failing this means the docs are describing a stack that does not exist."""
+    for svc in (app_svc, updater_svc):
+        assert svc["read_only"] is True
+        assert svc["cap_drop"] == ["ALL"]
+        assert "no-new-privileges:true" in svc["security_opt"]
+
+
 # ── The updater's identity ───────────────────────────────────────────────────
 
 def test_updater_does_not_run_as_root(updater_svc):
@@ -85,8 +153,13 @@ def test_updater_joins_the_apps_group_for_the_shared_volume(updater_svc):
 # ── The path that must not move ──────────────────────────────────────────────
 
 def _repo_mount(updater_svc):
-    return [str(v) for v in updater_svc["volumes"] if "docker.sock" not in str(v)
-            and not str(v).startswith("control:")][0]
+    # Restricted to str entries: the long-form tmpfs mount added alongside
+    # this one is a dict, and stringifying it would otherwise ALSO pass the
+    # "not docker.sock, not control:" filter below and silently qualify as a
+    # candidate — order-dependent and liable to break the moment volumes are
+    # reordered again.
+    return [v for v in updater_svc["volumes"] if isinstance(v, str)
+            and "docker.sock" not in v and not v.startswith("control:")][0]
 
 
 def _split_mount(spec: str) -> tuple[str, str]:

@@ -124,6 +124,38 @@ services:
       # unchanged, so a normal install behaves exactly as before.
       - ${VIGILANT_ROOT:-/opt/vigilant}:${VIGILANT_ROOT:-/opt/vigilant}
       - control:/control
+      - type: tmpfs
+        target: /tmp
+        # Long form, not the short `tmpfs: [/tmp]` list the app service uses
+        # below: the short list takes bare paths only, and this mount needs
+        # two options the app's /tmp does not.
+        #
+        # size caps it. Docker's own tmpfs default is UNBOUNDED — a tmpfs is
+        # backed by RAM, not disk, so an unbounded one does not fail with
+        # ENOSPC when something runs away, it eats host memory instead. 64m is
+        # generous for what actually lands here: docker-cli-compose's own
+        # writes under HOME (see updater/Dockerfile) and nothing else, since
+        # deploy.sh/rollback.sh's own tmp usage is the bind-mounted ROOT copy
+        # of themselves (see the self-modification guard atop both scripts),
+        # not this mount.
+        #
+        # mode: 1777 (world-writable, sticky) is specified explicitly rather
+        # than left to rely on whatever this Compose version's own default
+        # turns out to be: unlike the app service's uid 10001 baked into its
+        # image, this container's uid comes from VIGILANT_UID per install (see
+        # `user:` above) and is not known at image-build time, so the mount
+        # must be writable by whichever uid that turns out to be.
+        #
+        # Docker's tmpfs default also adds `noexec`, which is fine here: this
+        # container never executes anything from /tmp. deploy.sh and
+        # rollback.sh re-exec themselves from a `mktemp -d` elsewhere on the
+        # HOST filesystem (the bind-mounted repo root, not this tmpfs) via
+        # `exec bash "<file>"` — bash READS that file and interprets it, it
+        # does not execute it as a binary, so noexec on /tmp never enters into
+        # it either way.
+        tmpfs:
+          size: 64m
+          mode: 1777
     environment:
       - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
       - VIGILANT_CONTROL_DIR=/control
@@ -144,6 +176,22 @@ services:
     # pull is performed by the daemon, not by this process.
     security_opt:
       - no-new-privileges:true
+    # Parity with the app service above, and honest sizing about what it buys:
+    # this container already runs as a non-root uid with no-new-privileges (see
+    # `user:` above), so it holds no effective capabilities and its image files
+    # are root-owned, so it cannot write them regardless of this line. More
+    # fundamentally, this container holds the Docker socket — socket access is
+    # root on the host by construction, and cap_drop/read_only do not contain a
+    # compromised sidecar; nothing below changes that. What it does buy is real:
+    # no writable rootfs to persist anything into, no capability this container
+    # ever needed, and the most privileged service in the stack no longer being
+    # the one visibly least hardened.
+    cap_drop:
+      - ALL
+    # No cap_add, unlike the app service above: this container is never root at
+    # any point in its life — no entrypoint chown, no gosu drop, so there is no
+    # brief root window here that needs a capability handed back afterwards.
+    read_only: true
     logging:
       driver: json-file
       options:

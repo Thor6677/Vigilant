@@ -41,8 +41,21 @@ RUN apk add --no-cache \
 # supplies it — see the `user:` key on the updater service.
 #
 # HOME because that uid is not in /etc/passwd; git tolerates HOME=/ but the
-# rootfs is read-only in compose, so point it somewhere writable.
+# rootfs IS read-only, both when compose runs this image as the sidecar
+# (docker-compose.yml's `updater:` service sets read_only: true) and when the
+# self-update helper runs it directly (build_helper_command() in
+# updater/supervisor.py passes --read-only), so HOME has to point somewhere
+# writable either way. /tmp is that place on both paths: compose gives the
+# sidecar a size-capped tmpfs there, and the helper's own `docker run` gets an
+# identical one via --tmpfs.
+#
+# PYTHONDONTWRITEBYTECODE=1: /opt/updater is root-owned (no USER directive
+# above), so a .pyc write there already fails — silently, since Python catches
+# the OSError and carries on. Under a genuinely read-only rootfs that silent
+# failure is the only thing between this and an explicit one; saying it out
+# loud here is clearer than depending on an error being swallowed correctly.
 ENV HOME=/tmp \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/opt/updater \
     PYTHONUNBUFFERED=1 \
     VIGILANT_CONTROL_DIR=/control \
@@ -66,8 +79,10 @@ ENV HOME=/tmp \
 #
 # Via GIT_CONFIG_COUNT rather than a config file for three reasons, all of them
 # load-bearing:
-#   - The uid this runs as is not in /etc/passwd and HOME is a tmpfs, so
-#     ~/.gitconfig is neither guaranteed to exist nor guaranteed to survive.
+#   - The uid this runs as is not in /etc/passwd and HOME=/tmp is a genuinely
+#     size-capped tmpfs on both paths this image runs (the compose sidecar and
+#     the self-update helper — see the ENV block above), so ~/.gitconfig is
+#     neither guaranteed to exist nor guaranteed to survive a restart.
 #     Environment needs no writable filesystem at all.
 #   - Environment is INHERITED. run_action() spawns deploy.sh with
 #     env={**os.environ, ...}, so deploy.sh's own git children pick this up

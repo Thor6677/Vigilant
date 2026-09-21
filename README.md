@@ -480,11 +480,23 @@ What it does instead:
   `read_only: true`, uid 10001, and never touches the Docker socket. A
   remote-code-execution bug in Vigilant gets an attacker the ability to write
   one JSON file, whose contents the privileged side validates before acting on.
+- **The sidecar is hardened too, for what that is worth.** Its own container
+  gets `read_only: true`, `cap_drop: ALL` and a size-capped `/tmp` — the same
+  posture the app keeps, and no `cap_add`, because unlike the app the sidecar
+  is never root and needs no capability handed back. Be honest about what this
+  buys: the sidecar already runs as a non-root uid with `no-new-privileges`, so
+  it held no effective capabilities before this either, and Docker socket
+  access is root on the host regardless of what its rootfs or capability set
+  say — none of this contains a compromised sidecar. What it does do is real:
+  no writable rootfs to persist anything into, no capability it never needed,
+  and the most privileged container in the stack no longer being the one
+  visibly least hardened.
 - **One more privileged container, briefly.** When the sidecar upgrades itself
   (see below) it launches a short-lived helper that holds the Docker socket for
   a few seconds to recreate the `updater` service. It is the same privilege as
-  the sidecar, not a new one: same uid, gid and groups, `no-new-privileges`, no
-  network at all, and no listener. It runs one compose command and exits.
+  the sidecar, not a new one: same uid, gid and groups, `no-new-privileges`,
+  `read_only`, `cap_drop: ALL`, a size-capped `/tmp`, no network at all, and no
+  listener. It runs one compose command and exits.
 
 A compromised admin session can restart your app and roll it back to any release
 this host has previously run. Rollback targets are restricted to that list, but
@@ -576,10 +588,11 @@ update has succeeded and its lock is released, it:
 
 The helper is not part of the compose project, which is what lets it survive the
 recreate it is performing. It runs with no network (the image is already local),
-`no-new-privileges`, and the same uid, gid and supplementary groups as the
-sidecar — the same privilege, for a few seconds, and no new capability. It is
-not removed on exit: its exit code and logs are the post-mortem if something
-goes wrong.
+`no-new-privileges`, `read_only`, `cap_drop: ALL`, a size-capped `/tmp` (it runs
+`docker compose`, which needs somewhere writable under `HOME`), and the same
+uid, gid and supplementary groups as the sidecar — the same privilege, for a
+few seconds, and no new capability. It is not removed on exit: its exit code
+and logs are the post-mortem if something goes wrong.
 
 While this happens the panel says **"The updater is upgrading itself to vX…"**.
 Requests submitted during the handoff are not lost — they sit in the shared
