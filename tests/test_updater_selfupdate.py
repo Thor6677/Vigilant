@@ -218,6 +218,37 @@ def test_it_keeps_no_new_privileges():
     assert _pairs(_argv(), "--security-opt") == ["no-new-privileges"]
 
 
+# ── Parity with the sidecar service's own compose hardening ─────────────────
+#
+# docker-compose.yml's `updater:` service gets read_only/cap_drop/a capped
+# tmpfs, but compose hardening only applies to what COMPOSE launches. This
+# helper is launched by `docker run` from inside the running sidecar, never by
+# compose, so without its own copy of these flags the one moment the stack
+# runs an EXTRA privileged container would also be the one moment that
+# container was unhardened.
+
+def test_it_is_read_only():
+    assert "--read-only" in _argv()
+
+
+def test_it_drops_all_capabilities():
+    assert _pairs(_argv(), "--cap-drop") == ["ALL"]
+
+
+def test_it_gets_no_cap_add():
+    """Like the sidecar it replaces, this helper is never root and needs no
+    capability handed back."""
+    assert "--cap-add" not in _argv()
+
+
+def test_it_gets_a_capped_writable_tmp():
+    """Required by --read-only: `docker compose`, which is this helper's
+    entire job, writes under HOME (see updater/Dockerfile) and needs
+    somewhere to do it. Same size and mode as the compose file's own tmpfs,
+    and for the same reasons — see docker-compose.yml's `updater:` block."""
+    assert _pairs(_argv(), "--tmpfs") == ["/tmp:size=64m,mode=1777"]
+
+
 def test_it_runs_as_the_same_user_and_every_supplementary_group():
     """The docker-socket gid and the repo owner's uid are the entire reason
     this can work: drop either and it is "permission denied" on the socket, or
@@ -795,14 +826,16 @@ def test_the_heartbeat_publishes_the_record(sup):
 def test_self_checks_beat_after_every_check(sup, monkeypatch):
     """_self_checks' own timeouts sum to 15 + 15 + 20 + 30 = 80 seconds, which
     is beyond the app's 60s staleness window on its own. Beating after each
-    check bounds the gap to the single longest timeout instead of their sum."""
+    check bounds the gap to the single longest timeout instead of their sum.
+    `tmp` adds a sixth check but no timeout of its own — it's a bare
+    filesystem call — so it does not change that arithmetic."""
     monkeypatch.setattr(sup.subprocess, "run",
                         lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
     seen = []
     checks = sup._self_checks(seen.append)
-    assert len(seen) == len(checks) == 5
+    assert len(seen) == len(checks) == 6
     # Each call sees strictly more than the last, and the last sees them all.
-    assert [len(s) for s in seen] == [1, 2, 3, 4, 5]
+    assert [len(s) for s in seen] == [1, 2, 3, 4, 5, 6]
     assert seen[-1] == checks
     # A copy, not the live dict — the caller publishes what it was handed.
     assert seen[0] is not checks

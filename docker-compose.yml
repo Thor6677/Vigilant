@@ -124,6 +124,51 @@ services:
       # unchanged, so a normal install behaves exactly as before.
       - ${VIGILANT_ROOT:-/opt/vigilant}:${VIGILANT_ROOT:-/opt/vigilant}
       - control:/control
+      - type: tmpfs
+        target: /tmp
+        # Long form, not the short `tmpfs: [/tmp]` list the app service uses
+        # below: the short list takes bare paths only, and this mount needs
+        # a size cap the app's /tmp does not.
+        #
+        # size caps it. Docker's own tmpfs default is UNBOUNDED — a tmpfs is
+        # backed by RAM, not disk, so an unbounded one does not fail with
+        # ENOSPC when something runs away, it eats host memory instead. 64m is
+        # generous for what actually lands here: docker-cli-compose's own
+        # writes under HOME (see updater/Dockerfile), AND scripts/deploy.sh's
+        # and scripts/rollback.sh's own `mktemp -d` self-copy (see the
+        # self-modification guard atop both scripts) — that copy lands in
+        # THIS mount, not the bind-mounted repo root, since `mktemp -d` with
+        # no template resolves against TMPDIR/`/tmp` by default.
+        #
+        # Deliberately NO `mode` key. This mount needs to be writable by an
+        # arbitrary non-root uid (VIGILANT_UID per install, not baked into the
+        # image like the app's uid 10001 — see `user:` above), which argued
+        # for spelling out `mode: 1777` explicitly rather than trusting a
+        # default. That reasoning was wrong in a way only a real daemon
+        # caught: YAML reads `1777` as the DECIMAL integer 1777, which is
+        # octal 3361 — `drwxrwS--t`, NOT world-writable — and Compose passes
+        # that value straight through uninterpreted (`docker compose config`
+        # even ECHOES it back as `mode: 1777`, which looks right and is not).
+        # A sidecar built with that line starts cleanly, reports all five
+        # self-checks ok, and then fails its first update or rollback in
+        # seconds with nothing but `mktemp: Permission denied` in the log,
+        # because /tmp itself was never writable by its own uid. Compose's
+        # own tmpfs default mode is ALREADY 1777 (octal) — the same default
+        # that has always made the app's plain `- /tmp` below writable for
+        # its non-root uid with no mode key at all — so the fix is to rely on
+        # that default rather than restate it as a number a YAML parser reads
+        # differently than a human does. See the `tmp` self-check in
+        # updater/supervisor.py's _self_checks(), added specifically because
+        # this class of failure passed every check that existed before it.
+        #
+        # Docker's tmpfs default also adds `noexec`, which is fine here: this
+        # container never executes anything from /tmp. deploy.sh and
+        # rollback.sh copy themselves INTO this mount via `mktemp -d` and then
+        # `exec bash "<file>"` — bash READS that file and interprets it, it
+        # does not execute it as a binary, so noexec never enters into it
+        # either way.
+        tmpfs:
+          size: 64m
     environment:
       - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
       - VIGILANT_CONTROL_DIR=/control
@@ -144,6 +189,22 @@ services:
     # pull is performed by the daemon, not by this process.
     security_opt:
       - no-new-privileges:true
+    # Parity with the app service above, and honest sizing about what it buys:
+    # this container already runs as a non-root uid with no-new-privileges (see
+    # `user:` above), so it holds no effective capabilities and its image files
+    # are root-owned, so it cannot write them regardless of this line. More
+    # fundamentally, this container holds the Docker socket — socket access is
+    # root on the host by construction, and cap_drop/read_only do not contain a
+    # compromised sidecar; nothing below changes that. What it does buy is real:
+    # no writable rootfs to persist anything into, no capability this container
+    # ever needed, and the most privileged service in the stack no longer being
+    # the one visibly least hardened.
+    cap_drop:
+      - ALL
+    # No cap_add, unlike the app service above: this container is never root at
+    # any point in its life — no entrypoint chown, no gosu drop, so there is no
+    # brief root window here that needs a capability handed back afterwards.
+    read_only: true
     logging:
       driver: json-file
       options:

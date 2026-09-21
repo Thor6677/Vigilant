@@ -26,6 +26,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -582,8 +583,39 @@ def build_helper_command(image_ref: str, root: str, compose_file: str,
                         while the old sidecar was still alive. compose needs no
                         network to recreate a service from a local image, so the
                         most privileged container in the stack gets none.
-    --security-opt no-new-privileges
-                        same posture as the sidecar it replaces.
+    --security-opt no-new-privileges / --read-only / --cap-drop ALL
+                        same posture as the sidecar service now declares in
+                        docker-compose.yml (see the `updater:` block there).
+                        compose hardening applies only to what compose itself
+                        launches, and this helper is launched by `docker run`
+                        from inside the OLD sidecar — never by compose — so
+                        without these flags the one moment this stack runs an
+                        extra privileged container would also be the one
+                        moment that container was unhardened. No --cap-add to
+                        go with the drop: like the sidecar it is replacing,
+                        this helper is never root and needs no capability
+                        back.
+    --tmpfs /tmp:size=64m,mode=1777
+                        required by --read-only: `docker compose`, which this
+                        helper's whole job is to run, writes under HOME (see
+                        updater/Dockerfile) and needs somewhere to do it.
+                        Capped for the same reason as the compose file's
+                        tmpfs — a runaway write must not eat host RAM — and
+                        given an explicit mode because this helper inherits
+                        the sidecar's own arbitrary non-root uid via --user
+                        below, not a uid baked into the image.
+                        `mode=1777` HERE IS SAFE, unlike the identical-looking
+                        number that broke the compose file's tmpfs: this is
+                        `docker run`'s STRING option syntax
+                        (`size=...,mode=...`), which `dockerd` parses as a
+                        literal mount option and interprets in octal, the way
+                        `chmod`'s argument always has been. It is compose's
+                        YAML `mode: 1777` that is a decimal INTEGER and gets
+                        read as one — see docker-compose.yml's `updater:`
+                        tmpfs comment for the full account. Do not "harmonise"
+                        this string with that YAML by copying one into the
+                        other's syntax; they are not interchangeable even
+                        though they look it.
     --user / --group-add
                         identical uid:gid and EVERY supplementary group of the
                         running sidecar. The docker-socket gid and the repo
@@ -619,6 +651,9 @@ def build_helper_command(image_ref: str, root: str, compose_file: str,
         "--name", container_name,
         "--network", "none",
         "--security-opt", "no-new-privileges",
+        "--read-only",
+        "--cap-drop", "ALL",
+        "--tmpfs", "/tmp:size=64m,mode=1777",
         "--user", f"{uid}:{gid}",
     ]
     for group in groups:
@@ -1018,6 +1053,66 @@ def refresh_remote_check(checks: dict, last_checked: float, now: float) -> float
     return now
 
 
+# ── The `tmp` self-check ──────────────────────────────────────────────────────
+#
+# Added after a real stack shipped a sidecar whose /tmp had the wrong
+# permissions: it started cleanly, published all five self-checks as `ok` —
+# `socket`, `git`, `remote`, `compose`, `deployed` — and then failed its FIRST
+# update in seconds with nothing in the log but `mktemp: Permission denied`.
+# None of the existing checks could have caught it: none of them writes a
+# file. This one does, using the exact primitive scripts/deploy.sh and
+# scripts/rollback.sh call on themselves before touching git.
+
+
+def _tmp_check() -> str:
+    """Can this container actually create a file in its writable temp
+    directory — not merely assume the mount exists or is writable by this uid.
+
+    Resolves the directory as `${TMPDIR:-/tmp}` and passes it to
+    `tempfile.mkdtemp(dir=...)` EXPLICITLY, rather than calling
+    `tempfile.mkdtemp()` with no argument. That distinction is load-bearing:
+    with no `dir`, Python resolves the location via `tempfile.gettempdir()`,
+    which silently tries a whole LIST of fallback candidates (`TMPDIR`, then
+    `/tmp`, `/var/tmp`, `/usr/tmp`, finally the current directory) and
+    quietly succeeds in the first one that works. On a normal machine that
+    resilience would have masked exactly the failure this check exists to
+    catch, by silently creating the test file somewhere other than /tmp and
+    reporting "ok". `mktemp -d` (the shared primitive scripts/deploy.sh and
+    scripts/rollback.sh both call on themselves as their first action — see
+    the self-modification guard atop each script) resolves `${TMPDIR:-/tmp}`
+    and nothing else, so an equally forgiving check here could pass while
+    their first line fails. TMPDIR is never set anywhere in this repo, so
+    both resolve to plain `/tmp` today either way; the explicit `${TMPDIR:-
+    /tmp}` is what keeps that agreement if an operator ever sets it, rather
+    than each tool quietly following its own fallback rules.
+
+    Local and instant: no subprocess, no network, no meaningful ceiling to add
+    to _self_checks()'s startup-latency accounting. It belongs with the
+    one-shot checks, not with `remote`'s rate-limited retry — a /tmp mount
+    that is wrong does not heal itself while the container keeps running.
+    """
+    tmpdir = os.environ.get("TMPDIR") or "/tmp"
+    try:
+        path = tempfile.mkdtemp(dir=tmpdir)
+    except OSError as e:
+        return (
+            f"FAIL: could not create a file in {tmpdir}: {e}. "
+            f"scripts/deploy.sh and scripts/rollback.sh both copy themselves "
+            f"into a fresh directory there before doing anything else, so "
+            f"neither an update nor a rollback can run until this is fixed. "
+            f"On a read-only root filesystem, {tmpdir} must be mounted as a "
+            f"writable tmpfs — see the `updater:` service's tmpfs mount in "
+            f"docker-compose.yml.")
+    try:
+        os.rmdir(path)
+    except OSError:
+        # Cleanup failing is not the thing this check exists to catch — the
+        # create above already proved the mount is writable. Leaving a stray
+        # empty directory under the size-capped tmpfs is harmless.
+        pass
+    return "ok"
+
+
 def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
     """Startup environment checks, published so self-hoster environment
     failures show up as a disabled button with a readable reason instead of a
@@ -1039,7 +1134,9 @@ def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
     would make the panel vanish entirely while it came up. Beating after each
     check bounds the gap to the single longest timeout (30s, `compose`) instead
     of their sum. run() also beats once BEFORE calling this at all, so the app
-    sees a live updater from the first moment.
+    sees a live updater from the first moment. `tmp` is a bare filesystem call
+    with no subprocess and no timeout of its own, so it adds nothing worth
+    naming to that sum.
 
     Typical numbers are nowhere near those ceilings — every check but `remote`
     is local, and a healthy `remote` answers in well under a second — so the
@@ -1091,6 +1188,12 @@ def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
         checks["deployed"] = "ok"
     except Exception as e:
         checks["deployed"] = f"FAIL: {e}"
+    _progress()
+    # Last, not because it matters least — the class of failure it catches
+    # (a /tmp mount with the wrong permissions) passed every check above it on
+    # a real stack — but because it is the newest and the others already have
+    # an established order tests and docs refer to.
+    checks["tmp"] = _tmp_check()
     _progress()
     return checks
 

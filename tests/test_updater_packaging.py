@@ -123,6 +123,18 @@ def test_dockerfile_sets_home_and_unbuffered_output():
         "without this the deploy log appears only when the process exits"
 
 
+def test_dockerfile_disables_bytecode_writes():
+    """/opt/updater is root-owned (no USER directive), so a .pyc write there
+    already fails silently under a writable rootfs — and now that the rootfs
+    is genuinely read-only (compose's `updater:` service and the self-update
+    helper's `docker run` both set it), that silent failure is the only thing
+    standing in for an explicit one. Parsed via _dockerfile_env(), not a
+    substring check, for the same reason this file's own docstring gives for
+    parsing the GIT_CONFIG block: the interesting part is the VALUE, and a
+    substring match would pass just as happily for a typo'd key."""
+    assert _dockerfile_env().get("PYTHONDONTWRITEBYTECODE") == "1"
+
+
 # ── The HTTPS rewrite that lets an SSH-cloned host repo fetch from here ──────
 #
 # The sidecar has no ssh client on purpose (it holds the Docker socket; giving
