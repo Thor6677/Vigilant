@@ -276,6 +276,182 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
     return out
 
 
+# ── The `remote` self-check's vocabulary ─────────────────────────────────────
+#
+# All pure, so the message an operator actually reads can be asserted in the
+# main suite with no git, no network and no container anywhere near it. The
+# subprocess half lives below the banner and does nothing but feed these.
+
+# How often a FAILING `remote` check is retried. The other self-checks run once
+# at startup and stay put, which is right for them — a wrong DOCKER_GID does not
+# heal itself. This one is different: it depends on DNS and outbound network,
+# and after a host reboot the sidecar can easily win the race against either.
+# One-shot semantics there would leave the Update button disabled, with a
+# network error as its reason, until a human SSHed in to restart the container —
+# the exact situation this feature exists to avoid.
+#
+# Five minutes, not every tick: at POLL_SECONDS=1.0 a per-tick retry would mean
+# ~17,000 ls-remote calls a day against github.com from every install that has
+# this profile enabled. A passing check is never re-run at all.
+_REMOTE_RECHECK_SECONDS = 5 * 60
+
+# Userinfo in a URL, i.e. the `user:token@` in `https://user:token@host/path`.
+# A self-hoster who cloned with a personal access token embedded in the origin
+# URL has that token in git's own error output, and the whole point of this
+# check is that its reason gets PUBLISHED — into /control/updater.json, rendered
+# into an admin page, and pasted into bug reports. Redaction is applied to the
+# URL and to git's stderr, because git echoes the URL back inside the stderr.
+#
+# An scp-style remote (`USER@HOST:owner/repo`) is deliberately NOT touched:
+# there is no `://`, its "userinfo" is a well-known service account name rather
+# than a secret, and hiding it would erase the single most important clue on the
+# failure path this check exists for.
+_URL_USERINFO_RE = re.compile(r"(?<=://)[^/@\s]*@")
+
+# The one host whose SSH remotes the image rewrites to https:// (see the
+# GIT_CONFIG_* block in updater/Dockerfile). Named here rather than spelled
+# inline below so the classifier and the image cannot drift apart silently;
+# tests/test_updater_packaging.py asserts this matches the Dockerfile's
+# insteadOf key.
+REWRITTEN_SSH_HOST = "github.com"
+
+# Phrases git uses when the remote answered but refused. Distinguishing these
+# from "could not resolve host" is what lets the reason say "this repo needs
+# credentials the updater does not have" rather than a generic network error.
+_AUTH_HINT_RE = re.compile(
+    r"could not read Username|could not read Password|Authentication failed|"
+    r"terminal prompts disabled|Repository not found|403 Forbidden|"
+    r"Permission denied|access denied|Invalid username or password",
+    re.IGNORECASE,
+)
+
+
+def redact_userinfo(text: str) -> str:
+    """Replace `scheme://user:secret@` with `scheme://***@` everywhere."""
+    if not isinstance(text, str):
+        return ""
+    return _URL_USERINFO_RE.sub("***@", text)
+
+
+def looks_like_ssh_url(url: str) -> bool:
+    """Whether git would try to reach this URL by exec'ing an ssh client.
+
+    Two spellings count, and they parse completely differently:
+      - explicit scheme — `ssh://USER@HOST/owner/repo`, `git+ssh://…`
+      - scp-style — `USER@HOST:owner/repo`, which has no scheme at all and is
+        recognised only by a colon appearing before the first slash.
+
+    That second rule is why this cannot be `"ssh" in url` or a urlparse call:
+    urlparse reads an scp-style remote as scheme-less with a path, and the
+    string contains no "ssh" anywhere. Checking the first path segment for a
+    colon is the same test git itself applies.
+    """
+    if not isinstance(url, str):
+        return False
+    url = url.strip()
+    if not url:
+        return False
+    scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.\-]*)://", url)
+    if scheme:
+        return scheme.group(1).lower() in ("ssh", "git+ssh")
+    # No scheme: scp-style iff the colon comes before any slash. A bare local
+    # path (`/opt/vigilant`, `../mirror.git`) therefore does not match, which
+    # matters because a local-path origin is how this gets tested offline.
+    return ":" in url.split("/", 1)[0]
+
+
+def url_host(url: str) -> str:
+    """The hostname from either URL spelling, lowercased, or "" if unclear."""
+    if not isinstance(url, str):
+        return ""
+    url = url.strip()
+    scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^/@\s]*@)?([^/:\s]+)", url)
+    if scheme:
+        return scheme.group(1).lower()
+    head = url.split("/", 1)[0]
+    if ":" in head:
+        return head.split(":", 1)[0].rsplit("@", 1)[-1].lower()
+    return ""
+
+
+def remote_failure_reason(effective_url: str | None, stderr: str | None) -> str:
+    """The human-actionable half of a failed `remote` check.
+
+    "Actionable" is the requirement, and it is not the same as "accurate". The
+    accurate version of this failure is git's own
+    `error: cannot run ssh: No such file or directory / fatal: unable to fork`,
+    which tells a self-hoster nothing about what to change — and which the panel
+    never showed at all, because the check that would have caught it did not
+    exist. Every branch below names the thing to change.
+
+    `effective_url` must be the POST-rewrite URL (`git ls-remote --get-url`),
+    not the configured one (`git remote get-url`). The difference is the whole
+    diagnosis: a REWRITTEN_SSH_HOST origin that the image's insteadOf rules have
+    turned into https:// is fine, and an identical-looking one that is still
+    SSH by the time git resolves it means those rules are not in effect.
+    """
+    detail = redact_userinfo(" ".join((stderr or "").split()))[:400]
+    url = redact_userinfo((effective_url or "").strip()) or "origin"
+    suffix = f" git said: {detail}" if detail else ""
+
+    if looks_like_ssh_url(effective_url or ""):
+        if url_host(effective_url or "") == REWRITTEN_SSH_HOST:
+            # The rewrite should have caught this one, so the fault is in the
+            # container's environment, not in the operator's choice of origin.
+            return (
+                f"origin still resolves to {url} after URL rewriting. The "
+                f"updater image rewrites {REWRITTEN_SSH_HOST} SSH origins to "
+                f"https:// via GIT_CONFIG_COUNT/GIT_CONFIG_KEY_*; "
+                f"if that is not happening, "
+                f"those variables are missing from the sidecar's environment. "
+                f"Check `docker exec <updater> env | grep GIT_CONFIG` and that "
+                f"nothing strips the environment before deploy.sh runs."
+                f"{suffix}")
+        return (
+            f"origin resolves to {url}, which git can only reach over SSH. This "
+            f"container ships no SSH client and holds no key, deliberately: it "
+            f"also holds the Docker socket, so a credential stored here would "
+            f"hand one compromise both root on the host and push access to the "
+            f"source. The in-app updater needs origin to be an anonymously "
+            f"readable https:// URL. {REWRITTEN_SSH_HOST} SSH origins are "
+            f"rewritten automatically; private repositories and other SSH hosts are not "
+            f"supported — deploy those with scripts/deploy.sh over SSH, which "
+            f"is unaffected.{suffix}")
+
+    if _AUTH_HINT_RE.search(stderr or ""):
+        return (
+            f"origin {url} requires credentials. The in-app updater fetches "
+            f"anonymously and has none, by design — it holds the Docker socket, "
+            f"so no token lives here. A private repository cannot be deployed "
+            f"from the browser; use scripts/deploy.sh over SSH instead."
+            f"{suffix}")
+
+    return f"could not reach origin {url}.{suffix}"
+
+
+def should_recheck_remote(checks: dict, last_checked: float | None,
+                          now: float, interval: float = _REMOTE_RECHECK_SECONDS) -> bool:
+    """Whether the failing `remote` check is due for another attempt.
+
+    Deliberately narrow, and each condition is load-bearing:
+      - a missing `remote` key means _self_checks() never ran; the caller that
+        owns startup handles that, not the retry loop.
+      - "ok" is never re-run. A check that passed has nothing to heal, and
+        re-running it would put a network call on a timer for the life of the
+        container.
+      - the rate limit is measured from the LAST ATTEMPT, not the last failure,
+        so a check that keeps timing out does not accumulate back-to-back runs.
+    """
+    if not isinstance(checks, dict):
+        return False
+    result = checks.get("remote")
+    if result is None or result == "ok":
+        return False
+    if last_checked is None:
+        return True
+    return (now - last_checked) >= interval
+
+
 # ── Impure half: filesystem, subprocess, clock ───────────────────────────────
 
 log = logging.getLogger("updater")
@@ -453,13 +629,135 @@ def _deployed_text() -> str:
         return ""
 
 
+# Wall-clock ceiling on the `remote` check. This runs inside _self_checks(),
+# which runs before the first heartbeat, so it is also how long a sidecar with
+# no outbound network takes to publish anything at all — the panel stays hidden
+# for that long after a restart. Twenty seconds is the trade: long enough for a
+# slow TLS handshake over a congested link, short enough that a hard network
+# failure does not look like a sidecar that failed to start.
+_REMOTE_CHECK_TIMEOUT_SECONDS = 20
+
+
+def _git_env() -> dict:
+    """Environment for a read-only git call that must never block on input.
+
+    `{**os.environ, ...}` and NOT a fresh dict. The image sets GIT_CONFIG_COUNT
+    and GIT_CONFIG_KEY_*/VALUE_* to rewrite github.com SSH origins to https://
+    (see updater/Dockerfile); building a clean environment here would drop them
+    and make this check report a failure on a host where deploys actually
+    succeed — a false alarm that disables the button.
+
+    GIT_TERMINAL_PROMPT=0 turns "please enter a username" into an immediate
+    error. Without it a private-repo origin makes git block on a terminal that
+    will never answer, and the check would hit its timeout instead of returning
+    the one message that names the real problem.
+
+    GIT_ASKPASS is pinned for the same reason one level up: GIT_TERMINAL_PROMPT
+    governs git's OWN prompt, not a configured askpass helper or credential
+    manager, which on a developer machine is a GUI keychain that blocks. Pointing
+    it at a binary that prints an empty line and exits keeps failure fast.
+    """
+    return {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/echo",
+    }
+
+
+def _effective_origin_url(env: dict) -> str:
+    """origin's URL as git will actually use it — AFTER insteadOf rewriting.
+
+    `ls-remote --get-url`, not `remote get-url`: the latter reports the
+    configured string, so on a host whose clone was made over SSH (and whose
+    origin the image's environment rewrites to https) it would report an SSH URL for a remote
+    that works perfectly, and every failure here would be misdiagnosed as "your
+    origin is SSH". This form resolves the name locally and contacts nothing.
+    """
+    try:
+        proc = subprocess.run(["git", "-C", ROOT, "ls-remote", "--get-url", "origin"],
+                              capture_output=True, text=True, timeout=15, env=env)
+    except Exception:
+        return ""
+    return (proc.stdout or "").strip() if proc.returncode == 0 else ""
+
+
+def _remote_check() -> str:
+    """Can this container actually FETCH from origin, read-only.
+
+    The check that would have caught the cannot-run-ssh failure. Its absence is
+    why the panel showed four green checks and an enabled button on a host where
+    the first click could not possibly work: the old `git` check ran
+    `git rev-parse HEAD`, which is purely local and passes happily in a
+    container with no network, no ssh client and no credentials.
+
+    `--exit-code … HEAD` rather than a bare `ls-remote`: a remote that answers
+    but has no refs at all should not read as success, and `HEAD` is the one ref
+    every non-empty repository has.
+
+    check=False and stderr read directly, NOT check=True: the other checks in
+    _self_checks() format the raised CalledProcessError, whose str() is
+    "Command '[...]' returned non-zero exit status 128." — the exit code, the
+    argv, and none of the message git actually printed. On this check that
+    message is the entire diagnostic value.
+    """
+    try:
+        env = _git_env()
+        proc = subprocess.run(
+            ["git", "-C", ROOT, "ls-remote", "--exit-code", "origin", "HEAD"],
+            capture_output=True, text=True, env=env,
+            timeout=_REMOTE_CHECK_TIMEOUT_SECONDS,
+        )
+        if proc.returncode == 0:
+            return "ok"
+        return "FAIL: " + remote_failure_reason(_effective_origin_url(env), proc.stderr)
+    except subprocess.TimeoutExpired:
+        return (f"FAIL: `git ls-remote origin` did not answer within "
+                f"{_REMOTE_CHECK_TIMEOUT_SECONDS}s. The sidecar may have no "
+                f"outbound network, or origin may be unreachable from this host.")
+    except Exception as e:
+        # Never raises: this is called from the poll loop as well as at startup,
+        # and a failed check must disable the button, not kill the supervisor.
+        return "FAIL: " + redact_userinfo(f"could not run git ls-remote: {e}")[:512]
+
+
+def refresh_remote_check(checks: dict, last_checked: float, now: float) -> float:
+    """Re-run a failing `remote` check, in place. Returns the new attempt time.
+
+    Mutates the caller's dict rather than returning a fresh one so that run()'s
+    single `checks` object — the same one handed to write_heartbeat() every
+    tick — picks the new value up with no further plumbing. Rebuilding it by
+    calling _self_checks() again would be the obvious alternative and is wrong:
+    that re-runs socket, compose and deployed too, putting a `docker version`
+    and a `docker compose config` on a timer forever to fix a network blip.
+
+    This BLOCKS the poll loop for up to _REMOTE_CHECK_TIMEOUT_SECONDS when it
+    does run, which delays that iteration's heartbeat: a 10s beat interval can
+    stretch to ~30s. The app treats a heartbeat older than 60s as no updater at
+    all, so today it fits — but that headroom is now spoken for, and anyone
+    tightening the staleness window or lengthening the timeout has to count
+    this call against it.
+    """
+    if not should_recheck_remote(checks, last_checked, now):
+        return last_checked
+    previous = checks.get("remote")
+    checks["remote"] = _remote_check()
+    if checks["remote"] == "ok":
+        log.info("remote check recovered (was: %s)", previous)
+    return now
+
+
 def _self_checks() -> dict:
-    """One-time environment checks, published so self-hoster environment
+    """Startup environment checks, published so self-hoster environment
     failures show up as a disabled button with a readable reason instead of a
     mid-deploy explosion.
 
     The socket gid varies by distro and compose in this image is older than the
     host's, so a file the host parses might not parse here.
+
+    All but one are one-shot: they describe a mounting or permissions mistake,
+    which does not fix itself while the container keeps running. `remote` is the
+    exception — it depends on the network — and run() re-runs THAT ONE on a
+    timer while it is failing. See refresh_remote_check().
     """
     checks = {}
     try:
@@ -474,6 +772,11 @@ def _self_checks() -> dict:
         checks["git"] = "ok"
     except Exception as e:
         checks["git"] = f"FAIL: {e}"
+    # Deliberately adjacent to the `git` check above, because it is the half of
+    # it that was missing: `rev-parse HEAD` proves the bind mount and the repo
+    # ownership, and proves nothing at all about whether this container can
+    # reach the remote it is about to fetch a release tag from.
+    checks["remote"] = _remote_check()
     try:
         subprocess.run(["docker", "compose", "-f",
                         os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml"),
@@ -828,10 +1131,20 @@ def run() -> None:
 
     seen: list[str] = []
     last_beat = 0.0
+    # Seeded with the time _self_checks() ran, not with 0.0 or None: those would
+    # both make the first loop iteration re-run the network check immediately,
+    # milliseconds after the startup one, and then again every interval — which
+    # is the opposite of rate limiting. A boot-time failure waits the full
+    # interval before its first retry.
+    last_remote_check = time.time()
     lock_path = CONTROL / "update.lock"
 
     global _last_tick_error
     while True:
+        # Mutates `checks` in place while `remote` is failing, so the next
+        # heartbeat publishes the new value and the panel's button re-enables
+        # itself without anyone restarting the container. A no-op once it is ok.
+        last_remote_check = refresh_remote_check(checks, last_remote_check, time.time())
         if time.time() - last_beat >= HEARTBEAT_SECONDS:
             write_heartbeat(checks)
             last_beat = time.time()

@@ -512,6 +512,51 @@ docker compose --profile updater up -d
 Then reload Admin › Overview. The panel appears once the sidecar's heartbeat is
 less than 60 seconds old; if it stays hidden, the sidecar is not running.
 
+#### `origin` must be fetchable without credentials
+
+The sidecar runs `scripts/deploy.sh`, which starts with a `git fetch`. It ships
+**no SSH client and no credentials, deliberately** — it already holds the Docker
+socket, and storing a deploy key beside that would mean one compromise yields
+both root on the host and push access to your source.
+
+So the clone at `/opt/vigilant` needs an `origin` that is **anonymously
+readable over HTTPS**:
+
+- **An `https://github.com/…` origin** — works.
+- **A github.com SSH origin**, in either spelling (scp-style, or the `ssh://`
+  scheme) — works. The sidecar image rewrites github.com SSH origins to HTTPS
+  for its own git calls, using git's `insteadOf` supplied through the
+  environment, so it applies to `deploy.sh` and to anything you run via
+  `docker exec` as well. **Your clone is not modified**, and pushing from an SSH
+  session is unaffected.
+- **A private repository, or an SSH origin on any other host** (GitLab, Gitea,
+  a self-hosted mirror) — **not supported by in-app updates.** The panel shows a
+  failed `remote` check explaining why and keeps the buttons disabled. Deploy
+  those with `scripts/deploy.sh` over SSH as usual; nothing else changes.
+
+The `remote` check runs at startup and, **while it is failing**, retries every
+few minutes — so a sidecar that came up before the host's network did re-enables
+itself without a restart.
+
+#### Upgrading the sidecar is a separate, manual step
+
+`deploy.sh` and `rollback.sh` recreate **only the `app` service**
+(`up -d --no-deps --force-recreate app`). The sidecar is deliberately left
+alone, so an in-app update cannot pull the container out from under itself
+mid-run — but it also means **the sidecar keeps running its old image after you
+update**. Changes to the updater itself reach an existing install only when you
+recreate it by hand, on the host:
+
+```bash
+cd /opt/vigilant
+docker compose --profile updater up -d updater
+```
+
+Do this once after upgrading to a release that changes the updater — including
+the release that adds the HTTPS-origin handling described above, which is
+otherwise still absent from the running sidecar even though the new code is
+checked out.
+
 #### Two compose gotchas
 
 **A bare `docker compose down` does not stop the updater.** Without the profile
@@ -540,6 +585,7 @@ an in-app update cannot delete the sidecar out from under itself mid-run.
 | No panel in Admin › Overview | Sidecar not running, or its heartbeat is stale | `docker compose --profile updater ps`; check `docker logs vigilant-updater-1` |
 | Panel says "socket: FAIL" | `DOCKER_GID` does not match this host | `getent group docker \| cut -d: -f3`, correct `.env`, recreate the sidecar |
 | Panel says "git: FAIL" | `/opt/vigilant` not mounted, or not owned by `VIGILANT_UID` | Check the bind mount is `/opt/vigilant:/opt/vigilant` on both sides |
+| Panel says "remote: FAIL" | The sidecar cannot fetch from `origin` — an SSH origin on a non-github host, a private repo, or no outbound network | See [`origin` must be fetchable without credentials](#origin-must-be-fetchable-without-credentials). The check retries by itself every few minutes |
 | Panel says "deployed: FAIL" | `.deployed` missing — no release has been deployed by the scripts yet | Deploy once with `scripts/deploy.sh` |
 | Buttons are disabled | One of the self-checks above is failing | Fix the named check; the panel lists which |
 | "The last run was interrupted" | The sidecar died mid-deploy | Check the host and `docker logs`; the app will not queue another run until it is resolved |
