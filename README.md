@@ -480,6 +480,11 @@ What it does instead:
   `read_only: true`, uid 10001, and never touches the Docker socket. A
   remote-code-execution bug in Vigilant gets an attacker the ability to write
   one JSON file, whose contents the privileged side validates before acting on.
+- **One more privileged container, briefly.** When the sidecar upgrades itself
+  (see below) it launches a short-lived helper that holds the Docker socket for
+  a few seconds to recreate the `updater` service. It is the same privilege as
+  the sidecar, not a new one: same uid, gid and groups, `no-new-privileges`, no
+  network at all, and no listener. It runs one compose command and exits.
 
 A compromised admin session can restart your app and roll it back to any release
 this host has previously run. Rollback targets are restricted to that list, but
@@ -512,6 +517,15 @@ docker compose --profile updater up -d
 Then reload Admin › Overview. The panel appears once the sidecar's heartbeat is
 less than 60 seconds old; if it stays hidden, the sidecar is not running.
 
+**Running a fork, or a mirrored registry?** Both images are parameterised:
+`VIGILANT_IMAGE` (default `ghcr.io/thor6677/vigilant`) and
+`VIGILANT_UPDATER_IMAGE` (default `ghcr.io/thor6677/vigilant-updater`), each
+combined with `VIGILANT_TAG`. Leave them unset and nothing changes — the
+defaults resolve to exactly the images that were hardcoded before. Set them in
+`.env` and `scripts/deploy.sh`, compose, and the sidecar's self-update all agree
+on where a tag's image lives. Set only one of the two and they can disagree,
+which shows up as a "not found" at pull time.
+
 #### `origin` must be fetchable without credentials
 
 The sidecar runs `scripts/deploy.sh`, which starts with a `git fetch`. It ships
@@ -538,24 +552,74 @@ The `remote` check runs at startup and, **while it is failing**, retries every
 few minutes — so a sidecar that came up before the host's network did re-enables
 itself without a restart.
 
-#### Upgrading the sidecar is a separate, manual step
+#### The sidecar upgrades itself
 
 `deploy.sh` and `rollback.sh` recreate **only the `app` service**
-(`up -d --no-deps --force-recreate app`). The sidecar is deliberately left
-alone, so an in-app update cannot pull the container out from under itself
-mid-run — but it also means **the sidecar keeps running its old image after you
-update**. Changes to the updater itself reach an existing install only when you
-recreate it by hand, on the host:
+(`up -d --no-deps --force-recreate app`), and that does not change. It cannot:
+during an in-app update the sidecar *is* the process running `deploy.sh`, and
+compose is client-driven — telling it to recreate the sidecar from inside the
+sidecar kills the client mid-recreate, and the worst case is that the old
+container is gone, the new one never starts, and the install has no updater at
+all.
+
+So the sidecar updates itself a step later, and out of the way. After an in-app
+update has succeeded and its lock is released, it:
+
+1. asks compose which image the `updater` service should be running, reading the
+   compose file on disk (so a mirrored registry or a fork's namespace is
+   honoured, and nothing is reconstructed from a naming convention);
+2. pulls that image **while the old container is still alive and serving**, so a
+   missing or unpublished sidecar image fails here, with the registry's own
+   words, and nothing has been touched;
+3. launches a short-lived helper container from the image it just pulled, which
+   runs `docker compose --profile updater up -d --no-deps updater`.
+
+The helper is not part of the compose project, which is what lets it survive the
+recreate it is performing. It runs with no network (the image is already local),
+`no-new-privileges`, and the same uid, gid and supplementary groups as the
+sidecar — the same privilege, for a few seconds, and no new capability. It is
+not removed on exit: its exit code and logs are the post-mortem if something
+goes wrong.
+
+While this happens the panel says **"The updater is upgrading itself to vX…"**.
+Requests submitted during the handoff are not lost — they sit in the shared
+volume and are picked up by the new sidecar.
+
+**Forward only. The sidecar never downgrades.** Roll the app back and the
+sidecar stays where it is. It is the privileged component, so it should sit on
+the most-fixed version available; a downgraded sidecar would also lose this
+feature and strand itself, needing the manual recreate all over again. A newer
+sidecar with an older app is a supported combination — the app reads the shared
+files generically, and rollback targets are floored at the first release that
+shipped the updater.
+
+**It happens only after the sidecar's own successful update — never on a timer
+and never at startup.** A timer could fire while a command-line deploy was
+mid-flight and run two compose operations against one project at once. The cost
+is that `scripts/deploy.sh` over SSH still leaves the sidecar behind, which the
+panel now says out loud instead of hiding:
+
+> The updater is still running v1.2.2 while Vigilant is on v1.2.3…
+
+That warning names both versions and the command below, and it does **not**
+disable the Update and Rollback buttons — an in-app update is how a lagging
+sidecar heals itself. If a self-update was attempted and failed, the reason is
+shown with it.
+
+#### The manual recreate, and the one-time bootstrap
+
+The manual recreate remains the fallback, and is still the right thing to run
+after a command-line deploy that changed the updater:
 
 ```bash
 cd /opt/vigilant
 docker compose --profile updater up -d updater
 ```
 
-Do this once after upgrading to a release that changes the updater — including
-the release that adds the HTTPS-origin handling described above, which is
-otherwise still absent from the running sidecar even though the new code is
-checked out.
+**Sidecars from v1.2.2 and earlier cannot upgrade themselves** — they predate
+the code that does it. The release that first ships self-update therefore still
+needs that command run once, by hand, after deploying it. From then on, in-app
+updates carry the sidecar along with them.
 
 #### Two compose gotchas
 
@@ -589,6 +653,9 @@ an in-app update cannot delete the sidecar out from under itself mid-run.
 | Panel says "deployed: FAIL" | `.deployed` missing — no release has been deployed by the scripts yet | Deploy once with `scripts/deploy.sh` |
 | Buttons are disabled | One of the self-checks above is failing | Fix the named check; the panel lists which |
 | "The last run was interrupted" | The sidecar died mid-deploy | Check the host and `docker logs`; the app will not queue another run until it is resolved |
+| Panel says the updater is still running an older version | The last deploy was run from the command line, or this sidecar predates self-update | `docker compose --profile updater up -d updater` from the install directory. Updating and rolling back still work meanwhile |
+| Panel reports a failed self-update | The new sidecar image could not be pulled, or the helper could not recreate the service — the reason is shown with the warning | Fix what the reason names, then run the manual recreate above. The deploy itself succeeded; only the sidecar is behind |
+| A `…-updater-selfupdate` container is lying around | The self-update helper. It is deliberately not `--rm`, so its exit code and logs survive as the post-mortem | Its name is the install directory's basename plus `-updater-selfupdate` — `vigilant-updater-selfupdate` for `/opt/vigilant`, `vigilant-dev-updater-selfupdate` for `/opt/vigilant-dev` — so two stacks on one Docker host never collide. `docker logs <name>` to see what happened, then `docker rm <name>`. The sidecar removes it by itself once it has read it, so a lingering one means the sidecar never restarted |
 | Update button never appears | Already on the latest release, or the hourly checker has not polled yet | Compare the version chip against the newest release |
 | A second app container appeared | The repo was bind-mounted somewhere other than `/opt/vigilant` | compose derives its project identity from that path — it must be identical on both sides |
 

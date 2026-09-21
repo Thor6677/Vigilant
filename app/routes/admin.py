@@ -1083,6 +1083,12 @@ async def _updater_context(request: Request, db: AsyncSession,
     state = updater_client.run_state(status, datetime.now(timezone.utc))
     # Queued but not yet claimed: status.json still describes the PREVIOUS run.
     awaiting = beat is not None and updater_client.has_pending_request()
+    # The sidecar's own version and whether it trails the app. Both are lifted
+    # out of the heartbeat into top-level keys rather than left for the template
+    # to dig out: Jinja's dot access silently returns a bound method for any key
+    # that collides with a dict method, and keeping the decision in Python means
+    # it is a pure function with a test rather than an expression in markup.
+    self_update = updater_client.self_update_record(beat)
     return {
         "request": request,
         "available": beat is not None,
@@ -1101,6 +1107,13 @@ async def _updater_context(request: Request, db: AsyncSession,
         "latest_tag": latest,
         "update_available": bool(latest and current and latest != current),
         "checks": (beat or {}).get("checks") or {},
+        "updater_version": (beat or {}).get("version"),
+        "self_update": self_update,
+        "self_update_in_flight": (
+            self_update is not None
+            and self_update.get("state") in updater_client.SELF_UPDATE_IN_FLIGHT),
+        "updater_lagging": updater_client.updater_lagging(
+            (beat or {}).get("version"), current),
         "error": error,
         "IDLE": updater_client.IDLE,
         "BUSY": updater_client.BUSY,

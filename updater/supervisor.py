@@ -33,7 +33,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.ops.version import parse_version
+from app.ops.version import is_newer, parse_version
 
 # Only exact release tags. This single rule rejects git argument injection
 # (`--upload-pack=…`), shell metacharacters, path traversal and prereleases.
@@ -452,6 +452,229 @@ def should_recheck_remote(checks: dict, last_checked: float | None,
     return (now - last_checked) >= interval
 
 
+# ── Self-update ──────────────────────────────────────────────────────────────
+#
+# scripts/deploy.sh and scripts/rollback.sh recreate ONLY the `app` service
+# (`up -d --no-deps --force-recreate app`), so a sidecar keeps running the image
+# from whichever release first enabled the profile. Fixes shipped in the sidecar
+# image never reached an install through the panel, and nothing said so — the
+# skew was silent by construction. That bit production twice: once with a
+# sidecar fix that sat undelivered, and once with a manual recreate that
+# silently never happened and was only found by inspecting the container.
+#
+# Adding `updater` to deploy.sh's recreate command CANNOT fix it. The supervisor
+# is the process running deploy.sh, and compose is client-driven: recreating the
+# sidecar from inside the sidecar kills the client mid-recreate. Worst case the
+# old container is gone, the new one never starts, and the install is left with
+# no updater at all — recoverable only over the SSH session this feature exists
+# to avoid.
+#
+# So the recreate is performed by a short-lived HELPER container launched from
+# the NEW image, which is not part of the compose project and therefore survives
+# the recreate it is performing. The pure half below decides whether to do it
+# and builds the argv; the impure half runs it.
+#
+# Nothing here changes deploy.sh or rollback.sh. The CLI path stays exactly as
+# it was; a CLI deploy simply leaves the sidecar lagging, which the app's panel
+# now says out loud instead of hiding.
+
+SELF_UPDATE_PULLING = "pulling"
+SELF_UPDATE_HANDED_OFF = "handed_off"
+SELF_UPDATE_DONE = "done"
+SELF_UPDATE_FAILED = "failed"
+
+def helper_container_name(root: str) -> str:
+    """The self-update helper's container name for the stack rooted at `root`.
+
+    Fixed per stack, so a leftover from a previous attempt is found and removed
+    rather than accumulating one container per try — but PER STACK, not global.
+    Container names are unique per Docker daemon, and this repo runs a second
+    stack on the same daemon by design (the dev instance). A single hardcoded
+    name would mean one stack's sidecar `rm -f`ing another stack's helper
+    mid-recreate — precisely the "old container gone, new one never started"
+    outcome the helper exists to prevent — or simply failing to launch on a name
+    conflict. A second stack silently acting on the first is not hypothetical
+    here; it is a defect this project has already had once, with the sidecar's
+    repo mount.
+
+    Derived from the install directory, which is what both neighbours already
+    do: compose derives its project identity from the working directory, and
+    scripts/deploy.sh derives the app container as
+    `$(basename "$VIGILANT_ROOT")-app-1`. So /opt/vigilant gives
+    "vigilant-updater-selfupdate" and /opt/vigilant-dev gives
+    "vigilant-dev-updater-selfupdate", matching the containers beside them.
+
+    Deliberately NOT read from the live compose project name: that would be one
+    more docker call on the path where the old sidecar is about to be killed,
+    and this container must not carry compose project labels anyway (see
+    build_helper_command), so nothing about it needs to match the project.
+
+    A pure function of its argument, and callers pass ROOT at CALL time rather
+    than binding a module-level name at import — the same reasoning as
+    build_command's `root=None` default: a value frozen at import would ignore
+    a test (or an install) that sets ROOT afterwards.
+    """
+    base = os.path.basename((root or "").rstrip("/"))
+    # "/" and "" have no basename. Falling back keeps this from producing a
+    # container name that starts with a dash, which docker rejects outright.
+    return f"{base or 'vigilant'}-updater-selfupdate"
+
+
+def self_update_target(own_version, deployed_tag, run_state) -> str | None:
+    """The release this sidecar should move ITSELF to, or None to stay put.
+
+    FORWARD ONLY, and that is a deliberate asymmetry with the app rather than an
+    oversight. After a rollback the app goes back and the sidecar stays where it
+    is, because:
+      - the sidecar is the privileged component (it holds the Docker socket), so
+        it should sit on the most-fixed version available, not the one the
+        operator happens to want the *app* pinned to;
+      - a downgraded sidecar would lose this very feature and strand itself —
+        the only way back would be the manual recreate this exists to remove;
+      - newer-sidecar/older-app is an already-working, already-shipped
+        combination. The app reads the IPC files generically (app/ops/updater.py
+        classifies unknown states as idle rather than wedging), and
+        MIN_ROLLBACK_TAG guarantees any app the operator can roll back to has a
+        /control mount.
+
+    `is_newer` is the same comparator the update checker uses, and it FAILS
+    CLOSED on anything it cannot parse — which includes the "dev" version a
+    source build reports. So a dev sidecar never self-updates, and neither does
+    one whose .deployed tail is junk. No separate "is this dev?" flag is needed,
+    exactly as in app/ops/update_check.py.
+
+    `deployed_tag` must come from the last line of .deployed, which deploy.sh
+    appends only AFTER the health gate has passed — not from git state, which
+    changes at checkout time, before anything is known to work.
+
+    The returned tag is a LABEL: it is published into JSON and rendered in the
+    panel (escaped), and is never passed to git, to a shell, or to docker. The
+    image actually launched is resolved from the compose file on disk, so a
+    hostile .deployed line cannot steer what runs.
+    """
+    if run_state != "success":
+        return None
+    if not is_newer(deployed_tag, own_version):
+        return None
+    return deployed_tag
+
+
+def build_helper_command(image_ref: str, root: str, compose_file: str,
+                         uid: int, gid: int, groups,
+                         container_name: str) -> list[str]:
+    """argv for the throwaway container that recreates the `updater` service.
+
+    A LIST, never a shell string. Every flag below is load-bearing:
+
+    --name <per stack>  so the next attempt can find and remove a leftover, and
+                        so its exit code and logs are findable afterwards. The
+                        caller derives it with helper_container_name(), which
+                        keeps two stacks on one daemon from colliding.
+    (no compose labels) the helper must NOT look like part of the compose
+                        project. If it did, the very `up -d` it is running could
+                        reap it mid-recreate — and on Compose versions that do
+                        remove profile-disabled services, `--remove-orphans`
+                        elsewhere would too.
+    (no --rm)           its exit code and its logs ARE the post-mortem. A helper
+                        that deleted itself would leave a failed self-update
+                        with nothing to read.
+    --network none      the image is already local, because step 2 pulled it
+                        while the old sidecar was still alive. compose needs no
+                        network to recreate a service from a local image, so the
+                        most privileged container in the stack gets none.
+    --security-opt no-new-privileges
+                        same posture as the sidecar it replaces.
+    --user / --group-add
+                        identical uid:gid and EVERY supplementary group of the
+                        running sidecar. The docker-socket gid and the repo
+                        owner's uid are the entire reason this can work at all;
+                        dropping either gives "permission denied" on the socket
+                        or leaves root-owned files in the host repo.
+    -v docker.sock      the capability itself, held for a few seconds.
+    -v ROOT:ROOT        IDENTICAL on both sides. compose derives project
+                        identity from the working directory: mount the repo
+                        anywhere else and compose treats it as a NEW project and
+                        creates a second set of containers bound to the same
+                        volumes instead of recreating the running ones. This is
+                        the same constraint the sidecar service itself documents.
+    -w ROOT             so `docker compose` picks up that project identity and
+                        reads .env from the right place.
+    -e VIGILANT_ROOT    the only variable it needs.
+
+    VIGILANT_TAG is deliberately NOT passed. compose must read the pin from
+    .env, where deploy.sh's _pin_tag_in_env() just wrote it; passing it here
+    would let a stale in-process value win over the file that is the actual
+    record of what was deployed.
+
+    `image_ref` is an image ID or digest, never a floating tag: `:latest` could
+    resolve to something other than the image step 2 just pulled and verified.
+
+    The command is appended after the image ref, overriding the image's CMD.
+    updater/Dockerfile declares CMD and no ENTRYPOINT, which is what makes this
+    work against an OLDER-format or NEWER updater image alike — all the helper
+    needs from the image is docker-cli-compose, which every updater image has.
+    """
+    argv = [
+        "docker", "run", "--detach",
+        "--name", container_name,
+        "--network", "none",
+        "--security-opt", "no-new-privileges",
+        "--user", f"{uid}:{gid}",
+    ]
+    for group in groups:
+        argv += ["--group-add", str(group)]
+    argv += [
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-v", f"{root}:{root}",
+        "-w", root,
+        "-e", f"VIGILANT_ROOT={root}",
+        image_ref,
+        "docker", "compose", "-f", compose_file,
+        "--profile", "updater", "up", "-d", "--no-deps", "updater",
+    ]
+    return argv
+
+
+def reconciled_self_update_state(record, own_version) -> str | None:
+    """What a freshly started sidecar should record about a handoff it inherited.
+
+    Returns "done", "failed", or None when there is nothing to reconcile.
+
+    The old sidecar cannot publish the outcome of its own replacement — by the
+    time the answer exists it has been SIGTERMed. So it persists `handed_off`
+    to /control/selfupdate.json and the NEW process closes the loop by comparing
+    the target against its own version:
+
+      - own version is not older than the target  -> the handoff worked: "done".
+      - own version is STILL older than the target -> the replacement never
+        happened (or brought back the same image): "failed".
+
+    `failed` is reconciled as well as `handed_off`, which is not redundant. The
+    old sidecar records `failed` when its bounded wait expires with the helper
+    still running — a slow recreate, not a broken one — and it is then killed a
+    moment later anyway. Re-deciding from the version that actually came back
+    turns that pessimistic guess into the truth. A genuinely failed attempt
+    (the pull failed, say) leaves own_version BELOW target, so it stays failed.
+
+    A "dev" own_version cannot satisfy a release target, so it reads as failed
+    rather than silently as done — parse_version is what tells those apart, and
+    is_newer alone would not: it fails closed on "dev" in BOTH directions.
+    """
+    if not isinstance(record, dict):
+        return None
+    if record.get("state") not in (SELF_UPDATE_HANDED_OFF, SELF_UPDATE_FAILED):
+        return None
+    target = record.get("target")
+    if not isinstance(target, str) or not target:
+        # Malformed: there is no target to compare against, so there is no
+        # honest verdict to publish. Leaving it alone is better than inventing
+        # one; the record is cosmetic and the sidecar still works.
+        return None
+    if is_newer(target, own_version) or parse_version(own_version) is None:
+        return SELF_UPDATE_FAILED
+    return SELF_UPDATE_DONE
+
+
 # ── Impure half: filesystem, subprocess, clock ───────────────────────────────
 
 log = logging.getLogger("updater")
@@ -478,6 +701,55 @@ _REVERT_FAILED_RE = re.compile(r"^✗ Revert to (v\S+?) ALSO failed")
 # staleness so a timed-out run always releases its own lock before another
 # process would judge it abandoned.
 _RUN_TIMEOUT_SECONDS = 25 * 60
+
+# The self-update record, persisted so it survives the restart it describes.
+# It is a file on /control and NOT a new IPC channel: the app already reads that
+# directory, and adding a second transport for one dict would mean a second
+# thing to get wrong.
+_SELF_UPDATE_FILE = "selfupdate.json"
+
+# How long the old sidecar waits for its own SIGTERM after launching the helper.
+# The helper's work is a local-image recreate of one service, which takes a few
+# seconds; 90s is generous enough that a loaded host does not read as a failure,
+# and short enough that a helper which will never finish does not hold the
+# updater hostage. The wait heartbeats throughout, so the app never flips to
+# "no updater" during it.
+_HANDOFF_WAIT_SECONDS = 90
+
+# How long to keep waiting after the helper has exited 0 without our SIGTERM
+# having arrived. Normally the signal lands first and we never get here; this is
+# purely the race window.
+_HANDOFF_SIGTERM_GRACE_SECONDS = 15
+
+# Poll interval during the wait. Doubles as the heartbeat interval there, which
+# is why it is well under HEARTBEAT_MAX_AGE_SECONDS on the app side.
+_HANDOFF_POLL_SECONDS = 5.0
+
+# Ceilings on the docker calls the self-update makes. The pull gets the generous
+# one — it is a real network transfer — and it runs while the old sidecar is
+# still alive and serving, so a slow registry costs nothing but time.
+_SELF_UPDATE_PULL_TIMEOUT_SECONDS = 10 * 60
+_SELF_UPDATE_DOCKER_TIMEOUT_SECONDS = 60
+# Deliberately short: these run at STARTUP, between heartbeats, so their sum is
+# time the app spends seeing a stale heartbeat. Three calls x 10s is the worst
+# case, comfortably inside the app's 60s staleness window.
+_HELPER_INSPECT_TIMEOUT_SECONDS = 10
+
+# Bound on the helper's log tail as republished into selfupdate.json and the
+# admin panel. Same reasoning as clamp_log_tail: this file lives on a shared
+# volume and is rendered into a page.
+_HELPER_LOG_MAX_BYTES = 1024
+
+# Published in the heartbeat while _self_checks() is still running. NOT an empty
+# dict: the panel computes "can the updater run" by rejecting non-"ok" check
+# values, so an empty set of checks reads as "everything passed" and would
+# render the Update and Rollback buttons ENABLED before a single check had run.
+# That is the same fail-open class as the `remote` check that did not exist.
+_STARTUP_CHECKS = {
+    "startup": ("FAIL: the updater is still starting — its environment checks "
+                "have not finished yet. This clears by itself within a few "
+                "seconds."),
+}
 
 
 def _now_iso() -> str:
@@ -746,7 +1018,7 @@ def refresh_remote_check(checks: dict, last_checked: float, now: float) -> float
     return now
 
 
-def _self_checks() -> dict:
+def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
     """Startup environment checks, published so self-hoster environment
     failures show up as a disabled button with a readable reason instead of a
     mid-deploy explosion.
@@ -758,25 +1030,49 @@ def _self_checks() -> dict:
     which does not fix itself while the container keeps running. `remote` is the
     exception — it depends on the network — and run() re-runs THAT ONE on a
     timer while it is failing. See refresh_remote_check().
+
+    `on_progress` is called with the checks gathered so far after each one, and
+    exists because of the restart gap this function sits in the middle of. Add
+    up the timeouts below and startup can take 15 + 15 + 20 + 30 = 80 seconds
+    before the first heartbeat is written — longer than the app's
+    HEARTBEAT_MAX_AGE_SECONDS of 60, so a sidecar restarting into a bad network
+    would make the panel vanish entirely while it came up. Beating after each
+    check bounds the gap to the single longest timeout (30s, `compose`) instead
+    of their sum. run() also beats once BEFORE calling this at all, so the app
+    sees a live updater from the first moment.
+
+    Typical numbers are nowhere near those ceilings — every check but `remote`
+    is local, and a healthy `remote` answers in well under a second — so the
+    real handoff gap is a few seconds. The beats are for the pathological case,
+    which is precisely the one where the operator most needs the panel.
     """
     checks = {}
+
+    def _progress():
+        if on_progress is not None:
+            # A copy: the caller publishes this and we keep mutating ours.
+            on_progress(dict(checks))
+
     try:
         subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
                        check=True, capture_output=True, timeout=15)
         checks["socket"] = "ok"
     except Exception as e:
         checks["socket"] = f"FAIL: {e}"
+    _progress()
     try:
         subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],
                        check=True, capture_output=True, timeout=15)
         checks["git"] = "ok"
     except Exception as e:
         checks["git"] = f"FAIL: {e}"
+    _progress()
     # Deliberately adjacent to the `git` check above, because it is the half of
     # it that was missing: `rev-parse HEAD` proves the bind mount and the repo
     # ownership, and proves nothing at all about whether this container can
     # reach the remote it is about to fetch a release tag from.
     checks["remote"] = _remote_check()
+    _progress()
     try:
         subprocess.run(["docker", "compose", "-f",
                         os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml"),
@@ -785,6 +1081,7 @@ def _self_checks() -> dict:
         checks["compose"] = "ok"
     except Exception as e:
         checks["compose"] = f"FAIL: {e}"
+    _progress()
     try:
         # .deployed is the file the entire rollback list depends on
         # (eligible_rollback_targets reads it fresh on every pickup) — the one
@@ -794,23 +1091,38 @@ def _self_checks() -> dict:
         checks["deployed"] = "ok"
     except Exception as e:
         checks["deployed"] = f"FAIL: {e}"
+    _progress()
     return checks
 
 
-def write_heartbeat(checks: dict) -> None:
+def _own_version() -> str:
+    """This sidecar's image version, or "dev" for a source build.
+
+    Read at call time, like everything else here, so a test can set it per case.
+    """
+    return os.environ.get("VIGILANT_UPDATER_VERSION", "dev")
+
+
+def write_heartbeat(checks: dict, self_update: dict | None = None) -> None:
     """Publish liveness plus the rollback targets the app cannot see for itself.
 
     The app mounts only /control, so it cannot read /opt/vigilant/.deployed.
     This list is UX only — every target is re-validated on pickup.
+
+    `self_update` is always present in the payload, null when there is nothing
+    to report. A key that only appeared sometimes would make the app's "is this
+    an older heartbeat that predates the field?" check indistinguishable from
+    "nothing is happening", and those render differently.
     """
     current = _current_tag()
     payload = {
-        "version": os.environ.get("VIGILANT_UPDATER_VERSION", "dev"),
+        "version": _own_version(),
         "written_at": _now_iso(),
         "current_tag": current,
         "targets": eligible_rollback_targets(_deployed_text(), current),
         "min_rollback_tag": MIN_ROLLBACK_TAG,
         "checks": checks,
+        "self_update": self_update,
     }
     try:
         write_json_atomic(CONTROL / "updater.json", payload)
@@ -865,8 +1177,14 @@ def _publish_refusal(request: dict, error: str) -> None:
     ))
 
 
-def run_action(request: dict) -> None:
-    """Execute one claimed request, streaming progress into status.json."""
+def run_action(request: dict) -> dict:
+    """Execute one claimed request, streaming progress into status.json.
+
+    Returns the terminal status it published. The caller needs the outcome to
+    decide whether to self-update afterwards, and reading status.json back off
+    the volume to learn something this function already knows would be a
+    needless round trip through a file another container also writes to.
+    """
     action = request.get("action")
     tag = request.get("tag")
     status = _new_status(
@@ -885,14 +1203,14 @@ def run_action(request: dict) -> None:
             error=(f"{tag!r} is not a deployable release tag — only exact "
                    f"versions like v1.2.3 (prereleases are excluded)."))
         _publish(status)
-        return
+        return status
     if action not in ("update", "rollback"):
         status.update(
             state="failed", step="failed", finished_at=_now_iso(),
             error=(f"unknown action: {action!r}. This is a bug in Vigilant, "
                    f"not something you can fix from here."))
         _publish(status)
-        return
+        return status
     if action == "rollback" and tag not in eligible_rollback_targets(
             _deployed_text(), _current_tag()):
         status.update(
@@ -900,7 +1218,7 @@ def run_action(request: dict) -> None:
             error=(f"{tag} is not an eligible rollback target — it must be a "
                    f"release this host has run, at or above {MIN_ROLLBACK_TAG}"))
         _publish(status)
-        return
+        return status
 
     status["step"] = "preflight"
     _publish(status)
@@ -996,7 +1314,7 @@ def run_action(request: dict) -> None:
         status.update(state="failed", step="failed", finished_at=_now_iso(),
                       error=str(e)[:512], log_tail=clamp_log_tail(list(lines)))
         _publish(status)
-        return
+        return status
 
     if timed_out.is_set():
         status.update(
@@ -1018,9 +1336,381 @@ def run_action(request: dict) -> None:
                       error=error)
     status["log_tail"] = clamp_log_tail(list(lines))
     _publish(status)
+    return status
 
 
-def _tick(seen: list, lock_path: Path) -> None:
+# ── Self-update: the I/O half ────────────────────────────────────────────────
+#
+# Every docker call below is its own small function taking argv and returning a
+# CompletedProcess, so the tests can fake the subprocess boundary at argv level
+# rather than mocking whole behaviours. A past bug in this file hid behind a
+# `*args, **kwargs` stub, which is why the fakes here assert on what was run.
+
+
+def _docker(argv: list[str], timeout: int) -> subprocess.CompletedProcess:
+    """Run a docker CLI command, never raising. Failure is a returncode."""
+    try:
+        return subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout, cwd=ROOT,
+                              encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            argv, 124, stdout="", stderr=f"timed out after {timeout}s")
+    except Exception as e:
+        return subprocess.CompletedProcess(argv, 125, stdout="", stderr=str(e))
+
+
+def _short(text: str | None, limit: int = _HELPER_LOG_MAX_BYTES) -> str:
+    """Redact and bound something that is about to be published.
+
+    Goes through redact_userinfo for the same reason the `remote` check's
+    reason does: this text lands in /control/selfupdate.json, is rendered into
+    an admin page, and gets pasted into bug reports. Bounded in BYTES, sliced
+    from the END, and decoded with errors="ignore" so a cut cannot land
+    mid-codepoint and produce JSON the app then refuses to parse — the same
+    reasoning as clamp_log_tail.
+    """
+    cleaned = " ".join(redact_userinfo(text or "").split())
+    raw = cleaned.encode()
+    if len(raw) <= limit:
+        return cleaned
+    return "..." + raw[-(limit - 3):].decode(errors="ignore")
+
+
+def _compose_file() -> str:
+    return os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml")
+
+
+def _compose_updater_image() -> tuple[str | None, str]:
+    """The image compose WILL use for the `updater` service. Returns (image, error).
+
+    Read out of `docker compose config` against the file ON DISK rather than
+    rebuilt by string-building `f"{registry}:{tag}"`. Two reasons, both real:
+    the registry is overridable per install (VIGILANT_IMAGE exists precisely so
+    a mirrored stack works), and the tag comes from `${VIGILANT_TAG:-latest}`
+    resolved against .env — which deploy.sh's _pin_tag_in_env() has just
+    rewritten. Asking compose is asking the only component whose answer is
+    authoritative, and it means the sidecar never has to know the naming scheme.
+
+    --profile updater is required: without it compose omits the service
+    entirely and the lookup below finds nothing.
+
+    Note that VIGILANT_TAG is NOT in this process's environment (the compose
+    file gives the sidecar VIGILANT_ROOT, VIGILANT_CONTROL_DIR and
+    VIGILANT_IMAGE, and no env_file), so .env wins the interpolation, which is
+    what we want: .env is the record of what was actually deployed.
+    """
+    proc = _docker(["docker", "compose", "-f", _compose_file(),
+                    "--profile", "updater", "config", "--format", "json"],
+                   _SELF_UPDATE_DOCKER_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        return None, f"could not read the compose file: {_short(proc.stderr)}"
+    try:
+        config = json.loads(proc.stdout or "")
+        image = config["services"]["updater"]["image"]
+    except Exception as e:
+        return None, f"could not find services.updater.image in the compose file: {e}"
+    if not isinstance(image, str) or not image:
+        return None, "the compose file gives the updater service no image"
+    return image, ""
+
+
+def _pull_image(image: str) -> str:
+    """Pull `image`, returning "" on success or a readable reason.
+
+    Deliberately done BEFORE anything is touched and while the old sidecar is
+    still alive and serving. A missing or unpublished sidecar image then fails
+    HERE, with the registry's own words, and the install carries on exactly as
+    it was — rather than failing inside a helper that has already killed the
+    only updater on the host.
+    """
+    proc = _docker(["docker", "pull", image], _SELF_UPDATE_PULL_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        return f"could not pull {image}: {_short(proc.stderr or proc.stdout)}"
+    return ""
+
+
+def _image_id(image: str) -> tuple[str | None, str]:
+    """The local image ID for `image`. Returns (id, error).
+
+    The helper is launched by ID, never by the tag: `:latest` (the compose
+    default when no VIGILANT_TAG is pinned) can resolve to a different image
+    than the one just pulled and proved to exist, and the whole point of the
+    pull step is that what runs next is a known quantity.
+    """
+    proc = _docker(["docker", "image", "inspect", image, "--format", "{{.Id}}"],
+                   _SELF_UPDATE_DOCKER_TIMEOUT_SECONDS)
+    image_id = (proc.stdout or "").strip().splitlines()
+    if proc.returncode != 0 or not image_id or not image_id[0]:
+        return None, f"could not resolve an image id for {image}: {_short(proc.stderr)}"
+    return image_id[0], ""
+
+
+def _helper_name() -> str:
+    """This stack's helper container name, derived from ROOT at call time.
+
+    Every site that names the helper — launch, remove, inspect, logs,
+    post-mortem, startup reconciliation — goes through here, so the name can
+    never be derived one way in one place and another way in another. Getting
+    that wrong would mean removing (or failing to find) a container belonging
+    to a different stack on the same daemon.
+    """
+    return helper_container_name(ROOT)
+
+
+def _remove_helper() -> None:
+    """Delete a helper container left behind by a previous attempt.
+
+    Not --rm on the helper itself, so this is where the cleanup happens. Absent
+    is the normal case and is not an error — `docker rm` says "No such
+    container" and returns non-zero, which is fine.
+    """
+    _docker(["docker", "rm", "-f", _helper_name()],
+            _HELPER_INSPECT_TIMEOUT_SECONDS)
+
+
+def _helper_state() -> tuple[bool, int | None]:
+    """(running, exit_code) for the helper, or (False, None) if it is gone."""
+    proc = _docker(["docker", "inspect", _helper_name(), "--format",
+                    "{{.State.Running}} {{.State.ExitCode}}"],
+                   _HELPER_INSPECT_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        return False, None
+    parts = (proc.stdout or "").strip().split()
+    if len(parts) != 2:
+        return False, None
+    try:
+        return parts[0] == "true", int(parts[1])
+    except ValueError:
+        return False, None
+
+
+def _helper_log_tail() -> str:
+    proc = _docker(["docker", "logs", "--tail", "20", _helper_name()],
+                   _HELPER_INSPECT_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        return ""
+    return _short((proc.stdout or "") + " " + (proc.stderr or ""))
+
+
+def _helper_postmortem() -> str:
+    """Exit code plus a short log tail, then remove the container.
+
+    Captured BEFORE the removal, which is the whole reason the helper is not
+    `--rm`: a container that deleted itself takes the only evidence with it.
+    Tolerates the container being absent — an operator may well have cleaned it
+    up themselves, and that must not turn a successful self-update into a
+    failed one.
+    """
+    running, code = _helper_state()
+    tail = _helper_log_tail()
+    _remove_helper()
+    if code is None and not tail:
+        return ""
+    where = "still running" if running else f"exit {code}"
+    return _short(f"helper container {_helper_name()} {where}: {tail}".strip())
+
+
+def _persist_self_update(record: dict | None) -> dict | None:
+    """Write the record where a restarted sidecar will find it.
+
+    The heartbeat alone cannot carry this: it is rewritten from scratch by the
+    NEW process, which knows nothing about what the old one was doing. A file
+    the new process reads at startup is the only thing that crosses the restart.
+    """
+    try:
+        write_json_atomic(CONTROL / _SELF_UPDATE_FILE, record or {})
+    except OSError as e:
+        # Cosmetic state, not the feature. A self-update whose record could not
+        # be written still works; losing the record only costs the panel one
+        # line of explanation.
+        log.warning("could not persist the self-update record: %s", e)
+    return record
+
+
+def _record_self_update(state: str, target: str, error: str | None,
+                        publish: Callable[[dict | None], None] | None) -> dict:
+    """Persist, publish AND LOG one self-update record. The only way one is made.
+
+    The log line is not decoration. Everything else this writes goes to
+    /control — selfupdate.json and the heartbeat — which an operator reads
+    through the admin panel. When the panel is what they are trying to fix, or
+    when they are reading `docker logs` on the sidecar because something looks
+    wrong, a failure that exists only in a JSON file on a volume is a failure
+    they cannot see. Observed on a throwaway stack: a self-update that failed at
+    the pull step logged its "self-update: vA -> vB" start line and then nothing
+    at all, so the container's log implied it had simply worked.
+
+    WARNING and not ERROR for `failed`: the deploy that triggered this
+    succeeded, the site is up, and the sidecar carries on serving — it is
+    running an older image than ideal, which is exactly a warning. Reserving
+    ERROR for things that stop working keeps that distinction useful.
+
+    The reason has already been through _short() (redaction plus a byte bound)
+    by the time it arrives, so this cannot be the place a token embedded in an
+    origin URL escapes into a log file.
+    """
+    rec = {"state": state, "target": target, "error": error, "at": _now_iso()}
+    _persist_self_update(rec)
+    if publish is not None:
+        publish(rec)
+    if state == SELF_UPDATE_FAILED:
+        log.warning("self-update to %s failed: %s", target, error)
+    elif state == SELF_UPDATE_DONE:
+        log.info("self-update to %s completed", target)
+    return rec
+
+
+def _read_self_update() -> dict | None:
+    record = read_json(CONTROL / _SELF_UPDATE_FILE)
+    return record if isinstance(record, dict) and record.get("state") else None
+
+
+def _reconcile_self_update(record: dict | None) -> dict | None:
+    """Close out a handoff the previous process could not report on itself.
+
+    See reconciled_self_update_state() for the decision; this half does the
+    docker calls (post-mortem, then removal) and the write.
+
+    Goes through _record_self_update() like every other outcome, so the log
+    always says how a self-update ended regardless of which process got to
+    decide it. The helper's exit code and log tail are folded into the line on
+    the way past: on the success path they are the only record that the handoff
+    actually ran, and they are gone as soon as the container is removed.
+    """
+    state = reconciled_self_update_state(record, _own_version())
+    if state is None or state == (record or {}).get("state"):
+        return record
+    target = (record or {}).get("target")
+    detail = _helper_postmortem()
+    if state == SELF_UPDATE_DONE:
+        log.info("self-update handoff to %s verified at startup (%s)", target,
+                 detail or "no helper container left to inspect")
+        return _record_self_update(state, target, None, None)
+    return _record_self_update(state, target, _short(
+        f"the updater is still running {_own_version()} after handing off to "
+        f"{target}, so the replacement never started. Recreate it on the host "
+        f"with `docker compose --profile updater up -d updater` from the "
+        f"install directory. {detail}"), None)
+
+
+def _maybe_self_update(status: dict | None,
+                       publish: Callable[[dict | None], None] | None) -> dict | None:
+    """Move this sidecar onto the release the app just deployed, if any.
+
+    Called ONLY after a successful run of our own, with the update lock already
+    released. Not on a timer and not at startup, both deliberately: a timer
+    could fire while an operator's CLI deploy was mid-flight and run two compose
+    operations against one project at once. The cost of that choice is that a
+    CLI deploy leaves the sidecar lagging — which is exactly what the app's new
+    lag warning exists to say out loud.
+
+    A self-update problem must NEVER turn a successful deploy into a failed one.
+    status.json is finished and published before this runs and is not touched
+    here; everything this function has to say goes into the heartbeat and
+    selfupdate.json instead.
+
+    Requests that arrive during the handoff are not lost. The app writes
+    /control/request.json and claim_request() takes it with an os.replace()
+    rename — so a request written while this container is being replaced simply
+    sits there until the NEW supervisor's first _tick() renames it. The rename
+    is also what makes double-running impossible: if both processes were
+    somehow alive, only one rename can succeed.
+
+    Returns the record to publish, or None when nothing was attempted.
+    """
+    target = self_update_target(_own_version(), _current_tag(),
+                                (status or {}).get("state"))
+    if target is None:
+        return None
+
+    def record(state: str, error: str | None = None) -> dict:
+        return _record_self_update(state, target, error, publish)
+
+    log.info("self-update: %s -> %s", _own_version(), target)
+    record(SELF_UPDATE_PULLING)
+
+    image, error = _compose_updater_image()
+    if image is None:
+        return record(SELF_UPDATE_FAILED, error)
+    if error := _pull_image(image):
+        return record(SELF_UPDATE_FAILED, error)
+    image_id, error = _image_id(image)
+    if image_id is None:
+        return record(SELF_UPDATE_FAILED, error)
+
+    # Any leftover from a previous attempt must go before the new one can take
+    # the fixed name.
+    _remove_helper()
+    argv = build_helper_command(
+        image_id, ROOT, _compose_file(),
+        os.getuid(), os.getgid(), os.getgroups(),
+        _helper_name(),
+    )
+    proc = _docker(argv, _SELF_UPDATE_DOCKER_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        return record(SELF_UPDATE_FAILED,
+                      f"could not start the self-update helper: "
+                      f"{_short(proc.stderr or proc.stdout)}")
+
+    rec = record(SELF_UPDATE_HANDED_OFF)
+    return _await_handoff(target, rec, publish)
+
+
+def _await_handoff(target: str, handed_off: dict,
+                   publish: Callable[[dict | None], None] | None) -> dict | None:
+    """Wait for the helper to replace us, heartbeating throughout.
+
+    Three ways out:
+      - SIGTERM. This is the NORMAL path: the helper's `compose up -d updater`
+        stops this container, __main__'s handler calls sys.exit(0), and the
+        SystemExit raised in this thread propagates straight out of run(). It
+        is deliberately NOT caught below — `except Exception` does not catch
+        SystemExit, and widening it to BaseException would turn a textbook
+        successful handoff into a recorded failure.
+      - the helper exits non-zero while we are still alive. The recreate did not
+        happen; record it with the helper's own output and carry on serving. The
+        deploy that triggered this remains a success.
+      - the bounded wait expires. Recorded as failed, pessimistically: the
+        replacement may still be seconds away, and if it is, the NEW sidecar's
+        startup reconciliation turns this back into "done" by comparing its own
+        version against the target. Guessing wrong in the direction of "say
+        something" is better than leaving the panel on "upgrading itself…".
+    """
+    deadline = time.time() + _HANDOFF_WAIT_SECONDS
+
+    def finish(error: str) -> dict:
+        return _record_self_update(SELF_UPDATE_FAILED, target, _short(error),
+                                   publish)
+
+    while time.time() < deadline:
+        time.sleep(_HANDOFF_POLL_SECONDS)
+        # Keep beating. The app calls an updater with a heartbeat older than
+        # HEARTBEAT_MAX_AGE_SECONDS "not running" and hides the whole panel, so
+        # a silent wait would make the feature disappear in the middle of the
+        # one operation that is hardest to explain afterwards.
+        if publish is not None:
+            publish(handed_off)
+        running, code = _helper_state()
+        if running or code is None:
+            # Still working, or already gone — `docker inspect` also fails when
+            # something has removed the container, which is not a reason to
+            # declare failure while we are plainly still waiting to be replaced.
+            continue
+        if code != 0:
+            return finish(f"the self-update helper exited {code} without "
+                          f"replacing this container. {_helper_postmortem()}")
+        # Exit 0 and we are still here: almost always just the race between the
+        # helper finishing and our SIGTERM arriving. Give the signal a moment.
+        deadline = min(deadline, time.time() + _HANDOFF_SIGTERM_GRACE_SECONDS)
+
+    return finish(f"the self-update helper did not replace this container "
+                  f"within {_HANDOFF_WAIT_SECONDS}s. {_helper_postmortem()}")
+
+
+def _tick(seen: list, lock_path: Path,
+          self_update: dict | None = None,
+          publish_beat: Callable[[dict | None], None] | None = None) -> dict | None:
     """One pass of the poll loop.
 
     Extracted from run() purely so it can be tested: run() never returns, so
@@ -1036,10 +1726,16 @@ def _tick(seen: list, lock_path: Path) -> None:
     staleness/reclamation across restarts, not mutual exclusion within a single
     poll; writing it on every idle tick to close a window that cannot occur in
     the real deployment would just be needless I/O on a shared volume.
+
+    Returns the self-update record to keep publishing, which is `self_update`
+    unchanged on every path but the one where a successful run has just
+    triggered a handoff. `publish_beat` writes a heartbeat carrying a given
+    record; the handoff needs it because it blocks for up to a minute and a half
+    and the app must not conclude the updater has died meanwhile.
     """
     held = read_json(lock_path)
     if held is not None and not is_stale_lock(held, time.time(), _pid_alive):
-        return
+        return self_update
     if held is not None:
         # Unlink it here, not just log it: at POLL_SECONDS=1.0 leaving the file
         # in place made this fire on EVERY tick — ~86,400 identical warnings a
@@ -1053,13 +1749,13 @@ def _tick(seen: list, lock_path: Path) -> None:
 
     claimed, request = claim_request(CONTROL)
     if not claimed:
-        return
+        return self_update
     if request is None:
         log.warning("consumed an unusable request (malformed or not an object)")
         _publish_refusal(
             {}, "The update request was unreadable and has been discarded. "
                 "Please try again.")
-        return
+        return self_update
 
     rid = str(request.get("id") or "")
     if not rid:
@@ -1067,12 +1763,12 @@ def _tick(seen: list, lock_path: Path) -> None:
         _publish_refusal(
             request, "Request had no id and was refused. This is a bug in "
                      "Vigilant, not something you can fix from here.")
-        return
+        return self_update
     if seen_request(rid, seen):
         # A genuine replay: the original run already published its outcome, so
         # leave status.json alone rather than overwriting it.
         log.info("ignoring replayed request: %s", rid)
-        return
+        return self_update
 
     try:
         write_json_atomic(lock_path, {"pid": os.getpid(),
@@ -1083,10 +1779,11 @@ def _tick(seen: list, lock_path: Path) -> None:
             request, f"Could not take the update lock: {e} The /control "
                      f"volume may be root-owned; see the updater "
                      f"troubleshooting section.")
-        return
+        return self_update
 
+    status = None
     try:
-        run_action(request)
+        status = run_action(request)
     except Exception as e:
         log.exception("run_action crashed: %s", e)
         _publish_refusal(request, f"The updater crashed mid-run: {e}")
@@ -1095,6 +1792,13 @@ def _tick(seen: list, lock_path: Path) -> None:
             os.unlink(lock_path)
         except OSError:
             pass
+
+    # Deliberately AFTER the finally block above, so the update lock is already
+    # released and the run's terminal status is already published. A handoff
+    # started while still holding the lock would leave a lock file owned by a
+    # pid that no longer exists — recoverable, but only via the staleness
+    # timeout, which is 30 minutes of a disabled feature for no reason.
+    return _maybe_self_update(status, publish_beat) or self_update
 
 
 def _reconcile_orphaned_status() -> None:
@@ -1125,7 +1829,36 @@ def run() -> None:
     """Poll for requests forever. Never exits on a per-request failure."""
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(message)s")
-    checks = _self_checks()
+
+    # A heartbeat BEFORE the self-checks, and again after each one.
+    #
+    # The arithmetic that makes this necessary: the app treats a heartbeat older
+    # than HEARTBEAT_MAX_AGE_SECONDS (60s) as no updater at all and hides the
+    # panel entirely. A self-updating sidecar's worst-case gap is the old
+    # container's last beat (up to HEARTBEAT_SECONDS = 10s before it is
+    # stopped), plus the helper's recreate (the image is already local, so a few
+    # seconds), plus this process's startup. Startup used to mean the whole of
+    # _self_checks(), whose timeouts sum to 15 + 15 + 20 + 30 = 80s — over the
+    # limit on its own, before anything else is counted. Typical is a few
+    # seconds, but "typical" is not what a restart gap needs to be sized for,
+    # and refresh_remote_check() already spends the headroom that used to exist.
+    #
+    # So: beat immediately, then after every check. The largest remaining gap is
+    # one check's own timeout, 30s for `compose`, which leaves real margin.
+    #
+    # _STARTUP_CHECKS, not {}: an empty checks dict renders in the panel as "no
+    # failed checks", which ENABLES the Update and Rollback buttons before a
+    # single check has run.
+    self_update = _read_self_update()
+    write_heartbeat(_STARTUP_CHECKS, self_update)
+
+    # Close out a handoff the previous process could not report on itself. This
+    # can make docker calls, so it happens after the first beat is safely out.
+    self_update = _reconcile_self_update(self_update)
+    write_heartbeat(_STARTUP_CHECKS, self_update)
+
+    checks = _self_checks(
+        lambda partial: write_heartbeat({**_STARTUP_CHECKS, **partial}, self_update))
     log.info("updater starting: checks=%s root=%s control=%s", checks, ROOT, CONTROL)
     _reconcile_orphaned_status()
 
@@ -1146,10 +1879,15 @@ def run() -> None:
         # itself without anyone restarting the container. A no-op once it is ok.
         last_remote_check = refresh_remote_check(checks, last_remote_check, time.time())
         if time.time() - last_beat >= HEARTBEAT_SECONDS:
-            write_heartbeat(checks)
+            write_heartbeat(checks, self_update)
             last_beat = time.time()
         try:
-            _tick(seen, lock_path)
+            # The closure is how the handoff keeps beating while it blocks: it
+            # carries THIS loop's live `checks` dict, so a heartbeat written
+            # from inside _tick is indistinguishable from one written here.
+            self_update = _tick(
+                seen, lock_path, self_update,
+                lambda record: write_heartbeat(checks, record))
         except Exception as e:
             # Belt and braces. _tick guards its own known failure modes; this
             # exists so an UNKNOWN one cannot kill the loop and take the whole

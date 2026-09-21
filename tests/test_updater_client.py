@@ -301,6 +301,73 @@ def test_missing_control_dir_is_not_an_error(monkeypatch, tmp_path):
     assert uc.read_heartbeat() is None
 
 
+# ── Sidecar version skew ─────────────────────────────────────────────────────
+#
+# Both inputs already live in the heartbeat, so this costs no extra I/O and no
+# new IPC channel. Strictly older, so the post-rollback case — app moved BACK,
+# sidecar deliberately stayed forward — is silent.
+
+@pytest.mark.parametrize("version,current,expected", [
+    ("v1.2.2", "v1.2.3", True),
+    ("v1.2.2", "v2.0.0", True),
+    ("v1.2.3", "v1.2.3", False),      # in step: the state every install settles into
+    ("v1.2.3", "v1.2.2", False),      # sidecar ahead of the app, post-rollback
+    # Fails closed in both directions, which is what keeps a source build quiet:
+    # a "dev" sidecar must never nag about a release number it does not have.
+    ("dev", "v1.2.3", False),
+    ("v1.2.2", "dev", False),
+    ("dev", "dev", False),
+    (None, "v1.2.3", False),
+    ("v1.2.2", None, False),
+    ("v1.2.2", "", False),
+])
+def test_lagging_decision_table(version, current, expected):
+    assert uc.updater_lagging(version, current) is expected
+
+
+@pytest.mark.parametrize("state", ["pulling", "handed_off", "done", "failed"])
+def test_a_known_self_update_state_is_returned(state):
+    record = {"state": state, "target": "v1.2.3", "error": None, "at": "x"}
+    assert uc.self_update_record({"self_update": record}) == record
+
+
+@pytest.mark.parametrize("beat", [
+    None,
+    "not a dict",
+    {},                                      # a sidecar too old to have the field
+    {"self_update": None},                   # nothing to report
+    {"self_update": "handed_off"},           # not an object
+    {"self_update": []},
+    {"self_update": {}},                     # no state
+    {"self_update": {"state": "reticulating"}},
+])
+def test_an_absent_or_unusable_record_reads_as_nothing_to_say(beat):
+    """All of these render identically — as they did before this field existed.
+
+    The unknown-state case is not defensive padding: the sidecar owns this
+    vocabulary and is NEWER than the app by construction, because self-update is
+    forward-only. A state this version has never heard of has to read as
+    "nothing to say", not as a broken panel."""
+    assert uc.self_update_record(beat) is None
+
+
+def test_the_in_flight_states_are_exactly_the_two_non_terminal_ones():
+    assert uc.SELF_UPDATE_IN_FLIGHT == ("pulling", "handed_off")
+    assert uc.SELF_UPDATE_DONE not in uc.SELF_UPDATE_IN_FLIGHT
+    assert uc.SELF_UPDATE_FAILED not in uc.SELF_UPDATE_IN_FLIGHT
+
+
+def test_the_state_names_match_the_ones_the_sidecar_writes():
+    """The two halves duplicate these literals on purpose — the app image does
+    not ship `updater/`, so importing them would pass here and fail in the
+    container. Pinning both sides against each other is the substitute."""
+    from updater import supervisor as sup
+    assert uc.SELF_UPDATE_PULLING == sup.SELF_UPDATE_PULLING
+    assert uc.SELF_UPDATE_HANDED_OFF == sup.SELF_UPDATE_HANDED_OFF
+    assert uc.SELF_UPDATE_DONE == sup.SELF_UPDATE_DONE
+    assert uc.SELF_UPDATE_FAILED == sup.SELF_UPDATE_FAILED
+
+
 # ── The privilege property ───────────────────────────────────────────────────
 
 _FORBIDDEN_IMPORTS = {"subprocess", "docker", "shutil", "socket", "httpx", "requests"}
