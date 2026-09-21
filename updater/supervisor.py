@@ -1528,6 +1528,39 @@ def _persist_self_update(record: dict | None) -> dict | None:
     return record
 
 
+def _record_self_update(state: str, target: str, error: str | None,
+                        publish: Callable[[dict | None], None] | None) -> dict:
+    """Persist, publish AND LOG one self-update record. The only way one is made.
+
+    The log line is not decoration. Everything else this writes goes to
+    /control — selfupdate.json and the heartbeat — which an operator reads
+    through the admin panel. When the panel is what they are trying to fix, or
+    when they are reading `docker logs` on the sidecar because something looks
+    wrong, a failure that exists only in a JSON file on a volume is a failure
+    they cannot see. Observed on a throwaway stack: a self-update that failed at
+    the pull step logged its "self-update: vA -> vB" start line and then nothing
+    at all, so the container's log implied it had simply worked.
+
+    WARNING and not ERROR for `failed`: the deploy that triggered this
+    succeeded, the site is up, and the sidecar carries on serving — it is
+    running an older image than ideal, which is exactly a warning. Reserving
+    ERROR for things that stop working keeps that distinction useful.
+
+    The reason has already been through _short() (redaction plus a byte bound)
+    by the time it arrives, so this cannot be the place a token embedded in an
+    origin URL escapes into a log file.
+    """
+    rec = {"state": state, "target": target, "error": error, "at": _now_iso()}
+    _persist_self_update(rec)
+    if publish is not None:
+        publish(rec)
+    if state == SELF_UPDATE_FAILED:
+        log.warning("self-update to %s failed: %s", target, error)
+    elif state == SELF_UPDATE_DONE:
+        log.info("self-update to %s completed", target)
+    return rec
+
+
 def _read_self_update() -> dict | None:
     record = read_json(CONTROL / _SELF_UPDATE_FILE)
     return record if isinstance(record, dict) and record.get("state") else None
@@ -1538,27 +1571,27 @@ def _reconcile_self_update(record: dict | None) -> dict | None:
 
     See reconciled_self_update_state() for the decision; this half does the
     docker calls (post-mortem, then removal) and the write.
+
+    Goes through _record_self_update() like every other outcome, so the log
+    always says how a self-update ended regardless of which process got to
+    decide it. The helper's exit code and log tail are folded into the line on
+    the way past: on the success path they are the only record that the handoff
+    actually ran, and they are gone as soon as the container is removed.
     """
     state = reconciled_self_update_state(record, _own_version())
     if state is None or state == (record or {}).get("state"):
         return record
+    target = (record or {}).get("target")
     detail = _helper_postmortem()
-    out = dict(record or {})
-    out["state"] = state
-    out["at"] = _now_iso()
     if state == SELF_UPDATE_DONE:
-        out["error"] = None
-        log.info("self-update to %s completed (%s)", out.get("target"),
+        log.info("self-update handoff to %s verified at startup (%s)", target,
                  detail or "no helper container left to inspect")
-    else:
-        out["error"] = _short(
-            f"the updater is still running {_own_version()} after handing off to "
-            f"{out.get('target')}, so the replacement never started. Recreate it "
-            f"on the host with `docker compose --profile updater up -d updater` "
-            f"from the install directory. {detail}")
-        log.error("self-update to %s did not take effect: %s",
-                  out.get("target"), out["error"])
-    return _persist_self_update(out)
+        return _record_self_update(state, target, None, None)
+    return _record_self_update(state, target, _short(
+        f"the updater is still running {_own_version()} after handing off to "
+        f"{target}, so the replacement never started. Recreate it on the host "
+        f"with `docker compose --profile updater up -d updater` from the "
+        f"install directory. {detail}"), None)
 
 
 def _maybe_self_update(status: dict | None,
@@ -1592,11 +1625,7 @@ def _maybe_self_update(status: dict | None,
         return None
 
     def record(state: str, error: str | None = None) -> dict:
-        rec = {"state": state, "target": target, "error": error, "at": _now_iso()}
-        _persist_self_update(rec)
-        if publish is not None:
-            publish(rec)
-        return rec
+        return _record_self_update(state, target, error, publish)
 
     log.info("self-update: %s -> %s", _own_version(), target)
     record(SELF_UPDATE_PULLING)
@@ -1651,13 +1680,8 @@ def _await_handoff(target: str, handed_off: dict,
     deadline = time.time() + _HANDOFF_WAIT_SECONDS
 
     def finish(error: str) -> dict:
-        rec = {"state": SELF_UPDATE_FAILED, "target": target,
-               "error": _short(error), "at": _now_iso()}
-        _persist_self_update(rec)
-        if publish is not None:
-            publish(rec)
-        log.error("self-update to %s failed: %s", target, rec["error"])
-        return rec
+        return _record_self_update(SELF_UPDATE_FAILED, target, _short(error),
+                                   publish)
 
     while time.time() < deadline:
         time.sleep(_HANDOFF_POLL_SECONDS)

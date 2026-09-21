@@ -429,6 +429,96 @@ def test_the_image_is_pulled_before_anything_is_touched(sup, monkeypatch):
     assert not docker.ran("docker", "run")
 
 
+# ── The outcome has to reach `docker logs`, not just /control ───────────────
+#
+# Everything else a self-update writes goes to the shared volume and is read
+# through the admin panel. When the panel is what the operator is trying to fix,
+# or when they are reading the sidecar's log because something looks wrong, a
+# failure that exists only in a JSON file is a failure they cannot see. Found on
+# a throwaway stack: a self-update that failed at the pull step logged its
+# "self-update: vA -> vB" start line and then nothing, so the container's log
+# implied it had simply worked.
+
+def test_a_failed_self_update_logs_a_warning_with_the_reason(sup, monkeypatch, caplog):
+    docker = FakeDocker({**_happy_responses(),
+                         ("docker", "pull"): _fail("manifest unknown")})
+    monkeypatch.setattr(sup, "_docker", docker)
+
+    with caplog.at_level("INFO", logger="updater"):
+        sup._maybe_self_update({"state": "success"}, None)
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings, "a failed self-update left no trace in the container log"
+    message = " ".join(r.getMessage() for r in warnings)
+    assert "manifest unknown" in message      # the reason, not just "it failed"
+    assert "v1.2.3" in message                # which release it was going to
+
+
+def test_a_failure_during_the_wait_also_logs_its_reason(sup, monkeypatch, caplog):
+    """The other terminal path. Both go through one function so neither can be
+    the one that stays silent."""
+    monkeypatch.setattr(sup, "_docker", FakeDocker({
+        **_happy_responses(),
+        ("docker", "inspect"): _ok("false 3\n"),
+        ("docker", "logs"): _ok("no configuration file provided"),
+    }))
+    monkeypatch.setattr(sup.time, "sleep", lambda s: None)
+
+    with caplog.at_level("INFO", logger="updater"):
+        sup._await_handoff("v1.2.3", {"state": SELF_UPDATE_HANDED_OFF,
+                                      "target": "v1.2.3"}, None)
+
+    message = " ".join(r.getMessage() for r in caplog.records
+                       if r.levelname == "WARNING")
+    assert "exited 3" in message
+    assert "no configuration file provided" in message
+
+
+def test_a_failure_is_a_warning_not_an_error(sup, monkeypatch, caplog):
+    """The deploy that triggered this succeeded and the site is up; the sidecar
+    carries on serving an older image than ideal. Reserving ERROR for things
+    that have stopped working keeps the distinction worth reading."""
+    monkeypatch.setattr(sup, "_docker", FakeDocker(
+        {**_happy_responses(), ("docker", "pull"): _fail("manifest unknown")}))
+
+    with caplog.at_level("INFO", logger="updater"):
+        sup._maybe_self_update({"state": "success"}, None)
+
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "CRITICAL")]
+
+
+def test_a_successful_handoff_is_logged_at_startup(sup, monkeypatch, caplog):
+    monkeypatch.setenv("VIGILANT_UPDATER_VERSION", "v1.2.3")
+    monkeypatch.setattr(sup, "_docker", FakeDocker(
+        {("docker", "inspect"): _ok("false 0\n"),
+         ("docker", "logs"): _ok("Container updater Started"),
+         ("docker", "rm"): _ok()}))
+    (sup.CONTROL / "selfupdate.json").write_text(json.dumps(
+        {"state": SELF_UPDATE_HANDED_OFF, "target": "v1.2.3",
+         "error": None, "at": "2026-09-21T10:00:00Z"}))
+
+    with caplog.at_level("INFO", logger="updater"):
+        sup._reconcile_self_update(sup._read_self_update())
+
+    message = " ".join(r.getMessage() for r in caplog.records)
+    assert "v1.2.3" in message
+    # The helper's exit code is the only evidence the handoff actually ran, and
+    # it is gone as soon as the container is removed.
+    assert "exit 0" in message
+
+
+def test_a_self_update_that_never_starts_logs_nothing_about_one(sup, monkeypatch, caplog):
+    """A rollback, a failed deploy, or a sidecar already in step. Logging an
+    attempt that did not happen would make the log misleading in the opposite
+    direction."""
+    monkeypatch.setattr(sup, "_docker", FakeDocker(_happy_responses()))
+
+    with caplog.at_level("INFO", logger="updater"):
+        sup._maybe_self_update({"state": "failed"}, None)
+
+    assert not [r for r in caplog.records if "self-update" in r.getMessage()]
+
+
 def test_the_image_comes_from_the_compose_file_not_string_building(sup, monkeypatch):
     docker = FakeDocker(_happy_responses())
     monkeypatch.setattr(sup, "_docker", docker)
