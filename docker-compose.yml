@@ -9,7 +9,17 @@ services:
     # bare `docker compose up` outside the script still works. To build from
     # source instead, add the overlay:
     #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
-    image: ghcr.io/thor6677/vigilant:${VIGILANT_TAG:-latest}
+    #
+    # The registry half is VIGILANT_IMAGE, the SAME variable scripts/deploy.sh
+    # already resolves for its own `docker pull` (with the same default). When
+    # only the script knew about it, deploy.sh pulled from one registry while
+    # compose ran whatever this line hardcoded, and the two silently disagreed
+    # about what a tag meant. A fork also could not run at all: release.yml
+    # publishes a fork's images into the fork's own namespace, which this line
+    # could never name. The default below resolves to the byte-identical string
+    # it always did, so an existing install's compose config is unchanged and
+    # nothing is recreated on the release that introduces this.
+    image: ${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}:${VIGILANT_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -74,7 +84,19 @@ services:
   # app itself unprivileged.
   updater:
     profiles: ["updater"]
-    image: ghcr.io/thor6677/vigilant-updater:${VIGILANT_TAG:-latest}
+    # Separate variable from the app's, because they are separate images built
+    # from separate Dockerfiles — a fork or a mirror may well hold them in
+    # different places. Same reasoning as the app's line above, and the same
+    # byte-identical default.
+    #
+    # This line is also what the sidecar's self-update reads: it asks
+    # `docker compose config` for services.updater.image rather than
+    # string-building a name, so a non-default registry reaches the self-update
+    # for free. That matters here specifically, because the self-update helper
+    # runs compose with an explicit `-f` — which suppresses
+    # docker-compose.override.yml — so interpolation from .env is the ONLY way a
+    # non-default registry can reach the sidecar recreate.
+    image: ${VIGILANT_UPDATER_IMAGE:-ghcr.io/thor6677/vigilant-updater}:${VIGILANT_TAG:-latest}
     restart: unless-stopped
     # NOT root. Everything this writes into the host repo — .git objects, the
     # .deployed log — must stay owned by the repo owner, or the SSH fallback
@@ -105,11 +127,16 @@ services:
     environment:
       - VIGILANT_ROOT=${VIGILANT_ROOT:-/opt/vigilant}
       - VIGILANT_CONTROL_DIR=/control
-      # Passed through so the sidecar's `docker pull` resolves the same registry
-      # the compose file does. Without it deploy.sh falls back to its own
-      # ghcr.io default while compose uses this one, and the two disagree about
-      # what "v1.2.3" means — which surfaces as a "not found" at pull time, on a
-      # throwaway or mirrored stack only. Default is unchanged.
+      # Passed through so the deploy.sh that runs INSIDE this container resolves
+      # the same registry the compose file does. Both now read the same
+      # VIGILANT_IMAGE with the same default, so on a stock install they cannot
+      # disagree; this entry is what carries a non-default value across the
+      # container boundary, since the sidecar has no env_file of its own.
+      # Without it, an install that sets VIGILANT_IMAGE in .env gets a sidecar
+      # whose deploy.sh falls back to the ghcr.io default while compose uses the
+      # override — the two then disagree about what "v1.2.3" means, which
+      # surfaces as a "not found" at pull time. Caught on a mirrored throwaway
+      # stack, 2026-09-14. Default is unchanged.
       - VIGILANT_IMAGE=${VIGILANT_IMAGE:-ghcr.io/thor6677/vigilant}
     # Deliberately NOT on the `web` bridge: it publishes no ports and has no
     # listener, so nothing should be able to reach it. It still needs outbound

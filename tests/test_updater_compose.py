@@ -133,6 +133,85 @@ def test_repo_path_defaults_to_opt_vigilant(updater_svc):
     assert "${VIGILANT_ROOT:-/opt/vigilant}" in _repo_mount(updater_svc)
 
 
+# ── Which images the file resolves to ────────────────────────────────────────
+#
+# Parameterised so a fork or a mirrored registry can be named — release.yml
+# publishes a fork's images into the fork's own namespace, which a hardcoded
+# line could never reach — and because the sidecar's self-update reads
+# services.updater.image straight out of this file. The helper it launches runs
+# compose with an explicit `-f`, which suppresses docker-compose.override.yml,
+# so interpolation here is the ONLY route a non-default registry has into the
+# sidecar recreate.
+#
+# The defaults must resolve byte-identically to the strings that were hardcoded
+# before, or an existing install's compose config hash changes and the next
+# `up -d` recreates containers for no reason.
+
+_INTERPOLATE = __import__("re").compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _resolve(spec: str, env: dict) -> str:
+    """Apply compose's `${VAR:-default}` interpolation to one value.
+
+    Hand-rolled rather than shelled out to `docker compose config`: there is no
+    Docker daemon in this suite, and the two forms used in this file are the
+    whole of the syntax that needs covering.
+    """
+    return _INTERPOLATE.sub(
+        lambda m: env.get(m.group(1)) or (m.group(2) or ""), spec)
+
+
+def test_default_images_are_unchanged_from_the_hardcoded_ones(app_svc, updater_svc):
+    """Byte-identical, not merely equivalent. A different string is a different
+    compose config, and the release that introduces the variables would recreate
+    every stock install's containers to run exactly the same image."""
+    assert _resolve(app_svc["image"], {}) == "ghcr.io/thor6677/vigilant:latest"
+    assert _resolve(updater_svc["image"], {}) == \
+        "ghcr.io/thor6677/vigilant-updater:latest"
+
+
+def test_the_pinned_tag_still_reaches_both_images(app_svc, updater_svc):
+    env = {"VIGILANT_TAG": "v1.2.3"}
+    assert _resolve(app_svc["image"], env) == "ghcr.io/thor6677/vigilant:v1.2.3"
+    assert _resolve(updater_svc["image"], env) == \
+        "ghcr.io/thor6677/vigilant-updater:v1.2.3"
+
+
+def test_a_fork_can_point_both_services_at_its_own_registry(app_svc, updater_svc):
+    env = {"VIGILANT_IMAGE": "ghcr.io/someone/vigilant",
+           "VIGILANT_UPDATER_IMAGE": "ghcr.io/someone/vigilant-updater",
+           "VIGILANT_TAG": "v1.2.3"}
+    assert _resolve(app_svc["image"], env) == "ghcr.io/someone/vigilant:v1.2.3"
+    assert _resolve(updater_svc["image"], env) == \
+        "ghcr.io/someone/vigilant-updater:v1.2.3"
+
+
+def test_the_two_images_have_separate_variables(app_svc, updater_svc):
+    """They are built from separate Dockerfiles and a mirror may well hold them
+    in different places, so one variable for both would be wrong."""
+    assert "${VIGILANT_IMAGE:-" in app_svc["image"]
+    assert "${VIGILANT_UPDATER_IMAGE:-" in updater_svc["image"]
+    assert "VIGILANT_UPDATER_IMAGE" not in app_svc["image"]
+
+
+def test_env_example_documents_the_registry_overrides():
+    src = ENV_EXAMPLE.read_text()
+    assert "VIGILANT_IMAGE" in src
+    assert "VIGILANT_UPDATER_IMAGE" in src
+
+
+def test_the_supervisor_never_string_builds_an_image_name():
+    """It asks `docker compose config` for services.updater.image instead, which
+    is how the overrides above reach the self-update at all. A reconstructed
+    name would hardcode the default registry and quietly ignore them."""
+    src = Path("updater/supervisor.py").read_text()
+    # No registry host, and no `name:tag` assembly. HELPER_CONTAINER_NAME is a
+    # CONTAINER name and is allowed to be a constant — it names nothing that
+    # gets pulled.
+    assert "ghcr.io" not in src
+    assert '["services"]["updater"]["image"]' in src
+
+
 def test_updater_image_registry_is_passed_through(updater_svc):
     """deploy.sh resolves its own VIGILANT_IMAGE default independently of
     compose. If it is not passed in, the sidecar pulls from ghcr.io while
