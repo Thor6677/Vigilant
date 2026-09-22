@@ -46,9 +46,11 @@ PAGE_SIZE = 100
 
 # T-037 item 2: the count/SUM query re-aggregates 200-300k rows (~360ms) on
 # every search even when only the cursor changed. Cache (count, isk) keyed by
-# the filter-shaping params (sort/cursor excluded — they don't affect totals)
-# with a short TTL. Time presets ("24h") recompute their cutoff each compile,
-# so a cached total is at most TTL seconds stale — acceptable for a killboard.
+# the filter-shaping params (direction/cursor excluded — they don't affect
+# totals; sort mostly doesn't either, except that sort=="isk" changes the
+# compiled WHERE — see _nonnull_value_only) with a short TTL. Time presets
+# ("24h") recompute their cutoff each compile, so a cached total is at most
+# TTL seconds stale — acceptable for a killboard.
 _count_cache: dict[str, dict] = {}
 _COUNT_CACHE_TTL = 180
 _COUNT_CACHE_MAX = 256
@@ -74,7 +76,29 @@ async def _execute_with_timeout(db: AsyncSession, stmt):
         raise
 
 
+def _nonnull_value_only(params: dict[str, Any]) -> bool:
+    """True iff the compiled WHERE excludes killmails with a NULL total_value.
+
+    ISS-030: single source of truth for the ISK-sort NULL guard (see the
+    "NULL guard for ISK sort" comment in _compile_search_where). Both the
+    where-builder and _count_cache_key call this instead of each re-deriving
+    "sort == isk" independently, so the cache key can't drift out of sync
+    with the actual WHERE shape again.
+    """
+    return params.get("sort") == "isk"
+
+
 def _count_cache_key(params: dict[str, Any]) -> str:
+    """Cache key for the count/SUM query.
+
+    direction and cursor never affect the compiled WHERE, so they're
+    excluded outright. sort mostly doesn't either — EXCEPT that sort=="isk"
+    adds a NULL guard on total_value (see _nonnull_value_only), which DOES
+    change total_count/total_isk. Keying on that derived boolean rather than
+    raw sort keeps date/involved sharing one cache entry (they compile an
+    identical WHERE, so splitting them would just fragment the cache) while
+    still separating isk from the other two wherever it matters.
+    """
     parts = []
     for k in sorted(params):
         if k in ("sort", "direction", "cursor"):
@@ -83,6 +107,7 @@ def _count_cache_key(params: dict[str, Any]) -> str:
         if isinstance(v, (set, frozenset)):
             v = sorted(v)
         parts.append((k, repr(v)))
+    parts.append(("nonnull_value_only", _nonnull_value_only(params)))
     return repr(parts)
 
 # Hardcoded EVE-meta constants for the compiler.
@@ -471,8 +496,10 @@ async def _compile_search_where(params: dict[str, Any], db: AsyncSession) -> dic
     # NULL guard for ISK sort: NULL total_value rows can't be sensibly
     # ordered or paginated by ISK (the cursor tuple `total_value < val`
     # excludes NULLs on page 2+). Drop them at the source so the sort
-    # is internally consistent.
-    if params.get("sort") == "isk":
+    # is internally consistent. This is the one sort-dependent WHERE
+    # contribution in this function — _count_cache_key mirrors it via
+    # _nonnull_value_only() so the count cache can't drift from it (ISS-030).
+    if _nonnull_value_only(params):
         where.append(Killmail.total_value.isnot(None))
 
     # ── Sort + cursor ─────────────────────────────────────────────────
