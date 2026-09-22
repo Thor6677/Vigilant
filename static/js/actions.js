@@ -285,4 +285,74 @@
          * down — the same restart, not a different failure. */
         if (el && el.id === 'updater-panel') updaterRestartBanner(true);
     });
+
+    /* Alert banner dismiss handlers.
+     *
+     * These used to live as inline <script nonce="..."> blocks inside each
+     * banner partial (app/templates/partials/*_alert_banners.html and
+     * update_banner.html). The CSP nonce is minted per REQUEST
+     * (app/middleware/csp_nonce.py), and an htmx-loaded fragment is a
+     * separate request from the page that swaps it in — so a fragment's
+     * inline <script> carries a nonce that never matches the page's CSP
+     * header, and the browser silently refuses to run it. That is why every
+     * banner's (x) button did nothing: window.dismiss*Alert was never even
+     * defined. A static file loaded via <script src> is covered by
+     * script-src 'self' regardless of nonce, so the handlers live here now,
+     * where they actually execute — and the corresponding show/prune logic
+     * moved into base.html's applyDismissState(), which runs under the
+     * PAGE's own nonce on every htmx swap.
+     *
+     * Same localStorage keys and value shapes as the old fragment scripts,
+     * so a dismissal a user already made keeps working:
+     *   vigilant_dismissed_alerts       - structure + inventory + contract
+     *       banners. All three render the shared .structure-alert-banner
+     *       markup, and base.html's applyDismissState() already read this
+     *       ONE key for all three before this fix — so that, not the
+     *       contract partial's own dead dismissContractAlert /
+     *       vigilant_dismissed_contract_alerts, is the key that actually
+     *       governed contract-banner visibility in production. The contract
+     *       partial's button now dispatches here too instead of to a
+     *       same-named handler nothing ever read.
+     *   vigilant_dismissed_timer_alerts - structure timer banners.
+     *   vigilant_dismissed_update       - the "a newer release is
+     *       available" banner, keyed by release TAG (not a plain flag) so a
+     *       newer release is never pre-dismissed by the dismissal of an
+     *       older one.
+     */
+    function _bannerDismissed(key) {
+        try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { return {}; }
+    }
+    function _setBannerDismissed(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    }
+
+    window.dismissStructureAlert = window.dismissStructureAlert || function () {
+        var id = this.dataset && this.dataset.alertKey;
+        if (!id) return;
+        var d = _bannerDismissed('vigilant_dismissed_alerts');
+        d[id] = Date.now();
+        _setBannerDismissed('vigilant_dismissed_alerts', d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+
+    window.dismissTimerAlert = window.dismissTimerAlert || function () {
+        var id = this.dataset && this.dataset.alertKey;
+        if (!id) return;
+        var d = _bannerDismissed('vigilant_dismissed_timer_alerts');
+        d[id] = Date.now();
+        _setBannerDismissed('vigilant_dismissed_timer_alerts', d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+
+    window.dismissUpdateBanner = window.dismissUpdateBanner || function () {
+        var tag = this.dataset && this.dataset.updateTag;
+        if (!tag) return;
+        var d = _bannerDismissed('vigilant_dismissed_update');
+        d[tag] = 1;
+        _setBannerDismissed('vigilant_dismissed_update', d);
+        var el = document.getElementById('update-banner');
+        if (el) el.style.display = 'none';
+    };
 })();

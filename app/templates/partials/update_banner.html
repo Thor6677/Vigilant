@@ -1,35 +1,30 @@
-{# Starts hidden on purpose. The inline script below reveals it unless THIS
-   exact tag was dismissed, and the global htmx:afterSwap handler in base.html
-   re-applies that state after every swap. Never invert this to
-   visible-by-default: a dismissed banner would flash back on every page. #}
+{# Starts hidden on purpose. base.html's applyDismissState() (the dismiss
+   handler itself is dismissUpdateBanner in static/js/actions.js) reveals it
+   unless THIS exact tag was dismissed, and the same global htmx:afterSwap
+   handler re-applies that state after every swap. Never invert this to
+   visible-by-default: a dismissed banner would flash back on every page.
+   No inline script here — see the comment in structure_alert_banners.html
+   for why a fragment's own inline script tag is silently blocked by CSP.
+
+   Markup mirrors .structure-alert-banner (alert-icon/alert-text/alert-dismiss)
+   with an "is-accent" tone instead of is-danger/is-warn, so this banner lines
+   up flush with the alert banners stacked above it (base.html:220-246) —
+   same padding, same left border, same font, instead of the old one-off
+   inline-styled monospace block. #}
 <div id="update-banner"
-     class="update-banner"
+     class="structure-alert-banner is-accent"
      data-update-tag="{{ latest_tag }}"
-     style="display:none;padding:0.5rem 2rem;background:#0e0e0e;border-bottom:1px solid var(--accent);font-size:12px;font-family:'JetBrains Mono',monospace;">
-    <strong>Vigilant {{ latest_tag }} is available</strong>
-    &mdash; running {{ running }}.
-    {% if latest_url %}
-    <a href="{{ latest_url }}" target="_blank" rel="noopener noreferrer">Release notes</a>
-    {% endif %}
-    <button type="button" data-update-dismiss="{{ latest_tag }}"
-            aria-label="Dismiss update notice"
-            style="float:right;background:none;border:none;cursor:pointer;color:var(--muted);font:inherit;">&times;</button>
+     style="display:none;">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">&#8593;</span>
+        <span class="alert-text">
+            <strong>Vigilant {{ latest_tag }} is available</strong>
+            &mdash; running {{ running }}.
+            {% if latest_url %}
+            <a href="{{ latest_url }}" target="_blank" rel="noopener noreferrer">Release notes</a>
+            {% endif %}
+        </span>
+    </div>
+    <button type="button" class="alert-dismiss" data-click="dismissUpdateBanner" data-update-tag="{{ latest_tag }}"
+            aria-label="Dismiss update notice" title="Dismiss">&times;</button>
 </div>
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    var el = document.getElementById('update-banner');
-    if (!el) return;
-    var tag = el.getAttribute('data-update-tag');
-    var d = {};
-    try { d = JSON.parse(localStorage.getItem('vigilant_dismissed_update') || '{}'); } catch (e) {}
-    /* Keyed by TAG, so a newer release is never pre-dismissed by an older
-       dismissal. */
-    if (!d[tag]) el.style.display = '';
-    var btn = el.querySelector('[data-update-dismiss]');
-    if (btn) btn.addEventListener('click', function() {
-        d[tag] = 1;
-        try { localStorage.setItem('vigilant_dismissed_update', JSON.stringify(d)); } catch (e) {}
-        el.style.display = 'none';
-    });
-})();
-</script>
