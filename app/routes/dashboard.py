@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import time
 import httpx
+from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -794,19 +796,117 @@ async def _fetch_15m_delta(db: AsyncSession) -> int | None:
     return (latest - ref) if ref is not None else None
 
 
-async def fetch_server_status() -> dict:
+# ISS-032: SWR cache for the ESI /status/ call. ESI sends Cache-Control: 30s
+# on this endpoint, but api_server_status() awaited it inline on every hit —
+# measured on prod at p50 439ms / p95 1244ms / max 1800ms over 6 days
+# (n=223), with the flat p50 being the tell that every request paid the ESI
+# round-trip rather than only a cold-cache subset. The fix moves that
+# round-trip off the request path entirely: a request either gets an
+# in-process value immediately or (cold start only) pays for one fetch that
+# every other concurrent viewer/tab then rides for free. It's polled by both
+# dashboard.html (every 15 min, plus once on load) and tools_activity.html
+# (every 60s, plus once on load); a 30s TTL — matching ESI's own header —
+# doesn't stop tools_activity's 60s timer from refreshing on every tick, but
+# it does mean a page load and the next timer tick, or two browser tabs,
+# share one fetch instead of paying for their own.
+# Same stale-while-revalidate shape as the other ISS-018 panel caches in
+# this file (_recent_battles_cache and friends), just keyed on a monotonic
+# clock instead of wall time since staleness here is single-digit seconds,
+# and the clock/transport are injectable so tests don't need real time or
+# network (see tests/test_server_status_cache.py).
+_server_status_cache: dict | None = None
+_server_status_revalidating = False
+_SERVER_STATUS_TTL = 30          # matches ESI's Cache-Control on /status/
+_SERVER_STATUS_MAX_STALE = 120   # beyond this we stop vouching for the value
+
+# Strong references to the in-flight background refresh, same reason as
+# _discord_relay_tasks above: asyncio.create_task() only holds a *weak*
+# reference, so an unpinned task can be garbage-collected before it ever
+# starts running. If that happened here, the coroutine's `finally` would
+# never execute, _server_status_revalidating would stay True forever, and
+# the cache would wedge — no refresh ever fires again and the endpoint
+# degrades permanently to the offline/unknown shape once it ages past
+# _SERVER_STATUS_MAX_STALE. Worse than the latency bug this fixes.
+_server_status_refresh_tasks: set = set()
+
+# Same shape fetch_server_status has always returned when it couldn't get
+# a trustworthy answer from ESI — kept as one constant so "cold start
+# failed", "too stale to serve" and "ESI returned non-200" can't drift.
+_UNKNOWN_STATUS = {"online": False, "players": None}
+
+
+async def _fetch_server_status_live(transport: httpx.BaseTransport | None = None) -> dict:
+    """The actual ESI round-trip. Raises on network/timeout/decode errors so
+    callers can tell "ESI told us something" (even "it's down", which is
+    still a real answer worth caching) apart from "we couldn't reach ESI at
+    all" (which should leave an existing cache entry alone rather than be
+    treated as fresh data). `transport` lets tests swap in an
+    httpx.MockTransport with no real network."""
+    async with httpx.AsyncClient(timeout=5.0, transport=transport) as client:
+        resp = await client.get(
+            "https://esi.evetech.net/latest/status/",
+            headers={"User-Agent": user_agent()},
+        )
+    if resp.status_code == 200:
+        data = resp.json()
+        return {"online": True, "players": data.get("players", 0)}
+    return dict(_UNKNOWN_STATUS)
+
+
+async def _refresh_server_status_cache(clock: Callable[[], float], transport=None) -> None:
+    """Background refresh task. Single-flight is enforced by the caller
+    setting _server_status_revalidating before scheduling this."""
+    global _server_status_cache, _server_status_revalidating
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                "https://esi.evetech.net/latest/status/",
-                headers={"User-Agent": user_agent()},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return {"online": True, "players": data.get("players", 0)}
-            return {"online": False, "players": None}
-    except Exception:
-        return {"online": False, "players": None}
+        data = await _fetch_server_status_live(transport)
+        _server_status_cache = {"data": data, "fetched_at": clock()}
+    except Exception as e:
+        # Leave the existing cache entry (and its fetched_at) untouched — a
+        # network hiccup shouldn't erase a still-good last-known value. It
+        # naturally degrades to the unknown/offline shape below once it
+        # crosses _SERVER_STATUS_MAX_STALE.
+        logger.info("server-status SWR refresh failed: %s", e)
+    finally:
+        _server_status_revalidating = False
+
+
+async def fetch_server_status(
+    clock: Callable[[], float] = time.monotonic,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    global _server_status_cache, _server_status_revalidating
+    now = clock()
+
+    if _server_status_cache is None:
+        # Cold start: nothing to serve yet, so this one request pays the
+        # ESI round-trip. Every later request rides the cache instead.
+        try:
+            data = await _fetch_server_status_live(transport)
+        except Exception:
+            # Match the historical contract: report unknown rather than
+            # raising into the route. Cache nothing, so the next request
+            # retries instead of pinning a failure in place forever.
+            return dict(_UNKNOWN_STATUS)
+        _server_status_cache = {"data": data, "fetched_at": now}
+        return dict(data)
+
+    age = now - _server_status_cache["fetched_at"]
+
+    if age > _SERVER_STATUS_TTL and not _server_status_revalidating:
+        _server_status_revalidating = True
+        task = asyncio.create_task(_refresh_server_status_cache(clock, transport))
+        _server_status_refresh_tasks.add(task)
+        task.add_done_callback(_server_status_refresh_tasks.discard)
+
+    if age > _SERVER_STATUS_MAX_STALE:
+        # Honesty on failure: a value this old might be refreshing right
+        # now (kicked off above), but until it lands we won't keep telling
+        # callers the server is online off a minutes-old answer. Report the
+        # same unknown/offline shape fetch_server_status has always
+        # returned on error.
+        return dict(_UNKNOWN_STATUS)
+
+    return dict(_server_status_cache["data"])
 
 
 async def _fetch_live_history(db: AsyncSession, live_count: int | None = None) -> dict:
