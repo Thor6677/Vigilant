@@ -159,6 +159,15 @@
                 </div>
                 <div id="ship-name" style="font-size:12px;font-weight:600;color:var(--text);margin-top:0.25rem;display:none;"></div>
                 <div id="ship-group" style="font-size:10px;color:var(--muted);display:none;"></div>
+                {# The builder opens on a blank slate — autosave still runs, but it is
+                   no longer applied on load. This notice is the recovery path: shown
+                   only when a saved fit exists in localStorage and no deep-link
+                   (?load=) is already loading one. #}
+                <div id="restore-fit-notice" style="display:none;font-size:10px;color:var(--muted);margin-top:0.35rem;">
+                    A saved fit was found &mdash;
+                    <button type="button" data-click="restoreSavedFit"
+                            style="background:none;border:none;color:var(--accent);cursor:pointer;font:inherit;font-size:10px;padding:0;text-decoration:underline;">Restore last fit</button>
+                </div>
             </div>
         </div>
     </div>
@@ -174,6 +183,16 @@
 
 {# Slot layout #}
 <div id="slot-layout" style="display:none;">
+
+{# State-dot legend (T-ISS: discoverability) — kept to one low-weight line
+   since this is a dense tool; the per-dot title/aria-label carries the
+   click affordance, this just explains the color coding at a glance. #}
+<div style="display:flex;gap:0.6rem;align-items:center;font-size:9px;color:var(--muted);margin-bottom:0.4rem;">
+    <span>Module state:</span>
+    <span><span style="color:var(--success);">&#9679;</span> online</span>
+    <span><span style="color:var(--danger);">&#9679;</span> overheated</span>
+    <span><span style="color:var(--border);">&#9679;</span> offline</span>
+</div>
 
 {% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
@@ -333,6 +352,11 @@ function isSlotFull(slot) {
 
 function saveState() {
     localStorage.setItem(FIT_KEY, JSON.stringify(state));
+    // Whatever the "Restore last fit" notice was offering (the OLD stored
+    // value) is gone the moment we overwrite it here, so the offer no
+    // longer applies. Covers starting a fresh fit (selectShip/doImportEFT)
+    // without explicitly clicking Restore or Clear first.
+    hideRestoreNotice();
 }
 
 function restoreState() {
@@ -345,6 +369,28 @@ function restoreState() {
             applyState();
         }
     } catch(e) {}
+}
+
+/* Blank-slate open (product change): the page no longer auto-restores the
+   last fit on load. Autosave keeps running as a recovery path instead —
+   this notice/button pair is that recovery path's UI. */
+function showRestoreNotice() {
+    var el = document.getElementById('restore-fit-notice');
+    if (el) el.style.display = '';
+}
+
+function hideRestoreNotice() {
+    var el = document.getElementById('restore-fit-notice');
+    if (el) el.style.display = 'none';
+}
+
+function restoreSavedFit() {
+    restoreState();
+    hideRestoreNotice();
+    // applyState() (called by restoreState()) doesn't know about overheat
+    // capability — the restored items may include ones never checked
+    // against /tools/fitting/can-overheat yet (see refreshOverheatCache).
+    refreshOverheatCache();
 }
 
 function applyState() {
@@ -658,13 +704,17 @@ function renderSlots() {
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
-            // State toggle: green=online, red=overheated, grey=offline
+            // State toggle: green=online, red=overheated, grey=offline. The
+            // dot alone has no affordance (T-ISS: discoverability) — title
+            // gives a hover tooltip and aria-label carries the same text to
+            // screen readers, since the dot has no visible text of its own.
             var canOH = overheatCache[item.type_id] === true;
             var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
-            var stateTitle = isOverheated ? 'Overheated (click: offline)' :
-                (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
+            var stateTitle = isOverheated ? 'Overheated — click to offline' :
+                (isOnline && canOH ? 'Online — click to overheat' :
+                    (isOnline ? 'Online — click to offline' : 'Offline — click to online'));
             var onlineBtn = slot !== 'rig' ?
-                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
@@ -1249,6 +1299,10 @@ function doImportEFT() {
         state.items = data.items;
         saveState();
         applyState();
+        // EFT-imported items were never checked against
+        // /tools/fitting/can-overheat — without this, a hardener imported
+        // via EFT would show no overheat step at all.
+        refreshOverheatCache();
         hideImportModal();
     });
 }
@@ -1355,6 +1409,12 @@ function loadFitting(id) {
         state.implants = data.implants || {};
         saveState();
         applyState();
+        // init()'s own refreshOverheatCache() call races this fetch (it
+        // runs synchronously right after kicking this one off, while
+        // state.items is still empty) — call it again here, now that
+        // state.items is actually populated, or a saved fit opened via
+        // ?load= never gets its overheat capability checked.
+        refreshOverheatCache();
     });
 }
 
@@ -1702,7 +1762,7 @@ function refreshOverheatCache() {
 /* ── Initialize ───────────────────────────────────────────────────────────── */
 (function init() {
     /* Restore profile dropdown FIRST so the first recalcStats triggered
-       by restoreState/loadFitting uses the saved selection, not "uniform". */
+       by loadFitting/restoreSavedFit uses the saved selection, not "uniform". */
     restoreProfileSelection();
     /* ?load=<fit_id> — opened from the saved-fits page. Takes precedence
        over localStorage, and we strip it from the URL so refreshing the
@@ -1712,8 +1772,11 @@ function refreshOverheatCache() {
     if (loadId) {
         history.replaceState(null, '', window.location.pathname);
         loadFitting(parseInt(loadId, 10));
-    } else {
-        restoreState();
+    } else if (localStorage.getItem(FIT_KEY)) {
+        /* Open EMPTY (blank slate), not auto-restored. A saved fit still
+           exists in localStorage from a prior session — offer it via the
+           "Restore last fit" notice instead of applying it unasked. */
+        showRestoreNotice();
     }
     initBrowser();
     refreshOverheatCache();
