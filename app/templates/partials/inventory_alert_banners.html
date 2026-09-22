@@ -1,3 +1,9 @@
+{# Markup only — no inline script here. See the comment in
+   structure_alert_banners.html: a fragment's own inline script tag would
+   carry a CSP nonce that never matches the page's and gets silently
+   blocked. The dismiss handler (dismissStructureAlert — same bucket as
+   structure alerts) lives in static/js/actions.js; show/prune logic lives
+   in base.html's applyDismissState(). #}
 <div id="inventory-alerts" hx-get="/alerts/inventory-banners" hx-trigger="every 60s" hx-swap="outerHTML">
 {% for alert in alerts %}
 <div class="structure-alert-banner {{ 'is-danger' if alert.alert_state == 'critical' else 'is-warn' }}"
@@ -16,18 +22,4 @@
     <button class="alert-dismiss" data-click="dismissStructureAlert" data-alert-key="inv-{{ alert.id }}-{{ alert.alert_state }}" title="Dismiss">&times;</button>
 </div>
 {% endfor %}
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    var KEY = 'vigilant_dismissed_alerts';
-    function getDismissed() {
-        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
-    }
-    var dismissed = getDismissed();
-    var banners = document.querySelectorAll('#inventory-alerts .structure-alert-banner[data-alert-id]');
-    for (var i = 0; i < banners.length; i++) {
-        var aid = banners[i].getAttribute('data-alert-id');
-        if (!dismissed[aid]) banners[i].style.display = '';
-    }
-})();
-</script>
 </div>

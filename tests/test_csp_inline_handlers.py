@@ -148,6 +148,35 @@ def test_every_data_binding_resolves():
     )
 
 
+def test_banner_partials_carry_no_script_tags():
+    """Site-wide banner fragments (app/templates/partials/*banner*.html) load
+    via their OWN htmx request, separate from the page that swaps them in.
+    The CSP nonce is minted per request (app/middleware/csp_nonce.py), so a
+    fragment's inline <script> carries a nonce that never matches the page's
+    CSP header and the browser silently refuses to run it — which is exactly
+    how every banner's dismiss (x) button went dead while the banner itself
+    stayed visible (shown by base.html's page-level applyDismissState(),
+    which does run under the page's own nonce). Banner fragments carry markup
+    only now; behaviour lives in static/js/actions.js and base.html instead,
+    both loaded/executed as part of the page itself.
+    """
+    offenders = []
+    for path in _templates():
+        rel = _rel(path)
+        parts = rel.split("/")
+        if "partials" not in parts:
+            continue
+        if "banner" not in os.path.basename(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            if "<script" in fh.read():
+                offenders.append(rel)
+    assert not offenders, (
+        "banner partials must carry markup only — a <script> here carries a "
+        f"mismatched CSP nonce and is silently dead code: {sorted(offenders)}"
+    )
+
+
 # ── the policy the conversion work was for ──────────────────────────────────
 
 def test_policy_is_enforcing_and_script_src_has_no_unsafe_inline():

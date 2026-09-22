@@ -1,3 +1,9 @@
+{# Markup only — no inline script here. This partial loads via its own htmx
+   request, which carries a CSP nonce that never matches the page's, so an
+   inline script tag here would be silently blocked. The dismiss handler lives
+   in static/js/actions.js (dismissStructureAlert) and the show/prune/
+   timestamp logic lives in base.html's applyDismissState(), both under the
+   page's nonce. #}
 <div id="structure-alerts" hx-get="/alerts/structure-banners" hx-trigger="every 60s" hx-swap="outerHTML">
 {% for alert in alerts %}
 <div class="structure-alert-banner {% if alert.severity == 'danger' %}is-danger{% else %}is-warn{% endif %}"
@@ -16,52 +22,4 @@
     <button class="alert-dismiss" data-click="dismissStructureAlert" data-alert-key="{{ alert.id }}" title="Dismiss">&times;</button>
 </div>
 {% endfor %}
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    var KEY = 'vigilant_dismissed_alerts';
-    function getDismissed() {
-        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
-    }
-    function setDismissed(d) {
-        try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
-    }
-    window.dismissStructureAlert = function() {
-        var id = this.dataset.alertKey;
-        var d = getDismissed();
-        d[id] = Date.now();
-        setDismissed(d);
-        var el = document.querySelector('[data-alert-id="' + id + '"]');
-        if (el) el.style.display = 'none';
-    };
-    /* Show non-dismissed alerts */
-    var dismissed = getDismissed();
-    /* Prune entries older than 7 days */
-    var cutoff = Date.now() - 7 * 86400000;
-    var changed = false;
-    for (var k in dismissed) {
-        if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
-    }
-    if (changed) setDismissed(dismissed);
-    var banners = document.querySelectorAll('.structure-alert-banner[data-alert-id]');
-    for (var i = 0; i < banners.length; i++) {
-        var aid = banners[i].getAttribute('data-alert-id');
-        if (!dismissed[aid]) banners[i].style.display = '';
-    }
-    /* Relative timestamps */
-    var times = document.querySelectorAll('#structure-alerts .alert-time[data-ts]');
-    for (var j = 0; j < times.length; j++) {
-        try {
-            var ts = times[j].getAttribute('data-ts');
-            var d = new Date(ts);
-            var diff = Math.floor((Date.now() - d.getTime()) / 1000);
-            var label = '';
-            if (diff < 60) label = 'just now';
-            else if (diff < 3600) label = Math.floor(diff / 60) + 'm ago';
-            else if (diff < 86400) label = Math.floor(diff / 3600) + 'h ago';
-            else label = Math.floor(diff / 86400) + 'd ago';
-            times[j].textContent = ' (' + label + ')';
-        } catch(e) {}
-    }
-})();
-</script>
 </div>
