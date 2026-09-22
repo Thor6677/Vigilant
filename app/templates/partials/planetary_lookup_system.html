@@ -167,100 +167,17 @@
     }
 </style>
 
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    var container = document.querySelector('.pi-tier-container');
-    if (!container) return;
-    var svg = container.querySelector('.pi-conn-lines');
-    var items = container.querySelectorAll('.pi-tier-item');
-    if (!items.length || !svg) return;
+{# The tier grid's hover tracing — highlight a commodity's ancestors and
+   descendants, and draw curves to its direct inputs — used to be an inline
+   script block here. This fragment is fetched and written into #sys-result,
+   and inserted markup never executes its own scripts; planetary_lookup.html
+   worked around that by re-parenting them as fresh nodes, which under the
+   enforcing policy just turned "never ran" into "refused for a mismatched
+   nonce". Either way the tracing has never worked here.
 
-    function parseIds(attr) {
-        if (!attr) return [];
-        return attr.split(',').filter(Boolean).map(function(s){ return s.trim(); });
-    }
-
-    function clearLines() {
-        while (svg.firstChild) svg.removeChild(svg.firstChild);
-    }
-
-    function drawLine(fromEl, toEl, color) {
-        var cRect = container.getBoundingClientRect();
-        var f = fromEl.getBoundingClientRect();
-        var t = toEl.getBoundingClientRect();
-        // Anchor: right-mid of input tile → left-mid of output tile (inputs are to the LEFT in lower tiers)
-        var inputIsLeft = t.left < f.left;
-        var x1 = (inputIsLeft ? f.left : f.right) - cRect.left;
-        var y1 = f.top + f.height / 2 - cRect.top;
-        var x2 = (inputIsLeft ? t.right : t.left) - cRect.left;
-        var y2 = t.top + t.height / 2 - cRect.top;
-        // Smooth bezier curve with horizontal handle distance
-        var dx = Math.abs(x2 - x1) * 0.5;
-        var d = 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + (inputIsLeft ? -dx : dx)) + ' ' + y1
-              + ', ' + (x2 + (inputIsLeft ? dx : -dx)) + ' ' + y2
-              + ', ' + x2 + ' ' + y2;
-        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', color);
-        path.setAttribute('stroke-width', '1.5');
-        path.setAttribute('stroke-opacity', '0.9');
-        svg.appendChild(path);
-    }
-
-    function onEnter(e) {
-        var el = e.currentTarget;
-        var tid = el.dataset.typeId;
-        var ancestors = parseIds(el.dataset.ancestors);
-        var descendants = parseIds(el.dataset.descendants);
-        var direct = parseIds(el.dataset.directInputs);
-
-        container.classList.add('is-tracing');
-        el.classList.add('is-hover');
-
-        ancestors.forEach(function(aid) {
-            container.querySelectorAll('.pi-tier-item[data-type-id="' + aid + '"]').forEach(function(x){
-                x.classList.add('is-ancestor');
-            });
-        });
-        descendants.forEach(function(did) {
-            container.querySelectorAll('.pi-tier-item[data-type-id="' + did + '"]').forEach(function(x){
-                x.classList.add('is-descendant');
-            });
-        });
-
-        // Draw lines only to direct inputs (one level down) — cleaner than full tree
-        direct.forEach(function(iid) {
-            var target = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
-            if (target) drawLine(el, target, '#33aa55'); // green for inputs
-        });
-    }
-
-    function onLeave() {
-        container.classList.remove('is-tracing');
-        items.forEach(function(x){
-            x.classList.remove('is-hover', 'is-ancestor', 'is-descendant');
-        });
-        clearLines();
-    }
-
-    items.forEach(function(el) {
-        el.addEventListener('mouseenter', onEnter);
-        el.addEventListener('mouseleave', onLeave);
-    });
-
-    // Redraw lines on window resize if one is currently active
-    window.addEventListener('resize', function() {
-        if (!container.classList.contains('is-tracing')) return;
-        var hovered = container.querySelector('.pi-tier-item.is-hover');
-        if (!hovered) return;
-        clearLines();
-        parseIds(hovered.dataset.directInputs).forEach(function(iid) {
-            var t = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
-            if (t) drawLine(hovered, t, '#33aa55');
-        });
-    });
-})();
-</script>
+   piInitTierGraph() in planetary_lookup.html does the wiring now, called
+   after each lookup lands. Everything it needs is on the markup already:
+   data-type-id, data-ancestors, data-descendants and data-direct-inputs on
+   each .pi-tier-item, and the .pi-conn-lines overlay to draw into. #}
 
 {% endif %}

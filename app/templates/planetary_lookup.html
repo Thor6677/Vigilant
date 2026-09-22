@@ -106,17 +106,117 @@
         document.getElementById('sys-dd').style.display = 'none';
         piSysSubmit();
     };
-    // innerHTML does NOT execute <script nonce="{{ request.state.csp_nonce }}"> tags in inserted HTML — re-parent
-    // them as fresh script nodes so the hover-graph wiring runs.
-    function injectHtml(el, html) {
-        el.innerHTML = html;
-        el.querySelectorAll('script').forEach(function(old) {
-            var s = document.createElement('script');
-            for (var i = 0; i < old.attributes.length; i++) {
-                s.setAttribute(old.attributes[i].name, old.attributes[i].value);
-            }
-            s.textContent = old.textContent;
-            old.parentNode.replaceChild(s, old);
+    /* Hover tracing for the tier grid in partials/planetary_lookup_system.html.
+     *
+     * This used to ride along inside that fragment. Markup written with
+     * innerHTML never executes its own scripts, so the page re-parented them
+     * as fresh nodes to make it run — which, once the policy started
+     * enforcing, only turned "never ran" into "refused, because a fragment's
+     * nonce is not this page's". The re-parenting is gone and the wiring
+     * lives here, where the page's own nonce covers it; piSysSubmit calls it
+     * once the markup is in place.
+     *
+     * Everything it needs is already on the markup: data-type-id,
+     * data-ancestors, data-descendants and data-direct-inputs per tile, plus
+     * the .pi-conn-lines SVG overlay to draw into. */
+    function piInitTierGraph(root) {
+        var container = (root || document).querySelector('.pi-tier-container');
+        if (!container) return;
+        var svg = container.querySelector('.pi-conn-lines');
+        var items = container.querySelectorAll('.pi-tier-item');
+        if (!items.length || !svg) return;
+
+        function parseIds(attr) {
+            if (!attr) return [];
+            return attr.split(',').filter(Boolean).map(function(s){ return s.trim(); });
+        }
+
+        function clearLines() {
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+        }
+
+        function drawLine(fromEl, toEl, color) {
+            var cRect = container.getBoundingClientRect();
+            var f = fromEl.getBoundingClientRect();
+            var t = toEl.getBoundingClientRect();
+            /* Anchor: right-mid of input tile → left-mid of output tile
+               (inputs are to the LEFT in lower tiers) */
+            var inputIsLeft = t.left < f.left;
+            var x1 = (inputIsLeft ? f.left : f.right) - cRect.left;
+            var y1 = f.top + f.height / 2 - cRect.top;
+            var x2 = (inputIsLeft ? t.right : t.left) - cRect.left;
+            var y2 = t.top + t.height / 2 - cRect.top;
+            /* Smooth bezier curve with horizontal handle distance */
+            var dx = Math.abs(x2 - x1) * 0.5;
+            var d = 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + (inputIsLeft ? -dx : dx)) + ' ' + y1
+                  + ', ' + (x2 + (inputIsLeft ? dx : -dx)) + ' ' + y2
+                  + ', ' + x2 + ' ' + y2;
+            var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', color);
+            path.setAttribute('stroke-width', '1.5');
+            path.setAttribute('stroke-opacity', '0.9');
+            svg.appendChild(path);
+        }
+
+        function onEnter(e) {
+            var el = e.currentTarget;
+            var ancestors = parseIds(el.dataset.ancestors);
+            var descendants = parseIds(el.dataset.descendants);
+            var direct = parseIds(el.dataset.directInputs);
+
+            container.classList.add('is-tracing');
+            el.classList.add('is-hover');
+
+            ancestors.forEach(function(aid) {
+                container.querySelectorAll('.pi-tier-item[data-type-id="' + aid + '"]').forEach(function(x){
+                    x.classList.add('is-ancestor');
+                });
+            });
+            descendants.forEach(function(did) {
+                container.querySelectorAll('.pi-tier-item[data-type-id="' + did + '"]').forEach(function(x){
+                    x.classList.add('is-descendant');
+                });
+            });
+
+            /* Draw lines only to direct inputs (one level down) — cleaner
+               than the full tree */
+            direct.forEach(function(iid) {
+                var target = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
+                if (target) drawLine(el, target, '#33aa55'); /* green for inputs */
+            });
+        }
+
+        function onLeave() {
+            container.classList.remove('is-tracing');
+            items.forEach(function(x){
+                x.classList.remove('is-hover', 'is-ancestor', 'is-descendant');
+            });
+            clearLines();
+        }
+
+        /* mouseenter/mouseleave do not bubble, so these stay direct bindings
+           rather than going through the actions.js dispatcher. Re-binding on
+           every lookup is safe: the tiles are new elements each time. */
+        items.forEach(function(el) {
+            el.addEventListener('mouseenter', onEnter);
+            el.addEventListener('mouseleave', onLeave);
+        });
+
+        /* Redraw lines on window resize if one is currently active. Bound
+           once per lookup against the elements of that lookup; a stale
+           listener from a previous one finds no .is-hover tile and returns. */
+        window.addEventListener('resize', function() {
+            if (!container.isConnected) return;
+            if (!container.classList.contains('is-tracing')) return;
+            var hovered = container.querySelector('.pi-tier-item.is-hover');
+            if (!hovered) return;
+            clearLines();
+            parseIds(hovered.dataset.directInputs).forEach(function(iid) {
+                var t = container.querySelector('.pi-tier-item[data-type-id="' + iid + '"]');
+                if (t) drawLine(hovered, t, '#33aa55');
+            });
         });
     }
 
@@ -127,7 +227,7 @@
         el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
         fetch('/industry/planetary/lookup/system?name=' + encodeURIComponent(name))
             .then(function(r){ return r.text(); })
-            .then(function(html){ injectHtml(el, html); })
+            .then(function(html){ el.innerHTML = html; piInitTierGraph(el); })
             .catch(function(){ el.innerHTML = '<div class="b-empty b-pad-md">Lookup failed.</div>'; });
     };
     document.addEventListener('click', function(e) {
