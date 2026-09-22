@@ -392,6 +392,107 @@
         });
     };
 
+    // ── Activity history panel (#history-panel) ─────────────────────────
+    //
+    // partials/activity_history.html carried this as an inline script: fetch
+    // the daily series, build the chart, wire the year slider and its two
+    // step buttons. The fragment arrives by htmx swap, which re-creates a
+    // script element as inline script under the fragment's nonce — the
+    // page's CSP header never matches it — so the panel has shown an empty
+    // canvas and a dead slider.
+    //
+    // This lives here rather than in the panel's own page because that
+    // template is held by concurrent work; actions.js is loaded as a page
+    // script on every authed page, so the code runs under script-src 'self'
+    // either way. The hook below no-ops everywhere the panel is absent.
+    //
+    // Chart.js is loaded by the page, as it already was.
+    function initActivityHistory(panel) {
+        if (typeof Chart === 'undefined') return;
+        var VIEW = 365, H = null, chart = null;
+        var slider = panel.querySelector('#hist-slider');
+        var spanEl = panel.querySelector('#hist-span');
+        var canvas = panel.querySelector('#hist-chart');
+        if (!slider || !spanEl || !canvas) return;
+
+        function fmtIsk(v) {
+            if (v == null) return '';
+            if (v >= 1e12) return (v / 1e12).toFixed(1) + 'T';
+            if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+            return Math.round(v / 1e6) + 'M';
+        }
+
+        function render(start) {
+            var end = Math.min(start + VIEW, H.dates.length);
+            chart.data.labels = H.dates.slice(start, end);
+            chart.data.datasets[0].data = H.pcu_avg.slice(start, end);
+            chart.data.datasets[1].data = H.kills.slice(start, end);
+            chart.data.datasets[2].data = H.isk.slice(start, end);
+            chart.update('none');
+            spanEl.textContent = H.dates[start] + ' → ' + H.dates[end - 1];
+        }
+
+        fetch('/tools/activity/history.json').then(function (r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.json();
+        }).then(function (data) {
+            H = data;
+            var maxStart = Math.max(0, H.dates.length - VIEW);
+            slider.max = maxStart;
+            slider.value = maxStart;  // open on the most recent year
+            var existing = Chart.getChart ? Chart.getChart(canvas) : null;
+            if (existing) existing.destroy();
+            chart = new Chart(canvas, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Avg players', data: [], borderColor: '#c8a951',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y' },
+                    { label: 'Kills/day', data: [], borderColor: '#8899aa',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1' },
+                    { label: 'ISK/day', data: [], borderColor: '#aa5555',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1', hidden: true },
+                ]},
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                        y: { position: 'left', ticks: { color: '#c8a951' }, grid: { color: '#1a1a1a' } },
+                        y1: { position: 'right', ticks: { color: '#8899aa', callback: function (v) { return v >= 1e9 ? fmtIsk(v) : v; } }, grid: { drawOnChartArea: false } }
+                    },
+                    plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            if (ctx.dataset.label === 'ISK/day') return 'ISK: ' + fmtIsk(ctx.parsed.y);
+                            return ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '—' : ctx.parsed.y.toLocaleString());
+                        } } } }
+                }
+            });
+            render(maxStart);
+            // Direct listeners rather than the data-* dispatcher: these
+            // elements are re-created by every swap, and so is this closure,
+            // which owns the chart and the loaded series.
+            slider.addEventListener('input', function () { render(parseInt(slider.value, 10)); });
+            var prev = panel.querySelector('#hist-prev');
+            var next = panel.querySelector('#hist-next');
+            if (prev) prev.addEventListener('click', function () {
+                slider.value = Math.max(0, parseInt(slider.value, 10) - VIEW);
+                render(parseInt(slider.value, 10));
+            });
+            if (next) next.addEventListener('click', function () {
+                slider.value = Math.min(parseInt(slider.max, 10), parseInt(slider.value, 10) + VIEW);
+                render(parseInt(slider.value, 10));
+            });
+        }).catch(function () {
+            var err = panel.querySelector('#hist-error');
+            if (err) err.style.display = '';
+        });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+        var target = e.detail && e.detail.target;
+        if (target && target.id === 'history-panel') initActivityHistory(target);
+    });
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it
