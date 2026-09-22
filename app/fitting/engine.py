@@ -1263,7 +1263,17 @@ async def _build_item_attrs(
 
             phasing = item.get("resist_phasing")
             if phasing:
-                if type_id in rah_type_ids:
+                # `items` reaches the engine as whatever JSON the request
+                # carried, so this is the one field here that is unvalidated
+                # client input. A list or a bare string would otherwise reach
+                # .get() and 500 the handler — warn like every other bad
+                # phasing instead.
+                if not isinstance(phasing, dict):
+                    warnings.append(
+                        "resist_phasing ignored: expected an object keyed by "
+                        "damage type"
+                    )
+                elif type_id in rah_type_ids:
                     warning = _apply_rah_phasing(attrs, phasing)
                     if warning:
                         warnings.append(warning)

@@ -824,6 +824,19 @@ def test_rah_phasing_on_a_module_that_is_not_a_reactive_hardener_is_ignored():
     assert any("not a reactive armor hardener" in w for w in stats["warnings"])
 
 
+@pytest.mark.parametrize("bad", [[60, 0, 0, 0], "em", 5, True])
+def test_rah_phasing_that_is_not_an_object_warns_instead_of_raising(bad):
+    """`items` arrives as raw request JSON, so this field is client input.
+
+    A list or a bare string reaching .get() would 500 the stats route, which
+    is the one thing the warnings design exists to avoid.
+    """
+    stats = _stats([_low(RAH, resist_phasing=bad)])
+    assert any("expected an object" in w for w in stats["warnings"])
+    # Falls back to the module's own unphased resists rather than nothing.
+    assert stats["armor_em_resist"] == pytest.approx(15.0, abs=0.05)
+
+
 def test_rah_overheat_multiplies_on_top_of_the_phased_profile():
     """Order is charge -> phasing -> overload, so heat scales what phasing set.
 
