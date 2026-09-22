@@ -70,19 +70,53 @@ ATTR_RATE_OF_FIRE = 51         # turret/launcher ROF (ms) — "speed" attribute
 ATTR_MISSILE_DAMAGE_MULTIPLIER = 212        # on character entity
 ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS = 213  # on BCU (source attr)
 
-# Overload bonus attributes (on modules, applied when overheated)
-# Mapping: overload attr ID → (target attr to modify, is_reduction)
-# is_reduction=True means the bonus mechanically reduces the target (ROF/duration)
-OVERLOAD_ATTR_MAP = {
-    1210: (ATTR_DAMAGE_MULTIPLIER, False),   # overloadDamageModifier → +% damage
-    1205: (ATTR_RATE_OF_FIRE, True),          # overloadRofBonus → reduce cycle time
-    1223: (20, False),                        # overloadSpeedFactorBonus → +% speed
-    1208: (None, False),                      # overloadHardeningBonus → resist (special)
-    1230: (84, False),                        # overloadArmorDamageAmount → +% armor rep
-    1231: (68, False),                        # overloadShieldBonus → +% shield boost
-    1206: (ATTR_DURATION, True),              # overloadSelfDurationBonus → reduce cycle
-    1222: (54, False),                        # overloadRangeBonus → +% optimal range
-}
+# ── Overload / heat ──────────────────────────────────────────────────────
+# Overheating is NOT a special case in the dogma data: every overload bonus
+# is an ordinary effect whose modifiers target the module's OWN attributes
+# (domain "itemID"), gated by effect category 5. A census of the CCP SDE
+# (dogmaEffects.jsonl) found 49 modifier rows in category 5; all 49 have
+# domain "itemID" and all 49 read a source attribute whose name begins with
+# "overload". No category-5 row uses any other domain, and no "overload*"
+# source attribute appears on an "itemID" row outside category 5.
+#
+# That equivalence is what OVERLOAD_SOURCE_ATTR_PREFIX exploits: selecting
+# `domain == "itemID" AND source attribute name LIKE 'overload%'` picks out
+# exactly the overload rows, without depending on effect_category being
+# populated correctly in an already-imported database. See
+# engine._get_overload_modifiers.
+#
+# This replaces the former hand-written OVERLOAD_ATTR_MAP, which covered 8
+# of the 13 overload families and silently dropped overloadHardeningBonus
+# (its target was recorded as None). The SDE rows reproduce the other 7
+# families' targets exactly — the map's `is_reduction` flag was never read,
+# because a reduction is simply a negative bonus under postPercent.
+OVERLOAD_SOURCE_ATTR_PREFIX = "overload"
+
+# Resistance-bonus attributes carried by hardeners. These are the SOURCE
+# attributes the hardener's own effect reads to modify the ship's resonance
+# (e.g. effect 5231 modifyActiveArmorResonancePostPercent: armorEmDamageResonance
+# 267 modified by emDamageResistanceBonus 984, operator postPercent), and the
+# TARGET attributes that overloadHardeningBonus (1208) boosts.
+ATTR_EM_RESIST_BONUS = 984
+ATTR_EXPL_RESIST_BONUS = 985
+ATTR_KIN_RESIST_BONUS = 986
+ATTR_THERM_RESIST_BONUS = 987
+
+# ── Reactive Armor Hardener ──────────────────────────────────────────────
+# Effect 4928 (adaptiveArmorHardener) is the module's defining effect and
+# carries NO modifierInfo — CCP models the redistribution in the game server,
+# so the SDE cannot express it. Identify a reactive hardener by this effect
+# rather than by name or group: it is what actually makes a module one.
+EFFECT_ADAPTIVE_ARMOR_HARDENER = 4928
+ATTR_RESISTANCE_SHIFT_AMOUNT = 1849   # resist points moved per cycle (6.0)
+
+# ── Charges that modify their parent module ──────────────────────────────
+# Most of this is ordinary dogma: a charge's effect carries modifiers with
+# domain "otherID", meaning "the module I am loaded into". Two mechanics are
+# NOT expressible in modifierInfo and are hand-coded (Pyfa hand-codes them too):
+EFFECT_POWER_BOOSTER = 48             # capacitor booster module; effect 48 has 0 modifiers
+ATTR_CAPACITOR_BONUS = 67             # GJ injected by a cap booster charge
+ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER = 1886   # ancillary repairer's paste multiplier (3.0)
 
 # Spool-up (Triglavian entropic disintegrators)
 ATTR_DMG_MULT_BONUS_PER_CYCLE = 2733
@@ -121,6 +155,18 @@ ATTR_ARMOR_EM_RESONANCE = 267
 ATTR_ARMOR_THERM_RESONANCE = 270
 ATTR_ARMOR_KIN_RESONANCE = 269
 ATTR_ARMOR_EXPL_RESONANCE = 268
+
+# Armor resonance attributes in (em, thermal, kinetic, explosive) order —
+# the order the Reactive Armor Hardener phasing API uses throughout.
+ARMOR_RESONANCE_ATTRS = (
+    ATTR_ARMOR_EM_RESONANCE,
+    ATTR_ARMOR_THERM_RESONANCE,
+    ATTR_ARMOR_KIN_RESONANCE,
+    ATTR_ARMOR_EXPL_RESONANCE,
+)
+
+# Damage-type keys in the same order, used by the resist_phasing request field.
+DAMAGE_TYPE_KEYS = ("em", "thermal", "kinetic", "explosive")
 
 # Hull resists — ships store hull/structure resonance in the generic
 # damageResonance attrs (109-113), NOT the hull-specific 974-977.
