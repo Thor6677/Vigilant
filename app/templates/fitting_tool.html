@@ -506,6 +506,14 @@ function searchShip() {
 }
 
 function selectShip(typeId, typeName) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    // This is the search-result click path (fitting_search_results.html);
+    // there is no other caller, but the positional fallback is kept for
+    // consistency with the rest of this file's data-click handlers.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+    }
     state.shipTypeId = typeId;
     state.shipName = typeName;
     state.items = [];
@@ -609,6 +617,13 @@ function addModule(typeId, typeName, slot) {
 }
 
 function addDrone(typeId, typeName) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    // addModuleFromBrowser (Browse panel) still calls this positionally, so
+    // that path must keep working when dataset is absent.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+    }
     // Check if drone already exists, increment quantity
     for (var i = 0; i < state.items.length; i++) {
         if (state.items[i].type_id === typeId && state.items[i].slot === 'drone') {
@@ -1068,11 +1083,11 @@ function loadSkillCharList() {
             if (String(c.id) === saved) opt.selected = true;
             sel.appendChild(opt);
         });
-        if (saved) onSkillCharChange(/*silent*/true);
+        if (saved) onSkillCharChange();
     });
 }
 
-function onSkillCharChange(silent) {
+function onSkillCharChange() {
     var id = getSelectedSkillCharId();
     if (id) {
         localStorage.setItem(SKILL_CHAR_KEY, String(id));
@@ -1799,6 +1814,17 @@ function browseToPathIndex(idx, groupId) {
 /* ── Fit restriction check on search-based module add ────────────────────── */
 var _origAddModule = addModule;
 addModule = function(typeId, typeName, slot) {
+    // ISS-020: this wrapper — not the shadowed function above — is what the
+    // dispatcher's window['addModule'] lookup actually reaches for
+    // data-click="addModule" (search results, fitting_search_results.html),
+    // so the dataset prologue has to live here. addModuleFromBrowser (Browse
+    // panel) bypasses this wrapper entirely and calls _origAddModule
+    // directly, so it needs no fallback handling here.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        slot = this.dataset.slotType;
+    }
     if (!state.shipTypeId) { _origAddModule(typeId, typeName, slot); return; }
     fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
         .then(function(r) { return r.json(); })
