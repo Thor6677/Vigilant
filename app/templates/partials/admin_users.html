@@ -132,52 +132,8 @@
     </div>
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-/* Was an inline htmx.ajax in each role select's onchange. */
-window.adminSetRole = window.adminSetRole || function() {
-    htmx.ajax('POST', '/admin/action/set-role/' + this.dataset.userId + '/' + this.value,
-              {target: '#admin-content', swap: 'innerHTML'});
-};
-var _allowSearchTimer = null;
-function searchAllowlist() {
-    clearTimeout(_allowSearchTimer);
-    document.getElementById('allow-id').value = '';
-    document.getElementById('allow-name').value = '';
-    var q = document.getElementById('allow-search').value.trim();
-    var resultsDiv = document.getElementById('allow-results');
-    if (q.length < 3) { resultsDiv.style.display = 'none'; resultsDiv.innerHTML = ''; return; }
-    _allowSearchTimer = setTimeout(function() {
-        var cat = document.getElementById('allow-type').value;
-        fetch('/admin/action/allowlist-search?q=' + encodeURIComponent(q) + '&category=' + cat)
-            .then(function(r) { return r.text(); })
-            .then(function(html) {
-                resultsDiv.innerHTML = html;
-                resultsDiv.style.display = html ? 'block' : 'none';
-            });
-    }, 300);
-}
-function selectAllowlistResult() {
-    var id = this.dataset.id;
-    var name = this.dataset.name;
-    document.getElementById('allow-id').value = id;
-    document.getElementById('allow-name').value = name;
-    document.getElementById('allow-search').value = name;
-    document.getElementById('allow-results').style.display = 'none';
-}
-function clearAllowlistSearch() {
-    document.getElementById('allow-search').value = '';
-    document.getElementById('allow-id').value = '';
-    document.getElementById('allow-name').value = '';
-    document.getElementById('allow-results').style.display = 'none';
-}
-function addAllowlistEntry() {
-    var entryType = document.getElementById('allow-type').value;
-    var eveId = document.getElementById('allow-id').value.trim();
-    var name = document.getElementById('allow-name').value.trim();
-    if (!eveId) { alert('Search and select a name first.'); return; }
-    htmx.ajax('POST', '/admin/action/allowlist-add', {
-        target: '#admin-content', swap: 'innerHTML',
-        values: { entry_type: entryType, eve_id: eveId, name: name },
-    });
-}
-</script>
+{# adminSetRole, searchAllowlist, selectAllowlistResult, clearAllowlistSearch
+   and addAllowlistEntry are defined in admin.html, under the page's own
+   nonce. They cannot live here: this fragment arrives by htmx swap, and a
+   script in swapped content is re-created as inline script whose nonce never
+   matches the page's policy — which is why every control above did nothing. #}

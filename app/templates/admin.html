@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Admin — VIGILANT{% endblock %}
+
+{% block head %}
+{# Chart.js for the ESI section's request-activity chart. It used to ship
+   inside partials/admin_esi.html, which arrives by htmx swap — so its tag
+   carried the FRAGMENT's nonce, never the page's, and the enforcing policy
+   refused it. The chart has been blank since then. Loading it here, with the
+   page's own nonce, is what every other chart page does (dashboard,
+   character_detail, mining_ledger, market_type, networth, pnl). #}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
 {% block breadcrumbs %}
 <div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Admin</span></div>
 {% endblock %}
@@ -62,5 +72,123 @@ function switchTab() {
 refreshTimer = setInterval(function() {
     htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
 }, 10000);
+</script>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Behaviour for the admin section fragments.
+ *
+ * All of this used to live in inline blocks inside partials/admin_audit.html,
+ * partials/admin_esi.html and partials/admin_users.html. Those fragments
+ * arrive through htmx, which re-creates any script element it finds in
+ * swapped content — as INLINE script, under the fragment's own nonce, which
+ * never matches the page's CSP header. So none of it ran: the audit filter
+ * did nothing, the role selects did nothing, the allowlist search did
+ * nothing, and the request-activity chart stayed blank. The fragments carry
+ * markup only now, and this block runs under the PAGE's nonce, where it
+ * works.
+ *
+ * Section markup is replaced wholesale every few seconds, so nothing here may
+ * hold a reference to an element across a swap: the dispatched handlers look
+ * their targets up when they run, and the chart is rebuilt from the canvas's
+ * own data-chart attribute after every swap. */
+(function() {
+    /* ── Audit log ─────────────────────────────────────────────────────── */
+    window.adminAuditFilter = window.adminAuditFilter || function() {
+        htmx.ajax('GET', '/admin/section/audit?filter=' + this.value, '#admin-content');
+    };
+
+    /* ── Users ─────────────────────────────────────────────────────────── */
+    window.adminSetRole = window.adminSetRole || function() {
+        htmx.ajax('POST', '/admin/action/set-role/' + this.dataset.userId + '/' + this.value,
+                  {target: '#admin-content', swap: 'innerHTML'});
+    };
+
+    var _allowSearchTimer = null;
+    window.searchAllowlist = window.searchAllowlist || function() {
+        clearTimeout(_allowSearchTimer);
+        document.getElementById('allow-id').value = '';
+        document.getElementById('allow-name').value = '';
+        var q = document.getElementById('allow-search').value.trim();
+        var resultsDiv = document.getElementById('allow-results');
+        if (q.length < 3) { resultsDiv.style.display = 'none'; resultsDiv.innerHTML = ''; return; }
+        _allowSearchTimer = setTimeout(function() {
+            var cat = document.getElementById('allow-type').value;
+            fetch('/admin/action/allowlist-search?q=' + encodeURIComponent(q) + '&category=' + cat)
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    resultsDiv.innerHTML = html;
+                    resultsDiv.style.display = html ? 'block' : 'none';
+                });
+        }, 300);
+    };
+
+    /* Bound by the rows the allowlist-search endpoint builds in Python
+       (app/routes/admin.py), not by a template. */
+    window.selectAllowlistResult = window.selectAllowlistResult || function() {
+        document.getElementById('allow-id').value = this.dataset.id;
+        document.getElementById('allow-name').value = this.dataset.name;
+        document.getElementById('allow-search').value = this.dataset.name;
+        document.getElementById('allow-results').style.display = 'none';
+    };
+
+    window.clearAllowlistSearch = window.clearAllowlistSearch || function() {
+        document.getElementById('allow-search').value = '';
+        document.getElementById('allow-id').value = '';
+        document.getElementById('allow-name').value = '';
+        document.getElementById('allow-results').style.display = 'none';
+    };
+
+    window.addAllowlistEntry = window.addAllowlistEntry || function() {
+        var entryType = document.getElementById('allow-type').value;
+        var eveId = document.getElementById('allow-id').value.trim();
+        var name = document.getElementById('allow-name').value.trim();
+        if (!eveId) { window.alert('Search and select a name first.'); return; }
+        htmx.ajax('POST', '/admin/action/allowlist-add', {
+            target: '#admin-content', swap: 'innerHTML',
+            values: { entry_type: entryType, eve_id: eveId, name: name },
+        });
+    };
+
+    /* ── ESI request-activity chart ────────────────────────────────────── */
+    function adminRenderCharts() {
+        if (typeof Chart === 'undefined') return;
+        var canvas = document.getElementById('admin-request-chart');
+        if (!canvas) return;
+        var data;
+        try { data = JSON.parse(canvas.dataset.chart || 'null'); } catch (e) { return; }
+        if (!data) return;
+        /* The canvas is a brand-new element after each swap, but Chart.js
+           keeps the old instance registered against the old one; destroy it
+           or the library leaks a chart every 5 seconds. */
+        if (window._adminChart) { window._adminChart.destroy(); }
+        window._adminChart = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: data.labels,
+                datasets: [
+                    { label: 'Fetched', data: data.fetched, backgroundColor: 'rgba(51,170,85,0.7)', stack: 'r' },
+                    { label: 'Cached', data: data.cached, backgroundColor: 'rgba(100,160,220,0.7)', stack: 'r' },
+                    { label: 'Rejected', data: data.rejected, backgroundColor: 'rgba(204,51,51,0.7)', stack: 'r' },
+                ],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: { legend: { display: true, position: 'top', labels: { color: '#474747', font: { family: "'JetBrains Mono',monospace", size: 9 }, boxWidth: 10, padding: 8, usePointStyle: true } } },
+                scales: {
+                    x: { stacked: true, grid: { color: '#191919' }, ticks: { color: '#474747', font: { family: 'monospace', size: 9 }, maxTicksLimit: 10 } },
+                    y: { stacked: true, beginAtZero: true, grid: { color: '#191919' }, ticks: { color: '#474747', font: { family: 'monospace', size: 9 }, precision: 0 } }
+                }
+            }
+        });
+    }
+
+    /* Scoped to #admin-content, the only target these sections swap into —
+       same shape as base.html's banner hook. */
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target && evt.detail.target.id === 'admin-content') {
+            adminRenderCharts();
+        }
+    });
+})();
 </script>
 {% endblock %}
