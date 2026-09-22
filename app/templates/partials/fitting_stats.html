@@ -341,6 +341,39 @@
     </div>
 </div>
 
+{# ── Reactive Armor Hardener + engine warnings ─────────────────────────────
+   Read-only, and deliberately so: the phasing itself is set per item in the
+   request, so there is nothing here to edit. This block only reports what the
+   engine worked out — the distribution that would best match the selected
+   damage profile, and anything it had to correct. Purely additive markup with
+   its own `rah-` ids and no script of its own. #}
+{% if stats.rah_fitted and stats.rah_suggested_phasing %}
+<div class="b-section" id="rah-suggestion">
+    <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">
+        Reactive Armor Hardener &mdash; suggested phasing for this damage profile
+    </div>
+    <table style="width:100%;font-size:10px;">
+        {% for label, key in [('EM', 'em'), ('Thermal', 'thermal'),
+                              ('Kinetic', 'kinetic'), ('Explosive', 'explosive')] %}
+        <tr>
+            <td style="color:var(--muted);padding:2px 0;">{{ label }}</td>
+            <td style="text-align:right;color:var(--text);">
+                {{ "{:,.1f}".format(stats.rah_suggested_phasing[key]) }} pts
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+{% if stats.warnings %}
+<div class="b-section" id="rah-warnings">
+    {% for warning in stats.warnings %}
+    <div style="font-size:10px;color:var(--danger);padding:2px 0;">{{ warning }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <script nonce="{{ request.state.csp_nonce }}">
 /* Both of these were single-line onclick expressions. Each toggle flips its
    own button label and rewrites every value cell from the dataset the server
