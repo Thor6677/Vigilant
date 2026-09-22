@@ -157,6 +157,10 @@
 
 {% endif %}
 
-{# ── Chart data injection ─────────────────────────────────────────────────── #}
-<script nonce="{{ request.state.csp_nonce }}" id="mining-chart-data" type="application/json">{{ chart_data_json | safe }}</script>
-<script nonce="{{ request.state.csp_nonce }}">document.dispatchEvent(new CustomEvent('mining-chart-ready'));</script>
+{# ── Chart data ───────────────────────────────────────────────────────────── #}
+{# The series ride in on a data attribute, not a data island and not an event
+   dispatch. Both of those were script elements, and htmx re-creates script
+   elements in swapped content as inline script under this fragment's nonce —
+   which the page's CSP never matches, so the dispatch was refused on every
+   swap. mining_ledger.html reads this after the swap settles. #}
+<div id="mining-chart-data" hidden data-chart="{{ chart_data_json }}"></div>

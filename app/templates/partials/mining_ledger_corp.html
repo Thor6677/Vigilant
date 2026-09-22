@@ -53,17 +53,12 @@
 </div>
 {% endfor %}
 
-{# ── Restore checkbox state for previously selected chars ─────────────────── #}
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    try {
-        var sel = JSON.parse(localStorage.getItem('vigilant_mining_selection') || '[]');
-        var set = new Set(sel);
-        document.querySelectorAll('#corp-chars-{{ corp_id }} .ml-check').forEach(function(cb) {
-            if (set.has(parseInt(cb.dataset.charid))) cb.checked = true;
-        });
-    } catch(e) {}
-})();
-</script>
+{# The per-corp "restore checkbox state" block that used to sit here is gone.
+   It was a script inside an htmx-swapped fragment, so it was re-created as
+   inline script under this fragment's nonce and refused — it never ran. The
+   page already does the same restore on htmx:afterSwap (mining_ledger.html,
+   restoreCheckboxes), and that listener is now registered unconditionally so
+   it covers the case this block was reaching for: a corp card expanded after
+   the first character was ticked. #}
 
 {% endif %}
