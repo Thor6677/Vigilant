@@ -21,6 +21,31 @@
     .ta-heatmap-cell { aspect-ratio:1; min-height:14px; background:rgba(94,177,255,0); border:1px solid rgba(255,255,255,0.03); }
     .ta-heatmap-col-labels { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; font-size:8px; color:var(--muted); margin-bottom:2px; }
     .ta-heatmap-col-labels > div { text-align:center; }
+    /* Heatmap scope/mode controls */
+    .ta-hm-controls { display:flex; flex-wrap:wrap; gap:0.9rem; align-items:center; margin-bottom:0.7rem; }
+    .ta-hm-group { display:flex; align-items:center; gap:0.25rem; flex-wrap:wrap; }
+    .ta-hm-group .b-btn { padding:3px 9px; font-size:10px; text-decoration:none; }
+    .ta-hm-group .b-btn.is-active { color:var(--accent); border-color:var(--accent); }
+    .ta-hm-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-right:0.2rem; }
+    .ta-hm-input { background:var(--surface); border:1px solid var(--border); color:var(--text); font-size:10px; padding:3px 6px; }
+    #ta-region-filter { width:110px; }
+    #ta-region-select { max-width:190px; }
+    /* Presence strip: one bar per UTC hour, pilots online averaged over the
+       week. Sits above the columns so a hot kills cell can be read against
+       a quiet server. */
+    .ta-hm-strip { display:grid; grid-template-columns:30px repeat(24, 1fr); gap:1px; align-items:end; height:24px; margin-bottom:3px; }
+    .ta-hm-strip-cell { display:flex; align-items:flex-end; height:100%; }
+    .ta-hm-strip-cell > span { display:block; width:100%; min-height:1px; background:rgba(94,177,255,0.5); }
+    .ta-hm-strip-label { font-size:8px; color:var(--muted); display:flex; align-items:flex-end; justify-content:flex-end; padding-right:4px; }
+    /* Timezone bands overlay the grid rather than sitting beside it, so a
+       cell's column can be read as "this is EU prime" at a glance. */
+    .ta-hm-grid-wrap { position:relative; }
+    .ta-hm-bands { position:absolute; top:0; left:0; right:0; bottom:0; display:grid;
+                   grid-template-columns:30px repeat(24, 1fr); grid-template-rows:100%; gap:1px; pointer-events:none; }
+    .ta-hm-band { grid-row:1; height:100%; border-left:1px solid; border-right:1px solid; }
+    .ta-hm-legend { display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; font-size:9px; color:var(--muted); margin-top:0.55rem; }
+    .ta-hm-legend-item { display:inline-flex; align-items:center; gap:0.3rem; }
+    .ta-hm-swatch { display:inline-block; width:10px; height:10px; border:1px solid; }
 </style>
 {% endblock %}
 
@@ -37,7 +62,20 @@
   {%- if n >= 1000 -%}{{ "%.1f"|format(n / 1000) }}K{%- else -%}{{ n }}{%- endif -%}
 {% endmacro %}
 
+{# Every control on this page rebuilds the WHOLE query string. The heatmap
+   selection and the chart window are independent, so a window button that
+   dropped ?scope= would silently reset the user's view (and vice versa). #}
+{% macro ta_url(w, m, s, r) -%}
+/tools/activity?window={{ w }}&amp;mode={{ m }}&amp;scope={{ s }}{% if r %}&amp;region={{ r }}{% endif %}
+{%- endmacro %}
+
 {% block content %}
+
+{# Defaults so the live-mode branch, which builds no heatmap context, can
+   still render the window buttons through ta_url(). #}
+{% set hm_mode = heatmap_mode|default('kills') %}
+{% set hm_scope = heatmap_scope|default('all') %}
+{% set hm_region = heatmap_region|default(none) %}
 
 <div class="b-page-header">
     <div>
@@ -54,13 +92,13 @@
         <div class="ta-windows">
             {% set btn_label = {'1h':'1H','1d':'24H','36h':'36H','7d':'7D','30d':'30D','90d':'90D','1y':'1Y','5y':'5Y','all':'ALL'} %}
             {% for w, label in window_options %}
-            <a href="/tools/activity?window={{ w }}"
+            <a href="{{ ta_url(w, hm_mode, hm_scope, hm_region) }}"
                class="b-btn {% if w == window %}is-active{% endif %}"
                style="text-decoration:none;">
                 {{ btn_label.get(w, w) }}
             </a>
             {% endfor %}
-            <a href="/tools/activity?window=live"
+            <a href="{{ ta_url('live', hm_mode, hm_scope, hm_region) }}"
                class="b-btn {% if window == 'live' %}is-active{% endif %}"
                style="text-decoration:none;">
                 LIVE
@@ -396,70 +434,324 @@
 {% endif %}
 
 {% if has_heatmap_data %}
+{% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+{% set mode_blurb = {
+    'kills': 'Cell colour = kills in that hour-of-week bucket over the trailing ' ~ heatmap_days|default(90) ~ ' days, for the selected space.',
+    'pilots': 'Cell colour = average concurrent players online at that hour over the trailing ' ~ heatmap_days|default(90) ~ ' days. Server-wide — pilots online has no location dimension, so this view ignores the space selector.',
+    'percap': 'Cell colour = kills per 1,000 pilots online for that hour-of-week bucket. Kills are a 90-day total for the bucket; pilots online is the average concurrent headcount in the same bucket.',
+} %}
 <div class="b-section" style="margin-top:1rem;">
-    <div class="b-section-head"><span class="b-label">When is EVE busiest? · trailing 90 days · UTC</span></div>
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="b-label">When is EVE busiest? · trailing {{ heatmap_days|default(90) }} days · UTC{% if heatmap_region_name %} · {{ heatmap_region_name }}{% endif %}</span>
+        <button type="button" id="ta-tz-toggle" class="b-btn" data-click="taToggleLocalTime"
+                style="padding:3px 10px;font-size:10px;">Local time</button>
+    </div>
     <div class="b-pad-md">
-        <div class="ta-heatmap-col-labels">
-            <div></div>
-            {% for h in range(24) %}<div>{{ "%02d"|format(h) }}</div>{% endfor %}
-        </div>
-        {% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
-        <div class="ta-heatmap" id="pcu-heatmap" data-grid='{{ pcu_heatmap|tojson }}'>
-            {% for dow in range(7) %}
-                <div class="ta-heatmap-row-label">{{ days[dow] }}</div>
-                {% for hr in range(24) %}
-                <div class="ta-heatmap-cell" data-dow="{{ dow }}" data-hr="{{ hr }}"
-                     {% if pcu_heatmap[dow][hr] is not none %}title="{{ days[dow] }} {{ '%02d'|format(hr) }}:00 — {{ pcu_heatmap[dow][hr] }} avg players"{% endif %}></div>
+
+        {% if heatmap_zone_available %}
+        <div class="ta-hm-controls">
+            <div class="ta-hm-group" id="ta-heatmap-modes">
+                <span class="ta-hm-label">Measure</span>
+                {% for m, m_label in heatmap_modes %}
+                <a class="b-btn ta-hm-mode {% if m == hm_mode %}is-active{% endif %}"
+                   href="{{ ta_url(window, m, hm_scope, hm_region) }}">{{ m_label }}</a>
                 {% endfor %}
-            {% endfor %}
+            </div>
+            {# Picking a scope clears the region: a region already implies its
+               space, and carrying a stale region through a scope click would
+               show Providence while the null-sec button looks selected. #}
+            <div class="ta-hm-group" id="ta-heatmap-scopes">
+                <span class="ta-hm-label">Space</span>
+                {% for s, s_label in heatmap_scopes %}
+                <a class="b-btn ta-hm-scope {% if s == hm_scope and not hm_region %}is-active{% endif %}"
+                   href="{{ ta_url(window, hm_mode, s, none) }}">{{ s_label }}</a>
+                {% endfor %}
+            </div>
+            {# Plain form GET, no fetch: the browser writes the query string
+               for us, so the view stays linkable with no JS state to sync. #}
+            <form class="ta-hm-group" id="ta-region-form" method="get" action="/tools/activity">
+                <input type="hidden" name="window" value="{{ window }}">
+                <input type="hidden" name="mode" value="{{ hm_mode }}">
+                <input type="hidden" name="scope" value="{{ hm_scope }}">
+                <span class="ta-hm-label">Region</span>
+                {# No name= on the filter box, so it never reaches the URL. #}
+                <input type="text" id="ta-region-filter" class="ta-hm-input" autocomplete="off"
+                       placeholder="Filter…" data-input="taFilterRegions">
+                <select name="region" id="ta-region-select" class="ta-hm-input"
+                        data-change="taSubmitRegion">
+                    <option value="">All regions in scope</option>
+                    {% for r in heatmap_regions %}
+                    <option value="{{ r['region_id'] }}" data-jspace="{{ 1 if r['jspace'] else 0 }}"
+                            {% if hm_region == r['region_id'] %}selected{% endif %}>{{ r['region_name'] }}</option>
+                    {% endfor %}
+                </select>
+            </form>
         </div>
+        {% endif %}
+
+        {% if heatmap_sparse %}
+        <div class="b-empty" style="padding:1.5rem;color:var(--muted);font-size:11px;text-align:center;">
+            Not enough data for this selection — {{ '{:,}'.format(heatmap_kills_total) }} kills
+            over the trailing {{ heatmap_days }} days, below the {{ '{:,}'.format(heatmap_min_kills) }}
+            needed for the shape to mean anything. Pick a wider space or another region.
+        </div>
+        {% else %}
+        <div class="ta-hm-strip" id="ta-presence-strip" data-strip='{{ presence_strip|default([])|tojson }}'>
+            <div class="ta-hm-strip-label">PCU</div>
+            {% for h in range(24) %}<div class="ta-hm-strip-cell"><span data-hr="{{ h }}"></span></div>{% endfor %}
+        </div>
+        <div class="ta-heatmap-col-labels" id="ta-hm-col-labels">
+            <div></div>
+            {% for h in range(24) %}<div data-hr="{{ h }}">{{ "%02d"|format(h) }}</div>{% endfor %}
+        </div>
+        <div class="ta-hm-grid-wrap">
+            <div class="ta-heatmap" id="pcu-heatmap"
+                 data-grid='{{ heatmap_grid|default(pcu_heatmap)|tojson }}'
+                 data-max="{{ heatmap_max|default(0) }}"
+                 data-min="{{ heatmap_min|default(0) }}"
+                 data-mode="{{ hm_mode }}">
+                {% for dow in range(7) %}
+                    <div class="ta-heatmap-row-label">{{ days[dow] }}</div>
+                    {% for hr in range(24) %}
+                    {% set kills_v = heatmap_kills[dow][hr] if heatmap_kills else none %}
+                    {% set pcu_v = pcu_heatmap[dow][hr] %}
+                    {% set cell_v = (heatmap_grid|default(pcu_heatmap))[dow][hr] %}
+                    <div class="ta-heatmap-cell" data-dow="{{ dow }}" data-hr="{{ hr }}"
+                         title="{{ days[dow] }} {{ '%02d'|format(hr) }}:00–{{ '%02d'|format((hr + 1) % 24) }}:00 UTC · {% if kills_v is not none %}{{ '{:,}'.format(kills_v) }} kills{% else %}no kill data{% endif %} · {% if pcu_v is not none %}{{ '{:,}'.format(pcu_v) }} pilots online avg{% else %}no pilots-online sample{% endif %}{% if hm_mode == 'percap' %} · {% if cell_v is not none %}{{ cell_v }} kills per 1,000 pilots online{% else %}per capita unavailable{% endif %}{% endif %}"></div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+            <div class="ta-hm-bands" id="ta-hm-bands" data-bands='{{ tz_bands|default([])|tojson }}'></div>
+        </div>
+        <div class="ta-hm-legend" id="ta-hm-legend">
+            {% for band in tz_bands|default([]) %}
+            <span class="ta-hm-legend-item">
+                <span class="ta-hm-swatch" data-band-swatch="{{ loop.index0 }}"></span>
+                {{ band[0] }}
+                <span data-band-range="{{ loop.index0 }}">{{ '%02d'|format(band[1]) }}–{{ '%02d'|format(band[2]) }} UTC</span>
+            </span>
+            {% endfor %}
+            <span>prime-time bands · approximate · DST not applied</span>
+        </div>
+        {% endif %}
+
         <div style="font-size:9px;color:var(--muted);margin-top:0.5rem;">
-            Cell color = average concurrent players online at that hour over the last 90 days. Combines ESI live samples with eve-offline.net (Chribba) and eve-offline.com (Adminor) minute-resolution archives. Downtime is at 11:00 UTC; expect a dip there.
+            {{ mode_blurb[hm_mode] }}
+            The strip above the grid is the server-wide pilots-online curve per UTC hour — a cell can be busy by kills and quiet by presence, which is what null-sec timers at 04:00 UTC look like.
+            Colour is scaled to this grid's own maximum, so a quiet region still shows its own shape.
+            Pilots online combines ESI live samples with eve-offline.net (Chribba) and eve-offline.com (Adminor) minute-resolution archives; kills come from the killmail stream joined to the SDE for security and region. Downtime is at 11:00 UTC; expect a dip there.
         </div>
     </div>
 </div>
 <script nonce="{{ request.state.csp_nonce }}">
 (function() {
     const el = document.getElementById('pcu-heatmap');
-    if (!el) return;
-    const grid = JSON.parse(el.dataset.grid);
-    let min = Infinity, max = -Infinity;
-    for (const row of grid) for (const v of row) {
-        if (v == null) continue;
-        if (v < min) min = v;
-        if (v > max) max = v;
-    }
-    if (!isFinite(min) || max <= min) return;
-    // EVE's PCU never goes near zero, so a (0, max) scale collapses every
-    // cell into a narrow band. Rescale to (min, max) and lerp through a
-    // perceptually distinct ramp: deep blue → cyan → gold → red. Anchor
-    // colors picked to read on the dark theme.
-    const stops = [
-        [0.00, [22,  40,  90 ]],   // deep blue
-        [0.35, [60, 130, 200 ]],   // mid blue
-        [0.65, [220,170, 90  ]],   // gold
-        [1.00, [238, 85, 85  ]],   // red
-    ];
-    const lerp = (a, b, t) => Math.round(a + (b - a) * t);
-    const colorAt = (t) => {
-        for (let i = 1; i < stops.length; i++) {
-            if (t <= stops[i][0]) {
-                const [t0, c0] = stops[i-1], [t1, c1] = stops[i];
-                const k = (t - t0) / (t1 - t0);
-                return [lerp(c0[0],c1[0],k), lerp(c0[1],c1[1],k), lerp(c0[2],c1[2],k)];
+
+    // ── Cell colour ─────────────────────────────────────────────────────
+    // Normalised against THIS grid's own max (server-computed, data-max) so
+    // a low-volume region still shows its internal shape instead of coming
+    // out uniformly black next to null-sec.
+    //
+    // The pilots-online grid is the one exception to a 0-based ramp: EVE's
+    // PCU never goes near zero, so a (0, max) scale collapses every cell
+    // into a narrow band. That grid alone rescales from its own minimum.
+    if (el) {
+        const grid = JSON.parse(el.dataset.grid);
+        const max = parseFloat(el.dataset.max);
+        const min = parseFloat(el.dataset.min) || 0;
+        // Deep blue → mid blue → gold → red. Anchors picked to read on the
+        // dark theme.
+        const stops = [
+            [0.00, [22,  40,  90 ]],
+            [0.35, [60, 130, 200 ]],
+            [0.65, [220,170, 90  ]],
+            [1.00, [238, 85, 85  ]],
+        ];
+        const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+        const colorAt = (t) => {
+            for (let i = 1; i < stops.length; i++) {
+                if (t <= stops[i][0]) {
+                    const [t0, c0] = stops[i-1], [t1, c1] = stops[i];
+                    const k = (t - t0) / (t1 - t0);
+                    return [lerp(c0[0],c1[0],k), lerp(c0[1],c1[1],k), lerp(c0[2],c1[2],k)];
+                }
             }
+            return stops[stops.length-1][1];
+        };
+        if (isFinite(max) && max > min) {
+            el.querySelectorAll('.ta-heatmap-cell').forEach(cell => {
+                const dow = parseInt(cell.dataset.dow, 10);
+                const hr = parseInt(cell.dataset.hr, 10);
+                const v = grid[dow][hr];
+                if (v == null) return;
+                const t = Math.max(0, Math.min(1, (v - min) / (max - min)));
+                const [r, g, b] = colorAt(t);
+                cell.style.background = `rgb(${r},${g},${b})`;
+            });
         }
-        return stops[stops.length-1][1];
+    }
+
+    // ── Presence strip ──────────────────────────────────────────────────
+    // Pilots online per UTC hour, averaged down the weekday axis. Drawn
+    // against its own max for the same reason the grid is.
+    const strip = document.getElementById('ta-presence-strip');
+    if (strip) {
+        const values = JSON.parse(strip.dataset.strip || '[]');
+        const present = values.filter(v => v != null);
+        if (present.length) {
+            const lo = Math.min(...present), hi = Math.max(...present);
+            strip.querySelectorAll('.ta-hm-strip-cell > span').forEach(bar => {
+                const v = values[parseInt(bar.dataset.hr, 10)];
+                if (v == null) { bar.style.background = 'transparent'; return; }
+                const t = hi > lo ? (v - lo) / (hi - lo) : 1;
+                bar.style.height = (6 + Math.round(t * 18)) + 'px';
+                bar.title = v.toLocaleString() + ' pilots online avg at ' +
+                            String(bar.dataset.hr).padStart(2, '0') + ':00 UTC';
+            });
+        }
+    }
+
+    // ── Timezone bands + the local-time relabel ─────────────────────────
+    // Columns are UTC hour buckets and stay that way — the data is never
+    // re-bucketed client-side. The toggle rewrites the 24 column headers to
+    // the viewer's local equivalent of each UTC hour, and the band ranges
+    // in the legend are rewritten through the same offset so a band always
+    // reads in whatever clock the headers are showing. The band's COLUMNS
+    // do not move, because the hours it covers did not.
+    //
+    // Offset is rounded to whole hours: a half-hour zone (UTC+05:30) would
+    // otherwise have no column to land on.
+    const BAND_RGB = [
+        [94, 177, 255],   // US West
+        [238, 85, 85],    // US East
+        [120, 200, 140],  // EU
+        [220, 170, 90],   // AU
+        [170, 120, 220],  // CN
+    ];
+    const bandsEl = document.getElementById('ta-hm-bands');
+    const bands = bandsEl ? JSON.parse(bandsEl.dataset.bands || '[]') : [];
+    const tzOffset = Math.round(-new Date().getTimezoneOffset() / 60);
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    function paintBands() {
+        if (!bandsEl) return;
+        bandsEl.textContent = '';
+        bands.forEach((band, i) => {
+            const [, start, end] = band;
+            const rgb = BAND_RGB[i % BAND_RGB.length];
+            // A wrap-around band (start > end) is two spans, not one: a
+            // single grid-column from 23 to 3 would render inverted or
+            // collapse to nothing.
+            const spans = start <= end ? [[start, end]] : [[start, 24], [0, end]];
+            spans.forEach(([a, b]) => {
+                if (b <= a) return;
+                const div = document.createElement('div');
+                div.className = 'ta-hm-band';
+                // +2: column 1 is the weekday label gutter.
+                div.style.gridColumn = (a + 2) + ' / ' + (b + 2);
+                div.style.background = 'rgba(' + rgb.join(',') + ',0.10)';
+                div.style.borderColor = 'rgba(' + rgb.join(',') + ',0.40)';
+                bandsEl.appendChild(div);
+            });
+        });
+    }
+
+    function paintSwatches() {
+        bands.forEach((band, i) => {
+            const rgb = BAND_RGB[i % BAND_RGB.length];
+            const sw = document.querySelector('[data-band-swatch="' + i + '"]');
+            if (!sw) return;
+            sw.style.background = 'rgba(' + rgb.join(',') + ',0.35)';
+            sw.style.borderColor = 'rgba(' + rgb.join(',') + ',0.75)';
+        });
+    }
+
+    function applyClock(local) {
+        const shift = local ? tzOffset : 0;
+        const suffix = local ? ' local' : ' UTC';
+        document.querySelectorAll('#ta-hm-col-labels > div[data-hr]').forEach(cell => {
+            const hr = parseInt(cell.dataset.hr, 10);
+            cell.textContent = pad2(((hr + shift) % 24 + 24) % 24);
+        });
+        bands.forEach((band, i) => {
+            const range = document.querySelector('[data-band-range="' + i + '"]');
+            if (!range) return;
+            const a = ((band[1] + shift) % 24 + 24) % 24;
+            const b = ((band[2] + shift) % 24 + 24) % 24;
+            range.textContent = pad2(a) + '–' + pad2(b) + suffix;
+        });
+        const btn = document.getElementById('ta-tz-toggle');
+        if (btn) {
+            btn.textContent = local ? 'UTC' : 'Local time';
+            btn.classList.toggle('is-active', local);
+        }
+    }
+
+    let localClock = false;
+    try { localClock = localStorage.getItem('ta_hm_local') === '1'; } catch (e) {}
+
+    window.taToggleLocalTime = function () {
+        localClock = !localClock;
+        try { localStorage.setItem('ta_hm_local', localClock ? '1' : '0'); } catch (e) {}
+        applyClock(localClock);
     };
-    el.querySelectorAll('.ta-heatmap-cell').forEach(cell => {
-        const dow = parseInt(cell.dataset.dow, 10);
-        const hr = parseInt(cell.dataset.hr, 10);
-        const v = grid[dow][hr];
-        if (v == null) return;
-        const t = (v - min) / (max - min);
-        const [r, g, b] = colorAt(t);
-        cell.style.background = `rgb(${r},${g},${b})`;
-    });
+
+    paintBands();
+    paintSwatches();
+    applyClock(localClock);
+
+    // ── Region select: filter-as-you-type over 100+ options ─────────────
+    // Options are rebuilt from a JS-side copy rather than toggling `hidden`
+    // on <option> elements, which browsers honour inconsistently inside a
+    // closed select.
+    const select = document.getElementById('ta-region-select');
+    if (select) {
+        const scope = '{{ hm_scope }}';
+        const all = Array.prototype.slice.call(select.options)
+            .filter(o => o.value !== '')
+            .map(o => ({ value: o.value, label: o.textContent.trim(),
+                         jspace: o.dataset.jspace === '1' }));
+        const current = select.value;
+
+        function rebuild(term) {
+            const needle = (term || '').toLowerCase();
+            // J-space regions only appear under the J-space scope: they are
+            // hundreds of unnamed systems and would drown the k-space list.
+            const pool = all.filter(o => (scope === 'j') === o.jspace);
+            select.textContent = '';
+            const blank = document.createElement('option');
+            blank.value = '';
+            blank.textContent = 'All regions in scope';
+            select.appendChild(blank);
+            pool.filter(o => !needle || o.label.toLowerCase().indexOf(needle) !== -1)
+                .forEach(o => {
+                    const opt = document.createElement('option');
+                    opt.value = o.value;
+                    opt.textContent = o.label;
+                    select.appendChild(opt);
+                });
+            // Keep the active region selected even when the filter hides it,
+            // so typing does not silently reset the view on the next change.
+            if (current && !Array.prototype.some.call(select.options, o => o.value === current)) {
+                const keep = all.find(o => o.value === current);
+                if (keep) {
+                    const opt = document.createElement('option');
+                    opt.value = keep.value;
+                    opt.textContent = keep.label;
+                    select.appendChild(opt);
+                }
+            }
+            select.value = current;
+        }
+
+        window.taFilterRegions = function () {
+            rebuild(this.value);
+        };
+        window.taSubmitRegion = function () {
+            if (this.form) this.form.submit();
+        };
+        rebuild('');
+    }
 })();
 </script>
 {% endif %}

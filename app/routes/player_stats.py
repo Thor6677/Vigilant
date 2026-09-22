@@ -31,6 +31,23 @@ from app.db.models import (
     get_db,
 )
 from app.db.sde_models import SDESystem
+from app.intel.activity_heatmap import (
+    HEATMAP_DAYS,
+    MIN_KILLS_FOR_GRID,
+    MODE_LABELS,
+    MODES,
+    SCOPE_LABELS,
+    SCOPES,
+    TZ_BANDS,
+    empty_grid,
+    grid_max,
+    grid_total,
+    per_capita_grid,
+    region_hour_of_week_kills,
+    region_options,
+    zone_case_expr,
+    zone_hour_of_week_kills,
+)
 
 _ZONES = ("highsec", "lowsec", "nullsec", "wormhole")
 
@@ -126,22 +143,298 @@ async def warm_activity_cache() -> None:
     if "history" not in _payload_cache:
         _refreshing.add("history")
         await _refresh_payload("history")
+    await warm_heatmap_zone_grids()
     log.info("tools/activity: cache pre-warm complete (%d windows)", len(_payload_cache))
 
-# Heatmap is a 90-day aggregate, window-independent, and runs ~1.5s via a
-# row_number() over 200k+ rows. Cache the result for all windows to share.
+
+async def warm_heatmap_zone_grids() -> None:
+    """Precompute the five kills-by-zone hour-of-week grids.
+
+    All / HS / LS / NS / J-space are the views everyone actually clicks, and
+    one query fills all five — so paying for it once at boot means the
+    common heatmap selections never wait on a 90-day killmails scan. Regions
+    stay on demand: 114 of them, each cheap, almost none of them hot.
+
+    Its own AsyncSessionLocal session, never a request's: this runs from a
+    background task whose lifetime is unrelated to any response.
+
+    Split out of warm_activity_cache() so it is callable on its own — that
+    one opens with a 30-second sleep and cannot be driven from a test.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            await _kills_hour_of_week_grid(db, "all", None)
+    except Exception:
+        log.exception("tools/activity: heatmap zone pre-warm failed")
+
+# Heatmap grids are 90-day aggregates, window-independent, and expensive:
+# the pilots-online one runs ~1.5s via a row_number() over 200k+ rows, and
+# the kills one scans 90 days of the raw killmails table (~1.4M rows on a
+# real install). Every window shares one cache.
+#
+# Keyed by (mode, scope, region_id) now that the panel has a scope selector:
+#   ("pilots", "all", None)  — the server-wide presence grid, one per box
+#   ("kills",  "ns",  None)  — one of the five precomputed zone grids
+#   ("kills",  "all", 10000002) — a region, computed on demand
+#   ("percap", ...)          — derived from the two above, cached the same way
+# region_id stays in the key even for zone scopes so a stale entry can never
+# leak from one selection into another.
 _HEATMAP_TTL_SECONDS = 1800
-_heatmap_cache: tuple[datetime, list[list[int | None]], bool] | None = None
+_heatmap_cache: dict[tuple[str, str, int | None], tuple[datetime, list, bool]] = {}
+
+# Region list comes from the SDE, which changes only on an expansion — but
+# it is empty until the first SDE import finishes, so it cannot be read once
+# at import time. Same TTL as the grids; 114 rows either way.
+_region_options_cache: tuple[datetime, list[dict]] | None = None
+
+
+def _heatmap_cached(key: tuple[str, str, int | None], now: datetime):
+    entry = _heatmap_cache.get(key)
+    if entry is not None and now < entry[0]:
+        return entry[1], entry[2]
+    return None
+
+
+def _heatmap_store(key: tuple[str, str, int | None], now: datetime, grid, has_data: bool):
+    _heatmap_cache[key] = (
+        now + timedelta(seconds=_HEATMAP_TTL_SECONDS), grid, has_data,
+    )
+
+
+async def _pcu_hour_of_week_grid(db: AsyncSession) -> tuple[list[list[int | None]], bool]:
+    """Server-wide pilots-online 7×24 grid, trailing 90 days.
+
+    Independent of the selected chart window — it answers a different
+    question ("when is EVE busiest?") and only makes sense at hourly
+    resolution. Source preference: ESI when present (our own live samples),
+    fall back to Chribba's eve-offline-net, then Adminor's eve-offline-com.
+    Implemented via row_number() window function — picks one row per
+    recorded_at minute by source priority. Coarse granularities
+    (daily/weekly archive rollups) excluded so they don't blur the hourly
+    buckets. SQLite strftime('%w') is 0=Sunday.
+
+    There is no location dimension on this table, so this grid is the same
+    for every scope — it is the PRESENCE baseline the kill grids are read
+    against, never something the scope selector filters.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    key = ("pilots", "all", None)
+    cached = _heatmap_cached(key, now)
+    if cached is not None:
+        return cached
+
+    heatmap_cutoff = now - timedelta(days=HEATMAP_DAYS)
+    src_rank = case(
+        (PlayerCountSnapshot.source == "esi", 0),
+        (PlayerCountSnapshot.source == "eve-offline-net", 1),
+        (PlayerCountSnapshot.source == "eve-offline-com", 2),
+        else_=3,
+    )
+    ranked = (
+        select(
+            PlayerCountSnapshot.recorded_at,
+            PlayerCountSnapshot.player_count,
+            func.row_number().over(
+                partition_by=PlayerCountSnapshot.recorded_at,
+                order_by=src_rank,
+            ).label("rn"),
+        )
+        .where(
+            PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
+            PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
+        )
+        .subquery()
+    )
+    heatmap_rows = (await db.execute(
+        select(
+            func.strftime("%w", ranked.c.recorded_at).label("dow"),
+            func.strftime("%H", ranked.c.recorded_at).label("hr"),
+            func.avg(ranked.c.player_count).label("avg_pc"),
+        )
+        .where(ranked.c.rn == 1)
+        .group_by("dow", "hr")
+    )).all()
+    # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
+    grid: list[list[int | None]] = empty_grid(None)
+    for dow_str, hr_str, avg_pc in heatmap_rows:
+        if dow_str is None or hr_str is None or avg_pc is None:
+            continue
+        # SQLite: Sun=0 Mon=1 … Sat=6. Rotate so Mon=0 … Sun=6.
+        dow = (int(dow_str) + 6) % 7
+        hr = int(hr_str)
+        if 0 <= dow < 7 and 0 <= hr < 24:
+            grid[dow][hr] = round(float(avg_pc))
+    has_data = any(v is not None for row in grid for v in row)
+    _heatmap_store(key, now, grid, has_data)
+    return grid, has_data
+
+
+async def _kills_hour_of_week_grid(
+    db: AsyncSession, scope: str, region_id: int | None
+) -> list[list[int]]:
+    """Kills grid for one selection, cached.
+
+    A region selection REPLACES the zone filter rather than intersecting it
+    — picking Providence already implies null-sec, and intersecting would
+    silently return an empty grid for any scope/region mismatch a stale
+    bookmark happened to carry.
+
+    On a scope miss the five zone grids are filled from a single query and
+    all five are cached, so the next scope click is free.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if region_id is not None:
+        key = ("kills", "all", region_id)
+        cached = _heatmap_cached(key, now)
+        if cached is not None:
+            return cached[0]
+        grid = await region_hour_of_week_kills(db, region_id)
+        _heatmap_store(key, now, grid, grid_total(grid) > 0)
+        return grid
+
+    key = ("kills", scope, None)
+    cached = _heatmap_cached(key, now)
+    if cached is not None:
+        return cached[0]
+    grids = await zone_hour_of_week_kills(db)
+    for grid_scope, grid in grids.items():
+        _heatmap_store(("kills", grid_scope, None), now, grid, grid_total(grid) > 0)
+    return grids[scope]
+
+
+async def _build_heatmap_context(
+    db: AsyncSession,
+    pcu_grid: list[list[int | None]],
+    pcu_has_data: bool,
+    *,
+    mode: str,
+    scope: str,
+    region_id: int | None,
+) -> dict:
+    """Template context for the "When is EVE busiest?" panel.
+
+    Builds the kills grid regardless of mode: the per-cell tooltip always
+    quotes both series, so even the pilots-online view needs the kill counts
+    behind it.
+    """
+    global _region_options_cache
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    kills_grid = await _kills_hour_of_week_grid(db, scope, region_id)
+    kills_total = grid_total(kills_grid)
+    # "Has kill data at all" is about the trailing 90 days, not the selected
+    # chart window — the zone controls must not vanish just because the user
+    # is looking at a 1h chart. Judged on the unfiltered 'all' grid so an
+    # empty region never hides the selector that got the user there.
+    all_grid = await _kills_hour_of_week_grid(db, "all", None)
+    zone_available = grid_total(all_grid) > 0
+
+    if _region_options_cache is not None and now < _region_options_cache[0]:
+        regions = _region_options_cache[1]
+    else:
+        regions = await region_options(db) if zone_available else []
+        _region_options_cache = (
+            now + timedelta(seconds=_HEATMAP_TTL_SECONDS), regions,
+        )
+
+    if not zone_available:
+        # No kills to slice: fall back to the pilots-only grid this panel
+        # shipped with, and hide the mode/scope controls entirely.
+        mode = "pilots"
+
+    percap_grid = None
+    if mode == "percap":
+        key = ("percap", scope, region_id)
+        cached = _heatmap_cached(key, now)
+        if cached is not None:
+            percap_grid = cached[0]
+        else:
+            percap_grid = per_capita_grid(kills_grid, pcu_grid)
+            _heatmap_store(key, now, percap_grid, grid_total(percap_grid) > 0)
+
+    if mode == "pilots":
+        active_grid = pcu_grid
+        # PCU never goes near zero, so a 0..max ramp collapses every cell
+        # into one narrow band — this grid alone keeps a min..max rescale.
+        scale_min = min(
+            (v for row in pcu_grid for v in row if v is not None), default=0
+        )
+    elif mode == "percap":
+        active_grid = percap_grid
+        scale_min = 0
+    else:
+        active_grid = kills_grid
+        scale_min = 0
+
+    # Sparse means "we have a grid but too few kills for its shape to mean
+    # anything". Only the kill-derived modes can be sparse; the pilots grid
+    # is a server-wide average and is dense or absent, never thin.
+    sparse = mode in ("kills", "percap") and kills_total < MIN_KILLS_FOR_GRID
+
+    region_name = next(
+        (r["region_name"] for r in regions if r["region_id"] == region_id), None
+    )
+    # Per-column presence strip: collapse the pilots grid down the weekday
+    # axis so each UTC hour gets one bar above the columns. It is the same
+    # series as the pilots grid, just averaged over the 7 rows.
+    presence_strip: list[int | None] = []
+    for hr in range(24):
+        column = [pcu_grid[dow][hr] for dow in range(7) if pcu_grid[dow][hr] is not None]
+        presence_strip.append(round(sum(column) / len(column)) if column else None)
+
+    return {
+        "heatmap_mode": mode,
+        "heatmap_scope": scope,
+        "heatmap_region": region_id,
+        "heatmap_region_name": region_name,
+        "heatmap_grid": active_grid,
+        "heatmap_kills": kills_grid,
+        "heatmap_max": grid_max(active_grid),
+        "heatmap_min": scale_min,
+        "heatmap_kills_total": int(kills_total),
+        "heatmap_sparse": sparse,
+        "heatmap_zone_available": zone_available,
+        "heatmap_regions": regions,
+        "heatmap_modes": [(m, MODE_LABELS[m]) for m in MODES],
+        "heatmap_scopes": [(s, SCOPE_LABELS[s]) for s in SCOPES],
+        "heatmap_days": HEATMAP_DAYS,
+        "heatmap_min_kills": MIN_KILLS_FOR_GRID,
+        "tz_bands": TZ_BANDS,
+        "pcu_heatmap": pcu_grid,
+        "presence_strip": presence_strip,
+        "has_heatmap_data": pcu_has_data or zone_available,
+    }
+
+
+def _parse_heatmap_params(scope: str, region: str, mode: str) -> tuple[str, int | None, str]:
+    """Clamp URL state to something renderable. A bookmark that outlived a
+    rename must degrade to the default view, never 422."""
+    scope = scope if scope in SCOPES else "all"
+    mode = mode if mode in MODES else "kills"
+    try:
+        region_id = int(region) if region not in ("", "all", None) else None
+    except (TypeError, ValueError):
+        region_id = None
+    return scope, region_id, mode
 
 
 @router.get("/tools/activity", response_class=HTMLResponse)
 async def tools_activity(
     request: Request,
     window: str = "30d",
+    scope: str = "all",
+    region: str = "",
+    mode: str = "kills",
     db: AsyncSession = Depends(get_db),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
+
+    # Heatmap selection is resolved HERE rather than inside the window
+    # payload: the grids are window-independent 90-day aggregates, and
+    # folding scope/region/mode into _payload_cache's key would multiply
+    # nine windows by every selection for no gain.
+    scope, region_id, mode = _parse_heatmap_params(scope, region, mode)
 
     if window == "live":
         return templates.TemplateResponse(request, "tools_activity.html", {
@@ -169,15 +462,23 @@ async def tools_activity(
             if window not in _refreshing:
                 _refreshing.add(window)
                 asyncio.create_task(_refresh_payload(window))
-        return templates.TemplateResponse(request, "tools_activity.html", {**payload})
+    else:
+        payload = await _build_activity_payload(db, window)
+        _payload_cache[window] = (
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            + timedelta(seconds=_WINDOW_TTL_SECONDS[window]),
+            payload,
+        )
 
-    payload = await _build_activity_payload(db, window)
-    _payload_cache[window] = (
-        datetime.now(timezone.utc).replace(tzinfo=None)
-        + timedelta(seconds=_WINDOW_TTL_SECONDS[window]),
-        payload,
+    heatmap = await _build_heatmap_context(
+        db,
+        payload.get("pcu_heatmap") or empty_grid(None),
+        bool(payload.get("has_heatmap_data")),
+        mode=mode, scope=scope, region_id=region_id,
     )
-    return templates.TemplateResponse(request, "tools_activity.html", {**payload})
+    return templates.TemplateResponse(
+        request, "tools_activity.html", {**payload, **heatmap}
+    )
 
 
 async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
@@ -307,13 +608,8 @@ async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
             (Killmail.attacker_count <= 50, "medium"),
             else_="large",
         ).label("bucket")
-        zone_expr = case(
-            (Killmail.solar_system_id >= 31000000, "wormhole"),
-            (SDESystem.security.is_(None), "unknown"),
-            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
-            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
-            else_="nullsec",
-        ).label("zone")
+        # Shared classifier — see app/intel/activity_heatmap.py.
+        zone_expr = zone_case_expr()
         combined_q = (
             select(
                 _bin_expr(Killmail.killmail_time).label("b"),
@@ -443,67 +739,7 @@ async def _build_activity_payload(db: AsyncSession, window: str) -> dict:
     daily_kills_counts = [dk_by_date[d][0] for d in daily_kills_dates]
 
     # ── Hour-of-day × day-of-week PCU heatmap (always trailing 90d) ──
-    # Independent of the selected chart window — it answers a different
-    # question ("when is EVE busiest?") and only makes sense at hourly
-    # resolution. Source preference: ESI when present (our own live
-    # samples), fall back to Chribba's eve-offline-net, then Adminor's
-    # eve-offline-com. Implemented via row_number() window function —
-    # picks one row per recorded_at minute by source priority. Coarse
-    # granularities (daily/weekly archive rollups) excluded so they
-    # don't blur the hourly buckets. SQLite strftime('%w') is 0=Sunday.
-    global _heatmap_cache
-    pcu_heatmap: list[list[int | None]]
-    if _heatmap_cache is not None and now < _heatmap_cache[0]:
-        pcu_heatmap = _heatmap_cache[1]
-        has_heatmap_data = _heatmap_cache[2]
-    else:
-        heatmap_cutoff = now - timedelta(days=90)
-        src_rank = case(
-            (PlayerCountSnapshot.source == "esi", 0),
-            (PlayerCountSnapshot.source == "eve-offline-net", 1),
-            (PlayerCountSnapshot.source == "eve-offline-com", 2),
-            else_=3,
-        )
-        ranked = (
-            select(
-                PlayerCountSnapshot.recorded_at,
-                PlayerCountSnapshot.player_count,
-                func.row_number().over(
-                    partition_by=PlayerCountSnapshot.recorded_at,
-                    order_by=src_rank,
-                ).label("rn"),
-            )
-            .where(
-                PlayerCountSnapshot.recorded_at >= heatmap_cutoff,
-                PlayerCountSnapshot.granularity.in_(("60s", "minute", "hourly")),
-            )
-            .subquery()
-        )
-        heatmap_rows = (await db.execute(
-            select(
-                func.strftime("%w", ranked.c.recorded_at).label("dow"),
-                func.strftime("%H", ranked.c.recorded_at).label("hr"),
-                func.avg(ranked.c.player_count).label("avg_pc"),
-            )
-            .where(ranked.c.rn == 1)
-            .group_by("dow", "hr")
-        )).all()
-        # Build 7×24 grid; rows ordered Mon…Sun (rotate from SQLite's Sun=0).
-        pcu_heatmap = [[None] * 24 for _ in range(7)]
-        for dow_str, hr_str, avg_pc in heatmap_rows:
-            if dow_str is None or hr_str is None or avg_pc is None:
-                continue
-            # SQLite: Sun=0 Mon=1 … Sat=6. Rotate so Mon=0 … Sun=6.
-            dow = (int(dow_str) + 6) % 7
-            hr = int(hr_str)
-            if 0 <= dow < 7 and 0 <= hr < 24:
-                pcu_heatmap[dow][hr] = round(float(avg_pc))
-        has_heatmap_data = any(v is not None for row in pcu_heatmap for v in row)
-        _heatmap_cache = (
-            now + timedelta(seconds=_HEATMAP_TTL_SECONDS),
-            pcu_heatmap,
-            has_heatmap_data,
-        )
+    pcu_heatmap, has_heatmap_data = await _pcu_hour_of_week_grid(db)
 
     # Source coverage breakdown. For day+ bins we sum sample_count from the
     # daily aggregate (cheap). For sub-day windows we GROUP BY on the
