@@ -26,42 +26,9 @@
 {% endfor %}
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-var _openMailId = null;
-function toggleMail() {
-    var mailId = this.dataset.mailId;
-    var charId = this.dataset.charId;
-    var headerEl = this;
-    var bodyEl = document.getElementById('mail-body-' + mailId);
-
-    /* If clicking the already-open mail, close it */
-    if (_openMailId === mailId) {
-        bodyEl.style.display = 'none';
-        bodyEl.innerHTML = '';
-        _openMailId = null;
-        headerEl.style.background = '';
-        return;
-    }
-
-    /* Close any currently open mail */
-    if (_openMailId !== null) {
-        var oldBody = document.getElementById('mail-body-' + _openMailId);
-        if (oldBody) {
-            oldBody.style.display = 'none';
-            oldBody.innerHTML = '';
-        }
-        /* Reset old header background */
-        document.querySelectorAll('.mail-header').forEach(function(h) { h.style.background = ''; });
-    }
-
-    /* Open the clicked mail */
-    _openMailId = mailId;
-    headerEl.style.background = 'var(--border)';
-    bodyEl.style.display = '';
-    bodyEl.innerHTML = '<div style="padding:0.75rem;font-size:10px;color:var(--muted);">Loading...</div>';
-
-    /* Fetch mail body via htmx */
-    htmx.ajax('GET', '/character/' + charId + '/mail/' + mailId, {target: '#mail-body-' + mailId, swap: 'innerHTML'});
-}
-</script>
+{# toggleMail (data-click on each mail header above) is defined in
+   character_detail.html, under the page's own nonce. It cannot live here:
+   this fragment arrives by htmx swap, and a script in swapped content is
+   re-created as inline script whose nonce never matches the page's policy —
+   so no mail would open. #}
 {% endif %}

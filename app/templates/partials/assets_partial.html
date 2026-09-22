@@ -1,7 +1,7 @@
 {% for loc in locations %}
 {% set is_current = docked_at and loc.location == docked_at %}
 <div class="asset-location">
-    <div class="asset-location-header"{% if is_current %} style="background:rgba(200,169,81,0.12);"{% endif %}>
+    <div class="asset-location-header" data-click="toggleAssetLocation"{% if is_current %} style="background:rgba(200,169,81,0.12);"{% endif %}>
         <span class="asset-location-name">{% if is_current %}▸ {% endif %}{{ loc.location }}</span>
         <div style="display:flex;gap:0.5rem;align-items:center;">
             <span class="asset-location-count">{{ loc['items']|length }} type{% if loc['items']|length != 1 %}s{% endif %}</span>
@@ -20,11 +20,10 @@
 {% else %}
 <div style="color:var(--muted);font-size:10px;padding:1rem 0.75rem;">No assets found.</div>
 {% endfor %}
-<script nonce="{{ request.state.csp_nonce }}">
-document.querySelectorAll('#assets-inner .asset-location-header').forEach(function(h) {
-    h.addEventListener('click', function() {
-        this.nextElementSibling.classList.toggle('open');
-        this.querySelector('.expand-icon').classList.toggle('open');
-    });
-});
-</script>
+{# The expand/collapse wiring used to be an inline script block here, binding
+   a click listener to each header. This fragment arrives by htmx swap, which
+   re-creates script elements as inline script under the fragment's nonce —
+   the page's policy never matches it — so the locations would not open.
+   toggleAssetLocation is defined in character_detail.html and reached by
+   data-click, which also means it no longer depends on running after the
+   markup exists. #}

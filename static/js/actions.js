@@ -234,6 +234,164 @@
         window.location.href = '/industry/hauling';
     };
 
+    // ── Combat-profile charts ───────────────────────────────────────────
+    //
+    // partials/character_kill_stats.html and
+    // partials/dashboard_combat_profile.html each carried a ~150-line inline
+    // script drawing the same four charts. The two were identical bar the
+    // canvas ids and some line wrapping, and neither ran: both fragments
+    // arrive by htmx swap, and a script in swapped content is re-created as
+    // inline script under the fragment's nonce, which the page's CSP header
+    // never matches. Every one of those four charts was a blank canvas.
+    //
+    // One renderer here, driven by the markup. Each canvas says what it is
+    // (data-chart-kind) and carries its own series (data-chart, JSON). The
+    // parent page calls this after its swap, scoped to its own target, so
+    // nothing has to know either fragment's canvas ids.
+    //
+    // Chart.js must be loaded by the PAGE — for the same nonce reason, a
+    // library tag inside a fragment is refused too. Both parents already
+    // load it.
+    function _combatChart(canvas, kind, d) {
+        var palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7',
+                       '#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
+        if (kind === 'radar') {
+            return new Chart(canvas, {
+                type: 'radar',
+                data: {
+                    labels: d.labels,
+                    datasets: [{
+                        label: 'Profile',
+                        data: d.values,
+                        backgroundColor: 'rgba(200,169,81,0.18)',
+                        borderColor: 'rgba(200,169,81,0.85)',
+                        pointBackgroundColor: '#c8a951',
+                        pointRadius: 3,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            suggestedMin: 0, suggestedMax: 100,
+                            ticks: { display: false },
+                            grid: { color: 'rgba(255,255,255,0.08)' },
+                            angleLines: { color: 'rgba(255,255,255,0.10)' },
+                            pointLabels: { color: '#bfbfbf', font: { size: 10 } }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            var suffix = [' kills', '%', ' solo', ' gang', ' ISK', ' systems'];
+                            var raw = d.raw[ctx.dataIndex];
+                            var v = raw;
+                            if (ctx.dataIndex === 4) v = (raw / 1000000).toFixed(1) + 'M';
+                            else if (typeof raw === 'number') v = (raw % 1 === 0 ? raw : raw.toFixed(1));
+                            return d.labels[ctx.dataIndex] + ': ' + v + suffix[ctx.dataIndex];
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'autopsy') {
+            var labels = ['Solo PvP', 'Small Gang', 'Fleet', 'Smartbomb', 'NPC'];
+            var data = [d.solo, d.small_gang, d.fleet, d.smartbomb, d.npc];
+            return new Chart(canvas, {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data,
+                    backgroundColor: ['#5eb1ff', '#4ade80', '#ee5555', '#a855f7', '#fb923c'],
+                    borderColor: '#1a1a1a', borderWidth: 2 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '50%',
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            var total = data.reduce(function (a, b) { return a + b; }, 0);
+                            var pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
+                            return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'profit') {
+            var rows = d.rows || [];
+            var names = d.names || {};
+            return new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: rows.map(function (r) {
+                        return names[r.ship_type_id] || ('Type ' + r.ship_type_id);
+                    }),
+                    datasets: [
+                        { label: 'Destroyed',
+                          data: rows.map(function (r) { return r.isk_destroyed / 1000000; }),
+                          backgroundColor: 'rgba(46,160,67,0.7)' },
+                        { label: 'Lost',
+                          data: rows.map(function (r) { return -r.isk_lost / 1000000; }),
+                          backgroundColor: 'rgba(204,51,51,0.7)' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { stacked: true, ticks: { color: '#888', font: { size: 10 }, callback: function (v) { return v + 'M'; } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { stacked: true, ticks: { color: '#bfbfbf', font: { size: 10 } }, grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            return ctx.dataset.label + ': ' + Math.abs(ctx.raw).toFixed(1) + 'M ISK';
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'stream') {
+            var datasets = d.datasets || [];
+            datasets.forEach(function (ds, i) {
+                ds.backgroundColor = palette[i % palette.length] + 'cc';
+                ds.borderColor = palette[i % palette.length];
+                ds.pointRadius = 0;
+            });
+            var weeks = d.weeks || 0;
+            var wLabels = [];
+            for (var i = 0; i < weeks; i++) wLabels.push('W' + (i - weeks + 1));
+            return new Chart(canvas, {
+                type: 'line',
+                data: { labels: wLabels, datasets: datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
+                        y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    },
+                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' } }
+                }
+            });
+        }
+        return null;
+    }
+
+    window.renderCombatCharts = window.renderCombatCharts || function (root) {
+        if (typeof Chart === 'undefined') return;
+        var scope = root || document;
+        scope.querySelectorAll('canvas[data-chart-kind]').forEach(function (canvas) {
+            var payload;
+            try { payload = JSON.parse(canvas.dataset.chart || 'null'); }
+            catch (e) { return; }
+            if (!payload) return;
+            // A re-swap hands us a fresh canvas, but Chart.js keeps the old
+            // instance registered against whatever was there; destroy it or
+            // the library throws "Canvas is already in use".
+            var existing = Chart.getChart ? Chart.getChart(canvas) : null;
+            if (existing) existing.destroy();
+            _combatChart(canvas, canvas.dataset.chartKind, payload);
+        });
+    };
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it

@@ -491,7 +491,7 @@
     <div style="padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;" id="jump-clones-list">
         {% for clone in jump_clones %}
         <div class="asset-location">
-            <div class="asset-location-header">
+            <div class="asset-location-header" data-click="toggleAssetLocation">
                 <span class="asset-location-name" style="font-size: 10px;">{{ clone.location }}</span>
                 <div style="display:flex;gap:0.5rem;align-items:center;">
                     {% if clone.implants %}
@@ -759,13 +759,78 @@
 </script>
 
 <script nonce="{{ request.state.csp_nonce }}">
-// Jump clone expand/collapse
-document.querySelectorAll('#jump-clones-list .asset-location-header').forEach(function(h) {
-    h.addEventListener('click', function() {
-        this.nextElementSibling.classList.toggle('open');
-        this.querySelector('.expand-icon').classList.toggle('open');
+/* Behaviour for this page's htmx-loaded panels.
+ *
+ * partials/assets_partial.html, partials/mail_panel.html and
+ * partials/character_kill_stats.html each carried their own inline script.
+ * They arrive by htmx swap, which re-creates script elements as inline
+ * script under the FRAGMENT's nonce — never this page's — so none of it ran:
+ * the asset locations would not expand, mail would not open, and all four
+ * combat charts were blank canvases. It runs from here now.
+ *
+ * Nothing below holds a reference across a swap; the handlers look their
+ * targets up when they fire, and the charts are drawn from the canvases'
+ * own attributes after the swap lands. */
+(function() {
+    /* Expand/collapse a location card. Was a direct addEventListener loop
+       in assets_partial, which also meant it only ever covered the elements
+       present when it ran. Delegated through data-click, it covers the
+       jump-clone list here and the asset list in the fragment with one
+       definition — the two were the same four lines. */
+    window.toggleAssetLocation = function() {
+        var body = this.nextElementSibling;
+        if (body) body.classList.toggle('open');
+        var icon = this.querySelector('.expand-icon');
+        if (icon) icon.classList.toggle('open');
+    };
+
+    /* Mail list: open one mail at a time, closing whichever was open. The
+       body is fetched into #mail-body-<id> rather than replacing the row,
+       so the list keeps its scroll position. */
+    var _openMailId = null;
+    window.toggleMail = function() {
+        var mailId = this.dataset.mailId;
+        var charId = this.dataset.charId;
+        var headerEl = this;
+        var bodyEl = document.getElementById('mail-body-' + mailId);
+        if (!bodyEl) return;
+
+        /* Clicking the already-open mail closes it. */
+        if (_openMailId === mailId) {
+            bodyEl.style.display = 'none';
+            bodyEl.innerHTML = '';
+            _openMailId = null;
+            headerEl.style.background = '';
+            return;
+        }
+
+        if (_openMailId !== null) {
+            var oldBody = document.getElementById('mail-body-' + _openMailId);
+            if (oldBody) {
+                oldBody.style.display = 'none';
+                oldBody.innerHTML = '';
+            }
+            document.querySelectorAll('.mail-header').forEach(function(h) { h.style.background = ''; });
+        }
+
+        _openMailId = mailId;
+        headerEl.style.background = 'var(--border)';
+        bodyEl.style.display = '';
+        bodyEl.innerHTML = '<div style="padding:0.75rem;font-size:10px;color:var(--muted);">Loading...</div>';
+        htmx.ajax('GET', '/character/' + charId + '/mail/' + mailId,
+                  {target: '#mail-body-' + mailId, swap: 'innerHTML'});
+    };
+
+    /* Combat-profile charts — the renderer is shared with the dashboard's
+       copy of this panel and lives in static/js/actions.js. Scoped to this
+       page's swap target, the way base.html scopes its banner hook. */
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        var target = evt.detail.target;
+        if (target && target.id === 'kill-stats-panel') {
+            window.renderCombatCharts(target);
+        }
     });
-});
+})();
 </script>
 
 {% endblock %}
