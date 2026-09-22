@@ -491,9 +491,16 @@
 
         {% if heatmap_sparse %}
         <div class="b-empty" style="padding:1.5rem;color:var(--muted);font-size:11px;text-align:center;">
+            {% if heatmap_kills_total < heatmap_min_kills %}
             Not enough data for this selection — {{ '{:,}'.format(heatmap_kills_total) }} kills
             over the trailing {{ heatmap_days }} days, below the {{ '{:,}'.format(heatmap_min_kills) }}
             needed for the shape to mean anything. Pick a wider space or another region.
+            {% else %}
+            Not enough data to draw this view — there are kills to show, but no
+            pilots-online samples for the trailing {{ heatmap_days }} days, so this
+            measure has nothing to scale against. The archive backfill runs on
+            startup and accumulates; try the Kills view meanwhile.
+            {% endif %}
         </div>
         {% else %}
         <div class="ta-hm-strip" id="ta-presence-strip" data-strip='{{ presence_strip|default([])|tojson }}'>
@@ -539,6 +546,7 @@
             {{ mode_blurb[hm_mode] }}
             The strip above the grid is the server-wide pilots-online curve per UTC hour — a cell can be busy by kills and quiet by presence, which is what null-sec timers at 04:00 UTC look like.
             Colour is scaled to this grid's own maximum, so a quiet region still shows its own shape.
+            Columns are UTC hour buckets and stay that way; the local-time toggle relabels each column with your clock's equivalent of that bucket, which is why the axis then starts somewhere other than 00.
             Pilots online combines ESI live samples with eve-offline.net (Chribba) and eve-offline.com (Adminor) minute-resolution archives; kills come from the killmail stream joined to the SDE for security and region. Downtime is at 11:00 UTC; expect a dip there.
         </div>
     </div>

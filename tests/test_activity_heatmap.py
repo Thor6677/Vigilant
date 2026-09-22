@@ -458,6 +458,30 @@ def test_template_says_not_enough_data_instead_of_drawing_a_blank_grid():
     assert 'class="b-btn ta-hm-scope' in html
 
 
+def test_per_capita_without_a_pilots_archive_says_so(session_factory):
+    """Kills present, pilots-online archive still empty: per capita divides
+    by nothing, so the grid is all None. Reachable on a fresh install, and
+    it must not render as 168 colourless cells with no explanation."""
+    player_stats = _fresh_cache()
+
+    async def call():
+        async with session_factory() as s:
+            return await player_stats._build_heatmap_context(
+                s, empty_grid(None), False,
+                mode="percap", scope="all", region_id=None,
+            )
+
+    ctx = _run(call)
+    assert ctx["heatmap_max"] == 0
+    assert ctx["heatmap_sparse"] is True
+
+    html = _render(heatmap_sparse=True, heatmap_kills_total=5000,
+                   heatmap_mode="percap",
+                   heatmap_grid=[[None] * 24 for _ in range(7)], heatmap_max=0)
+    assert "pilots-online samples for the trailing" in html
+    assert 'id="pcu-heatmap"' not in html
+
+
 def test_template_hides_the_controls_when_there_are_no_kills():
     html = _render(heatmap_zone_available=False, heatmap_mode="pilots",
                    heatmap_grid=[[None] * 24 for _ in range(7)],

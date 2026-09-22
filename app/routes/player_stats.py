@@ -366,10 +366,19 @@ async def _build_heatmap_context(
         active_grid = kills_grid
         scale_min = 0
 
-    # Sparse means "we have a grid but too few kills for its shape to mean
-    # anything". Only the kill-derived modes can be sparse; the pilots grid
-    # is a server-wide average and is dense or absent, never thin.
+    # Sparse means "we have a grid but nothing worth drawing in it". Two
+    # ways to get there:
+    #   * too few kills for the shape to mean anything (kill-derived modes
+    #     only — the pilots grid is a server-wide average, dense or absent,
+    #     never thin);
+    #   * nothing paintable in the ACTIVE grid at all. Per capita needs BOTH
+    #     series, so a box with kills but no pilots-online archive yet
+    #     produces an all-None grid; without this it would render 168
+    #     colourless cells with nothing to explain them.
+    active_max = grid_max(active_grid)
     sparse = mode in ("kills", "percap") and kills_total < MIN_KILLS_FOR_GRID
+    if not sparse and active_max <= 0:
+        sparse = True
 
     region_name = next(
         (r["region_name"] for r in regions if r["region_id"] == region_id), None
@@ -389,7 +398,7 @@ async def _build_heatmap_context(
         "heatmap_region_name": region_name,
         "heatmap_grid": active_grid,
         "heatmap_kills": kills_grid,
-        "heatmap_max": grid_max(active_grid),
+        "heatmap_max": active_max,
         "heatmap_min": scale_min,
         "heatmap_kills_total": int(kills_total),
         "heatmap_sparse": sparse,
