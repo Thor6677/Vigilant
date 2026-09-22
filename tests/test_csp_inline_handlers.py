@@ -177,6 +177,29 @@ def test_banner_partials_carry_no_script_tags():
     )
 
 
+def test_base_disables_htmx_script_tag_execution():
+    """base.html must set `htmx.config.allowScriptTags = false`.
+
+    htmx re-creates any script element it finds in swapped-in content and
+    appends it to the document, which makes it inline script. Under the
+    enforcing policy such a script cannot carry the page's nonce — the
+    fragment is a different request with a nonce of its own — so it was
+    refused and did nothing. The refusal still costs a violation report
+    each, and the admin Overview re-fetches itself every 10s: a stale
+    session there swapped the whole landing page in on every tick and filed
+    six reports a time, ~2.4k an hour from one idle tab.
+
+    Left at htmx's default this silently comes back the moment anyone adds
+    a script element to a fragment, so the setting is pinned here rather
+    than trusted to stay.
+    """
+    with open(os.path.join(TEMPLATES, "base.html"), encoding="utf-8") as fh:
+        body = fh.read()
+    assert re.search(
+        r"htmx\.config\.allowScriptTags\s*=\s*false", body
+    ), "base.html no longer disables htmx's script-tag execution"
+
+
 # ── the policy the conversion work was for ──────────────────────────────────
 
 def test_policy_is_enforcing_and_script_src_has_no_unsafe_inline():
