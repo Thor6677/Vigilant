@@ -134,84 +134,16 @@
     </div>
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-var allBuilt = false;
+{# toggleBuildAll, openComponent, closeComponent and toggleComponentFromEl
+   used to be an inline script block here. This fragment arrives by htmx
+   swap, which re-creates script elements as inline script under the
+   fragment's nonce; the page's policy never matches it, so the Build All
+   button and every per-component Build toggle did nothing. All four are
+   defined in industry.html now, under the page's own nonce.
 
-function toggleBuildAll() {
-    var btns = document.querySelectorAll('.build-toggle-btn');
-    var buildAllBtn = document.getElementById('build-all-btn');
-    allBuilt = !allBuilt;
-
-    if (allBuilt) {
-        // Open all: stagger requests 200ms apart to avoid flooding
-        var delay = 0;
-        btns.forEach(function(btn) {
-            var typeId = parseInt(btn.dataset.typeId);
-            var needed = parseInt(btn.dataset.needed);
-            var panel = document.getElementById('component-' + typeId);
-            if (panel && panel.style.display === 'none') {
-                setTimeout(function() {
-                    openComponent(typeId, needed, btn);
-                }, delay);
-                delay += 200;
-            }
-        });
-    } else {
-        // Close all: immediate, no server calls
-        btns.forEach(function(btn) {
-            var typeId = parseInt(btn.dataset.typeId);
-            var panel = document.getElementById('component-' + typeId);
-            if (panel && panel.style.display !== 'none') {
-                closeComponent(typeId, btn);
-            }
-        });
-    }
-    if (buildAllBtn) {
-        buildAllBtn.textContent = allBuilt ? 'Buy All' : 'Build All';
-    }
-}
-
-function openComponent(typeId, needed, btn) {
-    var panel = document.getElementById('component-' + typeId);
-    panel.style.display = '';
-    btn.textContent = 'Build ▾';
-    btn.style.borderColor = 'var(--accent)';
-    btn.style.color = 'var(--accent)';
-    var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
-    var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
-    var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
-    var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
-    if (typeof buildComponents !== 'undefined') {
-        buildComponents[typeId] = {me: parseInt(pMe), structure: pSt, rig: pRi, security: pSe};
-    }
-    var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
-    htmx.ajax('GET', '/industry/component?' + params, '#component-' + typeId);
-}
-
-function closeComponent(typeId, btn) {
-    var panel = document.getElementById('component-' + typeId);
-    panel.style.display = 'none';
-    btn.textContent = 'Build ▸';
-    btn.style.borderColor = 'var(--border)';
-    btn.style.color = '';
-    if (typeof buildComponents !== 'undefined') {
-        delete buildComponents[typeId];
-    }
-}
-
-/* industry.html defines its own toggleComponent of the same name for the
-   parent build page; whichever page this partial lands on supplies it. The
-   element-bound entry point stays separate so neither signature changes. */
-window.toggleComponentFromEl = function() {
-    toggleComponent(this.dataset.typeId, this.dataset.qty, this);
-};
-
-function toggleComponent(typeId, needed, btn) {
-    var panel = document.getElementById('component-' + typeId);
-    if (panel.style.display === 'none') {
-        openComponent(typeId, needed, btn);
-    } else {
-        closeComponent(typeId, btn);
-    }
-}
-</script>
+   The fragment's own toggleComponent went with them and was NOT kept:
+   industry.html has defined a toggleComponent of that name all along, and
+   its version is a superset — it also registers the component in
+   buildComponents and clears the stale shopping list. The copy here was
+   guarded behind `window.x = window.x ||`, so even had it run it would have
+   lost to the page's. One definition now, the right one. #}

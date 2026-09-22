@@ -162,6 +162,78 @@
         if (src) this.src = src;
     };
 
+    // Copy a block of text to the clipboard and flash the button that asked.
+    //
+    // Replaces copyShoppingList / copyCompressionMultibuy / copyAppraisal,
+    // three all-but-identical functions that lived in three htmx-loaded
+    // fragments (shopping_list, compression_results, appraisal_results) and
+    // therefore never ran at all — a fragment's script carries that
+    // fragment's nonce, which the page's CSP never matches. One definition
+    // here, reached by data-click, does run.
+    //
+    //   data-copy-from  — id of an input/textarea (or any element) whose
+    //                     text to copy. The multibuy textareas use this.
+    //   data-copy-text  — literal text, for a caller with nothing on the
+    //                     page to point at (the appraisal total).
+    //   data-copy-label — what to put back after the "Copied!" flash;
+    //                     defaults to whatever the button says right now.
+    window.copyToClipboard = window.copyToClipboard || function () {
+        var el = this;
+        var text = el.dataset.copyText;
+        if (text == null) {
+            var src = el.dataset.copyFrom
+                ? document.getElementById(el.dataset.copyFrom) : null;
+            if (!src) return;
+            text = src.value != null ? src.value : src.textContent;
+        }
+        if (!navigator.clipboard) return;
+        var label = el.dataset.copyLabel || el.textContent.trim();
+        var color = el.style.color;
+        var border = el.style.borderColor;
+        navigator.clipboard.writeText(text).then(function () {
+            el.textContent = 'Copied!';
+            el.style.color = 'var(--success)';
+            el.style.borderColor = 'var(--success)';
+            setTimeout(function () {
+                el.textContent = label;
+                el.style.color = color;
+                el.style.borderColor = border;
+            }, 2000);
+        });
+    };
+
+    // Hand a list of items to the hauling planner.
+    //
+    // Was sendToHauling in shopping_list and appraisal_results, plus
+    // sendOresToHauling in compression_results — the same function three
+    // times over the same localStorage key, each one dead for the same
+    // reason. The item list came from a Jinja loop inside the script; it now
+    // comes off the rows that are already in the markup, one data attribute
+    // per field (the ISS-021 convention above), so the fragment needs no
+    // script of its own.
+    //
+    //   data-haul-scope — selector for the element holding the rows;
+    //                     defaults to the whole document.
+    //   rows carry data-haul-name / data-haul-qty / data-haul-volume.
+    window.sendToHauling = window.sendToHauling || function () {
+        var scope = this.dataset.haulScope
+            ? document.querySelector(this.dataset.haulScope) : document;
+        if (!scope) return;
+        var items = [];
+        scope.querySelectorAll('[data-haul-name]').forEach(function (row) {
+            items.push({
+                name: row.dataset.haulName,
+                qty: parseInt(row.dataset.haulQty, 10) || 0,
+                volume: parseFloat(row.dataset.haulVolume) || 0,
+            });
+        });
+        if (!items.length) return;
+        try {
+            localStorage.setItem('vigilant_haul_items', JSON.stringify(items));
+        } catch (e) { /* private mode — the planner will just open empty */ }
+        window.location.href = '/industry/hauling';
+    };
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it
