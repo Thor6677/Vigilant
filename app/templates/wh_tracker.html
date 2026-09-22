@@ -36,13 +36,13 @@
 
 <div class="b-section" style="margin-bottom:1rem;">
     <div class="b-section-head">
-        <span class="b-label">Tracked Characters</span>
-        <span class="b-muted-sm">first checked character in J-space wins</span>
+        <span class="b-label">Tracked Character</span>
+        <span class="b-muted-sm">pick one — selecting it checks its location immediately</span>
     </div>
     <div style="padding:0.6rem 0.75rem;display:flex;gap:1.25rem;flex-wrap:wrap;align-items:center;">
         {% for c in chars %}
         <label style="display:flex;align-items:center;gap:0.4rem;font-size:11px;color:{{ 'var(--text)' if c.has_scope else 'var(--muted)' }};cursor:{{ 'pointer' if c.has_scope else 'not-allowed' }};">
-            <input type="checkbox" class="wht-char" value="{{ c.id }}" {{ 'disabled' if not c.has_scope }}>
+            <input type="radio" name="wht-char" class="wht-char" value="{{ c.id }}" {{ 'disabled' if not c.has_scope }}>
             {{ c.name }}{% if not c.has_scope %} <span style="font-size:9px;">(no location scope)</span>{% endif %}
         </label>
         {% endfor %}
@@ -55,39 +55,46 @@
     </div>
 </div>
 
-<input type="hidden" id="tracker-chars" name="chars" value="">
+<input type="hidden" id="tracker-char" name="char" value="">
 
 <div id="wht-panel"
      hx-get="/intel/tracker/poll"
-     hx-trigger="tracker-tick from:body, every 30s"
-     hx-include="#tracker-chars"
+     hx-trigger="tracker-tick from:body, every 15s"
+     hx-include="#tracker-char"
      hx-swap="innerHTML">
     <div class="b-panel" style="padding:1rem;text-align:center;">
-        <span class="b-muted-sm">Check a character above to start tracking.</span>
+        <span class="b-muted-sm">Select a character above to start tracking.</span>
     </div>
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
 (function() {
-    var KEY = 'vigilant_wht_chars';
+    /* Single character id, not a CSV — the picker is one radio group now. */
+    var KEY = 'vigilant_wht_char';
 
     function selected() {
-        return Array.prototype.filter.call(
-            document.querySelectorAll('.wht-char'), function(cb) { return cb.checked; }
-        ).map(function(cb) { return cb.value; });
+        var checked = document.querySelector('.wht-char:checked');
+        return checked ? checked.value : '';
     }
 
     function tick() {
         var sel = selected();
-        document.getElementById('tracker-chars').value = sel.join(',');
-        localStorage.setItem(KEY, sel.join(','));
-        if (sel.length) document.body.dispatchEvent(new Event('tracker-tick'));
+        document.getElementById('tracker-char').value = sel;
+        try {
+            if (sel) localStorage.setItem(KEY, sel);
+            else localStorage.removeItem(KEY);
+        } catch (e) { /* private-browsing localStorage can throw — non-fatal */ }
+        if (sel) document.body.dispatchEvent(new Event('tracker-tick'));
     }
 
-    /* Restore last selection */
-    var saved = (localStorage.getItem(KEY) || '').split(',');
+    /* Restore last selection (may no longer exist or may have lost its
+       scope since — the disabled check keeps that state un-selectable). */
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) { saved = null; }
     Array.prototype.forEach.call(document.querySelectorAll('.wht-char'), function(cb) {
-        if (saved.indexOf(cb.value) !== -1 && !cb.disabled) cb.checked = true;
+        if (saved && cb.value === saved && !cb.disabled) cb.checked = true;
+        /* Selecting fires a poll immediately rather than waiting for the
+           next tick — that is the whole point of a "live" tracker. */
         cb.addEventListener('change', tick);
     });
     document.getElementById('wht-refresh').addEventListener('click', tick);
@@ -96,16 +103,34 @@
             !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) tick();
     });
 
-    /* Fire the initial poll once the saved selection is restored. */
-    if (selected().length) tick();
+    /* Fire the initial poll once the saved selection is restored. Deferred
+       to DOMContentLoaded rather than called synchronously here: htmx
+       (loaded in <head>, itself DOMContentLoaded-gated) has not wired up
+       #wht-panel's hx-trigger listener yet at this point in the parse —
+       dispatching now races that init and the event fires into an empty
+       room, so the restored selection would silently wait for the next
+       15s tick instead of checking immediately. Listeners for the same
+       event fire in registration order, and htmx's was registered first
+       (it loads earlier, in <head>), so by the time this one runs htmx
+       is ready. document.readyState covers the (unused today, but cheap
+       to guard) case of this script itself loading after that point. */
+    if (selected()) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', tick, { once: true });
+        } else {
+            tick();
+        }
+    }
 
-    /* Stale-poll ticker: bump the "checked Xs ago" label every 5s. */
+    /* Stale-poll ticker: bump the "checked Xs ago" label every 5s. Danger
+       threshold scales with the 15s poll interval below (same ~2.5x
+       headroom the old 30s/75s pairing used). */
     setInterval(function() {
         var el = document.getElementById('wht-checked');
         if (!el || !el.dataset.ts) return;
         var secs = Math.max(0, Math.round((Date.now() - parseInt(el.dataset.ts, 10)) / 1000));
         el.textContent = 'checked ' + secs + 's ago';
-        el.style.color = secs > 75 ? 'var(--danger)' : 'var(--muted)';
+        el.style.color = secs > 38 ? 'var(--danger)' : 'var(--muted)';
     }, 5000);
 })();
 </script>
