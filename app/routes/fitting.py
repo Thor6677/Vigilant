@@ -358,8 +358,12 @@ async def search_implants(
     drives a vanilla <input> + <ul> rather than the htmx partial used
     for modules/drones, because each slot picks one item only.
     """
-    from sqlalchemy import select
-    from app.db.models import SDEType, SDETypeDogmaAttribute
+    # `select`, `SDEType`, `SDETypeDogmaAttribute` are already imported at
+    # module scope (sqlalchemy + app.db.sde_models above) — a stray local
+    # re-import here used to shadow them with `app.db.models.SDEType`, which
+    # doesn't exist (the SDE tables live in app.db.sde_models), so every call
+    # raised ImportError before the query ever ran. That's the whole bug
+    # behind "implant search doesn't work": the endpoint 500'd unconditionally.
     pattern = f"%{q}%"
     # Implant types have implantness (attr_id 331) set to their slot.
     stmt = (
@@ -786,7 +790,7 @@ async def clone_implants(
     char = r.scalar_one_or_none()
     if not char:
         return {"error": "Character not found"}
-    if "esi-clones.read_implants.v1" not in (char.scopes or ""):
+    if _IMPLANTS_SCOPE not in (char.scopes or ""):
         return {"error": "Character lacks the implants scope — re-add it to grant."}
 
     try:
@@ -1294,6 +1298,10 @@ async def can_overheat(
 # ── Character skills + fit skill-check ──────────────────────────────────
 
 _SKILLS_SCOPE = "esi-skills.read_skills.v1"
+# Referenced by clone_implants() above too — defined here alongside
+# _SKILLS_SCOPE since Python resolves module-level names at call time, not
+# definition order, and this keeps the two scope constants together.
+_IMPLANTS_SCOPE = "esi-clones.read_implants.v1"
 
 
 async def _character_skills_map(db: AsyncSession, char: Character) -> dict[int, int]:
@@ -1309,7 +1317,18 @@ async def _character_skills_map(db: AsyncSession, char: Character) -> dict[int, 
 
 @router.get("/tools/fitting/characters")
 async def list_fitting_characters(request: Request, db: AsyncSession = Depends(get_db)):
-    """Dropdown source — characters the user owns that have the skills scope."""
+    """Character-picker source, shared by the skill-check selector and the
+    implant character picker: every character linked to this user, each
+    tagged with the two scopes those pickers care about. One query backs
+    both UIs instead of each running its own — see fetchFittingCharacters()
+    in fitting_tool.html, which caches this response for both callers.
+
+    Returning every character (not just scope-holders) lets the implant
+    picker show characters missing the clones scope as a disabled option
+    with a reason, rather than omitting them silently. The skill-check
+    selector still only wants scope-holders, so it filters has_skills_scope
+    client-side — this endpoint no longer pre-filters that for it.
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return {"characters": []}
@@ -1320,9 +1339,13 @@ async def list_fitting_characters(request: Request, db: AsyncSession = Depends(g
     )
     return {
         "characters": [
-            {"id": c.character_id, "name": c.character_name}
+            {
+                "id": c.character_id,
+                "name": c.character_name,
+                "has_skills_scope": _SKILLS_SCOPE in (c.scopes or ""),
+                "has_implants_scope": _IMPLANTS_SCOPE in (c.scopes or ""),
+            }
             for c in r.scalars().all()
-            if _SKILLS_SCOPE in (c.scopes or "")
         ],
     }
 

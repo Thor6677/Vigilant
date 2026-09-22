@@ -215,7 +215,12 @@
 </div>
 {% endfor %}
 
-{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring) #}
+{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring).
+   ISS-016 follow-up: picking a character is the PRIMARY path — one select
+   pulls that character's whole active clone into the 10 slots in one shot,
+   replacing the old two-control layout (an unrelated top-of-page character
+   dropdown plus a separate "load" button). Name search stays as the
+   secondary path, below, for hypothetical implants nobody has plugged in. #}
 <div class="b-section" id="section-implant" style="display:none;">
     <div class="b-section-head">
         <span class="b-label">Implants</span>
@@ -223,21 +228,25 @@
     </div>
     <div id="slots-implant" style="padding:0.25rem 0;"></div>
     <div style="padding:0.25rem 0;">
+        <select id="implant-char-select" data-change="onImplantCharChange"
+                title="Load a linked character's active clone implants"
+                style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;cursor:pointer;">
+            <option value="">Load from character&hellip;</option>
+            {# populated via JS on init — characters lacking the implants
+               scope render disabled with a reason in the option text #}
+        </select>
+        <div id="implant-char-status" style="font-size:9px;color:var(--muted);margin-top:0.25rem;display:none;"></div>
+    </div>
+    <div style="padding:0.25rem 0;">
         <div style="position:relative;">
             <input type="text" id="implant-search"
-                   placeholder="+ Search implants by name..."
+                   placeholder="+ Or search implants by name..."
                    autocomplete="off"
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
                    data-input="searchImplant">
             <div id="implant-results"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
         </div>
-        {# ISS-016: import the skill-character's currently-plugged implants #}
-        <button type="button" id="btn-clone-implants" data-click="loadCloneImplants"
-                style="margin-top:0.35rem;padding:0.25rem 0.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;"
-                title="Fetch the selected skill character's active clone implants from ESI">
-            Load active clone
-        </button>
     </div>
 </div>
 
@@ -847,30 +856,75 @@ function removeImplant(slot) {
     recalcStats();
 }
 
-/* ISS-016: import the selected skill character's active-clone implants.
-   Replaces the whole loadout (a clone IS a full loadout); imported slots
-   get from_clone=true so renderImplantSlots badges them. */
-function loadCloneImplants() {
-    var charId = getSelectedSkillCharId();
-    if (!charId) { alert('Select a skill character first (top of the stats panel).'); return; }
-    var btn = document.getElementById('btn-clone-implants');
-    btn.disabled = true; btn.textContent = 'Loading…';
+/* ISS-016 follow-up: character-first implant picker. Populates the select
+   from the same /tools/fitting/characters list the skill-check selector
+   uses (see fetchFittingCharacters below) rather than issuing its own
+   query, and disables options for characters that haven't granted the
+   implants scope instead of only failing after the fact. */
+function loadImplantCharList() {
+    var sel = document.getElementById('implant-char-select');
+    if (!sel) return;
+    fetchFittingCharacters().then(function(characters) {
+        characters.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = String(c.id);
+            opt.textContent = c.has_implants_scope
+                ? c.name
+                : (c.name + ' — no implant access');
+            opt.disabled = !c.has_implants_scope;
+            sel.appendChild(opt);
+        });
+    });
+}
+
+/* Fires on 'change' of #implant-char-select (dispatcher calls this with
+   `this` = the <select>, per static/js/actions.js). Replaces the whole
+   loadout (a clone IS a full loadout) — imported slots get from_clone=true
+   so renderImplantSlots badges them. Confirms first if slots are already
+   occupied, matching the confirm() pattern used elsewhere on this page
+   (see doImportEFT-adjacent module-compat check and deleteFitting). */
+function onImplantCharChange() {
+    var sel = this;
+    var statusEl = document.getElementById('implant-char-status');
+    var charId = sel.value ? parseInt(sel.value, 10) : null;
+    if (!charId) { if (statusEl) statusEl.style.display = 'none'; return; }
+
+    var label = sel.options[sel.selectedIndex]
+        ? sel.options[sel.selectedIndex].textContent : '';
+    var hadImplants = state.implants && Object.keys(state.implants).length > 0;
+    if (hadImplants && !confirm('Replace all implant slots with ' + label + '’s active clone?')) {
+        sel.value = '';
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.style.display = '';
+        statusEl.textContent = 'Loading ' + label + '…';
+    }
     fetch('/tools/fitting/clone-implants/' + charId)
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        if (data.error) { alert(data.error); return; }
+        if (data.error) {
+            if (statusEl) statusEl.textContent = data.error;
+            sel.value = '';
+            return;
+        }
         state.implants = data.implants || {};
         saveState();
         renderImplantSlots();
         recalcStats();
         var n = Object.keys(state.implants).length;
-        btn.textContent = n ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's')) : 'Clone is empty';
-        setTimeout(function() { btn.textContent = 'Load active clone'; }, 2500);
+        var who = data.character_name || label;
+        if (statusEl) {
+            statusEl.textContent = n
+                ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's') + ' from ' + who + '.')
+                : (who + '’s active clone has no implants plugged in.');
+        }
+        sel.value = '';
     })
-    .catch(function() { alert('Clone implant fetch failed.'); })
-    .finally(function() {
-        btn.disabled = false;
-        if (btn.textContent === 'Loading…') btn.textContent = 'Load active clone';
+    .catch(function() {
+        if (statusEl) statusEl.textContent = 'Clone implant fetch failed — try again shortly.';
+        sel.value = '';
     });
 }
 
@@ -986,22 +1040,36 @@ function getSelectedSkillCharId() {
     return v ? parseInt(v, 10) : null;
 }
 
+/* GET /tools/fitting/characters is the one query behind every character
+   picker on this page (skill-check selector here, implant picker below) —
+   it returns every linked character tagged with has_skills_scope /
+   has_implants_scope so each picker can filter client-side. Caching the
+   promise means the implant picker's init reuses this same fetch instead
+   of firing a second one. */
+var _fittingCharsPromise = null;
+function fetchFittingCharacters() {
+    if (!_fittingCharsPromise) {
+        _fittingCharsPromise = fetch('/tools/fitting/characters')
+            .then(function(r) { return r.json(); })
+            .then(function(data) { return data.characters || []; });
+    }
+    return _fittingCharsPromise;
+}
+
 function loadSkillCharList() {
     var sel = document.getElementById('skill-char-select');
     if (!sel) return;
-    fetch('/tools/fitting/characters')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
-            (data.characters || []).forEach(function(c) {
-                var opt = document.createElement('option');
-                opt.value = String(c.id);
-                opt.textContent = c.name;
-                if (String(c.id) === saved) opt.selected = true;
-                sel.appendChild(opt);
-            });
-            if (saved) onSkillCharChange(/*silent*/true);
+    fetchFittingCharacters().then(function(characters) {
+        var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
+        characters.filter(function(c) { return c.has_skills_scope; }).forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = String(c.id);
+            opt.textContent = c.name;
+            if (String(c.id) === saved) opt.selected = true;
+            sel.appendChild(opt);
         });
+        if (saved) onSkillCharChange(/*silent*/true);
+    });
 }
 
 function onSkillCharChange(silent) {
@@ -1781,6 +1849,7 @@ function refreshOverheatCache() {
     initBrowser();
     refreshOverheatCache();
     loadSkillCharList();
+    loadImplantCharList();
 })();
 </script>
 
