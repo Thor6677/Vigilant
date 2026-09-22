@@ -148,6 +148,105 @@ def test_every_data_binding_resolves():
     )
 
 
+# ── ISS-020/021 positional-arg regression guard ─────────────────────────────
+#
+# test_every_data_binding_resolves (above) only proves a data-* binding's
+# name resolves to SOME window function — it does not prove that function
+# honours the calling convention it was bound under. selectShip / addModule /
+# addDrone shipped in v1.1.0 still expecting real positional args
+# (typeId, typeName, ...) even though the CSP dispatcher only ever calls a
+# handler as `fn.call(el, event)` — one positional argument, the Event. Every
+# other data-click handler in this file (toggleOnline, removeItem,
+# addModuleFromBrowser, addImplant, ...) opens with a `this.dataset`
+# prologue for exactly this reason; these three didn't, so clicking a search
+# result resolved "typeId" to a PointerEvent instead of an SDE type id.
+
+FITTING_TEMPLATES = [
+    os.path.join(TEMPLATES, "fitting_tool.html"),
+    os.path.join(TEMPLATES, "partials", "fitting_search_results.html"),
+]
+
+# A data-bound handler for the fitting tool is defined either inline in
+# fitting_tool.html's own <script> block, or (for a handful of generic ones
+# like closeModalOnBackdrop) in the shared dispatcher module.
+_HANDLER_SOURCES = FITTING_TEMPLATES + [os.path.join(STATIC_JS, "actions.js")]
+
+_FN_DEF = re.compile(
+    r'(?:^|\n)[ \t]*function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{'
+)
+# A later top-level reassignment shadows the `function name(...)` declared
+# above it, because a <script> block runs synchronously top-to-bottom on
+# load — by the time a click can happen the reassignment has already taken
+# effect (this is exactly how the addModule fit-restriction wrapper works:
+# `var _origAddModule = addModule; addModule = function(...) {...}`).
+# actions.js's `window.X = window.X || function (...) {...}` idempotent-init
+# idiom is the same shape with an extra `window.X || ` in the middle.
+_FN_REASSIGN = re.compile(
+    r'(?:^|\n)[ \t]*(?:window\.)?([A-Za-z_$][\w$]*)\s*=\s*'
+    r'(?:window\.\1\s*\|\|\s*)?function\s*\(([^)]*)\)\s*\{'
+)
+
+
+def _handler_definitions(body):
+    """name -> (params, body_window) for the LAST definition of each name in
+    `body` (see _FN_REASSIGN docstring for why "last" is the one that runs).
+
+    body_window is the ~12 lines after the opening brace, not the true
+    function body (finding the real matching `}` needs a parser, not a
+    regex) — enough to hold the this.dataset prologue every compliant
+    handler in this codebase puts right at the top.
+    """
+    defs = {}  # name -> (start_pos, params, window)
+    for pattern in (_FN_DEF, _FN_REASSIGN):
+        for m in pattern.finditer(body):
+            name, params = m.group(1), m.group(2)
+            window = "\n".join(body[m.end():].splitlines()[:12])
+            if name not in defs or m.start() > defs[name][0]:
+                defs[name] = (m.start(), params, window)
+    return {name: (params, window) for name, (_, params, window) in defs.items()}
+
+
+def test_fitting_data_handlers_read_dataset_not_positionals():
+    """Every data-click/data-change/data-input handler reachable from the
+    fitting templates must either take no positional parameters (reading
+    `this`/`this.dataset` directly, e.g. searchShip's `this.value`) or read
+    `this.dataset` near the top of its body as the documented fallback for
+    programmatic callers (Browse panel, EFT import, saved-fit load).
+
+    This can't verify a handler reads its dataset fields *correctly* — only
+    that the fallback code path exists at all, so a handler with declared
+    positional parameters and no this.dataset anywhere near its top is
+    almost certainly still expecting the dispatcher to pass them, which it
+    never will. Same tier of guarantee as test_every_data_binding_resolves,
+    one level deeper.
+    """
+    binding_names = set()
+    for path in FITTING_TEMPLATES:
+        with open(path, encoding="utf-8") as fh:
+            binding_names |= set(_BINDING.findall(fh.read()))
+    binding_names.discard("hide")  # data-on-error's built-in shortcut, not a window fn
+
+    definitions = {}
+    for path in _HANDLER_SOURCES:
+        with open(path, encoding="utf-8") as fh:
+            definitions.update(_handler_definitions(fh.read()))
+
+    violations = {}
+    for name in sorted(binding_names):
+        if name not in definitions:
+            continue  # test_every_data_binding_resolves already reports this
+        params, window = definitions[name]
+        if params.strip() and "this.dataset" not in window:
+            violations[name] = params.strip()
+
+    assert not violations, (
+        "data-click/data-change/data-input handlers with positional "
+        "parameters but no this.dataset fallback — the dispatcher only ever "
+        f"calls fn.call(el, event), so these resolve their args to the Event "
+        f"object instead: {violations}"
+    )
+
+
 def test_banner_partials_carry_no_script_tags():
     """Site-wide banner fragments (app/templates/partials/*banner*.html) load
     via their OWN htmx request, separate from the page that swaps them in.
