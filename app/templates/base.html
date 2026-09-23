@@ -17,6 +17,29 @@
        or an authed-only route/template. #}
     {% if request.session.get('user_id') %}
     <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script nonce="{{ request.state.csp_nonce }}">
+    /* htmx re-creates any script element it finds in swapped-in content and
+       appends it to the document, which makes it an INLINE script as far as
+       the browser is concerned. Under the enforcing policy (T-033:
+       `script-src 'self' 'nonce-…'`, no 'unsafe-inline') such a script can
+       never carry the page's nonce — the fragment is a separate request with
+       a nonce of its own, and the parser clears the nonce attribute anyway —
+       so it was already refused and has been dead code since v1.1.0.
+
+       Turning the feature off makes that explicit and, more to the point,
+       stops the browser filing a violation report for each one. The admin
+       Overview refreshes itself every 10s; when its session has expired the
+       redirect to the landing page is followed by XHR and the whole page gets
+       swapped in, so six blocks were re-created and refused on every tick —
+       ~2.4k reports/hour into the /csp-report sink from one idle tab.
+
+       Page behaviour is unchanged precisely because none of those scripts ran.
+       Note the deliberate choice NOT to set htmx.config.inlineScriptNonce
+       instead: that would revive every fragment script at once, on pages
+       nobody has exercised since they went dead. Moving the behaviour that is
+       still wanted up to page level is separate, reviewable work. */
+    if (window.htmx) htmx.config.allowScriptTags = false;
+    </script>
     {% endif %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
