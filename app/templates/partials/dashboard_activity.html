@@ -42,111 +42,15 @@
     </div>
     {% else %}
     <div style="position:relative;height:200px;padding:0.5rem 0.75rem;">
-        <canvas id="activity-chart-{{ window }}"></canvas>
+        <canvas id="activity-chart-{{ window }}"
+                data-activity-chart="{{ {'labels': labels, 'isk': isk_values, 'pcu': pcu_values}|tojson|forceescape }}"></canvas>
     </div>
     {% endif %}
 </div>
 
-{% if total_isk > 0 or peak_pcu > 0 %}
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    if (typeof Chart === 'undefined') return;
-    const el = document.getElementById('activity-chart-{{ window }}');
-    if (!el) return;
-    const labels = {{ labels|tojson }};
-    const iskValues = {{ isk_values|tojson }};
-    const pcuValues = {{ pcu_values|tojson }};
-    const fmtISK = (v) => {
-        if (v === null) return '';
-        if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
-        if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
-        if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
-        if (v >= 1e3)  return (v/1e3).toFixed(1) + 'K';
-        return v.toFixed(0);
-    };
-    const fmtPCU = (v) => {
-        if (v === null) return '';
-        if (v >= 1000) return (v/1000).toFixed(1) + 'K';
-        return v.toFixed(0);
-    };
-    new Chart(el, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Players online',
-                    data: pcuValues,
-                    yAxisID: 'y',
-                    borderColor: 'rgba(94,177,255,0.95)',
-                    backgroundColor: 'rgba(94,177,255,0.10)',
-                    borderWidth: 1.5,
-                    pointRadius: 0,
-                    pointHoverRadius: 3,
-                    fill: false,
-                    tension: 0,
-                    spanGaps: true,
-                },
-                {
-                    label: 'ISK destroyed',
-                    data: iskValues,
-                    yAxisID: 'y1',
-                    borderColor: 'rgba(200,169,81,0.95)',
-                    backgroundColor: 'rgba(200,169,81,0.08)',
-                    borderWidth: 1.5,
-                    borderDash: [4, 3],
-                    pointRadius: 0,
-                    pointHoverRadius: 3,
-                    fill: false,
-                    tension: 0,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top',
-                    align: 'end',
-                    labels: { font: { size: 9 }, color: '#bfbfbf', boxWidth: 16, boxHeight: 2 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const v = ctx.parsed.y;
-                            if (v === null) return ctx.dataset.label + ': —';
-                            if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
-                            return ctx.dataset.label + ': ' + fmtPCU(v);
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    ticks: { color:'#7a7a7a', font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:8 },
-                    grid:  { display:false }
-                },
-                y: {
-                    type:'linear', position:'left',
-                    beginAtZero: false,
-                    ticks: { color:'rgba(94,177,255,0.95)', font:{size:9}, callback: (v)=>fmtPCU(v) },
-                    grid:  { color:'rgba(255,255,255,0.05)' },
-                    title: { display:true, text:'Players', color:'rgba(94,177,255,0.7)', font:{size:9} },
-                },
-                y1: {
-                    type:'linear', position:'right',
-                    beginAtZero: true,
-                    ticks: { color:'rgba(200,169,81,0.95)', font:{size:9}, callback: (v)=>fmtISK(v) },
-                    grid:  { drawOnChartArea:false },
-                    title: { display:true, text:'ISK', color:'rgba(200,169,81,0.7)', font:{size:9} },
-                },
-            }
-        }
-    });
-})();
-</script>
-{% endif %}
+{# The chart used to be drawn by an inline script block here. This fragment
+   arrives by htmx swap, which re-creates script elements as inline script
+   under the fragment's nonce — the page's policy never matches it — so the
+   canvas has been rendering empty. The series ride in on the canvas above
+   and dashboard.html draws them after the swap. #}
 </div>

@@ -247,33 +247,100 @@ def test_fitting_data_handlers_read_dataset_not_positionals():
     )
 
 
-def test_banner_partials_carry_no_script_tags():
-    """Site-wide banner fragments (app/templates/partials/*banner*.html) load
-    via their OWN htmx request, separate from the page that swaps them in.
-    The CSP nonce is minted per request (app/middleware/csp_nonce.py), so a
-    fragment's inline <script> carries a nonce that never matches the page's
-    CSP header and the browser silently refuses to run it — which is exactly
-    how every banner's dismiss (x) button went dead while the banner itself
-    stayed visible (shown by base.html's page-level applyDismissState(),
-    which does run under the page's own nonce). Banner fragments carry markup
-    only now; behaviour lives in static/js/actions.js and base.html instead,
-    both loaded/executed as part of the page itself.
+# Partials still allowed to ship a script element. This list may only ever
+# SHRINK — a new entry means a new instance of a bug that has now bitten
+# twice (every banner's dismiss button, then nineteen more fragments).
+#
+# fitting_stats.html: deferred, not exempt. It is held by concurrent work at
+# the time of writing and migrating it here would collide; it comes out on
+# its own change.
+PARTIALS_WITH_SCRIPT_ALLOWED = {
+    "app/templates/partials/fitting_stats.html",
+}
+
+
+def test_partials_carry_no_script_tags():
+    """A fragment in app/templates/partials/ must carry markup only.
+
+    These load via their OWN request, separate from the page that swaps them
+    in. The CSP nonce is minted per request (app/middleware/csp_nonce.py), so
+    a script element in a fragment carries a nonce that never matches the
+    page's CSP header. htmx re-creates such an element on swap, as inline
+    script, and the browser refuses it — silently, apart from a violation
+    report. Whatever it implemented is dead code that still looks alive in
+    the source.
+
+    That is exactly how every banner's dismiss (x) button went dead while the
+    banner itself stayed visible, shown by base.html's page-level
+    applyDismissState(), which does run under the page's own nonce. The same
+    thing had quietly happened to eighteen more fragments: chart panels that
+    rendered an empty canvas, admin controls that did nothing, copy buttons
+    that copied nothing.
+
+    So the rule is the whole directory, not just the banners. Behaviour goes
+    to the parent page's own nonced block, to static/js/actions.js, or to an
+    after-swap hook scoped by target id — all of which execute as part of the
+    page. Data the behaviour needs travels on data-* attributes.
+
+    A fragment that needs a script element is a fragment whose behaviour has
+    not been migrated yet, so this list is the migration's remaining work,
+    not a set of exceptions.
     """
     offenders = []
     for path in _templates():
         rel = _rel(path)
-        parts = rel.split("/")
-        if "partials" not in parts:
+        if "partials" not in rel.split("/"):
             continue
-        if "banner" not in os.path.basename(path):
+        if rel in PARTIALS_WITH_SCRIPT_ALLOWED:
             continue
         with open(path, encoding="utf-8") as fh:
             if "<script" in fh.read():
                 offenders.append(rel)
     assert not offenders, (
-        "banner partials must carry markup only — a <script> here carries a "
+        "partials must carry markup only — a script element here carries a "
         f"mismatched CSP nonce and is silently dead code: {sorted(offenders)}"
     )
+
+
+def test_partial_script_allowlist_is_not_stale():
+    """The allowlist has to keep shrinking. An entry that no longer ships a
+    script element is one nobody remembered to delete, and a stale entry is
+    how an allowlist quietly turns back into a loophole."""
+    stale = []
+    for rel in PARTIALS_WITH_SCRIPT_ALLOWED:
+        path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            stale.append(rel)
+            continue
+        with open(path, encoding="utf-8") as fh:
+            if "<script" not in fh.read():
+                stale.append(rel)
+    assert not stale, (
+        f"PARTIALS_WITH_SCRIPT_ALLOWED is out of date — remove: {sorted(stale)}"
+    )
+
+
+def test_base_disables_htmx_script_tag_execution():
+    """base.html must set `htmx.config.allowScriptTags = false`.
+
+    htmx re-creates any script element it finds in swapped-in content and
+    appends it to the document, which makes it inline script. Under the
+    enforcing policy such a script cannot carry the page's nonce — the
+    fragment is a different request with a nonce of its own — so it was
+    refused and did nothing. The refusal still costs a violation report
+    each, and the admin Overview re-fetches itself every 10s: a stale
+    session there swapped the whole landing page in on every tick and filed
+    six reports a time, ~2.4k an hour from one idle tab.
+
+    Left at htmx's default this silently comes back the moment anyone adds
+    a script element to a fragment, so the setting is pinned here rather
+    than trusted to stay.
+    """
+    with open(os.path.join(TEMPLATES, "base.html"), encoding="utf-8") as fh:
+        body = fh.read()
+    assert re.search(
+        r"htmx\.config\.allowScriptTags\s*=\s*false", body
+    ), "base.html no longer disables htmx's script-tag execution"
 
 
 # ── the policy the conversion work was for ──────────────────────────────────

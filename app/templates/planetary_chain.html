@@ -93,6 +93,30 @@
 </style>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Intra-panel navigation between commodity nodes.
+ *
+ * This lived inside partials/planetary_chain_node.html, which htmx swaps
+ * into #chain-detail — so its script was re-created as inline script under
+ * the fragment's nonce, which this page's CSP header never matches, and
+ * clicking from one commodity to the next did nothing. Defined here, under
+ * the page's own nonce, it runs. */
+window.piLoadNode = function(e) {
+    /* These sit on links whose inline handler used to end in `return false`
+       to cancel the navigation. */
+    if (e && e.preventDefault) e.preventDefault();
+    var typeId = this.dataset.typeId;
+    var el = document.getElementById('chain-detail');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">Loading…</div>';
+    /* Clear active highlights + try to set the one we're loading */
+    document.querySelectorAll('.chain-item').forEach(function(t){ t.classList.remove('is-active'); });
+    var target = document.querySelector('.chain-item[data-type-id="' + typeId + '"]');
+    if (target) target.classList.add('is-active');
+    fetch('/industry/planetary/chain/node/' + typeId)
+        .then(function(r){ return r.text(); })
+        .then(function(html){ el.innerHTML = html; });
+};
+
 /* Clicking a chain tile makes it the active one. */
 function selectChainItem() {
     document.querySelectorAll('.chain-item').forEach(function(el) {

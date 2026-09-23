@@ -128,75 +128,15 @@
     {% endfor %}
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-(function(){
-    /* The ME slider both updates its own label and recalculates. */
-    window.subMeSlide = window.subMeSlide || function() {
-        var typeId = this.dataset.typeId;
-        var label = document.getElementById('sub-me-val-' + typeId);
-        if (label) label.textContent = this.value;
-        recalcComponent(typeId, this.dataset.needed);
-    };
+{# subMeSlide, recalcComponentFromEl, toggleSubComponent and
+   copyParentSettings used to be an inline script block here. This fragment
+   arrives by htmx swap \u2014 and swaps into itself, recursively, for every
+   sub-component level \u2014 so its script was re-created as inline script under
+   a nonce the page never matches, and every control in this panel was inert.
+   All four are defined in industry.html now, under the page's own nonce.
 
-    /* recalcComponent keeps its (typeId, qty) signature on purpose:
-       industry.html defines its own implementation of the same name for the
-       parent build page, and copyParentSettings below calls it directly.
-       This is only the element-bound entry point for the panel's selects. */
-    window.recalcComponentFromEl = window.recalcComponentFromEl || function() {
-        recalcComponent(this.dataset.typeId, this.dataset.needed);
-    };
-
-    window.recalcComponent = window.recalcComponent || function(typeId, qty) {
-        var p = new URLSearchParams({
-            type_id: typeId,
-            needed: qty,
-            me: document.getElementById('sub-me-' + typeId).value,
-            structure: document.getElementById('sub-struct-' + typeId).value,
-            rig: document.getElementById('sub-rig-' + typeId).value,
-            security: document.getElementById('sub-sec-' + typeId).value,
-        });
-        htmx.ajax('GET', '/industry/component?' + p.toString(), '#component-' + typeId);
-    };
-    window.toggleSubComponent = window.toggleSubComponent || function() {
-        var typeId = this.dataset.typeId;
-        var needed = this.dataset.qty;
-        var btn = this;
-        var panel = document.getElementById('subcomp-' + typeId);
-        if (panel.style.display === 'none') {
-            panel.style.display = '';
-            btn.textContent = 'Build \u25BE';
-            btn.style.borderColor = 'var(--accent)';
-            btn.style.color = 'var(--accent)';
-            var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
-            var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
-            var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
-            var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
-            var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
-            htmx.ajax('GET', '/industry/component?' + params, '#subcomp-' + typeId);
-        } else {
-            panel.style.display = 'none';
-            btn.textContent = 'Build \u25B8';
-            btn.style.borderColor = 'var(--border)';
-            btn.style.color = '';
-        }
-    };
-    window.copyParentSettings = window.copyParentSettings || function() {
-        var typeId = this.dataset.typeId;
-        var needed = this.dataset.needed;
-        var pMe = document.getElementById('inp-me');
-        var pSt = document.getElementById('inp-structure');
-        var pRi = document.getElementById('inp-rig');
-        var pSe = document.getElementById('inp-security');
-        if (pMe) {
-            var slider = document.getElementById('sub-me-' + typeId);
-            slider.value = pMe.value;
-            var label = document.getElementById('sub-me-val-' + typeId);
-            if (label) label.textContent = pMe.value;
-        }
-        if (pSt) document.getElementById('sub-struct-' + typeId).value = pSt.value;
-        if (pRi) document.getElementById('sub-rig-' + typeId).value = pRi.value;
-        if (pSe) document.getElementById('sub-sec-' + typeId).value = pSe.value;
-        recalcComponent(typeId, needed);
-    };
-})();
-</script>
+   The fragment's own recalcComponent went with them and was NOT kept:
+   industry.html has defined one of that name all along, and its version is a
+   superset \u2014 it also updates buildComponents and clears the stale shopping
+   list. The copy here was guarded behind `window.x = window.x ||` and would
+   have lost to the page's anyway. #}

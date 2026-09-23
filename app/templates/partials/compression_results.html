@@ -40,11 +40,16 @@
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Ores to Buy</span>
             <div style="display:flex;gap:6px;">
-                <button data-click="copyCompressionMultibuy" id="comp-copy-btn"
+                {# Both handlers live in static/js/actions.js — see the note at
+                   the foot of this file. #}
+                <button data-click="copyToClipboard" id="comp-copy-btn"
+                        data-copy-from="comp-multibuy-text"
+                        data-copy-label="Copy for Multibuy"
                         class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">
                     Copy for Multibuy
                 </button>
-                <button data-click="sendOresToHauling" id="comp-haul-btn"
+                <button data-click="sendToHauling" id="comp-haul-btn"
+                        data-haul-scope="#comp-ore-rows"
                         class="b-btn" style="padding:2px 10px;font-size:10px;border:1px solid var(--text);color:var(--text);">
                     Send to Hauling
                 </button>
@@ -59,8 +64,11 @@
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Volume</span>
         </div>
 
+        <div id="comp-ore-rows">
         {% for ore in ores %}
-        <div class="b-table-row">
+        <div class="b-table-row"
+             data-haul-name="{{ ore.name }}" data-haul-qty="{{ ore.quantity }}"
+             data-haul-volume="{{ ore.volume }}">
             <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
                 <img src="https://images.evetech.net/types/{{ ore.type_id }}/icon?size=32"
                      style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
@@ -73,6 +81,7 @@
             <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(ore.volume) }} m3</span>
         </div>
         {% endfor %}
+        </div>
 
         <div class="b-table-row" style="border-top:2px solid var(--border);">
             <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Total</span>
@@ -119,31 +128,13 @@
     Paste into EVE's Multibuy window (Alt+M). Format: <code>Item Name x{qty}</code>
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-function copyCompressionMultibuy() {
-    var text = document.getElementById('comp-multibuy-text').value;
-    navigator.clipboard.writeText(text).then(function() {
-        var btn = document.getElementById('comp-copy-btn');
-        btn.textContent = 'Copied!';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-        setTimeout(function() {
-            btn.textContent = 'Copy for Multibuy';
-            btn.style.color = 'var(--accent)';
-            btn.style.borderColor = 'var(--accent)';
-        }, 2000);
-    });
-}
-
-function sendOresToHauling() {
-    var items = [
-        {% for ore in ores %}
-        {name: {{ ore.name | tojson }}, qty: {{ ore.quantity }}, volume: {{ ore.volume }}},
-        {% endfor %}
-    ];
-    localStorage.setItem('vigilant_haul_items', JSON.stringify(items));
-    window.location.href = '/industry/hauling';
-}
-</script>
+{# copyCompressionMultibuy and sendOresToHauling used to be an inline script
+   block here. This fragment arrives by htmx swap, which re-creates script
+   elements as inline script under the fragment's nonce — the page's policy
+   never matches it, so neither button did anything. Both were the same
+   function the shopping list and appraisal fragments each carried their own
+   dead copy of; there is now one of each in static/js/actions.js
+   (copyToClipboard / sendToHauling), driven by the data-copy-* and
+   data-haul-* attributes above. #}
 
 {% endif %}

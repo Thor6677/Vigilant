@@ -114,24 +114,9 @@
     {% endif %}
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-    // Helper for intra-partial navigation between commodity nodes.
-    if (typeof piLoadNode === 'undefined') {
-        window.piLoadNode = function(e) {
-            /* These sit on <a href="#"> links whose inline handler ended in
-               `return false` to cancel the navigation. */
-            if (e && e.preventDefault) e.preventDefault();
-            var typeId = this.dataset.typeId;
-            var el = document.getElementById('chain-detail');
-            if (!el) return;
-            el.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:11px;">Loading…</div>';
-            // Clear active highlights + try to set the one we're loading
-            document.querySelectorAll('.chain-item').forEach(function(e){ e.classList.remove('is-active'); });
-            var target = document.querySelector('.chain-item[data-type-id="' + typeId + '"]');
-            if (target) target.classList.add('is-active');
-            fetch('/industry/planetary/chain/node/' + typeId)
-                .then(function(r){ return r.text(); })
-                .then(function(html){ el.innerHTML = html; });
-        };
-    }
-</script>
+{# piLoadNode (data-click on the commodity links above) is defined in
+   planetary_chain.html, under the page's own nonce. It cannot live here:
+   this fragment is swapped into #chain-detail by htmx, and a script in
+   swapped content is re-created as inline script whose nonce never matches
+   the page's policy — so clicking through from one commodity to the next
+   did nothing. #}

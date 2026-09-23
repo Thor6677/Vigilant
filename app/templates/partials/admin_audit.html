@@ -46,9 +46,7 @@
     {% endif %}
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-/* Was an inline htmx.ajax in the select's onchange. */
-window.adminAuditFilter = window.adminAuditFilter || function() {
-    htmx.ajax('GET', '/admin/section/audit?filter=' + this.value, '#admin-content');
-};
-</script>
+{# adminAuditFilter (data-change on the filter select above) is defined in
+   admin.html, under the page's own nonce. It cannot live here: this fragment
+   arrives by htmx swap, and a script in swapped content is re-created as
+   inline script whose nonce never matches the page's policy. #}

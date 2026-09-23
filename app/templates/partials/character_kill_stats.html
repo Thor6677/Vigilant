@@ -255,7 +255,8 @@
         <div class="b-panel b-pad-md">
             <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Combat Profile</span></div>
             <div style="position:relative;height:240px;">
-                <canvas id="radar-{{ character_id }}"></canvas>
+                <canvas id="radar-{{ character_id }}" data-chart-kind="radar"
+                        data-chart="{{ {'labels': radar_labels, 'values': radar_values, 'raw': radar_raw}|tojson|forceescape }}"></canvas>
             </div>
         </div>
 
@@ -266,7 +267,8 @@
             </div>
             {% if autopsy_total > 0 %}
             <div style="position:relative;height:240px;">
-                <canvas id="autopsy-{{ character_id }}"></canvas>
+                <canvas id="autopsy-{{ character_id }}" data-chart-kind="autopsy"
+                        data-chart="{{ autopsy|tojson|forceescape }}"></canvas>
             </div>
             {% else %}
             <div style="font-size:11px;color:var(--muted);">No losses in window — well done.</div>
@@ -280,7 +282,8 @@
             </div>
             {% if profitability %}
             <div style="position:relative;height:240px;">
-                <canvas id="profit-{{ character_id }}"></canvas>
+                <canvas id="profit-{{ character_id }}" data-chart-kind="profit"
+                        data-chart="{{ {'rows': profitability, 'names': type_names}|tojson|forceescape }}"></canvas>
             </div>
             {% else %}
             <div style="font-size:11px;color:var(--muted);">No data.</div>
@@ -297,7 +300,8 @@
             <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships</span>
         </div>
         <div style="position:relative;height:200px;">
-            <canvas id="stream-{{ character_id }}"></canvas>
+            <canvas id="stream-{{ character_id }}" data-chart-kind="stream"
+                    data-chart="{{ {'datasets': ts_datasets, 'weeks': ts_weeks}|tojson|forceescape }}"></canvas>
         </div>
     </div>
     {% endif %}
@@ -311,167 +315,11 @@
     </div>
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    if (typeof Chart === 'undefined') return;
-    const ck = "{{ character_id }}";
-
-    {% if has_data %}
-    // Radar
-    const radarEl = document.getElementById('radar-' + ck);
-    if (radarEl) {
-        const radarRaw = {{ radar_raw|tojson }};
-        const radarLabels = {{ radar_labels|tojson }};
-        new Chart(radarEl, {
-            type: 'radar',
-            data: {
-                labels: radarLabels,
-                datasets: [{
-                    label: 'Profile',
-                    data: {{ radar_values|tojson }},
-                    backgroundColor: 'rgba(200,169,81,0.18)',
-                    borderColor: 'rgba(200,169,81,0.85)',
-                    pointBackgroundColor: '#c8a951',
-                    pointRadius: 3,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    r: {
-                        suggestedMin: 0,
-                        suggestedMax: 100,
-                        ticks: { display: false },
-                        grid: { color: 'rgba(255,255,255,0.08)' },
-                        angleLines: { color: 'rgba(255,255,255,0.10)' },
-                        pointLabels: { color: '#bfbfbf', font: { size: 10 } }
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const raw = radarRaw[ctx.dataIndex];
-                                const suffix = [' kills', '%', ' solo', ' gang', ' ISK', ' systems'];
-                                let v = raw;
-                                if (ctx.dataIndex === 4) v = (raw / 1_000_000).toFixed(1) + 'M';
-                                else if (typeof raw === 'number') v = (raw % 1 === 0 ? raw : raw.toFixed(1));
-                                return radarLabels[ctx.dataIndex] + ': ' + v + suffix[ctx.dataIndex];
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Loss Autopsies doughnut
-    {% if autopsy_total > 0 %}
-    const autopsyEl = document.getElementById('autopsy-' + ck);
-    if (autopsyEl) {
-        const buckets = {{ autopsy|tojson }};
-        const labels = ['Solo PvP', 'Small Gang', 'Fleet', 'Smartbomb', 'NPC'];
-        const data = [buckets.solo, buckets.small_gang, buckets.fleet, buckets.smartbomb, buckets.npc];
-        const colors = ['#5eb1ff', '#4ade80', '#ee5555', '#a855f7', '#fb923c'];
-        new Chart(autopsyEl, {
-            type: 'doughnut',
-            data: {
-                labels: labels,
-                datasets: [{ data: data, backgroundColor: colors, borderColor: '#1a1a1a', borderWidth: 2 }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '50%',
-                plugins: {
-                    legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const total = data.reduce((a, b) => a + b, 0);
-                                const pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
-                                return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    {% endif %}
-
-    // Profitability bar
-    {% if profitability %}
-    const profitEl = document.getElementById('profit-' + ck);
-    if (profitEl) {
-        const rows = {{ profitability|tojson }};
-        const typeNames = {{ type_names|tojson }};
-        const labels = rows.map(r => typeNames[r.ship_type_id] || ('Type ' + r.ship_type_id));
-        const destroyed = rows.map(r => r.isk_destroyed);
-        const lost = rows.map(r => r.isk_lost);
-        new Chart(profitEl, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: 'Destroyed', data: destroyed.map(v => v / 1_000_000), backgroundColor: 'rgba(46,160,67,0.7)' },
-                    { label: 'Lost', data: lost.map(v => -v / 1_000_000), backgroundColor: 'rgba(204,51,51,0.7)' }
-                ]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: { stacked: true, ticks: { color: '#888', font: { size: 10 }, callback: (v) => v + 'M' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                    y: { stacked: true, ticks: { color: '#bfbfbf', font: { size: 10 } }, grid: { display: false } }
-                },
-                plugins: {
-                    legend: { labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => ctx.dataset.label + ': ' + Math.abs(ctx.raw).toFixed(1) + 'M ISK'
-                        }
-                    }
-                }
-            }
-        });
-    }
-    {% endif %}
-
-    // Ship Usage Stream
-    {% if ts_datasets %}
-    const streamEl = document.getElementById('stream-' + ck);
-    if (streamEl) {
-        const datasets = {{ ts_datasets|tojson }};
-        const palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7','#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
-        datasets.forEach((d, i) => {
-            d.backgroundColor = palette[i % palette.length] + 'cc';
-            d.borderColor = palette[i % palette.length];
-            d.pointRadius = 0;
-        });
-        const weeks = {{ ts_weeks }};
-        const labels = Array.from({length: weeks}, (_, i) => 'W' + (i - weeks + 1));
-        new Chart(streamEl, {
-            type: 'line',
-            data: { labels: labels, datasets: datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: {
-                    x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
-                    y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
-                },
-                plugins: {
-                    legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' }
-                }
-            }
-        });
-    }
-    {% endif %}
-    {% endif %}
-})();
-</script>
+{# The four charts above used to be drawn by a ~150-line inline script block
+   here. This fragment arrives by htmx swap, which re-creates script elements
+   as inline script under the fragment's nonce — the page's policy never
+   matches it — so every one of them has been a blank canvas. The series ride
+   in on the canvases now, and static/js/actions.js draws them
+   (renderCombatCharts), called by character_detail.html after the swap.
+   partials/dashboard_combat_profile.html carried a line-for-line copy of the
+   same script; there is one renderer for both now. #}

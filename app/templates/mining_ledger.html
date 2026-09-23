@@ -158,10 +158,15 @@
             if (raw) {
                 JSON.parse(raw).forEach(function(id) { selectedChars.add(id); });
                 updateSelectionBar();
-                /* Restore checkbox state after HTMX loads */
-                document.addEventListener('htmx:afterSwap', restoreCheckboxes);
             }
         } catch(e) {}
+        /* Restore checkbox state after every htmx swap. Registered
+           unconditionally, not only when a selection already existed at page
+           load: a corp card expanded AFTER the first tick-box would otherwise
+           come back unchecked. partials/mining_ledger_corp.html used to carry
+           its own per-corp copy of this restore for that very case, but it was
+           a script inside a swapped fragment and never ran. */
+        document.addEventListener('htmx:afterSwap', restoreCheckboxes);
     }
 
     function saveSelection() {
@@ -405,21 +410,28 @@
         });
     }
 
-    /* Listen for chart data from the HTMX partial */
+    /* Chart data from the htmx partial.
+     *
+     * partials/mining_ledger_data.html used to ship the series as a JSON
+     * data island plus a script that dispatched 'mining-chart-ready'. Both
+     * were script elements in swapped content, so htmx re-created them as
+     * inline script under the fragment's nonce and the policy refused the
+     * dispatch on every swap — the afterSettle hook below is what has
+     * actually been driving the chart. The series now arrive on a data
+     * attribute, so there is no script in the fragment and no event to
+     * listen for. */
     function tryLoadChartData() {
         var el = document.getElementById('mining-chart-data');
         if (!el) return;
         try {
-            fullChartData = JSON.parse(el.textContent);
+            fullChartData = JSON.parse(el.dataset.chart);
             setActiveRange(30);
             buildMiningChart(fullChartData, 30);
         } catch(e) { console.error('Chart data parse error:', e); }
     }
-    document.addEventListener('mining-chart-ready', tryLoadChartData);
-    /* Also hook into htmx afterSettle as a fallback for script execution */
     document.addEventListener('htmx:afterSettle', function(evt) {
         if (evt.detail && evt.detail.target && evt.detail.target.id === 'ledger-data') {
-            setTimeout(tryLoadChartData, 100);
+            tryLoadChartData();
         }
     });
 

@@ -208,6 +208,174 @@ function recalcComponent(typeId, qty) {
     document.getElementById('shopping-list-container').innerHTML = '';
 }
 
+/* ── Behaviour that used to live inside the result fragments ─────────────
+ *
+ * partials/calc_results.html, partials/component_panel.html and
+ * partials/shopping_list.html each shipped their own inline script block.
+ * They arrive by htmx swap, which re-creates script elements as inline
+ * script under the FRAGMENT's nonce — never this page's — so the enforcing
+ * policy refused all of it. Build All, every per-component Build toggle,
+ * every sub-component control and the Send Minerals to Compressor button
+ * were dead controls. They run from here now, under this page's nonce.
+ *
+ * These sit in the same block as toggleComponent / recalcComponent above on
+ * purpose: the fragments carried same-named copies of both, guarded behind
+ * `window.x = window.x ||`, which would have deferred to these even if they
+ * had run. One definition each, and it is this one. */
+
+var allBuilt = false;
+
+/* calc_results: the Build All / Buy All button. */
+window.toggleBuildAll = function() {
+    var btns = document.querySelectorAll('.build-toggle-btn');
+    var buildAllBtn = document.getElementById('build-all-btn');
+    allBuilt = !allBuilt;
+
+    if (allBuilt) {
+        /* Open all: stagger requests 200ms apart to avoid flooding */
+        var delay = 0;
+        btns.forEach(function(btn) {
+            var typeId = parseInt(btn.dataset.typeId);
+            var needed = parseInt(btn.dataset.needed);
+            var panel = document.getElementById('component-' + typeId);
+            if (panel && panel.style.display === 'none') {
+                setTimeout(function() {
+                    openComponent(typeId, needed, btn);
+                }, delay);
+                delay += 200;
+            }
+        });
+    } else {
+        /* Close all: immediate, no server calls */
+        btns.forEach(function(btn) {
+            var typeId = parseInt(btn.dataset.typeId);
+            var panel = document.getElementById('component-' + typeId);
+            if (panel && panel.style.display !== 'none') {
+                closeComponent(typeId, btn);
+            }
+        });
+    }
+    if (buildAllBtn) {
+        buildAllBtn.textContent = allBuilt ? 'Buy All' : 'Build All';
+    }
+};
+
+function openComponent(typeId, needed, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    panel.style.display = '';
+    btn.textContent = 'Build ▾';
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.color = 'var(--accent)';
+    var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
+    var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
+    var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
+    var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
+    buildComponents[typeId] = {me: parseInt(pMe), structure: pSt, rig: pRi, security: pSe};
+    var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
+    htmx.ajax('GET', '/industry/component?' + params, '#component-' + typeId);
+}
+
+function closeComponent(typeId, btn) {
+    var panel = document.getElementById('component-' + typeId);
+    panel.style.display = 'none';
+    btn.textContent = 'Build ▸';
+    btn.style.borderColor = 'var(--border)';
+    btn.style.color = '';
+    delete buildComponents[typeId];
+}
+
+/* The element-bound entry point for a component row's Build button. Kept
+   separate from toggleComponent so that function's (typeId, needed, btn)
+   signature stays available to the callers that pass ids directly. */
+window.toggleComponentFromEl = function() {
+    toggleComponent(this.dataset.typeId, this.dataset.qty, this);
+};
+
+/* component_panel: the ME slider mirrors its value into its label, then
+   recalculates. */
+window.subMeSlide = function() {
+    var typeId = this.dataset.typeId;
+    var label = document.getElementById('sub-me-val-' + typeId);
+    if (label) label.textContent = this.value;
+    recalcComponent(typeId, this.dataset.needed);
+};
+
+window.recalcComponentFromEl = function() {
+    recalcComponent(this.dataset.typeId, this.dataset.needed);
+};
+
+/* component_panel: a sub-component's own Build toggle. Swaps into
+   #subcomp-<id> rather than #component-<id>, which is what keeps the
+   nesting one level deeper rather than replacing the panel it sits in. */
+window.toggleSubComponent = function() {
+    var typeId = this.dataset.typeId;
+    var needed = this.dataset.qty;
+    var btn = this;
+    var panel = document.getElementById('subcomp-' + typeId);
+    if (panel.style.display === 'none') {
+        panel.style.display = '';
+        btn.textContent = 'Build ▾';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        var pMe = document.getElementById('inp-me') ? document.getElementById('inp-me').value : '0';
+        var pSt = document.getElementById('inp-structure') ? document.getElementById('inp-structure').value : 'npc_station';
+        var pRi = document.getElementById('inp-rig') ? document.getElementById('inp-rig').value : 'none';
+        var pSe = document.getElementById('inp-security') ? document.getElementById('inp-security').value : 'highsec';
+        var params = 'type_id=' + typeId + '&needed=' + needed + '&me=' + pMe + '&structure=' + pSt + '&rig=' + pRi + '&security=' + pSe;
+        htmx.ajax('GET', '/industry/component?' + params, '#subcomp-' + typeId);
+    } else {
+        panel.style.display = 'none';
+        btn.textContent = 'Build ▸';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = '';
+    }
+};
+
+/* component_panel: pull the parent blueprint's ME/structure/rig/security
+   down into this sub-panel and recalculate with them. */
+window.copyParentSettings = function() {
+    var typeId = this.dataset.typeId;
+    var needed = this.dataset.needed;
+    var pMe = document.getElementById('inp-me');
+    var pSt = document.getElementById('inp-structure');
+    var pRi = document.getElementById('inp-rig');
+    var pSe = document.getElementById('inp-security');
+    if (pMe) {
+        document.getElementById('sub-me-' + typeId).value = pMe.value;
+        var label = document.getElementById('sub-me-val-' + typeId);
+        if (label) label.textContent = pMe.value;
+    }
+    if (pSt) document.getElementById('sub-struct-' + typeId).value = pSt.value;
+    if (pRi) document.getElementById('sub-rig-' + typeId).value = pRi.value;
+    if (pSe) document.getElementById('sub-sec-' + typeId).value = pSe.value;
+    recalcComponent(typeId, needed);
+};
+
+/* shopping_list: hand the mineral totals to the compression calculator.
+   The destination (with its mineral_<id>=<qty> query string) is rendered
+   onto the button as data-compressor-url, so the fragment stays markup. */
+window.sendToCompressor = function() {
+    var url = this.dataset.compressorUrl;
+    if (!url) return;
+    try {
+        var existing = localStorage.getItem('vigilant_comp_state');
+        if (existing) {
+            var state = JSON.parse(existing);
+            var hasValues = false;
+            for (var k in state) {
+                if (k.indexOf('mineral_') === 0 && parseInt(state[k]) > 0) { hasValues = true; break; }
+            }
+            if (hasValues && !window.confirm(
+                    'The Compression Calculator already has mineral values saved. '
+                    + 'Overwrite with these new values?')) {
+                return;
+            }
+        }
+        localStorage.removeItem('vigilant_comp_state');
+    } catch (e) { /* private mode — nothing saved to clash with */ }
+    window.location.href = url;
+};
+
 function generateShoppingList() {
     if (!selectedTypeId) return;
     var params = new URLSearchParams({
