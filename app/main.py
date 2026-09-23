@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.nav import NAV_GROUPS, item_active, group_active
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.csp_nonce import CSPNonceMiddleware
+from app.middleware.htmx_redirect import HTMXRedirectMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
@@ -129,6 +130,13 @@ class _RequestTimingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_RequestTimingMiddleware)
+
+# Redirects answered to htmx become `401 + HX-Redirect` (ISS-038). Every
+# route gates itself with a redirect to the login page; XHR follows that
+# redirect and htmx swaps the login page into the request's target — on a
+# polling slot, every tick until the tab is closed. Sits inside the CSP
+# middleware so the rewritten response still carries the policy header.
+app.add_middleware(HTMXRedirectMiddleware)
 
 # CSP nonce middleware (T-012). Stamps a per-request nonce on
 # request.state.csp_nonce and emits an enforcing Content-Security-Policy

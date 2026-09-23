@@ -72,6 +72,24 @@ function switchTab() {
 refreshTimer = setInterval(function() {
     htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
 }, 10000);
+
+/* Stop polling the moment the server says this session is gone (401) or no
+   longer an admin's (403). A 401 also carries HX-Redirect, which htmx honours
+   before it looks at the status, so on that tick the page normally navigates
+   to the login page; this is the belt under that, and the only handling a
+   403 gets. Without it the timer spins for as long as the tab is open
+   (ISS-038). htmx.ajax() fires its events on body with the swap target in
+   evt.detail.target, which is how the updater panel's own poll is excluded. */
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    var xhr = evt.detail.xhr;
+    var target = evt.detail.target;
+    if (!xhr || !target || target.id !== 'admin-content') return;
+    if (xhr.status !== 401 && xhr.status !== 403) return;
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    target.innerHTML = '<div class="b-empty">' +
+        (xhr.status === 401 ? 'Your session has expired' : 'This account no longer has admin access') +
+        ' &mdash; <a href="/">sign in again</a>.</div>';
+});
 </script>
 
 <script nonce="{{ request.state.csp_nonce }}">
