@@ -373,39 +373,3 @@
     {% endfor %}
 </div>
 {% endif %}
-
-<script nonce="{{ request.state.csp_nonce }}">
-/* Both of these were single-line onclick expressions. Each toggle flips its
-   own button label and rewrites every value cell from the dataset the server
-   rendered onto it, so no refetch is needed. Guarded: this partial is swapped
-   in on every stats refresh. */
-window.toggleResourceUnits = window.toggleResourceUnits || function() {
-    var showingPct = this.textContent.trim() === '%';
-    var next = showingPct ? 'val' : 'pct';
-    this.textContent = showingPct ? 'VAL' : '%';
-    document.querySelectorAll('.fr-val').forEach(function(el) {
-        el.textContent = el.dataset[next];
-    });
-};
-
-window.toggleDefenceUnits = window.toggleDefenceUnits || function() {
-    var showingEhp = this.textContent.trim() === 'EHP';
-    var key = showingEhp ? 'hp' : 'ehp';
-    this.textContent = showingEhp ? 'HP' : 'EHP';
-    document.querySelectorAll('.def-hp-val').forEach(function(el) {
-        el.textContent = el.dataset[key];
-    });
-    var label = document.getElementById('def-header-label');
-    if (label) {
-        var cells = document.querySelectorAll('.def-hp-val');
-        var last = cells[cells.length - 1];
-        label.textContent = showingEhp
-            ? '(Raw HP: ' + last.dataset.hp + ')'
-            : '(Effective HP: ' + last.dataset.ehp + ')';
-    }
-    document.querySelectorAll('.def-rep-val').forEach(function(el) {
-        el.textContent = (showingEhp ? el.dataset.hp : el.dataset.ehp)
-            + (showingEhp ? ' HP/s' : ' EHP/s');
-    });
-};
-</script>
