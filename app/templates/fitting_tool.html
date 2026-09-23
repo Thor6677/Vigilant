@@ -1012,6 +1012,42 @@ function restoreProfileSelection() {
     _syncCustomSliderUI();
 }
 
+/* ── Stats panel unit toggles ─────────────────────────────────────────────── */
+/* These lived in partials/fitting_stats.html, which recalcStats() writes in
+   with innerHTML — and inserted markup never executes its own scripts, so
+   neither toggle had ever run. Each flips its own button label and rewrites
+   every value cell from the dataset the server rendered onto it, so no
+   refetch is needed. Dispatched via data-click from the fragment's markup. */
+function toggleResourceUnits() {
+    var showingPct = this.textContent.trim() === '%';
+    var next = showingPct ? 'val' : 'pct';
+    this.textContent = showingPct ? 'VAL' : '%';
+    document.querySelectorAll('.fr-val').forEach(function(el) {
+        el.textContent = el.dataset[next];
+    });
+}
+
+function toggleDefenceUnits() {
+    var showingEhp = this.textContent.trim() === 'EHP';
+    var key = showingEhp ? 'hp' : 'ehp';
+    this.textContent = showingEhp ? 'HP' : 'EHP';
+    document.querySelectorAll('.def-hp-val').forEach(function(el) {
+        el.textContent = el.dataset[key];
+    });
+    var label = document.getElementById('def-header-label');
+    if (label) {
+        var cells = document.querySelectorAll('.def-hp-val');
+        var last = cells[cells.length - 1];
+        label.textContent = showingEhp
+            ? '(Raw HP: ' + last.dataset.hp + ')'
+            : '(Effective HP: ' + last.dataset.ehp + ')';
+    }
+    document.querySelectorAll('.def-rep-val').forEach(function(el) {
+        el.textContent = (showingEhp ? el.dataset.hp : el.dataset.ehp)
+            + (showingEhp ? ' HP/s' : ' EHP/s');
+    });
+}
+
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
 function recalcStats() {
     if (!state.shipTypeId) return;

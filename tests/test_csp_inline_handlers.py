@@ -249,14 +249,9 @@ def test_fitting_data_handlers_read_dataset_not_positionals():
 
 # Partials still allowed to ship a script element. This list may only ever
 # SHRINK — a new entry means a new instance of a bug that has now bitten
-# twice (every banner's dismiss button, then nineteen more fragments).
-#
-# fitting_stats.html: deferred, not exempt. It is held by concurrent work at
-# the time of writing and migrating it here would collide; it comes out on
-# its own change.
-PARTIALS_WITH_SCRIPT_ALLOWED = {
-    "app/templates/partials/fitting_stats.html",
-}
+# twice (every banner's dismiss button, then nineteen more fragments). It is
+# empty as of the fitting_stats.html migration and should stay that way.
+PARTIALS_WITH_SCRIPT_ALLOWED: set[str] = set()
 
 
 def test_partials_carry_no_script_tags():
