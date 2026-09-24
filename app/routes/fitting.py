@@ -17,6 +17,7 @@ from app.sde import lookup as sde
 from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
 from app.fitting.compare import build_compare_sections
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
+from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
 from app.db.sde_models import (
     SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute, SDEDogmaAttribute,
     SDETypeSkillReq,
@@ -259,10 +260,11 @@ async def compare_fittings(
     isn't owned by the session user 404s via ``_owned_fit_or_none``. Reads
     only, so the two sequential engine calls share the request session safely.
 
-    Each fit's saved implants (``implants_json``, ISS-016) go into the same
-    engine call the builder makes, so a fit compares with the numbers it
-    was saved with. The header says how many implants each side carries so
-    a lopsided comparison is visible for what it is.
+    Each fit's saved implants (``implants_json``, ISS-016) and boosters
+    (``boosters_json``, T-049) go into the same engine call the builder
+    makes, so a fit compares with the numbers it was saved with. The header
+    says how many implants and boosters each side carries so a lopsided
+    comparison is visible for what it is.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -280,19 +282,28 @@ async def compare_fittings(
             implants = {}
         return [rec["type_id"] for rec in implants.values()]
 
-    async def _stats_for(fit: UserFitting, implants: list[int]) -> dict:
+    def _boosters_for(fit: UserFitting) -> list[dict]:
+        try:
+            boosters = _sanitize_boosters_map(json.loads(fit.boosters_json or "{}"))
+        except Exception:
+            boosters = {}
+        return _booster_entries(boosters)
+
+    async def _stats_for(fit: UserFitting, implants: list[int], boosters: list[dict]) -> dict:
         try:
             items = json.loads(fit.items_json) if fit.items_json else []
         except Exception:
             items = []
         return await calculate_fitting_stats(
-            db, fit.ship_type_id, items, implants=implants,
+            db, fit.ship_type_id, items, implants=implants, boosters=boosters,
         )
 
     implants_a = _implant_ids(fit_a)
     implants_b = _implant_ids(fit_b)
-    stats_a = await _stats_for(fit_a, implants_a)
-    stats_b = await _stats_for(fit_b, implants_b)
+    boosters_a = _boosters_for(fit_a)
+    boosters_b = _boosters_for(fit_b)
+    stats_a = await _stats_for(fit_a, implants_a, boosters_a)
+    stats_b = await _stats_for(fit_b, implants_b, boosters_b)
 
     names = await sde.type_ids_to_names(db, [fit_a.ship_type_id, fit_b.ship_type_id])
     sections = build_compare_sections(stats_a, stats_b)
@@ -303,12 +314,14 @@ async def compare_fittings(
             "ship_name": names.get(fit_a.ship_type_id, f"Type {fit_a.ship_type_id}"),
             "ship_type_id": fit_a.ship_type_id,
             "implant_count": len(implants_a),
+            "booster_count": len(boosters_a),
         },
         "fit_b": {
             "id": fit_b.id, "name": fit_b.name,
             "ship_name": names.get(fit_b.ship_type_id, f"Type {fit_b.ship_type_id}"),
             "ship_type_id": fit_b.ship_type_id,
             "implant_count": len(implants_b),
+            "booster_count": len(boosters_b),
         },
         "sections": sections,
     })
@@ -401,6 +414,55 @@ async def search_implants(
     ])
 
 
+@router.get("/tools/fitting/search/boosters")
+async def search_boosters(
+    q: str = Query("", min_length=2),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return combat boosters matching a name query (T-049).
+
+    Returns JSON: [{type_id, name, slot, side_effects: [{effect_id, label,
+    chance}, ...]}, ...] — mirrors search_implants' JSON-endpoint shape
+    (vanilla <input> + results list, one item picked at a time), but slot
+    here is boosterness (attr 1087), not implantness, and each result
+    carries the side-effect catalog the UI needs to draw its checkboxes.
+
+    Name + published filtering happens here against the SDE; slot and
+    side_effects come from get_booster_info, the engine-side lookup this
+    module doesn't implement. A type_id absent from that lookup (unknown to
+    the engine) is simply left out of the results.
+    """
+    pattern = f"%{q}%"
+    stmt = (
+        select(SDEType.type_id)
+        .join(SDETypeDogmaAttribute,
+              (SDETypeDogmaAttribute.type_id == SDEType.type_id)
+              & (SDETypeDogmaAttribute.attribute_id == ATTR_BOOSTERNESS))
+        .where(SDEType.type_name.like(pattern))
+        .where(SDEType.published == True)
+        .order_by(SDEType.type_name)
+        .limit(30)
+    )
+    rows = (await db.execute(stmt)).fetchall()
+    type_ids = [r[0] for r in rows]
+    if not type_ids:
+        return JSONResponse([])
+
+    info = await get_booster_info(db, type_ids)
+    results = []
+    for type_id in type_ids:
+        rec = info.get(type_id)
+        if not rec:
+            continue
+        results.append({
+            "type_id": rec["type_id"],
+            "name": rec["name"],
+            "slot": rec["slot"],
+            "side_effects": rec.get("side_effects", []),
+        })
+    return JSONResponse(results)
+
+
 @router.get("/tools/fitting/search/charges", response_class=HTMLResponse)
 async def search_charges(
     request: Request,
@@ -449,6 +511,22 @@ async def fitting_stats(
     # hardwirings whose modifiers apply via _apply_implant_bonuses.
     implants_raw = body.get("implants", []) or []
     implants = [int(x) for x in implants_raw if x]
+    # Active boosters (T-049) — engine entry shape {"type_id", "side_effects"}
+    # per app/fitting/boosters.py. Malformed entries drop silently, same
+    # tolerance as the implants line above; count capped defensively.
+    boosters_raw = body.get("boosters", []) or []
+    boosters: list[dict] = []
+    for b in boosters_raw[:MAX_BOOSTERS_PER_REQUEST]:
+        if not isinstance(b, dict):
+            continue
+        try:
+            type_id = int(b.get("type_id"))
+        except (TypeError, ValueError):
+            continue
+        boosters.append({
+            "type_id": type_id,
+            "side_effects": _clean_side_effects(b.get("side_effects")),
+        })
 
     # Optional: scale by a specific character's trained skills instead of All V.
     user_id = request.session.get("user_id")
@@ -475,6 +553,7 @@ async def fitting_stats(
         target_resist_profile=target_resist_profile,
         implants=implants,
         damage_profile_custom=damage_profile_custom,
+        boosters=boosters,
     )
 
     # Get ship name
@@ -781,6 +860,92 @@ def _sanitize_implants_map(raw) -> dict:
     return out
 
 
+# Boosterness (the booster slot) is not a small fixed range like implantness
+# (1-10) — the SDE runs 1 into the hundreds, since accelerators and event
+# boosters each get a slot of their own. Bound generously rather than to a
+# tight real-world range. See app/fitting/boosters.py for the full contract.
+MAX_BOOSTER_SLOT = 1000
+# A booster's SDE side-effect list is short — 12 booster*Penalty effects
+# spread over 24 classic combat boosters, so no single booster has more than
+# a handful. Capped well above that as a defensive bound, not a real limit.
+MAX_BOOSTER_SIDE_EFFECTS = 20
+# Defensive cap on how many boosters one /tools/fitting/stats request may
+# carry — comfortably above any real loadout (one booster per boosterness
+# slot; a handful of slots exist at all).
+MAX_BOOSTERS_PER_REQUEST = 50
+
+
+def _clean_side_effects(raw) -> list[int]:
+    """Coerce a side_effects list to deduped, capped ints.
+
+    Shared by the boosters map sanitizer and the stats route's inline
+    request validation — both need the exact same tolerance for junk input.
+    """
+    out: list[int] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[int] = set()
+    for e in raw:
+        try:
+            e_int = int(e)
+        except (TypeError, ValueError):
+            continue
+        if e_int in seen:
+            continue
+        seen.add(e_int)
+        out.append(e_int)
+        if len(out) >= MAX_BOOSTER_SIDE_EFFECTS:
+            break
+    return out
+
+
+def _sanitize_boosters_map(raw) -> dict:
+    """Validate a booster loadout map to
+    {"<slot>": {type_id, name, side_effects}}, mirroring
+    _sanitize_implants_map above.
+
+    Accepts untrusted JSON (save body or a stored row); drops anything
+    malformed rather than erroring — a booster map is never worth failing a
+    fit save over. Slot is boosterness (see MAX_BOOSTER_SLOT above, not the
+    1-10 implantness range). `side_effects` are the side-effect dogma effect
+    IDs the user has switched ON for that booster (see app/fitting/boosters.py
+    for why the rest stay off by default).
+    """
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for slot, rec in raw.items():
+        try:
+            s = int(slot)
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= s <= MAX_BOOSTER_SLOT) or not isinstance(rec, dict):
+            continue
+        try:
+            type_id = int(rec.get("type_id"))
+        except (TypeError, ValueError):
+            continue
+        out[str(s)] = {
+            "type_id": type_id,
+            "name": str(rec.get("name") or f"Type {type_id}")[:128],
+            "side_effects": _clean_side_effects(rec.get("side_effects")),
+        }
+    return out
+
+
+def _booster_entries(boosters_map: dict) -> list[dict]:
+    """Sanitized booster map -> engine entry list [{type_id, side_effects}].
+
+    The shape calculate_fitting_stats(..., boosters=...) takes, per
+    app/fitting/boosters.py. Used by the compare view, and available to any
+    other caller that already has a sanitized map in hand.
+    """
+    return [
+        {"type_id": rec["type_id"], "side_effects": rec.get("side_effects", [])}
+        for rec in boosters_map.values()
+    ]
+
+
 @router.get("/tools/fitting/clone-implants/{character_id}")
 async def clone_implants(
     request: Request,
@@ -859,6 +1024,7 @@ async def save_fitting(
     description = body.get("description", "").strip()
     items = body.get("items", [])
     implants = _sanitize_implants_map(body.get("implants_map"))
+    boosters = _sanitize_boosters_map(body.get("boosters_map"))
     fitting_id = body.get("fitting_id")
     folder_id = body.get("folder_id")
     if folder_id is not None:
@@ -893,6 +1059,7 @@ async def save_fitting(
             fitting.ship_type_id = int(ship_type_id)
             fitting.items_json = json.dumps(items)
             fitting.implants_json = json.dumps(implants)
+            fitting.boosters_json = json.dumps(boosters)
             fitting.updated_at = now
             if "folder_id" in body:
                 fitting.folder_id = folder_id
@@ -907,6 +1074,7 @@ async def save_fitting(
         ship_type_id=int(ship_type_id),
         items_json=json.dumps(items),
         implants_json=json.dumps(implants),
+        boosters_json=json.dumps(boosters),
         created_at=now,
         updated_at=now,
     )
@@ -947,6 +1115,17 @@ async def load_fitting(
         implants = _sanitize_implants_map(json.loads(fitting.implants_json or "{}"))
     except (ValueError, TypeError):
         implants = {}
+    try:
+        boosters = _sanitize_boosters_map(json.loads(fitting.boosters_json or "{}"))
+    except (ValueError, TypeError):
+        boosters = {}
+
+    # The saved map only carries the switched-ON side-effect IDs. Rendering
+    # the checkboxes for a reloaded fit needs every side effect's label and
+    # chance too — including the ones currently off — so hand back the full
+    # per-type catalog alongside the sanitized map; the builder merges it in.
+    booster_type_ids = [rec["type_id"] for rec in boosters.values()]
+    booster_info = await get_booster_info(db, booster_type_ids) if booster_type_ids else {}
 
     return {
         "id": fitting.id,
@@ -956,6 +1135,8 @@ async def load_fitting(
         "ship_name": ship_name or f"Ship {fitting.ship_type_id}",
         "items": items,
         "implants": implants,
+        "boosters": boosters,
+        "booster_info": booster_info,
     }
 
 
