@@ -101,8 +101,24 @@ def _schedule_defaults():
         schedule_error=None,
         schedule_notice=None,
         grace_hours=update_schedule.GRACE_SECONDS // 3600,
-        notify_configured=False,
+        open_form=None,
+        policy_form=dict(enabled=False, weekday=6, local_time="04:00",
+                         timezone="UTC", patch_only=True),
+        schedule_form=dict(run_at="", timezone="UTC"),
+        notify=_notify_defaults(),
+        push_configured=False,
+        run_history=[],
     )
+
+
+def _notify_defaults(**overrides):
+    """app/ops/update_reports.py:notify_view() for a fresh install: no push
+    channel of any kind, nothing delivered yet."""
+    view = dict(discord_webhook_set=False, discord_on=False, discord_policy="all",
+                discord_last=None, webhook_set=False, webhook_shown="",
+                webhook_format="json", webhook_policy="all", webhook_last=None)
+    view.update(overrides)
+    return view
 
 
 def test_schedule_defaults_cover_every_key_the_route_supplies():
@@ -516,7 +532,7 @@ def test_admin_content_still_auto_refreshes():
 # Nothing in a Python test can watch a browser lose typed text, so what is
 # pinned here is the wiring that prevents it.
 
-@pytest.mark.parametrize("cls", ["updater-schedule-form", "updater-policy"])
+@pytest.mark.parametrize("cls", ["updater-schedule-form", "updater-policy", "updater-notify"])
 def test_scheduling_details_record_the_operators_touch(cls, panel):
     tag = panel[panel.index(f'<details class="{cls}"'):]
     tag = tag[:tag.index(">") + 1]
@@ -558,3 +574,37 @@ def test_panel_refusals_are_swapped_in_not_turned_into_a_pill(actions):
     assert "400" in hook and "409" in hook
     assert "shouldSwap = true" in hook
     assert "isError = false" in hook
+
+
+# ── The bell ─────────────────────────────────────────────────────────────────
+
+NOTIFICATIONS = Path("static/js/notifications.js")
+
+
+def test_the_bell_knows_the_update_report_type():
+    """Without a default pref the bell treats an unknown type as enabled but
+    unlabelled; without a settings box a muted type can never be unmuted."""
+    js = NOTIFICATIONS.read_text()
+    prefs = js[js.index("var DEFAULT_PREFS"):js.index("};", js.index("var DEFAULT_PREFS"))]
+    labels = js[js.index("var TYPE_LABELS"):js.index("};", js.index("var TYPE_LABELS"))]
+    assert "auto_update: true" in prefs
+    assert "auto_update:" in labels
+    assert 'data-notif-type="auto_update"' in BASE.read_text()
+
+
+def test_the_report_banner_slot_is_not_part_of_the_local_dismiss_state():
+    """Acknowledgement is server-side. applyDismissState() hides elements by
+    localStorage, so the report banner must match none of its selectors."""
+    env = Environment(loader=FileSystemLoader(_TEMPLATES), autoescape=True)
+    banner = env.get_template("partials/update_report_banner.html").render(reports=[
+        dict(id=1, kind="automatic", outcome=o, problem=o != "succeeded",
+             from_tag="v1.2.0", to_tag="v1.3.0", detail="d", headline="h",
+             at="2026-09-13 04:30", acknowledged=False, deliveries={})
+        for o in ("succeeded", "failed", "reverted", "skipped")])
+    assert banner.count("update-report-banner") == 4
+    assert "data-alert-id" not in banner
+    assert 'id="update-banner"' not in banner
+    assert "<script" not in banner
+    base = BASE.read_text()
+    assert 'hx-get="/status/update-reports"' in base
+

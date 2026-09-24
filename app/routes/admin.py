@@ -19,15 +19,15 @@ from app.db.models import (
     get_db, User, Character, CharacterDashboardCache, WalletSnapshot,
     MiningLedgerEntry, DScanResult, CharacterAssetCache, CorpInventoryThreshold,
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
-    UpdateSchedule,
+    UpdateSchedule, UpdateRunReport,
 )
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
 from app.esi.rate_limit import rate_limit_tracker
 from app.config import get_settings
 from app.ops import updater as updater_client
+from app.ops import update_reports
 from app.ops import update_schedule
-from app.notify.discord import delivers as discord_delivers
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1081,7 +1081,9 @@ async def _updater_context(request: Request, db: AsyncSession,
                            error: str | None = None,
                            polling: bool = False,
                            schedule_error: str | None = None,
-                           schedule_notice: str | None = None) -> dict:
+                           schedule_notice: str | None = None,
+                           open_form: str | None = None,
+                           draft: dict | None = None) -> dict:
     """Everything partials/updater_panel.html needs — update state AND schedule
     state, always together.
 
@@ -1116,7 +1118,8 @@ async def _updater_context(request: Request, db: AsyncSession,
         # looking exactly like a button that did nothing.
         "awaiting_pickup": awaiting,
         "polling": polling or awaiting or state == updater_client.BUSY,
-        **(await _schedule_context(request, db, schedule_error, schedule_notice)),
+        **(await _schedule_context(request, db, schedule_error, schedule_notice,
+                                   open_form, draft)),
         "targets": (beat or {}).get("targets") or [],
         "current_tag": current,
         "latest_tag": latest,
@@ -1232,14 +1235,37 @@ async def updater_rollback(request: Request, tag: str = Form(...),
 # start a deploy with different guard rails.
 
 
+def _policy_form(policy, draft: dict | None) -> dict:
+    """The policy form's field values: what is saved, or — re-rendering after
+    a refused save — what the operator typed, so a typo costs one fix rather
+    than re-entering the whole form."""
+    form = {"enabled": bool(policy.enabled), "weekday": policy.weekday,
+            "local_time": policy.local_time, "timezone": policy.timezone,
+            "patch_only": bool(policy.patch_only)}
+    if draft and draft.get("form") == "policy":
+        form.update({k: v for k, v in draft.items() if k in form})
+    return form
+
+
+def _schedule_form(policy, draft: dict | None) -> dict:
+    form = {"run_at": "", "timezone": policy.timezone}
+    if draft and draft.get("form") == "schedule":
+        form.update({k: v for k, v in draft.items() if k in form})
+    return form
+
+
 async def _schedule_context(request: Request, db: AsyncSession,
                             error: str | None = None,
-                            notice: str | None = None) -> dict:
+                            notice: str | None = None,
+                            open_form: str | None = None,
+                            draft: dict | None = None) -> dict:
     policy = await update_schedule.get_policy(db)
     pending = await update_schedule.pending_schedule(db)
     now = datetime.now(timezone.utc)
     nxt = update_schedule.next_window(
         policy.weekday, policy.local_time, policy.timezone, now)
+    notify = update_reports.notify_view(await update_reports.get_notify_settings(db))
+    history = await update_reports.recent_reports(db)
     return {
         "policy": policy,
         "pending_schedule": pending,
@@ -1248,23 +1274,30 @@ async def _schedule_context(request: Request, db: AsyncSession,
         "schedule_error": error,
         "schedule_notice": notice,
         "grace_hours": update_schedule.GRACE_SECONDS // 3600,
-        # Surfaced where the decision is made, not buried in the docs. Discord
-        # is the compensating control for unattended deploys — a run nobody
-        # watched, with no push notification, leaves only an audit row somebody
-        # has to think to go and read. Verified on this host 2026-09-14: the
-        # app has no webhook configured at all, so the notification would be a
-        # silent no-op. Asked of the relay itself rather than re-derived here.
-        "notify_configured": discord_delivers(update_schedule.ALERT_TYPE),
+        # Which <details> to render open: the one whose form was just
+        # submitted, so its answer — or its error — is not folded away.
+        "open_form": open_form,
+        "policy_form": _policy_form(policy, draft),
+        "schedule_form": _schedule_form(policy, draft),
+        # Where run reports go beyond the audit log and the admin banner, which
+        # always happen. Nothing is gated on this: with no push channel the
+        # panel says results will be here, and how to be told without looking.
+        "notify": notify,
+        "push_configured": notify["discord_on"] or notify["webhook_set"],
+        "run_history": [update_reports.report_view(r) for r in history],
     }
 
 
 async def _overview_after_schedule_change(request: Request, db: AsyncSession,
                                           error=None, notice=None,
-                                          status_code: int = 200):
+                                          status_code: int = 200,
+                                          open_form: str | None = None,
+                                          draft: dict | None = None):
     return templates.TemplateResponse(
         request, "partials/updater_panel.html",
         await _updater_context(request, db, schedule_error=error,
-                               schedule_notice=notice),
+                               schedule_notice=notice, open_form=open_form,
+                               draft=draft),
         status_code=status_code)
 
 
@@ -1283,24 +1316,26 @@ async def updater_schedule_create(request: Request,
     explicitly next to it.
     """
     _require_updater()
+    draft = {"form": "schedule", "run_at": run_at, "timezone": tz}
+
+    async def refuse(error: str):
+        return await _overview_after_schedule_change(
+            request, db, error=error, status_code=400,
+            open_form="schedule", draft=draft)
+
     if not updater_client.validate_tag_advisory(tag):
-        return await _overview_after_schedule_change(
-            request, db, error=f"not a release tag: {tag}", status_code=400)
+        return await refuse(f"not a release tag: {tag}")
     if not update_schedule.valid_timezone(tz):
-        return await _overview_after_schedule_change(
-            request, db, error=f"unknown timezone: {tz}", status_code=400)
+        return await refuse(f"unknown timezone: {tz}")
     try:
         naive = datetime.strptime(run_at.strip(), "%Y-%m-%d %H:%M")
     except ValueError:
-        return await _overview_after_schedule_change(
-            request, db, error="time must look like 2026-09-20 04:00",
-            status_code=400)
+        return await refuse("time must look like 2026-09-20 04:00")
 
     local = naive.replace(tzinfo=ZoneInfo(tz))
     run_at_utc = local.astimezone(timezone.utc)
     if run_at_utc <= datetime.now(timezone.utc):
-        return await _overview_after_schedule_change(
-            request, db, error="that time is in the past", status_code=400)
+        return await refuse("that time is in the past")
 
     # At most one pending schedule. Asking again replaces the previous one
     # rather than queueing two updates nobody is tracking.
@@ -1354,15 +1389,23 @@ async def updater_policy_save(request: Request,
     ineffective.
     """
     _require_updater()
+    draft = {"form": "policy", "enabled": enabled is not None, "weekday": weekday,
+             "local_time": local_time, "timezone": tz,
+             "patch_only": patch_only is not None}
+
+    async def refuse(error: str):
+        # Re-rendered OPEN with what was typed: a closed <details> over reset
+        # values hid both the error's context and the input it was about.
+        return await _overview_after_schedule_change(
+            request, db, error=error, status_code=400,
+            open_form="policy", draft=draft)
+
     if not update_schedule.valid_timezone(tz):
-        return await _overview_after_schedule_change(
-            request, db, error=f"unknown timezone: {tz}", status_code=400)
+        return await refuse(f"unknown timezone: {tz}")
     if update_schedule.parse_local_time(local_time) is None:
-        return await _overview_after_schedule_change(
-            request, db, error="time must look like 04:00", status_code=400)
+        return await refuse("time must look like 04:00")
     if not (0 <= weekday <= 6):
-        return await _overview_after_schedule_change(
-            request, db, error="invalid day", status_code=400)
+        return await refuse("invalid day")
 
     policy = await update_schedule.get_policy(db)
     was_enabled = policy.enabled
@@ -1392,5 +1435,121 @@ async def updater_policy_save(request: Request,
                              f"patch_only={policy.patch_only})"),
                      ip=request.client.host if request.client else None)
     return await _overview_after_schedule_change(
-        request, db,
+        request, db, open_form="policy",
         notice="Automatic updates enabled." if policy.enabled else "Automatic updates off.")
+
+
+# ── Where run reports go ─────────────────────────────────────────────────────
+#
+# The audit log, the admin banner and the panel's history always get every
+# report. These routes configure the optional push channels on top, and let an
+# admin prove one works before relying on it. None of it gates an update.
+
+
+@router.post("/update/notify", response_class=HTMLResponse)
+async def updater_notify_save(request: Request,
+                              discord_policy: str = Form(update_reports.POLICY_ALL),
+                              webhook_url: str = Form(""),
+                              webhook_format: str = Form(update_reports.FORMAT_JSON),
+                              webhook_policy: str = Form(update_reports.POLICY_ALL),
+                              webhook_remove: str = Form(None),
+                              db: AsyncSession = Depends(get_db),
+                              admin: User = Depends(require_admin)):
+    """Save the push channels.
+
+    The webhook URL is write-only from here: the panel never renders it back
+    (for ntfy the topic URL is the whole credential, and the panel is re-fetched
+    into every admin's tab every few seconds). A blank field keeps what is
+    saved; the remove box clears it. A new URL resets the channel's last-delivery
+    line, which described the old target.
+    """
+    _require_updater()
+
+    async def refuse(error: str):
+        return await _overview_after_schedule_change(
+            request, db, error=error, status_code=400, open_form="notify")
+
+    if discord_policy not in update_reports.POLICIES or webhook_policy not in update_reports.POLICIES:
+        return await refuse("unknown report policy")
+    if webhook_format not in update_reports.FORMATS:
+        return await refuse("unknown webhook format")
+    new_url = None
+    if webhook_remove is None and webhook_url.strip():
+        new_url, problem = update_reports.validate_webhook_url(webhook_url)
+        if problem:
+            return await refuse(f"webhook: {problem}")
+
+    row = await update_reports.get_notify_settings(db)
+    if webhook_remove is not None or new_url:
+        row.webhook_url = new_url
+        row.webhook_last_at = row.webhook_last_ok = row.webhook_last_error = None
+    row.discord_policy = discord_policy
+    row.webhook_format = webhook_format
+    row.webhook_policy = webhook_policy
+    row.updated_by = admin.id
+    row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.commit()
+
+    shown = update_reports.redact_url(row.webhook_url) or "none"
+    await _log_audit(db, "admin_update_notify", admin.id,
+                     detail=(f"discord={discord_policy}, webhook={shown} "
+                             f"({webhook_format}, {webhook_policy})"),
+                     ip=request.client.host if request.client else None)
+    return await _overview_after_schedule_change(
+        request, db, open_form="notify", notice="Notification settings saved.")
+
+
+@router.post("/update/notify/test", response_class=HTMLResponse)
+async def updater_notify_test(request: Request,
+                              channel: str = Form(...),
+                              db: AsyncSession = Depends(get_db),
+                              admin: User = Depends(require_admin)):
+    """Send a test message on one channel, ignoring its report policy.
+
+    A failed delivery is an answer, not a bad request: 200 with the reason, and
+    the reason also lands on the channel's last-delivery line.
+    """
+    _require_updater()
+    if channel not in ("discord", "webhook"):
+        return await _overview_after_schedule_change(
+            request, db, error="unknown channel", status_code=400, open_form="notify")
+    result = await update_reports.send_test(db, channel)
+    label = "Discord" if channel == "discord" else "the webhook"
+    await _log_audit(db, "admin_update_notify_test", admin.id,
+                     detail=f"{channel}: {result.get('state')}",
+                     ip=request.client.host if request.client else None)
+    if result.get("state") == update_reports.SENT:
+        return await _overview_after_schedule_change(
+            request, db, open_form="notify", notice=f"Test notification sent to {label}.")
+    return await _overview_after_schedule_change(
+        request, db, open_form="notify",
+        error=f"Test notification to {label} was not delivered: {result.get('error')}")
+
+
+@router.post("/update/report/{report_id}/ack", response_class=HTMLResponse)
+async def updater_report_ack(request: Request, report_id: int,
+                             db: AsyncSession = Depends(get_db),
+                             admin: User = Depends(require_admin)):
+    """Acknowledge (or, for a success, dismiss) one run report.
+
+    Server-side, so every admin and every tab agree. Deliberately does NOT
+    require a running updater: a report that says the updater died must still
+    be acknowledgeable. Answers with the banner's remaining content, which the
+    button swaps into #update-report-slot.
+    """
+    report = await db.get(UpdateRunReport, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="No such report")
+    if report.acknowledged_at is None:
+        report.acknowledged_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        report.acknowledged_by = admin.id
+        await db.commit()
+        await _log_audit(db, "admin_update_report_acknowledged", admin.id,
+                         detail=f"report {report.id}: {report.kind} {report.outcome}",
+                         ip=request.client.host if request.client else None)
+    remaining = await update_reports.banner_reports(db)
+    if not remaining:
+        return HTMLResponse("")
+    return templates.TemplateResponse(request, "partials/update_report_banner.html", {
+        "reports": [update_reports.report_view(r) for r in remaining],
+    })

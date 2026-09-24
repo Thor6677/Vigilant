@@ -710,16 +710,20 @@ def test_policy_is_audit_logged(env):
     assert any(e == "admin_update_policy" for e, _ in env.audit_events())
 
 
-def test_enabled_policy_warns_when_no_notification_is_configured(env):
-    """Discord is the compensating control for unattended deploys. This host has
-    no webhook at all (verified 2026-09-14), so enabling auto-update without
-    saying so would mean silent unattended deploys."""
+def test_no_push_channel_gets_a_note_not_a_warning_and_gates_nothing(env):
+    """Automatic updates are not gated on any external service. With no push
+    channel the panel says where results will appear instead, and the policy
+    still enables."""
     _beat(env.control)
-    env.admin().post("/admin/update/policy", data={
+    r = env.admin().post("/admin/update/policy", data={
         "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    assert r.status_code == 200
+    assert _policy_row(env).enabled is True
     body = env.admin().get("/admin/update/status").text
-    assert "No Discord notification is configured" in body
-    assert "audit log" in body
+    assert "No push channel is set" in body
+    assert "in Vigilant only" in body
+    assert "No Discord notification is configured" not in body
+    assert "banner" in body and "audit log" in body
 
 
 def _alert_settings(monkeypatch, alert_types):
@@ -733,22 +737,248 @@ def _alert_settings(monkeypatch, alert_types):
 
 def test_opting_in_to_release_notices_does_not_count_as_auto_update_reports(env, monkeypatch):
     """The regression the separate type exists to prevent. A webhook that only
-    carries "a release is out" notices would drop every auto-update report, so
-    the panel must still say nothing will be sent."""
+    carries "a release is out" notices would drop every run report, so the
+    panel must say Discord will not be told."""
     _alert_settings(monkeypatch, "structure_attack,update_available")
     _beat(env.control)
-    env.admin().post("/admin/update/policy", data={
-        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
     body = env.admin().get("/admin/update/status").text
-    assert "No Discord notification is configured" in body
-    assert "auto_update" in body
+    assert "No push channel is set" in body
+    assert "is not in <code>DISCORD_ALERT_TYPES</code>" in body
 
 
-def test_opting_in_to_auto_update_reports_clears_the_warning(env, monkeypatch):
+def test_opting_in_to_auto_update_reports_counts_as_a_push_channel(env, monkeypatch):
     _alert_settings(monkeypatch, "structure_attack,auto_update")
     _beat(env.control)
-    env.admin().post("/admin/update/policy", data={
-        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
     body = env.admin().get("/admin/update/status").text
-    assert "No Discord notification is configured" not in body
-    assert "report to Discord" in body
+    assert "No push channel is set" not in body
+    assert "sends to the webhook in <code>DISCORD_WEBHOOK_URL</code>" in body
+    assert "Send test notification to Discord" in body
+
+
+# ── Run reports: the admin banner ────────────────────────────────────────────
+
+def _add_report(env_, outcome="failed", kind="automatic", days_ago=0, **kw):
+    from app.db.models import UpdateRunReport
+
+    async def go():
+        async with env_._sessionmaker() as db:
+            r = UpdateRunReport(
+                created_at=(datetime.now(timezone.utc) - timedelta(days=days_ago)).replace(tzinfo=None),
+                kind=kind, outcome=outcome, from_tag="v1.2.0", to_tag="v1.3.0",
+                detail=kw.pop("detail", f"a {outcome} run"), **kw)
+            db.add(r)
+            await db.commit()
+            return r.id
+    return _run(go())
+
+
+def _report_row(env_, rid):
+    from app.db.models import UpdateRunReport
+
+    async def go():
+        async with env_._sessionmaker() as db:
+            return await db.get(UpdateRunReport, rid)
+    return _run(go())
+
+
+def test_the_report_banner_is_empty_for_anonymous_and_plain_users(env):
+    _add_report(env, "failed")
+    for client in (env.anon(), env.plain()):
+        r = client.get("/status/update-reports")
+        assert r.status_code == 200
+        assert r.text == ""
+
+
+def test_a_failure_stays_on_the_banner_until_acknowledged(env):
+    rid = _add_report(env, "reverted", detail="rolled back to v1.2.0", days_ago=30)
+    body = env.admin().get("/status/update-reports").text
+    assert "rolled back to v1.2.0" in body
+    assert "Acknowledge" in body
+    assert 'href="/admin"' in body
+    assert f'hx-post="/admin/update/report/{rid}/ack"' in body
+    assert "data-alert-id" not in body and 'id="update-banner"' not in body
+
+    r = env.admin().post(f"/admin/update/report/{rid}/ack")
+    assert r.status_code == 200
+    assert "rolled back to v1.2.0" not in r.text
+    assert env.admin().get("/status/update-reports").text == ""
+    assert _report_row(env, rid).acknowledged_by == ADMIN_ID
+    assert any(e == "admin_update_report_acknowledged" for e, _ in env.audit_events())
+
+
+def test_a_success_is_dismissible_and_lapses_after_a_week(env):
+    fresh = _add_report(env, "succeeded", kind="scheduled", detail="fresh success")
+    _add_report(env, "succeeded", detail="old success", days_ago=8)
+    body = env.admin().get("/status/update-reports").text
+    assert "fresh success" in body and "old success" not in body
+    assert "Acknowledge" not in body and "Dismiss" in body
+
+    env.admin().post(f"/admin/update/report/{fresh}/ack")
+    assert env.admin().get("/status/update-reports").text == ""
+
+
+def test_only_an_admin_can_acknowledge(env):
+    rid = _add_report(env, "failed")
+    assert env.plain().post(f"/admin/update/report/{rid}/ack").status_code == 403
+    assert _report_row(env, rid).acknowledged_at is None
+
+
+def test_acknowledging_needs_the_csrf_token(env):
+    rid = _add_report(env, "failed")
+    c = env.admin()
+    del c.headers["X-CSRF-Token"]
+    assert c.post(f"/admin/update/report/{rid}/ack").status_code == 403
+    assert _report_row(env, rid).acknowledged_at is None
+
+
+def test_acknowledging_works_with_no_updater_running(env):
+    """A report saying the updater died must still be acknowledgeable."""
+    rid = _add_report(env, "skipped")
+    assert env.admin().post(f"/admin/update/report/{rid}/ack").status_code == 200
+
+
+# ── Run reports: the panel's history ─────────────────────────────────────────
+
+def test_the_panel_lists_recent_runs_with_their_deliveries(env):
+    _beat(env.control)
+    _add_report(env, "succeeded", kind="scheduled",
+                deliveries=json.dumps({"webhook": {"state": "sent", "at": "x", "error": None}}))
+    _add_report(env, "failed",
+                deliveries=json.dumps({"webhook": {"state": "failed", "at": "x",
+                                                   "error": "HTTP 500"}}))
+    _add_report(env, "skipped")
+    body = env.admin().get("/admin/update/status").text
+    assert "Recent scheduled and automatic runs" in body
+    for needle in ("succeeded", "failed", "skipped", "webhook: sent",
+                   "webhook: failed (HTTP 500)", "in Vigilant only"):
+        assert needle in body, needle
+
+
+# ── Push channel settings ────────────────────────────────────────────────────
+
+HOOK = "https://ntfy.example/vigilant-secret-topic-abc123"
+
+
+def _notify_row(env_):
+    from app.db.models import UpdateNotifySettings
+
+    async def q():
+        async with env_._sessionmaker() as db:
+            return (await db.execute(select(UpdateNotifySettings))).scalars().first()
+    return _run(q())
+
+
+def _save_notify(client, **data):
+    form = {"discord_policy": "all", "webhook_url": "", "webhook_format": "json",
+            "webhook_policy": "all"}
+    form.update(data)
+    return client.post("/admin/update/notify", data=form)
+
+
+def test_a_webhook_is_saved_but_never_rendered_back(env):
+    _beat(env.control)
+    r = _save_notify(env.admin(), webhook_url=HOOK, webhook_format="ntfy",
+                     webhook_policy="problems")
+    assert r.status_code == 200
+    row = _notify_row(env)
+    assert (row.webhook_url, row.webhook_format, row.webhook_policy) == (HOOK, "ntfy", "problems")
+    for text in (r.text, env.admin().get("/admin/update/status").text):
+        assert "secret-topic" not in text
+        assert "https://ntfy.example/" in text                   # the redacted form
+    assert all("secret-topic" not in (d or "") for _, d in env.audit_events())
+
+
+def test_the_webhook_is_encrypted_at_rest(env):
+    from sqlalchemy import text
+
+    _beat(env.control)
+    _save_notify(env.admin(), webhook_url=HOOK)
+
+    async def raw():
+        async with env._sessionmaker() as db:
+            return (await db.execute(text("SELECT webhook_url FROM update_notify_settings"))).scalar()
+    assert "secret-topic" not in _run(raw())
+
+
+def test_a_blank_url_keeps_the_webhook_and_remove_clears_it(env):
+    _beat(env.control)
+    c = env.admin()
+    _save_notify(c, webhook_url=HOOK)
+    _save_notify(c, webhook_url="", webhook_policy="problems")
+    assert _notify_row(env).webhook_url == HOOK
+    _save_notify(c, webhook_remove="on")
+    assert _notify_row(env).webhook_url is None
+
+
+@pytest.mark.parametrize("bad", ["ftp://example.com/x", "not a url", "https:///x"])
+def test_a_bad_webhook_is_refused_in_the_open_form(env, bad):
+    _beat(env.control)
+    r = _save_notify(env.admin(), webhook_url=bad)
+    assert r.status_code == 400
+    assert "webhook:" in r.text
+    assert '<details class="updater-notify" open' in r.text
+    assert _notify_row(env) is None or _notify_row(env).webhook_url is None
+
+
+def test_notification_settings_are_admin_only(env):
+    _beat(env.control)
+    assert _save_notify(env.plain(), webhook_url=HOOK).status_code == 403
+    assert env.plain().post("/admin/update/notify/test",
+                            data={"channel": "webhook"}).status_code == 403
+
+
+def test_the_test_button_needs_an_updater(env):
+    assert env.admin().post("/admin/update/notify/test",
+                            data={"channel": "webhook"}).status_code == 404
+
+
+def test_the_test_button_sends_and_shows_the_last_delivery(env, monkeypatch):
+    import app.ops.update_reports as ur
+
+    posts = []
+
+    class Resp:
+        status_code = 200
+
+    class Client:
+        def __init__(self, *a, **k):
+            assert k.get("follow_redirects") is False
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *exc):
+            return False
+        async def post(self, url, **kwargs):
+            posts.append(url)
+            return Resp()
+    monkeypatch.setattr(ur.httpx, "AsyncClient", Client)
+
+    _beat(env.control)
+    _save_notify(env.admin(), webhook_url=HOOK, webhook_format="ntfy")
+    r = env.admin().post("/admin/update/notify/test", data={"channel": "webhook"})
+    assert r.status_code == 200
+    assert posts == [HOOK]
+    assert "Test notification sent to the webhook" in r.text
+    assert "Last delivery:" in r.text and "ok," in r.text
+    assert _notify_row(env).webhook_last_ok is True
+
+
+# ── A refused policy save keeps the form open, with what was typed ───────────
+
+def test_a_refused_policy_save_reopens_the_form_with_the_input(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/policy", data={
+        "weekday": "3", "local_time": "25:99", "tz": "Europe/London"})
+    assert r.status_code == 400
+    assert '<details class="updater-policy" open' in r.text
+    assert 'value="25:99"' in r.text
+    assert 'value="Europe/London"' in r.text
+    assert '<option value="3" selected>' in r.text
+
+
+def test_a_refused_schedule_keeps_the_typed_time(env):
+    _beat(env.control)
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": "tomorrow-ish", "tz": "UTC"})
+    assert r.status_code == 400
+    assert '<details class="updater-schedule-form" open' in r.text
+    assert 'value="tomorrow-ish"' in r.text

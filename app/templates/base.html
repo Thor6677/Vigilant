@@ -165,6 +165,15 @@
                             <input type="checkbox" data-notif-type="stockpile_low" data-change="saveNotifPrefs" checked> Stockpile Alerts
                         </label>
                     </div>
+                    {% if request.session.get('is_admin') %}
+                    {# Only admins ever receive auto_update events, and without a
+                       box here a muted type could never be turned back on. #}
+                    <div style="border-top:1px solid var(--border);margin-top:0.3rem;padding-top:0.3rem;">
+                        <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                            <input type="checkbox" data-notif-type="auto_update" data-change="saveNotifPrefs" checked> Vigilant Updates
+                        </label>
+                    </div>
+                    {% endif %}
                 </div>
                 <div id="notif-list">
                     <div style="padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">No notifications</div>
@@ -269,6 +278,15 @@
 <div id="update-banner-slot"
      hx-get="/status/update-banner"
      hx-trigger="load delay:400ms, every 300s"
+     hx-swap="innerHTML"></div>
+{# How recent scheduled and automatic updates ended — admin-only, empty for
+   everyone else. Read from the database, so a report survives the app restart
+   the update itself causes. Server-side acknowledgement, so it is not part of
+   applyDismissState() below. innerHTML for the same reason as the slot above:
+   the slot keeps polling after every swap, including an acknowledge. #}
+<div id="update-report-slot"
+     hx-get="/status/update-reports"
+     hx-trigger="load delay:500ms, every 120s"
      hx-swap="innerHTML"></div>
 
 {# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────

@@ -23,11 +23,11 @@ Everything above the `# ── Impure half` banner is pure.
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import AdminAuditLog, UpdateNotifySettings, UpdateRunReport, User
@@ -366,8 +366,10 @@ def _note_last_delivery(settings: UpdateNotifySettings, channel: str, result: di
 
 
 def _discord_configured() -> bool:
-    from app.config import get_settings
-    return bool(get_settings().discord_webhook_url)
+    # Through the relay's own settings lookup, so this and delivers() can never
+    # disagree about whether a webhook is set.
+    from app.notify import discord as discord_notify
+    return bool(discord_notify.get_settings().discord_webhook_url)
 
 
 async def _to_bell(db, report) -> None:
@@ -431,6 +433,76 @@ async def dispatch(db, report: UpdateRunReport) -> dict:
         logger.error("update report: could not store delivery results: %s", e)
         await db.rollback()
     return results
+
+
+BANNER_LIMIT = 5
+HISTORY_LIMIT = 10
+
+
+async def banner_reports(db) -> list[UpdateRunReport]:
+    """What the admin banner shows: unacknowledged reports, newest first.
+
+    A success lapses on its own after SUCCESS_BANNER_DAYS — it is news, not a
+    task. Failed, reverted and skipped stay until an admin acknowledges them,
+    however old, because each one means something did not happen that someone
+    expected to.
+    """
+    cutoff = _now_naive() - timedelta(days=SUCCESS_BANNER_DAYS)
+    return list((await db.execute(
+        select(UpdateRunReport)
+        .where(UpdateRunReport.acknowledged_at.is_(None))
+        .where(or_(UpdateRunReport.outcome != SUCCEEDED,
+                   UpdateRunReport.created_at >= cutoff))
+        .order_by(UpdateRunReport.id.desc())
+        .limit(BANNER_LIMIT)
+    )).scalars().all())
+
+
+async def recent_reports(db, limit: int = HISTORY_LIMIT) -> list[UpdateRunReport]:
+    return list((await db.execute(
+        select(UpdateRunReport).order_by(UpdateRunReport.id.desc()).limit(limit)
+    )).scalars().all())
+
+
+def report_view(report) -> dict:
+    """A report flattened for a template: plain values only, so a detached row
+    can never lazy-load mid-render, and the delivery JSON already decoded."""
+    return {
+        "id": report.id,
+        "kind": report.kind,
+        "outcome": report.outcome,
+        "problem": report.outcome in PROBLEMS,
+        "from_tag": report.from_tag,
+        "to_tag": report.to_tag,
+        "detail": report.detail or "",
+        "headline": headline(report.kind, report.outcome, report.to_tag),
+        "at": report.created_at.strftime("%Y-%m-%d %H:%M") if report.created_at else "",
+        "acknowledged": report.acknowledged_at is not None,
+        "deliveries": deliveries_of(report),
+    }
+
+
+def notify_view(row: UpdateNotifySettings) -> dict:
+    """The notification settings as the panel shows them. The webhook URL is
+    reduced to redact_url() here, so the full secret never reaches a template."""
+    from app.notify.discord import delivers
+
+    def last(at, ok, error):
+        if at is None:
+            return None
+        return {"at": at.strftime("%Y-%m-%d %H:%M"), "ok": bool(ok), "error": error}
+
+    return {
+        "discord_webhook_set": _discord_configured(),
+        "discord_on": delivers(ALERT_TYPE),
+        "discord_policy": row.discord_policy or POLICY_ALL,
+        "discord_last": last(row.discord_last_at, row.discord_last_ok, row.discord_last_error),
+        "webhook_set": bool(row.webhook_url),
+        "webhook_shown": redact_url(row.webhook_url),
+        "webhook_format": row.webhook_format or FORMAT_JSON,
+        "webhook_policy": row.webhook_policy or POLICY_ALL,
+        "webhook_last": last(row.webhook_last_at, row.webhook_last_ok, row.webhook_last_error),
+    }
 
 
 class _TestReport:

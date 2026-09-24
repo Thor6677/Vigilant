@@ -42,6 +42,9 @@
         inventory_low: true,
         contract_low: true,
         stockpile_low: true,
+        /* Admins only: how a scheduled or automatic update ended. Raised by
+           app/ops/update_reports.py, which delivers to Discord itself. */
+        auto_update: true,
     };
 
     /* Human-readable type labels */
@@ -63,6 +66,7 @@
         contract_critical: 'Contracts',
         stockpile_low: 'Stockpile',
         structure_alert: 'Structure',
+        auto_update: 'Vigilant Update',
     };
 
     var TYPE_COLORS = {
@@ -83,6 +87,7 @@
         contract_low: 'var(--accent)',
         contract_critical: 'var(--danger)',
         stockpile_low: 'var(--accent)',
+        auto_update: 'var(--accent)',
     };
 
     function loadPrefs() {

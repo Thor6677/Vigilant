@@ -1,0 +1,36 @@
+{# How recent scheduled and automatic updates ended. Admin-only: the endpoints
+   return empty content for everyone else.
+
+   Visible by default, unlike the localStorage-dismissed banners beside it.
+   Acknowledging is server-side (update_run_report.acknowledged_at), so every
+   admin and every tab agree on what is still outstanding, and the report is
+   read from the database — which is what lets it outlive the app restart the
+   update itself causes. No data-alert-id and not #update-banner, so base.html's
+   applyDismissState() never touches these.
+
+   A success is news: dismissible, and it lapses on its own after a week. A
+   failure, a rollback or a skip is a task: it stays until an admin
+   acknowledges it, and points at the panel where a paused policy is resumed.
+
+   No inline handlers or script (CSP): the button is a plain hx-post, which
+   base.html's configRequest hook gives the CSRF header. #}
+{% for r in reports %}
+<div class="structure-alert-banner update-report-banner {% if r['outcome'] in ('failed', 'reverted') %}is-danger{% elif r['outcome'] == 'skipped' %}is-warn{% else %}is-accent{% endif %}"
+     data-report-id="{{ r['id'] }}">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">{% if r['problem'] %}&#9888;{% else %}&#10003;{% endif %}</span>
+        <span class="alert-text">
+            <strong>{{ r['headline'] }}</strong>
+            &mdash; {{ r['detail'] }}
+            <span class="alert-time">({{ r['at'] }} UTC)</span>
+            {% if r['problem'] %}
+            <a href="/admin">Review in Admin &rsaquo; Overview</a>
+            {% endif %}
+        </span>
+    </div>
+    <button type="button" class="alert-dismiss"
+            hx-post="/admin/update/report/{{ r['id'] }}/ack"
+            hx-target="#update-report-slot" hx-swap="innerHTML"
+            {% if r['problem'] %}aria-label="Acknowledge this update report" title="Acknowledge">Acknowledge{% else %}aria-label="Dismiss this update report" title="Dismiss">&times;{% endif %}</button>
+</div>
+{% endfor %}
