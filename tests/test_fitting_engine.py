@@ -56,7 +56,7 @@ from app.fitting.engine import (
     calculate_fitting_stats, normalise_resist_phasing, rah_total_resist_points,
     suggest_rah_phasing,
 )
-from app.sde.loader import needs_update
+from app.sde.loader import EFFECTS_USAGE_CHANCE_MARKER, needs_update
 
 # ── dogma constants this fixture needs that constants.py has no name for ────
 ATTR_OVERLOAD_HARDENING_BONUS = 1208   # overloadHardeningBonus
@@ -533,7 +533,7 @@ def _one_placeholder_row(table_name):
     return table.insert().values(**values)
 
 
-def _needs_update_with(effect_rows):
+def _needs_update_with(effect_rows, marker=True):
     """Seed every table needs_update() checks, plus the given effect rows.
 
     The empty-table loop in needs_update() returns True if ANY of a dozen
@@ -543,8 +543,14 @@ def _needs_update_with(effect_rows):
 
     Each effect row is (effect_id, name, category) or, for a booster side
     effect, (effect_id, name, category, chance_attribute_id): a healthy table
-    must hold at least one of the latter (T-049), see
-    tests/test_fitting_boosters_engine.py.
+    should hold at least one of the latter, as any real SDE does, though it
+    no longer changes needs_update()'s answer (see `marker` below).
+
+    `marker` seeds (or omits) the T-049 EFFECTS_USAGE_CHANCE_MARKER row in
+    sde_meta -- see tests/test_fitting_boosters_engine.py, which is the one
+    that turns this False to prove the "install predates the marker" path.
+    Defaults True so every other caller here, which is testing something
+    else entirely, gets the healthy baseline it's assuming.
     """
     tables = (
         "sde_types", "sde_planets", "sde_planet_schematics",
@@ -561,6 +567,11 @@ def _needs_update_with(effect_rows):
             "INSERT INTO sde_meta (key, value) VALUES "
             "('last_updated', '2099-01-01T00:00:00+00:00')"
         ))
+        if marker:
+            await db.execute(
+                text("INSERT INTO sde_meta (key, value) VALUES (:k, '1')"),
+                {"k": EFFECTS_USAGE_CHANCE_MARKER},
+            )
         for table in tables:
             await db.execute(_one_placeholder_row(table))
         for eff in effect_rows:

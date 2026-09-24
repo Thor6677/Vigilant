@@ -76,6 +76,15 @@ log = logging.getLogger(__name__)
 SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 REFRESH_DAYS = 30
 
+# sde_meta key set once an import has run with code that keeps
+# fittingUsageChanceAttributeID on sde_effects (T-049). needs_update() uses
+# its absence, not the table's contents, to decide whether a reimport is
+# owed for this — see _booster_side_effects_missing's old docstring (now
+# gone) for why a data-shape check doesn't hold up here: a future SDE where
+# zero real effects happen to carry the field would force a reimport every
+# single boot forever, since the reimport can never make the check pass.
+EFFECTS_USAGE_CHANCE_MARKER = "effects_usage_chance_v1"
+
 
 async def _get_meta(db: AsyncSession, key: str) -> str | None:
     result = await db.execute(text("SELECT value FROM sde_meta WHERE key = :key"), {"key": key})
@@ -109,6 +118,19 @@ async def needs_update(db: AsyncSession) -> bool:
     if datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS):
         return True
 
+    # T-049: an install that imported before fittingUsageChanceAttributeID was
+    # kept has no way to notice on its own. This is a marker check, not a
+    # data-shape one, deliberately: sde_meta already exists and is cheap to
+    # query, so it doesn't need the broad try/except the table-shape checks
+    # below have (those guard against a table that doesn't exist yet).
+    if not await _get_meta(db, EFFECTS_USAGE_CHANCE_MARKER):
+        log.warning(
+            "sde_meta has no %r marker — this install predates T-049's "
+            "fittingUsageChanceAttributeID column. Forcing SDE reimport.",
+            EFFECTS_USAGE_CHANCE_MARKER,
+        )
+        return True
+
     # Force reimport if sde_types is empty (e.g. a previous import failed mid-way
     # after DELETE FROM sde_types but before re-populating).
     # Also force if any NEW table (added after last import) is still empty
@@ -133,13 +155,6 @@ async def needs_update(db: AsyncSession) -> bool:
             log.warning(
                 "sde_effects has no categories and no names — the rows were "
                 "imported with the legacy YAML field names. Forcing SDE reimport."
-            )
-            return True
-
-        if await _booster_side_effects_missing(db):
-            log.warning(
-                "sde_effects has no booster side-effect rows — it was imported "
-                "before fittingUsageChanceAttributeID was kept. Forcing SDE reimport."
             )
             return True
     except Exception:
@@ -174,33 +189,6 @@ async def _effects_import_is_broken(db: AsyncSession) -> bool:
     ))
     total, with_category, with_name = r.first()
     return bool(total) and not (with_category or 0) and not (with_name or 0)
-
-
-async def _booster_side_effects_missing(db: AsyncSession) -> bool:
-    """Detect an sde_effects table imported before side effects were kept.
-
-    The importer used to drop `fittingUsageChanceAttributeID`, the field that
-    marks a booster side effect (T-049). The column was added later, so an
-    install that imported before then has it NULL on every row and the
-    fitting engine cannot tell a Blue Pill's shield penalty from its shield
-    bonus. Same shape of problem as `_effects_import_is_broken`, and the same
-    remedy: notice it here so the reimport happens by itself.
-
-    A real SDE sets the field on exactly twelve effects, so "populated but
-    not one row with it" is unambiguous and never true of a healthy database.
-    The startup migration in app/main.py adds the column before this runs;
-    on a database that somehow lacks it the query raises and the caller's
-    guard treats that as "no reimport", which leaves the migration to run
-    first rather than attempting an import that could not store the field.
-    """
-    r = await db.execute(text(
-        "SELECT COUNT(1), "
-        "       SUM(CASE WHEN fitting_usage_chance_attribute_id IS NOT NULL "
-        "                THEN 1 ELSE 0 END) "
-        "FROM sde_effects"
-    ))
-    total, with_chance = r.first()
-    return bool(total) and not (with_chance or 0)
 
 
 def _iter_jsonl(zf: zipfile.ZipFile, filename: str):
@@ -1335,6 +1323,10 @@ async def download_and_import(db: AsyncSession):
     except Exception as e:
         log.warning(f"Map-data regeneration failed (non-fatal): {e}")
 
+    # T-049: this run imported sde_effects with code that keeps
+    # fittingUsageChanceAttributeID, so needs_update() never has to force
+    # another reimport just to check for it again.
+    await _set_meta(db, EFFECTS_USAGE_CHANCE_MARKER, "1")
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")
