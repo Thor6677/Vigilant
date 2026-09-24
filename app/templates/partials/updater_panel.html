@@ -210,7 +210,10 @@
         {% endif %}
       </div>
 
-      {# ── Deferred and automatic updates ─────────────────────────────────── #}
+      {# ── Deferred and automatic updates ───────────────────────────────────
+         Both forms sit inside #admin-content, which re-renders every 10s. The
+         data-*="updaterHoldRefresh" bindings on their <details> are what stop
+         that refresh wiping a half-typed form (static/js/actions.js). #}
       <div class="updater-schedule">
         {% if schedule_error %}
           <p class="b-empty" style="color:var(--danger);">{{ schedule_error }}</p>
@@ -232,7 +235,8 @@
             </form>
           </div>
         {% elif update_available %}
-          <details class="updater-schedule-form">
+          <details class="updater-schedule-form" data-click="updaterHoldRefresh"
+                   data-input="updaterHoldRefresh" data-change="updaterHoldRefresh">
             <summary>Schedule this update instead</summary>
             <form hx-post="/admin/update/schedule"
                   hx-target="#updater-panel" hx-swap="outerHTML">
@@ -256,7 +260,9 @@
           </details>
         {% endif %}
 
-        <details class="updater-policy" {% if policy.enabled %}open{% endif %}>
+        <details class="updater-policy" {% if policy.enabled %}open{% endif %}
+                 data-click="updaterHoldRefresh" data-input="updaterHoldRefresh"
+                 data-change="updaterHoldRefresh">
           <summary>
             Automatic updates &mdash;
             {% if policy.enabled %}

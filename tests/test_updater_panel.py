@@ -508,3 +508,40 @@ def test_admin_content_still_auto_refreshes():
     src = ADMIN.read_text()
     assert "refreshSections" in src
     assert "setInterval" in src
+
+
+# ── The refresh vs the scheduling forms ──────────────────────────────────────
+#
+# The scheduling forms live inside #admin-content, which re-renders every 10s.
+# Nothing in a Python test can watch a browser lose typed text, so what is
+# pinned here is the wiring that prevents it.
+
+@pytest.mark.parametrize("cls", ["updater-schedule-form", "updater-policy"])
+def test_scheduling_details_record_the_operators_touch(cls, panel):
+    tag = panel[panel.index(f'<details class="{cls}"'):]
+    tag = tag[:tag.index(">") + 1]
+    for attr in ("data-click", "data-input", "data-change"):
+        assert f'{attr}="updaterHoldRefresh"' in tag, (cls, attr)
+
+
+def test_every_refresh_timer_asks_before_re_rendering():
+    """Both setInterval sites — the initial Overview one and switchTab's — must
+    go through the hold check. One that bypassed it would wipe the form on
+    exactly the tab where it lives."""
+    src = ADMIN.read_text()
+    assert src.count("setInterval(") == 2
+    assert src.count("setInterval(refreshAdminSection,") == 2
+    fn = src[src.index("function refreshAdminSection"):]
+    fn = fn[:fn.index("\n}")]
+    assert fn.index("updaterRefreshHeld") < fn.index("htmx.ajax")
+
+
+def test_the_hold_lapses_on_its_own(actions):
+    """An edit abandoned in a background tab must not freeze the section, and
+    the update panel inside it, for good. Focus is not a reason to hold: it
+    stays where it was in a forgotten tab."""
+    fn = actions[actions.index("window.updaterRefreshHeld"):]
+    fn = fn[:fn.index("\n    };")]
+    assert "UPDATER_HOLD_MS" in fn and "Date.now()" in fn
+    assert "activeElement" not in fn
+    assert "UPDATER_HOLD_MS = 2 * 60 * 1000" in actions
