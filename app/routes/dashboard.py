@@ -832,7 +832,17 @@ _server_status_refresh_tasks: set = set()
 # Same shape fetch_server_status has always returned when it couldn't get
 # a trustworthy answer from ESI — kept as one constant so "cold start
 # failed", "too stale to serve" and "ESI returned non-200" can't drift.
-_UNKNOWN_STATUS = {"online": False, "players": None}
+#
+# `status` is the honest three-way answer; `online` is kept for the
+# consumers that only ask "may I show a pilot count". They differ in one
+# case: "unknown" is *not* "offline". Right after a deploy the first poll's
+# ESI round-trip competes with app boot (and, after an SDE change, the
+# reimport) and can time out — that used to paint the dashboard pill red
+# OFFLINE for the next fifteen minutes while Tranquility was perfectly
+# fine. Only ESI itself saying the datasource is unavailable (503, which
+# is what it answers during downtime) earns "offline".
+_UNKNOWN_STATUS = {"online": False, "players": None, "status": "unknown"}
+_OFFLINE_STATUS = {"online": False, "players": None, "status": "offline"}
 
 
 async def _fetch_server_status_live(transport: httpx.BaseTransport | None = None) -> dict:
@@ -849,7 +859,9 @@ async def _fetch_server_status_live(transport: httpx.BaseTransport | None = None
         )
     if resp.status_code == 200:
         data = resp.json()
-        return {"online": True, "players": data.get("players", 0)}
+        return {"online": True, "players": data.get("players", 0), "status": "online"}
+    if resp.status_code == 503:
+        return dict(_OFFLINE_STATUS)
     return dict(_UNKNOWN_STATUS)
 
 
