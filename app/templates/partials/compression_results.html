@@ -24,9 +24,10 @@
         <div class="b-stat-val">{{ ores | length }}</div>
         <div class="b-stat-label">Ore Types</div>
     </div>
-    <div class="b-stat">
+    <div class="b-stat" title="{{ price_source }}">
         <div class="b-stat-val">{{ hub_label }}</div>
         <div class="b-stat-label">Market</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:0.15rem;">{{ price_source }}</div>
     </div>
     <div class="b-stat">
         <div class="b-stat-val" style="text-transform:uppercase;">{{ mode }}</div>

@@ -38,6 +38,7 @@
         sovereignty: true,
         moonmining: true,
         poco: true,
+        structure_timer: true,
         inventory_low: true,
         contract_low: true,
         stockpile_low: true,
@@ -55,6 +56,7 @@
         sovereignty: 'Sovereignty',
         moonmining: 'Moonmining',
         poco: 'POCO',
+        structure_timer: 'Timer',
         inventory_low: 'Inventory',
         inventory_critical: 'Inventory',
         contract_low: 'Contracts',
@@ -74,6 +76,7 @@
         sovereignty: 'var(--warn, var(--accent))',
         moonmining: 'var(--accent)',
         poco: 'var(--danger)',
+        structure_timer: 'var(--danger)',
         structure_alert: 'var(--danger)',
         inventory_low: 'var(--accent)',
         inventory_critical: 'var(--danger)',
@@ -114,6 +117,18 @@
         if (type === 'structure_alert') return prefs['structure_attack'] !== false;
         return prefs[type] !== false;
     }
+
+    /* For scripts outside this file that want to raise a browser
+       Notification of their own (the timer banners in actions.js): true only
+       when the bell has been enabled — which is where permission was asked,
+       from a user gesture — AND the per-type preference is on. Both halves,
+       so a user who turned notifications off, or muted this type, is never
+       pinged by a side path. */
+    window.vigilantNotifAllows = function(type) {
+        if (localStorage.getItem(STORAGE_KEY) !== 'true') return false;
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+        return isTypeEnabled(type);
+    };
 
     function getIcon() { return document.getElementById('notif-icon'); }
     function getSlash() { return document.getElementById('notif-slash'); }
