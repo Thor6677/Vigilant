@@ -288,6 +288,17 @@ def read_heartbeat() -> dict | None:
     return _read_json(control_dir() / "updater.json")
 
 
+def read_last_heartbeat() -> dict | None:
+    """The last heartbeat ever written, fresh or not. None if there is none.
+
+    Not a liveness signal — is_available() is. For the scheduler, which has to
+    tell "no updater on this install" (no file: do nothing at all) apart from
+    "the updater has stopped beating" (a missed window someone should hear
+    about), and still wants the last deployed tag the sidecar reported.
+    """
+    return _read_json(control_dir() / "updater.json")
+
+
 def read_status() -> dict | None:
     """The current or last run, or None if nothing has ever run."""
     return _read_json(control_dir() / "status.json")

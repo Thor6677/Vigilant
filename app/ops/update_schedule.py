@@ -28,6 +28,7 @@ from sqlalchemy import select
 
 from app.db.models import (AdminAuditLog, AsyncSessionLocal, UpdatePolicy,
                            UpdateSchedule, UpdateStatus)
+from app.ops import update_reports
 from app.ops import updater as updater_client
 from app.ops.version import parse_version
 
@@ -36,13 +37,9 @@ logger = logging.getLogger(__name__)
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday",
             "Friday", "Saturday", "Sunday")
 
-# Its own type, NOT app/ops/update_check.py's `update_available`. This report
-# is the compensating control for a deploy nobody watched; sharing a type meant
-# an admin who opted out of "a new release exists" notices silently opted out
-# of the failure reports as well. The cost of a second opt-in type is that
-# someone has to know to enable it, so the panel says so beside the switch
-# that makes it matter (see notify_configured in app/routes/admin.py).
-ALERT_TYPE = "auto_update"
+# The Discord alert type (and bell event type) for run reports. Defined, with
+# the reason it is not `update_available`, in app/ops/update_reports.py.
+ALERT_TYPE = update_reports.ALERT_TYPE
 
 # How late a window may be honoured. The app is BOTH the scheduler and the thing
 # being recreated, so it will sometimes be down when a window passes. Firing
@@ -56,6 +53,12 @@ GRACE_SECONDS = 2 * 60 * 60
 # and keeps a missed window's lateness bounded by the grace above rather than by
 # the tick.
 TICK_SECONDS = 60
+
+# When this process started. A policy window that closed before then passed
+# while Vigilant was down, which is one of the two ways a window can be shown
+# to have been missed (see _report_missed_window). Read at call time, so a test
+# can move it.
+STARTED_AT = datetime.now(timezone.utc)
 
 
 # ── Pure half ────────────────────────────────────────────────────────────────
@@ -252,17 +255,29 @@ def policy_decision(policy, now_utc: datetime, latest_tag: str | None,
     late = (_local_now(policy.timezone, now_utc) - window).total_seconds()
     if late > grace_seconds:
         return False, key, "outside the window"
+    eligible, reason = release_eligible(policy, latest_tag, current_tag)
+    return eligible, key, reason
+
+
+def release_eligible(policy, latest_tag: str | None,
+                     current_tag: str | None) -> tuple[bool, str]:
+    """Whether the policy would apply `latest_tag` at all, window aside.
+
+    Split out of policy_decision so a CLOSED window can be asked the same
+    question: a window is only reported as skipped if there was something it
+    would have applied.
+    """
     if not latest_tag:
-        return False, key, "no release information yet"
+        return False, "no release information yet"
     if latest_tag == current_tag:
-        return False, key, "already up to date"
+        return False, "already up to date"
     if not updater_client.validate_tag_advisory(latest_tag):
         # Belt and braces: validate_tag's regex admits no hyphen, so a
         # prerelease is structurally ineligible for unattended application.
-        return False, key, f"{latest_tag} is not an exact release tag"
+        return False, f"{latest_tag} is not an exact release tag"
     if policy.patch_only and not is_patch_upgrade(current_tag, latest_tag):
-        return False, key, f"{latest_tag} is not a patch release"
-    return True, key, "due"
+        return False, f"{latest_tag} is not a patch release"
+    return True, "due"
 
 
 # ── Impure half ──────────────────────────────────────────────────────────────
@@ -288,72 +303,78 @@ async def pending_schedule(db) -> UpdateSchedule | None:
 
 
 async def _reconcile_outcome(db, policy) -> None:
-    """Report how a previous automatic run ended, once it has ended.
+    """Report how the last scheduled or automatic run ended, once it has ended.
 
     Runs here rather than at submit time because the app is recreated by the
     very update it triggers: whatever was in memory when the request was written
-    is gone by the time there is an outcome to report. awaiting_request_id is in
-    the database precisely so this survives that restart.
+    is gone by the time there is an outcome to report. awaiting_request_id and
+    fired_request_id are in the database precisely so this survives that
+    restart, and the report's unique request_id is what makes it once-only.
+
+    Reads status.json whatever the heartbeat says: reporting an outcome needs
+    nothing from the sidecar, and waiting for it (through a self-update, say)
+    would only widen the gap below.
 
     KNOWN GAP: if someone deploys manually before this reconciles, status.json
-    is overwritten with the manual run's id and the automatic run's outcome is
-    never reported — awaiting_request_id then stays set until the next automatic
-    fire replaces it. Narrow (it needs a manual deploy inside the minute after
-    an automatic one finishes) and it fails toward silence rather than toward a
-    wrong report, so it is recorded rather than fixed with more bookkeeping.
+    is overwritten with the manual run's id and that scheduled or automatic
+    run's outcome is never reported — for an automatic run, awaiting_request_id
+    then stays set until the next automatic fire replaces it. Narrow (it needs a
+    manual deploy inside the minute after an unattended one finishes) and it
+    fails toward silence rather than toward a wrong report, so it is recorded
+    rather than fixed with more bookkeeping.
     """
-    if not policy.awaiting_request_id:
-        return
     status = updater_client.read_status()
     if not isinstance(status, dict):
         return
-    if status.get("id") != policy.awaiting_request_id:
-        return
     if status.get("state") not in ("success", "failed"):
         return
+    rid = status.get("id")
+    if not rid:
+        return
 
-    ok = status.get("state") == "success"
+    automatic = bool(policy.awaiting_request_id) and rid == policy.awaiting_request_id
+    if not automatic:
+        fired = (await db.execute(
+            select(UpdateSchedule.id).where(UpdateSchedule.fired_request_id == rid)
+        )).first()
+        if fired is None:
+            return          # a run somebody started by hand: not ours to report
+    if await update_reports.already_reported(db, rid):
+        if automatic:
+            policy.awaiting_request_id = None
+            await db.commit()
+        return
+
+    outcome = update_reports.outcome_of(status)
+    kind = update_reports.AUTOMATIC if automatic else update_reports.SCHEDULED
+    label = "Automatic" if automatic else "Scheduled"
+    from_tag, to_tag = status.get("from_tag"), status.get("to_tag")
     reverted = status.get("reverted_to")
-    tag = status.get("to_tag")
 
-    if ok:
-        message = f"Automatic update to {tag} succeeded."
-    elif reverted:
-        message = (f"Automatic update to {tag} FAILED and was rolled back to "
-                   f"{reverted}. Automatic updates are paused until you "
-                   f"re-enable them.")
+    if outcome == update_reports.SUCCEEDED:
+        message = f"{label} update from {from_tag or '?'} to {to_tag} succeeded."
+    elif outcome == update_reports.REVERTED:
+        message = (f"{label} update to {to_tag} failed and was rolled back to "
+                   f"{reverted}.")
     else:
-        message = (f"Automatic update to {tag} FAILED. Automatic updates are "
-                   f"paused until you re-enable them.")
+        error = (status.get("error") or "").strip()
+        message = f"{label} update to {to_tag} failed." + (f" {error}" if error else "")
 
-    policy.awaiting_request_id = None
-    if not ok:
-        # Pause rather than retry. Without this the same bad release is
-        # attempted again every week, unattended, forever.
-        policy.enabled = False
-        policy.paused_reason = f"automatic update to {tag} failed"
-    await db.commit()
+    if automatic:
+        policy.awaiting_request_id = None
+        if outcome != update_reports.SUCCEEDED:
+            # Pause rather than retry. Without this the same bad release is
+            # attempted again every week, unattended, forever.
+            policy.enabled = False
+            policy.paused_reason = f"automatic update to {to_tag} failed"
+            message += " Automatic updates are paused until you re-enable them."
 
-    logger.info("updater: %s", message)
-    try:
-        from app.notify.discord import send_discord_alert
-        # KEYWORDS, not positional. The signature is
-        # (title, body, alert_type, key=None) — passing these positionally in
-        # the obvious "type first" order silently makes alert_type the message
-        # body, which then matches nothing in DISCORD_ALERT_TYPES and is dropped
-        # without an error. Caught in review before this shipped; the test binds
-        # against the real signature so an argument-order change breaks loudly.
-        await send_discord_alert(
-            title=f"Vigilant auto-update {'succeeded' if ok else 'FAILED'}",
-            body=message,
-            alert_type=ALERT_TYPE,
-            key="auto-update",
-        )
-    except Exception as e:
-        # An unattended change with no human-visible trail is the real hazard
-        # here, so a failure to notify is worth a loud log line — but it must
-        # not take the loop down.
-        logger.error("updater: could not send auto-update notification: %s", e)
+    # One commit: the pause above, the audit row and the report row.
+    report = await update_reports.record(
+        db, kind=kind, outcome=outcome, from_tag=from_tag, to_tag=to_tag,
+        detail=message, request_id=rid)
+    if report is not None:
+        await update_reports.dispatch(db, report)
 
 
 async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
@@ -365,19 +386,23 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
     seconds later cannot come back, re-evaluate an open window and fire a second
     time. update_status.notified_tag solves the identical problem for Discord
     announcements the same way.
+
+    A refused submit is recorded as a hold, like any other reason the request
+    could not go in: if the grace runs out, it is what the skip report says.
     """
     try:
         request_id = updater_client.submit(action, tag, None)
     except (updater_client.UpdaterUnavailable, updater_client.UpdaterBusy,
             updater_client.InvalidRequest) as e:
         logger.warning("updater: scheduled %s to %s not submitted: %s", action, tag, e)
+        await _note_hold(db, f"the request was refused: {e}",
+                         policy=policy, schedule=schedule, key=key)
         return False
 
     now = datetime.now(timezone.utc)
-    # An unattended deploy needs a durable record. Discord is the notification,
-    # but it is gated on an opt-in type and may not be configured at all, so the
-    # audit log is the one place this is guaranteed to be written down. Null
-    # user id: nobody asked — that IS the fact being recorded.
+    # An unattended deploy needs a durable record written when it is REQUESTED,
+    # before the restart it causes. Null user id: nobody asked — that IS the
+    # fact being recorded. How it ended is a second row, from the report.
     db.add(AdminAuditLog(
         user_id=None,
         event_type="auto_update_requested" if policy is not None else "scheduled_update_requested",
@@ -388,12 +413,125 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
         schedule.state = "fired"
         schedule.fired_at = now
         schedule.fired_request_id = request_id
+        schedule.held_reason = None
     if policy is not None:
         policy.last_fired_window = key
         policy.last_fired_tag = tag
         policy.awaiting_request_id = request_id
+        policy.held_window = None
+        policy.held_reason = None
     await db.commit()
     logger.info("updater: scheduled %s to %s submitted (id=%s)", action, tag, request_id)
+    return True
+
+
+def _submission_hold(beat) -> str | None:
+    """Why a request must not be written right now, or None when it may.
+
+    Evaluated only at the point of submission, never before: a schedule or a
+    window that is held for its whole grace still has to reach the code that
+    reports it as skipped.
+    """
+    if not updater_client.is_available():
+        return "no updater"
+    # Never stack a request on top of a run, and never race the sidecar's
+    # pickup. The supervisor's lock is the real mutex; this keeps the app
+    # from queueing work it knows will be refused.
+    if updater_client.current_run_state() != updater_client.IDLE:
+        return "busy"
+    if updater_client.has_pending_request():
+        return "a request is already queued"
+    return updater_not_ready(beat)
+
+
+async def _note_hold(db, reason: str, *, policy=None, schedule=None,
+                     key: str | None = None) -> None:
+    """Remember why a due run was held back — written only when it changes, so
+    a long hold costs one write, not one per tick."""
+    reason = reason[:255]
+    changed = False
+    if schedule is not None and schedule.held_reason != reason:
+        schedule.held_reason = reason
+        changed = True
+    if policy is not None and (policy.held_window != key or policy.held_reason != reason):
+        policy.held_window = key
+        policy.held_reason = reason
+        changed = True
+    if changed:
+        await db.commit()
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+async def _report_missed_schedule(db, sched, current_tag) -> None:
+    """The skip report for a one-shot schedule whose grace ran out. Also
+    commits the caller's pending state change on the schedule."""
+    grace_h = GRACE_SECONDS // 3600
+    why = sched.held_reason or "Vigilant or its updater was not running"
+    detail = (f"Scheduled update to {sched.target_tag}, due "
+              f"{sched.run_at.strftime('%Y-%m-%d %H:%M')} UTC, was not started "
+              f"within {grace_h}h: {why}. It has been dropped; schedule it again "
+              f"if it is still wanted.")
+    report = await update_reports.record(
+        db, kind=update_reports.SCHEDULED, outcome=update_reports.SKIPPED,
+        from_tag=current_tag, to_tag=sched.target_tag, detail=detail)
+    if report is not None:
+        await update_reports.dispatch(db, report)
+
+
+async def _report_missed_window(db, policy, key: str | None, now: datetime,
+                                status_row, current_tag) -> bool:
+    """Report a policy window that closed without firing — once, and only with
+    evidence that it should have fired.
+
+    Evidence is one of:
+      - a tick INSIDE the window wanted to fire and was held (held_window), or
+      - the window closed before this process started, and the release it would
+        have applied had been published before the window closed — Vigilant was
+        down for the window, and an up-and-running one would have acted.
+
+    Anything else stays silent. A skipped report is a banner someone has to
+    acknowledge, so a false one (a release published after the window closed,
+    say) costs more than a missing one.
+    """
+    if not key or key in (policy.last_fired_window, policy.last_skipped_window):
+        return False
+    latest_tag = status_row.latest_tag if status_row else None
+    window = most_recent_window(policy.weekday, policy.local_time, policy.timezone, now)
+    if window is None:
+        return False
+    closed_at = window.astimezone(timezone.utc) + timedelta(seconds=GRACE_SECONDS)
+
+    if policy.held_window == key:
+        why = policy.held_reason or "the updater was not ready"
+    else:
+        published = _as_utc(status_row.latest_published_at) if status_row else None
+        if STARTED_AT < closed_at:
+            return False        # we were running; a due tick would have held it
+        if published is None or published > closed_at:
+            return False
+        eligible, _ = release_eligible(policy, latest_tag, current_tag)
+        if not eligible:
+            return False
+        why = "Vigilant was not running during the window"
+
+    policy.last_skipped_window = key
+    policy.held_window = None
+    policy.held_reason = None
+    detail = (f"The automatic update window ({WEEKDAYS[policy.weekday]} "
+              f"{policy.local_time} {policy.timezone}, {key}) closed without "
+              f"updating to {latest_tag or 'the latest release'}: {why}. The "
+              f"next window will try again.")
+    # One commit: the skip marker, the audit row and the report row.
+    report = await update_reports.record(
+        db, kind=update_reports.AUTOMATIC, outcome=update_reports.SKIPPED,
+        from_tag=current_tag, to_tag=latest_tag, detail=detail)
+    if report is not None:
+        await update_reports.dispatch(db, report)
     return True
 
 
@@ -401,28 +539,20 @@ async def tick(now_utc: datetime | None = None) -> str:
     """One evaluation. Returns a short reason, for logs and tests."""
     now = now_utc or datetime.now(timezone.utc)
 
-    if not updater_client.is_available():
+    # No heartbeat file at all means the updater profile has never run on this
+    # install — the default. Nothing to schedule against, so not even a
+    # database read. A file that has merely gone STALE is different: the
+    # updater has stopped, and a window missed because of that is exactly
+    # what an admin needs to hear about.
+    beat = updater_client.read_last_heartbeat()
+    if not isinstance(beat, dict):
         return "no updater"
 
     async with AsyncSessionLocal() as db:
         policy = await get_policy(db)
         await _reconcile_outcome(db, policy)
 
-        # Never stack a request on top of a run, and never race the sidecar's
-        # pickup. The supervisor's lock is the real mutex; this keeps the app
-        # from queueing work it knows will be refused.
-        if updater_client.current_run_state() != updater_client.IDLE:
-            return "busy"
-        if updater_client.has_pending_request():
-            return "a request is already queued"
-
-        beat = updater_client.read_heartbeat() or {}
-        # After the reconcile above, deliberately: reporting how the last run
-        # ended needs nothing from the sidecar, and holding it back for a
-        # handoff would widen the known gap in _reconcile_outcome.
-        not_ready = updater_not_ready(beat)
-        if not_ready:
-            return not_ready
+        hold = _submission_hold(beat)
         current_tag = beat.get("current_tag")
 
         # One-shot first: the operator named this tag explicitly, so it outranks
@@ -435,14 +565,19 @@ async def tick(now_utc: datetime | None = None) -> str:
                     sched.state = "superseded"
                     await db.commit()
                     return "scheduled tag already running"
+                if hold:
+                    await _note_hold(db, hold, schedule=sched)
+                    return hold
                 return ("fired schedule" if await _fire(db, "update", sched.target_tag,
                                                         schedule=sched)
                         else "schedule submit failed")
             if reason == "missed the window":
                 sched.state = "superseded"
-                await db.commit()
                 logger.warning("updater: scheduled update to %s missed its window",
                                sched.target_tag)
+                # pending -> superseded happens exactly once per schedule, so
+                # this is the one place its skip is reported.
+                await _report_missed_schedule(db, sched, current_tag)
                 return "schedule missed its window"
 
         # What the hourly checker last saw, so up to an hour stale — and
@@ -456,11 +591,17 @@ async def tick(now_utc: datetime | None = None) -> str:
         latest_tag = row.latest_tag if row else None
 
         fire, key, reason = policy_decision(policy, now, latest_tag, current_tag)
-        if not fire:
-            return reason
-        return ("fired policy" if await _fire(db, "update", latest_tag,
-                                              policy=policy, key=key)
-                else "policy submit failed")
+        if fire:
+            if hold:
+                await _note_hold(db, hold, policy=policy, key=key)
+                return hold
+            return ("fired policy" if await _fire(db, "update", latest_tag,
+                                                  policy=policy, key=key)
+                    else "policy submit failed")
+        if reason == "outside the window" and await _report_missed_window(
+                db, policy, key, now, row, current_tag):
+            return "window skipped"
+        return reason
 
 
 async def run_scheduler() -> None:

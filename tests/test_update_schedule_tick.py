@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import delete, select
 
-from app.db.models import AsyncSessionLocal, UpdatePolicy, UpdateSchedule, UpdateStatus
+from app.db.models import (AsyncSessionLocal, UpdateNotifySettings, UpdatePolicy,
+                           UpdateRunReport, UpdateSchedule, UpdateStatus)
 from app.ops import update_schedule as us
 
 UTC = timezone.utc
@@ -38,6 +39,8 @@ def control(tmp_path, monkeypatch):
             await db.execute(delete(UpdatePolicy))
             await db.execute(delete(UpdateSchedule))
             await db.execute(delete(UpdateStatus))
+            await db.execute(delete(UpdateRunReport))
+            await db.execute(delete(UpdateNotifySettings))
             await db.commit()
     _run(reset())
     return tmp_path
@@ -316,7 +319,10 @@ def test_a_finished_run_is_still_reported_during_the_handoff(control, monkeypatc
 
     _finish(control, rid, "success")
     _beat(control, current_tag="v1.3.0", self_update=_handoff("pulling", "v1.3.0"))
-    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=5))) == "updater is upgrading itself"
+    # The hold applies only at the point of submitting, and this window has
+    # already fired — so the tick says that, and the report still went out.
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=5))) == "already fired for this window"
+    assert _request(control) is None
     assert _policy().awaiting_request_id is None
     assert sent and "succeeded" in sent[0]["title"]
 
@@ -326,7 +332,8 @@ def test_a_finished_run_is_still_reported_during_the_handoff(control, monkeypatc
 def _finish(control, request_id, state, reverted_to=None):
     (control / "status.json").write_text(json.dumps({
         "id": request_id, "state": state, "step": "done" if state == "success" else "failed",
-        "action": "update", "to_tag": "v1.3.0", "reverted_to": reverted_to,
+        "action": "update", "from_tag": "v1.2.0", "to_tag": "v1.3.0",
+        "reverted_to": reverted_to,
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }))
 

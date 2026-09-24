@@ -1044,6 +1044,10 @@ class UpdateSchedule(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     fired_at = Column(DateTime, nullable=True)
     fired_request_id = Column(String(64), nullable=True)
+    # Why the last due tick could not submit (updater busy, upgrading itself,
+    # failing a check, not running). Written only when it changes, and read once:
+    # it becomes the detail of the "skipped" report if the grace runs out.
+    held_reason = Column(String(255), nullable=True)
 
 
 class UpdatePolicy(Base):
@@ -1083,6 +1087,72 @@ class UpdatePolicy(Base):
     # Why the policy disabled itself. An automatic run that auto-reverted must
     # not retry the same bad release every week unattended.
     paused_reason = Column(String(255), nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+    # A window in which a tick wanted to fire and could not, and why. The
+    # evidence behind a "skipped" report: without it, a release that appeared
+    # only after the window closed would read as a missed update.
+    held_window = Column(String(10), nullable=True)
+    held_reason = Column(String(255), nullable=True)
+    # The last window reported as skipped, so each is reported at most once.
+    last_skipped_window = Column(String(10), nullable=True)
+
+
+class UpdateRunReport(Base):
+    """How one scheduled or automatic update ended — or that it never started.
+
+    Written for every unattended run, one-shot and policy alike, because nobody
+    was watching either of them. `outcome` is succeeded | failed | reverted |
+    skipped; "skipped" means a schedule or window whose grace ran out without a
+    request ever reaching the updater. The row outlives the app restart that the
+    update itself causes, which is what lets the admin banner report it
+    afterwards. Paired with an admin_audit_log row written in the same commit,
+    before any push is attempted.
+    """
+    __tablename__ = "update_run_report"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, nullable=False, index=True,
+                        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    kind = Column(String(16), nullable=False)          # scheduled | automatic
+    outcome = Column(String(16), nullable=False)
+    from_tag = Column(String(64), nullable=True)
+    to_tag = Column(String(64), nullable=True)
+    detail = Column(String(512), nullable=True)
+    # The updater request this reports on. Unique, so a run is reported at most
+    # once however many ticks see its status; NULL for a skip, which never had
+    # a request (SQLite allows any number of NULLs under a unique index).
+    request_id = Column(String(64), nullable=True, unique=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    acknowledged_by = Column(Integer, nullable=True)
+    # JSON: {channel: {"state": sent|failed|filtered|off, "at": iso, "error": str}}
+    deliveries = Column(Text, nullable=True)
+
+
+class UpdateNotifySettings(Base):
+    """Where update reports are pushed, beyond the audit log and the in-app
+    banner, which always happen. Single row, id always 1.
+
+    Nothing here gates an update. A channel that is unset, filtered or failing
+    only changes who hears about a run, never whether it runs.
+    """
+    __tablename__ = "update_notify_settings"
+
+    id = Column(Integer, primary_key=True)             # always 1
+    # "all" or "problems" (failed, reverted, skipped). Discord's webhook itself
+    # stays in the environment (DISCORD_WEBHOOK_URL, alert type auto_update).
+    discord_policy = Column(String(16), nullable=False, default="all")
+    # The topic URL is the whole credential for ntfy, so it is encrypted at
+    # rest and never rendered back or logged in full.
+    webhook_url = Column(EncryptedText, nullable=True)
+    webhook_format = Column(String(8), nullable=False, default="json")  # json | ntfy
+    webhook_policy = Column(String(16), nullable=False, default="all")
+    discord_last_at = Column(DateTime, nullable=True)
+    discord_last_ok = Column(Boolean, nullable=True)
+    discord_last_error = Column(String(255), nullable=True)
+    webhook_last_at = Column(DateTime, nullable=True)
+    webhook_last_ok = Column(Boolean, nullable=True)
+    webhook_last_error = Column(String(255), nullable=True)
     updated_by = Column(Integer, nullable=True)
     updated_at = Column(DateTime, nullable=True)
 
