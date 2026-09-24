@@ -279,7 +279,13 @@ async def corp_journal(
             "categories": CATEGORY_LABELS, "is_corp": True,
             "corp_id": corp_id, "division": division})
 
-    char = corp_chars[0]  # For template display
+    # The character shown as the viewer is whichever one ESI actually let
+    # read the journal — set inside the loop on success, not picked up
+    # front (ISS-040: it used to be corp_chars[0], so the page headlined
+    # the first scoped pilot in DB order while the entries came from the
+    # one holding the in-game role). Until a fetch succeeds it stays the
+    # first candidate, which is what the error page shows.
+    char = corp_chars[0]
 
     try:
         # Try each character until one succeeds (handles 403 from missing Director role)
@@ -298,6 +304,7 @@ async def corp_journal(
                     if len(raw) < 2500:
                         break
                 last_error = None
+                char = c  # this is the pilot whose role read the journal
                 break  # Success
             except Exception as e:
                 last_error = e
