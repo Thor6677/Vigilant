@@ -28,6 +28,7 @@ from app.config import get_settings
 from app.ops import updater as updater_client
 from app.ops import update_reports
 from app.ops import update_schedule
+from app.ops.version import is_newer
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1315,7 +1316,7 @@ async def updater_schedule_create(request: Request,
     conversion, which is the last thing wanted on a field whose zone is chosen
     explicitly next to it.
     """
-    _require_updater()
+    beat = _require_updater()
     draft = {"form": "schedule", "run_at": run_at, "timezone": tz}
 
     async def refuse(error: str):
@@ -1325,6 +1326,14 @@ async def updater_schedule_create(request: Request,
 
     if not updater_client.validate_tag_advisory(tag):
         return await refuse(f"not a release tag: {tag}")
+    # Forward only. There is no scheduled rollback: the panel never offers one,
+    # and an unattended downgrade is not something to accept by accident from
+    # a stale form. Rolling back is the Roll back button, now, with a person
+    # watching.
+    current = beat.get("current_tag")
+    if not is_newer(tag, current):
+        return await refuse(f"{tag} is not newer than the running {current or 'release'}; "
+                            f"only upgrades can be scheduled — use Roll back to go back")
     if not update_schedule.valid_timezone(tz):
         return await refuse(f"unknown timezone: {tz}")
     try:

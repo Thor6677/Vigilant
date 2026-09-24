@@ -982,3 +982,13 @@ def test_a_refused_schedule_keeps_the_typed_time(env):
     assert r.status_code == 400
     assert '<details class="updater-schedule-form" open' in r.text
     assert 'value="tomorrow-ish"' in r.text
+
+
+def test_an_older_tag_cannot_be_scheduled(env):
+    """Only upgrades can be scheduled; going back is the Roll back button."""
+    _beat(env.control, current_tag="v1.4.0")
+    r = env.admin().post("/admin/update/schedule",
+                         data={"tag": "v1.3.0", "run_at": _future(), "tz": "UTC"})
+    assert r.status_code == 400
+    assert "not newer" in r.text
+    assert _schedules(env) == []

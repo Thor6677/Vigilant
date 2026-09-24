@@ -30,7 +30,7 @@ from app.db.models import (AdminAuditLog, AsyncSessionLocal, UpdatePolicy,
                            UpdateSchedule, UpdateStatus)
 from app.ops import update_reports
 from app.ops import updater as updater_client
-from app.ops.version import parse_version
+from app.ops.version import is_newer, parse_version
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +293,15 @@ def release_eligible(policy, latest_tag: str | None,
         # Belt and braces: validate_tag's regex admits no hyphen, so a
         # prerelease is structurally ineligible for unattended application.
         return False, f"{latest_tag} is not an exact release tag"
+    # Never a downgrade, and never a guess. With patch_only off nothing else
+    # stops "latest" v1.4.1 replacing a running v1.5.0 (a CLI deploy of a
+    # release the hourly checker has not seen yet does exactly that), and an
+    # unknown or "dev" running version cannot be compared at all. is_newer
+    # fails closed on both.
+    if parse_version(current_tag) is None:
+        return False, f"the running release ({current_tag or 'unknown'}) cannot be compared"
+    if not is_newer(latest_tag, current_tag):
+        return False, f"{latest_tag} is not newer than the running {current_tag}"
     if policy.patch_only and not is_patch_upgrade(current_tag, latest_tag):
         return False, f"{latest_tag} is not a patch release"
     return True, "due"
@@ -592,6 +601,16 @@ async def tick(now_utc: datetime | None = None) -> str:
                     sched.state = "superseded"
                     await db.commit()
                     return "scheduled tag already running"
+                if parse_version(current_tag) is None:
+                    # Cannot tell an upgrade from a downgrade. Hold, not drop:
+                    # the heartbeat usually knows again within a tick.
+                    hold = hold or "the running release is unknown"
+                elif not is_newer(sched.target_tag, current_tag):
+                    # Something newer got deployed meanwhile. Applying this
+                    # now would be a downgrade nobody asked for.
+                    sched.state = "superseded"
+                    await db.commit()
+                    return "scheduled tag is not newer than the running release"
                 if hold:
                     await _note_hold(db, hold, schedule=sched)
                     return hold
@@ -600,8 +619,11 @@ async def tick(now_utc: datetime | None = None) -> str:
                         else "schedule submit failed")
             if reason == "missed the window":
                 sched.state = "superseded"
-                if sched.target_tag == current_tag:
-                    # Deployed some other way meanwhile: nothing was missed.
+                if sched.target_tag == current_tag or (
+                        parse_version(current_tag) is not None
+                        and not is_newer(sched.target_tag, current_tag)):
+                    # Deployed (or overtaken) some other way meanwhile:
+                    # nothing was missed.
                     await db.commit()
                     return "scheduled tag already running"
                 logger.warning("updater: scheduled update to %s missed its window",

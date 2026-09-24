@@ -473,3 +473,13 @@ def test_a_scheduled_fire_is_audit_logged_distinctly(control):
     _schedule("v1.3.0", minutes_ago=5)
     _run(us.tick())
     assert any(r[0] == "scheduled_update_requested" for r in _audit_rows())
+
+
+def test_a_schedule_overtaken_by_a_newer_release_is_dropped_not_applied(control):
+    """Scheduled v1.3.0; meanwhile v1.4.0 went out from the CLI. Firing would
+    be a downgrade nobody asked for."""
+    _beat(control, current_tag="v1.4.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    assert _run(us.tick()) == "scheduled tag is not newer than the running release"
+    assert _request(control) is None
+    assert ("v1.3.0", "superseded") in _schedule_states()

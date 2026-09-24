@@ -347,3 +347,15 @@ def test_an_ambiguous_window_that_has_passed_is_the_most_recent():
     n = us.next_window(6, "01:30", "Europe/London",
                        datetime(2026, 10, 25, 1, 10, tzinfo=UTC))
     assert us.window_key(n) == "2026-11-01"
+
+
+# ── Never a downgrade, never a guess ─────────────────────────────────────────
+
+@pytest.mark.parametrize("current", ["v1.5.0", None, "dev", "garbage"])
+def test_the_policy_never_downgrades_or_guesses(current):
+    """patch_only off: nothing else stood between a stale "latest" and a
+    downgrade of the running release."""
+    p = _policy(patch_only=False)
+    fire, _, reason = us.policy_decision(p, SUNDAY_0600, "v1.4.1", current)
+    assert fire is False, reason
+    assert "not newer" in reason or "cannot be compared" in reason
