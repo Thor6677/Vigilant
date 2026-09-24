@@ -367,6 +367,28 @@ def test_non_boosters_and_a_second_booster_in_a_taken_slot_are_ignored():
     assert swapped["weapon_optimal_range"] == TURRET_OPTIMAL
 
 
+def test_overflowing_type_ids_and_side_effects_are_dropped_not_raised():
+    """_parse_entries used to do a bare int(x): a type_id or side effect
+    that's a float-overflow (the `inf` json.loads produces from a literal
+    like 1e400) raised OverflowError instead of being caught alongside the
+    TypeError/ValueError cases, and a type_id that converts cleanly but is
+    too big for a downstream SQLite bind (a JSON integer literal like
+    99999999999999999999999) sailed through uncaught entirely. Neither
+    should reach the query layer -- both are just dropped, same as any
+    other junk entry."""
+    off = _stats(GUN_FIT, boosters=[_booster(BLUE_PILL)])
+    stats = _stats(GUN_FIT, boosters=[
+        {"type_id": float("inf"), "side_effects": []},
+        {"type_id": 99999999999999999999999, "side_effects": []},
+        {"type_id": BLUE_PILL, "side_effects": [float("inf"), EFF_SHIELD_CAPACITY_PENALTY]},
+    ])
+    # The two overflowing entries vanish entirely rather than raising. Blue
+    # Pill's own entry still applies, and the one valid side effect in its
+    # list still switches on even though its overflowing neighbor in that
+    # same list gets dropped.
+    assert stats["shield_hp"] == pytest.approx(off["shield_hp"] * 0.70, abs=0.5)
+
+
 def test_booster_bonus_sits_outside_the_module_stacking_chain():
     """Two tracking computers penalise each other; the Drop booster's +37.5%
     multiplies the penalised product untouched, as dogma exempts implant-
@@ -464,21 +486,42 @@ def test_get_booster_info_names_an_unknown_side_effect_from_its_attribute():
 # SDE: the side-effect marker column and its self-heal
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_needs_update_reimports_when_no_effect_marks_a_side_effect():
-    """Names and categories are fine — this is the post-v1.4.0 shape, not the
-    legacy-YAML one — but fittingUsageChanceAttributeID was dropped."""
+def test_needs_update_reimports_when_the_meta_marker_is_missing():
+    """An existing install that imported before EFFECTS_USAGE_CHANCE_MARKER
+    existed (T-049) has no marker row in sde_meta -- names, categories and
+    even a booster side effect's chance attribute can all be perfectly
+    healthy, and it still has to reimport exactly once so the marker gets
+    written. This is deliberately a marker check, not a data-shape one: see
+    EFFECTS_USAGE_CHANCE_MARKER's docstring in app/sde/loader.py for why a
+    data check (no effect anywhere carries the field) would force a
+    reimport on every single boot forever if a future SDE ever legitimately
+    had none, since the reimport could never make that check pass."""
     assert _needs_update_with([
         (5231, "modifyActiveArmorResonancePostPercent", 1),
         (3015, "overloadHardeningBonus", 5),
-        (2737, "boosterShieldCapacityPenalty", 0),
-    ]) is True
+        (2737, "boosterShieldCapacityPenalty", 0, 1089),
+    ], marker=False) is True
 
 
-def test_needs_update_is_quiet_once_a_side_effect_row_carries_its_marker():
+def test_needs_update_is_quiet_once_the_meta_marker_is_set():
+    """The healthy case: same data as above, but the marker row exists (as
+    it does the moment any import finishes under the current code) --
+    no reimport."""
     assert _needs_update_with([
         (5231, "modifyActiveArmorResonancePostPercent", 1),
         (2737, "boosterShieldCapacityPenalty", 0, 1089),
-    ]) is False
+    ], marker=True) is False
+
+
+def test_needs_update_tolerates_zero_booster_side_effects_once_marked():
+    """The whole point of switching to a marker: a future SDE where zero
+    real effects carry fittingUsageChanceAttributeID must not force a
+    reimport every single boot, as the old data-shape check would have --
+    once the marker is set, the table's content stops mattering for this."""
+    assert _needs_update_with([
+        (5231, "modifyActiveArmorResonancePostPercent", 1),
+        (3015, "overloadHardeningBonus", 5),
+    ], marker=True) is False
 
 
 def test_startup_migration_adds_the_marker_column():

@@ -111,24 +111,53 @@ _BOOSTER_MODIFIER_OVERRIDES: dict[tuple[int, int], dict] = {
 }
 
 
+# Upper bound for a booster type ID or effect ID coming from untrusted
+# input. Not a real-world limit -- the SDE never gets close to it -- it's a
+# defense against a value that ``int()`` converts without error but that
+# breaks something downstream: a JSON integer literal like
+# 99999999999999999999999 parses fine as an arbitrary-precision Python int
+# and would reach a query as a bind parameter, where SQLite's 64-bit
+# INTEGER limit turns it into an OverflowError from the driver instead.
+_INT_UPPER_BOUND = 2 ** 31
+
+
+def _bounded_int(value) -> int | None:
+    """int(value), or None if it isn't a clean positive int under 2**31.
+
+    Three ways a bare ``int(x)`` breaks on untrusted input: a non-numeric
+    value (TypeError/ValueError); a huge literal like ``1e400`` that
+    ``json.loads`` turns into the float ``inf`` before this ever runs, where
+    ``int(inf)`` raises OverflowError rather than returning anything; and an
+    arbitrary-precision integer literal that converts cleanly but is too
+    large for a downstream SQLite bind (see _INT_UPPER_BOUND above). Mirrors
+    app.routes.fitting's helper of the same name -- duplicated rather than
+    imported, since app/fitting/ must not depend on app/routes/.
+    """
+    try:
+        x = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (0 < x < _INT_UPPER_BOUND):
+        return None
+    return x
+
+
 def _parse_entries(boosters) -> list[tuple[int, set[int]]]:
     """(type_id, requested side-effect IDs) per usable entry; junk is dropped."""
     out: list[tuple[int, set[int]]] = []
     for entry in boosters or ():
         if not isinstance(entry, dict):
             continue
-        try:
-            type_id = int(entry.get("type_id"))
-        except (TypeError, ValueError):
+        type_id = _bounded_int(entry.get("type_id"))
+        if type_id is None:
             continue
         requested: set[int] = set()
         raw = entry.get("side_effects") or ()
         if isinstance(raw, (list, tuple, set, frozenset)):
             for value in raw:
-                try:
-                    requested.add(int(value))
-                except (TypeError, ValueError):
-                    continue
+                v = _bounded_int(value)
+                if v is not None:
+                    requested.add(v)
         out.append((type_id, requested))
     return out
 

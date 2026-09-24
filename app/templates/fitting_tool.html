@@ -1048,8 +1048,13 @@ function renderBoosterSlots() {
                     escapeHtml(e.label) + ' <span style="color:var(--muted);">(' + pct + ' per injection)</span>' +
                 '</label>';
             }).join('');
-        } else if (b.side_effects && b.side_effects.length) {
-            html += '<div style="font-size:9px;color:var(--muted);margin-left:2rem;">Loading side effects&hellip;</div>';
+        } else if (b.effects === undefined) {
+            // applyBoosterInfo always resolves `effects` (to [] when the
+            // lookup has nothing) before the first render this state can
+            // reach, so this is defensive: it never claims to be "loading"
+            // something that isn't actually in flight, since nothing here
+            // is asynchronous by the time renderBoosterSlots runs.
+            html += '<div style="font-size:9px;color:var(--muted);margin-left:2rem;">No side-effect data for this booster</div>';
         }
         html += '</div>';
     });
@@ -1128,10 +1133,13 @@ function toggleBoosterEffect() {
    side-effect ids (state.boosters[slot].side_effects) -- the checkbox list
    needs every side effect's label/chance too, including the ones off, so
    this merges the load response's booster_info catalog (get_booster_info,
-   keyed by type_id) into state.boosters before the first render. A booster
-   whose type_id isn't in the catalog (engine lookup miss) keeps showing its
-   raw on-count via the "Loading side effects…" line in renderBoosterSlots
-   until the underlying data exists. */
+   keyed by type_id) into state.boosters before the first render.
+
+   Always resolves `effects` to a definite array, even when the lookup has
+   nothing for that type_id (not a real booster, or an engine-lookup miss)
+   -- there is nothing asynchronous left to wait on once this has run once,
+   so leaving `effects` unset here would make renderBoosterSlots show a
+   "loading" state that will never actually resolve. */
 function applyBoosterInfo(boosterInfo) {
     boosterInfo = boosterInfo || {};
     var boosters = state.boosters || {};
@@ -1139,9 +1147,9 @@ function applyBoosterInfo(boosterInfo) {
         var b = boosters[slot];
         if (!b || b.effects) return;
         var info = boosterInfo[String(b.type_id)] || boosterInfo[b.type_id];
-        if (!info || !info.side_effects) return;
         var onIds = b.side_effects || [];
-        b.effects = info.side_effects.map(function(se) {
+        var catalog = (info && info.side_effects) || [];
+        b.effects = catalog.map(function(se) {
             return {
                 effect_id: se.effect_id, label: se.label, chance: se.chance,
                 on: onIds.indexOf(se.effect_id) !== -1
