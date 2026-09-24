@@ -244,7 +244,14 @@ def _seeded_app_db():
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
             mine_1 = UserFitting(user_id=USER_A, name="Alpha", ship_type_id=587,
-                                 items_json="[]")
+                                 items_json="[]",
+                                 # Two hardwirings plus junk the sanitizer must drop.
+                                 implants_json=json.dumps({
+                                     "6": {"type_id": 33953, "name": "Zor's Custom Navigation Hyper-Link"},
+                                     "9": {"type_id": 33965, "name": "Eifyr and Co. 'Gunslinger' SX-3"},
+                                     "11": {"type_id": 1, "name": "out of range"},
+                                     "7": {"type_id": "nope"},
+                                 }))
             mine_2 = UserFitting(user_id=USER_A, name="Bravo", ship_type_id=602,
                                  items_json="[]")
             theirs = UserFitting(user_id=USER_B, name="Hostile", ship_type_id=587,
@@ -279,11 +286,12 @@ def test_compare_renders_own_fits_and_404s_foreign_fit():
     try:
         client = _authed_client(USER_A)
 
-        # Both fits owned -> 200, names on the page, implants deferral noted.
+        # Both fits owned -> 200, names on the page, implants stated per side.
         r = client.get(f"/tools/fitting/compare?a={mine_1}&b={mine_2}")
         assert r.status_code == 200
         assert "Alpha" in r.text and "Bravo" in r.text
-        assert "implants not modeled" in r.text
+        assert "implants not modeled" not in r.text
+        assert "implants as saved (2 vs 0)" in r.text
 
         # Another user's fit in either slot -> 404 (not 403 — never leak
         # that the id exists).
@@ -297,3 +305,29 @@ def test_compare_renders_own_fits_and_404s_foreign_fit():
             f"/tools/fitting/compare?a={mine_1}&b=999999").status_code == 404
     finally:
         teardown()
+
+
+def test_compare_feeds_each_fits_saved_implants_to_the_engine(monkeypatch):
+    """T-041: the compare view used to call the engine without implants, so a
+    fit saved with hardwirings compared with different numbers than the
+    builder showed for it. Each side's sanitised implant type ids must reach
+    the same `calculate_fitting_stats` call the builder makes."""
+    import app.routes.fitting as fitting_mod
+
+    seen: list[tuple[int, list[int]]] = []
+
+    async def fake_stats(db, ship_type_id, items, *args, **kwargs):
+        seen.append((ship_type_id, sorted(kwargs.get("implants") or [])))
+        return {}
+
+    monkeypatch.setattr(fitting_mod, "calculate_fitting_stats", fake_stats)
+    monkeypatch.setattr(fitting_mod, "build_compare_sections", lambda a, b: [])
+
+    (mine_1, mine_2, _), teardown = _seeded_app_db()
+    try:
+        r = _authed_client(USER_A).get(f"/tools/fitting/compare?a={mine_1}&b={mine_2}")
+        assert r.status_code == 200
+    finally:
+        teardown()
+
+    assert seen == [(587, [33953, 33965]), (602, [])], seen
