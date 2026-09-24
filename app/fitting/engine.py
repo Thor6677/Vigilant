@@ -179,6 +179,15 @@ STACKING_CONSTANT = 7.1289
 # upstream, so no overrides are warranted. This dict stays empty by design;
 # it is not a TODO. See tests/test_ship_modifier_overrides.py.
 #
+# ISS-029 close-out (2026-09-24): the same question asked of EVERY hull, not
+# twelve — scripts/audit_ship_modifiers.py screens all published ships with
+# trait rows for a skill filter from a weapon system the hull's traits do
+# not name (the ISS-015 shape). Against the live SDE: 419 hulls, 2,155
+# skill-filtered modifiers, zero genuine mismatches. The "~200 ships" in
+# the original estimate came from Pyfa's HISTORICAL override coverage; CCP
+# has since cleaned modifierInfo up. Re-run the script after an SDE import;
+# it exits non-zero on an unexplained flag.
+#
 # If a future hull IS found broken, verify the correct target against
 # github.com/pyfa-org/Pyfa (eos/effects/) before adding an entry.
 _SHIP_MODIFIER_OVERRIDES: dict[int, dict[tuple[int, int], dict]] = {}
