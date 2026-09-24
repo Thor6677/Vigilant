@@ -250,6 +250,24 @@ async def already_reported(db, request_id: str) -> bool:
     )).first() is not None
 
 
+async def failed_here(db, tag: str | None) -> datetime | None:
+    """When `tag` last failed or was rolled back on this install, or None.
+
+    Only run reports count, not status.json: the sidecar also publishes a
+    "failed" status for refusals (a lock it could not take, an unreadable
+    request) that say nothing about the release, and one of those must not
+    blacklist a tag for good.
+    """
+    if not tag:
+        return None
+    return (await db.execute(
+        select(UpdateRunReport.created_at)
+        .where(UpdateRunReport.to_tag == tag)
+        .where(UpdateRunReport.outcome.in_((FAILED, REVERTED)))
+        .order_by(UpdateRunReport.id.desc()).limit(1)
+    )).scalar()
+
+
 async def admin_user_ids(db) -> list[int]:
     """Everyone require_admin lets into the updater panel: admin and manager."""
     rows = await db.execute(select(User.id).where(User.role.in_(("admin", "manager"))))

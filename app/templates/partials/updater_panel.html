@@ -277,6 +277,14 @@
               Paused: {{ policy.paused_reason }}. Saving this form re-enables it.
             </p>
           {% endif %}
+          {% if skipped_release %}
+            <p class="b-empty is-warn">
+              <b class="mono">{{ skipped_release['tag'] }}</b> failed here on
+              {{ skipped_release['on'] }}; automatic updates will skip it. A newer
+              release will be applied as usual, or update to this one by hand if
+              you still want it.
+            </p>
+          {% endif %}
 
           <form hx-post="/admin/update/policy"
                 hx-target="#updater-panel" hx-swap="outerHTML"

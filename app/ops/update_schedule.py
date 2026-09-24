@@ -241,7 +241,8 @@ def schedule_is_due(run_at_utc: datetime | None, now_utc: datetime,
 
 def policy_decision(policy, now_utc: datetime, latest_tag: str | None,
                     current_tag: str | None,
-                    grace_seconds: int = GRACE_SECONDS) -> tuple[bool, str | None, str]:
+                    grace_seconds: int = GRACE_SECONDS, *,
+                    failed_on: datetime | None = None) -> tuple[bool, str | None, str]:
     """Should the standing policy fire? Returns (fire, window_key, reason).
 
     Every refusal carries a reason so the UI and the log can say WHY nothing
@@ -275,12 +276,14 @@ def policy_decision(policy, now_utc: datetime, latest_tag: str | None,
     late = (_utc(now_utc) - _utc(window)).total_seconds()
     if late > grace_seconds:
         return False, key, "outside the window"
-    eligible, reason = release_eligible(policy, latest_tag, current_tag)
+    eligible, reason = release_eligible(policy, latest_tag, current_tag,
+                                        failed_on=failed_on)
     return eligible, key, reason
 
 
 def release_eligible(policy, latest_tag: str | None,
-                     current_tag: str | None) -> tuple[bool, str]:
+                     current_tag: str | None, *,
+                     failed_on: datetime | None = None) -> tuple[bool, str]:
     """Whether the policy would apply `latest_tag` at all, window aside.
 
     Split out of policy_decision so a CLOSED window can be asked the same
@@ -304,6 +307,13 @@ def release_eligible(policy, latest_tag: str | None,
         return False, f"the running release ({current_tag or 'unknown'}) cannot be compared"
     if not is_newer(latest_tag, current_tag):
         return False, f"{latest_tag} is not newer than the running {current_tag}"
+    # A release that already failed or was rolled back on THIS install — by a
+    # one-shot schedule or by the policy itself — is never tried again
+    # unattended. Pausing the policy covered only its own failures; a failed
+    # one-shot left it free to retry the same tag an hour later.
+    if failed_on is not None:
+        return False, (f"{latest_tag} failed here on {failed_on:%Y-%m-%d}; "
+                       f"automatic updates skip it")
     if policy.patch_only and not is_patch_upgrade(current_tag, latest_tag):
         return False, f"{latest_tag} is not a patch release"
     return True, "due"
@@ -643,7 +653,9 @@ async def _report_missed_window(db, policy, key: str | None, now: datetime,
         return False
     closed_at = window.astimezone(timezone.utc) + timedelta(seconds=GRACE_SECONDS)
 
-    eligible, _ = release_eligible(policy, latest_tag, current_tag)
+    eligible, _ = release_eligible(
+        policy, latest_tag, current_tag,
+        failed_on=await update_reports.failed_here(db, latest_tag))
     if not eligible:
         if policy.held_window is not None:
             # Held, but satisfied some other way. Forget it, once.
@@ -752,7 +764,9 @@ async def tick(now_utc: datetime | None = None) -> str:
             select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
         latest_tag = row.latest_tag if row else None
 
-        fire, key, reason = policy_decision(policy, now, latest_tag, current_tag)
+        fire, key, reason = policy_decision(
+            policy, now, latest_tag, current_tag,
+            failed_on=await update_reports.failed_here(db, latest_tag))
         if key and reason != "outside the window" and policy.observed_window != key:
             policy.observed_window = key
             await db.commit()

@@ -684,3 +684,25 @@ def test_a_stale_request_someone_else_wrote_is_left_alone(control):
     _run(us.tick())
     assert _request(control)["id"] == "manual-1"
     assert _reports() == []
+
+
+# ── A release that failed here is never retried unattended ──────────────────
+
+def test_a_tag_a_one_shot_failed_on_is_skipped_by_the_policy(control):
+    """The one-shot's rollback does not pause the policy; without this check it
+    retried the same bad release at the next window."""
+    _fire_schedule_and_finish(control, "failed", reverted_to="v1.2.0")
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    reason = _run(us.tick(SUNDAY_0430))
+    assert reason.startswith("v1.3.0 failed here on")
+    assert _request(control) is None
+
+
+def test_a_newer_release_after_a_failure_is_applied(control):
+    _fire_schedule_and_finish(control, "failed", reverted_to="v1.2.0")
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.1")
+    assert _run(us.tick(SUNDAY_0430)) == "fired policy"

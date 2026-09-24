@@ -1015,3 +1015,11 @@ def test_editing_an_enabled_policy_never_fires_for_a_window_that_just_passed(env
     assert p.last_fired_window == past.date().isoformat()
     fire, _, reason = us.policy_decision(p, now, "v9.9.9", "v1.2.0")
     assert (fire, reason) == (False, "already fired for this window")
+
+
+def test_the_panel_says_a_failed_release_will_be_skipped(env):
+    _beat(env.control)
+    _add_report(env, "reverted")               # to_tag v1.3.0, the seeded latest
+    body = env.admin().get("/admin/update/status").text
+    assert "failed here on" in body
+    assert "automatic updates will skip it" in body

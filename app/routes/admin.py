@@ -1267,6 +1267,8 @@ async def _schedule_context(request: Request, db: AsyncSession,
         policy.weekday, policy.local_time, policy.timezone, now)
     notify = update_reports.notify_view(await update_reports.get_notify_settings(db))
     history = await update_reports.recent_reports(db)
+    latest = await _latest_known_tag(db)
+    failed_on = await update_reports.failed_here(db, latest)
     return {
         "policy": policy,
         "pending_schedule": pending,
@@ -1286,6 +1288,10 @@ async def _schedule_context(request: Request, db: AsyncSession,
         "notify": notify,
         "push_configured": notify["discord_on"] or notify["webhook_set"],
         "run_history": [update_reports.report_view(r) for r in history],
+        # The latest release, if it already failed or was rolled back here —
+        # the policy will not apply it again, and the panel says so.
+        "skipped_release": ({"tag": latest, "on": failed_on.strftime("%Y-%m-%d")}
+                            if failed_on else None),
     }
 
 

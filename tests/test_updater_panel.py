@@ -108,6 +108,7 @@ def _schedule_defaults():
         notify=_notify_defaults(),
         push_configured=False,
         run_history=[],
+        skipped_release=None,
     )
 
 
