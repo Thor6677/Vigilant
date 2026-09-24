@@ -56,7 +56,7 @@ from app.fitting.engine import (
     calculate_fitting_stats, normalise_resist_phasing, rah_total_resist_points,
     suggest_rah_phasing,
 )
-from app.sde.loader import needs_update
+from app.sde.loader import EFFECTS_USAGE_CHANCE_MARKER, needs_update
 
 # ── dogma constants this fixture needs that constants.py has no name for ────
 ATTR_OVERLOAD_HARDENING_BONUS = 1208   # overloadHardeningBonus
@@ -533,13 +533,24 @@ def _one_placeholder_row(table_name):
     return table.insert().values(**values)
 
 
-def _needs_update_with(effect_rows):
+def _needs_update_with(effect_rows, marker=True):
     """Seed every table needs_update() checks, plus the given effect rows.
 
     The empty-table loop in needs_update() returns True if ANY of a dozen
     tables is empty — sde_effects included. So a healthy baseline has to be
     genuinely complete, or the bad-state check below would never be reached
     and its test would be proving nothing.
+
+    Each effect row is (effect_id, name, category) or, for a booster side
+    effect, (effect_id, name, category, chance_attribute_id): a healthy table
+    should hold at least one of the latter, as any real SDE does, though it
+    no longer changes needs_update()'s answer (see `marker` below).
+
+    `marker` seeds (or omits) the T-049 EFFECTS_USAGE_CHANCE_MARKER row in
+    sde_meta -- see tests/test_fitting_boosters_engine.py, which is the one
+    that turns this False to prove the "install predates the marker" path.
+    Defaults True so every other caller here, which is testing something
+    else entirely, gets the healthy baseline it's assuming.
     """
     tables = (
         "sde_types", "sde_planets", "sde_planet_schematics",
@@ -556,14 +567,22 @@ def _needs_update_with(effect_rows):
             "INSERT INTO sde_meta (key, value) VALUES "
             "('last_updated', '2099-01-01T00:00:00+00:00')"
         ))
+        if marker:
+            await db.execute(
+                text("INSERT INTO sde_meta (key, value) VALUES (:k, '1')"),
+                {"k": EFFECTS_USAGE_CHANCE_MARKER},
+            )
         for table in tables:
             await db.execute(_one_placeholder_row(table))
-        for eff_id, name, category in effect_rows:
+        for eff in effect_rows:
+            eff_id, name, category = eff[:3]
+            chance_attr = eff[3] if len(eff) > 3 else None
             await db.execute(
                 text("INSERT INTO sde_effects "
-                     "(effect_id, effect_name, effect_category) "
-                     "VALUES (:i, :n, :c)"),
-                {"i": eff_id, "n": name, "c": category},
+                     "(effect_id, effect_name, effect_category, "
+                     " fitting_usage_chance_attribute_id) "
+                     "VALUES (:i, :n, :c, :f)"),
+                {"i": eff_id, "n": name, "c": category, "f": chance_attr},
             )
         await db.commit()
         return await needs_update(db)
@@ -581,6 +600,8 @@ def test_needs_update_false_for_a_healthy_effects_table():
         (5231, "modifyActiveArmorResonancePostPercent", 1),
         (3015, "overloadHardeningBonus", 5),
         (16, "online", 4),
+        # One booster side effect, as any real import has twelve of.
+        (2737, "boosterShieldCapacityPenalty", 0, 1089),
     ]) is False
 
 
@@ -602,6 +623,7 @@ def test_needs_update_tolerates_a_single_real_effect_row():
     assert _needs_update_with([
         (5231, "", 0),
         (3015, "modifyActiveArmorResonancePostPercent", 0),
+        (2737, "", 0, 1089),
     ]) is False
 
 

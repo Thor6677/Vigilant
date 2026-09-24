@@ -76,6 +76,15 @@ log = logging.getLogger(__name__)
 SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 REFRESH_DAYS = 30
 
+# sde_meta key set once an import has run with code that keeps
+# fittingUsageChanceAttributeID on sde_effects (T-049). needs_update() uses
+# its absence, not the table's contents, to decide whether a reimport is
+# owed for this — see _booster_side_effects_missing's old docstring (now
+# gone) for why a data-shape check doesn't hold up here: a future SDE where
+# zero real effects happen to carry the field would force a reimport every
+# single boot forever, since the reimport can never make the check pass.
+EFFECTS_USAGE_CHANCE_MARKER = "effects_usage_chance_v1"
+
 
 async def _get_meta(db: AsyncSession, key: str) -> str | None:
     result = await db.execute(text("SELECT value FROM sde_meta WHERE key = :key"), {"key": key})
@@ -107,6 +116,19 @@ async def needs_update(db: AsyncSession) -> bool:
     if updated.tzinfo is None:
         updated = updated.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) - updated > timedelta(days=REFRESH_DAYS):
+        return True
+
+    # T-049: an install that imported before fittingUsageChanceAttributeID was
+    # kept has no way to notice on its own. This is a marker check, not a
+    # data-shape one, deliberately: sde_meta already exists and is cheap to
+    # query, so it doesn't need the broad try/except the table-shape checks
+    # below have (those guard against a table that doesn't exist yet).
+    if not await _get_meta(db, EFFECTS_USAGE_CHANCE_MARKER):
+        log.warning(
+            "sde_meta has no %r marker — this install predates T-049's "
+            "fittingUsageChanceAttributeID column. Forcing SDE reimport.",
+            EFFECTS_USAGE_CHANCE_MARKER,
+        )
         return True
 
     # Force reimport if sde_types is empty (e.g. a previous import failed mid-way
@@ -1164,6 +1186,10 @@ async def download_and_import(db: AsyncSession):
                     "effect_category": int(item.get("effectCategoryID", 0)),
                     "discharge_attribute_id": item.get("dischargeAttributeID"),
                     "duration_attribute_id": item.get("durationAttributeID"),
+                    # Marks a booster side effect; see SDEEffect.
+                    "fitting_usage_chance_attribute_id": item.get(
+                        "fittingUsageChanceAttributeID"
+                    ),
                 })
             except (KeyError, ValueError, TypeError):
                 continue
@@ -1297,6 +1323,10 @@ async def download_and_import(db: AsyncSession):
     except Exception as e:
         log.warning(f"Map-data regeneration failed (non-fatal): {e}")
 
+    # T-049: this run imported sde_effects with code that keeps
+    # fittingUsageChanceAttributeID, so needs_update() never has to force
+    # another reimport just to check for it again.
+    await _set_meta(db, EFFECTS_USAGE_CHANCE_MARKER, "1")
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")
