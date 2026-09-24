@@ -21,6 +21,7 @@ and idempotency traps in it — be tested exhaustively without a running app.
 """
 import asyncio
 import logging
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -406,30 +407,58 @@ async def _reconcile_outcome(db, policy) -> None:
 
 async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
                 key: str | None = None) -> bool:
-    """Submit one request and record that we did, atomically with the decision.
+    """Record the decision, THEN write the request, then record that it went in.
 
-    The commit ordering is the whole point. last_fired_window is written in the
-    SAME transaction as the decision to submit, so an app that is recreated
-    seconds later cannot come back, re-evaluate an open window and fire a second
-    time. update_status.notified_tag solves the identical problem for Discord
-    announcements the same way.
+    The order is the whole point. The request id is minted here and the
+    decision — last_fired_window and awaiting_request_id, or the schedule's
+    fired state — is committed BEFORE request.json exists. So:
+      - a commit that fails writes no request at all;
+      - a process that dies between the commit and the write has claimed the
+        window without a request, which fails toward silence (no report, no
+        second run) rather than toward a deploy nobody recorded;
+      - the app recreated by the update it just requested comes back to a
+        window already marked handled and cannot fire it again.
+    update_status.notified_tag solves the same class of problem the same way.
 
-    A refused submit is recorded as a hold, like any other reason the request
-    could not go in: if the grace runs out, it is what the skip report says.
+    A refused submit puts the decision back exactly as it was and is recorded
+    as a hold, like any other reason the request could not go in: if the grace
+    runs out, it is what the skip report says.
     """
+    request_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    previous = None
+    if schedule is not None:
+        schedule.state = "fired"
+        schedule.fired_at = now
+        schedule.fired_request_id = request_id
+    if policy is not None:
+        previous = (policy.last_fired_window, policy.last_fired_tag,
+                    policy.awaiting_request_id)
+        policy.last_fired_window = key
+        policy.last_fired_tag = tag
+        policy.awaiting_request_id = request_id
+    await db.commit()
+
     try:
-        request_id = updater_client.submit(action, tag, None)
+        updater_client.submit(action, tag, None, request_id=request_id)
     except (updater_client.UpdaterUnavailable, updater_client.UpdaterBusy,
             updater_client.InvalidRequest) as e:
         logger.warning("updater: scheduled %s to %s not submitted: %s", action, tag, e)
+        if schedule is not None:
+            schedule.state = "pending"
+            schedule.fired_at = None
+            schedule.fired_request_id = None
+        if policy is not None:
+            (policy.last_fired_window, policy.last_fired_tag,
+             policy.awaiting_request_id) = previous
+        await db.commit()
         await _note_hold(db, f"the request was refused: {e}",
                          policy=policy, schedule=schedule, key=key)
         return False
 
-    now = datetime.now(timezone.utc)
-    # An unattended deploy needs a durable record written when it is REQUESTED,
-    # before the restart it causes. Null user id: nobody asked — that IS the
-    # fact being recorded. How it ended is a second row, from the report.
+    # An unattended deploy needs a durable record of being REQUESTED, before
+    # the restart it causes. Null user id: nobody asked — that IS the fact
+    # being recorded. How it ended is a second row, from the report.
     db.add(AdminAuditLog(
         user_id=None,
         event_type="auto_update_requested" if policy is not None else "scheduled_update_requested",
@@ -437,14 +466,8 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
                 + (f", window {key}" if key else "") + ")"),
     ))
     if schedule is not None:
-        schedule.state = "fired"
-        schedule.fired_at = now
-        schedule.fired_request_id = request_id
         schedule.held_reason = None
     if policy is not None:
-        policy.last_fired_window = key
-        policy.last_fired_tag = tag
-        policy.awaiting_request_id = request_id
         policy.held_window = None
         policy.held_reason = None
     await db.commit()

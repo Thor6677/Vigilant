@@ -483,3 +483,54 @@ def test_a_schedule_overtaken_by_a_newer_release_is_dropped_not_applied(control)
     assert _run(us.tick()) == "scheduled tag is not newer than the running release"
     assert _request(control) is None
     assert ("v1.3.0", "superseded") in _schedule_states()
+
+
+# ── The decision is committed before the request exists ──────────────────────
+
+def test_the_window_is_claimed_before_the_request_is_written(control, monkeypatch):
+    """Whatever goes wrong between deciding and writing, the window is already
+    marked handled: the next tick cannot fire it a second time."""
+    real_submit = us.updater_client.submit
+
+    def boom(*a, **k):
+        raise RuntimeError("the process died mid-write")
+
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    monkeypatch.setattr(us.updater_client, "submit", boom)
+    with pytest.raises(RuntimeError):
+        _run(us.tick(SUNDAY_0430))
+    p = _policy()
+    assert p.last_fired_window == "2026-09-13"
+    assert p.awaiting_request_id
+
+    monkeypatch.setattr(us.updater_client, "submit", real_submit)
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=1))) == "already fired for this window"
+    assert _request(control) is None
+
+
+def test_a_refused_submit_puts_the_decision_back(control, monkeypatch):
+    def refuse(*a, **k):
+        raise us.updater_client.UpdaterBusy("busy")
+
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC",
+                patch_only=False, last_fired_window="2026-09-06")
+    _latest("v1.3.0")
+    monkeypatch.setattr(us.updater_client, "submit", refuse)
+    assert _run(us.tick(SUNDAY_0430)) == "policy submit failed"
+    p = _policy()
+    assert (p.last_fired_window, p.awaiting_request_id) == ("2026-09-06", None)
+    assert p.held_window == "2026-09-13" and "refused" in p.held_reason
+
+
+def test_the_request_carries_the_id_that_was_committed(control):
+    _beat(control, current_tag="v1.2.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    assert _run(us.tick()) == "fired schedule"
+
+    async def fired_id():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(UpdateSchedule.fired_request_id))).scalar()
+    assert _request(control)["id"] == _run(fired_id())
