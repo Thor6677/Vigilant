@@ -619,3 +619,68 @@ def test_a_restart_after_a_window_vigilant_saw_is_not_a_skip(control, monkeypatc
     monkeypatch.setattr(us, "STARTED_AT", datetime(2026, 9, 16, 12, 0, tzinfo=UTC))
     _run(us.tick(datetime(2026, 9, 16, 12, 1, tzinfo=UTC)))
     assert _reports() == []
+
+
+# ── A request nothing claimed is withdrawn, not left to run whenever ─────────
+
+def _age_request(control, hours):
+    path = control / "request.json"
+    req = json.loads(path.read_text())
+    req["requested_at"] = (datetime.now(UTC) - timedelta(hours=hours)).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+    path.write_text(json.dumps(req))
+    return req["id"]
+
+
+def test_an_unclaimed_request_of_ours_is_withdrawn_after_the_grace(control):
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    assert _run(us.tick(SUNDAY_0430)) == "fired policy"
+    rid = _age_request(control, hours=3)          # the sidecar died before claiming
+
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=1))) == "stale request withdrawn"
+    assert _request(control) is None
+    assert json.loads((control / "request.json.withdrawn").read_text())["id"] == rid
+    [r] = _reports()
+    assert (r.kind, r.outcome, r.request_id) == ("automatic", "skipped", rid)
+    assert "withdrawn" in r.detail
+    p = _policy()
+    assert p.awaiting_request_id is None and p.enabled is True
+
+
+def test_a_withdrawn_schedule_is_marked_and_reported(control):
+    _beat(control, current_tag="v1.2.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    assert _run(us.tick()) == "fired schedule"
+    _age_request(control, hours=3)
+    assert _run(us.tick()) == "stale request withdrawn"
+    [r] = _reports()
+    assert (r.kind, r.outcome) == ("scheduled", "skipped")
+
+    async def states():
+        async with AsyncSessionLocal() as db:
+            return [s.state for s in (await db.execute(select(UpdateSchedule))).scalars()]
+    assert _run(states()) == ["withdrawn"]
+
+
+def test_a_request_within_the_grace_is_left_for_the_sidecar(control):
+    _beat(control, current_tag="v1.2.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    _run(us.tick())
+    _age_request(control, hours=1)
+    assert _run(us.tick()) != "stale request withdrawn"
+    assert _request(control) is not None
+    assert _reports() == []
+
+
+def test_a_stale_request_someone_else_wrote_is_left_alone(control):
+    """An admin's own click was watched; it is theirs to deal with."""
+    _beat(control, current_tag="v1.2.0")
+    old = (datetime.now(UTC) - timedelta(hours=5)).isoformat(timespec="seconds")
+    (control / "request.json").write_text(json.dumps(
+        {"id": "manual-1", "action": "update", "tag": "v1.3.0",
+         "requested_by": 7, "requested_at": old.replace("+00:00", "Z")}))
+    _run(us.tick())
+    assert _request(control)["id"] == "manual-1"
+    assert _reports() == []

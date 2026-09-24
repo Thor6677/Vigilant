@@ -21,6 +21,7 @@ and idempotency traps in it — be tested exhaustively without a running app.
 """
 import asyncio
 import logging
+import os
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -475,6 +476,89 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
     return True
 
 
+async def _withdraw_stale_request(db, policy) -> bool:
+    """Take back a request of OURS that nothing has claimed within the grace.
+
+    A request the sidecar never picks up (it died just after the heartbeat
+    said it was alive) otherwise waits in /control with no age bound, and the
+    next sidecar to start — hours or days later — runs it on the spot: exactly
+    the unattended-at-a-surprising-time deploy GRACE_SECONDS exists to
+    prevent. Only the scheduler's own requests are touched (the policy's
+    awaiting id, or a fired schedule's); one an admin queued by hand was
+    watched, and is theirs.
+
+    Race-safe against the sidecar's claim, which is also a rename of
+    request.json: the file is renamed away first and only then re-read, so
+    exactly one side gets it. If it turns out to be somebody else's (a click
+    that replaced ours in between), it is put back with a link that cannot
+    overwrite a newer one. Age is measured against the real clock and the
+    request's own requested_at, which this app wrote.
+
+    Residual: a sidecar that comes back in the same instant can still win,
+    and then runs the request late. Nothing on this side can stop that.
+    """
+    pending = updater_client.read_pending_request()
+    if pending is None or not pending.get("id"):
+        return False
+    rid = pending["id"]
+    automatic = bool(policy.awaiting_request_id) and rid == policy.awaiting_request_id
+    sched = None
+    if not automatic:
+        sched = (await db.execute(
+            select(UpdateSchedule).where(UpdateSchedule.fired_request_id == rid)
+        )).scalars().first()
+        if sched is None:
+            return False
+    requested = updater_client.parse_iso(pending.get("requested_at"))
+    if requested is None:
+        return False
+    if (datetime.now(timezone.utc) - requested).total_seconds() <= GRACE_SECONDS:
+        return False
+
+    control = updater_client.control_dir()
+    src = control / "request.json"
+    taking = control / f"request.json.withdrawing.{os.getpid()}"
+    try:
+        os.replace(src, taking)
+    except OSError:
+        return False                    # the sidecar claimed it first
+    taken = updater_client._read_json(taking)
+    if not isinstance(taken, dict) or taken.get("id") != rid:
+        try:
+            os.link(taking, src)        # never overwrites a newer request
+        except OSError:
+            pass
+        try:
+            os.unlink(taking)
+        except OSError:
+            pass
+        return False
+    try:
+        os.replace(taking, control / "request.json.withdrawn")
+    except OSError:
+        pass
+
+    kind = update_reports.AUTOMATIC if automatic else update_reports.SCHEDULED
+    label = "Automatic" if automatic else "Scheduled"
+    if automatic:
+        policy.awaiting_request_id = None
+    else:
+        sched.state = "withdrawn"
+    detail = (f"{label} update to {pending.get('tag')} was requested at "
+              f"{pending.get('requested_at')} but the updater never picked it up "
+              f"within {GRACE_SECONDS // 3600}h, so the request has been withdrawn "
+              f"rather than left to run whenever the updater comes back.")
+    logger.warning("updater: withdrew unclaimed request %s", rid)
+    beat = updater_client.read_last_heartbeat() or {}
+    report = await update_reports.record(
+        db, kind=kind, outcome=update_reports.SKIPPED,
+        from_tag=beat.get("current_tag"), to_tag=pending.get("tag"),
+        detail=detail, request_id=rid)
+    if report is not None:
+        await update_reports.dispatch(db, report)
+    return True
+
+
 def _submission_hold(beat) -> str | None:
     """Why a request must not be written right now, or None when it may.
 
@@ -610,6 +694,8 @@ async def tick(now_utc: datetime | None = None) -> str:
     async with AsyncSessionLocal() as db:
         policy = await get_policy(db)
         await _reconcile_outcome(db, policy)
+        if await _withdraw_stale_request(db, policy):
+            return "stale request withdrawn"
 
         hold = _submission_hold(beat)
         current_tag = beat.get("current_tag")

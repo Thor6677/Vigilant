@@ -333,6 +333,13 @@ def has_pending_request() -> bool:
     return (control_dir() / "request.json").exists()
 
 
+def read_pending_request() -> dict | None:
+    """The unclaimed request.json, parsed, or None. For the scheduler, which
+    withdraws its own requests if nothing claims them in time."""
+    data = _read_json(control_dir() / "request.json")
+    return data if isinstance(data, dict) else None
+
+
 def current_run_state() -> str:
     return run_state(read_status(), datetime.now(timezone.utc))
 
