@@ -14,6 +14,7 @@ References: Pyfa eos/modifiedAttributeDict.py, eos/calc.py, docs/fitting-mechani
 
 import math
 from collections import defaultdict
+from typing import NamedTuple
 
 from sqlalchemy import select, text
 
@@ -723,14 +724,111 @@ async def _apply_implant_bonuses(
     if not implant_type_ids:
         return
 
-    all_type_ids = list(module_attrs_map.keys())
-    charge_type_ids = list(charge_attrs_map.keys())
-    combined = list(set(all_type_ids + charge_type_ids))
-    # Don't early-return on empty modules — ItemModifier+shipID implant
-    # rows (CPU subprocessors, agility hardwirings, sig-radius implants,
-    # etc.) modify ship_attrs directly and must fire even on bare hulls.
+    # Implant modifiers via the implant's type effects. Implants typically
+    # have a single passive effect. Use the same domain/func vocabulary as
+    # skills + the ItemModifier branch from T-023 (ship-self attrs).
+    res = await db.execute(
+        select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
+               SDEModifier.modified_attribute_id, SDEModifier.operator,
+               SDEModifier.func, SDEModifier.domain,
+               SDEModifier.filter_type, SDEModifier.filter_value,
+               SDETypeEffect.type_id)
+        .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
+        .where(SDETypeEffect.type_id.in_(implant_type_ids))
+        .where(SDEModifier.domain.in_(CHARACTER_MODIFIER_DOMAINS))
+        .where(SDEModifier.func.in_(CHARACTER_MODIFIER_FUNCS))
+    )
+    modifiers = res.fetchall()
+    if not modifiers:
+        return
 
-    # Group + skill-req lookups for matching against modules/drones/charges
+    # Look up each implant's bonus-source attributes (e.g. damageMultiplierBonus=2.0)
+    impl_attrs = await get_types_dogma_attrs(db, implant_type_ids)
+    rows = [
+        CharacterModifier(
+            row.modified_attribute_id, row.modifying_attribute_id, row.operator,
+            row.func, row.domain, row.filter_type, row.filter_value,
+            impl_attrs.get(row.type_id, {}).get(row.modifying_attribute_id) or 0.0,
+        )
+        for row in modifiers
+    ]
+    await _apply_character_modifiers(
+        db, ship_attrs, module_attrs_map, charge_attrs_map, rows,
+    )
+
+
+# Modifier rows a character-owned item (implant, booster) can carry that the
+# engine knows how to place. Shared by implants and app/fitting/boosters.py.
+CHARACTER_MODIFIER_DOMAINS = ("shipID", "charID")
+CHARACTER_MODIFIER_FUNCS = (
+    "ItemModifier",
+    "LocationGroupModifier", "LocationRequiredSkillModifier",
+    "OwnerRequiredSkillModifier",
+)
+# Missile Launcher Operation — every missile requires it, which is how dogma
+# scopes the character's missileDamageMultiplier to missiles.
+SKILL_MISSILE_LAUNCHER_OPERATION = 3319
+
+
+class CharacterModifier(NamedTuple):
+    """One modifier row with its source value already read off the item."""
+    modified_attribute_id: int
+    modifying_attribute_id: int
+    operator: int
+    func: str
+    domain: str
+    filter_type: str | None
+    filter_value: int | None
+    source_value: float
+
+
+async def _apply_character_modifiers(
+    db: AsyncSession,
+    ship_attrs: dict[int, float],
+    module_attrs_map: dict[int, dict[int, float]],
+    charge_attrs_map: dict[int, dict[int, float]],
+    modifiers: list[CharacterModifier],
+) -> None:
+    """Apply modifier rows the character carries — implants and boosters —
+    to the ship, modules and charges in place.
+
+    Dispatch is the domain/func vocabulary skills use:
+
+    - ItemModifier + shipID: the ship's own attribute (CPU subprocessors,
+      agility hardwirings, a booster's velocity penalty). Fires on a bare
+      hull, so there is no early return when nothing is fitted.
+    - ItemModifier + charID: an attribute of the character entity. The one
+      this engine models is missileDamageMultiplier (212), which dogma reads
+      when a missile launches, so it is applied to the damage of every charge
+      requiring Missile Launcher Operation — the shape Pyfa gives effect 2851
+      (missileDMGBonusPassive) for the event damage boosters. The character's
+      other attributes (perception, drone control distance, industry rates)
+      have no combat stat here and are skipped.
+    - LocationGroupModifier / LocationRequiredSkillModifier + shipID: modules
+      and drones in the ship, by group or required skill; never charges.
+    - OwnerRequiredSkillModifier + charID: anything the character owns that
+      requires the skill — charges and drones as well as modules.
+
+    Nothing here takes a stacking penalty, and that is deliberate. The
+    penalty is a property of the SOURCE, not of the target attribute's
+    `stackable` flag alone: dogma exempts sources in the ship, charge, skill,
+    implant and subsystem categories, and boosters are category 20 (Implant),
+    group 303. This engine already applies skills and implants that way (see
+    _apply_all_v_skill_bonuses). Pyfa agrees — in eos/effects.py an effect
+    shared by a module and a booster switches the penalty off for the
+    booster (Effect2803 energyWeaponDamageMultiplyPassive: `penalties =
+    'booster' not in context`; Effect2851 missileDMGBonusPassive: `penalize =
+    False if 'booster' in context else True`), the booster-only effects
+    (Effect4951 shieldBoostAmplifierPassiveBooster, Effect2737, Effect4970)
+    never pass stackingPenalties=True, and eos/modifiedAttributeDict.py
+    `multiply()` defaults stackingPenalties=False, which folds the factor
+    into the plain multiplier rather than into a penalty group. So a Strong
+    Blue Pill's +30% shield boost sits outside the boost amplifiers' chain.
+    """
+    if not modifiers:
+        return
+
+    combined = list(set(module_attrs_map) | set(charge_attrs_map))
     group_ids: dict[int, int] = {}
     skill_reqs: dict[int, set[int]] = defaultdict(set)
     if combined:
@@ -744,61 +842,42 @@ async def _apply_implant_bonuses(
         )
         for r in res.fetchall():
             skill_reqs[r.type_id].add(r.skill_type_id)
-    charge_tid_set = set(charge_type_ids)
+    charge_tid_set = set(charge_attrs_map)
 
-    # Implant modifiers via the implant's type effects. Implants typically
-    # have a single passive effect. Use the same domain/func vocabulary as
-    # skills + the ItemModifier branch from T-023 (ship-self attrs).
-    res = await db.execute(
-        select(SDEModifier.effect_id, SDEModifier.modifying_attribute_id,
-               SDEModifier.modified_attribute_id, SDEModifier.operator,
-               SDEModifier.func, SDEModifier.domain,
-               SDEModifier.filter_type, SDEModifier.filter_value,
-               SDETypeEffect.type_id)
-        .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
-        .where(SDETypeEffect.type_id.in_(implant_type_ids))
-        .where(SDEModifier.domain.in_(["shipID", "charID"]))
-        .where(SDEModifier.func.in_([
-            "ItemModifier",
-            "LocationGroupModifier", "LocationRequiredSkillModifier",
-            "OwnerRequiredSkillModifier",
-        ]))
-    )
-    modifiers = res.fetchall()
-    if not modifiers:
-        return
-
-    # Look up each implant's bonus-source attributes (e.g. damageMultiplierBonus=2.0)
-    src_attr_ids = list({r.modifying_attribute_id for r in modifiers})
-    impl_attrs = await get_types_dogma_attrs(db, implant_type_ids)
-
-    for row in modifiers:
-        implant_tid = row.type_id
-        src_val = impl_attrs.get(implant_tid, {}).get(row.modifying_attribute_id)
+    for mod in modifiers:
+        src_val = mod.source_value
         if not src_val:
             continue
 
-        # Ship-to-self implant modifier (CPU subprocessors, agility, sig radius,
-        # max velocity etc.). Same shape as the ship-hull-self fix in T-023:
-        # ItemModifier + shipID targets the ship's own attribute.
-        if row.func == "ItemModifier" and row.domain == "shipID":
-            _apply_modifier(ship_attrs, row.modified_attribute_id, row.operator, src_val)
+        if mod.func == "ItemModifier":
+            if mod.domain == "shipID":
+                _apply_modifier(ship_attrs, mod.modified_attribute_id, mod.operator, src_val)
+            elif (mod.domain == "charID"
+                    and mod.modified_attribute_id == ATTR_MISSILE_DAMAGE_MULTIPLIER):
+                for tid in charge_tid_set:
+                    if SKILL_MISSILE_LAUNCHER_OPERATION not in skill_reqs.get(tid, ()):
+                        continue
+                    for dmg_attr in (ATTR_EM_DAMAGE, ATTR_THERMAL_DAMAGE,
+                                     ATTR_KINETIC_DAMAGE, ATTR_EXPLOSIVE_DAMAGE):
+                        if dmg_attr in charge_attrs_map[tid]:
+                            _apply_modifier(charge_attrs_map[tid], dmg_attr,
+                                            mod.operator, src_val)
             continue
 
         matching_type_ids: set[int] = set()
         matching_charge_ids: set[int] = set()
 
-        if row.func == "LocationGroupModifier" and row.filter_type == "group":
+        if mod.func == "LocationGroupModifier" and mod.filter_type == "group":
             for tid, gid in group_ids.items():
-                if gid == row.filter_value and tid not in charge_tid_set:
+                if gid == mod.filter_value and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
-        elif row.func == "LocationRequiredSkillModifier" and row.filter_type == "skill":
+        elif mod.func == "LocationRequiredSkillModifier" and mod.filter_type == "skill":
             for tid, skills in skill_reqs.items():
-                if row.filter_value in skills and tid not in charge_tid_set:
+                if mod.filter_value in skills and tid not in charge_tid_set:
                     matching_type_ids.add(tid)
-        elif row.func == "OwnerRequiredSkillModifier" and row.filter_type == "skill":
+        elif mod.func == "OwnerRequiredSkillModifier" and mod.filter_type == "skill":
             for tid, skills in skill_reqs.items():
-                if row.filter_value in skills:
+                if mod.filter_value in skills:
                     if tid in charge_tid_set:
                         matching_charge_ids.add(tid)
                     else:
@@ -806,12 +885,12 @@ async def _apply_implant_bonuses(
 
         for tid in matching_type_ids:
             if tid in module_attrs_map:
-                _apply_modifier(module_attrs_map[tid], row.modified_attribute_id,
-                                row.operator, src_val)
+                _apply_modifier(module_attrs_map[tid], mod.modified_attribute_id,
+                                mod.operator, src_val)
         for tid in matching_charge_ids:
             if tid in charge_attrs_map:
-                _apply_modifier(charge_attrs_map[tid], row.modified_attribute_id,
-                                row.operator, src_val)
+                _apply_modifier(charge_attrs_map[tid], mod.modified_attribute_id,
+                                mod.operator, src_val)
 
 
 # Drone size + racial specialization skills that have a
@@ -1460,6 +1539,90 @@ async def calculate_fitting_stats(
                 current *= (1 + p / 100)
             ship_attrs[attr_id] = current
 
+    # ── Type-level bonuses: skills, implants, boosters, hull, subsystems ──
+    # These are keyed by type_id and must land in module_attrs_map and
+    # charge_attrs_map BEFORE the per-item dicts below are copied from them.
+    # From v1.4.0 to v1.4.2 this block ran after that copy, so a skill,
+    # implant or hull bonus changed a type-level dict nothing read any more
+    # and DPS, rep and application figures lost every one of them; only
+    # charges (read from charge_attrs_map directly) kept theirs.
+    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
+    # These core skills use ItemModifier with domain=shipID to add +5% per
+    # level to the ship's own CPU/PG/HP attributes. They're applied outside
+    # the dogma modifier graph because the graph doesn't target the ship's
+    # own attrs (only modules/drones/charges).  When `skill_levels` is
+    # supplied, each bonus scales by the character's actual level in that
+    # specific skill; otherwise All V (× 1.25) is assumed.
+    _FITTING_SKILLS_FIVE_PCT = [
+        (3426, ATTR_CPU_OUTPUT),       # CPU Management
+        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
+        (3419, ATTR_SHIELD_HP),        # Shield Management
+        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
+        (3392, ATTR_HP),               # Mechanics
+    ]
+    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
+        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
+        if lvl:
+            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
+
+    # ── Apply All-V weapon/support skill bonuses to module attributes ─────
+    # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
+    # target modules by group or required skill. At All V, the bonus is
+    # skill_base_attr * 5, applied as postPercent.
+    await _apply_all_v_skill_bonuses(
+        db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
+    )
+
+    # Fill the drone-skill modifier gaps the SDE doesn't propagate
+    # (Light/Med/Heavy Drone Operation + racial specs + Sentry Interfacing).
+    await _apply_drone_skill_bonuses(
+        db, module_attrs_map, items, skill_levels=skill_levels,
+    )
+
+    # Apply implant bonuses (slots 1-10). Stat-training implants in slots
+    # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
+    # range, cap recharge, agility, CPU/PG, etc. Mix of OwnerRequiredSkillModifier
+    # (damage-via-skill) and ItemModifier+shipID (ship-self attrs like CPU).
+    if implants:
+        await _apply_implant_bonuses(
+            db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
+        )
+
+    # Combat boosters (T-049): primary effects always, side effects only
+    # when switched on. Entry shape and rules live in app/fitting/boosters.py.
+    if boosters:
+        await apply_booster_bonuses(
+            db, ship_attrs, module_attrs_map, charge_attrs_map, boosters,
+        )
+
+    # ── Apply ship hull bonuses to module/charge attributes ──────────────
+    # Makes deep copies so we don't mutate cached SDE data
+    module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
+    await _apply_ship_hull_bonuses(
+        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
+        skill_levels=skill_levels,
+    )
+
+    # ── Apply subsystem bonuses to module/charge attributes ──────────────
+    # Subsystem LocationGroupModifier/LocationRequiredSkillModifier/
+    # OwnerRequiredSkillModifier bonuses work like ship hull bonuses but
+    # originate from the fitted subsystem. Re-use _apply_ship_hull_bonuses
+    # with each subsystem as the source (per-level detection extended to
+    # cover subsystemBonus* attributes).
+    if subsystem_type_ids:
+        for item in fitted_items:
+            if item.get("slot") != "subsystem":
+                continue
+            sub_attrs = module_attrs_map.get(item["type_id"], {})
+            sub_scaling = await _subsystem_scaling_skill_ids(db, item["type_id"])
+            await _apply_ship_hull_bonuses(
+                db, item["type_id"], sub_attrs,
+                module_attrs_map, charge_attrs_map, items,
+                skill_levels=skill_levels,
+                scaling_skill_override=sub_scaling,
+            )
+
+
     # ── Per-item attributes ───────────────────────────────────────────────
     # The type-level pipeline (subsystems, hull bonuses, skills) is finished.
     # Everything above depends only on what a module IS, which is why keying
@@ -1626,82 +1789,6 @@ async def calculate_fitting_stats(
                     if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
                         current = 1.0
                     attrs[target_attr] = current * product
-
-    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
-    # These core skills use ItemModifier with domain=shipID to add +5% per
-    # level to the ship's own CPU/PG/HP attributes. They're applied outside
-    # the dogma modifier graph because the graph doesn't target the ship's
-    # own attrs (only modules/drones/charges).  When `skill_levels` is
-    # supplied, each bonus scales by the character's actual level in that
-    # specific skill; otherwise All V (× 1.25) is assumed.
-    _FITTING_SKILLS_FIVE_PCT = [
-        (3426, ATTR_CPU_OUTPUT),       # CPU Management
-        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
-        (3419, ATTR_SHIELD_HP),        # Shield Management
-        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
-        (3392, ATTR_HP),               # Mechanics
-    ]
-    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
-        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
-        if lvl:
-            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
-
-    # ── Apply All-V weapon/support skill bonuses to module attributes ─────
-    # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
-    # target modules by group or required skill. At All V, the bonus is
-    # skill_base_attr * 5, applied as postPercent.
-    await _apply_all_v_skill_bonuses(
-        db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
-    )
-
-    # Fill the drone-skill modifier gaps the SDE doesn't propagate
-    # (Light/Med/Heavy Drone Operation + racial specs + Sentry Interfacing).
-    await _apply_drone_skill_bonuses(
-        db, module_attrs_map, items, skill_levels=skill_levels,
-    )
-
-    # Apply implant bonuses (slots 1-10). Stat-training implants in slots
-    # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
-    # range, cap recharge, agility, CPU/PG, etc. Mix of OwnerRequiredSkillModifier
-    # (damage-via-skill) and ItemModifier+shipID (ship-self attrs like CPU).
-    if implants:
-        await _apply_implant_bonuses(
-            db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
-        )
-
-    # Combat boosters (T-049): primary effects always, side effects only
-    # when switched on. Entry shape and rules live in app/fitting/boosters.py.
-    if boosters:
-        await apply_booster_bonuses(
-            db, ship_attrs, module_attrs_map, charge_attrs_map, boosters,
-        )
-
-    # ── Apply ship hull bonuses to module/charge attributes ──────────────
-    # Makes deep copies so we don't mutate cached SDE data
-    module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
-    await _apply_ship_hull_bonuses(
-        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
-        skill_levels=skill_levels,
-    )
-
-    # ── Apply subsystem bonuses to module/charge attributes ──────────────
-    # Subsystem LocationGroupModifier/LocationRequiredSkillModifier/
-    # OwnerRequiredSkillModifier bonuses work like ship hull bonuses but
-    # originate from the fitted subsystem. Re-use _apply_ship_hull_bonuses
-    # with each subsystem as the source (per-level detection extended to
-    # cover subsystemBonus* attributes).
-    if subsystem_type_ids:
-        for item in fitted_items:
-            if item.get("slot") != "subsystem":
-                continue
-            sub_attrs = module_attrs_map.get(item["type_id"], {})
-            sub_scaling = await _subsystem_scaling_skill_ids(db, item["type_id"])
-            await _apply_ship_hull_bonuses(
-                db, item["type_id"], sub_attrs,
-                module_attrs_map, charge_attrs_map, items,
-                skill_levels=skill_levels,
-                scaling_skill_override=sub_scaling,
-            )
 
     # ── Collect character-level missile damage multiplier (BCU mechanism) ──
     # BCU sets character attr 212 (missileDamageMultiplier) via ItemModifier
