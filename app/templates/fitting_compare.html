@@ -44,7 +44,8 @@
         <h1 class="b-page-title">Compare Fits</h1>
         <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">
             {{ fit_a.name }} ({{ fit_a.ship_name }}) vs {{ fit_b.name }} ({{ fit_b.ship_name }})
-            &middot; All V skills, uniform damage profile &middot; implants not modeled (deferred)
+            &middot; All V skills, uniform damage profile
+            &middot; implants as saved ({{ fit_a.implant_count }} vs {{ fit_b.implant_count }})
         </div>
     </div>
     <div>

@@ -259,7 +259,10 @@ async def compare_fittings(
     isn't owned by the session user 404s via ``_owned_fit_or_none``. Reads
     only, so the two sequential engine calls share the request session safely.
 
-    Implants are intentionally NOT modeled here (deferred — see UI note).
+    Each fit's saved implants (``implants_json``, ISS-016) go into the same
+    engine call the builder makes, so a fit compares with the numbers it
+    was saved with. The header says how many implants each side carries so
+    a lopsided comparison is visible for what it is.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -270,15 +273,26 @@ async def compare_fittings(
     if not fit_a or not fit_b:
         raise HTTPException(status_code=404, detail="Fitting not found")
 
-    async def _stats_for(fit: UserFitting) -> dict:
+    def _implant_ids(fit: UserFitting) -> list[int]:
+        try:
+            implants = _sanitize_implants_map(json.loads(fit.implants_json or "{}"))
+        except Exception:
+            implants = {}
+        return [rec["type_id"] for rec in implants.values()]
+
+    async def _stats_for(fit: UserFitting, implants: list[int]) -> dict:
         try:
             items = json.loads(fit.items_json) if fit.items_json else []
         except Exception:
             items = []
-        return await calculate_fitting_stats(db, fit.ship_type_id, items)
+        return await calculate_fitting_stats(
+            db, fit.ship_type_id, items, implants=implants,
+        )
 
-    stats_a = await _stats_for(fit_a)
-    stats_b = await _stats_for(fit_b)
+    implants_a = _implant_ids(fit_a)
+    implants_b = _implant_ids(fit_b)
+    stats_a = await _stats_for(fit_a, implants_a)
+    stats_b = await _stats_for(fit_b, implants_b)
 
     names = await sde.type_ids_to_names(db, [fit_a.ship_type_id, fit_b.ship_type_id])
     sections = build_compare_sections(stats_a, stats_b)
@@ -288,11 +302,13 @@ async def compare_fittings(
             "id": fit_a.id, "name": fit_a.name,
             "ship_name": names.get(fit_a.ship_type_id, f"Type {fit_a.ship_type_id}"),
             "ship_type_id": fit_a.ship_type_id,
+            "implant_count": len(implants_a),
         },
         "fit_b": {
             "id": fit_b.id, "name": fit_b.name,
             "ship_name": names.get(fit_b.ship_type_id, f"Type {fit_b.ship_type_id}"),
             "ship_type_id": fit_b.ship_type_id,
+            "implant_count": len(implants_b),
         },
         "sections": sections,
     })
