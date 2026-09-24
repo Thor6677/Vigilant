@@ -488,15 +488,18 @@ async def _report_missed_window(db, policy, key: str | None, now: datetime,
     """Report a policy window that closed without firing — once, and only with
     evidence that it should have fired.
 
-    Evidence is one of:
+    The release must STILL be one the policy would apply: if something else got
+    there first (a one-shot schedule, an admin pressing Update, a CLI deploy),
+    nothing was missed, whatever the ticks inside the window saw. Then one of:
       - a tick INSIDE the window wanted to fire and was held (held_window), or
-      - the window closed before this process started, and the release it would
-        have applied had been published before the window closed — Vigilant was
-        down for the window, and an up-and-running one would have acted.
+      - no tick ever saw the window (observed_window), it closed before this
+        process started, and the release had been published before it closed —
+        Vigilant was down for the window, and an up-and-running one would have
+        acted. "Started after the window" alone is not enough: any restart
+        after a window (a rollback, say) satisfies it.
 
     Anything else stays silent. A skipped report is a banner someone has to
-    acknowledge, so a false one (a release published after the window closed,
-    say) costs more than a missing one.
+    acknowledge, so a false one costs more than a missing one.
     """
     if not key or key in (policy.last_fired_window, policy.last_skipped_window):
         return False
@@ -506,16 +509,22 @@ async def _report_missed_window(db, policy, key: str | None, now: datetime,
         return False
     closed_at = window.astimezone(timezone.utc) + timedelta(seconds=GRACE_SECONDS)
 
+    eligible, _ = release_eligible(policy, latest_tag, current_tag)
+    if not eligible:
+        if policy.held_window is not None:
+            # Held, but satisfied some other way. Forget it, once.
+            policy.held_window = None
+            policy.held_reason = None
+            await db.commit()
+        return False
+
     if policy.held_window == key:
         why = policy.held_reason or "the updater was not ready"
     else:
         published = _as_utc(status_row.latest_published_at) if status_row else None
-        if STARTED_AT < closed_at:
+        if policy.observed_window == key or STARTED_AT < closed_at:
             return False        # we were running; a due tick would have held it
         if published is None or published > closed_at:
-            return False
-        eligible, _ = release_eligible(policy, latest_tag, current_tag)
-        if not eligible:
             return False
         why = "Vigilant was not running during the window"
 
@@ -573,6 +582,10 @@ async def tick(now_utc: datetime | None = None) -> str:
                         else "schedule submit failed")
             if reason == "missed the window":
                 sched.state = "superseded"
+                if sched.target_tag == current_tag:
+                    # Deployed some other way meanwhile: nothing was missed.
+                    await db.commit()
+                    return "scheduled tag already running"
                 logger.warning("updater: scheduled update to %s missed its window",
                                sched.target_tag)
                 # pending -> superseded happens exactly once per schedule, so
@@ -591,6 +604,9 @@ async def tick(now_utc: datetime | None = None) -> str:
         latest_tag = row.latest_tag if row else None
 
         fire, key, reason = policy_decision(policy, now, latest_tag, current_tag)
+        if key and reason != "outside the window" and policy.observed_window != key:
+            policy.observed_window = key
+            await db.commit()
         if fire:
             if hold:
                 await _note_hold(db, hold, policy=policy, key=key)

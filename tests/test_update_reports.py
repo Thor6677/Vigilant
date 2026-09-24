@@ -572,3 +572,50 @@ def test_the_docs_describe_the_channels_as_built():
         assert needle in flat, needle
     env = Path(".env.example").read_text()
     assert "auto_update" in env and "updater panel" in env
+
+
+# ── A false "skipped" is worse than a missing one ────────────────────────────
+
+def test_a_held_window_satisfied_some_other_way_is_not_a_skip(control):
+    """Held all morning behind an admin's own run, which applied the release."""
+    _beat(control, current_tag="v1.2.0")
+    started = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+    (control / "status.json").write_text(json.dumps({"state": "running", "started_at": started}))
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    assert _run(us.tick(SUNDAY_0430)) == "busy"
+    assert _policy().held_window == "2026-09-13"
+
+    (control / "status.json").unlink()
+    _beat(control, current_tag="v1.3.0")                    # someone else deployed it
+    _run(us.tick(datetime(2026, 9, 13, 6, 30, tzinfo=UTC)))
+    assert _reports() == []
+    assert _policy().held_window is None
+
+
+def test_a_missed_schedule_whose_tag_is_now_running_is_not_a_skip(control):
+    handoff = {"state": "pulling", "target": "v1.2.0", "error": None, "at": "x"}
+    _beat(control, current_tag="v1.2.0", self_update=handoff)
+    base = datetime(2026, 9, 13, 4, 0, tzinfo=UTC)
+    _schedule("v1.3.0", minutes_ago=0, base=base)
+    assert _run(us.tick(base + timedelta(minutes=5))) == "updater is upgrading itself"
+
+    _beat(control, current_tag="v1.3.0")                    # deployed from the CLI
+    assert _run(us.tick(base + timedelta(hours=3))) == "scheduled tag already running"
+    assert _reports() == []
+
+
+def test_a_restart_after_a_window_vigilant_saw_is_not_a_skip(control, monkeypatch):
+    """Up to date through Sunday's window; rolled back on Wednesday, which
+    restarts the app. The window was not missed while down."""
+    _beat(control, current_tag="v1.3.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    _published(datetime(2026, 9, 10, tzinfo=UTC))
+    assert _run(us.tick(SUNDAY_0430)) == "already up to date"
+    assert _policy().observed_window == "2026-09-13"
+
+    _beat(control, current_tag="v1.2.9")                    # the rollback
+    monkeypatch.setattr(us, "STARTED_AT", datetime(2026, 9, 16, 12, 0, tzinfo=UTC))
+    _run(us.tick(datetime(2026, 9, 16, 12, 1, tzinfo=UTC)))
+    assert _reports() == []

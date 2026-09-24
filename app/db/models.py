@@ -1096,6 +1096,9 @@ class UpdatePolicy(Base):
     held_reason = Column(String(255), nullable=True)
     # The last window reported as skipped, so each is reported at most once.
     last_skipped_window = Column(String(10), nullable=True)
+    # The last window any tick saw while it was open. Written once per window.
+    # A window that closed with this unset is one Vigilant was down for.
+    observed_window = Column(String(10), nullable=True)
 
 
 class UpdateRunReport(Base):
