@@ -520,8 +520,15 @@
         // Walk up from e.target to find the nearest element carrying our
         // attribute for this event type. Bubbling lets a delegated listener
         // catch clicks on children (e.g. an <svg> inside a <button>).
+        //
+        // Guard against non-Element targets: these listeners sit on the
+        // document, so an event aimed at the Document itself (or at a text
+        // node) reaches them too, and neither has closest(). Same guard as
+        // the 'submit' and 'error' listeners below. ISS-041.
+        var t = e.target;
+        if (!t || typeof t.closest !== 'function') return;
         var attr = 'data-' + eventType;
-        var el = e.target.closest('[' + attr + ']');
+        var el = t.closest('[' + attr + ']');
         if (!el) return;
         if (el.hasAttribute('data-stop')) {
             e.stopPropagation();
