@@ -545,3 +545,16 @@ def test_the_hold_lapses_on_its_own(actions):
     assert "UPDATER_HOLD_MS" in fn and "Date.now()" in fn
     assert "activeElement" not in fn
     assert "UPDATER_HOLD_MS = 2 * 60 * 1000" in actions
+
+
+def test_panel_refusals_are_swapped_in_not_turned_into_a_pill(actions):
+    """htmx 1.x does not swap a 4xx, and base.html's ISS-007 handler then
+    replaces the submitting form with "couldn't load". The panel answers bad
+    input and a busy updater with a re-render that says why, so those two
+    statuses must reach the page — and only for the panel."""
+    i = actions.index("htmx:beforeSwap")
+    hook = actions[i:actions.index("});", i)]
+    assert "updater-panel" in hook
+    assert "400" in hook and "409" in hook
+    assert "shouldSwap = true" in hook
+    assert "isError = false" in hook

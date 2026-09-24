@@ -617,6 +617,24 @@
         if (el && el.id === 'updater-panel') updaterRestartBanner(true);
     });
 
+    /* Updater panel refusals. The panel's POSTs answer bad input (400) and
+     * "already running" (409) with the re-rendered panel carrying the reason.
+     * htmx 1.x does not swap a 4xx: it fires htmx:responseError instead, and
+     * base.html's ISS-007 handler then overwrites the submitting <form> with a
+     * generic "couldn't load" pill — so the operator is told nothing about
+     * what was wrong. Swap those two statuses like any other answer. Scoped to
+     * the panel as the swap target; every other 4xx on the site keeps the
+     * default. isError=false is what keeps htmx from raising responseError. */
+    document.addEventListener('htmx:beforeSwap', function (e) {
+        var d = e.detail || {};
+        var status = d.xhr && d.xhr.status;
+        if (d.target && d.target.id === 'updater-panel' &&
+                (status === 400 || status === 409)) {
+            d.shouldSwap = true;
+            d.isError = false;
+        }
+    });
+
     /* Updater panel scheduling forms vs the Overview refresh. admin.html
      * re-renders #admin-content every 10s, and the panel is rendered inside
      * it. A refresh mid-edit replaces the scheduling forms — discarding what
