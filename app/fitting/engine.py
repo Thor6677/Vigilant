@@ -1456,6 +1456,83 @@ async def calculate_fitting_stats(
                 current *= (1 + p / 100)
             ship_attrs[attr_id] = current
 
+    # ── Type-level bonuses: skills, implants, hull and subsystems ──────────
+    # These are keyed by type_id and must land in module_attrs_map and
+    # charge_attrs_map BEFORE the per-item dicts below are copied from them.
+    # From v1.4.0 to v1.4.2 this block ran after that copy, so a skill,
+    # implant or hull bonus changed a type-level dict nothing read any more
+    # and DPS, rep and application figures lost every one of them; only
+    # charges (read from charge_attrs_map directly) kept theirs.
+    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
+    # These core skills use ItemModifier with domain=shipID to add +5% per
+    # level to the ship's own CPU/PG/HP attributes. They're applied outside
+    # the dogma modifier graph because the graph doesn't target the ship's
+    # own attrs (only modules/drones/charges).  When `skill_levels` is
+    # supplied, each bonus scales by the character's actual level in that
+    # specific skill; otherwise All V (× 1.25) is assumed.
+    _FITTING_SKILLS_FIVE_PCT = [
+        (3426, ATTR_CPU_OUTPUT),       # CPU Management
+        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
+        (3419, ATTR_SHIELD_HP),        # Shield Management
+        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
+        (3392, ATTR_HP),               # Mechanics
+    ]
+    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
+        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
+        if lvl:
+            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
+
+    # ── Apply All-V weapon/support skill bonuses to module attributes ─────
+    # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
+    # target modules by group or required skill. At All V, the bonus is
+    # skill_base_attr * 5, applied as postPercent.
+    await _apply_all_v_skill_bonuses(
+        db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
+    )
+
+    # Fill the drone-skill modifier gaps the SDE doesn't propagate
+    # (Light/Med/Heavy Drone Operation + racial specs + Sentry Interfacing).
+    await _apply_drone_skill_bonuses(
+        db, module_attrs_map, items, skill_levels=skill_levels,
+    )
+
+    # Apply implant bonuses (slots 1-10). Stat-training implants in slots
+    # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
+    # range, cap recharge, agility, CPU/PG, etc. Mix of OwnerRequiredSkillModifier
+    # (damage-via-skill) and ItemModifier+shipID (ship-self attrs like CPU).
+    if implants:
+        await _apply_implant_bonuses(
+            db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
+        )
+
+    # ── Apply ship hull bonuses to module/charge attributes ──────────────
+    # Makes deep copies so we don't mutate cached SDE data
+    module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
+    await _apply_ship_hull_bonuses(
+        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
+        skill_levels=skill_levels,
+    )
+
+    # ── Apply subsystem bonuses to module/charge attributes ──────────────
+    # Subsystem LocationGroupModifier/LocationRequiredSkillModifier/
+    # OwnerRequiredSkillModifier bonuses work like ship hull bonuses but
+    # originate from the fitted subsystem. Re-use _apply_ship_hull_bonuses
+    # with each subsystem as the source (per-level detection extended to
+    # cover subsystemBonus* attributes).
+    if subsystem_type_ids:
+        for item in fitted_items:
+            if item.get("slot") != "subsystem":
+                continue
+            sub_attrs = module_attrs_map.get(item["type_id"], {})
+            sub_scaling = await _subsystem_scaling_skill_ids(db, item["type_id"])
+            await _apply_ship_hull_bonuses(
+                db, item["type_id"], sub_attrs,
+                module_attrs_map, charge_attrs_map, items,
+                skill_levels=skill_levels,
+                scaling_skill_override=sub_scaling,
+            )
+
+
     # ── Per-item attributes ───────────────────────────────────────────────
     # The type-level pipeline (subsystems, hull bonuses, skills) is finished.
     # Everything above depends only on what a module IS, which is why keying
@@ -1622,75 +1699,6 @@ async def calculate_fitting_stats(
                     if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
                         current = 1.0
                     attrs[target_attr] = current * product
-
-    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
-    # These core skills use ItemModifier with domain=shipID to add +5% per
-    # level to the ship's own CPU/PG/HP attributes. They're applied outside
-    # the dogma modifier graph because the graph doesn't target the ship's
-    # own attrs (only modules/drones/charges).  When `skill_levels` is
-    # supplied, each bonus scales by the character's actual level in that
-    # specific skill; otherwise All V (× 1.25) is assumed.
-    _FITTING_SKILLS_FIVE_PCT = [
-        (3426, ATTR_CPU_OUTPUT),       # CPU Management
-        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
-        (3419, ATTR_SHIELD_HP),        # Shield Management
-        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
-        (3392, ATTR_HP),               # Mechanics
-    ]
-    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
-        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
-        if lvl:
-            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
-
-    # ── Apply All-V weapon/support skill bonuses to module attributes ─────
-    # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
-    # target modules by group or required skill. At All V, the bonus is
-    # skill_base_attr * 5, applied as postPercent.
-    await _apply_all_v_skill_bonuses(
-        db, module_attrs_map, charge_attrs_map, items, skill_levels=skill_levels,
-    )
-
-    # Fill the drone-skill modifier gaps the SDE doesn't propagate
-    # (Light/Med/Heavy Drone Operation + racial specs + Sentry Interfacing).
-    await _apply_drone_skill_bonuses(
-        db, module_attrs_map, items, skill_levels=skill_levels,
-    )
-
-    # Apply implant bonuses (slots 1-10). Stat-training implants in slots
-    # 1-5 are no-ops here; combat hardwirings in slots 6-10 modify damage,
-    # range, cap recharge, agility, CPU/PG, etc. Mix of OwnerRequiredSkillModifier
-    # (damage-via-skill) and ItemModifier+shipID (ship-self attrs like CPU).
-    if implants:
-        await _apply_implant_bonuses(
-            db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
-        )
-
-    # ── Apply ship hull bonuses to module/charge attributes ──────────────
-    # Makes deep copies so we don't mutate cached SDE data
-    module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
-    await _apply_ship_hull_bonuses(
-        db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
-        skill_levels=skill_levels,
-    )
-
-    # ── Apply subsystem bonuses to module/charge attributes ──────────────
-    # Subsystem LocationGroupModifier/LocationRequiredSkillModifier/
-    # OwnerRequiredSkillModifier bonuses work like ship hull bonuses but
-    # originate from the fitted subsystem. Re-use _apply_ship_hull_bonuses
-    # with each subsystem as the source (per-level detection extended to
-    # cover subsystemBonus* attributes).
-    if subsystem_type_ids:
-        for item in fitted_items:
-            if item.get("slot") != "subsystem":
-                continue
-            sub_attrs = module_attrs_map.get(item["type_id"], {})
-            sub_scaling = await _subsystem_scaling_skill_ids(db, item["type_id"])
-            await _apply_ship_hull_bonuses(
-                db, item["type_id"], sub_attrs,
-                module_attrs_map, charge_attrs_map, items,
-                skill_levels=skill_levels,
-                scaling_skill_override=sub_scaling,
-            )
 
     # ── Collect character-level missile damage multiplier (BCU mechanism) ──
     # BCU sets character attr 212 (missileDamageMultiplier) via ItemModifier
