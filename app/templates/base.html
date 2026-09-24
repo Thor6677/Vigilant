@@ -283,11 +283,15 @@
    everyone else. Read from the database, so a report survives the app restart
    the update itself causes. Server-side acknowledgement, so it is not part of
    applyDismissState() below. innerHTML for the same reason as the slot above:
-   the slot keeps polling after every swap, including an acknowledge. #}
+   the slot keeps polling after every swap, including an acknowledge. And
+   data-htmx-no-error, because a poll that lands while the app is being
+   recreated by an update — exactly when this slot matters — would otherwise
+   be replaced by ISS-007's "couldn't load" pill; the next poll recovers. #}
 <div id="update-report-slot"
      hx-get="/status/update-reports"
      hx-trigger="load delay:500ms, every 120s"
-     hx-swap="innerHTML"></div>
+     hx-swap="innerHTML"
+     data-htmx-no-error="1"></div>
 
 {# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────
    MUST be a direct child of <body> (a backdrop-filter / transform ancestor

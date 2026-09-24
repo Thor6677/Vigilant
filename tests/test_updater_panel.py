@@ -553,6 +553,23 @@ def test_every_refresh_timer_asks_before_re_rendering():
     assert fn.index("updaterRefreshHeld") < fn.index("htmx.ajax")
 
 
+def test_only_a_form_field_holds_the_refresh(actions):
+    """Clicking a <summary> to look is not editing; freezing the whole
+    Overview for it was too heavy."""
+    fn = actions[actions.index("window.updaterHoldRefresh"):]
+    fn = fn[:fn.index("\n    };")]
+    assert "INPUT|SELECT|TEXTAREA" in fn
+    assert fn.index("tagName") < fn.index("setAttribute")
+
+
+def test_the_report_banner_slot_survives_a_failed_poll():
+    """It polls through the app's own restart, when a failure is expected."""
+    base = BASE.read_text()
+    slot = base[base.index('<div id="update-report-slot"'):]
+    slot = slot[:slot.index(">") + 1]
+    assert 'data-htmx-no-error="1"' in slot
+
+
 def test_the_hold_lapses_on_its_own(actions):
     """An edit abandoned in a background tab must not freeze the section, and
     the update panel inside it, for good. Focus is not a reason to hold: it

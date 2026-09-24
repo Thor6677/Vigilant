@@ -640,8 +640,9 @@
      * it. A refresh mid-edit replaces the scheduling forms — discarding what
      * was typed and collapsing their <details> — so the <details> carry
      * data-click/data-input/data-change="updaterHoldRefresh", which stamps
-     * the time of the operator's last touch, and admin.html's timer asks
-     * updaterRefreshHeld() before each tick.
+     * the time of the operator's last touch of a FORM FIELD (not the summary
+     * or the text around it), and admin.html's timer asks updaterRefreshHeld()
+     * before each tick.
      *
      * The hold lapses on its own two minutes after the last touch (every
      * keystroke is one): an edit abandoned in a background tab must not
@@ -651,7 +652,12 @@
      * back unstamped markup. */
     var UPDATER_HOLD_MS = 2 * 60 * 1000;
 
-    window.updaterHoldRefresh = window.updaterHoldRefresh || function () {
+    window.updaterHoldRefresh = window.updaterHoldRefresh || function (e) {
+        /* Only a form field counts. Opening or closing the <details> by its
+           <summary>, or clicking the surrounding text, is looking, not
+           editing, and must not freeze the whole Overview for two minutes. */
+        var t = e && e.target;
+        if (!t || !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) return;
         this.setAttribute('data-touched', String(Date.now()));
     };
 
