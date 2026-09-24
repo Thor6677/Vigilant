@@ -689,12 +689,19 @@ the updater, which is itself off by default.
 - **Schedule this update** defers one update — to the exact release you were
   shown — to a time you choose, in a timezone you name. It fires within 2 hours
   of that time; if Vigilant is down for longer than that, the schedule is
-  abandoned rather than applied at a surprising hour.
+  abandoned rather than applied at a surprising hour. Only an upgrade can be
+  scheduled (going back is **Roll back**, with you watching), and a schedule
+  that a newer deploy has overtaken is dropped rather than applied.
 - **Automatic updates** apply the newest release in a weekly window (day, local
   time and an IANA timezone, resolved at run time so the window stays put
-  across DST). Patch releases only (x.y.**Z**) unless you untick it, and never a
-  prerelease. Switching it on never fires for a window that is already open —
-  the first run is the next one.
+  across DST, with its 2 hours measured in real elapsed time). Patch releases
+  only (x.y.**Z**) unless you untick it; never a prerelease, never anything
+  older than what is running, and never a release that already failed or was
+  rolled back on this install — the panel names it. If the hourly release
+  check has not succeeded for 3 hours, the window waits rather than act on old
+  information. Saving the policy — switching it on, or changing its day, time
+  or timezone — never fires for a window that is already open; the first run is
+  the next one.
 
 `deploy.sh`'s health gate proves the new release is **up**, not that it
 **works**: a release that starts cleanly with a broken page passes it. So every
@@ -706,7 +713,9 @@ The scheduler never hands the sidecar a request while it is upgrading itself,
 while any of its self-checks is failing (the same checks that disable the
 buttons), or while it has stopped responding. It holds that minute and asks
 again on the next one, within the window, rather than leaving a request queued
-for a sidecar that may not come back.
+for a sidecar that may not come back. If a request it did write is still
+unclaimed after 2 hours, it takes it back and reports the run as skipped, so a
+sidecar that returns days later does not deploy it on the spot.
 
 #### How you find out what happened
 
