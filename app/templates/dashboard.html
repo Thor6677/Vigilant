@@ -654,16 +654,35 @@ function updateServerStatus() {
                     }
                     players.style.display = '';
                 }
-            } else {
+            } else if (data.status === 'offline') {
                 dot.style.background = 'var(--danger)';
                 text.style.color = 'var(--danger)';
                 text.textContent = 'TRANQUILITY — OFFLINE';
                 players.style.display = 'none';
+            } else {
+                /* "unknown" is not "offline": the app couldn't get an answer
+                   out of ESI (typically the first poll right after a deploy,
+                   racing app boot). Stay neutral and ask again soon rather
+                   than painting it red for the next fifteen minutes. */
+                dot.style.background = 'var(--muted)';
+                text.style.color = 'var(--muted)';
+                text.textContent = 'TRANQUILITY — CHECKING…';
+                players.style.display = 'none';
+                scheduleServerStatusRetry();
             }
         })
         .catch(() => {
             document.getElementById('server-status-text').textContent = 'TRANQUILITY — UNKNOWN';
+            scheduleServerStatusRetry();
         });
+}
+var serverStatusRetry = null;
+function scheduleServerStatusRetry() {
+    if (serverStatusRetry) return;
+    serverStatusRetry = setTimeout(function() {
+        serverStatusRetry = null;
+        updateServerStatus();
+    }, 30 * 1000);
 }
 updateServerStatus();
 setInterval(updateServerStatus, 15 * 60 * 1000);
