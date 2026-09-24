@@ -98,6 +98,12 @@ def _local_now(tz_name: str, now_utc: datetime) -> datetime:
     return now_utc.astimezone(ZoneInfo(tz_name))
 
 
+def _utc(dt: datetime) -> datetime:
+    """An aware datetime in UTC. Elapsed time and ordering are only real there:
+    Python subtracts and compares two datetimes sharing a tzinfo by wall clock."""
+    return dt.astimezone(timezone.utc)
+
+
 def most_recent_window(weekday: int, local_time: str, tz_name: str,
                        now_utc: datetime) -> datetime | None:
     """The latest occurrence of (weekday, local_time) at or before now, local.
@@ -106,6 +112,13 @@ def most_recent_window(weekday: int, local_time: str, tz_name: str,
     hour. A stored hour drifts by one twice a year, silently — "Sunday 4am"
     quietly becoming 3am or 5am is the kind of bug nobody notices until an
     unattended deploy runs at the wrong time.
+
+    Candidates are compared in UTC. Two aware datetimes sharing one ZoneInfo
+    compare by WALL CLOCK in Python, ignoring the offset, so on the night the
+    clocks go back a 01:30 window that has already passed (first 01:30, BST)
+    would read as still to come at 01:10 GMT. A local time the clocks skip on
+    the spring-forward night resolves at the pre-transition offset, i.e. it
+    runs an hour later by the clock on the wall.
     """
     hm = parse_local_time(local_time)
     if hm is None or not valid_timezone(tz_name) or not (0 <= weekday <= 6):
@@ -113,6 +126,7 @@ def most_recent_window(weekday: int, local_time: str, tz_name: str,
     hour, minute = hm
     tz = ZoneInfo(tz_name)
     local_now = _local_now(tz_name, now_utc)
+    now = _utc(now_utc)
 
     # Walk back at most 8 days: enough to find the weekday even when today IS
     # the weekday but the time has not arrived yet.
@@ -121,7 +135,7 @@ def most_recent_window(weekday: int, local_time: str, tz_name: str,
         if day.weekday() != weekday:
             continue
         candidate = datetime.combine(day, time(hour, minute), tzinfo=tz)
-        if candidate <= local_now:
+        if _utc(candidate) <= now:
             return candidate
     return None
 
@@ -135,12 +149,13 @@ def next_window(weekday: int, local_time: str, tz_name: str,
     hour, minute = hm
     tz = ZoneInfo(tz_name)
     local_now = _local_now(tz_name, now_utc)
+    now = _utc(now_utc)
     for forward in range(0, 8):
         day = (local_now + timedelta(days=forward)).date()
         if day.weekday() != weekday:
             continue
         candidate = datetime.combine(day, time(hour, minute), tzinfo=tz)
-        if candidate >= local_now:
+        if _utc(candidate) >= now:     # UTC, for the reason in most_recent_window
             return candidate
     return None
 
@@ -252,7 +267,10 @@ def policy_decision(policy, now_utc: datetime, latest_tag: str | None,
         # successful fire, and the guard against the restart loop.
         return False, key, "already fired for this window"
 
-    late = (_local_now(policy.timezone, now_utc) - window).total_seconds()
+    # Elapsed time in UTC. The same subtraction in local time is wall-clock
+    # arithmetic, which makes the grace an hour short on the night the clocks
+    # go forward and an hour long on the night they go back.
+    late = (_utc(now_utc) - _utc(window)).total_seconds()
     if late > grace_seconds:
         return False, key, "outside the window"
     eligible, reason = release_eligible(policy, latest_tag, current_tag)

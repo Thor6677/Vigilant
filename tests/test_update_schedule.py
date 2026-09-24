@@ -311,3 +311,39 @@ def test_a_failing_check_names_itself():
     reason = us.updater_not_ready(_heartbeat(
         checks={"socket": "ok", "remote": "FAIL: could not reach origin"}))
     assert reason and "remote" in reason and "socket" not in reason
+
+
+# ── Elapsed time across a DST change is measured in UTC ──────────────────────
+#
+# Python compares and subtracts two aware datetimes that share a tzinfo by WALL
+# CLOCK. Done that way, the grace is an hour short on the night the clocks go
+# forward and an hour long on the night they go back.
+
+LONDON_0030 = dict(weekday=6, local_time="00:30", timezone="Europe/London")
+
+
+def test_spring_forward_keeps_the_full_grace():
+    """00:30 GMT is 00:30Z; at 01:45Z (02:45 BST) only 1h15 has passed."""
+    p = _policy(**LONDON_0030)
+    fire, key, reason = us.policy_decision(
+        p, datetime(2026, 3, 29, 1, 45, tzinfo=UTC), "v1.3.0", "v1.2.0")
+    assert (fire, key, reason) == (True, "2026-03-29", "due")
+
+
+def test_fall_back_does_not_stretch_the_grace():
+    """00:30 BST is 23:30Z the day before; at 02:15Z (02:15 GMT) 2h45 has passed."""
+    p = _policy(**LONDON_0030)
+    fire, key, reason = us.policy_decision(
+        p, datetime(2026, 10, 25, 2, 15, tzinfo=UTC), "v1.3.0", "v1.2.0")
+    assert (fire, reason) == (False, "outside the window")
+
+
+def test_an_ambiguous_window_that_has_passed_is_the_most_recent():
+    """01:30 happens twice on 2026-10-25 in London. The first (BST, 00:30Z) has
+    passed by 01:10Z (01:10 GMT), though the wall clock says 01:10 < 01:30."""
+    w = us.most_recent_window(6, "01:30", "Europe/London",
+                              datetime(2026, 10, 25, 1, 10, tzinfo=UTC))
+    assert us.window_key(w) == "2026-10-25"
+    n = us.next_window(6, "01:30", "Europe/London",
+                       datetime(2026, 10, 25, 1, 10, tzinfo=UTC))
+    assert us.window_key(n) == "2026-11-01"
