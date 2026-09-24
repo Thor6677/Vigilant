@@ -551,3 +551,24 @@ def test_redaction_keeps_the_host_and_hides_the_topic():
 ])
 def test_report_policies(policy, outcome, expected):
     assert ur.wants(policy, outcome) is expected
+
+
+# ── Docs ─────────────────────────────────────────────────────────────────────
+
+def test_the_docs_describe_the_channels_as_built():
+    """The JSON shape is a contract with whatever receives it; the README is
+    where an operator reads it, so pin it to the code's own keys."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    readme = Path("README.md").read_text()
+    keys = ur.json_payload(SimpleNamespace(
+        kind="automatic", outcome="failed", from_tag=None, to_tag=None,
+        created_at=None, detail=None)).keys()
+    for key in keys:
+        assert f'"{key}"' in readme, key
+    flat = " ".join(readme.split())
+    for needle in ("ntfy", "auto_update", "problems only", "Send test notification"):
+        assert needle in flat, needle
+    env = Path(".env.example").read_text()
+    assert "auto_update" in env and "updater panel" in env
