@@ -497,6 +497,138 @@
     </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Charts for the two htmx-loaded panels below.
+ *
+ * partials/dashboard_combat_profile.html and partials/dashboard_activity.html
+ * each drew their own charts from an inline script block. Both arrive by htmx
+ * swap, which re-creates script elements as inline script under the
+ * FRAGMENT's nonce — never this page's — so both panels have been rendering
+ * an empty canvas. The series ride in on the canvases now and are drawn from
+ * here, under the page's nonce, after each swap.
+ *
+ * The combat-profile renderer is shared with character_detail.html, which
+ * loads a character-scoped copy of the same panel, and lives in
+ * static/js/actions.js. The activity chart is this page's alone.
+ *
+ * Both renderers are scoped to the swapped subtree, the way base.html scopes
+ * its banner hook — this dashboard has a dozen lazy panels and re-rendering
+ * on every one of their swaps would be wasteful. Scoping is by subtree
+ * rather than by target id because the activity panel swaps with outerHTML,
+ * which replaces the target element itself: detail.target can be the
+ * detached old node, so fall back to the document when it has left the
+ * page. */
+(function() {
+    function renderActivityChart(root) {
+        if (typeof Chart === 'undefined') return;
+        var el = root.querySelector('canvas[data-activity-chart]');
+        if (!el) return;
+        var d;
+        try { d = JSON.parse(el.dataset.activityChart || 'null'); } catch (e) { return; }
+        if (!d) return;
+        var existing = Chart.getChart ? Chart.getChart(el) : null;
+        if (existing) existing.destroy();
+
+        var fmtISK = function(v) {
+            if (v === null) return '';
+            if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+            if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
+            if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
+            if (v >= 1e3)  return (v/1e3).toFixed(1) + 'K';
+            return v.toFixed(0);
+        };
+        var fmtPCU = function(v) {
+            if (v === null) return '';
+            if (v >= 1000) return (v/1000).toFixed(1) + 'K';
+            return v.toFixed(0);
+        };
+        new Chart(el, {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    {
+                        label: 'Players online',
+                        data: d.pcu,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(94,177,255,0.95)',
+                        backgroundColor: 'rgba(94,177,255,0.10)',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        pointHoverRadius: 3,
+                        fill: false,
+                        tension: 0,
+                        spanGaps: true,
+                    },
+                    {
+                        label: 'ISK destroyed',
+                        data: d.isk,
+                        yAxisID: 'y1',
+                        borderColor: 'rgba(200,169,81,0.95)',
+                        backgroundColor: 'rgba(200,169,81,0.08)',
+                        borderWidth: 1.5,
+                        borderDash: [4, 3],
+                        pointRadius: 0,
+                        pointHoverRadius: 3,
+                        fill: false,
+                        tension: 0,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        align: 'end',
+                        labels: { font: { size: 9 }, color: '#bfbfbf', boxWidth: 16, boxHeight: 2 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var v = ctx.parsed.y;
+                                if (v === null) return ctx.dataset.label + ': —';
+                                if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + fmtISK(v) + ' ISK';
+                                return ctx.dataset.label + ': ' + fmtPCU(v);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color:'#7a7a7a', font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:8 },
+                        grid:  { display:false }
+                    },
+                    y: {
+                        type:'linear', position:'left',
+                        beginAtZero: false,
+                        ticks: { color:'rgba(94,177,255,0.95)', font:{size:9}, callback: function(v){ return fmtPCU(v); } },
+                        grid:  { color:'rgba(255,255,255,0.05)' },
+                        title: { display:true, text:'Players', color:'rgba(94,177,255,0.7)', font:{size:9} },
+                    },
+                    y1: {
+                        type:'linear', position:'right',
+                        beginAtZero: true,
+                        ticks: { color:'rgba(200,169,81,0.95)', font:{size:9}, callback: function(v){ return fmtISK(v); } },
+                        grid:  { drawOnChartArea:false },
+                        title: { display:true, text:'ISK', color:'rgba(200,169,81,0.7)', font:{size:9} },
+                    },
+                }
+            }
+        });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        var target = evt.detail.target;
+        if (!target) return;
+        var scope = target.isConnected ? target : document;
+        window.renderCombatCharts(scope);
+        renderActivityChart(scope);
+    });
+})();
+
 function updateServerStatus() {
     fetch('/api/server-status')
         .then(r => r.json())
@@ -522,16 +654,35 @@ function updateServerStatus() {
                     }
                     players.style.display = '';
                 }
-            } else {
+            } else if (data.status === 'offline') {
                 dot.style.background = 'var(--danger)';
                 text.style.color = 'var(--danger)';
                 text.textContent = 'TRANQUILITY — OFFLINE';
                 players.style.display = 'none';
+            } else {
+                /* "unknown" is not "offline": the app couldn't get an answer
+                   out of ESI (typically the first poll right after a deploy,
+                   racing app boot). Stay neutral and ask again soon rather
+                   than painting it red for the next fifteen minutes. */
+                dot.style.background = 'var(--muted)';
+                text.style.color = 'var(--muted)';
+                text.textContent = 'TRANQUILITY — CHECKING…';
+                players.style.display = 'none';
+                scheduleServerStatusRetry();
             }
         })
         .catch(() => {
             document.getElementById('server-status-text').textContent = 'TRANQUILITY — UNKNOWN';
+            scheduleServerStatusRetry();
         });
+}
+var serverStatusRetry = null;
+function scheduleServerStatusRetry() {
+    if (serverStatusRetry) return;
+    serverStatusRetry = setTimeout(function() {
+        serverStatusRetry = null;
+        updateServerStatus();
+    }, 30 * 1000);
 }
 updateServerStatus();
 setInterval(updateServerStatus, 15 * 60 * 1000);

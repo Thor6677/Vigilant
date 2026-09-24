@@ -159,6 +159,15 @@
                 </div>
                 <div id="ship-name" style="font-size:12px;font-weight:600;color:var(--text);margin-top:0.25rem;display:none;"></div>
                 <div id="ship-group" style="font-size:10px;color:var(--muted);display:none;"></div>
+                {# The builder opens on a blank slate — autosave still runs, but it is
+                   no longer applied on load. This notice is the recovery path: shown
+                   only when a saved fit exists in localStorage and no deep-link
+                   (?load=) is already loading one. #}
+                <div id="restore-fit-notice" style="display:none;font-size:10px;color:var(--muted);margin-top:0.35rem;">
+                    A saved fit was found &mdash;
+                    <button type="button" data-click="restoreSavedFit"
+                            style="background:none;border:none;color:var(--accent);cursor:pointer;font:inherit;font-size:10px;padding:0;text-decoration:underline;">Restore last fit</button>
+                </div>
             </div>
         </div>
     </div>
@@ -174,6 +183,16 @@
 
 {# Slot layout #}
 <div id="slot-layout" style="display:none;">
+
+{# State-dot legend (T-ISS: discoverability) — kept to one low-weight line
+   since this is a dense tool; the per-dot title/aria-label carries the
+   click affordance, this just explains the color coding at a glance. #}
+<div style="display:flex;gap:0.6rem;align-items:center;font-size:9px;color:var(--muted);margin-bottom:0.4rem;">
+    <span>Module state:</span>
+    <span><span style="color:var(--success);">&#9679;</span> online</span>
+    <span><span style="color:var(--danger);">&#9679;</span> overheated</span>
+    <span><span style="color:var(--border);">&#9679;</span> offline</span>
+</div>
 
 {% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
@@ -196,7 +215,12 @@
 </div>
 {% endfor %}
 
-{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring) #}
+{# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring).
+   ISS-016 follow-up: picking a character is the PRIMARY path — one select
+   pulls that character's whole active clone into the 10 slots in one shot,
+   replacing the old two-control layout (an unrelated top-of-page character
+   dropdown plus a separate "load" button). Name search stays as the
+   secondary path, below, for hypothetical implants nobody has plugged in. #}
 <div class="b-section" id="section-implant" style="display:none;">
     <div class="b-section-head">
         <span class="b-label">Implants</span>
@@ -204,21 +228,25 @@
     </div>
     <div id="slots-implant" style="padding:0.25rem 0;"></div>
     <div style="padding:0.25rem 0;">
+        <select id="implant-char-select" data-change="onImplantCharChange"
+                title="Load a linked character's active clone implants"
+                style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;cursor:pointer;">
+            <option value="">Load from character&hellip;</option>
+            {# populated via JS on init — characters lacking the implants
+               scope render disabled with a reason in the option text #}
+        </select>
+        <div id="implant-char-status" style="font-size:9px;color:var(--muted);margin-top:0.25rem;display:none;"></div>
+    </div>
+    <div style="padding:0.25rem 0;">
         <div style="position:relative;">
             <input type="text" id="implant-search"
-                   placeholder="+ Search implants by name..."
+                   placeholder="+ Or search implants by name..."
                    autocomplete="off"
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
                    data-input="searchImplant">
             <div id="implant-results"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
         </div>
-        {# ISS-016: import the skill-character's currently-plugged implants #}
-        <button type="button" id="btn-clone-implants" data-click="loadCloneImplants"
-                style="margin-top:0.35rem;padding:0.25rem 0.6rem;background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;"
-                title="Fetch the selected skill character's active clone implants from ESI">
-            Load active clone
-        </button>
     </div>
 </div>
 
@@ -333,6 +361,11 @@ function isSlotFull(slot) {
 
 function saveState() {
     localStorage.setItem(FIT_KEY, JSON.stringify(state));
+    // Whatever the "Restore last fit" notice was offering (the OLD stored
+    // value) is gone the moment we overwrite it here, so the offer no
+    // longer applies. Covers starting a fresh fit (selectShip/doImportEFT)
+    // without explicitly clicking Restore or Clear first.
+    hideRestoreNotice();
 }
 
 function restoreState() {
@@ -345,6 +378,28 @@ function restoreState() {
             applyState();
         }
     } catch(e) {}
+}
+
+/* Blank-slate open (product change): the page no longer auto-restores the
+   last fit on load. Autosave keeps running as a recovery path instead —
+   this notice/button pair is that recovery path's UI. */
+function showRestoreNotice() {
+    var el = document.getElementById('restore-fit-notice');
+    if (el) el.style.display = '';
+}
+
+function hideRestoreNotice() {
+    var el = document.getElementById('restore-fit-notice');
+    if (el) el.style.display = 'none';
+}
+
+function restoreSavedFit() {
+    restoreState();
+    hideRestoreNotice();
+    // applyState() (called by restoreState()) doesn't know about overheat
+    // capability — the restored items may include ones never checked
+    // against /tools/fitting/can-overheat yet (see refreshOverheatCache).
+    refreshOverheatCache();
 }
 
 function applyState() {
@@ -451,6 +506,14 @@ function searchShip() {
 }
 
 function selectShip(typeId, typeName) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    // This is the search-result click path (fitting_search_results.html);
+    // there is no other caller, but the positional fallback is kept for
+    // consistency with the rest of this file's data-click handlers.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+    }
     state.shipTypeId = typeId;
     state.shipName = typeName;
     state.items = [];
@@ -554,6 +617,13 @@ function addModule(typeId, typeName, slot) {
 }
 
 function addDrone(typeId, typeName) {
+    // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
+    // addModuleFromBrowser (Browse panel) still calls this positionally, so
+    // that path must keep working when dataset is absent.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+    }
     // Check if drone already exists, increment quantity
     for (var i = 0; i < state.items.length; i++) {
         if (state.items[i].type_id === typeId && state.items[i].slot === 'drone') {
@@ -658,13 +728,17 @@ function renderSlots() {
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
-            // State toggle: green=online, red=overheated, grey=offline
+            // State toggle: green=online, red=overheated, grey=offline. The
+            // dot alone has no affordance (T-ISS: discoverability) — title
+            // gives a hover tooltip and aria-label carries the same text to
+            // screen readers, since the dot has no visible text of its own.
             var canOH = overheatCache[item.type_id] === true;
             var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
-            var stateTitle = isOverheated ? 'Overheated (click: offline)' :
-                (isOnline && canOH ? 'Online (click: overheat)' : (isOnline ? 'Online (click: offline)' : 'Offline (click: online)'));
+            var stateTitle = isOverheated ? 'Overheated — click to offline' :
+                (isOnline && canOH ? 'Online — click to overheat' :
+                    (isOnline ? 'Online — click to offline' : 'Offline — click to online'));
             var onlineBtn = slot !== 'rig' ?
-                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
@@ -797,30 +871,75 @@ function removeImplant(slot) {
     recalcStats();
 }
 
-/* ISS-016: import the selected skill character's active-clone implants.
-   Replaces the whole loadout (a clone IS a full loadout); imported slots
-   get from_clone=true so renderImplantSlots badges them. */
-function loadCloneImplants() {
-    var charId = getSelectedSkillCharId();
-    if (!charId) { alert('Select a skill character first (top of the stats panel).'); return; }
-    var btn = document.getElementById('btn-clone-implants');
-    btn.disabled = true; btn.textContent = 'Loading…';
+/* ISS-016 follow-up: character-first implant picker. Populates the select
+   from the same /tools/fitting/characters list the skill-check selector
+   uses (see fetchFittingCharacters below) rather than issuing its own
+   query, and disables options for characters that haven't granted the
+   implants scope instead of only failing after the fact. */
+function loadImplantCharList() {
+    var sel = document.getElementById('implant-char-select');
+    if (!sel) return;
+    fetchFittingCharacters().then(function(characters) {
+        characters.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = String(c.id);
+            opt.textContent = c.has_implants_scope
+                ? c.name
+                : (c.name + ' — no implant access');
+            opt.disabled = !c.has_implants_scope;
+            sel.appendChild(opt);
+        });
+    });
+}
+
+/* Fires on 'change' of #implant-char-select (dispatcher calls this with
+   `this` = the <select>, per static/js/actions.js). Replaces the whole
+   loadout (a clone IS a full loadout) — imported slots get from_clone=true
+   so renderImplantSlots badges them. Confirms first if slots are already
+   occupied, matching the confirm() pattern used elsewhere on this page
+   (see doImportEFT-adjacent module-compat check and deleteFitting). */
+function onImplantCharChange() {
+    var sel = this;
+    var statusEl = document.getElementById('implant-char-status');
+    var charId = sel.value ? parseInt(sel.value, 10) : null;
+    if (!charId) { if (statusEl) statusEl.style.display = 'none'; return; }
+
+    var label = sel.options[sel.selectedIndex]
+        ? sel.options[sel.selectedIndex].textContent : '';
+    var hadImplants = state.implants && Object.keys(state.implants).length > 0;
+    if (hadImplants && !confirm('Replace all implant slots with ' + label + '’s active clone?')) {
+        sel.value = '';
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.style.display = '';
+        statusEl.textContent = 'Loading ' + label + '…';
+    }
     fetch('/tools/fitting/clone-implants/' + charId)
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        if (data.error) { alert(data.error); return; }
+        if (data.error) {
+            if (statusEl) statusEl.textContent = data.error;
+            sel.value = '';
+            return;
+        }
         state.implants = data.implants || {};
         saveState();
         renderImplantSlots();
         recalcStats();
         var n = Object.keys(state.implants).length;
-        btn.textContent = n ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's')) : 'Clone is empty';
-        setTimeout(function() { btn.textContent = 'Load active clone'; }, 2500);
+        var who = data.character_name || label;
+        if (statusEl) {
+            statusEl.textContent = n
+                ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's') + ' from ' + who + '.')
+                : (who + '’s active clone has no implants plugged in.');
+        }
+        sel.value = '';
     })
-    .catch(function() { alert('Clone implant fetch failed.'); })
-    .finally(function() {
-        btn.disabled = false;
-        if (btn.textContent === 'Loading…') btn.textContent = 'Load active clone';
+    .catch(function() {
+        if (statusEl) statusEl.textContent = 'Clone implant fetch failed — try again shortly.';
+        sel.value = '';
     });
 }
 
@@ -893,6 +1012,42 @@ function restoreProfileSelection() {
     _syncCustomSliderUI();
 }
 
+/* ── Stats panel unit toggles ─────────────────────────────────────────────── */
+/* These lived in partials/fitting_stats.html, which recalcStats() writes in
+   with innerHTML — and inserted markup never executes its own scripts, so
+   neither toggle had ever run. Each flips its own button label and rewrites
+   every value cell from the dataset the server rendered onto it, so no
+   refetch is needed. Dispatched via data-click from the fragment's markup. */
+function toggleResourceUnits() {
+    var showingPct = this.textContent.trim() === '%';
+    var next = showingPct ? 'val' : 'pct';
+    this.textContent = showingPct ? 'VAL' : '%';
+    document.querySelectorAll('.fr-val').forEach(function(el) {
+        el.textContent = el.dataset[next];
+    });
+}
+
+function toggleDefenceUnits() {
+    var showingEhp = this.textContent.trim() === 'EHP';
+    var key = showingEhp ? 'hp' : 'ehp';
+    this.textContent = showingEhp ? 'HP' : 'EHP';
+    document.querySelectorAll('.def-hp-val').forEach(function(el) {
+        el.textContent = el.dataset[key];
+    });
+    var label = document.getElementById('def-header-label');
+    if (label) {
+        var cells = document.querySelectorAll('.def-hp-val');
+        var last = cells[cells.length - 1];
+        label.textContent = showingEhp
+            ? '(Raw HP: ' + last.dataset.hp + ')'
+            : '(Effective HP: ' + last.dataset.ehp + ')';
+    }
+    document.querySelectorAll('.def-rep-val').forEach(function(el) {
+        el.textContent = (showingEhp ? el.dataset.hp : el.dataset.ehp)
+            + (showingEhp ? ' HP/s' : ' EHP/s');
+    });
+}
+
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
 function recalcStats() {
     if (!state.shipTypeId) return;
@@ -936,25 +1091,39 @@ function getSelectedSkillCharId() {
     return v ? parseInt(v, 10) : null;
 }
 
+/* GET /tools/fitting/characters is the one query behind every character
+   picker on this page (skill-check selector here, implant picker below) —
+   it returns every linked character tagged with has_skills_scope /
+   has_implants_scope so each picker can filter client-side. Caching the
+   promise means the implant picker's init reuses this same fetch instead
+   of firing a second one. */
+var _fittingCharsPromise = null;
+function fetchFittingCharacters() {
+    if (!_fittingCharsPromise) {
+        _fittingCharsPromise = fetch('/tools/fitting/characters')
+            .then(function(r) { return r.json(); })
+            .then(function(data) { return data.characters || []; });
+    }
+    return _fittingCharsPromise;
+}
+
 function loadSkillCharList() {
     var sel = document.getElementById('skill-char-select');
     if (!sel) return;
-    fetch('/tools/fitting/characters')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
-            (data.characters || []).forEach(function(c) {
-                var opt = document.createElement('option');
-                opt.value = String(c.id);
-                opt.textContent = c.name;
-                if (String(c.id) === saved) opt.selected = true;
-                sel.appendChild(opt);
-            });
-            if (saved) onSkillCharChange(/*silent*/true);
+    fetchFittingCharacters().then(function(characters) {
+        var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
+        characters.filter(function(c) { return c.has_skills_scope; }).forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = String(c.id);
+            opt.textContent = c.name;
+            if (String(c.id) === saved) opt.selected = true;
+            sel.appendChild(opt);
         });
+        if (saved) onSkillCharChange();
+    });
 }
 
-function onSkillCharChange(silent) {
+function onSkillCharChange() {
     var id = getSelectedSkillCharId();
     if (id) {
         localStorage.setItem(SKILL_CHAR_KEY, String(id));
@@ -1249,6 +1418,10 @@ function doImportEFT() {
         state.items = data.items;
         saveState();
         applyState();
+        // EFT-imported items were never checked against
+        // /tools/fitting/can-overheat — without this, a hardener imported
+        // via EFT would show no overheat step at all.
+        refreshOverheatCache();
         hideImportModal();
     });
 }
@@ -1355,6 +1528,12 @@ function loadFitting(id) {
         state.implants = data.implants || {};
         saveState();
         applyState();
+        // init()'s own refreshOverheatCache() call races this fetch (it
+        // runs synchronously right after kicking this one off, while
+        // state.items is still empty) — call it again here, now that
+        // state.items is actually populated, or a saved fit opened via
+        // ?load= never gets its overheat capability checked.
+        refreshOverheatCache();
     });
 }
 
@@ -1671,6 +1850,17 @@ function browseToPathIndex(idx, groupId) {
 /* ── Fit restriction check on search-based module add ────────────────────── */
 var _origAddModule = addModule;
 addModule = function(typeId, typeName, slot) {
+    // ISS-020: this wrapper — not the shadowed function above — is what the
+    // dispatcher's window['addModule'] lookup actually reaches for
+    // data-click="addModule" (search results, fitting_search_results.html),
+    // so the dataset prologue has to live here. addModuleFromBrowser (Browse
+    // panel) bypasses this wrapper entirely and calls _origAddModule
+    // directly, so it needs no fallback handling here.
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        slot = this.dataset.slotType;
+    }
     if (!state.shipTypeId) { _origAddModule(typeId, typeName, slot); return; }
     fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
         .then(function(r) { return r.json(); })
@@ -1702,7 +1892,7 @@ function refreshOverheatCache() {
 /* ── Initialize ───────────────────────────────────────────────────────────── */
 (function init() {
     /* Restore profile dropdown FIRST so the first recalcStats triggered
-       by restoreState/loadFitting uses the saved selection, not "uniform". */
+       by loadFitting/restoreSavedFit uses the saved selection, not "uniform". */
     restoreProfileSelection();
     /* ?load=<fit_id> — opened from the saved-fits page. Takes precedence
        over localStorage, and we strip it from the URL so refreshing the
@@ -1712,12 +1902,16 @@ function refreshOverheatCache() {
     if (loadId) {
         history.replaceState(null, '', window.location.pathname);
         loadFitting(parseInt(loadId, 10));
-    } else {
-        restoreState();
+    } else if (localStorage.getItem(FIT_KEY)) {
+        /* Open EMPTY (blank slate), not auto-restored. A saved fit still
+           exists in localStorage from a prior session — offer it via the
+           "Restore last fit" notice instead of applying it unasked. */
+        showRestoreNotice();
     }
     initBrowser();
     refreshOverheatCache();
     loadSkillCharList();
+    loadImplantCharList();
 })();
 </script>
 

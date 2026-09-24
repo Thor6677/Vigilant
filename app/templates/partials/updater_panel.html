@@ -69,6 +69,46 @@
       </div>
     {% endif %}
 
+    {# ── Sidecar version skew ──────────────────────────────────────────────
+       Rendered above the run states and outside all of them, because it is
+       true regardless of what the last run did — and because the operator
+       most needs to see it right after a successful CLI deploy, which is
+       exactly when the panel is sitting in its idle branch.
+
+       Deliberately NOT tied to the buttons. A lagging sidecar is still a
+       working sidecar, and an in-app update is how it heals itself: disabling
+       the controls would wedge the one path out of the skew.
+
+       Neither branch adds a form, a button or an input. Every form in this
+       panel is pinned by tests/test_updater_panel.py (each destructive one
+       confirms, the rollback form's select is its only tag chooser), and CSP
+       forbids inline handlers — so the remedy is stated as text the operator
+       copies.
+
+       dict['key'] rather than dict.key throughout: dot access silently
+       returns the bound method for any key colliding with a dict method. #}
+    {% if self_update_in_flight %}
+      <p class="b-empty">
+        The updater is upgrading itself to
+        <b class="mono">{{ self_update['target'] }}</b>… The panel may go quiet
+        for a few seconds while it restarts.
+      </p>
+    {% elif updater_lagging %}
+      <div class="b-empty is-warn">
+        The updater is still running
+        <b class="mono">{{ updater_version }}</b> while Vigilant is on
+        <b class="mono">{{ current_tag }}</b>, so it does not yet have the
+        fixes from the newer release. Updating and rolling back still work.
+        The updater upgrades itself after an in-app update; a deploy run from
+        the command line does not trigger that. To bring it up to date now, run
+        this from the install directory:
+        <code class="mono">docker compose --profile updater up -d updater</code>
+        {% if self_update and self_update['state'] == 'failed' and self_update['error'] %}
+          <br>The last self-update attempt failed: {{ self_update['error'] }}
+        {% endif %}
+      </div>
+    {% endif %}
+
     {% if run_state == BUSY or awaiting_pickup or (polling and not status) %}
       <div class="updater-progress">
         <p>

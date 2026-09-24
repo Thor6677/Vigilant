@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import time
 import httpx
+from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -14,7 +16,7 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.config import user_agent
-from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction, CorpWalletSnapshot
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.utils.perf import perf_log, perf_enabled, ms_since
@@ -794,19 +796,129 @@ async def _fetch_15m_delta(db: AsyncSession) -> int | None:
     return (latest - ref) if ref is not None else None
 
 
-async def fetch_server_status() -> dict:
+# ISS-032: SWR cache for the ESI /status/ call. ESI sends Cache-Control: 30s
+# on this endpoint, but api_server_status() awaited it inline on every hit —
+# measured on prod at p50 439ms / p95 1244ms / max 1800ms over 6 days
+# (n=223), with the flat p50 being the tell that every request paid the ESI
+# round-trip rather than only a cold-cache subset. The fix moves that
+# round-trip off the request path entirely: a request either gets an
+# in-process value immediately or (cold start only) pays for one fetch that
+# every other concurrent viewer/tab then rides for free. It's polled by both
+# dashboard.html (every 15 min, plus once on load) and tools_activity.html
+# (every 60s, plus once on load); a 30s TTL — matching ESI's own header —
+# doesn't stop tools_activity's 60s timer from refreshing on every tick, but
+# it does mean a page load and the next timer tick, or two browser tabs,
+# share one fetch instead of paying for their own.
+# Same stale-while-revalidate shape as the other ISS-018 panel caches in
+# this file (_recent_battles_cache and friends), just keyed on a monotonic
+# clock instead of wall time since staleness here is single-digit seconds,
+# and the clock/transport are injectable so tests don't need real time or
+# network (see tests/test_server_status_cache.py).
+_server_status_cache: dict | None = None
+_server_status_revalidating = False
+_SERVER_STATUS_TTL = 30          # matches ESI's Cache-Control on /status/
+_SERVER_STATUS_MAX_STALE = 120   # beyond this we stop vouching for the value
+
+# Strong references to the in-flight background refresh, same reason as
+# _discord_relay_tasks above: asyncio.create_task() only holds a *weak*
+# reference, so an unpinned task can be garbage-collected before it ever
+# starts running. If that happened here, the coroutine's `finally` would
+# never execute, _server_status_revalidating would stay True forever, and
+# the cache would wedge — no refresh ever fires again and the endpoint
+# degrades permanently to the offline/unknown shape once it ages past
+# _SERVER_STATUS_MAX_STALE. Worse than the latency bug this fixes.
+_server_status_refresh_tasks: set = set()
+
+# Same shape fetch_server_status has always returned when it couldn't get
+# a trustworthy answer from ESI — kept as one constant so "cold start
+# failed", "too stale to serve" and "ESI returned non-200" can't drift.
+#
+# `status` is the honest three-way answer; `online` is kept for the
+# consumers that only ask "may I show a pilot count". They differ in one
+# case: "unknown" is *not* "offline". Right after a deploy the first poll's
+# ESI round-trip competes with app boot (and, after an SDE change, the
+# reimport) and can time out — that used to paint the dashboard pill red
+# OFFLINE for the next fifteen minutes while Tranquility was perfectly
+# fine. Only ESI itself saying the datasource is unavailable (503, which
+# is what it answers during downtime) earns "offline".
+_UNKNOWN_STATUS = {"online": False, "players": None, "status": "unknown"}
+_OFFLINE_STATUS = {"online": False, "players": None, "status": "offline"}
+
+
+async def _fetch_server_status_live(transport: httpx.BaseTransport | None = None) -> dict:
+    """The actual ESI round-trip. Raises on network/timeout/decode errors so
+    callers can tell "ESI told us something" (even "it's down", which is
+    still a real answer worth caching) apart from "we couldn't reach ESI at
+    all" (which should leave an existing cache entry alone rather than be
+    treated as fresh data). `transport` lets tests swap in an
+    httpx.MockTransport with no real network."""
+    async with httpx.AsyncClient(timeout=5.0, transport=transport) as client:
+        resp = await client.get(
+            "https://esi.evetech.net/latest/status/",
+            headers={"User-Agent": user_agent()},
+        )
+    if resp.status_code == 200:
+        data = resp.json()
+        return {"online": True, "players": data.get("players", 0), "status": "online"}
+    if resp.status_code == 503:
+        return dict(_OFFLINE_STATUS)
+    return dict(_UNKNOWN_STATUS)
+
+
+async def _refresh_server_status_cache(clock: Callable[[], float], transport=None) -> None:
+    """Background refresh task. Single-flight is enforced by the caller
+    setting _server_status_revalidating before scheduling this."""
+    global _server_status_cache, _server_status_revalidating
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                "https://esi.evetech.net/latest/status/",
-                headers={"User-Agent": user_agent()},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return {"online": True, "players": data.get("players", 0)}
-            return {"online": False, "players": None}
-    except Exception:
-        return {"online": False, "players": None}
+        data = await _fetch_server_status_live(transport)
+        _server_status_cache = {"data": data, "fetched_at": clock()}
+    except Exception as e:
+        # Leave the existing cache entry (and its fetched_at) untouched — a
+        # network hiccup shouldn't erase a still-good last-known value. It
+        # naturally degrades to the unknown/offline shape below once it
+        # crosses _SERVER_STATUS_MAX_STALE.
+        logger.info("server-status SWR refresh failed: %s", e)
+    finally:
+        _server_status_revalidating = False
+
+
+async def fetch_server_status(
+    clock: Callable[[], float] = time.monotonic,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    global _server_status_cache, _server_status_revalidating
+    now = clock()
+
+    if _server_status_cache is None:
+        # Cold start: nothing to serve yet, so this one request pays the
+        # ESI round-trip. Every later request rides the cache instead.
+        try:
+            data = await _fetch_server_status_live(transport)
+        except Exception:
+            # Match the historical contract: report unknown rather than
+            # raising into the route. Cache nothing, so the next request
+            # retries instead of pinning a failure in place forever.
+            return dict(_UNKNOWN_STATUS)
+        _server_status_cache = {"data": data, "fetched_at": now}
+        return dict(data)
+
+    age = now - _server_status_cache["fetched_at"]
+
+    if age > _SERVER_STATUS_TTL and not _server_status_revalidating:
+        _server_status_revalidating = True
+        task = asyncio.create_task(_refresh_server_status_cache(clock, transport))
+        _server_status_refresh_tasks.add(task)
+        task.add_done_callback(_server_status_refresh_tasks.discard)
+
+    if age > _SERVER_STATUS_MAX_STALE:
+        # Honesty on failure: a value this old might be refreshing right
+        # now (kicked off above), but until it lands we won't keep telling
+        # callers the server is online off a minutes-old answer. Report the
+        # same unknown/offline shape fetch_server_status has always
+        # returned on error.
+        return dict(_UNKNOWN_STATUS)
+
+    return dict(_server_status_cache["data"])
 
 
 async def _fetch_live_history(db: AsyncSession, live_count: int | None = None) -> dict:
@@ -1757,7 +1869,9 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
 
 
 async def _cleanup_old_snapshots():
-    """Delete WalletSnapshot rows older than 1 year to prevent unbounded DB growth."""
+    """Delete WalletSnapshot / CorpWalletSnapshot rows older than 1 year to
+    prevent unbounded DB growth. Same policy for both: a year of hourly corp
+    rows is 7 divisions x 8,760 samples per corp — modest, but bounded."""
     from sqlalchemy import delete as sa_delete
     cutoff = datetime.now(timezone.utc) - timedelta(days=365)
     cutoff_naive = cutoff.replace(tzinfo=None)
@@ -1765,9 +1879,81 @@ async def _cleanup_old_snapshots():
         result = await db.execute(
             sa_delete(WalletSnapshot).where(WalletSnapshot.recorded_at < cutoff_naive)
         )
+        corp_result = await db.execute(
+            sa_delete(CorpWalletSnapshot).where(CorpWalletSnapshot.recorded_at < cutoff_naive)
+        )
         await db.commit()
         if result.rowcount:
             logger.info("Cleaned up %d old WalletSnapshot rows", result.rowcount)
+        if corp_result.rowcount:
+            logger.info("Cleaned up %d old CorpWalletSnapshot rows", corp_result.rowcount)
+
+
+_CORP_WALLET_SCOPE = "esi-wallet.read_corporation_wallets.v1"
+
+
+async def _snapshot_corp_wallets() -> int:
+    """Hourly distinct-corp pass: one CorpWalletSnapshot row per division for
+    every player corp that any linked character can read (T-056).
+
+    Grouped by corp across ALL users — several users' characters may share a
+    corp, and it is fetched once, not once per user and never per character.
+    NPC corps (id < 2,000,000) have no readable wallet and are skipped. The
+    wallets endpoint needs an in-game role on top of the scope; a character
+    without it gets a 403, is remembered in _corp_403_cache so it is not
+    retried every hour, and the next scoped character in the corp is tried.
+    If none succeeds the corp writes nothing this cycle — that is the gap
+    the chart must show, not a value to carry forward. Returns rows written.
+    """
+    async with AsyncSessionLocal() as db:
+        chars = (await db.execute(select(Character))).scalars().all()
+        by_corp: dict[int, list[Character]] = {}
+        for c in chars:
+            if not c.corporation_id or c.corporation_id < 2000000:
+                continue
+            if _CORP_WALLET_SCOPE not in (c.scopes or ""):
+                continue
+            by_corp.setdefault(c.corporation_id, []).append(c)
+
+        if not by_corp:
+            return 0
+
+        # One timestamp for the whole pass so every corp's seven rows — and
+        # every corp — line up on the same sample.
+        recorded_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        written = 0
+        for corp_id, corp_chars in by_corp.items():
+            raw = None
+            for char in corp_chars:
+                if (char.character_id, corp_id) in _corp_403_cache:
+                    continue
+                try:
+                    client, err = await _client_for(char)
+                    if err or not client:
+                        continue
+                    raw = await esi_corp.get_corporation_wallets(client, corp_id)
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 403:
+                        _corp_403_cache.add((char.character_id, corp_id))
+                        continue
+                    logger.info("corp wallet snapshot: corp %s via %s: %s", corp_id, char.character_id, e)
+                except Exception as e:
+                    logger.info("corp wallet snapshot: corp %s via %s: %s", corp_id, char.character_id, e)
+            if not isinstance(raw, list):
+                continue
+            for d in raw:
+                try:
+                    division = int(d.get("division"))
+                    balance = float(d.get("balance", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                db.add(CorpWalletSnapshot(corp_id=corp_id, division=division,
+                                          balance=balance, recorded_at=recorded_at))
+                written += 1
+        if written:
+            await db.commit()
+        return written
 
 
 async def _check_all_inventory_thresholds():
@@ -1926,8 +2112,21 @@ async def _background_scheduler():
             except Exception as e:
                 logger.warning("Background scheduler error: %s", e)
 
-            # ESI cache GC (every hour) — drops rows whose expires_at has passed.
             now = datetime.now(timezone.utc)
+
+            # Corp wallet history (T-056) — hourly, matching ESI's max-age on
+            # the corp wallets endpoint. Never triggered by a page load.
+            if not hasattr(_background_scheduler, '_last_corp_wallet_snapshot') or \
+               (now - _background_scheduler._last_corp_wallet_snapshot).total_seconds() >= 3600:
+                try:
+                    rows = await _snapshot_corp_wallets()
+                    if rows:
+                        logger.info("Corp wallet snapshot wrote %d division rows", rows)
+                    _background_scheduler._last_corp_wallet_snapshot = now
+                except Exception as e:
+                    logger.warning("Corp wallet snapshot error: %s", e)
+
+            # ESI cache GC (every hour) — drops rows whose expires_at has passed.
             if not hasattr(_background_scheduler, '_last_cache_gc') or \
                (now - _background_scheduler._last_cache_gc).total_seconds() >= 3600:
                 try:

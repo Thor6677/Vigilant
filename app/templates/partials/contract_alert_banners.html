@@ -1,3 +1,16 @@
+{# Markup only — no inline script here. See the comment in
+   structure_alert_banners.html: a fragment's own inline script tag would
+   carry a CSP nonce that never matches the page's and gets silently
+   blocked.
+
+   The dismiss button below dispatches to dismissStructureAlert, not a
+   contract-specific handler — base.html's applyDismissState() already
+   showed/hid these banners via the SAME vigilant_dismissed_alerts key as
+   structure and inventory banners (all three share the
+   .structure-alert-banner markup), so that key is what governed contract
+   banner visibility in production even before this fix. A dedicated
+   dismissContractAlert / vigilant_dismissed_contract_alerts pair existed
+   here previously but was never actually read by anything. #}
 <div id="contract-alerts" hx-get="/alerts/contract-banners" hx-trigger="every 60s" hx-swap="outerHTML">
 {% for alert in alerts %}
 <div class="structure-alert-banner is-warn"
@@ -12,39 +25,8 @@
     </div>
     <div style="display:flex;align-items:center;gap:0.5rem;">
         <a href="/corporations/{{ alert.corp_id }}/contracts" style="font-size:9px;color:var(--accent);text-decoration:none;">View</a>
-        <button class="alert-dismiss" data-click="dismissContractAlert" data-alert-key="contract-{{ alert.id }}" title="Dismiss">&times;</button>
+        <button class="alert-dismiss" data-click="dismissStructureAlert" data-alert-key="contract-{{ alert.id }}" title="Dismiss">&times;</button>
     </div>
 </div>
 {% endfor %}
-<script nonce="{{ request.state.csp_nonce }}">
-(function() {
-    var KEY = 'vigilant_dismissed_contract_alerts';
-    function getDismissed() {
-        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch(e) { return {}; }
-    }
-    function setDismissed(d) {
-        try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e) {}
-    }
-    window.dismissContractAlert = function() {
-        var id = this.dataset.alertKey;
-        var d = getDismissed();
-        d[id] = Date.now();
-        setDismissed(d);
-        var el = document.querySelector('[data-alert-id="' + id + '"]');
-        if (el) el.style.display = 'none';
-    };
-    var dismissed = getDismissed();
-    var cutoff = Date.now() - 7 * 86400000;
-    var changed = false;
-    for (var k in dismissed) {
-        if (dismissed[k] < cutoff) { delete dismissed[k]; changed = true; }
-    }
-    if (changed) setDismissed(dismissed);
-    var banners = document.querySelectorAll('#contract-alerts .structure-alert-banner[data-alert-id]');
-    for (var i = 0; i < banners.length; i++) {
-        var aid = banners[i].getAttribute('data-alert-id');
-        if (!dismissed[aid]) banners[i].style.display = '';
-    }
-})();
-</script>
 </div>

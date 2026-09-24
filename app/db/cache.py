@@ -22,7 +22,18 @@ TTL = {
     "character_jobs":   300,          # industry jobs — 5 min
     "character_clones": 300,          # clones — 5 min
     "character_wallet": 120,          # wallet — 2 min
-    "character_location": 60,         # location — 60 sec
+    # location — matches ESI's own 5s cache on this endpoint. Used to be
+    # 60s, which was fine for the dashboard's own per-character sync (it
+    # only re-fetches location every 60s regardless of this TTL — see
+    # FIELD_CACHE_SECONDS["location"] in app/routes/dashboard.py — so this
+    # entry was never actually deduping the dashboard's own calls, just
+    # sitting well past its next scheduled fetch either way) but left the
+    # live wormhole tracker (app/routes/wh_tracker.py) polling a system
+    # that could be up to 60s stale. Kept as a real (if short) cache rather
+    # than bypassed entirely: several tracker tabs open on the same
+    # character still dedupe within the 5s window, and ESI's error limit
+    # is shared across the whole app.
+    "character_location": 5,
     "killmail":         86400,        # killmails are immutable — 24h
     "search":           300,          # search results — 5 min
     "corp_contracts":   300,          # corp contracts list — 5 min

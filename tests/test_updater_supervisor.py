@@ -734,8 +734,48 @@ def test_self_checks_key_set(monkeypatch, tmp_path):
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     (tmp_path / ".deployed").write_text("2026-01-01T00:00:00Z v1.2.0\n")
     checks = sup._self_checks()
-    assert set(checks) == {"socket", "git", "compose", "remote", "deployed"}
+    assert set(checks) == {"socket", "git", "compose", "remote", "deployed", "tmp"}
     assert checks["remote"] == "ok"
+    assert checks["tmp"] == "ok"
+
+
+# ── The `tmp` check: added after a /tmp permissions bug passed every check ───
+# that existed before it ───────────────────────────────────────────────────
+#
+# A sidecar built with the wrong tmpfs `mode` (see docker-compose.yml's
+# `updater:` tmpfs comment for the full story) started cleanly, published
+# `socket`, `git`, `remote`, `compose` and `deployed` as all `ok`, and then
+# failed its first update in seconds with nothing but `mktemp: Permission
+# denied` in the log — none of the existing checks writes a file. Both tests
+# below use real filesystem behaviour, no mocks: the whole point of this check
+# is that it exercises the actual primitive, and a mock of "was mkdtemp
+# called" would prove nothing about whether the real one can succeed.
+
+def test_tmp_check_ok():
+    import updater.supervisor as sup
+    assert sup._tmp_check() == "ok"
+
+
+def test_tmp_check_reports_a_readable_reason_when_the_directory_is_unusable(
+        tmp_path, monkeypatch):
+    """TMPDIR pointed at a path whose parent does not exist — real behaviour,
+    no mocks. `_tmp_check()` resolves the directory as `${TMPDIR:-/tmp}` and
+    passes it to mkdtemp EXPLICITLY (see the function's docstring for why:
+    the no-argument form silently tries other candidates and could mask
+    exactly this failure), so setting TMPDIR is enough to steer it without
+    needing to break the real /tmp on the machine running the suite."""
+    import updater.supervisor as sup
+    bad = tmp_path / "does-not-exist" / "child"
+    monkeypatch.setenv("TMPDIR", str(bad))
+
+    result = sup._tmp_check()
+
+    assert result.startswith("FAIL: ")
+    # Names the directory it actually tried, not a generic message — the
+    # whole reason self-checks exist is to name what to go fix.
+    assert str(bad) in result
+    assert "scripts/deploy.sh" in result
+    assert "scripts/rollback.sh" in result
 
 
 # ── The `remote` check: can this container actually fetch from origin ────────

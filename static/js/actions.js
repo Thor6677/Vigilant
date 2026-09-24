@@ -162,6 +162,337 @@
         if (src) this.src = src;
     };
 
+    // Copy a block of text to the clipboard and flash the button that asked.
+    //
+    // Replaces copyShoppingList / copyCompressionMultibuy / copyAppraisal,
+    // three all-but-identical functions that lived in three htmx-loaded
+    // fragments (shopping_list, compression_results, appraisal_results) and
+    // therefore never ran at all — a fragment's script carries that
+    // fragment's nonce, which the page's CSP never matches. One definition
+    // here, reached by data-click, does run.
+    //
+    //   data-copy-from  — id of an input/textarea (or any element) whose
+    //                     text to copy. The multibuy textareas use this.
+    //   data-copy-text  — literal text, for a caller with nothing on the
+    //                     page to point at (the appraisal total).
+    //   data-copy-label — what to put back after the "Copied!" flash;
+    //                     defaults to whatever the button says right now.
+    window.copyToClipboard = window.copyToClipboard || function () {
+        var el = this;
+        var text = el.dataset.copyText;
+        if (text == null) {
+            var src = el.dataset.copyFrom
+                ? document.getElementById(el.dataset.copyFrom) : null;
+            if (!src) return;
+            text = src.value != null ? src.value : src.textContent;
+        }
+        if (!navigator.clipboard) return;
+        var label = el.dataset.copyLabel || el.textContent.trim();
+        var color = el.style.color;
+        var border = el.style.borderColor;
+        navigator.clipboard.writeText(text).then(function () {
+            el.textContent = 'Copied!';
+            el.style.color = 'var(--success)';
+            el.style.borderColor = 'var(--success)';
+            setTimeout(function () {
+                el.textContent = label;
+                el.style.color = color;
+                el.style.borderColor = border;
+            }, 2000);
+        });
+    };
+
+    // Hand a list of items to the hauling planner.
+    //
+    // Was sendToHauling in shopping_list and appraisal_results, plus
+    // sendOresToHauling in compression_results — the same function three
+    // times over the same localStorage key, each one dead for the same
+    // reason. The item list came from a Jinja loop inside the script; it now
+    // comes off the rows that are already in the markup, one data attribute
+    // per field (the ISS-021 convention above), so the fragment needs no
+    // script of its own.
+    //
+    //   data-haul-scope — selector for the element holding the rows;
+    //                     defaults to the whole document.
+    //   rows carry data-haul-name / data-haul-qty / data-haul-volume.
+    window.sendToHauling = window.sendToHauling || function () {
+        var scope = this.dataset.haulScope
+            ? document.querySelector(this.dataset.haulScope) : document;
+        if (!scope) return;
+        var items = [];
+        scope.querySelectorAll('[data-haul-name]').forEach(function (row) {
+            items.push({
+                name: row.dataset.haulName,
+                qty: parseInt(row.dataset.haulQty, 10) || 0,
+                volume: parseFloat(row.dataset.haulVolume) || 0,
+            });
+        });
+        if (!items.length) return;
+        try {
+            localStorage.setItem('vigilant_haul_items', JSON.stringify(items));
+        } catch (e) { /* private mode — the planner will just open empty */ }
+        window.location.href = '/industry/hauling';
+    };
+
+    // ── Combat-profile charts ───────────────────────────────────────────
+    //
+    // partials/character_kill_stats.html and
+    // partials/dashboard_combat_profile.html each carried a ~150-line inline
+    // script drawing the same four charts. The two were identical bar the
+    // canvas ids and some line wrapping, and neither ran: both fragments
+    // arrive by htmx swap, and a script in swapped content is re-created as
+    // inline script under the fragment's nonce, which the page's CSP header
+    // never matches. Every one of those four charts was a blank canvas.
+    //
+    // One renderer here, driven by the markup. Each canvas says what it is
+    // (data-chart-kind) and carries its own series (data-chart, JSON). The
+    // parent page calls this after its swap, scoped to its own target, so
+    // nothing has to know either fragment's canvas ids.
+    //
+    // Chart.js must be loaded by the PAGE — for the same nonce reason, a
+    // library tag inside a fragment is refused too. Both parents already
+    // load it.
+    function _combatChart(canvas, kind, d) {
+        var palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7',
+                       '#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
+        if (kind === 'radar') {
+            return new Chart(canvas, {
+                type: 'radar',
+                data: {
+                    labels: d.labels,
+                    datasets: [{
+                        label: 'Profile',
+                        data: d.values,
+                        backgroundColor: 'rgba(200,169,81,0.18)',
+                        borderColor: 'rgba(200,169,81,0.85)',
+                        pointBackgroundColor: '#c8a951',
+                        pointRadius: 3,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            suggestedMin: 0, suggestedMax: 100,
+                            ticks: { display: false },
+                            grid: { color: 'rgba(255,255,255,0.08)' },
+                            angleLines: { color: 'rgba(255,255,255,0.10)' },
+                            pointLabels: { color: '#bfbfbf', font: { size: 10 } }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            var suffix = [' kills', '%', ' solo', ' gang', ' ISK', ' systems'];
+                            var raw = d.raw[ctx.dataIndex];
+                            var v = raw;
+                            if (ctx.dataIndex === 4) v = (raw / 1000000).toFixed(1) + 'M';
+                            else if (typeof raw === 'number') v = (raw % 1 === 0 ? raw : raw.toFixed(1));
+                            return d.labels[ctx.dataIndex] + ': ' + v + suffix[ctx.dataIndex];
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'autopsy') {
+            var labels = ['Solo PvP', 'Small Gang', 'Fleet', 'Smartbomb', 'NPC'];
+            var data = [d.solo, d.small_gang, d.fleet, d.smartbomb, d.npc];
+            return new Chart(canvas, {
+                type: 'doughnut',
+                data: { labels: labels, datasets: [{ data: data,
+                    backgroundColor: ['#5eb1ff', '#4ade80', '#ee5555', '#a855f7', '#fb923c'],
+                    borderColor: '#1a1a1a', borderWidth: 2 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '50%',
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            var total = data.reduce(function (a, b) { return a + b; }, 0);
+                            var pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
+                            return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'profit') {
+            var rows = d.rows || [];
+            var names = d.names || {};
+            return new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: rows.map(function (r) {
+                        return names[r.ship_type_id] || ('Type ' + r.ship_type_id);
+                    }),
+                    datasets: [
+                        { label: 'Destroyed',
+                          data: rows.map(function (r) { return r.isk_destroyed / 1000000; }),
+                          backgroundColor: 'rgba(46,160,67,0.7)' },
+                        { label: 'Lost',
+                          data: rows.map(function (r) { return -r.isk_lost / 1000000; }),
+                          backgroundColor: 'rgba(204,51,51,0.7)' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { stacked: true, ticks: { color: '#888', font: { size: 10 }, callback: function (v) { return v + 'M'; } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { stacked: true, ticks: { color: '#bfbfbf', font: { size: 10 } }, grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            return ctx.dataset.label + ': ' + Math.abs(ctx.raw).toFixed(1) + 'M ISK';
+                        } } }
+                    }
+                }
+            });
+        }
+        if (kind === 'stream') {
+            var datasets = d.datasets || [];
+            datasets.forEach(function (ds, i) {
+                ds.backgroundColor = palette[i % palette.length] + 'cc';
+                ds.borderColor = palette[i % palette.length];
+                ds.pointRadius = 0;
+            });
+            var weeks = d.weeks || 0;
+            var wLabels = [];
+            for (var i = 0; i < weeks; i++) wLabels.push('W' + (i - weeks + 1));
+            return new Chart(canvas, {
+                type: 'line',
+                data: { labels: wLabels, datasets: datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
+                        y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    },
+                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' } }
+                }
+            });
+        }
+        return null;
+    }
+
+    window.renderCombatCharts = window.renderCombatCharts || function (root) {
+        if (typeof Chart === 'undefined') return;
+        var scope = root || document;
+        scope.querySelectorAll('canvas[data-chart-kind]').forEach(function (canvas) {
+            var payload;
+            try { payload = JSON.parse(canvas.dataset.chart || 'null'); }
+            catch (e) { return; }
+            if (!payload) return;
+            // A re-swap hands us a fresh canvas, but Chart.js keeps the old
+            // instance registered against whatever was there; destroy it or
+            // the library throws "Canvas is already in use".
+            var existing = Chart.getChart ? Chart.getChart(canvas) : null;
+            if (existing) existing.destroy();
+            _combatChart(canvas, canvas.dataset.chartKind, payload);
+        });
+    };
+
+    // ── Activity history panel (#history-panel) ─────────────────────────
+    //
+    // partials/activity_history.html carried this as an inline script: fetch
+    // the daily series, build the chart, wire the year slider and its two
+    // step buttons. The fragment arrives by htmx swap, which re-creates a
+    // script element as inline script under the fragment's nonce — the
+    // page's CSP header never matches it — so the panel has shown an empty
+    // canvas and a dead slider.
+    //
+    // This lives here rather than in the panel's own page because that
+    // template is held by concurrent work; actions.js is loaded as a page
+    // script on every authed page, so the code runs under script-src 'self'
+    // either way. The hook below no-ops everywhere the panel is absent.
+    //
+    // Chart.js is loaded by the page, as it already was.
+    function initActivityHistory(panel) {
+        if (typeof Chart === 'undefined') return;
+        var VIEW = 365, H = null, chart = null;
+        var slider = panel.querySelector('#hist-slider');
+        var spanEl = panel.querySelector('#hist-span');
+        var canvas = panel.querySelector('#hist-chart');
+        if (!slider || !spanEl || !canvas) return;
+
+        function fmtIsk(v) {
+            if (v == null) return '';
+            if (v >= 1e12) return (v / 1e12).toFixed(1) + 'T';
+            if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+            return Math.round(v / 1e6) + 'M';
+        }
+
+        function render(start) {
+            var end = Math.min(start + VIEW, H.dates.length);
+            chart.data.labels = H.dates.slice(start, end);
+            chart.data.datasets[0].data = H.pcu_avg.slice(start, end);
+            chart.data.datasets[1].data = H.kills.slice(start, end);
+            chart.data.datasets[2].data = H.isk.slice(start, end);
+            chart.update('none');
+            spanEl.textContent = H.dates[start] + ' → ' + H.dates[end - 1];
+        }
+
+        fetch('/tools/activity/history.json').then(function (r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.json();
+        }).then(function (data) {
+            H = data;
+            var maxStart = Math.max(0, H.dates.length - VIEW);
+            slider.max = maxStart;
+            slider.value = maxStart;  // open on the most recent year
+            var existing = Chart.getChart ? Chart.getChart(canvas) : null;
+            if (existing) existing.destroy();
+            chart = new Chart(canvas, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Avg players', data: [], borderColor: '#c8a951',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y' },
+                    { label: 'Kills/day', data: [], borderColor: '#8899aa',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1' },
+                    { label: 'ISK/day', data: [], borderColor: '#aa5555',
+                      backgroundColor: 'transparent', pointRadius: 0, borderWidth: 1, yAxisID: 'y1', hidden: true },
+                ]},
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                        y: { position: 'left', ticks: { color: '#c8a951' }, grid: { color: '#1a1a1a' } },
+                        y1: { position: 'right', ticks: { color: '#8899aa', callback: function (v) { return v >= 1e9 ? fmtIsk(v) : v; } }, grid: { drawOnChartArea: false } }
+                    },
+                    plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                        tooltip: { callbacks: { label: function (ctx) {
+                            if (ctx.dataset.label === 'ISK/day') return 'ISK: ' + fmtIsk(ctx.parsed.y);
+                            return ctx.dataset.label + ': ' + (ctx.parsed.y == null ? '—' : ctx.parsed.y.toLocaleString());
+                        } } } }
+                }
+            });
+            render(maxStart);
+            // Direct listeners rather than the data-* dispatcher: these
+            // elements are re-created by every swap, and so is this closure,
+            // which owns the chart and the loaded series.
+            slider.addEventListener('input', function () { render(parseInt(slider.value, 10)); });
+            var prev = panel.querySelector('#hist-prev');
+            var next = panel.querySelector('#hist-next');
+            if (prev) prev.addEventListener('click', function () {
+                slider.value = Math.max(0, parseInt(slider.value, 10) - VIEW);
+                render(parseInt(slider.value, 10));
+            });
+            if (next) next.addEventListener('click', function () {
+                slider.value = Math.min(parseInt(slider.max, 10), parseInt(slider.value, 10) + VIEW);
+                render(parseInt(slider.value, 10));
+            });
+        }).catch(function () {
+            var err = panel.querySelector('#hist-error');
+            if (err) err.style.display = '';
+        });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+        var target = e.detail && e.detail.target;
+        if (target && target.id === 'history-panel') initActivityHistory(target);
+    });
+
     // Modal-backdrop close helper. Use on the outer modal element:
     //   <div data-click="closeModalOnBackdrop" data-modal-closer="hideMyModal">
     // Reads the closer function name from data-modal-closer and invokes it
@@ -285,4 +616,191 @@
          * down — the same restart, not a different failure. */
         if (el && el.id === 'updater-panel') updaterRestartBanner(true);
     });
+
+    /* Alert banner dismiss handlers.
+     *
+     * These used to live as inline <script nonce="..."> blocks inside each
+     * banner partial (app/templates/partials/*_alert_banners.html and
+     * update_banner.html). The CSP nonce is minted per REQUEST
+     * (app/middleware/csp_nonce.py), and an htmx-loaded fragment is a
+     * separate request from the page that swaps it in — so a fragment's
+     * inline <script> carries a nonce that never matches the page's CSP
+     * header, and the browser silently refuses to run it. That is why every
+     * banner's (x) button did nothing: window.dismiss*Alert was never even
+     * defined. A static file loaded via <script src> is covered by
+     * script-src 'self' regardless of nonce, so the handlers live here now,
+     * where they actually execute — and the corresponding show/prune logic
+     * moved into base.html's applyDismissState(), which runs under the
+     * PAGE's own nonce on every htmx swap.
+     *
+     * Same localStorage keys and value shapes as the old fragment scripts,
+     * so a dismissal a user already made keeps working:
+     *   vigilant_dismissed_alerts       - structure + inventory + contract
+     *       banners. All three render the shared .structure-alert-banner
+     *       markup, and base.html's applyDismissState() already read this
+     *       ONE key for all three before this fix — so that, not the
+     *       contract partial's own dead dismissContractAlert /
+     *       vigilant_dismissed_contract_alerts, is the key that actually
+     *       governed contract-banner visibility in production. The contract
+     *       partial's button now dispatches here too instead of to a
+     *       same-named handler nothing ever read.
+     *   vigilant_dismissed_timer_alerts - structure timer banners.
+     *   vigilant_dismissed_update       - the "a newer release is
+     *       available" banner, keyed by release TAG (not a plain flag) so a
+     *       newer release is never pre-dismissed by the dismissal of an
+     *       older one.
+     */
+    function _bannerDismissed(key) {
+        try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { return {}; }
+    }
+    function _setBannerDismissed(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    }
+
+    window.dismissStructureAlert = window.dismissStructureAlert || function () {
+        var id = this.dataset && this.dataset.alertKey;
+        if (!id) return;
+        var d = _bannerDismissed('vigilant_dismissed_alerts');
+        d[id] = Date.now();
+        _setBannerDismissed('vigilant_dismissed_alerts', d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+
+    window.dismissTimerAlert = window.dismissTimerAlert || function () {
+        var id = this.dataset && this.dataset.alertKey;
+        if (!id) return;
+        var d = _bannerDismissed('vigilant_dismissed_timer_alerts');
+        d[id] = Date.now();
+        _setBannerDismissed('vigilant_dismissed_timer_alerts', d);
+        var el = document.querySelector('[data-alert-id="' + id + '"]');
+        if (el) el.style.display = 'none';
+    };
+
+    window.dismissUpdateBanner = window.dismissUpdateBanner || function () {
+        var tag = this.dataset && this.dataset.updateTag;
+        if (!tag) return;
+        var d = _bannerDismissed('vigilant_dismissed_update');
+        d[tag] = 1;
+        _setBannerDismissed('vigilant_dismissed_update', d);
+        var el = document.getElementById('update-banner');
+        if (el) el.style.display = 'none';
+    };
+})();
+
+/* ── Structure timer banners: countdown, colour tiers, 1h notification ──────
+ *
+ * This used to be an inline script inside partials/timer_alert_banners.html.
+ * A fragment's script carries the FRAGMENT request's CSP nonce, which never
+ * matches the page's, so from the day the policy went enforcing none of it
+ * ran: the countdown span stayed empty, every banner sat in its neutral tier
+ * and the "timer inside the hour" notification never fired (ISS-035). The
+ * dismiss half was moved out in ISS-033; this is the rest, running here as a
+ * page script under script-src 'self'.
+ *
+ * Tiers, from the original: more than 2h out is neutral; 2h or less is warn;
+ * 1h or less is danger; an expired timer stays up in danger reading (0m) for
+ * 30 minutes and is then hidden. The banner's own data-expires is the clock
+ * source; the fragment re-fetches every 60s and the swap restarts styling
+ * via base.html's htmx:afterSwap hook calling window.styleTimerBanners.
+ *
+ * The notification fires once per timer id when it first enters the hour,
+ * throttled through localStorage (2-day prune, same as the dismiss key), and
+ * ONLY if notifications.js says the user opted in — the bell being enabled
+ * (where permission was requested, from a click) and the "Timer < 1h" type
+ * not muted. Nothing here ever asks for permission itself.
+ */
+(function () {
+    var NOTIFIED_KEY = 'vigilant_timer_notified';
+    var HOUR = 3600000;
+    var EXPIRED_GRACE = 1800000;
+
+    function _notified() {
+        try { return JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '{}'); } catch (e) { return {}; }
+    }
+    function _setNotified(d) {
+        try { localStorage.setItem(NOTIFIED_KEY, JSON.stringify(d)); } catch (e) {}
+    }
+
+    function _tier(el, tier, countdown) {
+        var border = {danger: 'var(--danger)', warn: 'var(--warn)', none: 'var(--border)'}[tier];
+        var bg = {danger: 'rgba(204, 51, 51, 0.10)', warn: 'rgba(200, 169, 81, 0.08)', none: 'transparent'}[tier];
+        var fg = {danger: 'var(--danger)', warn: '#c8a951', none: 'var(--muted)'}[tier];
+        el.style.borderLeftColor = border;
+        el.style.background = bg;
+        el.classList.toggle('is-danger', tier === 'danger');
+        el.classList.toggle('is-warn', tier === 'warn');
+        if (countdown) countdown.style.color = fg;
+    }
+
+    function _notify(el, diff) {
+        var aid = el.getAttribute('data-alert-id');
+        if (!aid) return;
+        var seen = _notified();
+        if (seen[aid]) return;
+        if (typeof window.vigilantNotifAllows !== 'function' || !window.vigilantNotifAllows('structure_timer')) return;
+        var d = el.dataset;
+        var disp = d.disposition || '';
+        var m = Math.floor(diff / 60000);
+        try {
+            new Notification('Timer Alert — ' + m + 'm remaining', {
+                body: disp.charAt(0).toUpperCase() + disp.slice(1) + ' ' + (d.structureType || '') +
+                      ' in ' + (d.system || '') + ' — ' + (d.name || '') + ' — ' + (d.phase || ''),
+                icon: '/static/logo.png',
+                tag: aid,
+            });
+        } catch (e) {}
+        seen[aid] = Date.now();
+        _setNotified(seen);
+    }
+
+    window.styleTimerBanners = function () {
+        var banners = document.querySelectorAll('.timer-alert-banner[data-expires]');
+        if (!banners.length) return;
+        var now = Date.now();
+        banners.forEach(function (el) {
+            if (el.style.display === 'none') return;
+            var expires = new Date(el.dataset.expires + (el.dataset.expires.slice(-1) === 'Z' ? '' : 'Z')).getTime();
+            var diff = expires - now;
+            var countdown = el.querySelector('.timer-banner-countdown');
+
+            if (diff <= 0) {
+                if (diff < -EXPIRED_GRACE) { el.style.display = 'none'; return; }
+                _tier(el, 'danger', countdown);
+                if (countdown) countdown.textContent = '(0m)';
+                return;
+            }
+
+            var h = Math.floor(diff / HOUR);
+            var m = Math.floor((diff % HOUR) / 60000);
+            var s = Math.floor((diff % 60000) / 1000);
+            var parts = [];
+            if (h > 0) parts.push(h + 'h');
+            parts.push(String(m).padStart(2, '0') + 'm');
+            parts.push(String(s).padStart(2, '0') + 's');
+            if (countdown) countdown.textContent = '(' + parts.join(' ') + ')';
+
+            if (diff <= HOUR) {
+                _tier(el, 'danger', countdown);
+                _notify(el, diff);
+            } else if (diff <= 2 * HOUR) {
+                _tier(el, 'warn', countdown);
+            } else {
+                _tier(el, 'none', countdown);
+            }
+        });
+    };
+
+    /* Prune the notified map on the same 2-day cutoff as the dismiss key. */
+    (function () {
+        var seen = _notified(), cutoff = Date.now() - 2 * 86400000, changed = false;
+        for (var k in seen) { if (seen[k] < cutoff) { delete seen[k]; changed = true; } }
+        if (changed) _setNotified(seen);
+    })();
+
+    /* One ticker per page. The seconds field is what makes a sub-hour timer
+       readable, so it ticks every second; the work is a handful of elements
+       and returns immediately when there are none. */
+    if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
+    window._timerBannerInterval = setInterval(window.styleTimerBanners, 1000);
 })();

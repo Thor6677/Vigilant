@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.nav import NAV_GROUPS, item_active, group_active
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.csp_nonce import CSPNonceMiddleware
+from app.middleware.htmx_redirect import HTMXRedirectMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
@@ -84,6 +85,25 @@ def _css_version() -> str:
     return h.hexdigest()[:8]
 
 
+def _js_version() -> str:
+    """Content hash of every page script under static/js/, same purpose as
+    _css_version and for the same 7-day immutable edge cache. The script
+    tags used to carry hand-bumped `?v=1` / `?v=6` suffixes, which nobody
+    bumped: actions.js changed in every release from v1.3.3 on (banner
+    dismiss, then eighteen fragments' worth of handlers) under a URL that
+    never did, so a returning browser kept the old file — and `immutable`
+    means it would not revalidate on a plain reload — leaving every one of
+    those handlers undefined for that user. ISS-039.
+    """
+    h = hashlib.md5()
+    for p in sorted(Path("static/js").glob("*.js")):
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:8]
+
+
 # Every app/routes/*.py and app/auth/routes.py module instantiates its own
 # Jinja2Templates(directory="app/templates") — each gets its own private
 # jinja2.Environment (confirmed in starlette.templating.Jinja2Templates), so
@@ -93,11 +113,13 @@ def _css_version() -> str:
 # modules are imported above (module-level), so by this point they're all
 # present in sys.modules with their `templates` attribute already built.
 CSS_V = _css_version()
+JS_V = _js_version()
 for _mod_name, _mod in list(sys.modules.items()):
     if _mod_name.startswith(("app.routes.", "app.auth.")):
         _templates = getattr(_mod, "templates", None)
         if isinstance(_templates, Jinja2Templates):
             _templates.env.globals["css_v"] = CSS_V
+            _templates.env.globals["js_v"] = JS_V
             # Single-source nav registry (see app/nav.py). base.html renders the
             # desktop nav, mobile menu, and footer from these; landings.py builds
             # its card grids from the same NAV_GROUPS.
@@ -129,6 +151,13 @@ class _RequestTimingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_RequestTimingMiddleware)
+
+# Redirects answered to htmx become `401 + HX-Redirect` (ISS-038). Every
+# route gates itself with a redirect to the login page; XHR follows that
+# redirect and htmx swaps the login page into the request's target — on a
+# polling slot, every tick until the tab is closed. Sits inside the CSP
+# middleware so the rewritten response still carries the policy header.
+app.add_middleware(HTMXRedirectMiddleware)
 
 # CSP nonce middleware (T-012). Stamps a per-request nonce on
 # request.state.csp_nonce and emits an enforcing Content-Security-Policy

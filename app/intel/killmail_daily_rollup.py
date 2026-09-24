@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db.models import (
@@ -26,6 +26,7 @@ from app.db.models import (
     KillmailZoneDailyAggregate,
 )
 from app.db.sde_models import SDESystem
+from app.intel.activity_heatmap import zone_case_expr
 from app.intel.zkb_totals_scraper import fetch_zkb_totals
 
 log = logging.getLogger(__name__)
@@ -77,17 +78,10 @@ async def rollup_recent_days(days: int = 35) -> dict:
             upserted += 1
 
         # ── Per-(date, zone) split. Same source data, joined to sde_systems
-        # for security classification. J-systems (id >= 31000000) are
-        # wormhole regardless of sec; otherwise round security to 1dp and
-        # bucket by the standard k-space rules. Rows without a matching
-        # SDE entry fall into 'unknown' rather than being dropped.
-        zone_expr = case(
-            (Killmail.solar_system_id >= 31000000, "wormhole"),
-            (SDESystem.security.is_(None), "unknown"),
-            (func.round(SDESystem.security, 1) >= 0.5, "highsec"),
-            (func.round(SDESystem.security, 1) > 0.0, "lowsec"),
-            else_="nullsec",
-        ).label("zone")
+        # for security classification. The classifier itself now lives in
+        # app/intel/activity_heatmap.py so this rollup and the hour-of-week
+        # heatmap can never disagree about where a system belongs.
+        zone_expr = zone_case_expr()
         zone_rows = (
             await db.execute(
                 select(

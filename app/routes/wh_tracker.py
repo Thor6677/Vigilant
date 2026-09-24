@@ -1,9 +1,9 @@
 """Live wormhole system tracker (T-034).
 
-A second-monitor page for active wormhole diving: pick characters to
-track, the page polls their ESI location every ~30s, and whenever a
-tracked character is in J-space it renders the full wormhole system
-reference (statics, class, effect — via the shared context builder in
+A second-monitor page for active wormhole diving: pick ONE character to
+track, the page polls its ESI location every ~15s, and whenever that
+character is in J-space it renders the full wormhole system reference
+(statics, class, effect — via the shared context builder in
 app/routes/wormholes.py) plus an intelligence panel sourced from the
 local killmail archive:
 
@@ -11,13 +11,25 @@ local killmail archive:
   * Capital activity — capital kills in the last year (count + latest)
   * Last structure kill — most recent structure loss in the system
 
+When the tracked character is in K-space, the panel renders a compact
+"<name> is in <system>" line instead — there is no wormhole-specific
+content to show, and no error: k-space is a normal, expected location.
+
 Location polling uses esi-location.read_location.v1. Previous-system
 memory is process-local (survives page reloads, resets on deploy).
+
+This used to be a multi-select tracker: several characters could be
+checked at once, and the first one found in J-space (in checkbox order)
+became the headline while the rest trailed as "· Name: system". That
+design is why a selected character's system could silently differ from
+what the panel showed — the headline was "first J-space character among
+those ticked", not "the character I picked". The product decision is
+single selection: the headline is always the one selected character,
+in J-space or not.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -29,9 +41,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Character, Killmail, KillmailAttacker, get_db
 from app.db.sde_models import SDESystem, SDEType
-from app.esi.client import ESIClient, refresh_token
+from app.esi.client import ESIClient, TokenRevoked, refresh_token
 from app.intel.recent_battles import resolve_entity_names
 from app.routes.wormholes import build_wh_system_context
+from app.sde import lookup as sde
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["intel"])
@@ -51,16 +64,30 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-async def _fetch_location(char, db: AsyncSession) -> dict | None:
-    """Current location for one character: {system_id, system_name, is_j}."""
+async def _fetch_location(char, db: AsyncSession) -> tuple[dict | None, str | None]:
+    """Current location for one character: {system_id, system_name, is_j}.
+
+    Returns (location, None) on success or (None, reason) on failure. The
+    reason is surfaced in the panel's error state — a revoked token reads
+    differently to the user than ESI being briefly unreachable, and only
+    one of those is worth re-authenticating over.
+    """
     try:
         token = await refresh_token(char, db)
+    except TokenRevoked as e:
+        log.info("wh_tracker: token revoked for %s: %s", char.character_id, e)
+        return None, "token revoked — re-link this character"
+    except Exception as e:
+        log.info("wh_tracker: token refresh failed for %s: %s", char.character_id, e)
+        return None, f"token refresh failed ({type(e).__name__})"
+
+    try:
         client = ESIClient(token, db=db)
         loc = await client.get(f"/characters/{char.character_id}/location/")
         system_id = int(loc["solar_system_id"])
     except Exception as e:
         log.info("wh_tracker: location fetch failed for %s: %s", char.character_id, e)
-        return None
+        return None, f"ESI location request failed ({type(e).__name__})"
 
     name_row = (await db.execute(
         select(SDESystem.system_name).where(SDESystem.system_id == system_id)
@@ -69,7 +96,7 @@ async def _fetch_location(char, db: AsyncSession) -> dict | None:
         "system_id": system_id,
         "system_name": name_row or f"System {system_id}",
         "is_j": WH_SYSTEM_MIN <= system_id <= WH_SYSTEM_MAX,
-    }
+    }, None
 
 
 def _update_last_seen(char_id: int, loc: dict) -> dict:
@@ -194,20 +221,24 @@ async def wh_tracker_page(request: Request, db: AsyncSession = Depends(get_db)):
 @router.get("/intel/tracker/poll", response_class=HTMLResponse)
 async def wh_tracker_poll(
     request: Request,
-    chars: str = "",
+    char: str = "",
     db: AsyncSession = Depends(get_db),
 ):
-    """One tracker tick: locate the tracked characters, pick whichever is
-    in J-space (first listed wins ties), render the system panel."""
+    """One tracker tick for the single selected character: locate it, then
+    render the full wormhole panel (J-space) or a compact location line
+    (K-space). The headline is always this character — there is no other
+    candidate to pick between any more."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    try:
-        char_ids = [int(x) for x in chars.split(",") if x.strip()]
-    except ValueError:
-        char_ids = []
-    if not char_ids:
+    char_id: int | None = None
+    if char.strip():
+        try:
+            char_id = int(char)
+        except ValueError:
+            char_id = None
+    if char_id is None:
         return templates.TemplateResponse(
             request, "partials/wh_tracker_panel.html",
             {"state": "none", "checked_at": _now()})
@@ -215,45 +246,44 @@ async def wh_tracker_poll(
     r = await db.execute(
         select(Character)
         .where(Character.user_id == user_id)
-        .where(Character.character_id.in_(char_ids)))
-    by_id = {c.character_id: c for c in r.scalars().all()
-             if _LOCATION_SCOPE in (c.scopes or "")}
-
-    located: list[tuple] = []  # (char, entry) in requested priority order
-    for cid in char_ids:
-        char = by_id.get(cid)
-        if not char:
-            continue
-        loc = await _fetch_location(char, db)
-        if loc:
-            located.append((char, _update_last_seen(cid, loc)))
-
-    if not located:
+        .where(Character.character_id == char_id))
+    selected = r.scalar_one_or_none()
+    if not selected or _LOCATION_SCOPE not in (selected.scopes or ""):
         return templates.TemplateResponse(
             request, "partials/wh_tracker_panel.html",
-            {"state": "error", "checked_at": _now()})
+            {"state": "error", "checked_at": _now(),
+             "reason": "character not found or missing the location scope"})
 
-    active = next(((c, e) for c, e in located if e["is_j"]), None)
-    if active is None:
-        # Nobody in J-space — idle state showing where everyone is.
+    loc, reason = await _fetch_location(selected, db)
+    if loc is None:
         return templates.TemplateResponse(
             request, "partials/wh_tracker_panel.html",
-            {"state": "idle", "checked_at": _now(),
-             "locations": [{"char_name": c.character_name,
-                            "system_name": e["system_name"]}
-                           for c, e in located]})
+            {"state": "error", "checked_at": _now(), "reason": reason})
 
-    char, entry = active
+    entry = _update_last_seen(char_id, loc)
+
+    if not entry["is_j"]:
+        # K-space: no wormhole panel to show, just where the character is.
+        # system_info() does one extra region-lookup join beyond what
+        # _update_last_seen already resolved — cheap, and the region is
+        # worth having on the compact line.
+        sys_info = await sde.system_info(db, entry["system_id"])
+        return templates.TemplateResponse(
+            request, "partials/wh_tracker_panel.html",
+            {"state": "kspace",
+             "checked_at": _now(),
+             "char_name": selected.character_name,
+             "system_name": entry["system_name"],
+             "region_name": (sys_info or {}).get("region"),
+             "prev_system_name": entry.get("prev_system_name")})
+
     ctx = await build_wh_system_context(db, entry["system_name"])
     intel = await _system_intel(db, entry["system_id"])
     return templates.TemplateResponse(
         request, "partials/wh_tracker_panel.html",
         {"state": "active",
          "checked_at": _now(),
-         "char_name": char.character_name,
+         "char_name": selected.character_name,
          "prev_system_name": entry.get("prev_system_name"),
          "intel": intel,
-         "others": [{"char_name": c.character_name,
-                     "system_name": e["system_name"]}
-                    for c, e in located if c.character_id != char.character_id],
          **(ctx or {"system": None})})

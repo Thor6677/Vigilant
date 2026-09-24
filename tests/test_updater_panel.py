@@ -34,15 +34,19 @@ def actions():
     return ACTIONS.read_text()
 
 
-def _render_finished(status):
+def _render_finished(status, **overrides):
     """Render the panel as it looks right after a run has reached a terminal
     state: not polling, not busy, a status dict with log_tail. Mirrors the
     context app/routes/admin.py:_updater_context builds, trimmed to what this
     template actually reads.
+
+    Note there is no StrictUndefined here, so a key this helper forgets renders
+    as empty and falsy rather than raising. Assertions below therefore check
+    rendered CONTENT, never the absence of an error.
     """
     env = Environment(loader=FileSystemLoader(_TEMPLATES), autoescape=True)
     tmpl = env.get_template("partials/updater_panel.html")
-    return tmpl.render(
+    context = dict(
         available=True,
         error=None,
         checks={"socket": "ok"},
@@ -54,11 +58,22 @@ def _render_finished(status):
         latest_tag=status.get("to_tag"),
         update_available=False,
         targets=[],
+        # Sidecar version skew. The quiet defaults are the normal state: the
+        # sidecar is on the same release as the app and is not mid-handoff, so
+        # neither the neutral "upgrading itself" line nor the lag warning
+        # renders. Kept here for the same reason the other sections' keys are —
+        # the template reads them unconditionally.
+        updater_version=status.get("to_tag"),
+        updater_lagging=False,
+        self_update=None,
+        self_update_in_flight=False,
         IDLE=IDLE,
         BUSY=BUSY,
         INTERRUPTED=INTERRUPTED,
         **_schedule_defaults(),
     )
+    context.update(overrides)
+    return tmpl.render(**context)
 
 
 def _schedule_defaults():
@@ -288,6 +303,136 @@ def test_different_run_ids_give_different_element_ids():
     assert 'id="updater-log-run-bbbb"' in html_b
     assert "updater-log-run-bbbb" not in html_a
     assert "updater-log-run-aaaa" not in html_b
+
+
+# ── Sidecar version skew ─────────────────────────────────────────────────────
+#
+# The sidecar upgrades itself after a successful in-app update, but never on a
+# timer and never at startup, so a CLI deploy still leaves it behind. Skew that
+# nobody is told about is how a sidecar fix sat undelivered in production; this
+# section is the telling.
+
+MANUAL_RECREATE = "docker compose --profile updater up -d updater"
+
+
+def _self_update(state, target="v1.2.3", error=None):
+    return {"state": state, "target": target, "error": error,
+            "at": "2026-09-21T10:00:00Z"}
+
+
+def test_a_lagging_sidecar_names_both_versions_and_the_command():
+    html = _render_finished(_finished_status(),
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3")
+    assert "v1.2.2" in html and "v1.2.3" in html
+    assert MANUAL_RECREATE in html
+    assert "install directory" in html
+
+
+def test_a_lagging_sidecar_does_not_disable_the_buttons():
+    """Updating is how a lagging sidecar heals itself. Disabling the controls
+    would wedge the one path out of the skew."""
+    html = _render_finished(_finished_status(),
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3",
+                            update_available=True,
+                            latest_tag="v1.2.4",
+                            targets=["v1.2.1"])
+    assert "Update to v1.2.4" in html
+    assert "Roll back" in html
+    assert "disabled" not in html
+
+
+def test_a_lagging_sidecar_adds_no_new_form_or_input():
+    """Every form in the panel is pinned by the tests above, and CSP forbids
+    inline handlers — so the remedy has to be text the operator copies, not
+    another control.
+
+    Measured against the same render without the skew rather than as absolute
+    zeroes: the scheduling section's policy form renders in every idle view,
+    so the question is only whether the notice itself adds anything."""
+    quiet = _render_finished(_finished_status(),
+                             updater_version="v1.2.3",
+                             current_tag="v1.2.3")
+    html = _render_finished(_finished_status(),
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3")
+    assert "install directory" in html       # the notice did render
+    for needle in ("<form", "<input", "<select", "<button", "hx-post"):
+        assert html.count(needle) == quiet.count(needle), needle
+
+
+def test_mid_self_update_is_neutral_and_says_nothing_about_lag():
+    """The skew is about to fix itself. Telling the operator to run a command
+    by hand at that moment would be actively wrong."""
+    for state in ("pulling", "handed_off"):
+        html = _render_finished(_finished_status(),
+                                updater_lagging=True,
+                                updater_version="v1.2.2",
+                                current_tag="v1.2.3",
+                                self_update=_self_update(state),
+                                self_update_in_flight=True)
+        assert "upgrading itself" in html
+        assert "v1.2.3" in html
+        assert MANUAL_RECREATE not in html
+
+
+def test_a_failed_self_update_shows_its_reason_with_the_warning():
+    html = _render_finished(_finished_status(),
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3",
+                            self_update=_self_update(
+                                "failed", error="manifest unknown"))
+    assert MANUAL_RECREATE in html
+    assert "manifest unknown" in html
+
+
+def test_a_newer_sidecar_than_the_app_warns_about_nothing():
+    """The post-rollback state. Forward-only self-update means the sidecar
+    deliberately stayed put while the app went back, and newer-sidecar with
+    older-app is a supported combination."""
+    html = _render_finished(_finished_status(),
+                            updater_lagging=False,
+                            updater_version="v1.2.3",
+                            current_tag="v1.2.2",
+                            self_update=_self_update("done"))
+    assert MANUAL_RECREATE not in html
+    assert "upgrading itself" not in html
+    assert "still running" not in html
+
+
+def test_a_legacy_heartbeat_renders_exactly_as_it_did_before():
+    """A sidecar too old to publish `self_update` at all. Nothing about the
+    skew section may appear, and the rest of the panel is untouched."""
+    html = _render_finished(_finished_status())
+    assert MANUAL_RECREATE not in html
+    assert "upgrading itself" not in html
+    assert "succeeded" in html
+
+
+def test_the_skew_notice_survives_a_run_in_progress():
+    """It is true regardless of run state, and the BUSY branch is exactly where
+    an operator watching a CLI-triggered restart would be looking."""
+    html = _render_finished(_finished_status(),
+                            run_state=BUSY,
+                            polling=True,
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3")
+    assert MANUAL_RECREATE in html
+    assert "in progress" in html
+
+
+def test_the_skew_notice_has_no_inline_handlers():
+    html = _render_finished(_finished_status(),
+                            updater_lagging=True,
+                            updater_version="v1.2.2",
+                            current_tag="v1.2.3")
+    assert not re.search(r"\son(click|change|submit|input|load|error)=", html)
 
 
 # ── Wiring ───────────────────────────────────────────────────────────────────

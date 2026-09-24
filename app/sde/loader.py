@@ -128,9 +128,45 @@ async def needs_update(db: AsyncSession) -> bool:
             except Exception:
                 # Table doesn't exist yet — create_all will make it, next startup will populate
                 return True
+
+        if await _effects_import_is_broken(db):
+            log.warning(
+                "sde_effects has no categories and no names — the rows were "
+                "imported with the legacy YAML field names. Forcing SDE reimport."
+            )
+            return True
     except Exception:
         pass
     return False
+
+
+async def _effects_import_is_broken(db: AsyncSession) -> bool:
+    """Detect an sde_effects table filled by the pre-fix field names.
+
+    Until this was corrected, the importer read `effectName`/`effectCategory`
+    from dogmaEffects.jsonl, which uses `name`/`effectCategoryID`. Every row
+    therefore landed with an empty name and category 0 — and category 0 is
+    "passive", so the fitting engine's category filter matched every effect
+    and could not separate passive from active, online or overload.
+
+    An install that imported before the fix has no way to notice: the table is
+    populated, so the empty-table heuristics above pass it. Detecting the bad
+    shape here means the reimport happens by itself, with no operator step.
+
+    The test is a conjunction — populated, AND not one row with a non-zero
+    category, AND not one row with a name — because any real SDE has thousands
+    of each. Requiring all three is what stops this from firing on a healthy
+    database and re-downloading the SDE on every boot.
+    """
+    r = await db.execute(text(
+        "SELECT COUNT(1), "
+        "       SUM(CASE WHEN effect_category != 0 THEN 1 ELSE 0 END), "
+        "       SUM(CASE WHEN effect_name IS NOT NULL AND effect_name != '' "
+        "                THEN 1 ELSE 0 END) "
+        "FROM sde_effects"
+    ))
+    total, with_category, with_name = r.first()
+    return bool(total) and not (with_category or 0) and not (with_name or 0)
 
 
 def _iter_jsonl(zf: zipfile.ZipFile, filename: str):
@@ -1115,10 +1151,17 @@ async def download_and_import(db: AsyncSession):
         for item in _iter_jsonl(zf, "dogmaEffects.jsonl"):
             try:
                 eff_id = int(item["_key"])
+                # The JSONL keys are `name` and `effectCategoryID`. Reading
+                # "effectName"/"effectCategory" (their names in the legacy YAML
+                # SDE) silently stored an empty name and category 0 for EVERY
+                # effect, which made `effect_category` useless as a filter:
+                # passive, active, online and overload effects were all 0 and
+                # therefore all matched PASSIVE_EFFECT_CATS. engine.py now
+                # filters on the real categories, so the two must land together.
                 eff_batch.append({
                     "effect_id": eff_id,
-                    "effect_name": item.get("effectName", ""),
-                    "effect_category": int(item.get("effectCategory", 0)),
+                    "effect_name": item.get("name", ""),
+                    "effect_category": int(item.get("effectCategoryID", 0)),
                     "discharge_attribute_id": item.get("dischargeAttributeID"),
                     "duration_attribute_id": item.get("durationAttributeID"),
                 })

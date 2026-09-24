@@ -97,12 +97,42 @@ def test_dockerfile_declares_no_user_directive():
                 "uid must come from compose, not the image"
 
 
+def test_dockerfile_declares_no_entrypoint():
+    """The self-update helper is this image run with a `docker compose …`
+    command appended after the image reference. That overrides CMD; it does NOT
+    override an ENTRYPOINT, which would instead receive the compose argv as
+    arguments and try to run the supervisor with them.
+
+    It matters across versions, which is the whole point of the helper: the
+    image launched may be NEWER than the sidecar that launched it. An ENTRYPOINT
+    added in some future release would break a self-update FROM every release
+    before it, discovered only in production. Also note the helper needs nothing
+    from this image but docker-cli-compose, which every updater image has.
+    """
+    with open(DOCKERFILE) as fh:
+        for line in fh:
+            assert not line.strip().upper().startswith("ENTRYPOINT"), \
+                "the self-update helper overrides CMD; an ENTRYPOINT defeats it"
+
+
 def test_dockerfile_sets_home_and_unbuffered_output():
     with open("updater/Dockerfile") as fh:
         src = fh.read()
     assert "HOME=" in src, "the container uid is not in /etc/passwd; git needs HOME"
     assert "PYTHONUNBUFFERED=1" in src, \
         "without this the deploy log appears only when the process exits"
+
+
+def test_dockerfile_disables_bytecode_writes():
+    """/opt/updater is root-owned (no USER directive), so a .pyc write there
+    already fails silently under a writable rootfs — and now that the rootfs
+    is genuinely read-only (compose's `updater:` service and the self-update
+    helper's `docker run` both set it), that silent failure is the only thing
+    standing in for an explicit one. Parsed via _dockerfile_env(), not a
+    substring check, for the same reason this file's own docstring gives for
+    parsing the GIT_CONFIG block: the interesting part is the VALUE, and a
+    substring match would pass just as happily for a typo'd key."""
+    assert _dockerfile_env().get("PYTHONDONTWRITEBYTECODE") == "1"
 
 
 # ── The HTTPS rewrite that lets an SSH-cloned host repo fetch from here ──────

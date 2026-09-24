@@ -42,8 +42,13 @@ from app.fitting.constants import (
     ATTR_CAPACITOR, ATTR_CAP_RECHARGE,
     ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
-    OVERLOAD_ATTR_MAP,
+    OVERLOAD_SOURCE_ATTR_PREFIX,
+    ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
+    EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER,
+    ATTR_CAPACITOR_BONUS, ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER,
+    CHARGE_GROUP_ATTRS,
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
+    ATTR_TRACKING_SPEED, ATTR_OPTIMAL_RANGE,
     ATTR_MISSILE_DAMAGE_MULTIPLIER, ATTR_MISSILE_DAMAGE_MULTIPLIER_BONUS,
     ATTR_ARMOR_DAMAGE_AMOUNT, ATTR_SHIELD_BONUS,
     ATTR_HI_SLOTS, ATTR_MED_SLOTS, ATTR_LOW_SLOTS,
@@ -127,8 +132,21 @@ EFFECT_CAT_ACTIVE = 1
 EFFECT_CAT_ONLINE = 4
 EFFECT_CAT_OVERLOAD = 5
 
-# Passive-equivalent categories (fire when module is online)
-PASSIVE_EFFECT_CATS = {EFFECT_CAT_PASSIVE, EFFECT_CAT_ONLINE}
+# Categories whose modifiers apply as soon as the module is online. Category 1
+# (active) belongs here because this engine models a fit as "everything that
+# can be running, is" — a hardener's resonance effect (5231), a tracking
+# computer's bonus (4559) and an afterburner's speed boost are all category 1,
+# and a fitting tool that dropped them would show no resists and no speed.
+#
+# Overload (5) is deliberately absent: those modifiers target the module's own
+# attributes and only fire when the pilot overheats that specific module, so
+# they are applied per item in `_apply_item_overload` rather than here.
+MODULE_EFFECT_CATS = {EFFECT_CAT_PASSIVE, EFFECT_CAT_ACTIVE, EFFECT_CAT_ONLINE}
+
+# Domain of a modifier that targets the module's own attributes ("this item").
+DOMAIN_SELF = "itemID"
+# Domain of a modifier on a CHARGE that targets the module holding it.
+DOMAIN_PARENT_MODULE = "otherID"
 
 # Stacking penalty constant: 2.67^2 = 7.1289
 STACKING_CONSTANT = 7.1289
@@ -160,6 +178,15 @@ STACKING_CONSTANT = 7.1289
 # to inject — and nothing on 12019 references 3306. CCP fixed the redirect
 # upstream, so no overrides are warranted. This dict stays empty by design;
 # it is not a TODO. See tests/test_ship_modifier_overrides.py.
+#
+# ISS-029 close-out (2026-09-24): the same question asked of EVERY hull, not
+# twelve — scripts/audit_ship_modifiers.py screens all published ships with
+# trait rows for a skill filter from a weapon system the hull's traits do
+# not name (the ISS-015 shape). Against the live SDE: 419 hulls, 2,155
+# skill-filtered modifiers, zero genuine mismatches. The "~200 ships" in
+# the original estimate came from Pyfa's HISTORICAL override coverage; CCP
+# has since cleaned modifierInfo up. Re-run the script after an SDE import;
+# it exits non-zero on an unexplained flag.
 #
 # If a future hull IS found broken, verify the correct target against
 # github.com/pyfa-org/Pyfa (eos/effects/) before adding an entry.
@@ -202,6 +229,129 @@ def apply_stacking_penalties(modifiers: list[float]) -> float:
             penalty = stacking_penalty(i)
             result *= 1 + (mod - 1) * penalty
     return result
+
+
+# ── Overload / heat ─────────────────────────────────────────────────────
+
+def _apply_self_modifiers(attrs: dict[int, float], rows: list[tuple[int, int, int]]) -> None:
+    """Apply "this item modifies its own attribute" modifier rows in place.
+
+    Each row is (modified_attribute_id, modifying_attribute_id, operator).
+    The source value is read from the SAME dict being modified, which is what
+    domain="itemID" means: e.g. an EM Armor Hardener II's overload row is
+    (984 emDamageResistanceBonus, 1208 overloadHardeningBonus, 6 postPercent),
+    so 984 becomes -55 * (1 + 20/100) = -66.
+
+    Reading the source from `attrs` (not from the unmodified SDE row) is
+    deliberate — it means a ship or subsystem bonus that boosts the module's
+    overload strength is already folded in by the time we get here, matching
+    Pyfa, where `getModifiedItemAttr` returns the post-bonus value.
+    """
+    for target_attr, source_attr, operator in rows:
+        source_val = attrs.get(source_attr)
+        if source_val is None or source_val == 0:
+            continue
+        if target_attr not in attrs and target_attr != ATTR_DAMAGE_MULTIPLIER:
+            # Nothing to scale. A percentage bonus on an absent attribute is a
+            # no-op, not a zero — skip rather than inventing a base value.
+            #
+            # damageMultiplier is the one exception, and it is not academic:
+            # a launcher has no damageMultiplier row in the SDE at all, yet
+            # overloadRofBonus/overloadDamageModifier rows target it. Dogma
+            # treats an absent damageMultiplier as its default of 1.0, which
+            # is what _apply_modifier substitutes. Letting it through keeps
+            # the behaviour the hand-written OVERLOAD_ATTR_MAP used to have.
+            continue
+        _apply_modifier(attrs, target_attr, operator, source_val)
+
+
+# ── Reactive Armor Hardener phasing ─────────────────────────────────────
+
+def rah_total_resist_points(resonances) -> float:
+    """Total resist percentage points a reactive hardener has to distribute.
+
+    The RAH's four armor resonance attributes are its *pool*: an unmodified
+    Reactive Armor Hardener carries 0.85 on all four (15% each, 60 points
+    total). Skills, ship bonuses and heat can move that number, so it is
+    computed from the module's live attributes rather than hardcoded.
+    """
+    return sum((1.0 - r) * 100.0 for r in resonances)
+
+
+def suggest_rah_phasing(
+    damage_weights: tuple[float, float, float, float],
+    total_points: float,
+) -> dict[str, float]:
+    """Resist points per damage type that best match an incoming damage profile.
+
+    Distributes the module's whole pool in proportion to the incoming damage
+    weights. This reproduces the equilibrium of Pyfa's cycle-by-cycle
+    simulation (eos/effects.py Effect4928 `adaptiveArmorHardener`) exactly for
+    the cases that simulation resolves cleanly:
+
+      - one damage type      → the whole pool on that type   (60/0/0/0)
+      - two, evenly split    → half the pool on each         (30/30/0/0)
+      - uniform              → an even quarter each          (15/15/15/15)
+
+    For lopsided three- and four-type profiles the real module oscillates
+    between neighbouring states and Pyfa averages the loop; proportional
+    distribution is a close approximation of that average, not a replay of it.
+    It is offered to the UI as a suggestion the pilot can edit, which is why an
+    approximation is acceptable here.
+    """
+    weights = [max(0.0, w) for w in damage_weights]
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        share = [total_points / 4.0] * 4
+    else:
+        share = [total_points * w / total_weight for w in weights]
+    return {key: round(val, 2) for key, val in zip(DAMAGE_TYPE_KEYS, share)}
+
+
+def normalise_resist_phasing(
+    phasing: dict, total_points: float,
+) -> tuple[tuple[float, float, float, float], str | None]:
+    """Coerce a user-supplied phasing dict into a usable distribution.
+
+    Returns ((em, thermal, kinetic, explosive) points, warning or None).
+
+    A reactive hardener can only ever move points between damage types, never
+    create them, so the four values must sum to the module's pool. Rather than
+    rejecting a request whose numbers don't add up — the UI's linked inputs can
+    easily produce 59.9 through rounding — the distribution is rescaled and the
+    caller is handed a warning to surface.
+
+    Each type is also clamped to [0, total_points]: 0 resist is the floor, and
+    the ceiling is the whole pool on a single type, which is exactly what the
+    in-game module reaches against single-type damage. There is no separate
+    per-type cap attribute in the SDE — the cap is emergent, and this is it.
+    """
+    values = []
+    for key in DAMAGE_TYPE_KEYS:
+        try:
+            values.append(float(phasing.get(key, 0) or 0))
+        except (TypeError, ValueError):
+            values.append(0.0)
+
+    clamped = [min(max(0.0, v), total_points) for v in values]
+    was_clamped = any(abs(c - v) > 1e-9 for c, v in zip(clamped, values))
+
+    current = sum(clamped)
+    if current <= 0:
+        even = total_points / 4.0
+        return (even, even, even, even), (
+            "resist_phasing summed to zero; distributed evenly instead"
+        )
+
+    if abs(current - total_points) > 0.05 or was_clamped:
+        scale = total_points / current
+        clamped = [v * scale for v in clamped]
+        return tuple(clamped), (
+            f"resist_phasing summed to {current:.1f} points, normalised to the "
+            f"module's {total_points:.1f}"
+        )
+
+    return tuple(clamped), None
 
 
 async def get_type_dogma_attrs(db: AsyncSession, type_id: int) -> dict[int, float]:
@@ -255,7 +405,7 @@ async def _get_module_modifiers(
         select(SDETypeEffect.type_id, SDETypeEffect.effect_id)
         .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
         .where(SDETypeEffect.type_id.in_(type_ids))
-        .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+        .where(SDEEffect.effect_category.in_(MODULE_EFFECT_CATS))
     )
     type_effects: dict[int, list[int]] = defaultdict(list)
     all_effect_ids = set()
@@ -290,6 +440,73 @@ async def _get_module_modifiers(
         for eff_id in eff_ids:
             out[tid].extend(effect_modifiers.get(eff_id, []))
     return out
+
+
+async def _get_self_modifiers(
+    db: AsyncSession, type_ids: list[int], domain: str,
+    overload_only: bool,
+) -> dict[int, list[tuple[int, int, int]]]:
+    """Fetch modifier rows that target a single item rather than the ship.
+
+    Two shapes share this query:
+
+    - ``domain="itemID", overload_only=True`` — a module's overload rows.
+    - ``domain="otherID", overload_only=False`` — a charge's rows, which
+      target the module the charge is loaded into.
+
+    Overload rows are selected by their SOURCE attribute's name beginning with
+    "overload" rather than by ``effect_category == 5``. Both identify exactly
+    the same 49 rows in the SDE (see constants.OVERLOAD_SOURCE_ATTR_PREFIX),
+    but the name test also works against a database imported before the
+    effect-category field name was corrected in app/sde/loader.py, where every
+    effect landed as category 0. That keeps this correct with or without an
+    SDE re-import.
+
+    Returns {type_id: [(modified_attr, modifying_attr, operator), ...]}.
+    """
+    if not type_ids:
+        return {}
+
+    query = (
+        select(SDETypeEffect.type_id, SDEModifier.modified_attribute_id,
+               SDEModifier.modifying_attribute_id, SDEModifier.operator)
+        .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
+        .where(SDETypeEffect.type_id.in_(type_ids))
+        .where(SDEModifier.domain == domain)
+        .where(SDEModifier.func == "ItemModifier")
+    )
+    if overload_only:
+        query = query.join(
+            SDEDogmaAttribute,
+            SDEDogmaAttribute.attribute_id == SDEModifier.modifying_attribute_id,
+        ).where(SDEDogmaAttribute.attribute_name.like(f"{OVERLOAD_SOURCE_ATTR_PREFIX}%"))
+
+    out: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
+    for row in (await db.execute(query)).fetchall():
+        out[row.type_id].append(
+            (row.modified_attribute_id, row.modifying_attribute_id, row.operator)
+        )
+    return out
+
+
+async def _get_types_with_effect(
+    db: AsyncSession, type_ids: list[int], effect_id: int,
+) -> set[int]:
+    """Which of these types carry a given dogma effect.
+
+    Used to classify modules by what they actually DO rather than by name — a
+    reactive armor hardener is any module with effect 4928, which covers the
+    T1 module and its faction variant without a name or group list to keep up
+    to date.
+    """
+    if not type_ids:
+        return set()
+    result = await db.execute(
+        select(SDETypeEffect.type_id)
+        .where(SDETypeEffect.type_id.in_(type_ids))
+        .where(SDETypeEffect.effect_id == effect_id)
+    )
+    return {row[0] for row in result.fetchall()}
 
 
 def _apply_modifier(attrs: dict[int, float], target_attr: int, operator: int, value: float):
@@ -373,7 +590,7 @@ async def _apply_ship_hull_bonuses(
         select(SDETypeEffect.effect_id)
         .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
         .where(SDETypeEffect.type_id == ship_type_id)
-        .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+        .where(SDEEffect.effect_category.in_(MODULE_EFFECT_CATS))
     )
     ship_effect_ids = [row[0] for row in result.fetchall()]
     if not ship_effect_ids:
@@ -892,6 +1109,197 @@ TARGET_RESIST_PROFILES = {
 }
 
 
+def _apply_charge_to_module(
+    module_attrs: dict[int, float],
+    charge_attrs: dict[int, float],
+    charge_rows: list[tuple[int, int, int]],
+    charge_group_id: int | None,
+    is_injector: bool,
+) -> None:
+    """Fold a loaded charge's effects into its parent module's attributes.
+
+    Most of this is plain dogma. A charge's effects carry modifiers with
+    domain "otherID" — "the module I am loaded into" — and the source value is
+    read from the charge while the target lives on the module. A Tracking Speed
+    Script is the canonical case: its modifier row targets the tracking
+    computer's own trackingSpeedBonus, so the module's bonus grows while the
+    script is loaded. The module then pushes that boosted bonus out to the
+    turrets through its own effect, which the module-to-module pass in
+    `calculate_fitting_stats` handles — which is why the per-item dicts are
+    built before that pass runs and not after it.
+
+    Two mechanics are NOT in the dogma data and are hand-coded here, as they
+    are in Pyfa:
+
+    1. Capacitor injection. The charge's `capacitorBonus` (67) has no modifier
+       row anywhere; Pyfa's Effect48 `powerBooster` assigns
+       `capacitorNeed = -capAmount`. The generic path above has already zeroed
+       the module's own capacitorNeed via the charge's `capNeedBonus` (317,
+       -100%), so the negative value is the whole cap effect. `cap_sim` reads a
+       negative cap_need as an injection.
+    2. Ancillary armour repairers. Effect 5275 `fueledArmorRepair` carries no
+       modifiers; Pyfa hardcodes a x3 for Nanite Repair Paste. The SDE does
+       record the multiplier as `chargedArmorDamageMultiplier` (1886) on the
+       module, so the value is read from the data even though the trigger is
+       not. It applies only when the loaded charge is one the module actually
+       accepts, so an arbitrary charge_type_id in the request cannot buff a rep.
+    """
+    for target_attr, source_attr, operator in charge_rows:
+        source_val = charge_attrs.get(source_attr)
+        if source_val is None or source_val == 0:
+            continue
+        if target_attr not in module_attrs and target_attr != ATTR_DAMAGE_MULTIPLIER:
+            # Same exception as _apply_self_modifiers: dogma's default for an
+            # absent damageMultiplier is 1.0, not "skip".
+            continue
+        _apply_modifier(module_attrs, target_attr, operator, source_val)
+
+    if is_injector:
+        injected = charge_attrs.get(ATTR_CAPACITOR_BONUS, 0)
+        if injected:
+            module_attrs[ATTR_CAPACITOR_NEED] = -injected
+
+    charge_multiplier = module_attrs.get(ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER)
+    accepted_groups = {module_attrs.get(a) for a in CHARGE_GROUP_ATTRS}
+    if (
+        charge_multiplier
+        and charge_group_id is not None
+        and charge_group_id in accepted_groups
+        and module_attrs.get(ATTR_ARMOR_DAMAGE_AMOUNT)
+    ):
+        module_attrs[ATTR_ARMOR_DAMAGE_AMOUNT] *= charge_multiplier
+
+
+def _apply_rah_phasing(attrs: dict[int, float], phasing: dict) -> str | None:
+    """Override a reactive hardener's four resonances with a phasing request.
+
+    The module's current resonances define the size of the pool; the request
+    says how to spread it. Returns a warning string when the request had to be
+    adjusted, or None when it was used as given.
+    """
+    resonances = [attrs.get(attr_id, 1.0) for attr_id in ARMOR_RESONANCE_ATTRS]
+    total_points = rah_total_resist_points(resonances)
+    if total_points <= 0:
+        return "resist_phasing ignored: the module has no resistance to distribute"
+
+    points, warning = normalise_resist_phasing(phasing, total_points)
+    for attr_id, type_points in zip(ARMOR_RESONANCE_ATTRS, points):
+        attrs[attr_id] = 1.0 - type_points / 100.0
+    return warning
+
+
+async def _build_item_attrs(
+    db: AsyncSession,
+    items: list[dict],
+    module_attrs_map: dict[int, dict[int, float]],
+    charge_attrs_map: dict[int, dict[int, float]],
+) -> tuple[list[tuple[dict, dict]], set[int], list[str]]:
+    """Give every fitted item its own attribute dict.
+
+    Everything upstream of this point is keyed by type_id, which is right for
+    anything that depends only on what a module IS — skills, hull bonuses,
+    implants. It is wrong for anything that depends on how a *particular copy*
+    is being used: which ammo is loaded, whether this one is overheated, how a
+    reactive hardener is phased. Previously a single overheated module heated
+    every copy of its type, and a charge only ever reached weapon damage.
+
+    Returns (list of (item, attrs) in `items` order, reactive-hardener type
+    IDs, warnings for the caller to surface).
+
+    Application order per item is charge → phasing → overload, so heat
+    multiplies on top of everything else, exactly as in game. Note that all
+    three are ordinary multiplications on the module's OWN attributes, applied
+    before the module joins the ship-wide modifier pass — which is what makes
+    "heat is applied before stacking penalties" true without any special
+    handling: an overheated hardener's boosted resistance bonus simply enters
+    the existing stacking machinery as a stronger modifier.
+    """
+    slotted = [i for i in items if i.get("slot") not in ("drone", "cargo")]
+    slotted_type_ids = list({i["type_id"] for i in slotted})
+    charge_type_ids = list({
+        i["charge_type_id"] for i in items if i.get("charge_type_id")
+    })
+
+    overload_rows = await _get_self_modifiers(
+        db, slotted_type_ids, DOMAIN_SELF, overload_only=True,
+    )
+    charge_rows = await _get_self_modifiers(
+        db, charge_type_ids, DOMAIN_PARENT_MODULE, overload_only=False,
+    )
+    rah_type_ids = await _get_types_with_effect(
+        db, slotted_type_ids, EFFECT_ADAPTIVE_ARMOR_HARDENER,
+    )
+    injector_type_ids = await _get_types_with_effect(
+        db, slotted_type_ids, EFFECT_POWER_BOOSTER,
+    )
+
+    charge_groups: dict[int, int] = {}
+    if charge_type_ids:
+        result = await db.execute(
+            select(SDEType.type_id, SDEType.group_id)
+            .where(SDEType.type_id.in_(charge_type_ids))
+        )
+        charge_groups = {row.type_id: row.group_id for row in result.fetchall()}
+
+    enriched: list[tuple[dict, dict]] = []
+    warnings: list[str] = []
+
+    for item in items:
+        type_id = item["type_id"]
+        base_attrs = module_attrs_map.get(type_id, {})
+
+        # Drones and cargo have no per-copy state, so they keep sharing the
+        # type-level dict rather than paying for a copy each.
+        if item.get("slot") in ("drone", "cargo"):
+            enriched.append((item, base_attrs))
+            continue
+
+        attrs = dict(base_attrs)
+
+        # An offline module runs no effects at all, so none of these apply —
+        # it still gets its own dict so downstream code can treat all items
+        # uniformly.
+        if item.get("online", True):
+            charge_type_id = item.get("charge_type_id")
+            if charge_type_id:
+                _apply_charge_to_module(
+                    attrs,
+                    charge_attrs_map.get(charge_type_id, {}),
+                    charge_rows.get(charge_type_id, []),
+                    charge_groups.get(charge_type_id),
+                    type_id in injector_type_ids,
+                )
+
+            phasing = item.get("resist_phasing")
+            if phasing:
+                # `items` reaches the engine as whatever JSON the request
+                # carried, so this is the one field here that is unvalidated
+                # client input. A list or a bare string would otherwise reach
+                # .get() and 500 the handler — warn like every other bad
+                # phasing instead.
+                if not isinstance(phasing, dict):
+                    warnings.append(
+                        "resist_phasing ignored: expected an object keyed by "
+                        "damage type"
+                    )
+                elif type_id in rah_type_ids:
+                    warning = _apply_rah_phasing(attrs, phasing)
+                    if warning:
+                        warnings.append(warning)
+                else:
+                    warnings.append(
+                        f"resist_phasing ignored for type {type_id}: not a "
+                        f"reactive armor hardener"
+                    )
+
+            if item.get("overheated"):
+                _apply_self_modifiers(attrs, overload_rows.get(type_id, []))
+
+        enriched.append((item, attrs))
+
+    return enriched, rah_type_ids, warnings
+
+
 async def calculate_fitting_stats(
     db: AsyncSession, ship_type_id: int, items: list[dict],
     damage_profile: str = "uniform",
@@ -949,30 +1357,12 @@ async def calculate_fitting_stats(
         raw_charge = await get_types_dogma_attrs(db, charge_type_ids)
         charge_attrs_map = {tid: dict(attrs) for tid, attrs in raw_charge.items()}
 
-    # ── Apply overload bonuses to overheated module attrs ───────────────────
-    # Only apply once per type_id (all copies share the same attrs dict)
-    overloaded_types = set()
-    for item in items:
-        if item.get("overheated") and item.get("online", True):
-            tid = item["type_id"]
-            if tid in overloaded_types or tid not in module_attrs_map:
-                continue
-            overloaded_types.add(tid)
-            attrs = module_attrs_map[tid] = dict(module_attrs_map.get(tid, {}))
-            raw_attrs = await get_type_dogma_attrs(db, tid)
-            for ol_attr_id, (target_attr, is_reduction) in OVERLOAD_ATTR_MAP.items():
-                ol_val = raw_attrs.get(ol_attr_id)
-                if ol_val is None or ol_val == 0:
-                    continue
-                if target_attr is None:
-                    continue
-                current = attrs.get(target_attr)
-                if current is None:
-                    if target_attr == ATTR_DAMAGE_MULTIPLIER:
-                        current = 1.0
-                    else:
-                        continue
-                attrs[target_attr] = current * (1 + ol_val / 100)
+    # Overload, charges and reactive-hardener phasing are NOT applied here.
+    # They are per-ITEM concerns — two identical turrets can carry different
+    # ammo, and only one of a pair of hardeners may be overheated — whereas
+    # `module_attrs_map` is keyed by type_id and shared by every copy. They are
+    # applied to per-item copies once this type-level pipeline is complete;
+    # see `_build_item_attrs` below.
 
     # ── Apply T3C subsystem bonuses ─────────────────────────────────────────
     # Subsystems provide:
@@ -1066,6 +1456,37 @@ async def calculate_fitting_stats(
                 current *= (1 + p / 100)
             ship_attrs[attr_id] = current
 
+    # ── Per-item attributes ───────────────────────────────────────────────
+    # The type-level pipeline (subsystems, hull bonuses, skills) is finished.
+    # Everything above depends only on what a module IS, which is why keying
+    # by type_id was right for it. Everything below depends on how a
+    # particular copy is being USED — which ammo or script is loaded, whether
+    # this one is overheated, how a reactive hardener is phased — so each
+    # fitted item gets its own attribute dict from here on.
+    #
+    # This must happen BEFORE the module-to-module pass below, not after it.
+    # A tracking computer's strength attribute is raised by its script and
+    # then pushed out to the turrets by the module's own effect; building the
+    # per-item dicts afterwards meant that pass read the module's unscripted
+    # value, so a loaded script changed the module and nothing else.
+    enriched_items, rah_type_ids, warnings = await _build_item_attrs(
+        db, items, module_attrs_map, charge_attrs_map,
+    )
+    enriched_fitted = [
+        (item, attrs) for item, attrs in enriched_items
+        if item.get("slot") not in ("drone", "cargo") and item.get("online", True)
+    ]
+
+    # Per-item attribute dicts grouped by type, for the pass below to write
+    # into. Drones and cargo share their type-level dict by design (they have
+    # no per-copy state), so the same object can appear under several items —
+    # dedupe by identity or a group bonus would be applied to them twice.
+    item_attrs_by_type: dict[int, list[dict[int, float]]] = defaultdict(list)
+    for _item, _attrs in enriched_items:
+        bucket = item_attrs_by_type[_item["type_id"]]
+        if not any(existing is _attrs for existing in bucket):
+            bucket.append(_attrs)
+
     # ── Apply module-to-module bonuses (Bastion, Siege, etc.) ──────────────
     # Some modules (Bastion, Siege) have effects that modify OTHER modules
     # via LocationRequiredSkillModifier / LocationGroupModifier.
@@ -1082,7 +1503,7 @@ async def calculate_fitting_stats(
             .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
             .where(SDETypeEffect.type_id.in_(non_sub_module_type_ids))
-            .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+            .where(SDEEffect.effect_category.in_(MODULE_EFFECT_CATS))
             .where(SDEModifier.domain.in_(["shipID", "charID"]))
             .where(SDEModifier.func.in_([
                 "LocationRequiredSkillModifier",
@@ -1093,10 +1514,15 @@ async def calculate_fitting_stats(
 
         cross_mods = mod_cross_result.fetchall()
         if cross_mods:
-            # Count copies of each module type in the fit
-            module_copies: dict[int, int] = defaultdict(int)
-            for item in fitted_items:
-                module_copies[item["type_id"]] += item.get("quantity", 1)
+            # Source modules, per copy rather than per type: two tracking
+            # computers can hold different scripts, and only one of a pair of
+            # damage mods may be overheated, so each contributes its own
+            # source value.
+            source_items: dict[int, list[tuple[int, dict[int, float]]]] = defaultdict(list)
+            for _item, _attrs in enriched_fitted:
+                source_items[_item["type_id"]].append(
+                    (_item.get("quantity", 1), _attrs)
+                )
 
             # Build skill/group lookups for all module types
             all_tid_list = list(module_attrs_map.keys())
@@ -1128,9 +1554,8 @@ async def calculate_fitting_stats(
 
             for cm in cross_mods:
                 src_type_id = cm[0]
-                src_attrs = module_attrs_map.get(src_type_id, {})
-                src_val = src_attrs.get(cm[1])
-                if src_val is None:
+                sources = source_items.get(src_type_id)
+                if not sources:
                     continue
 
                 # Find target modules/drones
@@ -1153,21 +1578,28 @@ async def calculate_fitting_stats(
 
                 target_attr = cm[2]
                 operator = cm[3]
-                copies = module_copies.get(src_type_id, 1)
 
                 for tid in matching:
-                    if tid not in module_attrs_map:
+                    targets = item_attrs_by_type.get(tid)
+                    if not targets:
                         continue
 
-                    if operator == OP_POST_MUL:
-                        for _ in range(copies):
-                            cross_collectors[(tid, target_attr, src_type_id)].append(src_val)
-                    elif operator == OP_POST_PERCENT:
-                        for _ in range(copies):
-                            cross_collectors[(tid, target_attr, src_type_id)].append(1.0 + src_val / 100.0)
-                    elif operator == OP_MOD_ADD:
-                        attrs = module_attrs_map[tid]
-                        attrs[target_attr] = attrs.get(target_attr, 0) + src_val * copies
+                    for copies, src_attrs in sources:
+                        src_val = src_attrs.get(cm[1])
+                        if src_val is None:
+                            continue
+
+                        if operator == OP_POST_MUL:
+                            for _ in range(copies):
+                                cross_collectors[(tid, target_attr, src_type_id)].append(src_val)
+                        elif operator == OP_POST_PERCENT:
+                            for _ in range(copies):
+                                cross_collectors[(tid, target_attr, src_type_id)].append(1.0 + src_val / 100.0)
+                        elif operator == OP_MOD_ADD:
+                            for attrs in targets:
+                                attrs[target_attr] = (
+                                    attrs.get(target_attr, 0) + src_val * copies
+                                )
 
             # Apply multipliers per group with stacking penalties, then combine.
             # Reorganize: (target_tid, target_attr) → list of per-group products.
@@ -1183,13 +1615,13 @@ async def calculate_fitting_stats(
                 combined[(tid, target_attr)] *= group_product
 
             for (tid, target_attr), product in combined.items():
-                attrs = module_attrs_map[tid]
-                if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
-                    attrs[target_attr] = 1.0
-                current = attrs.get(target_attr, 0)
-                if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
-                    current = 1.0
-                attrs[target_attr] = current * product
+                for attrs in item_attrs_by_type.get(tid, []):
+                    if target_attr == ATTR_DAMAGE_MULTIPLIER and target_attr not in attrs:
+                        attrs[target_attr] = 1.0
+                    current = attrs.get(target_attr, 0)
+                    if current == 0 and target_attr == ATTR_DAMAGE_MULTIPLIER:
+                        current = 1.0
+                    attrs[target_attr] = current * product
 
     # ── Apply fitting-skill bonuses to ship attributes ────────────────────
     # These core skills use ItemModifier with domain=shipID to add +5% per
@@ -1272,7 +1704,7 @@ async def calculate_fitting_stats(
             .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
             .where(SDETypeEffect.type_id.in_(module_type_ids))
-            .where(SDEEffect.effect_category.in_(PASSIVE_EFFECT_CATS))
+            .where(SDEEffect.effect_category.in_(MODULE_EFFECT_CATS))
             .where(SDEModifier.domain == "charID")
             .where(SDEModifier.func == "ItemModifier")
             .where(SDEModifier.modified_attribute_id == ATTR_MISSILE_DAMAGE_MULTIPLIER)
@@ -1309,12 +1741,17 @@ async def calculate_fitting_stats(
                 else:
                     char_missile_dmg_mult *= apply_stacking_penalties(bcu_multipliers)
 
-    # Fetch module slot info for turret/launcher counting
+    # Fetch module slot info for turret/launcher counting. Keyed off every
+    # slotted item rather than `module_type_ids` (which is online-only),
+    # because an offline module still occupies its hardpoint.
+    slotted_type_ids = list({
+        i["type_id"] for i in items if i.get("slot") not in ("drone", "cargo")
+    })
     slot_info = {}
-    if module_type_ids:
+    if slotted_type_ids:
         slot_result = await db.execute(
             select(SDEModuleSlot.type_id, SDEModuleSlot.is_turret, SDEModuleSlot.is_launcher)
-            .where(SDEModuleSlot.type_id.in_(module_type_ids))
+            .where(SDEModuleSlot.type_id.in_(slotted_type_ids))
         )
         for row in slot_result.fetchall():
             slot_info[row.type_id] = {"is_turret": row.is_turret, "is_launcher": row.is_launcher}
@@ -1334,11 +1771,25 @@ async def calculate_fitting_stats(
     # modifier_collectors[target_attr_id] = list of (operator, value) tuples
     mod_collectors: dict[int, list[tuple[int, float]]] = defaultdict(list)
 
-    for item in fitted_items:
+    # A reactive armor hardener's resonances are collected apart from every
+    # other resist module. Its defining effect (4928) carries no modifierInfo
+    # — CCP redistributes the resists server-side — so the module contributed
+    # nothing at all until this branch existed. Pyfa applies it with
+    # penaltyGroup='preMul', i.e. its own stacking group, and since only one
+    # reactive hardener may be fitted (maxGroupFitted = 1) it is always first
+    # in that group and therefore unpenalised.
+    rah_collectors: dict[int, list[float]] = defaultdict(list)
+
+    for item, mod_attrs in enriched_fitted:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
-        mod_attrs = module_attrs_map.get(tid, {})
         mods = module_modifiers.get(tid, [])
+
+        if tid in rah_type_ids:
+            for attr_id in ARMOR_RESONANCE_ATTRS:
+                resonance = mod_attrs.get(attr_id)
+                if resonance is not None and resonance != 1.0:
+                    rah_collectors[attr_id].append(resonance)
 
         for mod in mods:
             # Only apply ship-domain modifiers (or item-domain for self-modifying)
@@ -1428,6 +1879,12 @@ async def calculate_fitting_stats(
 
         modified_attrs[attr_id] = val
 
+    # Reactive hardener resonances, in their own stacking group (see above).
+    for attr_id, resonances in rah_collectors.items():
+        modified_attrs[attr_id] = (
+            modified_attrs.get(attr_id, 1.0) * apply_stacking_penalties(resonances)
+        )
+
     # ── Step 3: Calculate resource usage (from module attributes) ─────────
     cpu_used = 0.0
     pg_used = 0.0
@@ -1437,10 +1894,9 @@ async def calculate_fitting_stats(
     drone_bw_used = 0.0
     drone_bay_used = 0.0
 
-    for item in items:
+    for item, mod_attrs in enriched_items:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
-        mod_attrs = module_attrs_map.get(tid, {})
         slot = item.get("slot", "")
 
         if slot == "drone":
@@ -1451,7 +1907,20 @@ async def calculate_fitting_stats(
         if slot == "cargo":
             continue
 
-        # Offline modules don't consume CPU/PG (rigs always count calibration)
+        # Hardpoints are consumed by the module being FITTED, not by it being
+        # powered: an offline turret still occupies its turret hardpoint, and
+        # taking it offline to free one is not a thing you can do in game.
+        # Counted before the offline check below, which is about power.
+        si = slot_info.get(tid, {})
+        if si.get("is_turret"):
+            turrets_used += qty
+        if si.get("is_launcher"):
+            launchers_used += qty
+
+        # Offline modules draw no CPU and no powergrid — taking a module
+        # offline to fit the rest of a tight fit is a standard EVE technique.
+        # Rigs are exempt because calibration is consumed by installation, and
+        # a rig has no online/offline state to begin with.
         if not item.get("online", True) and slot != "rig":
             continue
 
@@ -1460,12 +1929,6 @@ async def calculate_fitting_stats(
 
         if slot == "rig":
             calibration_used += mod_attrs.get(ATTR_UPGRADE_COST, 0) * qty
-
-        si = slot_info.get(tid, {})
-        if si.get("is_turret"):
-            turrets_used += qty
-        if si.get("is_launcher"):
-            launchers_used += qty
 
     # ── Step 4: Build stats from modified attributes ──────────────────────
     def mattr(attr_id, default=0):
@@ -1504,10 +1967,11 @@ async def calculate_fitting_stats(
 
     # Build module drain list for the simulator
     cap_sim_modules: list[dict] = []
-    for item in fitted_items:
+    for item, mod_attrs in enriched_fitted:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
-        mod_attrs = module_attrs_map.get(tid, {})
+        # Negative for a capacitor booster with a charge loaded — cap_sim
+        # reads that as an injection rather than a drain.
         cap_need = mod_attrs.get(ATTR_CAPACITOR_NEED, 0)
         duration = mod_attrs.get(ATTR_DURATION, 0) or mod_attrs.get(ATTR_RATE_OF_FIRE, 0)
         if cap_need != 0 and duration > 0:
@@ -1534,10 +1998,8 @@ async def calculate_fitting_stats(
     # ── Active tank (rep/s) ──────────────────────────────────────────────
     armor_rep_rate = 0.0
     shield_rep_rate = 0.0
-    for item in fitted_items:
-        tid = item["type_id"]
+    for item, mod_attrs in enriched_fitted:
         qty = item.get("quantity", 1)
-        mod_attrs = module_attrs_map.get(tid, {})
         duration = mod_attrs.get(ATTR_DURATION, 0)
         if duration <= 0:
             continue
@@ -1562,6 +2024,13 @@ async def calculate_fitting_stats(
     # Order: (em, therm, kin, expl)
     weapon_dps_typed = [0.0, 0.0, 0.0, 0.0]
     drone_dps_typed = [0.0, 0.0, 0.0, 0.0]
+    # Turret application figures, taken from the first firing turret. A
+    # tracking or optimal-range script changes exactly these and nothing else,
+    # so without them the response could not show that a loaded script had
+    # done anything at all. Reported per turret rather than summed — they are
+    # properties of a gun, not quantities that add up across a fit.
+    weapon_tracking = 0.0
+    weapon_optimal_range = 0.0
 
     # Determine how many drones of each type are active (within bandwidth).
     # Sort by bandwidth cost ascending to maximize active drone count,
@@ -1596,10 +2065,9 @@ async def calculate_fitting_stats(
         drone_active_counts[tid] = drone_active_counts.get(tid, 0) + active
         bw_remaining -= active * bw_each
 
-    for item in items:
+    for item, mod_attrs in enriched_items:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
-        mod_attrs = module_attrs_map.get(tid, {})
         slot = item.get("slot", "")
 
         if slot == "drone":
@@ -1659,6 +2127,10 @@ async def calculate_fitting_stats(
         if si.get("is_launcher") and char_missile_dmg_mult != 1.0:
             total_dmg *= char_missile_dmg_mult
 
+        if not weapon_tracking and not weapon_optimal_range:
+            weapon_tracking = mod_attrs.get(ATTR_TRACKING_SPEED, 0) or 0.0
+            weapon_optimal_range = mod_attrs.get(ATTR_OPTIMAL_RANGE, 0) or 0.0
+
         volley = total_dmg * dmg_mult
         weapon_volley += volley * qty
         weapon_dps += (volley / (cycle / 1000)) * qty
@@ -1708,6 +2180,27 @@ async def calculate_fitting_stats(
     weapon_spool_ratio = (weapon_dps_max_spool / weapon_dps) if weapon_dps > 0 else 1.0
     effective_total_dps_max_spool = (effective_weapon_dps * weapon_spool_ratio
                                      + effective_drone_dps)
+
+    # ── Reactive hardener phasing suggestion ─────────────────────────────
+    # Computed whenever a reactive hardener is fitted and running, so the UI
+    # can offer a one-click "match incoming damage" button without having to
+    # know the module's pool size. Only one may be fitted per ship
+    # (maxGroupFitted = 1), so the first match is the only match.
+    # `rah_fitted` tracks the MODULE, not the suggestion: a reactive hardener
+    # whose pool has somehow gone to zero is still fitted, and a UI that keys
+    # its phasing controls off this flag should still show them.
+    rah_fitted = False
+    rah_suggested_phasing = None
+    for item, mod_attrs in enriched_fitted:
+        if item["type_id"] not in rah_type_ids:
+            continue
+        rah_fitted = True
+        pool = rah_total_resist_points(
+            [mod_attrs.get(attr_id, 1.0) for attr_id in ARMOR_RESONANCE_ATTRS]
+        )
+        if pool > 0:
+            rah_suggested_phasing = suggest_rah_phasing(dmg_prof, pool)
+        break
 
     return {
         "cpu_used": round(cpu_used, 1),
@@ -1788,6 +2281,10 @@ async def calculate_fitting_stats(
         "total_dps": round(total_dps, 1),
         "weapon_volley": round(weapon_volley),
         "weapon_dps_max_spool": round(weapon_dps_max_spool, 1),
+        # Per-turret application, after any loaded script. 0 when nothing is
+        # firing or the weapon has no such attribute (launchers).
+        "weapon_tracking": round(weapon_tracking, 4),
+        "weapon_optimal_range": round(weapon_optimal_range, 1),
         "total_dps_max_spool": round(total_dps_max_spool, 1),
         "spool_time_s": spool_time_s,
         # Resist-weighted effective DPS against target_resist_profile.
@@ -1798,6 +2295,17 @@ async def calculate_fitting_stats(
         "effective_total_dps": round(effective_total_dps, 1),
         "effective_total_dps_max_spool": round(effective_total_dps_max_spool, 1),
         "target_resist_profile": target_resist_profile,
+        # Reactive Armor Hardener: None unless one is fitted and online. The
+        # values are resist percentage points per damage type, in the shape
+        # the per-item `resist_phasing` request field expects, so the UI can
+        # send back what it was given.
+        "rah_fitted": rah_fitted,
+        "rah_suggested_phasing": rah_suggested_phasing,
+        # Non-fatal problems with the request (a phasing distribution that
+        # had to be normalised, a resist_phasing on a module that is not a
+        # reactive hardener). Surfaced rather than raised: a fitting tool that
+        # 400s on a rounding error is worse than one that says what it did.
+        "warnings": warnings,
     }
 
 

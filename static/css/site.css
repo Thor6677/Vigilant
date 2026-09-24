@@ -46,6 +46,14 @@
     border-left: 3px solid var(--warn);
     color: var(--warn);
 }
+/* Neutral/informational tone — the update-available banner, not an alert.
+   Same alpha as is-warn: --accent and --warn happen to share a color today,
+   but this is keyed to --accent on purpose so the two can diverge later. */
+.structure-alert-banner.is-accent {
+    background: rgba(200, 169, 81, 0.08);
+    border-left: 3px solid var(--accent);
+    color: var(--accent);
+}
 .structure-alert-banner .alert-icon { font-size: 13px; flex-shrink: 0; }
 .structure-alert-banner .alert-text { min-width: 0; }
 .structure-alert-banner .alert-text strong { font-weight: 600; }

@@ -65,8 +65,14 @@ def test_prod_and_dev_never_share_an_image_tag():
     prod_app = prod["services"]["app"]
     assert "build" not in prod_app, \
         "prod compose must pull, not build — build lives in docker-compose.build.yml"
-    assert prod_app["image"].startswith("ghcr.io/")
+    # Prod's registry half is parameterised (${VIGILANT_IMAGE:-…}) so a fork or
+    # a mirror can name its own namespace, so the literal prefix is checked
+    # against the DEFAULT rather than against the raw string. The property is
+    # unchanged: prod resolves to a registry image, dev to a local tag.
+    assert "ghcr.io/" in prod_app["image"]
+    assert prod_app["image"].split("}")[0].endswith("ghcr.io/thor6677/vigilant")
     assert prod_app["image"] != _app(_dev())["image"]
+    assert not _app(_dev())["image"].startswith("ghcr.io/")
 
 
 def test_prod_still_declares_the_external_web_network():

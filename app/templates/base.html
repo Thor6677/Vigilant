@@ -17,6 +17,29 @@
        or an authed-only route/template. #}
     {% if request.session.get('user_id') %}
     <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script nonce="{{ request.state.csp_nonce }}">
+    /* htmx re-creates any script element it finds in swapped-in content and
+       appends it to the document, which makes it an INLINE script as far as
+       the browser is concerned. Under the enforcing policy (T-033:
+       `script-src 'self' 'nonce-…'`, no 'unsafe-inline') such a script can
+       never carry the page's nonce — the fragment is a separate request with
+       a nonce of its own, and the parser clears the nonce attribute anyway —
+       so it was already refused and has been dead code since v1.1.0.
+
+       Turning the feature off makes that explicit and, more to the point,
+       stops the browser filing a violation report for each one. The admin
+       Overview refreshes itself every 10s; when its session has expired the
+       redirect to the landing page is followed by XHR and the whole page gets
+       swapped in, so six blocks were re-created and refused on every tick —
+       ~2.4k reports/hour into the /csp-report sink from one idle tab.
+
+       Page behaviour is unchanged precisely because none of those scripts ran.
+       Note the deliberate choice NOT to set htmx.config.inlineScriptNonce
+       instead: that would revive every fragment script at once, on pages
+       nobody has exercised since they went dead. Moving the behaviour that is
+       still wanted up to page level is separate, reviewable work. */
+    if (window.htmx) htmx.config.allowScriptTags = false;
+    </script>
     {% endif %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
@@ -127,6 +150,9 @@
                     </label>
                     <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
                         <input type="checkbox" data-notif-type="poco" data-change="saveNotifPrefs" checked> POCO
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
+                        <input type="checkbox" data-notif-type="structure_timer" data-change="saveNotifPrefs" checked> Timer &lt; 1h
                     </label>
                     <div style="border-top:1px solid var(--border);margin-top:0.3rem;padding-top:0.3rem;">
                         <label style="display:flex;align-items:center;gap:0.4rem;font-size:10px;color:var(--text);padding:0.15rem 0;cursor:pointer;">
@@ -390,29 +416,56 @@
    only ever wired to elements inside the user_id-gated nav or authed-only
    page templates. Nothing on the anonymous landing page uses either. #}
 {% if request.session.get('user_id') %}
-<script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v=1"></script>
-<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v=6"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v={{ js_v }}"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v={{ js_v }}"></script>
 {% endif %}
 <script nonce="{{ request.state.csp_nonce }}">
-/* Global dismiss handler for alert banners — runs after every htmx swap */
+/* Global dismiss handler for alert banners — runs after every htmx swap.
+   The dismiss (x) BUTTONS are wired in static/js/actions.js; this is the
+   other half — showing/hiding banners per the dismissed state, and (moved
+   here from the now-deleted per-partial inline script blocks — see the
+   banner-dismiss comment in actions.js for why those never ran) pruning
+   stale dismissals and rendering the structure-alert relative timestamps.
+   Both halves have to run under the PAGE's CSP nonce to actually execute. */
 (function() {
     function applyDismissState() {
-        /* Structure alerts */
+        var now = Date.now();
+        /* Structure + inventory + contract alerts share one key — see the
+           actions.js comment on dismissStructureAlert for why contract
+           banners are in this bucket rather than their own. Prune entries
+           older than 7 days, same cutoff the old structure/contract
+           fragment scripts each used. */
         try {
             var sa = JSON.parse(localStorage.getItem('vigilant_dismissed_alerts') || '{}');
+            var saCutoff = now - 7 * 86400000;
+            var saChanged = false;
+            for (var saKey in sa) {
+                if (sa[saKey] < saCutoff) { delete sa[saKey]; saChanged = true; }
+            }
+            if (saChanged) localStorage.setItem('vigilant_dismissed_alerts', JSON.stringify(sa));
             document.querySelectorAll('.structure-alert-banner[data-alert-id]:not(.timer-alert-banner)').forEach(function(el) {
                 var aid = el.getAttribute('data-alert-id');
                 el.style.display = sa[aid] ? 'none' : '';
             });
         } catch(e) {}
-        /* Timer alerts */
+        /* Timer alerts — 2-day prune, same cutoff the old timer fragment
+           script used (timers churn faster than the other alert types). */
         try {
             var ta = JSON.parse(localStorage.getItem('vigilant_dismissed_timer_alerts') || '{}');
+            var taCutoff = now - 2 * 86400000;
+            var taChanged = false;
+            for (var taKey in ta) {
+                if (ta[taKey] < taCutoff) { delete ta[taKey]; taChanged = true; }
+            }
+            if (taChanged) localStorage.setItem('vigilant_dismissed_timer_alerts', JSON.stringify(ta));
             document.querySelectorAll('.timer-alert-banner[data-alert-id]').forEach(function(el) {
                 var aid = el.getAttribute('data-alert-id');
                 if (ta[aid]) el.style.display = 'none';
                 else if (el.style.display === 'none') el.style.display = '';
             });
+            /* Countdown + colour tier straight away on a fresh swap rather
+               than waiting for the next 1s tick (actions.js, ISS-035). */
+            if (typeof window.styleTimerBanners === 'function') window.styleTimerBanners();
         } catch(e) {}
         /* Update-available banner — keyed by release tag, so a NEWER release is
            never pre-dismissed by the dismissal of an older one. */
@@ -423,11 +476,26 @@
                 el.style.display = ud[tag] ? 'none' : '';
             });
         } catch(e) {}
+        /* Relative timestamps on structure alert banners, e.g. "(3m ago)". */
+        try {
+            document.querySelectorAll('#structure-alerts .alert-time[data-ts]').forEach(function(el) {
+                var ts = el.getAttribute('data-ts');
+                var d = new Date(ts);
+                var diff = Math.floor((now - d.getTime()) / 1000);
+                var label;
+                if (diff < 60) label = 'just now';
+                else if (diff < 3600) label = Math.floor(diff / 60) + 'm ago';
+                else if (diff < 86400) label = Math.floor(diff / 3600) + 'h ago';
+                else label = Math.floor(diff / 86400) + 'd ago';
+                el.textContent = ' (' + label + ')';
+            });
+        } catch(e) {}
     }
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         var id = evt.detail.target.id || '';
         if (id === 'structure-alerts' || id === 'timer-alerts' ||
-            id === 'inventory-alerts' || id === 'update-banner-slot') {
+            id === 'inventory-alerts' || id === 'contract-alerts' ||
+            id === 'update-banner-slot') {
             applyDismissState();
         }
     });

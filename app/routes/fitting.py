@@ -259,7 +259,10 @@ async def compare_fittings(
     isn't owned by the session user 404s via ``_owned_fit_or_none``. Reads
     only, so the two sequential engine calls share the request session safely.
 
-    Implants are intentionally NOT modeled here (deferred — see UI note).
+    Each fit's saved implants (``implants_json``, ISS-016) go into the same
+    engine call the builder makes, so a fit compares with the numbers it
+    was saved with. The header says how many implants each side carries so
+    a lopsided comparison is visible for what it is.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -270,15 +273,26 @@ async def compare_fittings(
     if not fit_a or not fit_b:
         raise HTTPException(status_code=404, detail="Fitting not found")
 
-    async def _stats_for(fit: UserFitting) -> dict:
+    def _implant_ids(fit: UserFitting) -> list[int]:
+        try:
+            implants = _sanitize_implants_map(json.loads(fit.implants_json or "{}"))
+        except Exception:
+            implants = {}
+        return [rec["type_id"] for rec in implants.values()]
+
+    async def _stats_for(fit: UserFitting, implants: list[int]) -> dict:
         try:
             items = json.loads(fit.items_json) if fit.items_json else []
         except Exception:
             items = []
-        return await calculate_fitting_stats(db, fit.ship_type_id, items)
+        return await calculate_fitting_stats(
+            db, fit.ship_type_id, items, implants=implants,
+        )
 
-    stats_a = await _stats_for(fit_a)
-    stats_b = await _stats_for(fit_b)
+    implants_a = _implant_ids(fit_a)
+    implants_b = _implant_ids(fit_b)
+    stats_a = await _stats_for(fit_a, implants_a)
+    stats_b = await _stats_for(fit_b, implants_b)
 
     names = await sde.type_ids_to_names(db, [fit_a.ship_type_id, fit_b.ship_type_id])
     sections = build_compare_sections(stats_a, stats_b)
@@ -288,11 +302,13 @@ async def compare_fittings(
             "id": fit_a.id, "name": fit_a.name,
             "ship_name": names.get(fit_a.ship_type_id, f"Type {fit_a.ship_type_id}"),
             "ship_type_id": fit_a.ship_type_id,
+            "implant_count": len(implants_a),
         },
         "fit_b": {
             "id": fit_b.id, "name": fit_b.name,
             "ship_name": names.get(fit_b.ship_type_id, f"Type {fit_b.ship_type_id}"),
             "ship_type_id": fit_b.ship_type_id,
+            "implant_count": len(implants_b),
         },
         "sections": sections,
     })
@@ -358,8 +374,12 @@ async def search_implants(
     drives a vanilla <input> + <ul> rather than the htmx partial used
     for modules/drones, because each slot picks one item only.
     """
-    from sqlalchemy import select
-    from app.db.models import SDEType, SDETypeDogmaAttribute
+    # `select`, `SDEType`, `SDETypeDogmaAttribute` are already imported at
+    # module scope (sqlalchemy + app.db.sde_models above) — a stray local
+    # re-import here used to shadow them with `app.db.models.SDEType`, which
+    # doesn't exist (the SDE tables live in app.db.sde_models), so every call
+    # raised ImportError before the query ever ran. That's the whole bug
+    # behind "implant search doesn't work": the endpoint 500'd unconditionally.
     pattern = f"%{q}%"
     # Implant types have implantness (attr_id 331) set to their slot.
     stmt = (
@@ -786,7 +806,7 @@ async def clone_implants(
     char = r.scalar_one_or_none()
     if not char:
         return {"error": "Character not found"}
-    if "esi-clones.read_implants.v1" not in (char.scopes or ""):
+    if _IMPLANTS_SCOPE not in (char.scopes or ""):
         return {"error": "Character lacks the implants scope — re-add it to grant."}
 
     try:
@@ -1294,6 +1314,10 @@ async def can_overheat(
 # ── Character skills + fit skill-check ──────────────────────────────────
 
 _SKILLS_SCOPE = "esi-skills.read_skills.v1"
+# Referenced by clone_implants() above too — defined here alongside
+# _SKILLS_SCOPE since Python resolves module-level names at call time, not
+# definition order, and this keeps the two scope constants together.
+_IMPLANTS_SCOPE = "esi-clones.read_implants.v1"
 
 
 async def _character_skills_map(db: AsyncSession, char: Character) -> dict[int, int]:
@@ -1309,7 +1333,18 @@ async def _character_skills_map(db: AsyncSession, char: Character) -> dict[int, 
 
 @router.get("/tools/fitting/characters")
 async def list_fitting_characters(request: Request, db: AsyncSession = Depends(get_db)):
-    """Dropdown source — characters the user owns that have the skills scope."""
+    """Character-picker source, shared by the skill-check selector and the
+    implant character picker: every character linked to this user, each
+    tagged with the two scopes those pickers care about. One query backs
+    both UIs instead of each running its own — see fetchFittingCharacters()
+    in fitting_tool.html, which caches this response for both callers.
+
+    Returning every character (not just scope-holders) lets the implant
+    picker show characters missing the clones scope as a disabled option
+    with a reason, rather than omitting them silently. The skill-check
+    selector still only wants scope-holders, so it filters has_skills_scope
+    client-side — this endpoint no longer pre-filters that for it.
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return {"characters": []}
@@ -1320,9 +1355,13 @@ async def list_fitting_characters(request: Request, db: AsyncSession = Depends(g
     )
     return {
         "characters": [
-            {"id": c.character_id, "name": c.character_name}
+            {
+                "id": c.character_id,
+                "name": c.character_name,
+                "has_skills_scope": _SKILLS_SCOPE in (c.scopes or ""),
+                "has_implants_scope": _IMPLANTS_SCOPE in (c.scopes or ""),
+            }
             for c in r.scalars().all()
-            if _SKILLS_SCOPE in (c.scopes or "")
         ],
     }
 

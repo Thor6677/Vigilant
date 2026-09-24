@@ -341,38 +341,35 @@
     </div>
 </div>
 
-<script nonce="{{ request.state.csp_nonce }}">
-/* Both of these were single-line onclick expressions. Each toggle flips its
-   own button label and rewrites every value cell from the dataset the server
-   rendered onto it, so no refetch is needed. Guarded: this partial is swapped
-   in on every stats refresh. */
-window.toggleResourceUnits = window.toggleResourceUnits || function() {
-    var showingPct = this.textContent.trim() === '%';
-    var next = showingPct ? 'val' : 'pct';
-    this.textContent = showingPct ? 'VAL' : '%';
-    document.querySelectorAll('.fr-val').forEach(function(el) {
-        el.textContent = el.dataset[next];
-    });
-};
+{# ── Reactive Armor Hardener + engine warnings ─────────────────────────────
+   Read-only, and deliberately so: the phasing itself is set per item in the
+   request, so there is nothing here to edit. This block only reports what the
+   engine worked out — the distribution that would best match the selected
+   damage profile, and anything it had to correct. Purely additive markup with
+   its own `rah-` ids and no script of its own. #}
+{% if stats.rah_fitted and stats.rah_suggested_phasing %}
+<div class="b-section" id="rah-suggestion">
+    <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">
+        Reactive Armor Hardener &mdash; suggested phasing for this damage profile
+    </div>
+    <table style="width:100%;font-size:10px;">
+        {% for label, key in [('EM', 'em'), ('Thermal', 'thermal'),
+                              ('Kinetic', 'kinetic'), ('Explosive', 'explosive')] %}
+        <tr>
+            <td style="color:var(--muted);padding:2px 0;">{{ label }}</td>
+            <td style="text-align:right;color:var(--text);">
+                {{ "{:,.1f}".format(stats.rah_suggested_phasing[key]) }} pts
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
 
-window.toggleDefenceUnits = window.toggleDefenceUnits || function() {
-    var showingEhp = this.textContent.trim() === 'EHP';
-    var key = showingEhp ? 'hp' : 'ehp';
-    this.textContent = showingEhp ? 'HP' : 'EHP';
-    document.querySelectorAll('.def-hp-val').forEach(function(el) {
-        el.textContent = el.dataset[key];
-    });
-    var label = document.getElementById('def-header-label');
-    if (label) {
-        var cells = document.querySelectorAll('.def-hp-val');
-        var last = cells[cells.length - 1];
-        label.textContent = showingEhp
-            ? '(Raw HP: ' + last.dataset.hp + ')'
-            : '(Effective HP: ' + last.dataset.ehp + ')';
-    }
-    document.querySelectorAll('.def-rep-val').forEach(function(el) {
-        el.textContent = (showingEhp ? el.dataset.hp : el.dataset.ehp)
-            + (showingEhp ? ' HP/s' : ' EHP/s');
-    });
-};
-</script>
+{% if stats.warnings %}
+<div class="b-section" id="rah-warnings">
+    {% for warning in stats.warnings %}
+    <div style="font-size:10px;color:var(--danger);padding:2px 0;">{{ warning }}</div>
+    {% endfor %}
+</div>
+{% endif %}

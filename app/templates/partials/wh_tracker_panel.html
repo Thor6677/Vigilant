@@ -1,6 +1,8 @@
-{# Live WH tracker panel (T-034). States: none / error / idle / active.
+{# Live WH tracker panel (T-034). States: none / error / kspace / active.
    Active state reuses the wormhole system context (build_wh_system_context)
-   plus the killmail intel dict from app/routes/wh_tracker.py. #}
+   plus the killmail intel dict from app/routes/wh_tracker.py. The headline
+   is always the single selected character — see the module docstring in
+   app/routes/wh_tracker.py for why this used to be otherwise. #}
 
 <div style="display:flex;justify-content:flex-end;margin-bottom:0.4rem;">
     <span id="wht-checked" class="b-muted-sm" data-ts="{{ (checked_at.timestamp() * 1000) | int }}">checked just now</span>
@@ -8,23 +10,24 @@
 
 {% if state == 'none' %}
 <div class="b-panel" style="padding:1rem;text-align:center;">
-    <span class="b-muted-sm">Check a character above to start tracking.</span>
+    <span class="b-muted-sm">Select a character above to start tracking.</span>
 </div>
 
 {% elif state == 'error' %}
 <div class="b-panel" style="padding:1rem;text-align:center;">
-    <span style="color:var(--danger);font-size:11px;">Location lookup failed for every tracked character — ESI may be unreachable. Retrying on the next poll.</span>
+    <span style="color:var(--danger);font-size:11px;">Location lookup failed{% if reason %} — {{ reason }}{% endif %}. Retrying on the next poll.</span>
 </div>
 
-{% elif state == 'idle' %}
+{% elif state == 'kspace' %}
 <div class="b-panel" style="padding:1rem;">
-    <div class="b-muted-sm" style="margin-bottom:0.5rem;">No tracked character is in J-space right now.</div>
-    {% for l in locations %}
-    <div style="font-size:11px;padding:2px 0;">
-        <span style="color:var(--text);">{{ l.char_name }}</span>
-        <span style="color:var(--muted);"> — {{ l.system_name }}</span>
+    <div style="font-size:13px;">
+        <span style="color:var(--text);font-weight:600;">{{ char_name }}</span>
+        <span style="color:var(--muted);"> is in </span>
+        <span style="color:var(--text);">{{ system_name }}</span>{% if region_name %}<span style="color:var(--muted);"> ({{ region_name }})</span>{% endif %}
     </div>
-    {% endfor %}
+    {% if prev_system_name %}
+    <div class="b-muted-sm" style="margin-top:0.3rem;">came from <span style="color:var(--text);">{{ prev_system_name }}</span></div>
+    {% endif %}
 </div>
 
 {% elif state == 'active' and system %}
@@ -36,7 +39,6 @@
 </div>
 <div class="b-muted-sm" style="margin-bottom:0.75rem;">
     {{ char_name }} is here{% if prev_system_name %} · came from <span style="color:var(--text);">{{ prev_system_name }}</span>{% endif %}
-    {% for o in others %} · {{ o.char_name }}: {{ o.system_name }}{% endfor %}
 </div>
 
 <div class="ws-grid">

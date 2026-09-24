@@ -109,6 +109,33 @@ class WalletSnapshot(Base):
     recorded_at = Column(DateTime, nullable=False)  # naive UTC
 
 
+class CorpWalletSnapshot(Base):
+    """Hourly snapshot of one corporation wallet division (T-056).
+
+    Mirrors WalletSnapshot for corporations. Written by the background
+    scheduler's distinct-corp pass — one fetch per corp per cycle, never
+    per character, and never on page load (ESI's max-age on the corp
+    wallets endpoint is an hour). All seven divisions written in one cycle
+    share the same recorded_at, which is what lets the chart sum a total
+    per sample.
+
+    History only accrues while some linked character holds the in-game
+    role the endpoint needs; when that stops, the series simply stops, and
+    the chart shows the gap rather than carrying the last value forward.
+    CCP exposes no historical balances, so a gap can never be filled in.
+    """
+    __tablename__ = "corp_wallet_snapshots"
+    __table_args__ = (
+        Index("ix_corp_wallet_snapshots_corp_div_time", "corp_id", "division", "recorded_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    corp_id = Column(Integer, nullable=False)
+    division = Column(Integer, nullable=False)   # 1..7
+    balance = Column(Float, nullable=False)
+    recorded_at = Column(DateTime, nullable=False)  # naive UTC
+
+
 class WalletTransaction(Base):
     """Immutable wallet transaction (buy/sell fill) per character (Phase 5 Task 5).
 
