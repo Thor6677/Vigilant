@@ -992,3 +992,26 @@ def test_an_older_tag_cannot_be_scheduled(env):
     assert r.status_code == 400
     assert "not newer" in r.text
     assert _schedules(env) == []
+
+
+def test_editing_an_enabled_policy_never_fires_for_a_window_that_just_passed(env):
+    """Enabled already; the admin moves the window to one that passed ten
+    minutes ago, well inside the grace. That must not deploy within the
+    minute."""
+    from app.ops import update_schedule as us
+
+    _beat(env.control)
+    c = env.admin()
+    now = datetime.now(timezone.utc)
+    far = now + timedelta(days=3)
+    c.post("/admin/update/policy", data={
+        "enabled": "on", "weekday": str(far.weekday()), "local_time": "04:00", "tz": "UTC"})
+    past = now - timedelta(minutes=10)
+    r = c.post("/admin/update/policy", data={
+        "enabled": "on", "weekday": str(past.weekday()),
+        "local_time": past.strftime("%H:%M"), "tz": "UTC"})
+    assert r.status_code == 200
+    p = _policy_row(env)
+    assert p.last_fired_window == past.date().isoformat()
+    fire, _, reason = us.policy_decision(p, now, "v9.9.9", "v1.2.0")
+    assert (fire, reason) == (False, "already fired for this window")

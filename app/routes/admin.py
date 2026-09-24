@@ -1417,18 +1417,20 @@ async def updater_policy_save(request: Request,
         return await refuse("invalid day")
 
     policy = await update_schedule.get_policy(db)
-    was_enabled = policy.enabled
     policy.enabled = enabled is not None
     policy.weekday = weekday
     policy.local_time = local_time.strip()
     policy.timezone = tz
     policy.patch_only = patch_only is not None
     policy.paused_reason = None
-    # Turning the policy ON must not immediately fire for a window that already
-    # passed today. Claim the current window as already handled so the first
-    # automatic run is the NEXT one — enabling a schedule should never be
-    # indistinguishable from pressing Update.
-    if policy.enabled and not was_enabled:
+    # SAVING the policy must never fire for a window that has already passed —
+    # not only turning it on. Moving an enabled policy's day or time to one
+    # that passed ten minutes ago (or unticking "patch releases only" in the
+    # middle of a window) would otherwise deploy within the minute. Claim the
+    # current window as handled on every enabled save, so the first automatic
+    # run is the NEXT one: a save should never be indistinguishable from
+    # pressing Update.
+    if policy.enabled:
         window = update_schedule.most_recent_window(
             policy.weekday, policy.local_time, policy.timezone,
             datetime.now(timezone.utc))
