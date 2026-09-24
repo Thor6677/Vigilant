@@ -250,6 +250,30 @@
     </div>
 </div>
 
+{# Boosters (T-049) — boosterness is not a small fixed range like
+   implantness, so there's no slot grid: a search box adds a booster to
+   whichever slot it belongs to (replacing anything already there), and the
+   active list below shows each one's side effects as unchecked-by-default
+   toggles, since in game each only fires on its own per-injection roll. #}
+<div class="b-section" id="section-booster" style="display:none;">
+    <div class="b-section-head">
+        <span class="b-label">Boosters</span>
+        <span style="font-size:9px;color:var(--muted);">side effects roll per injection · off by default</span>
+    </div>
+    <div id="slots-booster" style="padding:0.25rem 0;"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" id="booster-search"
+                   placeholder="+ Search boosters by name..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   data-input="searchBooster">
+            <div id="booster-results"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:220px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+
 {# Drones #}
 <div class="b-section" id="section-drone">
     <div class="b-section-head">
@@ -339,7 +363,13 @@ var state = {
     items: [],
     // Implants: sparse array indexed 1..10 → {type_id, name} per slot.
     // Stored as an object keyed by slot string for JSON safety.
-    implants: {}
+    implants: {},
+    // Boosters (T-049): keyed by boosterness slot (not a small fixed range
+    // like implants) → {type_id, name, effects}. `effects` is the full
+    // side-effect catalog for that booster — [{effect_id, label, chance,
+    // on}] — so the checkbox list can render every option, not just the
+    // ones currently switched on.
+    boosters: {}
 };
 
 /* Ship slot limits — populated from stats response */
@@ -417,10 +447,12 @@ function applyState() {
     document.getElementById('fitting-name').value = state.fittingName || 'Unnamed';
     document.getElementById('slot-layout').style.display = '';
     document.getElementById('section-implant').style.display = '';
+    document.getElementById('section-booster').style.display = '';
 
     fetchShipSlots(state.shipTypeId);
     renderSlots();
     renderImplantSlots();
+    renderBoosterSlots();
     recalcStats();
 }
 
@@ -943,6 +975,181 @@ function onImplantCharChange() {
     });
 }
 
+/* ── Boosters (T-049, active-list + per-effect toggles) ──────────────
+   No character-clone import here (unlike implants above) — ESI has no
+   endpoint for a character's active boosters, only their implants, since
+   boosters are consumables rather than a persistent clone attribute. */
+
+// Cache of the last search response, keyed by type_id, so result rows carry
+// a plain data-type-id attribute instead of an embedded JSON blob (keeps to
+// the data-* scalar-attribute convention documented in actions.js).
+var boosterSearchCache = {};
+
+/* state.boosters[slot] -> engine entry {type_id, side_effects}. Reads the
+   "on" list from the full per-effect catalog (`effects`) when it's loaded,
+   falling back to the raw saved-fit list while that catalog is still being
+   fetched (see applyBoosterInfo). */
+function getBoosterPayload() {
+    var out = [];
+    var boosters = state.boosters || {};
+    Object.keys(boosters).forEach(function(slot) {
+        var b = boosters[slot];
+        if (!b || !b.type_id) return;
+        var onIds = b.effects
+            ? b.effects.filter(function(e) { return e.on; }).map(function(e) { return e.effect_id; })
+            : (b.side_effects || []);
+        out.push({type_id: b.type_id, side_effects: onIds});
+    });
+    return out;
+}
+
+/* state.boosters -> the boosters_map shape the save route persists. Only
+   the switched-on effect ids travel to the server — the label/chance
+   catalog is re-derived from get_booster_info on load (see
+   applyBoosterInfo), not duplicated into storage. */
+function getBoostersMapForSave() {
+    var out = {};
+    var boosters = state.boosters || {};
+    Object.keys(boosters).forEach(function(slot) {
+        var b = boosters[slot];
+        if (!b || !b.type_id) return;
+        var onIds = b.effects
+            ? b.effects.filter(function(e) { return e.on; }).map(function(e) { return e.effect_id; })
+            : (b.side_effects || []);
+        out[slot] = {type_id: b.type_id, name: b.name, side_effects: onIds};
+    });
+    return out;
+}
+
+function renderBoosterSlots() {
+    var host = document.getElementById('slots-booster');
+    if (!host) return;
+    var boosters = state.boosters || {};
+    var slots = Object.keys(boosters).sort(function(a, b) { return parseInt(a, 10) - parseInt(b, 10); });
+    if (!slots.length) {
+        host.innerHTML = '<div style="color:var(--muted);font-style:italic;font-size:10px;padding:2px 0.5rem;">No boosters active</div>';
+        return;
+    }
+    var html = '';
+    slots.forEach(function(slot) {
+        var b = boosters[slot];
+        html +=
+            '<div style="padding:3px 0.5rem;border-bottom:1px solid var(--border);">' +
+                '<div style="display:flex;align-items:center;gap:0.5rem;">' +
+                    '<span style="color:var(--muted);width:28px;font-size:9px;">#' + slot + '</span>' +
+                    '<span class="b-text" style="flex:1;font-size:10px;">' + escapeHtml(b.name || ('Type ' + b.type_id)) + '</span>' +
+                    '<button data-click="removeBooster" data-slot="' + slot + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;" title="Remove">&times;</button>' +
+                '</div>';
+        if (b.effects && b.effects.length) {
+            html += b.effects.map(function(e) {
+                var pct = (e.chance !== null && e.chance !== undefined) ? Math.round(e.chance * 100) + '%' : '?';
+                return '<label style="display:flex;align-items:center;gap:0.4rem;font-size:9.5px;color:var(--text);margin:2px 0 0 2rem;">' +
+                    '<input type="checkbox" data-change="toggleBoosterEffect" data-slot="' + slot + '" data-effect-id="' + e.effect_id + '"' + (e.on ? ' checked' : '') + '>' +
+                    escapeHtml(e.label) + ' <span style="color:var(--muted);">(' + pct + ' per injection)</span>' +
+                '</label>';
+            }).join('');
+        } else if (b.side_effects && b.side_effects.length) {
+            html += '<div style="font-size:9px;color:var(--muted);margin-left:2rem;">Loading side effects&hellip;</div>';
+        }
+        html += '</div>';
+    });
+    host.innerHTML = html;
+}
+
+var boosterSearchTimer = null;
+function searchBooster() {
+    var q = this.value;
+    clearTimeout(boosterSearchTimer);
+    var resultsEl = document.getElementById('booster-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    boosterSearchTimer = setTimeout(function() {
+        fetch('/tools/fitting/search/boosters?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(rows) {
+                if (!rows || !rows.length) {
+                    resultsEl.innerHTML = '<div style="padding:0.4rem 0.5rem;color:var(--muted);font-size:10px;">No matches</div>';
+                    resultsEl.style.display = '';
+                    return;
+                }
+                rows.forEach(function(r) { boosterSearchCache[r.type_id] = r; });
+                resultsEl.innerHTML = rows.map(function(r) {
+                    return '<div class="b-hover-bg" data-click="addBooster" data-type-id="' + r.type_id + '" ' +
+                           'style="padding:0.3rem 0.5rem;font-size:10px;cursor:pointer;border-bottom:1px solid var(--border);">' +
+                           '<span class="b-muted">#' + r.slot + '</span> ' + escapeHtml(r.name) +
+                           '</div>';
+                }).join('');
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+/* Adding a booster whose slot is already occupied replaces it outright —
+   two boosters sharing a boosterness value can't be active together in
+   game either, so there's nothing to merge. */
+function addBooster() {
+    var typeId = parseInt(this.dataset.typeId, 10);
+    var r = boosterSearchCache[typeId];
+    if (!r) return;
+    if (!state.boosters) state.boosters = {};
+    state.boosters[String(r.slot)] = {
+        type_id: r.type_id,
+        name: r.name,
+        effects: (r.side_effects || []).map(function(se) {
+            return {effect_id: se.effect_id, label: se.label, chance: se.chance, on: false};
+        })
+    };
+    saveState();
+    renderBoosterSlots();
+    document.getElementById('booster-search').value = '';
+    document.getElementById('booster-results').style.display = 'none';
+    recalcStats();
+}
+
+function removeBooster() {
+    var slot = this.dataset.slot;
+    if (state.boosters) delete state.boosters[slot];
+    saveState();
+    renderBoosterSlots();
+    recalcStats();
+}
+
+function toggleBoosterEffect() {
+    var slot = this.dataset.slot;
+    var effectId = parseInt(this.dataset.effectId, 10);
+    var b = state.boosters && state.boosters[slot];
+    if (!b || !b.effects) return;
+    var eff = b.effects.filter(function(e) { return e.effect_id === effectId; })[0];
+    if (eff) eff.on = this.checked;
+    saveState();
+    recalcStats();
+}
+
+/* A fit loaded from the server only carries each booster's switched-ON
+   side-effect ids (state.boosters[slot].side_effects) -- the checkbox list
+   needs every side effect's label/chance too, including the ones off, so
+   this merges the load response's booster_info catalog (get_booster_info,
+   keyed by type_id) into state.boosters before the first render. A booster
+   whose type_id isn't in the catalog (engine lookup miss) keeps showing its
+   raw on-count via the "Loading side effects…" line in renderBoosterSlots
+   until the underlying data exists. */
+function applyBoosterInfo(boosterInfo) {
+    boosterInfo = boosterInfo || {};
+    var boosters = state.boosters || {};
+    Object.keys(boosters).forEach(function(slot) {
+        var b = boosters[slot];
+        if (!b || b.effects) return;
+        var info = boosterInfo[String(b.type_id)] || boosterInfo[b.type_id];
+        if (!info || !info.side_effects) return;
+        var onIds = b.side_effects || [];
+        b.effects = info.side_effects.map(function(se) {
+            return {
+                effect_id: se.effect_id, label: se.label, chance: se.chance,
+                on: onIds.indexOf(se.effect_id) !== -1
+            };
+        });
+    });
+}
+
 /* ── Damage / target profile selector ─────────────────────────────── */
 var PROFILE_KEY = 'vigilant_fit_dmg_profile';
 var PROFILE_CUSTOM_KEY = 'vigilant_fit_dmg_custom';
@@ -1066,6 +1273,7 @@ function recalcStats() {
             target_resist_profile: profile === 'custom' ? 'uniform' : profile,
             damage_profile_custom: getCustomWeights(),
             implants: getImplantTypeIds(),
+            boosters: getBoosterPayload(),
         })
     })
     .then(_fitCheckOk)
@@ -1476,6 +1684,7 @@ function saveFitting() {
         name: name,
         items: state.items,
         implants_map: state.implants || {},
+        boosters_map: getBoostersMapForSave(),
         fitting_id: state.fittingId
     };
 
@@ -1526,6 +1735,8 @@ function loadFitting(id) {
         state.fittingId = data.id;
         state.items = data.items;
         state.implants = data.implants || {};
+        state.boosters = data.boosters || {};
+        applyBoosterInfo(data.booster_info);
         saveState();
         applyState();
         // init()'s own refreshOverheatCache() call races this fetch (it
@@ -1553,7 +1764,7 @@ function deleteFitting(id, btn) {
 }
 
 function clearFitting() {
-    state = {shipTypeId: null, shipName: '', fittingName: 'Unnamed', fittingId: null, items: [], implants: {}};
+    state = {shipTypeId: null, shipName: '', fittingName: 'Unnamed', fittingId: null, items: [], implants: {}, boosters: {}};
     localStorage.removeItem(FIT_KEY);
     location.reload();
 }

@@ -319,6 +319,8 @@ async def startup():
             # (T-049). Existing installs get the column empty; needs_update()
             # in app/sde/loader.py sees that and reimports the SDE once.
             "ALTER TABLE sde_effects ADD COLUMN fitting_usage_chance_attribute_id INTEGER",
+            # Fitting tool: booster loadout persisted with saved fits (T-049)
+            "ALTER TABLE user_fittings ADD COLUMN boosters_json TEXT NOT NULL DEFAULT '{}'",
             # Net worth: industry work-in-progress value (T-041 item 4)
             "ALTER TABLE net_worth_snapshots ADD COLUMN industry_value FLOAT NOT NULL DEFAULT 0",
             # ESI rate-limit events: soft-archive column for admin dismiss

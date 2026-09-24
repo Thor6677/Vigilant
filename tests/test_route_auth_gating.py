@@ -117,6 +117,7 @@ PUBLIC_LITERAL_GET = {
     "/tools/fitting/browse/groups",
     "/tools/fitting/can-overheat",
     "/tools/fitting/check-fit",
+    "/tools/fitting/search/boosters",
     "/tools/fitting/search/charges",
     "/tools/fitting/search/drones",
     "/tools/fitting/search/implants",
