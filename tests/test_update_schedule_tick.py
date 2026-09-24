@@ -54,10 +54,19 @@ def _beat(control, current_tag="v1.2.0", self_update=None, checks=None):
     }))
 
 
-def _latest(tag):
+def _latest(tag, checked_hours_ago=0):
+    """What the hourly checker would have written. checked_at is measured by
+    the REAL clock, whatever `now` a test hands tick()."""
+    checked = (datetime.now(UTC) - timedelta(hours=checked_hours_ago)).replace(tzinfo=None)
+
     async def go():
         async with AsyncSessionLocal() as db:
-            db.add(UpdateStatus(id=1, latest_tag=tag))
+            row = await db.get(UpdateStatus, 1)
+            if row is None:
+                row = UpdateStatus(id=1)
+                db.add(row)
+            row.latest_tag = tag
+            row.checked_at = checked
             await db.commit()
     _run(go())
 
@@ -534,3 +543,18 @@ def test_the_request_carries_the_id_that_was_committed(control):
         async with AsyncSessionLocal() as db:
             return (await db.execute(select(UpdateSchedule.fired_request_id))).scalar()
     assert _request(control)["id"] == _run(fired_id())
+
+
+def test_the_policy_holds_on_stale_release_information(control):
+    """A checker failing for days must not drive an unattended deploy from
+    what it saw last time. Held, not dropped: the window can still fire once
+    the checker answers again."""
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0", checked_hours_ago=4)
+    assert _run(us.tick(SUNDAY_0430)).startswith("release information is stale")
+    assert _request(control) is None
+    assert _policy().held_window == "2026-09-13"
+
+    _latest("v1.3.0")                                        # the checker is back
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=1))) == "fired policy"

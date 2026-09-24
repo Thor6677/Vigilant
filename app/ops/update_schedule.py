@@ -56,6 +56,13 @@ GRACE_SECONDS = 2 * 60 * 60
 # the tick.
 TICK_SECONDS = 60
 
+# How old the hourly checker's answer may be before the policy stops trusting
+# it. Three missed polls: long enough that a slow GitHub hour does not hold a
+# window, short enough that a checker failing for days (rate-limited, repo
+# renamed, network gone) cannot drive an unattended deploy from what it saw
+# last week.
+RELEASE_INFO_MAX_AGE_SECONDS = 3 * 60 * 60
+
 # When this process started. A policy window that closed before then passed
 # while Vigilant was down, which is one of the two ways a window can be shown
 # to have been missed (see _report_missed_window). Read at call time, so a test
@@ -569,6 +576,22 @@ async def _withdraw_stale_request(db, policy) -> bool:
     return True
 
 
+def _release_info_hold(status_row) -> str | None:
+    """A hold reason if the policy's release information is too old to act on.
+
+    Measured against the real clock, not tick()'s `now`: this is about how
+    fresh the data is, not about which window is being decided.
+    """
+    checked = _as_utc(status_row.checked_at) if status_row else None
+    if checked is None:
+        return "release information has never been checked successfully"
+    age = (datetime.now(timezone.utc) - checked).total_seconds()
+    if age > RELEASE_INFO_MAX_AGE_SECONDS:
+        return (f"release information is stale (last checked "
+                f"{checked:%Y-%m-%d %H:%M} UTC)")
+    return None
+
+
 def _submission_hold(beat) -> str | None:
     """Why a request must not be written right now, or None when it may.
 
@@ -771,6 +794,10 @@ async def tick(now_utc: datetime | None = None) -> str:
             policy.observed_window = key
             await db.commit()
         if fire:
+            # The policy applies whatever the checker last saw, so an answer
+            # from a checker that has been failing for days is not one to act
+            # on. Held, not dropped: it becomes a skip only by the usual rules.
+            hold = hold or _release_info_hold(row)
             if hold:
                 await _note_hold(db, hold, policy=policy, key=key)
                 return hold
