@@ -36,12 +36,13 @@ logger = logging.getLogger(__name__)
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday",
             "Friday", "Saturday", "Sunday")
 
-# Shared with app/ops/update_check.py. NOTE for the operator: this means an
-# admin who opts OUT of "a new release exists" notices also opts out of
-# auto-update FAILURE reports — the compensating control for unattended
-# deploys. Documented in README rather than silently split into a second type,
-# because a second type nobody knows to enable is worse.
-ALERT_TYPE = "update_available"
+# Its own type, NOT app/ops/update_check.py's `update_available`. This report
+# is the compensating control for a deploy nobody watched; sharing a type meant
+# an admin who opted out of "a new release exists" notices silently opted out
+# of the failure reports as well. The cost of a second opt-in type is that
+# someone has to know to enable it, so the panel says so beside the switch
+# that makes it matter (see notify_configured in app/routes/admin.py).
+ALERT_TYPE = "auto_update"
 
 # How late a window may be honoured. The app is BOTH the scheduler and the thing
 # being recreated, so it will sometimes be down when a window passes. Firing

@@ -313,8 +313,10 @@
               update will complete with nothing to tell you — successful or not.
               The admin audit log still records every automatic run, but you
               have to go and look. Set <code>DISCORD_WEBHOOK_URL</code> and
-              include <code>update_available</code> in
-              <code>DISCORD_ALERT_TYPES</code> to be told instead.
+              include <code>auto_update</code> in
+              <code>DISCORD_ALERT_TYPES</code> to be told instead &mdash; a
+              separate type from <code>update_available</code>, so opting in
+              to release notices does not cover this.
             </p>
           {% endif %}
           <p class="b-muted">

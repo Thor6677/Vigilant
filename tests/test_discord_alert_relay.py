@@ -111,6 +111,19 @@ def test_type_not_enabled_is_a_noop(monkeypatch):
     assert _FakeAsyncClient.calls == []
 
 
+def test_delivers_applies_both_gates_and_matches_whole_types(monkeypatch):
+    """delivers() is what a caller asks before warning that a notification
+    would be a silent no-op, so it must agree with send_discord_alert — whole
+    comma-separated types, never a substring of the raw setting."""
+    _patch(monkeypatch, _FakeSettings(alert_types="structure_attack, auto_update"))
+    assert discord_notify.delivers("auto_update") is True
+    assert discord_notify.delivers("update_available") is False
+    assert discord_notify.delivers("update") is False       # substring of both
+
+    _patch(monkeypatch, _FakeSettings(webhook_url="", alert_types="auto_update"))
+    assert discord_notify.delivers("auto_update") is False
+
+
 def test_send_failure_is_swallowed_and_logged(monkeypatch, caplog):
     _patch(monkeypatch, _FakeSettings())
     _FakeAsyncClient.raise_on_post = RuntimeError("connection refused")

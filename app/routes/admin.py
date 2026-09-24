@@ -27,6 +27,7 @@ from app.esi.rate_limit import rate_limit_tracker
 from app.config import get_settings
 from app.ops import updater as updater_client
 from app.ops import update_schedule
+from app.notify.discord import delivers as discord_delivers
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1252,9 +1253,8 @@ async def _schedule_context(request: Request, db: AsyncSession,
         # watched, with no push notification, leaves only an audit row somebody
         # has to think to go and read. Verified on this host 2026-09-14: the
         # app has no webhook configured at all, so the notification would be a
-        # silent no-op.
-        "notify_configured": bool(settings.discord_webhook_url)
-        and update_schedule.ALERT_TYPE in settings.discord_alert_types,
+        # silent no-op. Asked of the relay itself rather than re-derived here.
+        "notify_configured": discord_delivers(update_schedule.ALERT_TYPE),
     }
 
 

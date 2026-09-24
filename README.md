@@ -450,9 +450,10 @@ database schema on startup.
 
 When signed in as an admin, Vigilant tells you when a newer release exists — a
 banner in the UI and, if you opt in via `DISCORD_ALERT_TYPES`, one Discord
-message per release. It never updates itself; you choose when to deploy — from
-the command line above, or from the browser if you enable the optional updater
-below.
+message per release (alert type `update_available`). It never updates itself
+unless you explicitly set that up; you choose when to deploy — from the command
+line above, or from the browser if you enable the optional updater below, which
+can also apply an update at a time you pick or on a weekly window.
 
 ### In-App Updates (optional, off by default)
 
@@ -680,6 +681,40 @@ The panel offers only releases this host has actually run, read from
 no follow-up `git revert`. If the app fails its health check after an update,
 `deploy.sh` reverts automatically and the panel reports what it reverted to.
 
+#### Scheduled and automatic updates
+
+Both live in the same panel, both are **off by default**, and both sit on top of
+the updater, which is itself off by default.
+
+- **Schedule this update** defers one update — to the exact release you were
+  shown — to a time you choose, in a timezone you name. It fires within 2 hours
+  of that time; if Vigilant is down for longer than that, the schedule is
+  abandoned rather than applied at a surprising hour.
+- **Automatic updates** apply the newest release in a weekly window (day, local
+  time and an IANA timezone, resolved at run time so the window stays put
+  across DST). Patch releases only (x.y.**Z**) unless you untick it, and never a
+  prerelease. Switching it on never fires for a window that is already open —
+  the first run is the next one.
+
+`deploy.sh`'s health gate proves the new release is **up**, not that it
+**works**: a release that starts cleanly with a broken page passes it. So every
+automatic run is written to the admin audit log and its outcome is posted to
+Discord, and a failed run — including one `deploy.sh` rolled back — pauses
+automatic updates until you save the form again, instead of retrying the same
+bad release every week.
+
+**The outcome report has its own alert type, `auto_update`.** It is separate
+from `update_available`, so opting in to "a release is out" notices does not
+cover it. Set `DISCORD_WEBHOOK_URL` and add `auto_update` to
+`DISCORD_ALERT_TYPES`, or an unattended deploy finishes with nobody told; the
+panel warns you when that is the case.
+
+The scheduler never hands the sidecar a request while it is upgrading itself or
+while any of its self-checks is failing (the same checks that disable the
+buttons). It skips that minute and asks again on the next one, within the
+window, rather than leaving a request queued for a sidecar that may not come
+back.
+
 ### Dev Instance
 
 Run a second, disposable Vigilant beside production to test changes before
@@ -738,7 +773,7 @@ All settings are read from `.env`:
 | `CONTACT_EMAIL` | *(the project's issue tracker URL)* | Contact sent in the `User-Agent` on outbound requests to ESI, zKillboard, and other third-party APIs. These operators require a reachable contact. **Self-hosters should set their own address** so they can be reached about their own instance's traffic |
 | `DISCORD_WEBHOOK` | *(unset)* | Ops/backfill progress pings. No-op when unset |
 | `DISCORD_WEBHOOK_URL` | *(unset)* | User-facing alert relay (structure attacks, fuel alerts). Deliberately separate from `DISCORD_WEBHOOK` — don't alias them. No-op when unset |
-| `DISCORD_ALERT_TYPES` | `structure_attack,structure_fuel` | Comma-separated opt-in list gating which alert types the relay sends |
+| `DISCORD_ALERT_TYPES` | `structure_attack,structure_fuel` | Comma-separated opt-in list gating which alert types the relay sends. Update-related types: `update_available` (a newer release exists) and `auto_update` (how each automatic update ended — see [Scheduled and automatic updates](#scheduled-and-automatic-updates)) |
 | `WANDERER_URL` | *(unset)* | Link to your own Wanderer wormhole-mapper instance. Adds a "Wanderer" item to the Map nav group; unset omits the item entirely |
 
 ---

@@ -720,3 +720,35 @@ def test_enabled_policy_warns_when_no_notification_is_configured(env):
     body = env.admin().get("/admin/update/status").text
     assert "No Discord notification is configured" in body
     assert "audit log" in body
+
+
+def _alert_settings(monkeypatch, alert_types):
+    import app.notify.discord as discord_notify
+
+    class Fake:
+        discord_webhook_url = "https://discord.example/webhook"
+        discord_alert_types = alert_types
+    monkeypatch.setattr(discord_notify, "get_settings", lambda: Fake)
+
+
+def test_opting_in_to_release_notices_does_not_count_as_auto_update_reports(env, monkeypatch):
+    """The regression the separate type exists to prevent. A webhook that only
+    carries "a release is out" notices would drop every auto-update report, so
+    the panel must still say nothing will be sent."""
+    _alert_settings(monkeypatch, "structure_attack,update_available")
+    _beat(env.control)
+    env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    body = env.admin().get("/admin/update/status").text
+    assert "No Discord notification is configured" in body
+    assert "auto_update" in body
+
+
+def test_opting_in_to_auto_update_reports_clears_the_warning(env, monkeypatch):
+    _alert_settings(monkeypatch, "structure_attack,auto_update")
+    _beat(env.control)
+    env.admin().post("/admin/update/policy", data={
+        "enabled": "on", "weekday": "6", "local_time": "04:00", "tz": "UTC"})
+    body = env.admin().get("/admin/update/status").text
+    assert "No Discord notification is configured" not in body
+    assert "report to Discord" in body

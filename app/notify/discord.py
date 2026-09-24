@@ -41,6 +41,20 @@ def _enabled_types(raw: str) -> set[str]:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
+def delivers(alert_type: str) -> bool:
+    """Whether send_discord_alert would post `alert_type` at all right now: a
+    webhook is configured AND the type is opted in.
+
+    For a caller that has to warn when a notification it depends on would be a
+    silent no-op, so it asks the relay rather than re-deriving the rule. A
+    substring test against the raw setting is the obvious re-derivation and it
+    is wrong: it matches a type that is only part of another type's name.
+    """
+    settings = get_settings()
+    return bool(settings.discord_webhook_url) and alert_type in _enabled_types(
+        settings.discord_alert_types)
+
+
 async def send_discord_alert(title: str, body: str, alert_type: str, key: str | None = None) -> None:
     """POST an alert to the configured Discord webhook, if enabled.
 

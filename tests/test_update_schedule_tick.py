@@ -426,7 +426,12 @@ def test_the_discord_call_matches_the_real_signature(control, monkeypatch):
     _run(us.tick(SUNDAY_0430 + timedelta(minutes=5)))
 
     assert captured, "no notification was attempted"
-    assert captured["alert_type"] == us.ALERT_TYPE
+    # The literal, not us.ALERT_TYPE: comparing the constant with itself would
+    # pass whatever it held. And not the release-notice type — sharing it meant
+    # opting out of "a release is out" also silenced these failure reports.
+    from app.ops import update_check
+    assert captured["alert_type"] == "auto_update"
+    assert captured["alert_type"] != update_check.ALERT_TYPE
     assert "v1.3.0" in captured["body"]
     assert "FAILED" in captured["title"]
 
