@@ -328,3 +328,31 @@ async def update_banner(request: Request, db: AsyncSession = Depends(get_db)):
         "latest_url": row.latest_url,
         "running": settings.version,
     })
+
+
+@router.get("/status/update-reports", response_class=HTMLResponse)
+async def update_reports_banner(request: Request, db: AsyncSession = Depends(get_db)):
+    """How recent scheduled and automatic updates ended. Empty for non-admins.
+
+    On the status router for the same reason as /status/update-banner beside
+    it: base.html loads it on every page for every visitor, and it answers
+    anonymous callers with empty content rather than an error.
+
+    Admin here means admin or manager — the roles require_admin lets into the
+    updater panel and its acknowledge endpoint — read from the database, so a
+    demotion takes effect at once. (The release banner above checks the older
+    is_admin flag; this follows the panel it reports on.)
+    """
+    from app.ops import update_reports
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+    if not await _is_admin(request, db):
+        return HTMLResponse("")
+    reports = await update_reports.banner_reports(db)
+    if not reports:
+        return HTMLResponse("")
+    return templates.TemplateResponse(request, "partials/update_report_banner.html", {
+        "reports": [update_reports.report_view(r) for r in reports],
+    })

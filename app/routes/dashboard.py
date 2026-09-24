@@ -67,12 +67,16 @@ _NOTIFICATION_MAX = 50
 _discord_relay_tasks: set = set()
 
 
-def _emit_notification(user_id: int, event: dict):
+def _emit_notification(user_id: int, event: dict, relay: bool = True):
     """Add a notification event for a user, and relay it to Discord if
     configured. This is the single choke point every alert-emitting call
     site (dashboard sync, corp inventory/contract thresholds, killmail
     stream) funnels through, so wiring the Discord relay here covers all
     notification types without touching each call site individually.
+
+    `relay=False` queues the bell event only. For a caller that delivers to
+    Discord itself and records the result (update reports, see
+    app/ops/update_reports.py) — relaying here as well would post it twice.
     """
     if user_id not in _notification_events:
         _notification_events[user_id] = []
@@ -81,6 +85,9 @@ def _emit_notification(user_id: int, event: dict):
     q.append(event)
     if len(q) > _NOTIFICATION_MAX:
         _notification_events[user_id] = q[-_NOTIFICATION_MAX:]
+
+    if not relay:
+        return
 
     # Fire-and-forget: schedule the relay but never await it here, so a slow
     # or unreachable webhook can never delay/break the caller's sync path.

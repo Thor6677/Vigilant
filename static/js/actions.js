@@ -624,6 +624,61 @@
         if (el && el.id === 'updater-panel') updaterRestartBanner(true);
     });
 
+    /* Updater panel refusals. The panel's POSTs answer bad input (400) and
+     * "already running" (409) with the re-rendered panel carrying the reason.
+     * htmx 1.x does not swap a 4xx: it fires htmx:responseError instead, and
+     * base.html's ISS-007 handler then overwrites the submitting <form> with a
+     * generic "couldn't load" pill — so the operator is told nothing about
+     * what was wrong. Swap those two statuses like any other answer. Scoped to
+     * the panel as the swap target; every other 4xx on the site keeps the
+     * default. isError=false is what keeps htmx from raising responseError. */
+    document.addEventListener('htmx:beforeSwap', function (e) {
+        var d = e.detail || {};
+        var status = d.xhr && d.xhr.status;
+        if (d.target && d.target.id === 'updater-panel' &&
+                (status === 400 || status === 409)) {
+            d.shouldSwap = true;
+            d.isError = false;
+        }
+    });
+
+    /* Updater panel scheduling forms vs the Overview refresh. admin.html
+     * re-renders #admin-content every 10s, and the panel is rendered inside
+     * it. A refresh mid-edit replaces the scheduling forms — discarding what
+     * was typed and collapsing their <details> — so the <details> carry
+     * data-click/data-input/data-change="updaterHoldRefresh", which stamps
+     * the time of the operator's last touch of a FORM FIELD (not the summary
+     * or the text around it), and admin.html's timer asks updaterRefreshHeld()
+     * before each tick.
+     *
+     * The hold lapses on its own two minutes after the last touch (every
+     * keystroke is one): an edit abandoned in a background tab must not
+     * freeze the section, and the update panel inside it, for good. Focus is
+     * deliberately not a reason to hold — it stays put in a forgotten tab.
+     * A submit ends the hold sooner, since the swap that answers it brings
+     * back unstamped markup. */
+    var UPDATER_HOLD_MS = 2 * 60 * 1000;
+
+    window.updaterHoldRefresh = window.updaterHoldRefresh || function (e) {
+        /* Only a form field counts. Opening or closing the <details> by its
+           <summary>, or clicking the surrounding text, is looking, not
+           editing, and must not freeze the whole Overview for two minutes. */
+        var t = e && e.target;
+        if (!t || !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) return;
+        this.setAttribute('data-touched', String(Date.now()));
+    };
+
+    window.updaterRefreshHeld = window.updaterRefreshHeld || function () {
+        var panel = document.getElementById('updater-panel');
+        if (!panel) return false;
+        var touched = panel.querySelectorAll('[data-touched]');
+        for (var i = 0; i < touched.length; i++) {
+            var at = parseInt(touched[i].getAttribute('data-touched'), 10);
+            if (at && Date.now() - at < UPDATER_HOLD_MS) return true;
+        }
+        return false;
+    };
+
     /* Alert banner dismiss handlers.
      *
      * These used to live as inline <script nonce="..."> blocks inside each

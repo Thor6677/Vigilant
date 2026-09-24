@@ -1025,6 +1025,145 @@ class UpdateStatus(Base):
     last_error = Column(String(512), nullable=True)
 
 
+class UpdateSchedule(Base):
+    """One deferred update the operator asked for: "apply v1.2.3 on Saturday".
+
+    At most one row is ever `pending`; asking again supersedes the previous one
+    rather than queueing two. Distinct from UpdatePolicy because the two answer
+    different questions — this pins the exact tag the operator saw and approved,
+    while a standing policy deliberately cannot, since the whole point there is
+    to apply whatever is latest when the window arrives.
+    """
+    __tablename__ = "update_schedule"
+
+    id = Column(Integer, primary_key=True)
+    target_tag = Column(String(64), nullable=False)
+    # Stored in UTC, which is what the whole host runs on. `timezone` keeps the
+    # zone the operator actually chose so the UI can show the time they typed
+    # back to them rather than a translated one they never entered.
+    run_at = Column(DateTime, nullable=False)
+    timezone = Column(String(64), nullable=False, default="UTC")
+    state = Column(String(16), nullable=False, default="pending")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    fired_at = Column(DateTime, nullable=True)
+    fired_request_id = Column(String(64), nullable=True)
+    # Why the last due tick could not submit (updater busy, upgrading itself,
+    # failing a check, not running). Written only when it changes, and read once:
+    # it becomes the detail of the "skipped" report if the grace runs out.
+    held_reason = Column(String(255), nullable=True)
+
+
+class UpdatePolicy(Base):
+    """Standing auto-update policy. Single row, id always 1.
+
+    Ships DISABLED. Roadmap phase 8 said "never auto-updates", and this reverses
+    that deliberately — so the reversal is opt-in, on top of an updater profile
+    that is itself off by default. Two separate acts, not one.
+
+    The local weekday/time plus an IANA zone are stored rather than a UTC hour:
+    resolving through zoneinfo at evaluation time is what keeps "Sunday 4am"
+    meaning 4am after a DST change instead of silently drifting an hour twice a
+    year, in the direction nobody notices until an update runs at 3am.
+    """
+    __tablename__ = "update_policy"
+
+    id = Column(Integer, primary_key=True)             # always 1
+    enabled = Column(Boolean, nullable=False, default=False)
+    weekday = Column(Integer, nullable=False, default=6)      # 0=Mon .. 6=Sun
+    local_time = Column(String(5), nullable=False, default="04:00")
+    timezone = Column(String(64), nullable=False, default="UTC")
+    # Limits unattended changes to x.y.Z. On by default: the health gate that
+    # makes auto-update defensible is a LIVENESS check, so a release that boots
+    # fine and breaks the UI passes it. Smaller blast radius is the compensation.
+    patch_only = Column(Boolean, nullable=False, default=True)
+    # The resolved LOCAL DATE of the window this policy last fired for. The
+    # idempotency key, and the guard against the worst failure mode in the
+    # feature: the app triggers an update, the update recreates the app, the app
+    # comes back, re-evaluates, finds the window still open, and fires again.
+    # Written in the same transaction as the decision to submit — the pattern
+    # update_status.notified_tag already uses for the same class of problem.
+    last_fired_window = Column(String(10), nullable=True)
+    last_fired_tag = Column(String(64), nullable=True)
+    # Set while an automatic run is in flight so its outcome can be reported
+    # after the restart that loses all in-memory state.
+    awaiting_request_id = Column(String(64), nullable=True)
+    # Why the policy disabled itself. An automatic run that auto-reverted must
+    # not retry the same bad release every week unattended.
+    paused_reason = Column(String(255), nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+    # A window in which a tick wanted to fire and could not, and why. The
+    # evidence behind a "skipped" report: without it, a release that appeared
+    # only after the window closed would read as a missed update.
+    held_window = Column(String(10), nullable=True)
+    held_reason = Column(String(255), nullable=True)
+    # The last window reported as skipped, so each is reported at most once.
+    last_skipped_window = Column(String(10), nullable=True)
+    # The last window any tick saw while it was open. Written once per window.
+    # A window that closed with this unset is one Vigilant was down for.
+    observed_window = Column(String(10), nullable=True)
+
+
+class UpdateRunReport(Base):
+    """How one scheduled or automatic update ended — or that it never started.
+
+    Written for every unattended run, one-shot and policy alike, because nobody
+    was watching either of them. `outcome` is succeeded | failed | reverted |
+    skipped; "skipped" means a schedule or window whose grace ran out without a
+    request ever reaching the updater. The row outlives the app restart that the
+    update itself causes, which is what lets the admin banner report it
+    afterwards. Paired with an admin_audit_log row written in the same commit,
+    before any push is attempted.
+    """
+    __tablename__ = "update_run_report"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, nullable=False, index=True,
+                        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    kind = Column(String(16), nullable=False)          # scheduled | automatic
+    outcome = Column(String(16), nullable=False)
+    from_tag = Column(String(64), nullable=True)
+    to_tag = Column(String(64), nullable=True)
+    detail = Column(String(512), nullable=True)
+    # The updater request this reports on. Unique, so a run is reported at most
+    # once however many ticks see its status; NULL for a skip, which never had
+    # a request (SQLite allows any number of NULLs under a unique index).
+    request_id = Column(String(64), nullable=True, unique=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    acknowledged_by = Column(Integer, nullable=True)
+    # JSON: {channel: {"state": sent|failed|filtered|off, "at": iso, "error": str}}
+    deliveries = Column(Text, nullable=True)
+
+
+class UpdateNotifySettings(Base):
+    """Where update reports are pushed, beyond the audit log and the in-app
+    banner, which always happen. Single row, id always 1.
+
+    Nothing here gates an update. A channel that is unset, filtered or failing
+    only changes who hears about a run, never whether it runs.
+    """
+    __tablename__ = "update_notify_settings"
+
+    id = Column(Integer, primary_key=True)             # always 1
+    # "all" or "problems" (failed, reverted, skipped). Discord's webhook itself
+    # stays in the environment (DISCORD_WEBHOOK_URL, alert type auto_update).
+    discord_policy = Column(String(16), nullable=False, default="all")
+    # The topic URL is the whole credential for ntfy, so it is encrypted at
+    # rest and never rendered back or logged in full.
+    webhook_url = Column(EncryptedText, nullable=True)
+    webhook_format = Column(String(8), nullable=False, default="json")  # json | ntfy
+    webhook_policy = Column(String(16), nullable=False, default="all")
+    discord_last_at = Column(DateTime, nullable=True)
+    discord_last_ok = Column(Boolean, nullable=True)
+    discord_last_error = Column(String(255), nullable=True)
+    webhook_last_at = Column(DateTime, nullable=True)
+    webhook_last_ok = Column(Boolean, nullable=True)
+    webhook_last_error = Column(String(255), nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never

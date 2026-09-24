@@ -44,6 +44,18 @@ SLICE = (SLICE_PARENT,) + SLICE_CHILDREN
 # — the coverage test is what caught it.
 SKIP = (
     'esi_cache',
+    # Deployment control state, deliberately not inherited. A dev instance that
+    # copied production's policy would carry its enabled flag, its window and
+    # its last_fired_window — and while a "dev" build can never satisfy
+    # is_newer() and so can never actually fire, seeding one instance's
+    # deployment schedule into another is not a thing to leave to a fail-safe.
+    'update_policy',
+    'update_schedule',
+    # Production's update history and its push targets. A dev instance showing
+    # production's run reports would raise banners about deploys it never made,
+    # and one that inherited the webhook would page the operator for dev runs.
+    'update_notify_settings',
+    'update_run_report',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).

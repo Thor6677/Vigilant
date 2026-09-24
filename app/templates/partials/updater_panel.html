@@ -79,10 +79,11 @@
        working sidecar, and an in-app update is how it heals itself: disabling
        the controls would wedge the one path out of the skew.
 
-       Neither branch adds a form, a button or an input. The panel's two
-       hx-confirm forms are asserted by tests/test_updater_panel.py, the
-       rollback select is asserted to be the only chooser, and CSP forbids
-       inline handlers — so the remedy is stated as text the operator copies.
+       Neither branch adds a form, a button or an input. Every form in this
+       panel is pinned by tests/test_updater_panel.py (each destructive one
+       confirms, the rollback form's select is its only tag chooser), and CSP
+       forbids inline handlers — so the remedy is stated as text the operator
+       copies.
 
        dict['key'] rather than dict.key throughout: dot access silently
        returns the bound method for any key colliding with a dict method. #}
@@ -207,6 +208,275 @@
             </button>
           </form>
         {% endif %}
+      </div>
+
+      {# ── Deferred and automatic updates ───────────────────────────────────
+         Every form below sits inside #admin-content, which re-renders every
+         10s. The data-*="updaterHoldRefresh" bindings on their <details> are
+         what stop that refresh wiping a half-typed form (static/js/actions.js). #}
+      <div class="updater-schedule">
+        {% if schedule_error %}
+          <p class="b-empty" style="color:var(--danger);">{{ schedule_error }}</p>
+        {% elif schedule_notice %}
+          <p class="b-empty">{{ schedule_notice }}</p>
+        {% endif %}
+
+        {% if pending_schedule %}
+          <div class="updater-pending">
+            <p>
+              <b>Scheduled:</b> update to
+              <b class="mono">{{ pending_schedule.target_tag }}</b>
+              at <b class="mono">{{ pending_schedule.run_at.strftime('%Y-%m-%d %H:%M') }} UTC</b>
+              <span class="b-muted">(entered as {{ pending_schedule.timezone }})</span>
+            </p>
+            <form hx-post="/admin/update/schedule/cancel"
+                  hx-target="#updater-panel" hx-swap="outerHTML">
+              <button type="submit" class="b-btn b-btn-secondary">Cancel schedule</button>
+            </form>
+          </div>
+        {% elif update_available %}
+          {# Open, with what was typed, when this form's own submit was refused. #}
+          <details class="updater-schedule-form" {% if open_form == 'schedule' %}open{% endif %}
+                   data-click="updaterHoldRefresh"
+                   data-input="updaterHoldRefresh" data-change="updaterHoldRefresh">
+            <summary>Schedule this update instead</summary>
+            <form hx-post="/admin/update/schedule"
+                  hx-target="#updater-panel" hx-swap="outerHTML">
+              <input type="hidden" name="tag" value="{{ latest_tag }}">
+              {# Plain text, NOT datetime-local: that control forces
+                 browser-timezone conversion, which is the last thing wanted on a
+                 field whose zone is chosen explicitly beside it. #}
+              <label for="sched-at">Apply {{ latest_tag }} at</label>
+              <input id="sched-at" name="run_at" type="text" value="{{ schedule_form['run_at'] }}"
+                     placeholder="YYYY-MM-DD HH:MM" required>
+              <label for="sched-tz">Timezone</label>
+              <input id="sched-tz" name="tz" type="text" value="{{ schedule_form['timezone'] }}"
+                     placeholder="Europe/London">
+              <button type="submit" class="b-btn b-btn-secondary">Schedule</button>
+            </form>
+            <p class="b-muted">
+              Fires within {{ grace_hours }}h of the chosen time; if Vigilant is
+              down for longer than that, the schedule is abandoned rather than
+              applied at a surprising hour, and reported as skipped.
+            </p>
+          </details>
+        {% endif %}
+
+        <details class="updater-policy" {% if policy.enabled or open_form == 'policy' %}open{% endif %}
+                 data-click="updaterHoldRefresh" data-input="updaterHoldRefresh"
+                 data-change="updaterHoldRefresh">
+          <summary>
+            Automatic updates &mdash;
+            {% if policy.enabled %}
+              on, {{ weekdays[policy.weekday][1] }} {{ policy.local_time }} {{ policy.timezone }}
+            {% else %}off{% endif %}
+          </summary>
+
+          {% if policy.paused_reason %}
+            <p class="b-empty" style="color:var(--danger);">
+              Paused: {{ policy.paused_reason }}. Saving this form re-enables it.
+            </p>
+          {% endif %}
+          {% if skipped_release %}
+            <p class="b-empty is-warn">
+              <b class="mono">{{ skipped_release['tag'] }}</b> failed here on
+              {{ skipped_release['on'] }}; automatic updates will skip it. A newer
+              release will be applied as usual, or update to this one by hand if
+              you still want it.
+            </p>
+          {% endif %}
+
+          <form hx-post="/admin/update/policy"
+                hx-target="#updater-panel" hx-swap="outerHTML"
+                hx-confirm="Apply updates automatically, without anyone watching? Vigilant restarts each time and a release that starts cleanly but misbehaves will not be caught by the health check.">
+            <label>
+              <input type="checkbox" name="enabled" {% if policy_form['enabled'] %}checked{% endif %}>
+              Apply updates automatically
+            </label>
+
+            <label for="pol-day">Day</label>
+            <select id="pol-day" name="weekday">
+              {% for i, name in weekdays %}
+                <option value="{{ i }}" {% if i == policy_form['weekday'] %}selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="pol-time">Time</label>
+            <input id="pol-time" name="local_time" type="text"
+                   value="{{ policy_form['local_time'] }}" placeholder="04:00">
+
+            <label for="pol-tz">Timezone</label>
+            <input id="pol-tz" name="tz" type="text" value="{{ policy_form['timezone'] }}"
+                   placeholder="Europe/London">
+
+            <label>
+              <input type="checkbox" name="patch_only" {% if policy_form['patch_only'] %}checked{% endif %}>
+              Patch releases only (x.y.<b>Z</b>)
+            </label>
+
+            <button type="submit" class="b-btn b-btn-secondary">Save</button>
+          </form>
+
+          {% if next_window %}
+            <p class="b-muted">
+              Next run: <span class="mono">{{ next_window.strftime('%Y-%m-%d %H:%M %Z') }}</span>
+              &mdash; <span class="mono">{{ next_window.astimezone(None).strftime('%H:%M') }}</span> local to the server
+            </p>
+          {% endif %}
+          <p class="b-muted">
+            A failed run pauses automatic updates until you re-enable them.
+            Prereleases are never applied automatically. Every scheduled and
+            automatic run is reported &mdash; succeeded, failed, rolled back or
+            skipped &mdash; in the admin audit log, as a banner for admins and
+            in the history below{% if push_configured %}, and to the push
+            channels under <i>Update notifications</i>{% endif %}.
+          </p>
+        </details>
+
+        {# ── Where run reports go ──────────────────────────────────────────
+           The audit log, the banner and the history always get every report;
+           these channels are optional extras and nothing is gated on them.
+           The webhook URL is write-only here: only notify['webhook_shown'], a
+           redacted form, is ever rendered — for ntfy the topic URL is the
+           whole credential, and this panel is re-fetched into every admin's
+           tab every few seconds. #}
+        {% macro last_delivery(last) %}
+          <p class="b-muted">
+            Last delivery:
+            {% if last %}
+              {% if last['ok'] %}ok{% else %}<span style="color:var(--danger);">failed</span>{% endif %},
+              {{ last['at'] }} UTC{% if last['error'] %} &mdash; {{ last['error'] }}{% endif %}
+            {% else %}none yet{% endif %}
+          </p>
+        {% endmacro %}
+        <details class="updater-notify" {% if open_form == 'notify' %}open{% endif %}
+                 data-click="updaterHoldRefresh" data-input="updaterHoldRefresh"
+                 data-change="updaterHoldRefresh">
+          <summary>
+            Update notifications &mdash;
+            {% if push_configured %}
+              {% if notify['discord_on'] %}Discord{% endif %}{% if notify['discord_on'] and notify['webhook_set'] %} and {% endif %}{% if notify['webhook_set'] %}{{ 'ntfy' if notify['webhook_format'] == 'ntfy' else 'webhook' }}{% endif %}
+            {% else %}in Vigilant only{% endif %}
+          </summary>
+
+          {% if not push_configured %}
+            <p class="b-empty">
+              No push channel is set, so the results of scheduled and automatic
+              runs appear in Vigilant: as a banner for admins, in the history
+              below, and in the audit log. Add a webhook or an ntfy topic to be
+              told without opening it.
+            </p>
+          {% endif %}
+
+          <form hx-post="/admin/update/notify"
+                hx-target="#updater-panel" hx-swap="outerHTML">
+            <p><b>Discord</b> &mdash;
+              {% if notify['discord_on'] %}
+                sends to the webhook in <code>DISCORD_WEBHOOK_URL</code>.
+              {% elif notify['discord_webhook_set'] %}
+                <code>DISCORD_WEBHOOK_URL</code> is set, but <code>auto_update</code>
+                is not in <code>DISCORD_ALERT_TYPES</code>, so nothing is sent.
+              {% else %}
+                not set up. Set <code>DISCORD_WEBHOOK_URL</code> and add
+                <code>auto_update</code> to <code>DISCORD_ALERT_TYPES</code> in
+                <code>.env</code> to use it.
+              {% endif %}
+            </p>
+            <label for="notify-discord-policy">Report</label>
+            <select id="notify-discord-policy" name="discord_policy">
+              <option value="all" {% if notify['discord_policy'] == 'all' %}selected{% endif %}>every run</option>
+              <option value="problems" {% if notify['discord_policy'] == 'problems' %}selected{% endif %}>problems only (failed, rolled back, skipped)</option>
+            </select>
+            {{ last_delivery(notify['discord_last']) }}
+
+            <p><b>Webhook</b> &mdash;
+              {% if notify['webhook_set'] %}
+                sends to <span class="mono">{{ notify['webhook_shown'] }}</span>.
+              {% else %}
+                none. A JSON POST to any URL, or an ntfy topic
+                (<span class="mono">https://ntfy.sh/</span> plus a long random
+                name: free, no account, and the name is the only secret).
+              {% endif %}
+            </p>
+            <label for="notify-webhook-url">{% if notify['webhook_set'] %}Replace URL{% else %}URL{% endif %}</label>
+            <input id="notify-webhook-url" name="webhook_url" type="url" autocomplete="off"
+                   placeholder="{% if notify['webhook_set'] %}leave blank to keep the current one{% else %}https://ntfy.sh/your-long-random-topic{% endif %}">
+            <label for="notify-webhook-format">Format</label>
+            <select id="notify-webhook-format" name="webhook_format">
+              <option value="json" {% if notify['webhook_format'] == 'json' %}selected{% endif %}>JSON</option>
+              <option value="ntfy" {% if notify['webhook_format'] == 'ntfy' %}selected{% endif %}>ntfy</option>
+            </select>
+            <label for="notify-webhook-policy">Report</label>
+            <select id="notify-webhook-policy" name="webhook_policy">
+              <option value="all" {% if notify['webhook_policy'] == 'all' %}selected{% endif %}>every run</option>
+              <option value="problems" {% if notify['webhook_policy'] == 'problems' %}selected{% endif %}>problems only (failed, rolled back, skipped)</option>
+            </select>
+            {% if notify['webhook_set'] %}
+              <label>
+                <input type="checkbox" name="webhook_remove"> Remove this webhook
+              </label>
+            {% endif %}
+            {{ last_delivery(notify['webhook_last']) }}
+
+            <button type="submit" class="b-btn b-btn-secondary">Save</button>
+          </form>
+
+          {# A test button only for a channel that has somewhere to send.
+             Absent rather than disabled: "disabled" in this panel means the
+             updater's own checks are failing, and tests rely on that. #}
+          {% if notify['discord_webhook_set'] or notify['webhook_set'] %}
+            <div class="updater-notify-tests">
+              {% if notify['discord_webhook_set'] %}
+                <form hx-post="/admin/update/notify/test"
+                      hx-target="#updater-panel" hx-swap="outerHTML">
+                  <input type="hidden" name="channel" value="discord">
+                  <button type="submit" class="b-btn b-btn-secondary">Send test notification to Discord</button>
+                </form>
+              {% endif %}
+              {% if notify['webhook_set'] %}
+                <form hx-post="/admin/update/notify/test"
+                      hx-target="#updater-panel" hx-swap="outerHTML">
+                  <input type="hidden" name="channel" value="webhook">
+                  <button type="submit" class="b-btn b-btn-secondary">Send test notification to the webhook</button>
+                </form>
+              {% endif %}
+            </div>
+          {% endif %}
+          <p class="b-muted">
+            A delivery that fails is recorded here and on the run it was about;
+            it never affects the update or the report.
+          </p>
+        </details>
+
+        {# ── History ── inline, never lazily fetched: #admin-content
+           re-renders every 10s and a load-triggered child would flash. #}
+        <div class="updater-history">
+          <p><b>Recent scheduled and automatic runs</b></p>
+          {% if run_history %}
+            <div class="b-table-row" style="border-bottom:2px solid var(--border);flex-wrap:wrap;">
+              <span style="flex:0 0 110px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">When (UTC)</span>
+              <span style="flex:0 0 70px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Kind</span>
+              <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Change</span>
+              <span style="flex:0 0 80px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Outcome</span>
+              <span style="flex:2;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Delivered</span>
+            </div>
+            {% for r in run_history %}
+              <div class="b-table-row" style="flex-wrap:wrap;" title="{{ r['detail'] }}">
+                <span class="mono" style="flex:0 0 110px;font-size:10px;">{{ r['at'] }}</span>
+                <span style="flex:0 0 70px;font-size:10px;">{{ r['kind'] }}</span>
+                <span class="mono" style="flex:1;font-size:10px;">{{ r['from_tag'] or '?' }} &rarr; {{ r['to_tag'] or '?' }}</span>
+                <span style="flex:0 0 80px;">
+                  <span class="b-badge {% if r['outcome'] in ('failed', 'reverted') %}is-danger{% elif r['outcome'] == 'skipped' %}is-warn{% endif %}" style="font-size:7px;">{{ r['outcome'] }}</span>
+                </span>
+                <span style="flex:2;font-size:10px;color:var(--muted);">
+                  {% for channel, d in r['deliveries'].items() %}{{ channel }}: {{ d['state'] }}{% if d['error'] %} ({{ d['error'] }}){% endif %}{% if not loop.last %}; {% endif %}{% else %}in Vigilant only{% endfor %}
+                </span>
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="b-muted">None yet.</p>
+          {% endif %}
+        </div>
       </div>
     {% endif %}
   {% endif %}

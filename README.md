@@ -450,9 +450,10 @@ database schema on startup.
 
 When signed in as an admin, Vigilant tells you when a newer release exists — a
 banner in the UI and, if you opt in via `DISCORD_ALERT_TYPES`, one Discord
-message per release. It never updates itself; you choose when to deploy — from
-the command line above, or from the browser if you enable the optional updater
-below.
+message per release (alert type `update_available`). It never updates itself
+unless you explicitly set that up; you choose when to deploy — from the command
+line above, or from the browser if you enable the optional updater below, which
+can also apply an update at a time you pick or on a weekly window.
 
 ### In-App Updates (optional, off by default)
 
@@ -680,6 +681,87 @@ The panel offers only releases this host has actually run, read from
 no follow-up `git revert`. If the app fails its health check after an update,
 `deploy.sh` reverts automatically and the panel reports what it reverted to.
 
+#### Scheduled and automatic updates
+
+Both live in the same panel, both are **off by default**, and both sit on top of
+the updater, which is itself off by default.
+
+- **Schedule this update** defers one update — to the exact release you were
+  shown — to a time you choose, in a timezone you name. It fires within 2 hours
+  of that time; if Vigilant is down for longer than that, the schedule is
+  abandoned rather than applied at a surprising hour. Only an upgrade can be
+  scheduled (going back is **Roll back**, with you watching), and a schedule
+  that a newer deploy has overtaken is dropped rather than applied.
+- **Automatic updates** apply the newest release in a weekly window (day, local
+  time and an IANA timezone, resolved at run time so the window stays put
+  across DST, with its 2 hours measured in real elapsed time). Patch releases
+  only (x.y.**Z**) unless you untick it; never a prerelease, never anything
+  older than what is running, and never a release that already failed or was
+  rolled back on this install — the panel names it. If the hourly release
+  check has not succeeded for 3 hours, the window waits rather than act on old
+  information. Saving the policy — switching it on, or changing its day, time
+  or timezone — never fires for a window that is already open; the first run is
+  the next one.
+
+`deploy.sh`'s health gate proves the new release is **up**, not that it
+**works**: a release that starts cleanly with a broken page passes it. So every
+unattended run is reported, and a failed automatic run — including one
+`deploy.sh` rolled back — pauses automatic updates until you save the form
+again, instead of retrying the same bad release every week.
+
+The scheduler never hands the sidecar a request while it is upgrading itself,
+while any of its self-checks is failing (the same checks that disable the
+buttons), or while it has stopped responding. It holds that minute and asks
+again on the next one, within the window, rather than leaving a request queued
+for a sidecar that may not come back. If a request it did write is still
+unclaimed after 2 hours, it takes it back and reports the run as skipped, so a
+sidecar that returns days later does not deploy it on the spot.
+
+#### How you find out what happened
+
+Every scheduled and automatic run gets one report: **succeeded**, **failed**,
+**rolled back**, or **skipped** — a schedule or weekly window whose 2 hours ran
+out before the update could start (Vigilant was down, or the updater was busy,
+failing a check or not running). A skip is reported once, never once a minute.
+No external service is needed to see any of it:
+
+- the **admin audit log** gets a row first, before anything is pushed;
+- admins see a **banner** on every page. A success can be dismissed and goes
+  away on its own after a week; a failure, rollback or skip stays until an
+  admin acknowledges it, and links to Admin › Overview, where a paused policy
+  is resumed. The banner is read from the database, so it is there after the
+  restart the update itself causes;
+- the updater panel lists the **last ten runs**, with how each push channel
+  fared;
+- an open tab gets a **bell** notification (type "Vigilant Updates").
+
+To be told without opening Vigilant, add a push channel under **Update
+notifications** in the panel. Each one can report **every run** or **problems
+only** (failed, rolled back, skipped), has a **Send test notification** button,
+and shows its last delivery. A delivery that fails is recorded on the report
+and on that line; it never affects the update or the report.
+
+- **Discord** uses the existing relay: set `DISCORD_WEBHOOK_URL` and add
+  **`auto_update`** to `DISCORD_ALERT_TYPES`. That is its own type, separate
+  from `update_available`, so opting in to "a release is out" notices does not
+  cover it.
+- **Webhook** takes any `http(s)` URL, in one of two formats. It is sent with a
+  5 second timeout, redirects are not followed, and the URL is stored encrypted
+  and never shown back or logged in full.
+  - **JSON** — a POST of:
+    ```json
+    {"event": "vigilant.update", "kind": "automatic", "outcome": "failed",
+     "from_tag": "v1.3.0", "to_tag": "v1.3.1", "at": "2026-09-13T04:31:02Z",
+     "detail": "Automatic update to v1.3.1 failed. ..."}
+    ```
+    `kind` is `scheduled` or `automatic` (`test` for the test button);
+    `outcome` is `succeeded`, `failed`, `reverted` or `skipped`.
+  - **ntfy** — the message as a plain-text body with `Title`, `Priority` (`high`
+    for a problem) and `Tags` headers. [ntfy](https://ntfy.sh) is free and needs
+    no account: pick a long random topic, subscribe to it in the ntfy app, and
+    paste `https://ntfy.sh/<topic>` here. The topic name is the only secret —
+    anyone who knows it can read it.
+
 ### Dev Instance
 
 Run a second, disposable Vigilant beside production to test changes before
@@ -738,7 +820,7 @@ All settings are read from `.env`:
 | `CONTACT_EMAIL` | *(the project's issue tracker URL)* | Contact sent in the `User-Agent` on outbound requests to ESI, zKillboard, and other third-party APIs. These operators require a reachable contact. **Self-hosters should set their own address** so they can be reached about their own instance's traffic |
 | `DISCORD_WEBHOOK` | *(unset)* | Ops/backfill progress pings. No-op when unset |
 | `DISCORD_WEBHOOK_URL` | *(unset)* | User-facing alert relay (structure attacks, fuel alerts). Deliberately separate from `DISCORD_WEBHOOK` — don't alias them. No-op when unset |
-| `DISCORD_ALERT_TYPES` | `structure_attack,structure_fuel` | Comma-separated opt-in list gating which alert types the relay sends |
+| `DISCORD_ALERT_TYPES` | `structure_attack,structure_fuel` | Comma-separated opt-in list gating which alert types the relay sends. Update-related types: `update_available` (a newer release exists) and `auto_update` (how each scheduled or automatic update ended — see [How you find out what happened](#how-you-find-out-what-happened); a webhook or ntfy topic for the same reports is set in the updater panel, not here) |
 | `WANDERER_URL` | *(unset)* | Link to your own Wanderer wormhole-mapper instance. Adds a "Wanderer" item to the Map nav group; unset omits the item entirely |
 
 ---

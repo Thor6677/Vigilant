@@ -233,7 +233,8 @@ def self_update_record(heartbeat) -> dict | None:
     return record
 
 
-def build_request(action: str, tag: str, requested_by: int | None) -> dict:
+def build_request(action: str, tag: str, requested_by: int | None,
+                  request_id: str | None = None) -> dict:
     """The request.json payload. Raises InvalidRequest rather than writing
     something the sidecar will only refuse.
 
@@ -246,7 +247,7 @@ def build_request(action: str, tag: str, requested_by: int | None) -> dict:
     if not validate_tag_advisory(tag):
         raise InvalidRequest(f"not a release tag: {tag!r}")
     return {
-        "id": str(uuid.uuid4()),
+        "id": request_id or str(uuid.uuid4()),
         "action": action,
         "tag": tag,
         "requested_by": requested_by,
@@ -288,6 +289,17 @@ def read_heartbeat() -> dict | None:
     return _read_json(control_dir() / "updater.json")
 
 
+def read_last_heartbeat() -> dict | None:
+    """The last heartbeat ever written, fresh or not. None if there is none.
+
+    Not a liveness signal — is_available() is. For the scheduler, which has to
+    tell "no updater on this install" (no file: do nothing at all) apart from
+    "the updater has stopped beating" (a missed window someone should hear
+    about), and still wants the last deployed tag the sidecar reported.
+    """
+    return _read_json(control_dir() / "updater.json")
+
+
 def read_status() -> dict | None:
     """The current or last run, or None if nothing has ever run."""
     return _read_json(control_dir() / "status.json")
@@ -321,11 +333,19 @@ def has_pending_request() -> bool:
     return (control_dir() / "request.json").exists()
 
 
+def read_pending_request() -> dict | None:
+    """The unclaimed request.json, parsed, or None. For the scheduler, which
+    withdraws its own requests if nothing claims them in time."""
+    data = _read_json(control_dir() / "request.json")
+    return data if isinstance(data, dict) else None
+
+
 def current_run_state() -> str:
     return run_state(read_status(), datetime.now(timezone.utc))
 
 
-def submit(action: str, tag: str, requested_by: int | None) -> str:
+def submit(action: str, tag: str, requested_by: int | None,
+           request_id: str | None = None) -> str:
     """Queue one request for the sidecar. Returns the new request id.
 
     Raises UpdaterUnavailable, UpdaterBusy or InvalidRequest — all three are
@@ -345,7 +365,9 @@ def submit(action: str, tag: str, requested_by: int | None) -> str:
     if state != IDLE:
         raise UpdaterBusy(state)
 
-    payload = build_request(action, tag, requested_by)
+    # `request_id` lets a caller commit its record of the request BEFORE the
+    # request exists (the scheduler does; see update_schedule._fire).
+    payload = build_request(action, tag, requested_by, request_id)
 
     # The tmp file MUST be a sibling in /control: os.replace is atomic only
     # within a filesystem, and /control is in any case the one writable mount an

@@ -7,10 +7,12 @@ confirmation that never fires, a handler name that resolves to nothing.
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
 
+from app.ops import update_schedule
 from app.ops.updater import BUSY, IDLE, INTERRUPTED
 
 PANEL = Path("app/templates/partials/updater_panel.html")
@@ -68,9 +70,68 @@ def _render_finished(status, **overrides):
         IDLE=IDLE,
         BUSY=BUSY,
         INTERRUPTED=INTERRUPTED,
+        **_schedule_defaults(),
     )
     context.update(overrides)
     return tmpl.render(**context)
+
+
+def _schedule_defaults():
+    """The scheduling half of the context, in its shipped-off state: policy
+    disabled, nothing pending. Mirrors the KEYS of app/routes/admin.py:
+    _schedule_context, with UpdatePolicy's column defaults as the values.
+
+    A plain namespace rather than an UpdatePolicy(): SQLAlchemy applies column
+    defaults at flush, so an unflushed instance reads None for every field and
+    would render a panel no real install can produce.
+
+    It lives here because the panel is ONE template. The scheduling section
+    dereferences `policy.enabled` unconditionally, so a standalone render that
+    omits it raises UndefinedError before reaching the markup under test — which
+    is how four log-preservation tests broke the moment scheduling landed on top
+    of them, with nothing wrong in either change.
+    """
+    return dict(
+        policy=SimpleNamespace(enabled=False, weekday=6, local_time="04:00",
+                               timezone="UTC", patch_only=True,
+                               paused_reason=None),
+        pending_schedule=None,
+        next_window=None,
+        weekdays=list(enumerate(update_schedule.WEEKDAYS)),
+        schedule_error=None,
+        schedule_notice=None,
+        grace_hours=update_schedule.GRACE_SECONDS // 3600,
+        open_form=None,
+        policy_form=dict(enabled=False, weekday=6, local_time="04:00",
+                         timezone="UTC", patch_only=True),
+        schedule_form=dict(run_at="", timezone="UTC"),
+        notify=_notify_defaults(),
+        push_configured=False,
+        run_history=[],
+        skipped_release=None,
+    )
+
+
+def _notify_defaults(**overrides):
+    """app/ops/update_reports.py:notify_view() for a fresh install: no push
+    channel of any kind, nothing delivered yet."""
+    view = dict(discord_webhook_set=False, discord_on=False, discord_policy="all",
+                discord_last=None, webhook_set=False, webhook_shown="",
+                webhook_format="json", webhook_policy="all", webhook_last=None)
+    view.update(overrides)
+    return view
+
+
+def test_schedule_defaults_cover_every_key_the_route_supplies():
+    """The helper above is a hand-kept mirror, and a mirror drifts. If
+    _schedule_context grows a key the template then reads, the standalone
+    renders fail with an UndefinedError that names the variable but not the
+    cause; this names the cause."""
+    src = Path("app/routes/admin.py").read_text()
+    body = src.split("async def _schedule_context", 1)[1].split("\nasync def ", 1)[0]
+    returned = set(re.findall(r'^\s{8}"([a-z_]+)":', body, flags=re.M))
+    assert returned, "could not find _schedule_context's returned keys"
+    assert returned == set(_schedule_defaults())
 
 
 def _finished_status(**overrides):
@@ -150,15 +211,41 @@ def test_base_error_handler_still_honours_the_opt_out():
 
 # ── Confirmation ─────────────────────────────────────────────────────────────
 
-def test_both_destructive_forms_confirm(panel):
-    """The spec requires stating plainly that this restarts the app. Two forms,
-    two confirmations."""
-    assert panel.count("hx-confirm=") == 2
+def _form_for(panel: str, action: str) -> str:
+    """The markup of the form posting to `action`."""
+    i = panel.index(f'hx-post="{action}"')
+    start = panel.rindex("<form", 0, i)
+    return panel[start:panel.index("</form>", i)]
 
 
-def test_confirmations_mention_the_outage(panel):
-    for m in re.findall(r'hx-confirm="([^"]+)"', panel):
-        assert "unavailable" in m.lower(), m
+DESTRUCTIVE = ["/admin/update", "/admin/rollback", "/admin/update/policy"]
+
+
+@pytest.mark.parametrize("action", DESTRUCTIVE)
+def test_every_destructive_form_confirms(action, panel):
+    """Anything that can restart the app — now or on a schedule — asks first."""
+    assert "hx-confirm=" in _form_for(panel, action)
+
+
+@pytest.mark.parametrize("action", ["/admin/update", "/admin/rollback"])
+def test_immediate_actions_mention_the_outage(action, panel):
+    """The spec requires stating plainly that this restarts the app."""
+    msg = re.search(r'hx-confirm="([^"]+)"', _form_for(panel, action)).group(1)
+    assert "unavailable" in msg.lower(), msg
+
+
+def test_the_policy_confirmation_names_what_is_actually_being_agreed(panel):
+    """Enabling a policy is not an outage now — it is consenting to unattended
+    ones later, including the case the health check cannot catch. Saying "the
+    site will be unavailable for 30-60 seconds" here would be wrong."""
+    msg = re.search(r'hx-confirm="([^"]+)"', _form_for(panel, "/admin/update/policy")).group(1)
+    assert "automatically" in msg.lower()
+    assert "health check" in msg.lower()
+
+
+def test_cancelling_a_schedule_needs_no_confirmation(panel):
+    """Cancelling is the safe direction. A confirmation there is just friction."""
+    assert "hx-confirm=" not in _form_for(panel, "/admin/update/schedule/cancel")
 
 
 def test_confirm_uses_htmx_not_the_native_submit_dispatcher(panel):
@@ -276,16 +363,23 @@ def test_a_lagging_sidecar_does_not_disable_the_buttons():
 
 
 def test_a_lagging_sidecar_adds_no_new_form_or_input():
-    """The panel's two hx-confirm forms and its single rollback select are
-    pinned by the tests above, and CSP forbids inline handlers — so the remedy
-    has to be text the operator copies, not another control."""
+    """Every form in the panel is pinned by the tests above, and CSP forbids
+    inline handlers — so the remedy has to be text the operator copies, not
+    another control.
+
+    Measured against the same render without the skew rather than as absolute
+    zeroes: the scheduling section's policy form renders in every idle view,
+    so the question is only whether the notice itself adds anything."""
+    quiet = _render_finished(_finished_status(),
+                             updater_version="v1.2.3",
+                             current_tag="v1.2.3")
     html = _render_finished(_finished_status(),
                             updater_lagging=True,
                             updater_version="v1.2.2",
                             current_tag="v1.2.3")
-    assert html.count("<form") == 0          # no update/rollback offered here
-    assert "<input" not in html
-    assert "hx-post" not in html
+    assert "install directory" in html       # the notice did render
+    for needle in ("<form", "<input", "<select", "<button", "hx-post"):
+        assert html.count(needle) == quiet.count(needle), needle
 
 
 def test_mid_self_update_is_neutral_and_says_nothing_about_lag():
@@ -384,9 +478,20 @@ def test_overview_section_still_auto_refreshes():
 
 def test_rollback_targets_are_a_closed_list(panel):
     """A free-text tag field would invite typing any ref; the select can only
-    offer releases this host has actually run."""
-    assert "<select" in panel
-    assert 'type="text"' not in panel
+    offer releases this host has actually run. Scoped to the rollback form —
+    the schedule form legitimately takes typed text for a time and a zone."""
+    form = _form_for(panel, "/admin/rollback")
+    assert "<select" in form
+    assert 'type="text"' not in form
+
+
+def test_no_form_lets_a_tag_be_typed(panel):
+    """Applies to the schedule form too: it carries the tag as a hidden field
+    taken from the release the operator was shown, never as free text."""
+    for action in ["/admin/update", "/admin/rollback", "/admin/update/schedule"]:
+        form = _form_for(panel, action)
+        assert not re.search(r'<input[^>]*name="tag"[^>]*type="text"', form), action
+        assert not re.search(r'type="text"[^>]*name="tag"', form), action
 
 
 # ── The ancestor that can defeat all of the above ────────────────────────────
@@ -420,3 +525,104 @@ def test_admin_content_still_auto_refreshes():
     src = ADMIN.read_text()
     assert "refreshSections" in src
     assert "setInterval" in src
+
+
+# ── The refresh vs the scheduling forms ──────────────────────────────────────
+#
+# The scheduling forms live inside #admin-content, which re-renders every 10s.
+# Nothing in a Python test can watch a browser lose typed text, so what is
+# pinned here is the wiring that prevents it.
+
+@pytest.mark.parametrize("cls", ["updater-schedule-form", "updater-policy", "updater-notify"])
+def test_scheduling_details_record_the_operators_touch(cls, panel):
+    tag = panel[panel.index(f'<details class="{cls}"'):]
+    tag = tag[:tag.index(">") + 1]
+    for attr in ("data-click", "data-input", "data-change"):
+        assert f'{attr}="updaterHoldRefresh"' in tag, (cls, attr)
+
+
+def test_every_refresh_timer_asks_before_re_rendering():
+    """Both setInterval sites — the initial Overview one and switchTab's — must
+    go through the hold check. One that bypassed it would wipe the form on
+    exactly the tab where it lives."""
+    src = ADMIN.read_text()
+    assert src.count("setInterval(") == 2
+    assert src.count("setInterval(refreshAdminSection,") == 2
+    fn = src[src.index("function refreshAdminSection"):]
+    fn = fn[:fn.index("\n}")]
+    assert fn.index("updaterRefreshHeld") < fn.index("htmx.ajax")
+
+
+def test_only_a_form_field_holds_the_refresh(actions):
+    """Clicking a <summary> to look is not editing; freezing the whole
+    Overview for it was too heavy."""
+    fn = actions[actions.index("window.updaterHoldRefresh"):]
+    fn = fn[:fn.index("\n    };")]
+    assert "INPUT|SELECT|TEXTAREA" in fn
+    assert fn.index("tagName") < fn.index("setAttribute")
+
+
+def test_the_report_banner_slot_survives_a_failed_poll():
+    """It polls through the app's own restart, when a failure is expected."""
+    base = BASE.read_text()
+    slot = base[base.index('<div id="update-report-slot"'):]
+    slot = slot[:slot.index(">") + 1]
+    assert 'data-htmx-no-error="1"' in slot
+
+
+def test_the_hold_lapses_on_its_own(actions):
+    """An edit abandoned in a background tab must not freeze the section, and
+    the update panel inside it, for good. Focus is not a reason to hold: it
+    stays where it was in a forgotten tab."""
+    fn = actions[actions.index("window.updaterRefreshHeld"):]
+    fn = fn[:fn.index("\n    };")]
+    assert "UPDATER_HOLD_MS" in fn and "Date.now()" in fn
+    assert "activeElement" not in fn
+    assert "UPDATER_HOLD_MS = 2 * 60 * 1000" in actions
+
+
+def test_panel_refusals_are_swapped_in_not_turned_into_a_pill(actions):
+    """htmx 1.x does not swap a 4xx, and base.html's ISS-007 handler then
+    replaces the submitting form with "couldn't load". The panel answers bad
+    input and a busy updater with a re-render that says why, so those two
+    statuses must reach the page — and only for the panel."""
+    i = actions.index("htmx:beforeSwap")
+    hook = actions[i:actions.index("});", i)]
+    assert "updater-panel" in hook
+    assert "400" in hook and "409" in hook
+    assert "shouldSwap = true" in hook
+    assert "isError = false" in hook
+
+
+# ── The bell ─────────────────────────────────────────────────────────────────
+
+NOTIFICATIONS = Path("static/js/notifications.js")
+
+
+def test_the_bell_knows_the_update_report_type():
+    """Without a default pref the bell treats an unknown type as enabled but
+    unlabelled; without a settings box a muted type can never be unmuted."""
+    js = NOTIFICATIONS.read_text()
+    prefs = js[js.index("var DEFAULT_PREFS"):js.index("};", js.index("var DEFAULT_PREFS"))]
+    labels = js[js.index("var TYPE_LABELS"):js.index("};", js.index("var TYPE_LABELS"))]
+    assert "auto_update: true" in prefs
+    assert "auto_update:" in labels
+    assert 'data-notif-type="auto_update"' in BASE.read_text()
+
+
+def test_the_report_banner_slot_is_not_part_of_the_local_dismiss_state():
+    """Acknowledgement is server-side. applyDismissState() hides elements by
+    localStorage, so the report banner must match none of its selectors."""
+    env = Environment(loader=FileSystemLoader(_TEMPLATES), autoescape=True)
+    banner = env.get_template("partials/update_report_banner.html").render(reports=[
+        dict(id=1, kind="automatic", outcome=o, problem=o != "succeeded",
+             from_tag="v1.2.0", to_tag="v1.3.0", detail="d", headline="h",
+             at="2026-09-13 04:30", acknowledged=False, deliveries={})
+        for o in ("succeeded", "failed", "reverted", "skipped")])
+    assert banner.count("update-report-banner") == 4
+    assert "data-alert-id" not in banner
+    assert 'id="update-banner"' not in banner
+    assert "<script" not in banner
+    base = BASE.read_text()
+    assert 'hx-get="/status/update-reports"' in base
+

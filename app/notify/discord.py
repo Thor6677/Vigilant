@@ -36,12 +36,33 @@ _SUPPRESS_SECONDS = 30 * 60  # 30-minute per-(type, key) dedup window
 # attempt so a failing webhook doesn't retry-storm either.
 _last_sent: dict[tuple[str, str], float] = {}
 
+# What send_discord_alert() reports back. Plain strings so a caller can store
+# one as-is; anything else it returns starts with "failed: ".
+SENT = "sent"
+NOT_SENT_NO_WEBHOOK = "not sent: DISCORD_WEBHOOK_URL is not set"
+NOT_SENT_TYPE_OFF = "not sent: alert type not in DISCORD_ALERT_TYPES"
+NOT_SENT_SUPPRESSED = "not sent: repeat within the suppression window"
+
 
 def _enabled_types(raw: str) -> set[str]:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
-async def send_discord_alert(title: str, body: str, alert_type: str, key: str | None = None) -> None:
+def delivers(alert_type: str) -> bool:
+    """Whether send_discord_alert would post `alert_type` at all right now: a
+    webhook is configured AND the type is opted in.
+
+    For a caller that has to warn when a notification it depends on would be a
+    silent no-op, so it asks the relay rather than re-deriving the rule. A
+    substring test against the raw setting is the obvious re-derivation and it
+    is wrong: it matches a type that is only part of another type's name.
+    """
+    settings = get_settings()
+    return bool(settings.discord_webhook_url) and alert_type in _enabled_types(
+        settings.discord_alert_types)
+
+
+async def send_discord_alert(title: str, body: str, alert_type: str, key: str | None = None) -> str:
     """POST an alert to the configured Discord webhook, if enabled.
 
     Args:
@@ -58,20 +79,24 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
     Never raises. No-ops silently when the webhook URL is unset or the
     alert_type isn't in the opt-in list; logs at warning and swallows HTTP
     errors, timeouts, and any other exception from the send itself.
+
+    Returns what happened, for the one caller that records deliveries (update
+    reports): SENT, one of the NOT_SENT_* reasons, or "failed: <why>". The
+    fire-and-forget callers ignore it, and nothing about the send changes.
     """
     settings = get_settings()
     webhook_url = settings.discord_webhook_url
     if not webhook_url:
-        return  # relay not configured — silent no-op
+        return NOT_SENT_NO_WEBHOOK  # relay not configured — silent no-op
 
     if alert_type not in _enabled_types(settings.discord_alert_types):
-        return  # this alert type isn't opted in — silent no-op
+        return NOT_SENT_TYPE_OFF  # this alert type isn't opted in — silent no-op
 
     dedup_key = (alert_type, key or title)
     now = time.monotonic()
     last = _last_sent.get(dedup_key)
     if last is not None and (now - last) < _SUPPRESS_SECONDS:
-        return  # suppressed: an identical alert already went out recently
+        return NOT_SENT_SUPPRESSED  # an identical alert already went out recently
     _last_sent[dedup_key] = now
 
     payload = {"content": f"**{title}**\n{body}" if body else f"**{title}**"}
@@ -82,5 +107,8 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
                 logger.warning(
                     "discord alert relay: HTTP %s posting type=%s", resp.status_code, alert_type
                 )
+                return f"failed: HTTP {resp.status_code}"
     except Exception as e:
         logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, e)
+        return f"failed: {type(e).__name__}"
+    return SENT

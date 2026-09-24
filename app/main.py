@@ -343,6 +343,12 @@ async def startup():
             "ALTER TABLE detected_battles ADD COLUMN top_attacker_alliance_name TEXT",
             "ALTER TABLE detected_battles ADD COLUMN top_victim_alliance_id INTEGER",
             "ALTER TABLE detected_battles ADD COLUMN top_victim_alliance_name TEXT",
+            # Update reports: the evidence behind a "skipped" run
+            "ALTER TABLE update_schedule ADD COLUMN held_reason VARCHAR(255)",
+            "ALTER TABLE update_policy ADD COLUMN held_window VARCHAR(10)",
+            "ALTER TABLE update_policy ADD COLUMN held_reason VARCHAR(255)",
+            "ALTER TABLE update_policy ADD COLUMN last_skipped_window VARCHAR(10)",
+            "ALTER TABLE update_policy ADD COLUMN observed_window VARCHAR(10)",
         ]:
             try:
                 await db.execute(text(stmt))
@@ -562,3 +568,12 @@ async def startup():
         # since a "dev" version can never compare as older than a release.
         from app.ops.update_check import run_update_check
         asyncio.create_task(run_update_check())
+
+        # Deferred and automatic updates. Ticks every 60s but does nothing at
+        # all — not even a database read — unless an updater sidecar has run on
+        # this install (its heartbeat file exists), and fires nothing unless the
+        # operator has scheduled something or enabled the policy, both of which
+        # ship off. Also reports how each scheduled or automatic run ended.
+        # Inside the same jobs gate: only one instance may drive deployment.
+        from app.ops.update_schedule import run_scheduler
+        asyncio.create_task(run_scheduler())

@@ -62,16 +62,21 @@ function switchTab() {
     var refreshSections = {'overview': 10000, 'scheduler': 5000, 'esi': 5000};
     var interval = refreshSections[section];
     if (interval) {
-        refreshTimer = setInterval(function() {
-            htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
-        }, interval);
+        refreshTimer = setInterval(refreshAdminSection, interval);
     }
 }
 
-/* Start auto-refresh for overview */
-refreshTimer = setInterval(function() {
+/* Both timers go through here. A tick is skipped, not delayed, while the
+   operator is part-way through one of the updater panel's scheduling forms:
+   re-rendering the section would replace the form under them. The rule for
+   "part-way" lives with the handler that records it, in actions.js. */
+function refreshAdminSection() {
+    if (window.updaterRefreshHeld && window.updaterRefreshHeld()) return;
     htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
-}, 10000);
+}
+
+/* Start auto-refresh for overview */
+refreshTimer = setInterval(refreshAdminSection, 10000);
 
 /* Stop polling the moment the server says this session is gone (401) or no
    longer an admin's (403). A 401 also carries HX-Redirect, which htmx honours
