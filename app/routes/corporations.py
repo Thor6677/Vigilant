@@ -4,12 +4,12 @@ from datetime import datetime, timezone, timedelta
 from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold, CorpContractThreshold
+from app.db.models import get_db, Character, AsyncSessionLocal, CorpInventoryThreshold, CorpContractThreshold, CorpWalletSnapshot
 from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
 from app.esi import universe as esi_universe
@@ -265,6 +265,7 @@ async def corp_detail(
     # --- Corp wallet (if scope available) ---
     corp_wallets: list | None = None
     corp_wallet_total: float | None = None
+    wallet_history: dict | None = None
     if "wallet" in scope_chars:
         raw, error = await _try_api_call_with_fallback(
             "wallet",
@@ -280,6 +281,13 @@ async def corp_detail(
                 key=lambda d: d["division"],
             )
             corp_wallet_total = sum(d.get("balance", 0) for d in raw)
+            # History rides on the SAME live success (T-056 caveat B): the
+            # chart exists on the page only for a user ESI just let read
+            # the wallet. No live read, no chart, no hint that one exists.
+            try:
+                wallet_history = await _corp_wallet_history(corp_id, "1m", db)
+            except Exception as e:
+                logger.warning("Corp wallet history failed for %s: %s", corp_id, e)
         elif error:
             logger.warning("Corp wallets fetch failed for %s: %s", corp_id, error)
 
@@ -443,6 +451,7 @@ async def corp_detail(
         "member_count": member_count,
         "corp_wallets": corp_wallets,
         "corp_wallet_total": corp_wallet_total,
+        "wallet_history": wallet_history,
         "corp_jobs": corp_jobs,
         "corp_orders": corp_orders,
         "corp_structures": corp_structures,
@@ -465,6 +474,105 @@ HANGAR_LABELS = {
 CORP_HANGAR_FLAGS = {"CorpSAG1", "CorpSAG2", "CorpSAG3", "CorpSAG4", "CorpSAG5", "CorpSAG6", "CorpSAG7", "CorpDeliveries"}
 
 templates.env.globals["HANGAR_LABELS"] = HANGAR_LABELS
+
+
+# ── Corp wallet history (T-056) ───────────────────────────────────────────────
+
+_WALLET_RANGE_DAYS = {"1w": 7, "1m": 30, "3m": 90, "1y": 365}
+_WALLET_HISTORY_MAX_POINTS = 400
+# Samples are hourly. Two missed samples in a row is a real gap — the role
+# was lost, the character left, or the app was down — and the chart must
+# show it as a break, never as a flat line or a straight interpolation.
+_WALLET_GAP_SECONDS = 3 * 3600
+
+
+async def _corp_wallet_history(corp_id: int, range_key: str, db: AsyncSession) -> dict:
+    """Per-division and total series for the chart, with explicit gap breaks.
+
+    Returns {"labels": [iso...], "series": {"1": [...], ...}, "total": [...],
+    "samples": n}. A gap longer than _WALLET_GAP_SECONDS between consecutive
+    samples inserts one null point at its midpoint so Chart.js (spanGaps off)
+    breaks the line there. A division absent from a sample is null for that
+    sample; total is summed over the divisions that ARE present.
+
+    This function does no authorization. The caller must have established,
+    in the same request, that the requesting user can read this corp's
+    wallet live — see the gate in `corp_wallet_history`.
+    """
+    days = _WALLET_RANGE_DAYS.get(range_key, 30)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    rows = (await db.execute(
+        select(CorpWalletSnapshot.recorded_at, CorpWalletSnapshot.division, CorpWalletSnapshot.balance)
+        .where(CorpWalletSnapshot.corp_id == corp_id, CorpWalletSnapshot.recorded_at >= since)
+        .order_by(CorpWalletSnapshot.recorded_at)
+    )).all()
+
+    samples: dict[datetime, dict[int, float]] = {}
+    for recorded_at, division, balance in rows:
+        samples.setdefault(recorded_at, {})[int(division)] = float(balance)
+    times = sorted(samples)
+    divisions = sorted({d for s in samples.values() for d in s})
+
+    # Downsample evenly if a long range has more hourly points than a chart
+    # can show — but only ever drop samples, never gap markers, which are
+    # inserted after.
+    if len(times) > _WALLET_HISTORY_MAX_POINTS:
+        step = len(times) / _WALLET_HISTORY_MAX_POINTS
+        times = [times[int(i * step)] for i in range(_WALLET_HISTORY_MAX_POINTS)]
+
+    labels: list[str] = []
+    series: dict[str, list] = {str(d): [] for d in divisions}
+    total: list = []
+    prev: datetime | None = None
+    for t in times:
+        if prev is not None and (t - prev).total_seconds() > _WALLET_GAP_SECONDS:
+            labels.append((prev + (t - prev) / 2).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            for d in divisions:
+                series[str(d)].append(None)
+            total.append(None)
+        sample = samples[t]
+        labels.append(t.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        for d in divisions:
+            series[str(d)].append(sample.get(d))
+        total.append(sum(sample.values()))
+        prev = t
+    return {"labels": labels, "series": series, "total": total, "samples": len(times)}
+
+
+@router.get("/{corp_id}/wallet-history")
+async def corp_wallet_history(
+    corp_id: int,
+    request: Request,
+    range: str = "1m",
+    db: AsyncSession = Depends(get_db),
+):
+    """JSON series for the corp wallet chart's range selector.
+
+    THE GATE (T-056 caveat B): a member without the in-game role sees none
+    of this. Storing balances in our own table removed ESI's natural
+    enforcement, so this endpoint re-establishes it the same way the live
+    page does: the requesting user must, right now, have a character in
+    this corp that can read the wallet from ESI. That is checked on every
+    request — not at write time, not from a cached roles row — so a role
+    revoked an hour ago already closes the door, and someone who could
+    read it last year has no standing claim on the rows written then.
+    Failure answers 404, never a "no access" that would itself disclose
+    that a history exists.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    scope_chars = await _get_corp_scope_chars(user_id, corp_id, db)
+    raw, _err = await _try_api_call_with_fallback(
+        "wallet", scope_chars, esi_corp.get_corporation_wallets, corp_id, db,
+    )
+    if not isinstance(raw, list):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if range not in _WALLET_RANGE_DAYS:
+        range = "1m"
+    data = await _corp_wallet_history(corp_id, range, db)
+    data["range"] = range
+    return JSONResponse(data)
 
 
 async def _get_corp_scope_chars(user_id: int, corp_id: int, db: AsyncSession) -> dict[str, list]:

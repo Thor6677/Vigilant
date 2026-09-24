@@ -2,6 +2,7 @@
 {% block title %}Corporations — VIGILANT{% endblock %}
 
 {% block head %}
+<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style nonce="{{ request.state.csp_nonce }}">
     .corp-accordion {
         border: 1px solid var(--border);
@@ -178,6 +179,93 @@
 {% endif %}
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* ── Corp wallet history chart (T-056) ────────────────────────────────────── */
+/* The detail fragment carries the 30-day series on its canvas's data-chart;
+   this builds the chart after each #corp-detail-* swap and rebuilds it when
+   a range button asks the JSON endpoint for a different window. spanGaps is
+   OFF on purpose: a null in the series is a period nobody could read the
+   wallet, and the line must break there rather than bridge it. */
+(function() {
+    var charts = {};
+    var DIV_COLORS = ['#5eb1ff', '#c8a951', '#7ed37e', '#e07a7a', '#b58cf0', '#f0a35a', '#6fd6d6'];
+
+    function fmtISK(v) {
+        if (v === null || v === undefined) return '';
+        var a = Math.abs(v);
+        if (a >= 1e12) return (v / 1e12).toFixed(2) + 'T';
+        if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+        if (a >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+        return String(Math.round(v));
+    }
+
+    function build(canvas, data) {
+        if (typeof Chart === 'undefined' || !canvas) return;
+        var key = canvas.closest('.corp-wallet-history').dataset.corpId;
+        if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+        var datasets = [{
+            label: 'Total', data: data.total, borderColor: 'var(--accent)',
+            borderWidth: 2, pointRadius: 0, tension: 0.15, spanGaps: false,
+        }];
+        Object.keys(data.series).sort().forEach(function(div, i) {
+            datasets.push({
+                label: 'Division ' + div, data: data.series[div],
+                borderColor: DIV_COLORS[i % DIV_COLORS.length], borderWidth: 1,
+                pointRadius: 0, tension: 0.15, spanGaps: false, hidden: Object.keys(data.series).length > 3,
+            });
+        });
+        charts[key] = new Chart(canvas, {
+            type: 'line',
+            data: { labels: data.labels, datasets: datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#8a8a8a', font: { size: 9 }, boxWidth: 8 } },
+                    tooltip: { callbacks: { label: function(c) {
+                        return c.dataset.label + ': ' + (c.parsed.y === null ? 'no data' : fmtISK(c.parsed.y) + ' ISK');
+                    } } },
+                },
+                scales: {
+                    x: { ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
+                                  callback: function(v, i) { var l = this.getLabelForValue(v); return l ? l.slice(5, 16).replace('T', ' ') : ''; } },
+                         grid: { display: false } },
+                    y: { ticks: { color: '#7a7a7a', font: { size: 9 }, callback: fmtISK },
+                         grid: { color: 'rgba(255,255,255,0.05)' } },
+                },
+            },
+        });
+    }
+
+    function buildAll(scope) {
+        (scope || document).querySelectorAll('canvas.corp-wallet-chart[data-chart]').forEach(function(canvas) {
+            try { build(canvas, JSON.parse(canvas.dataset.chart)); } catch (e) { console.error('corp wallet chart', e); }
+        });
+    }
+
+    window.corpWalletRange = function() {
+        var corpId = this.dataset.corpId, range = this.dataset.range;
+        var wrap = this.closest('.corp-wallet-history');
+        var btn = this;
+        fetch('/corporations/' + corpId + '/wallet-history?range=' + encodeURIComponent(range))
+            .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+            .then(function(data) {
+                wrap.querySelectorAll('.corp-wallet-range').forEach(function(b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                var canvas = wrap.querySelector('canvas.corp-wallet-chart');
+                canvas.parentElement.style.display = data.samples < 2 ? 'none' : '';
+                build(canvas, data);
+            })
+            .catch(function(e) { console.warn('corp wallet history', e); });
+    };
+
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        var t = evt.detail.target;
+        if (t && t.id && t.id.indexOf('corp-detail-') === 0) buildAll(t.isConnected ? t : document);
+    });
+    buildAll(document);
+})();
+
 /* ── Drag-and-drop reorder for player corporations ────────────────────────── */
 (function() {
     var container = document.getElementById('player-corps');
