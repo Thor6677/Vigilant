@@ -687,3 +687,120 @@
         if (el) el.style.display = 'none';
     };
 })();
+
+/* ── Structure timer banners: countdown, colour tiers, 1h notification ──────
+ *
+ * This used to be an inline script inside partials/timer_alert_banners.html.
+ * A fragment's script carries the FRAGMENT request's CSP nonce, which never
+ * matches the page's, so from the day the policy went enforcing none of it
+ * ran: the countdown span stayed empty, every banner sat in its neutral tier
+ * and the "timer inside the hour" notification never fired (ISS-035). The
+ * dismiss half was moved out in ISS-033; this is the rest, running here as a
+ * page script under script-src 'self'.
+ *
+ * Tiers, from the original: more than 2h out is neutral; 2h or less is warn;
+ * 1h or less is danger; an expired timer stays up in danger reading (0m) for
+ * 30 minutes and is then hidden. The banner's own data-expires is the clock
+ * source; the fragment re-fetches every 60s and the swap restarts styling
+ * via base.html's htmx:afterSwap hook calling window.styleTimerBanners.
+ *
+ * The notification fires once per timer id when it first enters the hour,
+ * throttled through localStorage (2-day prune, same as the dismiss key), and
+ * ONLY if notifications.js says the user opted in — the bell being enabled
+ * (where permission was requested, from a click) and the "Timer < 1h" type
+ * not muted. Nothing here ever asks for permission itself.
+ */
+(function () {
+    var NOTIFIED_KEY = 'vigilant_timer_notified';
+    var HOUR = 3600000;
+    var EXPIRED_GRACE = 1800000;
+
+    function _notified() {
+        try { return JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '{}'); } catch (e) { return {}; }
+    }
+    function _setNotified(d) {
+        try { localStorage.setItem(NOTIFIED_KEY, JSON.stringify(d)); } catch (e) {}
+    }
+
+    function _tier(el, tier, countdown) {
+        var border = {danger: 'var(--danger)', warn: 'var(--warn)', none: 'var(--border)'}[tier];
+        var bg = {danger: 'rgba(204, 51, 51, 0.10)', warn: 'rgba(200, 169, 81, 0.08)', none: 'transparent'}[tier];
+        var fg = {danger: 'var(--danger)', warn: '#c8a951', none: 'var(--muted)'}[tier];
+        el.style.borderLeftColor = border;
+        el.style.background = bg;
+        el.classList.toggle('is-danger', tier === 'danger');
+        el.classList.toggle('is-warn', tier === 'warn');
+        if (countdown) countdown.style.color = fg;
+    }
+
+    function _notify(el, diff) {
+        var aid = el.getAttribute('data-alert-id');
+        if (!aid) return;
+        var seen = _notified();
+        if (seen[aid]) return;
+        if (typeof window.vigilantNotifAllows !== 'function' || !window.vigilantNotifAllows('structure_timer')) return;
+        var d = el.dataset;
+        var disp = d.disposition || '';
+        var m = Math.floor(diff / 60000);
+        try {
+            new Notification('Timer Alert — ' + m + 'm remaining', {
+                body: disp.charAt(0).toUpperCase() + disp.slice(1) + ' ' + (d.structureType || '') +
+                      ' in ' + (d.system || '') + ' — ' + (d.name || '') + ' — ' + (d.phase || ''),
+                icon: '/static/logo.png',
+                tag: aid,
+            });
+        } catch (e) {}
+        seen[aid] = Date.now();
+        _setNotified(seen);
+    }
+
+    window.styleTimerBanners = function () {
+        var banners = document.querySelectorAll('.timer-alert-banner[data-expires]');
+        if (!banners.length) return;
+        var now = Date.now();
+        banners.forEach(function (el) {
+            if (el.style.display === 'none') return;
+            var expires = new Date(el.dataset.expires + (el.dataset.expires.slice(-1) === 'Z' ? '' : 'Z')).getTime();
+            var diff = expires - now;
+            var countdown = el.querySelector('.timer-banner-countdown');
+
+            if (diff <= 0) {
+                if (diff < -EXPIRED_GRACE) { el.style.display = 'none'; return; }
+                _tier(el, 'danger', countdown);
+                if (countdown) countdown.textContent = '(0m)';
+                return;
+            }
+
+            var h = Math.floor(diff / HOUR);
+            var m = Math.floor((diff % HOUR) / 60000);
+            var s = Math.floor((diff % 60000) / 1000);
+            var parts = [];
+            if (h > 0) parts.push(h + 'h');
+            parts.push(String(m).padStart(2, '0') + 'm');
+            parts.push(String(s).padStart(2, '0') + 's');
+            if (countdown) countdown.textContent = '(' + parts.join(' ') + ')';
+
+            if (diff <= HOUR) {
+                _tier(el, 'danger', countdown);
+                _notify(el, diff);
+            } else if (diff <= 2 * HOUR) {
+                _tier(el, 'warn', countdown);
+            } else {
+                _tier(el, 'none', countdown);
+            }
+        });
+    };
+
+    /* Prune the notified map on the same 2-day cutoff as the dismiss key. */
+    (function () {
+        var seen = _notified(), cutoff = Date.now() - 2 * 86400000, changed = false;
+        for (var k in seen) { if (seen[k] < cutoff) { delete seen[k]; changed = true; } }
+        if (changed) _setNotified(seen);
+    })();
+
+    /* One ticker per page. The seconds field is what makes a sub-hour timer
+       readable, so it ticks every second; the work is a handful of elements
+       and returns immediately when there are none. */
+    if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
+    window._timerBannerInterval = setInterval(window.styleTimerBanners, 1000);
+})();
