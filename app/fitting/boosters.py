@@ -281,9 +281,17 @@ async def apply_booster_bonuses(
     module_attrs_map: dict,
     charge_attrs_map: dict,
     boosters: list[dict],
+    ship_mods: dict | None = None,
 ) -> None:
     """Apply each booster's primary effects, plus its switched-on side effects,
-    to the ship, modules and charges in place."""
+    to the ship, modules and charges in place.
+
+    ``ship_mods``, when given, collects the rows that target the ship's own
+    attributes as {attribute_id: [(operator, value)]} for the engine to
+    apply in dogma operator order next to the fitted modules' rows, so a
+    -30% shield capacity side effect lands after a shield extender's flat
+    add rather than before it (see engine._apply_character_modifiers).
+    """
     # engine.py imports this module at load time, so import it here instead.
     from app.fitting.engine import (
         CHARACTER_MODIFIER_DOMAINS, CHARACTER_MODIFIER_FUNCS, CharacterModifier,
@@ -358,4 +366,5 @@ async def apply_booster_bonuses(
     if modifiers:
         await _apply_character_modifiers(
             db, ship_attrs, module_attrs_map, charge_attrs_map, modifiers,
+            ship_mods=ship_mods,
         )
