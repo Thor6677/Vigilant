@@ -538,8 +538,17 @@ async def _apply_ship_hull_bonuses(
     items: list[dict],
     skill_levels: dict[int, int] | None = None,
     scaling_skill_override: list[int] | None = None,
+    ship_mods: dict[int, list[tuple[int, float]]] | None = None,
 ):
     """Apply ship hull bonuses to module and charge attributes.
+
+    A hull's bonuses to its OWN attributes (resists, sig radius, a per-level
+    shield HP trait) are recorded in `ship_mods` as (operator, value) when
+    it is given, for calculate_fitting_stats() to apply in dogma operator
+    order next to the fitted modules' rows — applied here directly, a
+    Crow's +5%/level shield HP would land before an extender's flat add
+    rather than after it (ISS-043). Without `ship_mods` they are applied
+    to `ship_attrs` on the spot.
 
     Handles three modifier function types:
     - LocationGroupModifier: matches modules by group ID → module_attrs_map
@@ -655,7 +664,10 @@ async def _apply_ship_hull_bonuses(
         # until this branch landed. See project_fitting_modifier_gaps memory
         # item 6 for the full failure case.
         if mod.func == "ItemModifier" and mod.domain == "shipID":
-            _apply_modifier(ship_attrs, target_attr, mod.operator, effective_val)
+            if ship_mods is not None:
+                ship_mods[target_attr].append((mod.operator, effective_val))
+            else:
+                _apply_modifier(ship_attrs, target_attr, mod.operator, effective_val)
             continue
 
         # Determine matching type IDs based on func type. ISS-015:
@@ -707,6 +719,7 @@ async def _apply_implant_bonuses(
     module_attrs_map: dict[int, dict[int, float]],
     charge_attrs_map: dict[int, dict[int, float]],
     implant_type_ids: list[int],
+    ship_mods: dict[int, list[tuple[int, float]]] | None = None,
 ) -> None:
     """Apply implant attribute modifiers to modules and charges.
 
@@ -754,6 +767,7 @@ async def _apply_implant_bonuses(
     ]
     await _apply_character_modifiers(
         db, ship_attrs, module_attrs_map, charge_attrs_map, rows,
+        ship_mods=ship_mods,
     )
 
 
@@ -788,6 +802,7 @@ async def _apply_character_modifiers(
     module_attrs_map: dict[int, dict[int, float]],
     charge_attrs_map: dict[int, dict[int, float]],
     modifiers: list[CharacterModifier],
+    ship_mods: dict[int, list[tuple[int, float]]] | None = None,
 ) -> None:
     """Apply modifier rows the character carries — implants and boosters —
     to the ship, modules and charges in place.
@@ -796,7 +811,12 @@ async def _apply_character_modifiers(
 
     - ItemModifier + shipID: the ship's own attribute (CPU subprocessors,
       agility hardwirings, a booster's velocity penalty). Fires on a bare
-      hull, so there is no early return when nothing is fitted.
+      hull, so there is no early return when nothing is fitted. With
+      `ship_mods` given the row is recorded there as (operator, value)
+      instead of being applied, for calculate_fitting_stats() to apply in
+      dogma operator order next to the fitted modules' rows: applied here
+      directly, a Blue Pill's -30% shield capacity landed before a shield
+      extender's +2600 rather than after it (ISS-043).
     - ItemModifier + charID: an attribute of the character entity. The one
       this engine models is missileDamageMultiplier (212), which dogma reads
       when a missile launches, so it is applied to the damage of every charge
@@ -851,7 +871,10 @@ async def _apply_character_modifiers(
 
         if mod.func == "ItemModifier":
             if mod.domain == "shipID":
-                _apply_modifier(ship_attrs, mod.modified_attribute_id, mod.operator, src_val)
+                if ship_mods is not None:
+                    ship_mods[mod.modified_attribute_id].append((mod.operator, src_val))
+                else:
+                    _apply_modifier(ship_attrs, mod.modified_attribute_id, mod.operator, src_val)
             elif (mod.domain == "charID"
                     and mod.modified_attribute_id == ATTR_MISSILE_DAMAGE_MULTIPLIER):
                 for tid in charge_tid_set:
@@ -1409,6 +1432,18 @@ async def calculate_fitting_stats(
         if type_mass:
             ship_attrs[ATTR_MASS] = type_mass
 
+    # Modifiers to the ship's OWN attributes from everything that is not a
+    # fitted module — fitting skills, implants, boosters, hull and subsystem
+    # traits — collected as {attribute_id: [(operator, value)]} and applied in
+    # Step 2 in dogma operator order next to the modules' rows (ISS-043).
+    # Applied on the spot, as they used to be, a skill's +25% shield HP landed
+    # BEFORE a shield extender's +2600 rather than after it, because the
+    # extender is a module and modules are collected later: a Drake with a
+    # Large Shield Extender II showed 9475 shield HP where (5500 + 2600) x
+    # 1.25 = 10125 is right. These sources are never stacking-penalized; the
+    # modules' chain is untouched.
+    ship_mods: dict[int, list[tuple[int, float]]] = defaultdict(list)
+
     # Collect all module type IDs (excluding drones and cargo)
     # Only online modules contribute to fitting (offline modules skip CPU/PG/effects)
     fitted_items = [i for i in items
@@ -1488,18 +1523,15 @@ async def calculate_fitting_stats(
                 if name.startswith("subsystemBonus") and "Role" not in name:
                     sub_per_level_ids.add(row.attribute_id)
 
-        # 3. Apply ItemModifier bonuses directly to ship_attrs
-        #    (CPU, PG, drone BW, cap, velocity, agility, etc.)
-        #
-        #    Modifiers are accumulated by (target_attr, operator) first, then
-        #    applied in dogma operator order: MOD_ADD before POST_MUL before
-        #    POST_PERCENT.  This ensures correct results regardless of
-        #    subsystem iteration order.
+        # 3. Collect ItemModifier bonuses to the ship's own attributes
+        #    (CPU, PG, drone BW, cap, velocity, agility, etc.) into
+        #    `ship_mods`, where Step 2 applies them in dogma operator order
+        #    together with every other source: MOD_ADD before POST_MUL before
+        #    POST_PERCENT, whichever item contributed which.
         #    Algorithm reference: pyfa eos/modifiedAttributeDict.py:308-416
         #    (__calculateValue — accumulates into operator-type buckets, applies
         #    in fixed order); theorycrafter FittingEngine.kt:3490-3582
         #    (iterates Operation.entries in enum declaration order).
-        sub_ship_mods: dict[int, list[tuple[int, float]]] = defaultdict(list)
         for item in fitted_items:
             if item.get("slot") != "subsystem":
                 continue
@@ -1518,26 +1550,9 @@ async def calculate_fitting_stats(
                     continue
                 if mod["modifying_attribute_id"] in sub_per_level_ids:
                     src_val *= sub_effective_level
-                sub_ship_mods[mod["modified_attribute_id"]].append(
+                ship_mods[mod["modified_attribute_id"]].append(
                     (mod["operator"], src_val)
                 )
-
-        # Apply accumulated modifiers in operator order per attribute
-        for attr_id, mods in sub_ship_mods.items():
-            current = ship_attrs.get(attr_id, 0)
-            adds = [v for op, v in mods if op == OP_MOD_ADD]
-            post_muls = [v for op, v in mods if op == OP_POST_MUL]
-            post_pcts = [v for op, v in mods if op == OP_POST_PERCENT]
-            pre_assigns = [v for op, v in mods if op == OP_PRE_ASSIGN]
-            if pre_assigns:
-                current = pre_assigns[-1]
-            for a in adds:
-                current += a
-            for m in post_muls:
-                current *= m
-            for p in post_pcts:
-                current *= (1 + p / 100)
-            ship_attrs[attr_id] = current
 
     # ── Type-level bonuses: skills, implants, boosters, hull, subsystems ──
     # These are keyed by type_id and must land in module_attrs_map and
@@ -1552,7 +1567,8 @@ async def calculate_fitting_stats(
     # the dogma modifier graph because the graph doesn't target the ship's
     # own attrs (only modules/drones/charges).  When `skill_levels` is
     # supplied, each bonus scales by the character's actual level in that
-    # specific skill; otherwise All V (× 1.25) is assumed.
+    # specific skill; otherwise All V (× 1.25) is assumed. Collected rather
+    # than applied, so an extender's or plate's flat add lands first.
     _FITTING_SKILLS_FIVE_PCT = [
         (3426, ATTR_CPU_OUTPUT),       # CPU Management
         (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
@@ -1563,7 +1579,7 @@ async def calculate_fitting_stats(
     for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
         lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
         if lvl:
-            ship_attrs[attr_id] = ship_attrs.get(attr_id, 0) * (1 + 0.05 * lvl)
+            ship_mods[attr_id].append((OP_POST_PERCENT, 5.0 * lvl))
 
     # ── Apply All-V weapon/support skill bonuses to module attributes ─────
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
@@ -1586,6 +1602,7 @@ async def calculate_fitting_stats(
     if implants:
         await _apply_implant_bonuses(
             db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
+            ship_mods=ship_mods,
         )
 
     # Combat boosters (T-049): primary effects always, side effects only
@@ -1593,6 +1610,7 @@ async def calculate_fitting_stats(
     if boosters:
         await apply_booster_bonuses(
             db, ship_attrs, module_attrs_map, charge_attrs_map, boosters,
+            ship_mods=ship_mods,
         )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
@@ -1600,7 +1618,7 @@ async def calculate_fitting_stats(
     module_attrs_map = {tid: dict(attrs) for tid, attrs in module_attrs_map.items()}
     await _apply_ship_hull_bonuses(
         db, ship_type_id, ship_attrs, module_attrs_map, charge_attrs_map, items,
-        skill_levels=skill_levels,
+        skill_levels=skill_levels, ship_mods=ship_mods,
     )
 
     # ── Apply subsystem bonuses to module/charge attributes ──────────────
@@ -1911,22 +1929,34 @@ async def calculate_fitting_stats(
     all_modified_attrs = set(mod_collectors.keys())
     stackable_flags = await _get_stackable_flags(db, all_modified_attrs)
 
-    # Build modified ship attributes
+    # Build modified ship attributes. Two kinds of row meet here per
+    # attribute: the fitted modules' (`mod_collectors`, stacking-penalized
+    # when the attribute is not stackable) and everything else's
+    # (`ship_mods`: fitting skills, implants, boosters, hull and subsystem
+    # traits, never penalized). Both go through the one operator order
+    # below, which is what puts an extender's flat add ahead of Shield
+    # Management's percentage whichever was collected first (ISS-043).
     modified_attrs = dict(ship_attrs)
 
-    for attr_id, modifiers in mod_collectors.items():
+    for attr_id in set(mod_collectors) | set(ship_mods):
+        modifiers = mod_collectors.get(attr_id, [])
+        own = ship_mods.get(attr_id, [])
+        combined = modifiers + own
         base = modified_attrs.get(attr_id, 0)
 
-        # Group by CCP operator
-        pre_assigns = [v for op, v in modifiers if op == OP_PRE_ASSIGN]
-        pre_muls = [v for op, v in modifiers if op == OP_PRE_MUL]
-        pre_divs = [v for op, v in modifiers if op == OP_PRE_DIV]
-        mod_adds = [v for op, v in modifiers if op == OP_MOD_ADD]
-        mod_subs = [v for op, v in modifiers if op == OP_MOD_SUB]
+        # Group by CCP operator. Only the multiplicative buckets keep the
+        # module rows apart, for the stacking penalty.
+        pre_assigns = [v for op, v in combined if op == OP_PRE_ASSIGN]
+        pre_muls = [v for op, v in combined if op == OP_PRE_MUL]
+        pre_divs = [v for op, v in combined if op == OP_PRE_DIV]
+        mod_adds = [v for op, v in combined if op == OP_MOD_ADD]
+        mod_subs = [v for op, v in combined if op == OP_MOD_SUB]
         post_muls = [v for op, v in modifiers if op == OP_POST_MUL]
-        post_divs = [v for op, v in modifiers if op == OP_POST_DIV]
+        own_post_muls = [v for op, v in own if op == OP_POST_MUL]
+        post_divs = [v for op, v in combined if op == OP_POST_DIV]
         post_pcts = [v for op, v in modifiers if op == OP_POST_PERCENT]
-        post_assigns = [v for op, v in modifiers if op == OP_POST_ASSIGN]
+        own_post_pcts = [v for op, v in own if op == OP_POST_PERCENT]
+        post_assigns = [v for op, v in combined if op == OP_POST_ASSIGN]
 
         # POST_ASSIGN: force/lock — skip all other modifiers
         if post_assigns:
@@ -1960,6 +1990,8 @@ async def calculate_fitting_stats(
                     val *= m
             else:
                 val *= apply_stacking_penalties(post_muls)
+        for m in own_post_muls:
+            val *= m
 
         # POST_DIV
         for d in post_divs:
@@ -1974,6 +2006,8 @@ async def calculate_fitting_stats(
                     val *= m
             else:
                 val *= apply_stacking_penalties(pct_muls)
+        for p in own_post_pcts:
+            val *= 1.0 + p / 100.0
 
         modified_attrs[attr_id] = val
 
