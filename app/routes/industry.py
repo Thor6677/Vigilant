@@ -20,6 +20,7 @@ from app.db.models import get_db, Character
 from app.db.sde_models import SDEBlueprintInvention
 import asyncio
 from app.sde import lookup as sde
+from app.esi.market import APPRAISAL_HUBS, get_hub_prices_batch
 from app.industry.compression import (
     MINERALS, MINERAL_IDS, MINERAL_NAMES, ORE_GROUP_SKILL,
     SKILL_REPROCESSING, SKILL_REPROCESSING_EFFICIENCY,
@@ -908,24 +909,48 @@ async def compression_calculate(
             ore_skill_level=ore_skill, implant=implant,
         )
 
-    # Fetch global average prices (single ESI call, covers all types)
-    hub_info = TRADE_HUBS.get(hub, TRADE_HUBS["jita"])
-    ore_prices = {}
-    mineral_prices = {}
+    # Price the ore basket at the chosen hub: lowest sell order at that hub's
+    # station, the same call the appraisal page makes (ISS-031 — the hub
+    # selector used to be a label over EVE's global average price, so every
+    # hub returned identical ISK figures labelled as hub-specific advice).
+    # An ore with no sell orders at the hub is not for sale there and drops
+    # out of the basket, exactly as it should.
+    if hub not in TRADE_HUBS:
+        hub = "jita"
+    hub_info = TRADE_HUBS[hub]
+    price_source = f"lowest sell at {APPRAISAL_HUBS[hub]['label']}"
+    ore_prices: dict[int, float] = {}
+    mineral_prices: dict[int, float] = {}
+    wanted = list(filtered_ore_data)
+    if mode == "waste":
+        wanted += list(MINERAL_IDS)
     try:
-        global_prices = await esi_market.get_market_prices(ESIClient("", db=db))
-        for p in global_prices:
-            tid = p.get("type_id")
-            price = p.get("average_price") or p.get("adjusted_price") or 0
-            if tid in filtered_ore_data:
-                ore_prices[tid] = price
-            if mode == "waste" and tid in (34, 35, 36, 37, 38, 39, 40):
-                mineral_prices[tid] = price or 1.0
+        hub_prices = await get_hub_prices_batch(ESIClient("", db=db), hub, wanted)
     except Exception:
-        pass
+        hub_prices = {}
+    for tid, price in hub_prices.items():
+        if not price or price <= 0:
+            continue
+        if tid in filtered_ore_data:
+            ore_prices[tid] = price
+        elif tid in MINERAL_IDS:
+            mineral_prices[tid] = price
 
-    # Remove ores with zero or missing prices
-    ore_prices = {k: v for k, v in ore_prices.items() if v > 0}
+    # If the hub could not be priced at all (ESI down, throttled), fall back
+    # to EVE's global average — and say so on the result, never silently.
+    if not ore_prices:
+        price_source = "EVE global average (hub prices unavailable)"
+        try:
+            global_prices = await esi_market.get_market_prices(ESIClient("", db=db))
+            for p in global_prices:
+                tid = p.get("type_id")
+                price = p.get("average_price") or p.get("adjusted_price") or 0
+                if tid in filtered_ore_data and price > 0:
+                    ore_prices[tid] = price
+                if mode == "waste" and tid in MINERAL_IDS:
+                    mineral_prices[tid] = price or 1.0
+        except Exception:
+            pass
 
     # Run solver
     result = solve_compression(target, filtered_ore_data, ore_prices, yield_per_ore, mode, mineral_prices)
@@ -947,7 +972,8 @@ async def compression_calculate(
         "target_minerals": target_named,
         "multibuy_text": multibuy_text,
         "mode": mode,
-        "hub_label": hub_info["label"]})
+        "hub_label": hub_info["label"],
+        "price_source": price_source})
 
 
 # ── Hauling Calculator ────────────────────────────────────────────────────────
@@ -1031,7 +1057,6 @@ async def hauling_resolve(
 
 # ── Appraisal Calculator ─────────────────────────────────────────────────────
 
-from app.esi.market import APPRAISAL_HUBS, get_hub_prices_batch
 from app.industry.hauling import parse_eve_paste
 
 
