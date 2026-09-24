@@ -18,6 +18,7 @@ from collections import defaultdict
 from sqlalchemy import select, text
 
 from app.fitting.cap_sim import simulate_cap
+from app.fitting.boosters import apply_booster_bonuses
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.sde_models import (
@@ -1307,8 +1308,11 @@ async def calculate_fitting_stats(
     target_resist_profile: str = "uniform",
     implants: list[int] | None = None,
     damage_profile_custom: list[float] | None = None,
+    boosters: list[dict] | None = None,
 ) -> dict:
     """Calculate aggregate fitting stats for a ship + modules.
+
+    ``boosters`` takes the entry shape documented in app/fitting/boosters.py.
 
     Applies the dogma modifier pipeline:
     1. Get base ship attributes
@@ -1663,6 +1667,13 @@ async def calculate_fitting_stats(
     if implants:
         await _apply_implant_bonuses(
             db, ship_attrs, module_attrs_map, charge_attrs_map, implants,
+        )
+
+    # Combat boosters (T-049): primary effects always, side effects only
+    # when switched on. Entry shape and rules live in app/fitting/boosters.py.
+    if boosters:
+        await apply_booster_bonuses(
+            db, ship_attrs, module_attrs_map, charge_attrs_map, boosters,
         )
 
     # ── Apply ship hull bonuses to module/charge attributes ──────────────
