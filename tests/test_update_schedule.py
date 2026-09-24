@@ -263,3 +263,51 @@ def test_every_refusal_carries_a_reason():
         fire, _, reason = us.policy_decision(policy, SUNDAY_0600, latest, current)
         assert fire is False
         assert reason and reason != "due"
+
+
+# ── Whether the sidecar may be handed work ───────────────────────────────────
+
+def _heartbeat(self_update=None, checks=None):
+    return {"version": "v1.2.0", "current_tag": "v1.3.0", "targets": [],
+            "checks": {"socket": "ok"} if checks is None else checks,
+            "self_update": self_update}
+
+
+def _record(state):
+    return {"state": state, "target": "v1.3.0", "error": None,
+            "at": "2026-09-13T04:00:00Z"}
+
+
+@pytest.mark.parametrize("state", ["pulling", "handed_off"])
+def test_a_handoff_in_flight_is_not_ready(state):
+    assert us.updater_not_ready(_heartbeat(_record(state))) == "updater is upgrading itself"
+
+
+@pytest.mark.parametrize("beat", [
+    _heartbeat(),
+    _heartbeat(_record("done")),
+    # A failed self-update leaves a working, merely older sidecar. It must not
+    # hold the scheduler off for good.
+    _heartbeat(_record("failed")),
+    # The sidecar owns this vocabulary and may be newer than the app.
+    _heartbeat({"state": "some_future_state", "target": "v9.9.9"}),
+    # A sidecar that predates self-update publishes no record at all.
+    {"version": "v1.2.0", "current_tag": "v1.3.0", "checks": {"socket": "ok"}},
+], ids=["idle", "done", "failed", "unknown-state", "legacy"])
+def test_a_settled_sidecar_is_ready(beat):
+    assert us.updater_not_ready(beat) is None
+
+
+def test_a_sidecar_still_running_its_startup_checks_is_not_ready():
+    """A replacement sidecar publishes a placeholder until its own checks have
+    run. It is alive, but it has not yet shown it can deploy anything."""
+    reason = us.updater_not_ready(_heartbeat(
+        _record("done"),
+        checks={"startup": "FAIL: the updater is still starting"}))
+    assert reason and "startup" in reason
+
+
+def test_a_failing_check_names_itself():
+    reason = us.updater_not_ready(_heartbeat(
+        checks={"socket": "ok", "remote": "FAIL: could not reach origin"}))
+    assert reason and "remote" in reason and "socket" not in reason

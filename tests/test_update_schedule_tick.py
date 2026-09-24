@@ -43,10 +43,11 @@ def control(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _beat(control, current_tag="v1.2.0"):
+def _beat(control, current_tag="v1.2.0", self_update=None, checks=None):
     (control / "updater.json").write_text(json.dumps({
         "version": "v1.2.0", "current_tag": current_tag, "targets": [],
-        "checks": {"socket": "ok"},
+        "checks": {"socket": "ok"} if checks is None else checks,
+        "self_update": self_update,
     }))
 
 
@@ -236,6 +237,88 @@ def test_a_schedule_outranks_the_policy(control):
     _schedule("v1.3.0", minutes_ago=5, base=SUNDAY_0430)
     assert _run(us.tick(SUNDAY_0430)) == "fired schedule"
     assert _request(control)["tag"] == "v1.3.0"
+
+
+# ── The sidecar replacing itself ─────────────────────────────────────────────
+#
+# After a successful in-app update the sidecar pulls its own new image and hands
+# off to a helper that recreates it. Its poll loop is blocked throughout, so a
+# request written then waits for whichever sidecar polls next — and if the
+# handoff leaves none running, it waits for whoever starts one, however late
+# that is. The scheduler must hold off rather than queue into that.
+
+def _handoff(state, target="v1.2.0"):
+    return {"state": state, "target": target, "error": None,
+            "at": "2026-09-13T04:29:00Z"}
+
+
+def _pending_schedule_ids():
+    async def go():
+        async with AsyncSessionLocal() as db:
+            return [r.id for r in (await db.execute(
+                select(UpdateSchedule).where(UpdateSchedule.state == "pending"))).scalars()]
+    return _run(go())
+
+
+@pytest.mark.parametrize("state", ["pulling", "handed_off"])
+def test_a_handoff_in_flight_is_waited_out_not_queued_into(control, state):
+    _beat(control, current_tag="v1.2.0", self_update=_handoff(state))
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    _schedule("v1.3.0", minutes_ago=5, base=SUNDAY_0430)
+
+    assert _run(us.tick(SUNDAY_0430)) == "updater is upgrading itself"
+    assert _request(control) is None, "queued a request into a sidecar handoff"
+    # Nothing recorded, so the next tick is free to try again.
+    assert _policy().last_fired_window is None
+    assert len(_pending_schedule_ids()) == 1
+
+
+def test_the_window_fires_once_the_replacement_is_ready(control):
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+
+    _beat(control, current_tag="v1.2.0", self_update=_handoff("handed_off"))
+    assert _run(us.tick(SUNDAY_0430)) == "updater is upgrading itself"
+
+    # The replacement is up but has not finished its own checks yet.
+    _beat(control, current_tag="v1.2.0", self_update=_handoff("done"),
+          checks={"startup": "FAIL: the updater is still starting"})
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=1))).startswith(
+        "updater checks not passing")
+    assert _request(control) is None
+
+    _beat(control, current_tag="v1.2.0", self_update=_handoff("done"))
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=2))) == "fired policy"
+    assert _request(control)["tag"] == "v1.3.0"
+    (control / "request.json").unlink()                     # sidecar claimed it
+
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=3))) == "already fired for this window"
+    assert _request(control) is None, "fired a second time inside one window"
+
+
+def test_a_finished_run_is_still_reported_during_the_handoff(control, monkeypatch):
+    """The handoff follows every successful in-app update, so it follows every
+    successful AUTOMATIC one. Reporting the outcome needs nothing from the
+    sidecar and must not wait for it."""
+    sent = []
+
+    async def spy(**kwargs):
+        sent.append(kwargs)
+    monkeypatch.setattr("app.notify.discord.send_discord_alert", spy)
+
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    _run(us.tick(SUNDAY_0430))
+    rid = _request(control)["id"]
+    (control / "request.json").unlink()
+
+    _finish(control, rid, "success")
+    _beat(control, current_tag="v1.3.0", self_update=_handoff("pulling", "v1.3.0"))
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=5))) == "updater is upgrading itself"
+    assert _policy().awaiting_request_id is None
+    assert sent and "succeeded" in sent[0]["title"]
 
 
 # ── Outcome reconciliation ───────────────────────────────────────────────────

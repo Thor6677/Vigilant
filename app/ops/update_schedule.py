@@ -160,6 +160,48 @@ def is_patch_upgrade(current: str | None, latest: str | None) -> bool:
     return a[0] == b[0] and a[1] == b[1] and b[2] > a[2]
 
 
+def updater_not_ready(heartbeat) -> str | None:
+    """Why the sidecar should not be handed an unattended request right now,
+    or None when it may.
+
+    Two things, both read from the heartbeat the sidecar already publishes:
+
+    1. **It is replacing itself.** After every successful in-app update the
+       sidecar pulls its own new image and hands off to a helper container
+       that recreates it (`pulling`, then `handed_off`). Its poll loop is
+       blocked for the whole of that, so a request written now is not claimed
+       by the outgoing process — it waits for whichever sidecar polls next.
+       The rename claim means it can never run twice, but it CAN be stranded:
+       the handoff's documented worst case is the old container gone and the
+       new one never started. The request then sits in /control, the window is
+       already recorded as fired, and whoever next starts a sidecar — hours or
+       days later — gets an unattended deploy with no grace bound on it, which
+       is precisely what GRACE_SECONDS exists to prevent. A human clicking
+       Update during a handoff is watching the panel; the scheduler is not.
+
+    2. **Any of its environment checks is not "ok".** This is the rule the
+       panel already applies to the Update and Rollback buttons, and it also
+       covers the tail of a handoff: a freshly started sidecar publishes a
+       `startup` placeholder check until its own checks have run, so this
+       holds off until the replacement has proved it can actually deploy.
+
+    Skipping is always safe here. Nothing is recorded, so the next tick simply
+    asks again, and a handoff takes seconds to minutes against a two-hour
+    grace. The one gap left is the few milliseconds between the sidecar
+    publishing a run's success and publishing `pulling`: the heartbeat cannot
+    show a handoff that has not been announced yet.
+    """
+    record = updater_client.self_update_record(heartbeat)
+    if record is not None and record.get("state") in updater_client.SELF_UPDATE_IN_FLIGHT:
+        return "updater is upgrading itself"
+    checks = heartbeat.get("checks") if isinstance(heartbeat, dict) else None
+    if isinstance(checks, dict):
+        failing = sorted(name for name, result in checks.items() if result != "ok")
+        if failing:
+            return "updater checks not passing: " + ", ".join(failing)
+    return None
+
+
 def schedule_is_due(run_at_utc: datetime | None, now_utc: datetime,
                     grace_seconds: int = GRACE_SECONDS) -> tuple[bool, str]:
     """Whether a one-shot schedule should fire now. Returns (due, reason)."""
@@ -374,6 +416,12 @@ async def tick(now_utc: datetime | None = None) -> str:
             return "a request is already queued"
 
         beat = updater_client.read_heartbeat() or {}
+        # After the reconcile above, deliberately: reporting how the last run
+        # ended needs nothing from the sidecar, and holding it back for a
+        # handoff would widen the known gap in _reconcile_outcome.
+        not_ready = updater_not_ready(beat)
+        if not_ready:
+            return not_ready
         current_tag = beat.get("current_tag")
 
         # One-shot first: the operator named this tag explicitly, so it outranks
