@@ -51,7 +51,7 @@ def _render_base(is_admin=True, path="/dashboard"):
         session={"user_id": 1, "is_admin": is_admin,
                  "active_character_id": 90000001, "csrf_token": "t"},
     )
-    return env.get_template("base.html").render(request=request, css_v="1")
+    return env.get_template("base.html").render(request=request, css_v="1", js_v="1")
 
 
 def _bar_group_labels(html):
