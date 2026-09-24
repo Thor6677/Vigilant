@@ -338,11 +338,11 @@ def test_a_finished_run_is_still_reported_during_the_handoff(control, monkeypatc
 
 # ── Outcome reconciliation ───────────────────────────────────────────────────
 
-def _finish(control, request_id, state, reverted_to=None):
+def _finish(control, request_id, state, reverted_to=None, message="", error=None):
     (control / "status.json").write_text(json.dumps({
         "id": request_id, "state": state, "step": "done" if state == "success" else "failed",
         "action": "update", "from_tag": "v1.2.0", "to_tag": "v1.3.0",
-        "reverted_to": reverted_to,
+        "reverted_to": reverted_to, "message": message, "error": error,
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }))
 

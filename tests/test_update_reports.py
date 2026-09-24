@@ -706,3 +706,20 @@ def test_a_newer_release_after_a_failure_is_applied(control):
     _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
     _latest("v1.3.1")
     assert _run(us.tick(SUNDAY_0430)) == "fired policy"
+
+
+def test_a_revert_that_also_failed_says_the_site_may_be_down(control):
+    """deploy.sh's worst outcome lives in status["message"], not in "error"."""
+    _beat(control, current_tag="v1.2.0")
+    _schedule("v1.3.0", minutes_ago=5)
+    _run(us.tick())
+    rid = _request(control)["id"]
+    (control / "request.json").unlink()
+    _finish(control, rid, "failed",
+            message="Revert to v1.2.0 ALSO failed — the site may be down. "
+                    "Manual intervention required on the host.",
+            error="update failed (exit 1) — see the log below. " + "x" * 600)
+    _run(us.tick())
+    [r] = _reports()
+    assert r.outcome == "failed"
+    assert "ALSO failed" in r.detail and "the site may be down" in r.detail

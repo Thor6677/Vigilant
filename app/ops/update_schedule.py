@@ -397,14 +397,23 @@ async def _reconcile_outcome(db, policy) -> None:
     from_tag, to_tag = status.get("from_tag"), status.get("to_tag")
     reverted = status.get("reverted_to")
 
+    # The sidecar's own summary line. On a failure it is where the one thing
+    # that matters most can live — "Revert to vX ALSO failed — the site may be
+    # down" — so it goes straight after the first sentence, ahead of the
+    # error, where the report's length cap cannot cut it off. On success it
+    # only repeats what the first sentence says.
+    sidecar = (status.get("message") or "").strip()
+    # Bounded, so a long error cannot push the pause note below off the end.
+    error = (status.get("error") or "").strip()[:200]
     if outcome == update_reports.SUCCEEDED:
         message = f"{label} update from {from_tag or '?'} to {to_tag} succeeded."
     elif outcome == update_reports.REVERTED:
-        message = (f"{label} update to {to_tag} failed and was rolled back to "
-                   f"{reverted}.")
+        message = " ".join(part for part in (
+            f"{label} update to {to_tag} failed and was rolled back to {reverted}.",
+            sidecar) if part)
     else:
-        error = (status.get("error") or "").strip()
-        message = f"{label} update to {to_tag} failed." + (f" {error}" if error else "")
+        message = " ".join(part for part in (
+            f"{label} update to {to_tag} failed.", sidecar, error) if part)
 
     if automatic:
         policy.awaiting_request_id = None
