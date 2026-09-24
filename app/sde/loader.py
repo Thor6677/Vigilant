@@ -135,6 +135,13 @@ async def needs_update(db: AsyncSession) -> bool:
                 "imported with the legacy YAML field names. Forcing SDE reimport."
             )
             return True
+
+        if await _booster_side_effects_missing(db):
+            log.warning(
+                "sde_effects has no booster side-effect rows — it was imported "
+                "before fittingUsageChanceAttributeID was kept. Forcing SDE reimport."
+            )
+            return True
     except Exception:
         pass
     return False
@@ -167,6 +174,33 @@ async def _effects_import_is_broken(db: AsyncSession) -> bool:
     ))
     total, with_category, with_name = r.first()
     return bool(total) and not (with_category or 0) and not (with_name or 0)
+
+
+async def _booster_side_effects_missing(db: AsyncSession) -> bool:
+    """Detect an sde_effects table imported before side effects were kept.
+
+    The importer used to drop `fittingUsageChanceAttributeID`, the field that
+    marks a booster side effect (T-049). The column was added later, so an
+    install that imported before then has it NULL on every row and the
+    fitting engine cannot tell a Blue Pill's shield penalty from its shield
+    bonus. Same shape of problem as `_effects_import_is_broken`, and the same
+    remedy: notice it here so the reimport happens by itself.
+
+    A real SDE sets the field on exactly twelve effects, so "populated but
+    not one row with it" is unambiguous and never true of a healthy database.
+    The startup migration in app/main.py adds the column before this runs;
+    on a database that somehow lacks it the query raises and the caller's
+    guard treats that as "no reimport", which leaves the migration to run
+    first rather than attempting an import that could not store the field.
+    """
+    r = await db.execute(text(
+        "SELECT COUNT(1), "
+        "       SUM(CASE WHEN fitting_usage_chance_attribute_id IS NOT NULL "
+        "                THEN 1 ELSE 0 END) "
+        "FROM sde_effects"
+    ))
+    total, with_chance = r.first()
+    return bool(total) and not (with_chance or 0)
 
 
 def _iter_jsonl(zf: zipfile.ZipFile, filename: str):
@@ -1164,6 +1198,10 @@ async def download_and_import(db: AsyncSession):
                     "effect_category": int(item.get("effectCategoryID", 0)),
                     "discharge_attribute_id": item.get("dischargeAttributeID"),
                     "duration_attribute_id": item.get("durationAttributeID"),
+                    # Marks a booster side effect; see SDEEffect.
+                    "fitting_usage_chance_attribute_id": item.get(
+                        "fittingUsageChanceAttributeID"
+                    ),
                 })
             except (KeyError, ValueError, TypeError):
                 continue
