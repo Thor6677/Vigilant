@@ -124,6 +124,32 @@
         {% else %}
         <div class="b-empty">All wallet divisions are empty.</div>
         {% endif %}
+        {# History chart (T-056). Rendered only when this request's live
+           wallet read succeeded — that IS the access check. Markup + data
+           only: the chart is built by corporations.html's page script
+           from data-chart after the swap (a fragment's own script would
+           never run under the page's CSP nonce). Divisions are numbered:
+           names need a Director-role call the balances do not. #}
+        {% if wallet_history is not none %}
+        <div class="corp-wallet-history" data-corp-id="{{ corp_id }}" style="margin-top:0.75rem;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.35rem;">
+                <span style="font-size:10px;color:var(--muted);">Balance history &middot; hourly &middot; gaps are periods no linked character could read the wallet</span>
+                <span style="display:flex;gap:0.25rem;">
+                    {% for key, label in [('1w','1W'),('1m','1M'),('3m','3M'),('1y','1Y')] %}
+                    <button type="button" class="b-btn range-btn corp-wallet-range{% if key == '1m' %} is-active{% endif %}"
+                            data-click="corpWalletRange" data-corp-id="{{ corp_id }}" data-range="{{ key }}"
+                            style="padding:1px 7px;font-size:9px;border:1px solid var(--border);color:var(--muted);">{{ label }}</button>
+                    {% endfor %}
+                </span>
+            </div>
+            {% if wallet_history.samples < 2 %}
+            <div class="b-empty" style="font-size:10px;">Collecting — the first hourly samples are being recorded. History starts the day it ships; CCP exposes no past balances.</div>
+            {% endif %}
+            <div style="height:160px;{% if wallet_history.samples < 2 %}display:none;{% endif %}">
+                <canvas class="corp-wallet-chart" data-chart="{{ wallet_history|tojson|forceescape }}"></canvas>
+            </div>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 

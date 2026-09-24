@@ -16,7 +16,7 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.config import user_agent
-from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction
+from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction, CorpWalletSnapshot
 from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.utils.perf import perf_log, perf_enabled, ms_since
@@ -1857,7 +1857,9 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
 
 
 async def _cleanup_old_snapshots():
-    """Delete WalletSnapshot rows older than 1 year to prevent unbounded DB growth."""
+    """Delete WalletSnapshot / CorpWalletSnapshot rows older than 1 year to
+    prevent unbounded DB growth. Same policy for both: a year of hourly corp
+    rows is 7 divisions x 8,760 samples per corp — modest, but bounded."""
     from sqlalchemy import delete as sa_delete
     cutoff = datetime.now(timezone.utc) - timedelta(days=365)
     cutoff_naive = cutoff.replace(tzinfo=None)
@@ -1865,9 +1867,81 @@ async def _cleanup_old_snapshots():
         result = await db.execute(
             sa_delete(WalletSnapshot).where(WalletSnapshot.recorded_at < cutoff_naive)
         )
+        corp_result = await db.execute(
+            sa_delete(CorpWalletSnapshot).where(CorpWalletSnapshot.recorded_at < cutoff_naive)
+        )
         await db.commit()
         if result.rowcount:
             logger.info("Cleaned up %d old WalletSnapshot rows", result.rowcount)
+        if corp_result.rowcount:
+            logger.info("Cleaned up %d old CorpWalletSnapshot rows", corp_result.rowcount)
+
+
+_CORP_WALLET_SCOPE = "esi-wallet.read_corporation_wallets.v1"
+
+
+async def _snapshot_corp_wallets() -> int:
+    """Hourly distinct-corp pass: one CorpWalletSnapshot row per division for
+    every player corp that any linked character can read (T-056).
+
+    Grouped by corp across ALL users — several users' characters may share a
+    corp, and it is fetched once, not once per user and never per character.
+    NPC corps (id < 2,000,000) have no readable wallet and are skipped. The
+    wallets endpoint needs an in-game role on top of the scope; a character
+    without it gets a 403, is remembered in _corp_403_cache so it is not
+    retried every hour, and the next scoped character in the corp is tried.
+    If none succeeds the corp writes nothing this cycle — that is the gap
+    the chart must show, not a value to carry forward. Returns rows written.
+    """
+    async with AsyncSessionLocal() as db:
+        chars = (await db.execute(select(Character))).scalars().all()
+        by_corp: dict[int, list[Character]] = {}
+        for c in chars:
+            if not c.corporation_id or c.corporation_id < 2000000:
+                continue
+            if _CORP_WALLET_SCOPE not in (c.scopes or ""):
+                continue
+            by_corp.setdefault(c.corporation_id, []).append(c)
+
+        if not by_corp:
+            return 0
+
+        # One timestamp for the whole pass so every corp's seven rows — and
+        # every corp — line up on the same sample.
+        recorded_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        written = 0
+        for corp_id, corp_chars in by_corp.items():
+            raw = None
+            for char in corp_chars:
+                if (char.character_id, corp_id) in _corp_403_cache:
+                    continue
+                try:
+                    client, err = await _client_for(char)
+                    if err or not client:
+                        continue
+                    raw = await esi_corp.get_corporation_wallets(client, corp_id)
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 403:
+                        _corp_403_cache.add((char.character_id, corp_id))
+                        continue
+                    logger.info("corp wallet snapshot: corp %s via %s: %s", corp_id, char.character_id, e)
+                except Exception as e:
+                    logger.info("corp wallet snapshot: corp %s via %s: %s", corp_id, char.character_id, e)
+            if not isinstance(raw, list):
+                continue
+            for d in raw:
+                try:
+                    division = int(d.get("division"))
+                    balance = float(d.get("balance", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                db.add(CorpWalletSnapshot(corp_id=corp_id, division=division,
+                                          balance=balance, recorded_at=recorded_at))
+                written += 1
+        if written:
+            await db.commit()
+        return written
 
 
 async def _check_all_inventory_thresholds():
@@ -2026,8 +2100,21 @@ async def _background_scheduler():
             except Exception as e:
                 logger.warning("Background scheduler error: %s", e)
 
-            # ESI cache GC (every hour) — drops rows whose expires_at has passed.
             now = datetime.now(timezone.utc)
+
+            # Corp wallet history (T-056) — hourly, matching ESI's max-age on
+            # the corp wallets endpoint. Never triggered by a page load.
+            if not hasattr(_background_scheduler, '_last_corp_wallet_snapshot') or \
+               (now - _background_scheduler._last_corp_wallet_snapshot).total_seconds() >= 3600:
+                try:
+                    rows = await _snapshot_corp_wallets()
+                    if rows:
+                        logger.info("Corp wallet snapshot wrote %d division rows", rows)
+                    _background_scheduler._last_corp_wallet_snapshot = now
+                except Exception as e:
+                    logger.warning("Corp wallet snapshot error: %s", e)
+
+            # ESI cache GC (every hour) — drops rows whose expires_at has passed.
             if not hasattr(_background_scheduler, '_last_cache_gc') or \
                (now - _background_scheduler._last_cache_gc).total_seconds() >= 3600:
                 try:
