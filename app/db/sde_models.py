@@ -365,6 +365,11 @@ class SDEEffect(Base):
     effect_category = Column(Integer, nullable=False, default=0)
     discharge_attribute_id = Column(Integer, nullable=True)
     duration_attribute_id = Column(Integer, nullable=True)
+    # dogmaEffects.fittingUsageChanceAttributeID. Set on exactly the twelve
+    # booster side-effect effects (booster*Penalty), naming the
+    # boosterEffectChanceN attribute that holds the per-injection roll; NULL
+    # for every other effect. app/fitting/boosters.py keys on it (T-049).
+    fitting_usage_chance_attribute_id = Column(Integer, nullable=True)
 
 
 class SDETypeEffect(Base):
