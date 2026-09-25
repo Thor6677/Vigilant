@@ -61,7 +61,7 @@
     <div class="b-panel-head">
       <span class="b-label">Updates</span>
       {% if newer_known %}<span class="b-badge is-warn">update available</span>
-      {% elif latest_tag %}<span class="b-badge is-ok">up to date</span>{% endif %}
+      {% elif latest_tag and (current_tag or app_version) == latest_tag %}<span class="b-badge is-ok">up to date</span>{% endif %}
     </div>
 
     {# ── What is running and what exists ─────────────────────────────────
@@ -297,7 +297,7 @@
             </div>
           {% elif update_available %}
             {# Open, with what was typed, when this form's own submit was refused. #}
-            <details class="updater-schedule-form" {% if open_form == 'schedule' %}open{% endif %}
+            <details class="updater-schedule-form" {% if open_form == 'schedule' %}open{% endif %} id="upd-schedule" data-keep-open
                      data-click="updaterHoldRefresh"
                      data-input="updaterHoldRefresh" data-change="updaterHoldRefresh">
               <summary>Schedule this update for later instead</summary>
@@ -329,7 +329,7 @@
 
   {% if idle_view %}
     {# ── Automatic updates ──────────────────────────────────────────────── #}
-    <details class="updater-policy" {% if policy.enabled or open_form == 'policy' %}open{% endif %}
+    <details class="updater-policy" {% if policy.enabled or open_form == 'policy' %}open{% endif %} id="upd-policy" data-keep-open
              data-click="updaterHoldRefresh" data-input="updaterHoldRefresh"
              data-change="updaterHoldRefresh">
       <summary>
@@ -411,7 +411,7 @@
        redacted form, is ever rendered — for ntfy the topic URL is the
        whole credential, and this panel is re-fetched into every admin's
        tab every few seconds. #}
-    <details class="updater-notify" {% if open_form == 'notify' %}open{% endif %}
+    <details class="updater-notify" {% if open_form == 'notify' %}open{% endif %} id="upd-notify" data-keep-open
              data-click="updaterHoldRefresh" data-input="updaterHoldRefresh"
              data-change="updaterHoldRefresh">
       <summary>
