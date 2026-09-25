@@ -1133,7 +1133,7 @@ async def set_autopilot_waypoint(character_id: int, request: Request):
         if "esi-ui.write_waypoint.v1" not in (char.scopes or ""):
             return JSONResponse({
                 "error": "missing_scope",
-                "message": "This character needs to be re-authorized to enable the autopilot push feature.",
+                "message": "This character does not share “Set autopilot waypoints”. Turn it on under Account › Characters & permissions.",
                 "character_name": char.character_name,
             }, status_code=403)
 

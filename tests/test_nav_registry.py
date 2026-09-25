@@ -282,11 +282,18 @@ def test_every_group_declares_account_placement():
     assert not missing, f"Groups missing the 'account' key: {missing}"
 
 
-def test_admin_is_the_only_account_group():
-    """The bar holds primary destinations only; Admin is reachable from the
-    account menu at the right end of the nav."""
+def test_account_groups_are_account_and_admin():
+    """The bar holds primary destinations only; Characters & Permissions and
+    Admin are reachable from the account menu at the right end of the nav."""
     account = [g["label"] for g in NAV_GROUPS if g["account"]]
-    assert account == ["Admin"]
+    assert account == ["Account", "Admin"]
+
+
+def test_every_user_gets_the_permissions_page_in_the_account_menu():
+    for is_admin in (False, True):
+        menu = _account_menu(_render_base(is_admin=is_admin))
+        assert 'href="/account"' in menu
+        assert 'href="/auth/connect"' in menu
 
 
 def test_top_level_bar_is_five_groups():
@@ -369,7 +376,7 @@ def _account_menu(html):
 
 def test_account_menu_carries_admin_add_character_and_logout():
     menu = _account_menu(_render_base(is_admin=True))
-    assert 'href="/auth/add-character"' in menu
+    assert 'href="/auth/connect"' in menu
     assert 'href="/admin"' in menu       # Admin group's Console item
     assert 'action="/auth/logout"' in menu
 
@@ -385,7 +392,7 @@ def test_account_menu_has_no_duplicate_destinations():
 
 def test_account_menu_hides_admin_items_from_non_admins():
     html = _render_base(is_admin=False)
-    assert 'href="/auth/add-character"' in html    # everyone gets this
+    assert 'href="/auth/connect"' in html    # everyone gets this
     # Neither the account menu nor the mobile menu may leak the console.
     # (Matched as hrefs: /status/banner is an unrelated hx-get in the chrome.)
     assert 'href="/admin"' not in html

@@ -14,6 +14,7 @@ from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
 from app.esi import universe as esi_universe
 from app.sde import lookup as sde
+from app.auth import status as perm_status
 
 logger = logging.getLogger(__name__)
 
@@ -456,7 +457,8 @@ async def corp_detail(
         "corp_orders": corp_orders,
         "corp_structures": corp_structures,
         "corp_contracts": corp_contracts,
-        "inv_alert_count": inv_alert_count})
+        "inv_alert_count": inv_alert_count,
+        "corp_roles": await perm_status.corp_roles_for(db, [c.character_id for c in corp_chars])})
 
 
 # ── Corp Inventory Tracker ────────────────────────────────────────────────────

@@ -84,6 +84,8 @@
 </div>
 
 {# ── Error state ──────────────────────────────────────────────────────────── #}
+{% from "partials/_permission_notice.html" import permission_notice %}
+{% if missing_perm %}{{ permission_notice([char], missing_perm) }}{% endif %}
 {% if error %}
 <div class="b-empty" style="{% if 'Failed' in error %}color:var(--danger);{% endif %}">{{ error }}</div>
 

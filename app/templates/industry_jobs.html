@@ -125,6 +125,10 @@
     </div>
 </div>
 
+{% from "partials/_permission_notice.html" import permission_notice %}
+{{ permission_notice(perm_chars, 'industry', what="their jobs are not listed") }}
+{{ permission_notice(perm_corp_chars, 'corp_industry', corp_roles, what="their corporation's jobs are not listed") }}
+
 <div class="ij-summary">
     <div class="ij-stat"><span class="ij-stat-label">Total</span><span class="ij-stat-value">{{ total }}</span></div>
     {% if counts_by_source.character %}
@@ -250,9 +254,7 @@
 {% else %}
 <div class="b-empty" style="padding:2rem;text-align:center;font-size:11px;color:var(--muted);">
     {% if char_count_with_scope == 0 and corp_count_with_scope == 0 %}
-    No characters have the industry-jobs scope granted.
-    Authorize a character with <code>esi-industry.read_character_jobs.v1</code>
-    (and <code>esi-industry.read_corporation_jobs.v1</code> for corp jobs) to populate this page.
+    None of your characters share their industry jobs — see above.
     {% else %}
     No {{ 'jobs' if include_completed else 'active jobs' }} found.
     {% endif %}

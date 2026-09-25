@@ -18,6 +18,7 @@ from app.esi import character as esi_char
 from app.esi.client import refresh_token
 from app.esi.character import get_wallet_journal
 from app.sde import lookup as sde
+from app.auth import scopes as perms
 from app.utils.perf import perf_log, perf_enabled, ms_since
 from time import perf_counter as _perf_now
 from dateutil import parser as iso_parser
@@ -230,6 +231,12 @@ async def _fetch_assets(character_id: int, char: Character, client: ESIClient, d
     result_locations.sort(key=lambda x: x["location"])
     return result_locations
 
+
+
+async def _owned_character(db: AsyncSession, character_id: int, user_id: int) -> Character | None:
+    return (await db.execute(select(Character).where(
+        Character.character_id == character_id,
+        Character.user_id == user_id))).scalar_one_or_none()
 
 @router.get("/character/{character_id}", response_class=HTMLResponse)
 async def character_detail(
@@ -1083,6 +1090,13 @@ async def character_mail_partial(character_id: int, request: Request, db: AsyncS
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("")
+    # Ownership, not just a session: this used to read any character's cache.
+    char = await _owned_character(db, character_id, user_id)
+    if char is None:
+        return HTMLResponse("", status_code=404)
+    if not perms.has(char, perms.MAIL):
+        return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
+            "mail_headers": [], "mail_error": None, "missing_perm": "mail", "char": char})
 
     cache_result = await db.execute(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
@@ -1092,7 +1106,7 @@ async def character_mail_partial(character_id: int, request: Request, db: AsyncS
     mail_data = json.loads(cache.mail_json) if cache and cache.mail_json else None
     if mail_data is None or mail_data == "no_scope":
         return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
-            "mail_headers": [], "mail_error": "Mail scope not available — re-authorize to view mail."})
+            "mail_headers": [], "mail_error": "No mail loaded for this character yet."})
 
     headers = mail_data.get("headers", []) if isinstance(mail_data, dict) else []
     return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
@@ -1155,6 +1169,14 @@ async def character_notifications_partial(character_id: int, request: Request, d
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("")
+    # Ownership, not just a session: this used to return ANY character's
+    # cached notifications to any logged-in user who changed the id.
+    char = await _owned_character(db, character_id, user_id)
+    if char is None:
+        return HTMLResponse("", status_code=404)
+    if not perms.has(char, perms.NOTIFICATIONS):
+        return templates.TemplateResponse(request, "partials/notifications_panel.html", {
+            "notifications": [], "notif_error": None, "missing_perm": "notifications", "char": char})
 
     cache_result = await db.execute(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
@@ -1163,7 +1185,8 @@ async def character_notifications_partial(character_id: int, request: Request, d
 
     notif_data = json.loads(cache.notifications_json) if cache and cache.notifications_json else None
     if notif_data is None or notif_data == "no_scope":
-        return templates.TemplateResponse(request, "partials/notifications_panel.html", {"notifications": [], "notif_error": "Notification scope not available — re-authorize."})
+        return templates.TemplateResponse(request, "partials/notifications_panel.html", {
+            "notifications": [], "notif_error": "No notifications synced for this character yet."})
 
     raw_notifs = notif_data.get("notifications", []) if isinstance(notif_data, dict) else []
     enriched = []

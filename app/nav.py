@@ -30,7 +30,7 @@ Data shape (plain dicts, no classes):
            "account"}                            # render in the account menu,
                                                  # not the top-level bar
 
-`account` groups (currently just Admin) are deliberately kept out of the
+`account` groups (Account and Admin) are deliberately kept out of the
 top-level bar and the footer: they render inside the account menu at the right
 end of the nav instead. The bar is a fixed-width surface and every group in it
 costs horizontal room, so anything that is not a primary destination belongs in
@@ -529,6 +529,20 @@ NAV_GROUPS = [
                     "Parses system J-code and owner corp",
                 ],
             ),
+        ],
+    },
+
+    # ── Account (every signed-in user) ─────────────────────────────────────
+    {
+        "label": "Account",
+        "url": "/account",
+        "match": [],
+        "admin": False,
+        "landing": False,
+        "account": True,
+        "items": [
+            _item("Characters & Permissions", "/account", [("prefix", "/account")],
+                  in_landing=False),
         ],
     },
 

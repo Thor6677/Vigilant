@@ -94,6 +94,7 @@ PUBLIC_LITERAL_GET = {
     # Infrastructure / auth entry points.
     "/healthz",                                 # uptime probe, must stay open
     "/auth/login",                              # the SSO entry point itself
+    "/auth/add-character",                      # bare redirect to the /auth/connect picker
     "/characters",                              # bare RedirectResponse to /dashboard
     "/dscan",                                   # bare redirect to /intel/dscan
     # Public EVE data, no user component, no authenticated ESI call.

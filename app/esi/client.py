@@ -12,6 +12,8 @@ from app.config import get_settings, user_agent
 from app.db.models import Character
 from app.db.cache import cache_get, cache_set
 from app.esi.rate_limit import rate_limit_tracker, log_event
+from app.esi import scope_guard
+from app.esi.scope_guard import ScopeNotGranted  # noqa: F401  (re-exported for callers)
 
 settings = get_settings()
 
@@ -201,6 +203,20 @@ async def _do_refresh(character: Character, db: AsyncSession) -> str:
     character.access_token = data["access_token"]
     character.refresh_token = data.get("refresh_token", character.refresh_token)
     character.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
+    # Keep the stored scopes equal to what the token can actually do (its scp
+    # claim — the same source the scope guard reads). If EVE ever narrows an
+    # authorization underneath us, the Account page and the sync layer see it
+    # at the next refresh instead of data quietly going stale.
+    in_token = scope_guard.scopes_in_token(character.access_token)
+    if in_token is not None:
+        from app.auth.scopes import join_scopes
+        refreshed = join_scopes(in_token)
+        if refreshed != (character.scopes or ""):
+            import logging
+            logging.getLogger(__name__).info(
+                "character %s scopes changed at refresh: %d -> %d",
+                character.character_id, len((character.scopes or "").split()), len(in_token))
+            character.scopes = refreshed
     await db.commit()
     return character.access_token
 
@@ -244,6 +260,9 @@ class ESIClient:
         # Namespaces the authenticated DB cache to this token's identity so a
         # role-gated response is never served to a different caller. See F1.
         self.principal = _principal_from_token(token)
+        # What the user let this token read. get()/post() refuse anything
+        # outside it before touching a cache or the network (scope_guard).
+        self.granted = scope_guard.granted_scopes(token)
         self.cache_enabled = cache_enabled if cache_enabled is not None else (db is not None)
         self.base = settings.eve_esi_base
         self.headers = {
@@ -282,6 +301,10 @@ class ESIClient:
           2. ETag cache (in-memory, wiped on restart) — on cache miss, sends
              If-None-Match so the ESI server can short-circuit with 304.
         """
+        # Permission first: a scope the user withdrew must not be served from
+        # either cache tier below, only refused.
+        scope_guard.check("GET", path, self.granted)
+
         # Tier 1: DB cache check — survives restarts, skips network entirely.
         if self.cache_enabled and not bypass_cache:
             try:
@@ -424,6 +447,7 @@ class ESIClient:
         and return 204 No Content. The caller decides how to interpret the
         status code (the ESI client doesn't try to JSON-decode the body).
         """
+        scope_guard.check("POST", path, self.granted)
         await self._throttle_if_needed()
         url = f"{self.base}{path}"
         client = get_http_client()

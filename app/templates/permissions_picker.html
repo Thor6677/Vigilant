@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{#
+  The permission picker — shown BEFORE the EVE SSO redirect, so SSO is only
+  ever asked for what is ticked here. Three uses, one template:
+
+    intent "signup"  logged out, first character   (/auth/connect)
+    intent "add"     logged in, another character  (/auth/connect)
+    intent "update"  one existing character        (/account/permissions/<id>)
+
+  Posts to /auth/authorize (CSRF-checked; the hidden csrf_token is explicit
+  because base.html only auto-injects it for logged-in pages, and signup is
+  not one). The script at the bottom runs under the page's own nonce — the
+  shared actions.js is not loaded for logged-out visitors (ISS-044), so the
+  picker must not depend on it. No inline handlers (CSP).
+
+  Catalog and wording: app/auth/scopes.py. Styles: .perm-* in site.css.
+#}
+{% block title %}{% if intent == 'update' %}Permissions — {{ character['character_name'] }}{% else %}Choose what to share{% endif %} — VIGILANT{% endblock %}
+{% block content %}
+<div class="perm-page">
+  <div class="b-page-header perm-header">
+    {% if intent == 'update' %}
+      <img class="perm-portrait" alt="" src="https://images.evetech.net/characters/{{ character['character_id'] }}/portrait?size=128">
+      <div>
+        <h1 class="b-page-title">{% if welcome %}Welcome, {{ character['character_name'] }}{% else %}{{ character['character_name'] }}{% endif %}</h1>
+        <p class="perm-lede">
+          {% if welcome %}
+            Choose what Vigilant may read for this character. Nothing is read
+            until you confirm on EVE Online's page.
+          {% else %}
+            Tick what Vigilant may read. EVE will ask you to confirm, then issues
+            a new authorization limited to exactly what you ticked.
+          {% endif %}
+        </p>
+      </div>
+    {% else %}
+      <div>
+        <h1 class="b-page-title">{% if intent == 'add' %}Add a character{% else %}Choose what Vigilant can see{% endif %}</h1>
+        <p class="perm-lede">
+          Vigilant only asks EVE Online for what you tick here — you'll confirm
+          on EVE's own page next, and pick the character there. You can change
+          this any time under <b>Account &rsaquo; Characters &amp; permissions</b>.
+        </p>
+      </div>
+    {% endif %}
+  </div>
+
+  <form method="post" action="/auth/authorize" class="perm-form" id="perm-form">
+    <input type="hidden" name="csrf_token" value="{{ request.session.get('csrf_token', '') }}">
+    <input type="hidden" name="intent" value="{{ intent }}">
+    {% if intent == 'update' %}<input type="hidden" name="character_id" value="{{ character['character_id'] }}">{% endif %}
+
+    <div class="perm-presets" role="group" aria-label="Presets">
+      {% for key, label, desc in presets %}
+        <button type="button" class="perm-preset {% if key == active_preset %}is-active{% endif %}"
+                data-preset="{{ key }}" aria-pressed="{{ 'true' if key == active_preset else 'false' }}">
+          <span class="perm-preset-label">{{ label }}</span>
+          <span class="perm-preset-desc">{{ desc }}</span>
+        </button>
+      {% endfor %}
+    </div>
+
+    {% for group_key, group_label in groups %}
+      <section class="perm-group" data-group="{{ group_key }}">
+        <div class="perm-group-head">
+          <h2 class="b-label">{{ group_label }}</h2>
+          {% if group_key == 'corporation' %}
+            <span class="perm-group-note">Some of these also need an in-game role — shown on each card.</span>
+          {% endif %}
+          <span class="perm-group-actions">
+            <button type="button" class="b-link-btn" data-group-all="{{ group_key }}">All</button>
+            <span aria-hidden="true">·</span>
+            <button type="button" class="b-link-btn" data-group-none="{{ group_key }}">None</button>
+          </span>
+        </div>
+        <div class="perm-grid">
+          {% for p in permissions if p.group == group_key %}
+            {% set checked = p.key in selected %}
+            {% set now_state = perms.state_of(p, character['scopes'], character['declined_scopes']) if character else None %}
+            <label class="perm-card {% if checked %}is-on{% endif %} {% if p.writes %}is-write{% endif %}" data-key="{{ p.key }}"
+                   {% if character %}data-current="{{ '1' if p.key in current else '0' }}"{% endif %}>
+              <input type="checkbox" class="b-switch perm-toggle" name="p" value="{{ p.key }}" {% if checked %}checked{% endif %}
+                     data-group="{{ p.group }}">
+              <span class="perm-icon" aria-hidden="true">{{ p.icon }}</span>
+              <span class="perm-body">
+                <span class="perm-title">
+                  {{ p.label }}
+                  {% if p.writes %}<span class="b-badge is-warn" title="Changes something in the game client">writes to game</span>{% endif %}
+                  {% if character %}
+                    {% if p.key in adding %}<span class="b-badge is-warn">requested</span>
+                    {% elif now_state == 'granted' %}<span class="b-badge is-ok">shared now</span>
+                    {% elif now_state == 'declined' %}<span class="b-badge">not shared</span>
+                    {% elif now_state in ('new', 'partial') %}<span class="b-badge is-warn">new</span>{% endif %}
+                  {% endif %}
+                </span>
+                <span class="perm-summary">{{ p.summary }}</span>
+                {% if p.in_game_roles %}
+                  <span class="perm-role">Needs in-game role: {{ perm_status.roles_text(p.in_game_roles) }}</span>
+                {% endif %}
+                {% if p.note %}<span class="perm-note">{{ p.note }}</span>{% endif %}
+                {% if p.powers %}
+                  <span class="perm-powers">{% for f in p.powers %}<span class="perm-chip">{{ f }}</span>{% endfor %}</span>
+                {% endif %}
+                <details class="perm-scopes">
+                  <summary>ESI scope{{ 's' if p.scopes | length > 1 }}</summary>
+                  {% for s in p.scopes %}<code>{{ s }}</code>{% endfor %}
+                </details>
+              </span>
+            </label>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+
+    {% if intent == 'update' %}
+      {# Shown by the script below only while a currently-shared permission is
+         unticked. Decision (T-064): ask every time, default off. #}
+      <div class="perm-purge" id="perm-purge" hidden>
+        <label class="perm-purge-check">
+          <input type="checkbox" class="b-check" name="purge" value="1">
+          Also delete the history Vigilant built up with the permissions you're removing
+        </label>
+        <p class="perm-purge-note">
+          Removing: <span id="perm-removing"></span>. Either way Vigilant stops
+          reading them straight away and drops their current values (balance,
+          assets, location, …). This box also deletes the history — wallet
+          snapshots and transactions, job history, mining ledger, and their
+          share of your net-worth chart. Corporation data your corp-mates can
+          also see is kept.
+        </p>
+      </div>
+    {% endif %}
+
+    <div class="perm-footer">
+      <span class="perm-count" id="perm-count" aria-live="polite"></span>
+      {% if intent == 'update' %}<a href="/account" class="b-link">Cancel</a>{% endif %}
+      <button type="submit" class="b-btn is-primary">Continue to EVE Online &rarr;</button>
+    </div>
+  </form>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var form = document.getElementById('perm-form');
+    if (!form) return;
+    var presets = {{ preset_keys | tojson }};
+    var names = {};
+    {% for p in permissions %}names[{{ p.key | tojson }}] = {{ p.label | tojson }};{% endfor %}
+    var total = {{ permissions | length }};
+    var toggles = Array.prototype.slice.call(form.querySelectorAll('.perm-toggle'));
+    var byKey = {};
+    toggles.forEach(function (t) { byKey[t.value] = t; });
+    var count = document.getElementById('perm-count');
+    var purge = document.getElementById('perm-purge');
+    var removing = document.getElementById('perm-removing');
+
+    function chosen() { return toggles.filter(function (t) { return t.checked; }).map(function (t) { return t.value; }); }
+
+    /* Mirrors normalize_keys() in app/auth/scopes.py: any corporation
+       permission brings "corp_roles" along, so a missing in-game role can be
+       told apart from a missing permission. The server applies the same rule,
+       so this is only here to make the page tell the truth. */
+    function applyCorpRule() {
+        var roles = byKey['corp_roles'];
+        if (!roles) return;
+        var anyCorp = toggles.some(function (t) {
+            return t.checked && t.dataset.group === 'corporation' && t.value !== 'corp_roles';
+        });
+        if (anyCorp) roles.checked = true;
+        roles.closest('.perm-card').classList.toggle('is-locked', anyCorp);
+        /* Not `disabled`: a disabled box is not submitted. It stays enabled and
+           the change handler snaps it back on while it is locked. */
+        if (anyCorp) { roles.dataset.locked = '1'; } else { delete roles.dataset.locked; }
+    }
+
+    function refresh() {
+        applyCorpRule();
+        var on = chosen();
+        toggles.forEach(function (t) { t.closest('.perm-card').classList.toggle('is-on', t.checked); });
+        count.textContent = on.length + ' of ' + total + ' permissions';
+        var match = null;
+        Object.keys(presets).forEach(function (k) {
+            var p = presets[k].slice().sort().join(',');
+            if (p === on.slice().sort().join(',')) match = k;
+        });
+        form.querySelectorAll('.perm-preset').forEach(function (b) {
+            var active = b.dataset.preset === match;
+            b.classList.toggle('is-active', active);
+            b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        if (purge) {
+            var gone = toggles.filter(function (t) {
+                return !t.checked && t.closest('.perm-card').dataset.current === '1';
+            }).map(function (t) { return names[t.value]; });
+            purge.hidden = gone.length === 0;
+            removing.textContent = gone.join(', ');
+        }
+    }
+
+    toggles.forEach(function (t) {
+        t.addEventListener('change', function () {
+            if (!t.checked && t.dataset.locked === '1') { t.checked = true; }
+            refresh();
+        });
+    });
+    form.querySelectorAll('.perm-preset').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var keys = presets[b.dataset.preset] || [];
+            toggles.forEach(function (t) { t.checked = keys.indexOf(t.value) !== -1; });
+            refresh();
+        });
+    });
+    form.querySelectorAll('[data-group-all],[data-group-none]').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var g = b.dataset.groupAll || b.dataset.groupNone;
+            var on = !!b.dataset.groupAll;
+            toggles.forEach(function (t) { if (t.dataset.group === g) t.checked = on; });
+            refresh();
+        });
+    });
+    refresh();
+})();
+</script>
+{% endblock %}
