@@ -679,6 +679,48 @@
         return false;
     };
 
+    /* <details id="..." data-keep-open> keeps the reader's open/closed choice
+     * across htmx swaps (ISS-049).
+     *
+     * Admin sections re-render themselves every few seconds (#admin-content:
+     * Overview/Updates 10s, ESI Health/Scheduler 5s) and the updater panel
+     * re-renders while it polls, so every <details> came back in its
+     * server-rendered state: whatever the operator had expanded snapped shut
+     * on the next tick. This remembers each choice by the element's id when
+     * its <summary> is clicked (keyboard Enter/Space on a summary dispatches
+     * click too) and re-applies it after every swap. A section the reader
+     * never touched keeps the server's default — e.g. "Automatic updates"
+     * renders open while a policy is on.
+     *
+     * Not a refresh hold: looking at a section must not freeze the page
+     * (updaterHoldRefresh below only holds for form edits). The finished-run
+     * Output log keeps its own hx-preserve and needs none of this. */
+    var detailsChoice = {};
+    window.vgDetailsChoice = detailsChoice;   /* read by tests */
+
+    document.addEventListener('click', function (e) {
+        var t = e && e.target;
+        if (!t || typeof t.closest !== 'function') return;   /* ISS-041 */
+        var summary = t.closest('summary');
+        if (!summary) return;
+        var d = summary.parentElement;
+        if (!d || d.tagName !== 'DETAILS' || !d.id || !d.hasAttribute('data-keep-open')) return;
+        /* The toggle is the click's default action, so it has not happened
+           yet; read the new state once it has. */
+        setTimeout(function () { detailsChoice[d.id] = d.open; }, 0);
+    });
+
+    if (document.body) {
+        document.body.addEventListener('htmx:afterSwap', function () {
+            Object.keys(detailsChoice).forEach(function (id) {
+                var d = document.getElementById(id);
+                if (d && d.hasAttribute('data-keep-open') && d.open !== detailsChoice[id]) {
+                    d.open = detailsChoice[id];
+                }
+            });
+        });
+    }
+
     /* Alert banner dismiss handlers.
      *
      * These used to live as inline <script nonce="..."> blocks inside each

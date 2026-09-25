@@ -516,7 +516,7 @@ async def _client_for(char: Character) -> tuple[ESIClient | None, str | None]:
             return client, None
         except TokenRevoked as e:
             logger.warning("Token revoked for char %s — user must re-authenticate: %s", char.character_id, e)
-            return None, "token_revoked"
+            return None, perm_status.TOKEN_REVOKED   # what token_failed() looks for
         except Exception as e:
             logger.warning("Token refresh failed for char %s: %s", char.character_id, e)
             return None, f"token_refresh_failed: {type(e).__name__}"

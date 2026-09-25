@@ -101,7 +101,7 @@ class CharacterDashboardCache(Base):
     last_synced = Column(DateTime, nullable=True)      # naive UTC
     sync_status = Column(String(16), nullable=False, default="idle")  # idle | syncing | error
     sync_error = Column(Text, nullable=True)
-    sync_warnings_json = Column(Text, nullable=True)  # JSON: {"wallet": "token_refresh_failed", ...}
+    sync_warnings_json = Column(Text, nullable=True)  # JSON: {"wallet": "token_revoked", ...} — see app/auth/status.py
     field_synced_json = Column(Text, nullable=True)   # JSON: {"wallet": "2024-01-01T00:00:00", ...}
 
 

@@ -649,3 +649,15 @@ def test_the_report_banner_slot_is_not_part_of_the_local_dismiss_state():
     base = BASE.read_text()
     assert 'hx-get="/status/update-reports"' in base
 
+
+
+
+def test_up_to_date_badge_needs_the_running_version_to_be_the_latest():
+    """A source build reports version "dev": is_newer() fails closed, so no
+    "update available" either — but it is not "up to date" with a release."""
+    head = lambda html: html[html.index('<div class="b-panel-head">'):html.index("</div>", html.index('<div class="b-panel-head">'))]
+    same = _render_finished(_finished_status(), current_tag="v1.2.1", latest_tag="v1.2.1", app_version="v1.2.1")
+    dev = _render_finished(_finished_status(), current_tag=None, latest_tag="v1.2.1", app_version="dev",
+                           available=False)
+    assert "up to date" in head(same)
+    assert "up to date" not in head(dev)

@@ -96,7 +96,18 @@ def summary(char) -> dict:
     }
 
 
+# What app/routes/dashboard.py:_client_for records when EVE rejects the refresh
+# (TokenRevoked: SSO answered 400/401). That is definitive — the authorization
+# is gone until the user renews it. Its other warning, "token_refresh_failed:
+# <Exception>", is a network or SSO outage and clears on its own, so it must
+# not tell anyone to re-authorize.
+TOKEN_REVOKED = "token_revoked"
+
+
 def token_failed(warnings: dict | None) -> bool:
-    """The sync layer records a dead refresh token as a token_refresh_failed
-    warning on the field it was syncing (app/routes/dashboard.py:_client_for)."""
-    return any("token_refresh_failed" in str(v) for v in (warnings or {}).values())
+    """True iff the last sync found this character's authorization rejected.
+
+    ISS-048: this used to look for "token_refresh_failed", which the sync
+    layer only writes for transient errors, so a genuinely dead token never
+    surfaced — characters sat silently stale for months."""
+    return any(str(v).startswith(TOKEN_REVOKED) for v in (warnings or {}).values())
