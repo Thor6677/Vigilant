@@ -1,0 +1,4 @@
+{# The tracker's "checked Xs ago" stamp; wh_tracker.html's ticker counts up
+   from data-ts. Rendered inside the panel, and on its own (out of band) when
+   a poll finds nothing on screen has changed (ISS-052). #}
+<span id="wht-checked" class="b-muted-sm" data-ts="{{ (checked_at.timestamp() * 1000) | int }}"{% if oob %} hx-swap-oob="true"{% endif %}>checked just now</span>

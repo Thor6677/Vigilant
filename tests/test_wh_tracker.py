@@ -274,3 +274,113 @@ def test_picker_is_a_single_radio_group_not_checkboxes():
         assert names == {"wht-char"}
     finally:
         teardown()
+
+
+# ── ISS-052: an unchanged panel is not re-rendered every 15s ────────────────
+
+def _shown(body):
+    m = re.search(r'<input type="hidden" id="wht-shown" name="shown" value="([^"]*)"', body)
+    assert m, "the panel must carry the key of what it shows"
+    return m.group(1)
+
+
+def test_unchanged_system_refreshes_only_the_checked_stamp(monkeypatch):
+    """Re-rendering the whole panel every poll reset the page's scroll (the
+    kill list reloads through a one-line placeholder) and wiped the
+    structure-age box."""
+    teardown = _seeded_app_db()
+    try:
+        monkeypatch.setattr(wh_tracker, "_last_seen", {})
+        monkeypatch.setattr(wh_tracker, "_fetch_location",
+                            _fake_fetch_location(J_SYSTEM_ID, J_SYSTEM_NAME, True))
+        client = _authed_client()
+        r1 = client.get("/intel/tracker/poll", params={"char": CHAR_A})
+        key = _shown(r1.text)
+        assert key
+
+        built = []
+        real_build = wh_tracker.build_wh_system_context
+
+        async def counting_build(db, name):
+            built.append(name)
+            return await real_build(db, name)
+        monkeypatch.setattr(wh_tracker, "build_wh_system_context", counting_build)
+
+        r2 = client.get("/intel/tracker/poll", params={"char": CHAR_A, "shown": key})
+        assert r2.status_code == 200
+        assert r2.headers.get("HX-Reswap") == "none"
+        assert 'id="wht-checked"' in r2.text and 'hx-swap-oob="true"' in r2.text
+        assert J_SYSTEM_NAME not in r2.text
+        assert built == []          # no system context rebuilt for nothing
+    finally:
+        teardown()
+
+
+def test_moving_system_renders_the_full_panel(monkeypatch):
+    teardown = _seeded_app_db()
+    try:
+        monkeypatch.setattr(wh_tracker, "_last_seen", {})
+        client = _authed_client()
+        monkeypatch.setattr(wh_tracker, "_fetch_location",
+                            _fake_fetch_location(J_SYSTEM_ID, J_SYSTEM_NAME, True))
+        key = _shown(client.get("/intel/tracker/poll", params={"char": CHAR_A}).text)
+
+        monkeypatch.setattr(wh_tracker, "_fetch_location",
+                            _fake_fetch_location(J_SYSTEM_B_ID, J_SYSTEM_B_NAME, True))
+        r = client.get("/intel/tracker/poll", params={"char": CHAR_A, "shown": key})
+        assert "HX-Reswap" not in r.headers
+        assert J_SYSTEM_B_NAME in r.text and "came from" in r.text
+        assert _shown(r.text) != key
+    finally:
+        teardown()
+
+
+def test_same_system_for_another_character_renders_the_full_panel(monkeypatch):
+    teardown = _seeded_app_db()
+    try:
+        monkeypatch.setattr(wh_tracker, "_last_seen", {})
+        monkeypatch.setattr(wh_tracker, "_fetch_location",
+                            _fake_fetch_location(J_SYSTEM_ID, J_SYSTEM_NAME, True))
+        client = _authed_client()
+        key_b = _shown(client.get("/intel/tracker/poll", params={"char": CHAR_B}).text)
+        r = client.get("/intel/tracker/poll", params={"char": CHAR_A, "shown": key_b})
+        assert "HX-Reswap" not in r.headers
+        assert "Pilot A" in r.text
+    finally:
+        teardown()
+
+
+def test_unchanged_kspace_line_is_not_re_rendered(monkeypatch):
+    teardown = _seeded_app_db()
+    try:
+        monkeypatch.setattr(wh_tracker, "_last_seen", {})
+        monkeypatch.setattr(wh_tracker, "_fetch_location",
+                            _fake_fetch_location(K_SYSTEM_ID, K_SYSTEM_NAME, False))
+        client = _authed_client()
+        key = _shown(client.get("/intel/tracker/poll", params={"char": CHAR_A}).text)
+        r = client.get("/intel/tracker/poll", params={"char": CHAR_A, "shown": key})
+        assert r.headers.get("HX-Reswap") == "none"
+        assert K_SYSTEM_NAME not in r.text
+    finally:
+        teardown()
+
+
+def test_error_and_empty_states_never_claim_to_show_anything(monkeypatch):
+    teardown = _seeded_app_db()
+    try:
+        monkeypatch.setattr(wh_tracker, "_last_seen", {})
+        monkeypatch.setattr(wh_tracker, "_fetch_location", _fake_fetch_location_failing("down"))
+        client = _authed_client()
+        assert _shown(client.get("/intel/tracker/poll", params={"char": CHAR_A}).text) == ""
+        assert _shown(client.get("/intel/tracker/poll", params={"char": ""}).text) == ""
+    finally:
+        teardown()
+
+
+def test_page_sends_the_shown_key_and_explicit_ticks_clear_it():
+    page = open("app/templates/wh_tracker.html").read()
+    assert 'hx-include="#tracker-char, #wht-shown"' in page
+    tick = page[page.index("function tick()"):page.index("dispatchEvent(new Event('tracker-tick'))")]
+    assert "getElementById('wht-shown')" in tick and "shown.value = ''" in tick
+    panel = open("app/templates/partials/wh_tracker_panel.html").read()
+    assert 'hx-trigger="load, every 60s"' in panel   # the kill list stays live on its own
