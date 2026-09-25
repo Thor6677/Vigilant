@@ -4,17 +4,16 @@
         <select data-change="adminAuditFilter"
                 style="padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <option value="" {% if not filter %}selected{% endif %}>All Events</option>
-            <option value="login" {% if filter == 'login' %}selected{% endif %}>Logins</option>
-            <option value="sync_error" {% if filter == 'sync_error' %}selected{% endif %}>Sync Errors</option>
-            <option value="token_refresh_failed" {% if filter == 'token_refresh_failed' %}selected{% endif %}>Token Failures</option>
-            <option value="admin_force_sync" {% if filter == 'admin_force_sync' %}selected{% endif %}>Force Syncs</option>
-            <option value="admin_sde_update" {% if filter == 'admin_sde_update' %}selected{% endif %}>SDE Updates</option>
-            <option value="admin_cache_purge" {% if filter == 'admin_cache_purge' %}selected{% endif %}>Cache Purges</option>
+            {# Built from AUDIT_FILTERS in app/routes/admin.py (T-068), so every
+               option matches events that something actually records. #}
+            {% for key, label, _prefixes in audit_filters %}
+            <option value="{{ key }}" {% if filter == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
         </select>
     </div>
 
     {% if not events %}
-    <div class="b-empty">No audit events{% if filter %} matching "{{ filter }}"{% endif %}.</div>
+    <div class="b-empty">No audit events{% for key, label, _prefixes in audit_filters if key == filter %} in {{ label }}{% endfor %}.</div>
     {% else %}
     <div class="b-table-row" style="border-bottom:2px solid var(--border);">
         <span style="flex:0 0 80px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Time</span>
