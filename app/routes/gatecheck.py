@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,40 +63,45 @@ _check_route_systems = check_route_systems
 
 @router.get("/intel/gatecheck", response_class=HTMLResponse)
 async def gatecheck_page(request: Request, db: AsyncSession = Depends(get_db)):
-    # Load logged-in user's characters with cached locations
-    char_locations = []
     user_id = request.session.get("user_id")
-    if user_id:
-        result = await db.execute(select(Character).where(Character.user_id == user_id))
-        characters = result.scalars().all()
-        cids = [c.character_id for c in characters]
-        if cids:
-            cache_result = await db.execute(
-                select(CharacterDashboardCache).where(
-                    CharacterDashboardCache.character_id.in_(cids)
-                )
+    if not user_id:
+        # ISS-044: login-only. base.html loads actions.js only for a session,
+        # so a stranger got a route checker whose controls were all dead.
+        return RedirectResponse("/")
+    # The user's characters with cached locations
+    char_locations = []
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = result.scalars().all()
+    cids = [c.character_id for c in characters]
+    if cids:
+        cache_result = await db.execute(
+            select(CharacterDashboardCache).where(
+                CharacterDashboardCache.character_id.in_(cids)
             )
-            caches = {c.character_id: c for c in cache_result.scalars().all()}
-            for char in characters:
-                cache = caches.get(char.character_id)
-                loc = None
-                if cache and cache.location_json:
-                    try:
-                        loc = json.loads(cache.location_json)
-                    except Exception:
-                        pass
-                if loc and loc.get("system_name"):
-                    char_locations.append({
-                        "character_name": char.character_name,
-                        "character_id": char.character_id,
-                        "system_name": loc["system_name"],
-                    })
+        )
+        caches = {c.character_id: c for c in cache_result.scalars().all()}
+        for char in characters:
+            cache = caches.get(char.character_id)
+            loc = None
+            if cache and cache.location_json:
+                try:
+                    loc = json.loads(cache.location_json)
+                except Exception:
+                    pass
+            if loc and loc.get("system_name"):
+                char_locations.append({
+                    "character_name": char.character_name,
+                    "character_id": char.character_id,
+                    "system_name": loc["system_name"],
+                })
 
     return templates.TemplateResponse(request, "gatecheck.html", {"char_locations": char_locations})
 
 
 @router.get("/intel/gatecheck/systems", response_class=JSONResponse)
-async def system_autocomplete(q: str = Query(""), db: AsyncSession = Depends(get_db)):
+async def system_autocomplete(request: Request, q: str = Query(""), db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     if len(q) < 2:
         return []
     return await sde.search_systems(db, q, limit=8)
@@ -104,6 +109,8 @@ async def system_autocomplete(q: str = Query(""), db: AsyncSession = Depends(get
 
 @router.post("/intel/gatecheck/check", response_class=HTMLResponse)
 async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     form = await request.form()
     origin = form.get("origin", "").strip()
     dest = form.get("destination", "").strip()
@@ -175,6 +182,8 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
     rolling 1h buffer (app/intel/killmail_stream.py::get_recent_kills) instead
     of per-request zKB polls. No external API call at page-load, and coverage
     is continuous rather than capped at zKB's 2-page window."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     from app.intel.killmail_stream import get_recent_kills
 
     recent = get_recent_kills(window_seconds=3600)
@@ -225,6 +234,8 @@ async def gatecamp_finder(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/intel/gatecheck/wartargets", response_class=HTMLResponse)
 async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     form = await request.form()
     name = form.get("entity_name", "").strip()
     hint = form.get("entity_type", "auto")

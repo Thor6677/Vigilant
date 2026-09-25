@@ -436,7 +436,9 @@
 {# actions.js dispatches on data-click (nav notif bell/hamburger + authed-page
    widgets) and notifications.js drives the nav notif bell/poller — both are
    only ever wired to elements inside the user_id-gated nav or authed-only
-   page templates. Nothing on the anonymous landing page uses either. #}
+   page templates. A page a logged-out visitor can open must use neither:
+   tests/test_route_auth_gating.py sweeps every GET route anonymously and fails
+   on any data-* binding it finds (ISS-044 — three tool pages shipped dead). #}
 {% if request.session.get('user_id') %}
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/actions.js?v={{ js_v }}"></script>
 <script nonce="{{ request.state.csp_nonce }}" src="/static/js/notifications.js?v={{ js_v }}"></script>
