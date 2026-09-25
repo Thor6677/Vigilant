@@ -222,12 +222,18 @@ async def wh_tracker_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def wh_tracker_poll(
     request: Request,
     char: str = "",
+    shown: str = "",
     db: AsyncSession = Depends(get_db),
 ):
     """One tracker tick for the single selected character: locate it, then
     render the full wormhole panel (J-space) or a compact location line
     (K-space). The headline is always this character — there is no other
-    candidate to pick between any more."""
+    candidate to pick between any more.
+
+    `shown` is the key of the panel already on screen. When it still matches,
+    only the "checked" stamp is refreshed (ISS-052): re-rendering the whole
+    panel every 15s reset the page's scroll, because the kill list reloads
+    through a one-line placeholder, and wiped the structure-age box."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
@@ -261,6 +267,13 @@ async def wh_tracker_poll(
             {"state": "error", "checked_at": _now(), "reason": reason})
 
     entry = _update_last_seen(char_id, loc)
+    shown_key = f"{'j' if entry['is_j'] else 'k'}:{char_id}:{entry['system_id']}"
+    if shown == shown_key:
+        resp = templates.TemplateResponse(
+            request, "partials/wh_tracker_checked.html",
+            {"checked_at": _now(), "oob": True})
+        resp.headers["HX-Reswap"] = "none"   # out-of-band stamp only
+        return resp
 
     if not entry["is_j"]:
         # K-space: no wormhole panel to show, just where the character is.
@@ -272,6 +285,7 @@ async def wh_tracker_poll(
             request, "partials/wh_tracker_panel.html",
             {"state": "kspace",
              "checked_at": _now(),
+             "shown_key": shown_key,
              "char_name": selected.character_name,
              "system_name": entry["system_name"],
              "region_name": (sys_info or {}).get("region"),
@@ -283,6 +297,7 @@ async def wh_tracker_poll(
         request, "partials/wh_tracker_panel.html",
         {"state": "active",
          "checked_at": _now(),
+         "shown_key": shown_key,
          "char_name": selected.character_name,
          "prev_system_name": entry.get("prev_system_name"),
          "intel": intel,

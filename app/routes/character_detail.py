@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -13,9 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, AsyncSessionLocal
-from app.esi.client import ESIClient
+from app.esi.client import ESIClient, TokenRevoked, get_client_safe
 from app.esi import character as esi_char
 from app.esi.client import refresh_token
+from app.esi.scope_guard import ScopeNotGranted
 from app.esi.character import get_wallet_journal
 from app.sde import lookup as sde
 from app.auth import scopes as perms
@@ -1084,9 +1086,59 @@ async def _enrich_notif_summary(notif_type: str, text: str, db) -> str:
     return ""
 
 
+# Mail headers are read from ESI each time the panel loads, never synced
+# (ISS-046). Only this panel uses them, and a stored copy is private mail at
+# rest — the sync writer that once filled CharacterDashboardCache.mail_json
+# was removed long ago, leaving most characters showing mail frozen for months.
+_MAIL_NAMES_TIMEOUT = 8.0   # seconds; past this the list renders without senders
+# Sender ids /universe/names/ answered 404 for. One such id fails its whole
+# batch, so they are left out of later batches. Process-local, like the
+# entity-name cache in app/intel/recent_battles.py.
+_unresolvable_senders: set[int] = set()
+
+
+async def _sender_names(client: ESIClient, ids: set[int]) -> dict[int, str]:
+    """{id: name} for the mail senders ESI can name. Never raises."""
+    wanted = sorted(i for i in ids if i and i not in _unresolvable_senders)
+    if not wanted:
+        return {}
+    try:
+        rows = await client.post_public("/universe/names/", wanted)
+        return {r["id"]: r["name"] for r in rows or []}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 404:
+            return {}
+    except Exception:
+        return {}
+
+    # 404 = at least one id ESI cannot name. Ask for each alone to find it;
+    # the answers are cached per id, so this runs once per new sender.
+    sem = asyncio.Semaphore(3)
+
+    async def _one(i: int) -> tuple[int, str | None]:
+        async with sem:
+            try:
+                rows = await client.post_public("/universe/names/", [i])
+                return i, (rows[0].get("name") if rows else None)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    if len(_unresolvable_senders) > 5000:
+                        _unresolvable_senders.clear()
+                    _unresolvable_senders.add(i)
+                return i, None
+            except Exception:
+                return i, None
+
+    return {i: n for i, n in await asyncio.gather(*[_one(i) for i in wanted]) if n}
+
+
 @router.get("/character/{character_id}/mail-partial", response_class=HTMLResponse)
 async def character_mail_partial(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    """Htmx partial: mail list for a character."""
+    """Htmx partial: the character's newest mail headers, read live from ESI.
+
+    Every outcome renders inside the panel with a 200. base.html's htmx error
+    handler would otherwise replace the panel with its generic error pill.
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("")
@@ -1094,23 +1146,41 @@ async def character_mail_partial(character_id: int, request: Request, db: AsyncS
     char = await _owned_character(db, character_id, user_id)
     if char is None:
         return HTMLResponse("", status_code=404)
+    ctx = {"character_id": character_id, "char_name": char.character_name,
+           "mail_headers": [], "mail_error": None}
     if not perms.has(char, perms.MAIL):
-        return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
-            "mail_headers": [], "mail_error": None, "missing_perm": "mail", "char": char})
+        return templates.TemplateResponse(request, "partials/mail_panel.html",
+                                          {**ctx, "missing_perm": "mail", "char": char})
 
-    cache_result = await db.execute(
-        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
-    )
-    cache = cache_result.scalar_one_or_none()
+    try:
+        client = await get_client_safe(char)
+        client.cache_enabled = True
+        raw = await esi_char.get_mail_headers(client, character_id) or []
+    except TokenRevoked:
+        ctx["mail_error"] = "expired"
+    except ScopeNotGranted:
+        # Stored scopes say mail, the token's own scp claim does not.
+        ctx["mail_error"] = "not_granted"
+    except Exception as e:
+        logger.warning("Mail headers fetch failed for char %s: %s", character_id, e)
+        ctx["mail_error"] = "failed"
+    if ctx["mail_error"]:
+        return templates.TemplateResponse(request, "partials/mail_panel.html", ctx)
 
-    mail_data = json.loads(cache.mail_json) if cache and cache.mail_json else None
-    if mail_data is None or mail_data == "no_scope":
-        return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
-            "mail_headers": [], "mail_error": "No mail loaded for this character yet."})
-
-    headers = mail_data.get("headers", []) if isinstance(mail_data, dict) else []
-    return templates.TemplateResponse(request, "partials/mail_panel.html", {"character_id": character_id,
-        "mail_headers": headers, "mail_error": None})
+    try:
+        names = await asyncio.wait_for(
+            _sender_names(client, {m.get("from") for m in raw}), _MAIL_NAMES_TIMEOUT)
+    except asyncio.TimeoutError:
+        names = {}
+    ctx["mail_headers"] = [{
+        "mail_id": m["mail_id"],
+        "subject": m.get("subject") or "(No Subject)",
+        "timestamp": m.get("timestamp") or "",
+        # ESI may omit is_read (sent mail); never badge those NEW.
+        "is_read": m.get("is_read", True),
+        "sender": names.get(m.get("from")),
+    } for m in raw if m.get("mail_id")]
+    return templates.TemplateResponse(request, "partials/mail_panel.html", ctx)
 
 
 @router.get("/character/{character_id}/mail/{mail_id}", response_class=HTMLResponse)

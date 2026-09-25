@@ -22,6 +22,7 @@ TTL = {
     "character_jobs":   300,          # industry jobs — 5 min
     "character_clones": 300,          # clones — 5 min
     "character_wallet": 120,          # wallet — 2 min
+    "character_mail":    30,          # mail headers — ESI's own max-age; read live on each view
     # location — matches ESI's own 5s cache on this endpoint. Used to be
     # 60s, which was fine for the dashboard's own per-character sync (it
     # only re-fetches location every 60s regardless of this TTL — see
@@ -79,6 +80,10 @@ def _ttl_for_path(path: str) -> int:
     import re as _re
     if _re.match(r'^/characters/\d+/?$', path):
         return TTL["character_public"]
+    # Mail headers only. Bodies (/mail/{mail_id}/) never change and keep the
+    # default; before this the list fell through to it too, 10x ESI's max-age.
+    if _re.match(r'^/characters/\d+/mail/?$', path):
+        return TTL["character_mail"]
     # Specific-subpath checks come BEFORE the generic /corporations/ and
     # /alliances/ catches — otherwise paths like /corporations/{id}/assets/
     # match the broad corp-info TTL (24h) before the assets-specific

@@ -5,8 +5,11 @@
    app/routes/wh_tracker.py for why this used to be otherwise. #}
 
 <div style="display:flex;justify-content:flex-end;margin-bottom:0.4rem;">
-    <span id="wht-checked" class="b-muted-sm" data-ts="{{ (checked_at.timestamp() * 1000) | int }}">checked just now</span>
+    {% include "partials/wh_tracker_checked.html" %}
 </div>
+{# What this panel shows. The next poll sends it back; while it still matches,
+   the server refreshes only the stamp above instead of the whole panel. #}
+<input type="hidden" id="wht-shown" name="shown" value="{{ shown_key or '' }}">
 
 {% if state == 'none' %}
 <div class="b-panel" style="padding:1rem;text-align:center;">
@@ -150,8 +153,10 @@
         <!-- Recent kills (reuses the system page's lazy endpoint) -->
         <div class="ws-section">
             <div class="ws-section-title">Kill Activity</div>
+            {# Refreshes on its own: the panel around it is only re-rendered
+               when the character changes system. #}
             <div hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
-                 hx-trigger="load"
+                 hx-trigger="load, every 60s"
                  hx-swap="innerHTML">
                 <div class="b-panel" style="padding:0.75rem;text-align:center;">
                     <span class="b-muted-sm">Loading kill data…</span>

@@ -92,7 +92,7 @@ class CharacterDashboardCache(Base):
     industry_json = Column(Text, nullable=True)
     clones_json = Column(Text, nullable=True)
     orders_json = Column(Text, nullable=True)
-    mail_json = Column(Text, nullable=True)
+    mail_json = Column(Text, nullable=True)   # unused: mail is read live (ISS-046); nulled at startup
     notifications_json = Column(Text, nullable=True)
     contracts_json = Column(Text, nullable=True)
     pi_json = Column(Text, nullable=True)

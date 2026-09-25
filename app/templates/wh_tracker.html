@@ -60,7 +60,7 @@
 <div id="wht-panel"
      hx-get="/intel/tracker/poll"
      hx-trigger="tracker-tick from:body, every 15s"
-     hx-include="#tracker-char"
+     hx-include="#tracker-char, #wht-shown"
      hx-swap="innerHTML">
     <div class="b-panel" style="padding:1rem;text-align:center;">
         <span class="b-muted-sm">Select a character above to start tracking.</span>
@@ -84,6 +84,10 @@
             if (sel) localStorage.setItem(KEY, sel);
             else localStorage.removeItem(KEY);
         } catch (e) { /* private-browsing localStorage can throw — non-fatal */ }
+        /* An explicit tick (picker, Refresh now, R) always re-renders the
+           panel; only the background 15s poll may skip an unchanged one. */
+        var shown = document.getElementById('wht-shown');
+        if (shown) shown.value = '';
         if (sel) document.body.dispatchEvent(new Event('tracker-tick'));
     }
 

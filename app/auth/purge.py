@@ -49,7 +49,7 @@ _CACHE_COLUMNS: dict[str, tuple[str, ...]] = {
     "planets": ("pi_json",),
     "contracts": ("contracts_json",),
     "notifications": ("notifications_json",),
-    "mail": ("mail_json",),
+    "mail": ("mail_json",),   # legacy column; live mail sits in the ESI cache, cleared below
 }
 _SYNC_FIELDS: dict[str, tuple[str, ...]] = {
     "wallet": ("wallet", "transactions"),

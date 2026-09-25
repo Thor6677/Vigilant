@@ -540,7 +540,7 @@
         <div class="b-panel-head">
             <span class="b-label">Mail</span>
         </div>
-        <div hx-get="/character/{{ char.character_id }}/mail-partial"
+        <div id="mail-panel" hx-get="/character/{{ char.character_id }}/mail-partial"
              hx-trigger="load"
              hx-swap="innerHTML">
             <div class="b-empty b-muted">Loading mail...</div>

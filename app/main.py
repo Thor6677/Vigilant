@@ -295,6 +295,15 @@ async def startup():
             .where(CharacterDashboardCache.sync_status == "syncing")
             .values(sync_status="idle")
         )
+        # ISS-046: mail is read live now. Drop the header copies a long-gone
+        # sync writer left behind (frozen since 2026-04). A no-op once done.
+        res = await db.execute(
+            update(CharacterDashboardCache)
+            .where(CharacterDashboardCache.mail_json.isnot(None))
+            .values(mail_json=None)
+        )
+        if res.rowcount:
+            logging.info("Cleared %d stale mail_json rows (ISS-046)", res.rowcount)
         await db.commit()
     async with AsyncSessionLocal() as db:
         for stmt in [
