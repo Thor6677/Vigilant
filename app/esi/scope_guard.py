@@ -92,6 +92,21 @@ def granted_scopes(token: str) -> frozenset[str]:
     return frozenset()
 
 
+def scopes_in_token(token: str) -> frozenset[str] | None:
+    """Like granted_scopes(), but None when the string is not a parseable EVE
+    JWT at all — so a caller can tell "this token has no scopes" (EVE omits
+    `scp` then) from "this is not a token I can read"."""
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or "sub" not in payload:
+        return None
+    return granted_scopes(token)
+
+
 def check(method: str, path: str, granted: frozenset[str]) -> None:
     """Raise ScopeNotGranted unless ``granted`` covers this call."""
     known, scope, _roles = lookup(method, path)

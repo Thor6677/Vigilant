@@ -10,9 +10,18 @@ permissions:
   permission picker (``GET /auth/connect``): SSO is asked for exactly the
   permissions the user ticked, nothing else.
 * ``POST /auth/authorize`` with intent ``update`` — from the Account page:
-  re-authorize one character with a new selection. Narrowing revokes the old
-  refresh token at EVE and, if the user asked, deletes data collected under the
-  withdrawn permissions (app/auth/purge.py).
+  re-authorize one character with a new selection. EVE issues a new
+  authorization limited to exactly that selection; Vigilant replaces the old
+  token with it, clears the live data the withdrawn permissions fed and, if the
+  user asked, deletes the history too (app/auth/purge.py).
+
+The old token is deliberately NOT revoked on an update. EVE keeps one
+authorization per character per application, and revoking any of its refresh
+tokens takes the whole authorization down — including the token that was just
+issued (verified on the dev instance 2026-09-25: revoke 200, then the new
+token's refresh 400). A new authorization already replaces the old one's scope
+set. Revocation is kept for removing a character, where ending the whole
+authorization is exactly the point.
 
 The catalog of permissions lives in app/auth/scopes.py; ESIClient refuses any
 call outside what a token carries (app/esi/scope_guard.py).
@@ -39,7 +48,7 @@ from app.db.models import AdminAuditLog, Character, User, get_db
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi import scope_guard
-from app.esi.client import ESIClient, TokenRevoked, _do_refresh
+from app.esi.client import ESIClient
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -330,9 +339,9 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             new_account = True
         # Deliberately NOT touching access_token / refresh_token / scopes on an
         # existing character: logging in must never change what it shares.
-        # The login token is simply dropped. It is not revoked either — it
-        # carries no scopes, and revoking a grant for the same character and
-        # application risks taking the stored data token down with it.
+        # The login token is simply dropped. It must NOT be revoked: EVE keeps
+        # one authorization per character per application, so revoking it
+        # would end the stored data token too (see the module docstring).
         _apply_metadata(existing, meta)
         existing.character_name = character_name
         user.last_login = datetime.now(timezone.utc)
@@ -387,8 +396,6 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             request.session.clear()
             return RedirectResponse("/auth/login", status_code=303)
 
-    old_refresh = existing.refresh_token if existing else None
-    old_is_ours = issued_to_us(existing.access_token) if existing else False
     old_scopes = perms.parse_scopes(existing.scopes) if existing else set()
     if existing is None:
         existing = Character(
@@ -421,18 +428,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     ))
     await db.commit()
 
-    # The superseded token: revoke it at EVE, then prove the new one still
-    # refreshes (a revocation that also took the new grant down would
-    # otherwise only surface as a failed sync later).
-    if old_refresh and old_refresh != refresh_token and old_is_ours:
-        if await revoke_refresh_token(old_refresh):
-            try:
-                await _do_refresh(existing, db)
-            except TokenRevoked:
-                logger.error("new token for %s stopped working after revoking the old one", character_id)
-                _flash(request, "danger",
-                       "EVE revoked the new authorization together with the old one. "
-                       "Please change this character's permissions once more.")
+    # No revocation of the superseded token here — see the module docstring:
+    # it would take the new authorization down with it.
 
     purged_note = ""
     if removed:

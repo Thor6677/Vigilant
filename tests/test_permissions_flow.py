@@ -90,22 +90,17 @@ def env(monkeypatch):
 
     main.app.dependency_overrides[get_db] = _override
 
-    calls = {"revoked": [], "refreshed": [], "synced": []}
+    calls = {"revoked": [], "synced": []}
 
     async def fake_revoke(token):
         calls["revoked"].append(token)
         return True
-
-    async def fake_refresh(char, db):
-        calls["refreshed"].append(char.character_id)
-        return char.access_token
 
     async def fake_meta(access_token, character_id):
         return {"corporation_id": 98000001, "alliance_id": None, "security_status": 1.0,
                 "birthday": None, "corporation_name": "Test Corp", "alliance_name": None}
 
     monkeypatch.setattr(auth_routes, "revoke_refresh_token", fake_revoke)
-    monkeypatch.setattr(auth_routes, "_do_refresh", fake_refresh)
     monkeypatch.setattr(auth_routes, "_public_metadata", fake_meta)
     monkeypatch.setattr(auth_routes, "_queue_sync", lambda cid: calls["synced"].append(cid))
 
@@ -312,7 +307,7 @@ def _count(env, model, **where):
     return env.q(go)
 
 
-def test_narrowing_revokes_the_old_token_and_clears_the_esi_cache(env):
+def test_narrowing_replaces_the_token_without_revoking_and_clears_the_esi_cache(env):
     _seed_alt_data(env)
     env.sso_returns(ALT_ID, "Alt Pilot", [cat.ASSETS])   # wallet withdrawn
     r = env.client(_pending("update", ["assets"], ALT_ID, user_id=USER_ID)).get(
@@ -321,8 +316,9 @@ def test_narrowing_revokes_the_old_token_and_clears_the_esi_cache(env):
     c = env.char(ALT_ID)
     assert cat.parse_scopes(c.scopes) == {cat.ASSETS}
     assert c.refresh_token == "new-refresh"
-    assert env.calls["revoked"] == ["old-refresh"]
-    assert env.calls["refreshed"] == [ALT_ID]           # the new token was proven
+    # EVE keeps one authorization per character per app: revoking the old
+    # token would kill the new one too (seen on the dev instance). Never.
+    assert env.calls["revoked"] == []
     # No purge requested: history stays...
     assert _count(env, WalletSnapshot, character_id=ALT_ID) == 1
     # ...but the live value is dropped, so nothing keeps reading it as current.
@@ -467,18 +463,65 @@ def test_granted_scopes_come_from_the_tokens_own_scp_claim(env, monkeypatch):
 
 
 def test_tokens_issued_to_another_application_are_never_revoked(env):
-    """The dev DB is seeded from production: a dev change must not send
-    production's refresh token to EVE under dev's credentials."""
+    """The dev DB is seeded from production: removing a character on dev must
+    not send production's refresh token to EVE under dev's credentials —
+    revocation ends the character's whole authorization."""
     async def as_prod(db):
         c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
         c.access_token = _access(azp="some-other-client")
         await db.commit()
     env.q(as_prod)
-    env.sso_returns(ALT_ID, "Alt Pilot", [cat.ASSETS])
-    env.client(_pending("update", ["assets"], ALT_ID, user_id=USER_ID)).get(
-        "/auth/callback?code=x&state=S")
+    r = env.user().post(f"/auth/remove/{ALT_ID}", data={"csrf_token": CSRF})
+    assert r.status_code == 303
+    assert env.char(ALT_ID) is None           # the removal itself still happens
     assert env.calls["revoked"] == []
-    assert env.char(ALT_ID).refresh_token == "new-refresh"   # the change itself still applies
+
+
+def test_refresh_keeps_stored_scopes_equal_to_the_token(env, monkeypatch):
+    """If EVE narrows an authorization underneath us, the next refresh must
+    show it in Character.scopes (what the Account page and sync read)."""
+    from app.esi import client as client_mod
+
+    def b64(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+    narrowed = f"{b64({'alg': 'none'})}.{b64({'sub': 'CHARACTER:EVE:1', 'scp': cat.ASSETS})}.x"
+
+    class Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"access_token": narrowed, "refresh_token": "r2", "expires_in": 1200}
+
+    class HC:
+        async def post(self, *a, **k): return Resp()
+
+    monkeypatch.setattr(client_mod, "get_http_client", lambda: HC())
+
+    async def go(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
+        await client_mod._do_refresh(c, db)
+        return c.scopes
+    assert env.q(go) == cat.ASSETS
+
+
+def test_refresh_leaves_scopes_alone_for_an_unreadable_token(env, monkeypatch):
+    from app.esi import client as client_mod
+
+    class Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"access_token": "opaque", "refresh_token": "r2", "expires_in": 1200}
+
+    class HC:
+        async def post(self, *a, **k): return Resp()
+
+    monkeypatch.setattr(client_mod, "get_http_client", lambda: HC())
+    before = env.char(ALT_ID).scopes
+
+    async def go(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
+        await client_mod._do_refresh(c, db)
+        return c.scopes
+    assert env.q(go) == before
 
 
 def test_csp_lets_the_picker_form_redirect_to_eve_sso(env):

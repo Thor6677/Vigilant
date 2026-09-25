@@ -203,6 +203,20 @@ async def _do_refresh(character: Character, db: AsyncSession) -> str:
     character.access_token = data["access_token"]
     character.refresh_token = data.get("refresh_token", character.refresh_token)
     character.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
+    # Keep the stored scopes equal to what the token can actually do (its scp
+    # claim — the same source the scope guard reads). If EVE ever narrows an
+    # authorization underneath us, the Account page and the sync layer see it
+    # at the next refresh instead of data quietly going stale.
+    in_token = scope_guard.scopes_in_token(character.access_token)
+    if in_token is not None:
+        from app.auth.scopes import join_scopes
+        refreshed = join_scopes(in_token)
+        if refreshed != (character.scopes or ""):
+            import logging
+            logging.getLogger(__name__).info(
+                "character %s scopes changed at refresh: %d -> %d",
+                character.character_id, len((character.scopes or "").split()), len(in_token))
+            character.scopes = refreshed
     await db.commit()
     return character.access_token
 

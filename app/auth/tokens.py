@@ -1,11 +1,14 @@
-"""EVE SSO token revocation.
+"""EVE SSO token revocation — used when a character is REMOVED.
 
-A refresh token Vigilant stops using is revoked at EVE rather than just
-forgotten: forgetting it only removes it from the live database, while every
-backup taken before still holds a working copy. Revocation is best-effort — a
-failure is logged and never blocks the change the user asked for, because the
-new token is already in place and the old one is gone from the live DB either
-way.
+EVE keeps one authorization per character per application, and revoking any
+of its refresh tokens ends the whole authorization (verified on the dev
+instance 2026-09-25). That is exactly right when a character is removed: its
+access ends at EVE, not just in Vigilant's live database, so copies in old
+backups stop working too. It is exactly wrong when permissions are merely
+changed — the token just issued would die with the old one — so the update
+flow never calls this (see app/auth/routes.py).
+
+Best-effort: a failure is logged and never blocks the removal.
 """
 from __future__ import annotations
 
@@ -26,8 +29,10 @@ def issued_to_us(access_token: str | None) -> bool:
     instance's database is seeded from production (scripts/dev_seed_tables.py
     copies ``characters`` whole), so a dev "change permissions" or "remove"
     would otherwise send production's refresh tokens to EVE under dev's
-    credentials. EVE should refuse that (RFC 7009 binds revocation to the
-    issuing client), but this does not depend on it. Unparseable -> False.
+    credentials — and since revocation ends a character's whole authorization,
+    that would cut off production. EVE should refuse it (RFC 7009 binds
+    revocation to the issuing client), but this does not depend on it.
+    Unparseable -> False.
     """
     import json
     try:
