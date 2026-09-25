@@ -479,3 +479,12 @@ def test_tokens_issued_to_another_application_are_never_revoked(env):
         "/auth/callback?code=x&state=S")
     assert env.calls["revoked"] == []
     assert env.char(ALT_ID).refresh_token == "new-refresh"   # the change itself still applies
+
+
+def test_csp_lets_the_picker_form_redirect_to_eve_sso(env):
+    """The picker POSTs to /auth/authorize, which 303s to EVE SSO. Browsers
+    apply form-action to every redirect hop, so 'self' alone silently blocked
+    the navigation (found on the dev instance). Exactly one origin is added."""
+    csp = env.client().get("/auth/connect").headers["content-security-policy"]
+    form_action = next(d for d in csp.split(";") if d.strip().startswith("form-action"))
+    assert form_action.split()[1:] == ["'self'", "https://login.eveonline.com"]

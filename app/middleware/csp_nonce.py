@@ -69,9 +69,25 @@ removing it is the one piece of T-033 that lives outside this repo.
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlsplit
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+
+from app.config import get_settings
+
+
+def _sso_origin() -> str:
+    """Origin of the EVE SSO authorize endpoint (https://login.eveonline.com).
+
+    The permission picker POSTs to /auth/authorize, which answers with a 303 to
+    EVE SSO. Browsers enforce form-action on every hop of a form submission's
+    redirect chain, so with 'self' alone the navigation to EVE is blocked and
+    the picker's button appears to do nothing (found on the dev instance,
+    2026-09-25). Only this one origin is added.
+    """
+    parts = urlsplit(get_settings().eve_sso_auth_url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 # Format string for the header. The {nonce} placeholder is filled per
@@ -101,11 +117,14 @@ _CSP_TEMPLATE = (
     "connect-src 'self' https://esi.evetech.net; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
-    "form-action 'self'; "
+    "form-action 'self' {sso_origin}; "
     # ISS-023: server-side violation sink. Sink lives at app/routes/csp.py,
     # appends to /data/logs/csp-violations.jsonl with size-capped rotation.
     "report-uri /csp-report"
 )
+
+
+_SSO_ORIGIN = _sso_origin()
 
 
 class CSPNonceMiddleware(BaseHTTPMiddleware):
@@ -123,6 +142,6 @@ class CSPNonceMiddleware(BaseHTTPMiddleware):
             k.lower() for k in response.headers.keys()
         }:
             response.headers["Content-Security-Policy"] = (
-                _CSP_TEMPLATE.format(nonce=nonce)
+                _CSP_TEMPLATE.format(nonce=nonce, sso_origin=_SSO_ORIGIN)
             )
         return response
