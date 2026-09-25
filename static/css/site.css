@@ -516,3 +516,62 @@
 .perm-notice-kind.is-permission { color: var(--accent); }
 .perm-notice-kind.is-role { color: var(--warn); }
 .perm-notice-kind.is-token { color: var(--danger); }
+
+/* ── Admin › Updates (partials/updater_panel.html) ─────────────────────── */
+/* T-061: the panel used to borrow .b-card (the character-card style, hover
+   lift included) and b-card-head / updater-* classes that had no rules at all,
+   so it rendered as bare browser defaults. The updater-* names are pinned by
+   tests and actions.js — style them here, never rename them. */
+.upd { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+.upd-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem; border-top: 1px solid var(--border); }
+.upd-body:empty { display: none; }
+.upd-note { margin: 0; font-size: var(--fs-base); line-height: 1.6; color: var(--muted); }
+.upd-note b, .upd-note code { color: var(--text); }
+.upd-note.is-danger, .upd-note .is-danger { color: var(--danger); }
+.upd-note.is-warn { color: var(--warn); }
+.upd-note .is-ok, .upd-note.is-ok { color: var(--success); }
+.upd-note ul { margin: 0.35rem 0 0 1.1rem; padding: 0; }
+.upd-note code { font-size: 11px; background: var(--surface-1); border: 1px solid var(--border); padding: 0 0.3rem; word-break: break-all; }
+.upd-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+.upd-progress-title { margin: 0; display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; color: var(--accent); }
+.updater-log { margin: 0.5rem 0 0; max-height: 320px; overflow: auto; padding: 0.6rem 0.75rem; background: var(--surface-1); border: 1px solid var(--border); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.updater-outcome details > summary,
+.updater-schedule-form > summary { cursor: pointer; font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+.updater-outcome details > summary:hover,
+.updater-schedule-form > summary:hover { color: var(--text); }
+.updater-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; }
+.updater-actions form, .updater-pending form, .updater-notify-tests form { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+.updater-actions label { font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+.updater-pending { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.updater-schedule-form[open] > summary { margin-bottom: 0.6rem; }
+.updater-schedule-form .upd-note { margin-top: 0.6rem; }
+
+/* Collapsible sections styled as panels: same border, gradient and gold head
+   as .b-panel / .b-panel-head, with the state on the right of the head. */
+.updater-policy, .updater-notify { border: 1px solid var(--border); background: linear-gradient(180deg, var(--surface-2), var(--surface-1)); }
+.updater-policy > summary, .updater-notify > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0.75rem; cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--accent); }
+.updater-policy > summary::-webkit-details-marker, .updater-notify > summary::-webkit-details-marker { display: none; }
+.updater-policy > summary::after, .updater-notify > summary::after { content: '▸'; color: var(--muted); transition: transform var(--dur-fast); }
+.updater-policy[open] > summary::after, .updater-notify[open] > summary::after { transform: rotate(90deg); }
+.updater-policy[open] > summary, .updater-notify[open] > summary { border-bottom: 1px solid var(--glass-border); }
+.upd-summary-state { margin-left: auto; font-weight: 400; letter-spacing: var(--ls-wide); color: var(--muted); text-align: right; }
+.upd-section { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem; }
+.upd-form { display: grid; grid-template-columns: 10rem minmax(0, 20rem) minmax(0, 1fr); gap: 0.5rem 0.9rem; align-items: center; margin: 0; }
+.upd-form > label { grid-column: 1; font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+.upd-form > input, .upd-form > select { grid-column: 2; }
+.upd-form > .upd-span { grid-column: 1 / -1; }
+.upd-form label.upd-check { display: flex; align-items: center; gap: 0.55rem; font-size: var(--fs-base); letter-spacing: normal; text-transform: none; color: var(--text); }
+.upd-form label.upd-check > input { flex: none; margin: 0; }
+.upd-channel-head { padding-top: 0.6rem; border-top: 1px solid var(--border); }
+.upd-form > .upd-channel-head:first-child { padding-top: 0; border-top: none; }
+.updater-notify-tests { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.upd-table-wrap { overflow-x: auto; }
+.upd-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.upd-table th { text-align: left; font-weight: 400; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.upd-table td { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.upd-table tr:last-child td { border-bottom: none; }
+@media (max-width: 640px) {
+    .upd-form { grid-template-columns: minmax(0, 1fr); }
+    .upd-form > label, .upd-form > input, .upd-form > select { grid-column: 1; }
+    .upd-form > label:not(.upd-check) { margin-bottom: -0.25rem; }
+}

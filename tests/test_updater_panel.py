@@ -19,6 +19,10 @@ PANEL = Path("app/templates/partials/updater_panel.html")
 ACTIONS = Path("static/js/actions.js")
 BASE = Path("app/templates/base.html")
 OVERVIEW = Path("app/templates/partials/admin_overview.html")
+UPDATES_TAB = Path("app/templates/partials/admin_updates.html")
+# First element inside #updater-panel. Everything before it is the panel's own
+# opening tag, which is where the poll and its opt-out must live.
+FIRST_CHILD = '<div class="b-panel upd-status">'
 ADMIN_TPL = Path("app/templates/admin.html")
 
 _TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
@@ -162,7 +166,7 @@ def test_poll_and_no_error_opt_out_are_on_the_same_element(panel):
     the panel with a "couldn't load" pill, destroying the hx-trigger and
     stranding the operator on an error.
     """
-    opening = panel[panel.index('<div id="updater-panel"'):panel.index("<div class=\"b-card-head\">")]
+    opening = panel[panel.index('<div id="updater-panel"'):panel.index(FIRST_CHILD)]
     assert "hx-trigger" in opening
     assert 'data-htmx-no-error="1"' in opening
 
@@ -171,7 +175,7 @@ def test_the_polling_element_is_the_swap_target(panel):
     """hx-swap replaces the target, so the poll must live on the element that
     gets replaced — htmx re-initialises the replacement and the loop continues.
     On an inner element the first swap would silently end the loop."""
-    opening = panel[:panel.index("<div class=\"b-card-head\">")]
+    opening = panel[panel.index('<div id="updater-panel"'):panel.index(FIRST_CHILD)]
     assert 'hx-target="#updater-panel"' in opening
     assert 'hx-swap="outerHTML"' in opening
 
@@ -463,10 +467,29 @@ def test_panel_is_rendered_inline_not_lazily_fetched():
     Reported from the browser 2026-09-14. Rendering the include inline means the
     panel arrives already built, with the section.
     """
-    src = OVERVIEW.read_text()
+    src = UPDATES_TAB.read_text()
     assert 'include "partials/updater_panel.html"' in src
     assert 'hx-get="/admin/update/status"' not in src, \
         "lazily fetching the panel here makes it flash on every section refresh"
+
+
+def test_overview_no_longer_carries_update_ui():
+    """T-061: the panel moved to its own tab, and Overview's second "Updates"
+    panel (Running / Latest / Last checked) was folded into it. Overview keeps
+    only the version tile, which links to the tab."""
+    src = OVERVIEW.read_text()
+    assert "updater_panel.html" not in src
+    assert "Last Checked" not in src
+    assert 'href="/admin?tab=updates"' in src
+
+
+def test_updates_tab_auto_refreshes():
+    """The panel only polls while a run is in flight; the section refresh is
+    what notices a new heartbeat, release or report while it is idle."""
+    src = ADMIN_TPL.read_text()
+    refresh = src[src.index("var refreshSections"):]
+    refresh = refresh[:refresh.index(";")]
+    assert "'updates'" in refresh
 
 
 def test_overview_section_still_auto_refreshes():

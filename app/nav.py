@@ -554,10 +554,12 @@ NAV_GROUPS = [
         "admin": True,
         "landing": False,
         "account": True,
+        # One item. There used to be a "Status" entry as well, but /status has
+        # redirected into this console since the status page was folded into
+        # it, so the account menu carried two links to the same page. The
+        # /status route stays for old bookmarks.
         "items": [
-            _item("Console", "/admin", [("prefix", "/admin")],
-                  admin=True, in_landing=False),
-            _item("Status", "/status", [("prefix", "/status")],
+            _item("Admin Console", "/admin", [("prefix", "/admin"), ("prefix", "/status")],
                   admin=True, in_landing=False),
         ],
     },
