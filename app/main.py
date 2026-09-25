@@ -3,7 +3,7 @@ import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,6 +17,8 @@ from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
+from app.auth.session_guard import check_session
+from app.db.user_ids import ensure_users_autoincrement
 from app.db.cache import ESICache  # registers table with Base
 from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo, SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial, SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
@@ -143,6 +145,9 @@ app = FastAPI(
     description="EVE Online character dashboard",
     docs_url="/api/docs" if settings.debug else None,
     redoc_url=None,
+    # Runs before every route: signs a session out once its account is gone,
+    # its role changed, or it was signed out everywhere.
+    dependencies=[Depends(check_session)],
 )
 
 class _RequestTimingMiddleware(BaseHTTPMiddleware):
@@ -318,6 +323,8 @@ async def startup():
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+            # Session cookies carry this; rotating it signs the account out
+            "ALTER TABLE users ADD COLUMN session_epoch VARCHAR(32)",
             # Skill plan sharing scopes (Phase 1 of corp/alliance/custom ACL rollout)
             "ALTER TABLE skill_plans ADD COLUMN visibility TEXT NOT NULL DEFAULT 'personal'",
             "ALTER TABLE skill_plans ADD COLUMN owner_corp_id INTEGER",
@@ -378,6 +385,22 @@ async def startup():
                 exc_str = str(migration_exc).lower()
                 if "duplicate column" not in exc_str and "already exists" not in exc_str:
                     logging.warning("Startup migration warning for %r: %s", stmt, migration_exc)
+
+    # ── Session epochs and non-reusable user ids ────────────────────────
+    # Every account needs an epoch before check_session can compare cookies
+    # against it. Filling the missing ones signs out every session issued
+    # before epochs existed — once, on the first start with this column.
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(text(
+            "UPDATE users SET session_epoch = lower(hex(randomblob(16))) "
+            "WHERE session_epoch IS NULL"))
+        await db.commit()
+        if res.rowcount:
+            logging.info("Assigned session epochs to %d users", res.rowcount)
+        try:
+            await ensure_users_autoincrement(db)
+        except Exception as e:
+            logging.warning("users AUTOINCREMENT rebuild failed, table unchanged: %s", e)
 
     # ── Add killmail_attackers columns introduced for /intel/kills ─────
     # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via PRAGMA check.

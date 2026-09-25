@@ -237,10 +237,13 @@ def test_fitting_tool_page_renders_with_notice_and_legend():
 
     import itsdangerous
 
+    from tests.conftest import ensure_user
+
     # Login-only since ISS-044.
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     cookie = signer.sign(base64.b64encode(json.dumps({"user_id": 1}).encode())).decode()
     with TestClient(main.app, base_url="https://testserver") as client:
+        ensure_user(1)   # after startup, which gives existing users an epoch
         client.cookies.set("vigilant_session", cookie)
         r = client.get("/tools/fitting")
     assert r.status_code == 200

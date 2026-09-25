@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.main as main
 import app.routes.journal as journal
-from app.db.models import Base, Character, get_db
+from app.db.models import Base, Character, User, get_db
 
 USER = 31
 CORP = 98000077
@@ -57,6 +57,7 @@ def test_journal_headlines_the_character_that_was_not_refused(monkeypatch):
                                  corporation_id=CORP, corporation_name="Test Corp",
                                  access_token="a", refresh_token="r",
                                  token_expiry=datetime.utcnow() + timedelta(days=1), scopes=SCOPE))
+            db.add(User(id=USER))
             await db.commit()
     _run(_seed())
 

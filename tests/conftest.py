@@ -40,3 +40,34 @@ def pytest_configure(config):
         await engine.dispose()
 
     asyncio.run(_create_schema())
+
+
+def ensure_user(user_id: int, db_url: str | None = None) -> int:
+    """Make sure a users row with this id exists, and return the id.
+
+    Every request whose session names a user_id is checked against that user's
+    row (app/auth/session_guard.py), so a forged test cookie must name a user
+    that exists in the database the request will read. By default that is the
+    hermetic DB above; a test that overrides get_db with its own engine passes
+    that engine's URL. The row is left with no session_epoch, which matches a
+    cookie that carries none — reset each time, because a test that runs the
+    app's startup (`with TestClient(...)`) assigns every existing user one.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def _insert():
+        eng = create_async_engine(db_url or os.environ["DATABASE_URL"])
+        try:
+            async with eng.begin() as conn:
+                await conn.execute(text("INSERT OR IGNORE INTO users (id, role) VALUES (:id, 'user')"),
+                                   {"id": user_id})
+                await conn.execute(text("UPDATE users SET session_epoch = NULL WHERE id = :id"),
+                                   {"id": user_id})
+        finally:
+            await eng.dispose()
+
+    asyncio.run(_insert())
+    return user_id

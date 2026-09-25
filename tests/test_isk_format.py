@@ -60,7 +60,7 @@ def test_corp_journal_page_shortens_expenses_and_totals(monkeypatch):
     """End to end through the real route and template."""
     import app.main as main
     import app.routes.journal as journal
-    from app.db.models import Base, Character, get_db
+    from app.db.models import Base, Character, User, get_db
 
     user, corp = 41, 98000088
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -77,6 +77,7 @@ def test_corp_journal_page_shortens_expenses_and_totals(monkeypatch):
                              access_token="a", refresh_token="r",
                              token_expiry=datetime.utcnow() + timedelta(days=1),
                              scopes="esi-wallet.read_corporation_wallets.v1"))
+            db.add(User(id=user))
             await db.commit()
     loop = asyncio.new_event_loop()
     try:

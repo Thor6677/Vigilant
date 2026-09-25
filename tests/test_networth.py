@@ -260,6 +260,9 @@ def _authed_client(user_id=USER_ID):
     import itsdangerous
     import app.main as main
 
+    from tests.conftest import ensure_user
+
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(_json.dumps({"user_id": user_id}).encode())
     cookie = signer.sign(data).decode()

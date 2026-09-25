@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
 from app.auth.purge import clear_live_state, purge_history
+from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
 from app.db.models import AdminAuditLog, Character, CharacterDashboardCache, User, get_db
@@ -308,8 +309,15 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     logger.warning("character %s changed EVE owner; removed from user %s", cid, old_user_id)
 
 
+def _ensure_session_epoch(user: User) -> None:
+    """New accounts, and any older row still without one. Caller commits."""
+    if not user.session_epoch:
+        user.session_epoch = new_session_epoch()
+
+
 def _start_session(request: Request, user: User, character_id: int) -> None:
     request.session["user_id"] = user.id
+    request.session[SESSION_EPOCH_KEY] = user.session_epoch
     request.session["active_character_id"] = character_id
     request.session["is_admin"] = user.role in ("admin", "manager")
     request.session["role"] = user.role
@@ -405,6 +413,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         if owner_hash:
             existing.owner_hash = owner_hash
         user.last_login = datetime.now(timezone.utc)
+        _ensure_session_epoch(user)
         await db.commit()
         _start_session(request, user, character_id)
         if new_account:
@@ -486,6 +495,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         cache.sync_warnings_json = None
     if intent == SIGNUP:
         user.last_login = datetime.now(timezone.utc)
+        _ensure_session_epoch(user)
 
     granted_set = perms.parse_scopes(granted)
     added = granted_set - old_scopes
@@ -549,6 +559,22 @@ async def logout(request: Request):
     # Clear-Site-Data support (see static/js/notifications.js). F4.
     resp.headers["Clear-Site-Data"] = '"storage"'
     return resp
+
+
+@router.post("/logout-everywhere")
+async def logout_everywhere(request: Request, db: AsyncSession = Depends(get_db)):
+    """Sign this account out on every browser, this one included."""
+    user_id = request.session.get("user_id")
+    if user_id:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is not None:
+            rotate_session_epoch(user)
+            db.add(AdminAuditLog(
+                user_id=user.id, event_type="user_logout_everywhere",
+                ip_address=request.client.host if request.client else None,
+            ))
+            await db.commit()
+    return await logout(request)
 
 
 @router.post("/switch/{character_id}")

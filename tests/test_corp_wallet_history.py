@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.main as main
 import app.routes.corporations as corps
 import app.routes.dashboard as dash
-from app.db.models import Base, Character, CorpWalletSnapshot, get_db
+from app.db.models import Base, Character, CorpWalletSnapshot, User, get_db
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T0 = datetime(2026, 9, 1, 0, 0, 0)
@@ -185,6 +185,7 @@ def gated_app(monkeypatch):
     async def _seed():
         async with SessionLocal() as db:
             db.add_all([_char(2001, USER_A, PLAYER_CORP), _char(2002, USER_B, PLAYER_CORP)])
+            db.add_all([User(id=USER_A), User(id=USER_B)])
             for h in range(5):
                 db.add(CorpWalletSnapshot(corp_id=PLAYER_CORP, division=1, balance=50,
                                           recorded_at=datetime.utcnow() - timedelta(hours=h)))

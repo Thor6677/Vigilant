@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.db.sde_models as sm
-from app.db.models import Base, UserFitting, get_db
+from app.db.models import Base, User, UserFitting, get_db
 import app.routes.fitting as fitting_mod
 from app.routes.fitting import (
     _sanitize_boosters_map, _clean_side_effects, _booster_entries, _bounded_int,
@@ -78,6 +78,9 @@ def _seeded_db(seed_coro=None):
     async def _setup():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            db.add_all([User(id=USER_A), User(id=USER_B)])  # the sessions below
+            await db.commit()
         if seed_coro:
             async with SessionLocal() as db:
                 await seed_coro(db)
@@ -548,6 +551,7 @@ def _seeded_compare_db(fit_a_boosters_json, extra_sde_rows=()):
                 user_id=USER_A, name="Bravo", ship_type_id=602, items_json="[]",
             )
             db.add_all([mine_1, mine_2])
+            db.add_all([User(id=USER_A), User(id=USER_B)])
             await db.commit()
             return mine_1.id, mine_2.id
 

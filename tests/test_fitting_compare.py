@@ -21,7 +21,8 @@ import itsdangerous
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db.models import Base, UserFitting, get_db
+from app.db.models import Base, User, UserFitting, get_db
+from tests.conftest import ensure_user
 from app.fitting.compare import COMPARE_STAT_SECTIONS, build_compare_sections
 from app.fitting.engine import DAMAGE_PROFILES, _calc_ehp, resolve_damage_profile
 
@@ -218,6 +219,7 @@ def _authed_client(user_id=USER_A):
     base_url because the session cookie is Secure outside debug mode."""
     import app.main as main
 
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(json.dumps({"user_id": user_id}).encode())
     cookie = signer.sign(data).decode()
@@ -257,6 +259,7 @@ def _seeded_app_db():
             theirs = UserFitting(user_id=USER_B, name="Hostile", ship_type_id=587,
                                  items_json="[]")
             db.add_all([mine_1, mine_2, theirs])
+            db.add_all([User(id=USER_A), User(id=USER_B)])
             await db.commit()
             return mine_1.id, mine_2.id, theirs.id
 
