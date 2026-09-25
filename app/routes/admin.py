@@ -60,7 +60,8 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
 AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("permissions", "Permissions", ("permissions_changed", "permissions_purged")),
     ("allowlist", "Allowlist", ("admin_allowlist",)),
-    ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character")),
+    ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
+                                 "character_transferred")),
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),

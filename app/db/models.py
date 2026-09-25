@@ -74,6 +74,11 @@ class Character(Base):
     # Account ownership — nullable to support migration of pre-existing rows
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     is_main = Column(Boolean, default=False)
+    # EVE SSO's CharacterOwnerHash: which EVE account owns the character. It
+    # changes when the character moves to another account, which is how a
+    # login by the new owner is told apart from the old owner's. Null until
+    # the character next signs in (rows from before this column existed).
+    owner_hash = Column(String, nullable=True)
 
     user = relationship("User", back_populates="characters")
 

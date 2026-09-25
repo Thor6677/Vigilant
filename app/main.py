@@ -312,6 +312,8 @@ async def startup():
             "ALTER TABLE characters ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0",
             # Permission picker: scopes the user declined (T-063)
             "ALTER TABLE characters ADD COLUMN declined_scopes TEXT NOT NULL DEFAULT ''",
+            # EVE account that owns the character, to notice a transfer
+            "ALTER TABLE characters ADD COLUMN owner_hash TEXT",
             "ALTER TABLE sde_types ADD COLUMN volume REAL",
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
