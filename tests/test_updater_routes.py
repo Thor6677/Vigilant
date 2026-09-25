@@ -494,22 +494,45 @@ def test_no_queued_state_once_the_request_is_claimed(env):
 
 # ── The overview section renders the panel itself ────────────────────────────
 
-def test_overview_section_contains_the_rendered_panel(env):
+def test_updates_section_contains_the_rendered_panel(env):
     """End-to-end version of the inline-rendering rule: the section's own HTML
     must already contain the panel, not a placeholder that fetches it."""
     _beat(env.control, current_tag="v1.2.0")
-    r = env.admin().get("/admin/section/overview")
+    r = env.admin().get("/admin/section/updates")
     assert r.status_code == 200
     assert 'id="updater-panel"' in r.text
     assert 'hx-get="/admin/update/status"' not in r.text
 
 
-def test_overview_section_survives_a_missing_updater(env):
+def test_updates_section_survives_a_missing_updater(env):
     """With no sidecar the section must still render — the panel degrades to the
-    'no updater' note rather than 500ing the whole Overview tab."""
-    r = env.admin().get("/admin/section/overview")
+    'no updater' note rather than 500ing the whole tab — and still shows the
+    update checker's rows, which do not need the sidecar."""
+    r = env.admin().get("/admin/section/updates")
     assert r.status_code == 200
     assert "No updater is running" in r.text
+    assert "Latest release" in r.text
+    assert "Last checked" in r.text
+
+
+def test_overview_section_no_longer_renders_the_panel(env):
+    _beat(env.control, current_tag="v1.2.0")
+    r = env.admin().get("/admin/section/overview")
+    assert r.status_code == 200
+    assert 'id="updater-panel"' not in r.text
+
+
+def test_admin_page_deep_links_to_a_tab(env):
+    r = env.admin().get("/admin?tab=updates")
+    assert r.status_code == 200
+    assert 'hx-get="/admin/section/updates"' in r.text
+
+
+def test_admin_page_ignores_an_unknown_tab(env):
+    r = env.admin().get("/admin?tab=%3Cscript%3E")
+    assert r.status_code == 200
+    assert 'hx-get="/admin/section/overview"' in r.text
+    assert "<script>" not in r.text.split('id="admin-tabs"')[1].split("</div>")[0]
 
 
 # ── Scheduling and the auto-update policy ────────────────────────────────────
@@ -794,7 +817,7 @@ def test_a_failure_stays_on_the_banner_until_acknowledged(env):
     body = env.admin().get("/status/update-reports").text
     assert "rolled back to v1.2.0" in body
     assert "Acknowledge" in body
-    assert 'href="/admin"' in body
+    assert 'href="/admin?tab=updates"' in body
     assert f'hx-post="/admin/update/report/{rid}/ack"' in body
     assert "data-alert-id" not in body and 'id="update-banner"' not in body
 

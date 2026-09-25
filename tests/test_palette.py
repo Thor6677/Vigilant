@@ -38,7 +38,9 @@ def test_flatten_pages_excludes_admin_for_non_admin():
 def test_flatten_pages_includes_admin_for_admin():
     urls = _urls(_flatten_pages(is_admin=True))
     assert "/admin" in urls
-    assert "/status" in urls
+    # /status only redirects to /admin, so it no longer has an entry of its
+    # own (T-061) — the palette would offer two rows for one page.
+    assert "/status" not in urls
 
 
 def test_flatten_pages_includes_every_dashboard_item():
