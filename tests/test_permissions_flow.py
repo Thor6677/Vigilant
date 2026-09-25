@@ -531,3 +531,31 @@ def test_csp_lets_the_picker_form_redirect_to_eve_sso(env):
     csp = env.client().get("/auth/connect").headers["content-security-policy"]
     form_action = next(d for d in csp.split(";") if d.strip().startswith("form-action"))
     assert form_action.split()[1:] == ["'self'", "https://login.eveonline.com"]
+
+
+
+def test_a_revoked_token_is_what_counts_as_expired():
+    """ISS-048: _client_for records EVE's rejection as "token_revoked"; the
+    check used to look only for "token_refresh_failed" (transient errors), so
+    dead characters never showed as needing renewal."""
+    assert perm_status.token_failed({"wallet": "token_revoked", "location": "token_revoked"})
+    assert not perm_status.token_failed({"wallet": "token_refresh_failed: ConnectTimeout"})
+    assert not perm_status.token_failed({"assets": "http_500"})
+    assert not perm_status.token_failed(None)
+
+
+def test_the_sync_layer_and_the_check_agree_on_the_string():
+    import inspect
+    from app.routes import dashboard
+    src = inspect.getsource(dashboard._client_for)
+    assert "perm_status.TOKEN_REVOKED" in src
+
+
+def test_account_page_flags_a_dead_character(env):
+    async def seed(db):
+        db.add(CharacterDashboardCache(character_id=ALT_ID,
+                                       sync_warnings_json=json.dumps({"wallet": "token_revoked"})))
+        await db.commit()
+    env.q(seed)
+    r = env.user().get("/account")
+    assert "authorization expired" in r.text
