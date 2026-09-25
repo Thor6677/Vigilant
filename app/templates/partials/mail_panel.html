@@ -1,29 +1,38 @@
-{# Mail list with inline expansion — loaded via htmx on character detail page #}
+{# Mail list with inline expansion — loaded via htmx on character detail page.
+   Headers are read live from ESI on every load (ISS-046); nothing is stored. #}
 {% from "partials/_permission_notice.html" import permission_notice %}
 {% if missing_perm %}{{ permission_notice([char], missing_perm) }}
+{% elif mail_error == "expired" %}
+<div class="b-empty">EVE no longer accepts {{ char_name }}'s authorization, so mail can't be read.
+    <a href="/account/permissions/{{ character_id }}" class="b-link">Renew &rarr;</a></div>
+{% elif mail_error == "not_granted" %}
+<div class="b-empty">{{ char_name }}'s current EVE authorization doesn't include mail.
+    <a href="/account/permissions/{{ character_id }}?add=mail" class="b-link">Review &rarr;</a></div>
 {% elif mail_error %}
-<div class="b-empty">{{ mail_error }}</div>
+<div class="b-empty">Couldn't load mail from EVE right now.
+    <button type="button" class="b-btn is-ghost" hx-get="/character/{{ character_id }}/mail-partial"
+            hx-target="#mail-panel" hx-swap="innerHTML">Retry</button></div>
 {% elif not mail_headers %}
 <div class="b-empty">No recent mail</div>
 {% else %}
 <div id="mail-list">
 {% for m in mail_headers %}
 <div class="mail-item">
-    <div class="b-table-row mail-header" style="cursor:pointer;{% if not m.is_read %}border-left:2px solid var(--accent);{% endif %}"
-         data-click="toggleMail" data-mail-id="{{ m.mail_id }}" data-char-id="{{ character_id }}">
+    <div class="b-table-row mail-header" style="cursor:pointer;{% if not m['is_read'] %}border-left:2px solid var(--accent);{% endif %}"
+         data-click="toggleMail" data-mail-id="{{ m['mail_id'] }}" data-char-id="{{ character_id }}">
         <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m.is_read %}font-weight:600;{% endif %}">
-                {{ m.subject }}
+            <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{% if not m['is_read'] %}font-weight:600;{% endif %}">
+                {{ m['subject'] }}
             </div>
             <div class="b-muted-sm">
-                {% if m.timestamp %}{{ m.timestamp[:16].replace('T', ' ') }}{% endif %}
+                {% if m['sender'] %}{{ m['sender'] }}{% if m['timestamp'] %} &middot; {% endif %}{% endif %}{% if m['timestamp'] %}{{ m['timestamp'][:16].replace('T', ' ') }}{% endif %}
             </div>
         </div>
-        {% if not m.is_read %}
+        {% if not m['is_read'] %}
         <span class="b-badge is-accent" style="flex-shrink:0;">NEW</span>
         {% endif %}
     </div>
-    <div id="mail-body-{{ m.mail_id }}" class="mail-body-inline" style="display:none;"></div>
+    <div id="mail-body-{{ m['mail_id'] }}" class="mail-body-inline" style="display:none;"></div>
 </div>
 {% endfor %}
 </div>
