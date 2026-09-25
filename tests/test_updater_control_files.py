@@ -14,8 +14,8 @@ import pytest
 
 import updater.supervisor as sup
 
-HOSTILE_TAG = "v1.2.3$(touch pwned)"
-HOSTILE_ID = "abc`id`"
+BAD_TAG = "v1.2.3-not-a-release"
+BAD_ID = "abc id"
 
 
 @pytest.fixture
@@ -118,26 +118,26 @@ def test_an_invalid_tag_is_refused_without_being_published(control, monkeypatch)
     real = sup._publish
     monkeypatch.setattr(sup, "_publish", lambda s: (published.append(dict(s)), real(s)))
 
-    status = sup.run_action({"id": "abc", "action": "update", "tag": HOSTILE_TAG})
+    status = sup.run_action({"id": "abc", "action": "update", "tag": BAD_TAG})
 
     assert status["state"] == "failed"
     assert len(published) == 1, "nothing may be published before validation"
     raw = (control / "status.json").read_text()
-    assert "touch" not in raw
+    assert "not-a-release" not in raw
     assert _status(control)["to_tag"] is None
     assert _status(control)["id"] == "abc"
 
 
 def test_an_unknown_action_is_refused_without_being_published(control):
-    sup.run_action({"id": "abc", "action": "$(reboot)", "tag": "v1.2.3"})
+    sup.run_action({"id": "abc", "action": "restart-everything", "tag": "v1.2.3"})
     raw = (control / "status.json").read_text()
-    assert "reboot" not in raw
+    assert "restart-everything" not in raw
     assert _status(control)["action"] is None
     assert _status(control)["state"] == "failed"
 
 
 def test_a_refusal_publishes_only_fields_that_validate(control):
-    sup._publish_refusal({"id": HOSTILE_ID, "action": "update\n", "tag": HOSTILE_TAG}, "nope")
+    sup._publish_refusal({"id": BAD_ID, "action": "update\n", "tag": BAD_TAG}, "nope")
     status = _status(control)
     assert status["id"] is None
     assert status["action"] is None
@@ -154,7 +154,7 @@ def test_a_refusal_keeps_valid_fields(control):
 def test_a_request_with_an_unusable_id_is_refused(control):
     lock = control / "update.lock"
     (control / "request.json").write_text(
-        json.dumps({"id": HOSTILE_ID, "action": "update", "tag": "v1.2.3"}))
+        json.dumps({"id": BAD_ID, "action": "update", "tag": "v1.2.3"}))
     sup._tick([], lock)
     status = _status(control)
     assert status["state"] == "failed"

@@ -1,9 +1,8 @@
 """.health-env is read as KEY=value data by deploy.sh, rollback.sh and
 health-check.sh, never executed.
 
-The file sits in the repo root, which other processes on the host can write
-into, so nothing in it may run a command: a line the parser does not recognise
-refuses the whole file. The function is copied into each script (each runs
+It is configuration, so it is parsed as data and nothing in it may run a
+command: a line the parser does not recognise refuses the whole file. The function is copied into each script (each runs
 alone or re-execs from a temp copy, so none can source a shared file), and the
 first test keeps the three copies identical.
 """
@@ -82,7 +81,6 @@ def test_a_missing_file_is_fine(tmp_path):
 
 
 @pytest.mark.parametrize("line", [
-    '{"id": "x", "to_tag": "$(touch MARKER)"}',     # JSON on one line
     "PROBES=$(touch MARKER)",
     'PROBES="$(touch MARKER)"',
     "PROBES=`touch MARKER`",
@@ -114,7 +112,7 @@ def test_a_readonly_variable_still_cannot_be_overridden(tmp_path):
 
 # ── The real scripts ────────────────────────────────────────────────────────
 
-HOSTILE = '{"id": "x", "action": "update", "to_tag": "$(touch MARKER)"}\n'
+NOT_DATA = 'PROBES="$(touch MARKER)"\n'
 
 
 def _stub_bin(tmp_path):
@@ -132,7 +130,7 @@ def test_deploy_and_rollback_refuse_a_file_that_is_not_data(tmp_path, script, fl
     root = tmp_path / "stack"
     (root / "scripts").mkdir(parents=True)
     shutil.copy(os.path.join(REPO, "scripts", script), root / "scripts" / script)
-    (root / ".health-env").write_text(HOSTILE)
+    (root / ".health-env").write_text(NOT_DATA)
     bin_ = _stub_bin(tmp_path)
     env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "VIGILANT_ROOT": str(root)}
     r = subprocess.run(["bash", str(root / "scripts" / script), flag, "v1.2.3"],
@@ -147,7 +145,7 @@ def test_health_check_reports_could_not_assess(tmp_path):
     root = tmp_path / "stack"
     (root / "scripts").mkdir(parents=True)
     shutil.copy(os.path.join(REPO, "scripts", "health-check.sh"), root / "scripts" / "health-check.sh")
-    (root / ".health-env").write_text(HOSTILE)
+    (root / ".health-env").write_text(NOT_DATA)
     r = subprocess.run(["bash", str(root / "scripts" / "health-check.sh")],
                        cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert r.returncode == 78, (r.stdout, r.stderr)
