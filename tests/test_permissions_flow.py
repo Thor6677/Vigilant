@@ -430,7 +430,7 @@ def test_notice_names_the_missing_in_game_role():
     c = _d(1, "Clerk", [cat.CORP_WALLETS, cat.CORP_ROLES])
     html = _render_notice([c], "corp_wallets", roles={1: {"Trader"}})
     assert "in-game role" in html
-    assert "Accountant or Junior Accountant" in html
+    assert "Accountant, Junior Accountant or Director" in html
     assert "You chose not to share" not in html
 
 
@@ -559,3 +559,95 @@ def test_account_page_flags_a_dead_character(env):
     env.q(seed)
     r = env.user().get("/account")
     assert "authorization expired" in r.text
+
+
+
+# ── ISS-050: in-game roles, Director, and choosing who reads corp data ───────
+
+def test_director_satisfies_any_required_role():
+    assert perm_status.holds_role({"Director"}, ("Accountant", "Junior_Accountant")) is True
+    assert perm_status.holds_role({"Junior_Accountant"}, ("Accountant", "Junior_Accountant")) is True
+    assert perm_status.holds_role({"Trader"}, ("Accountant",)) is False
+    assert perm_status.holds_role(None, ("Accountant",)) is None
+    assert perm_status.holds_role(set(), ()) is True
+
+
+def test_notice_does_not_tell_a_director_they_lack_the_role():
+    c = _d(1, "Boss", [cat.CORP_WALLETS, cat.CORP_ROLES])
+    assert "perm-notice" not in _render_notice([c], "corp_wallets", roles={1: {"Director"}})
+
+
+def test_candidates_are_ranked_role_holders_first_dead_tokens_last():
+    chars = [_d(1, "Aardvark", []), _d(2, "Booblez", []), _d(3, "Bjeltenhirfor", []), _d(4, "Unknown", [])]
+    roles = {1: {"Trader"}, 2: {"Director"}, 3: {"Director"}}
+    ranked = perm_status.rank_candidates(chars, ("Accountant", "Junior_Accountant"), roles, dead_ids={2})
+    assert [c["character_name"] for c in ranked] == ["Bjeltenhirfor", "Unknown", "Aardvark", "Booblez"]
+
+
+def test_corp_journal_reaches_the_director_past_a_dead_alt(env, monkeypatch):
+    """The reported case: the alphabetically first character's authorization
+    is dead; the Director further down must still be tried and shown."""
+    import app.routes.journal as journal
+    from app.esi.client import TokenRevoked
+    tried = []
+
+    async def seed(db):
+        for cid in (MAIN_ID, ALT_ID):
+            c = await _scalar(db, select(Character).where(Character.character_id == cid))
+            c.corporation_id = 98000001
+            c.scopes = cat.join_scopes([cat.CORP_WALLETS, cat.CORP_ROLES])
+        db.add(CharacterCorpRoles(character_id=ALT_ID, roles_json='["Director"]'))
+        db.add(CharacterDashboardCache(character_id=MAIN_ID,
+                                       sync_warnings_json=json.dumps({"wallet": "token_revoked"})))
+        await db.commit()
+    env.q(seed)
+
+    async def fake_refresh(char, db):
+        tried.append(char.character_id)
+        if char.character_id == MAIN_ID:
+            raise TokenRevoked("SSO returned 400")
+        return "tok"
+
+    async def fake_journal(client, corp_id, division, page=1):
+        return [{"id": 1, "date": "2026-09-25T00:00:00Z", "ref_type": "player_donation",
+                 "amount": 5.0, "balance": 10.0, "description": "x"}]
+
+    async def fake_names(client, ids):
+        return {}
+
+    monkeypatch.setattr(journal, "refresh_token", fake_refresh)
+    monkeypatch.setattr(journal.esi_corp, "get_corporation_wallet_journal", fake_journal)
+    monkeypatch.setattr(journal, "_resolve_names", fake_names)
+    r = env.user().get("/corporations/98000001/journal")
+    assert r.status_code == 200
+    assert tried[0] == ALT_ID            # the Director is tried first
+    assert "Alt Pilot" in r.text
+    assert "None of your characters could read" not in r.text
+
+
+def test_corp_journal_explains_every_failure(env, monkeypatch):
+    import app.routes.journal as journal
+    from app.esi.client import TokenRevoked
+
+    async def seed(db):
+        for cid in (MAIN_ID, ALT_ID):
+            c = await _scalar(db, select(Character).where(Character.character_id == cid))
+            c.corporation_id = 98000001
+            c.scopes = cat.join_scopes([cat.CORP_WALLETS, cat.CORP_ROLES])
+        await db.commit()
+    env.q(seed)
+
+    async def fake_refresh(char, db):
+        if char.character_id == MAIN_ID:
+            raise TokenRevoked("SSO returned 400")
+        return "tok"
+
+    async def refused(client, corp_id, division, page=1):
+        raise RuntimeError("403 Forbidden")
+
+    monkeypatch.setattr(journal, "refresh_token", fake_refresh)
+    monkeypatch.setattr(journal.esi_corp, "get_corporation_wallet_journal", refused)
+    r = env.user().get("/corporations/98000001/journal")
+    assert r.status_code == 200
+    assert "Main Pilot: authorization expired" in r.text
+    assert "Alt Pilot: EVE refused (in-game role)" in r.text

@@ -14,7 +14,7 @@ from app.esi.client import ESIClient, refresh_token
 from app.esi import corporation as esi_corp
 from app.esi import universe as esi_universe
 from app.sde import lookup as sde
-from app.auth import status as perm_status
+from app.auth import scopes as perms, status as perm_status
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,13 @@ async def _try_api_call_with_fallback(
     if scope_name not in scope_chars:
         return None, f"No characters with {scope_name} scope"
 
-    chars_to_try = scope_chars[scope_name]
+    # Most likely to succeed first: a holder of the endpoint's in-game role
+    # (Director counts), then unknown roles, then known-lacking; characters
+    # with a rejected authorization last (ISS-050 — this used to be DB order,
+    # so a role-less or dead-token alt could be tried, and shown, first). Own
+    # short session: callers may run several of these concurrently on the
+    # request's session, which must not be shared across coroutines.
+    chars_to_try = await _rank_for_scope(scope_name, scope_chars[scope_name])
     last_error = None
 
     for char in chars_to_try:
@@ -130,6 +136,20 @@ async def _try_api_call_with_fallback(
                 break
 
     return None, last_error
+
+
+_EXTRA_SCOPES = {"blueprints": perms.CORP_BLUEPRINTS}
+
+
+async def _rank_for_scope(scope_name: str, chars: list) -> list:
+    scope = CORP_SCOPES.get(scope_name) or _EXTRA_SCOPES.get(scope_name)
+    perm = perms.permission_for_scope(scope) if scope else None
+    required = perm.in_game_roles if perm else ()
+    ids = [c.character_id for c in chars]
+    async with AsyncSessionLocal() as rank_db:
+        roles = await perm_status.corp_roles_for(rank_db, ids)
+        dead = await perm_status.dead_token_ids(rank_db, ids)
+    return perm_status.rank_candidates(chars, required, roles, dead)
 
 
 async def _auth_client(char: Character, db: AsyncSession) -> ESIClient | None:
