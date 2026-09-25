@@ -118,13 +118,15 @@
       <div class="perm-purge" id="perm-purge" hidden>
         <label class="perm-purge-check">
           <input type="checkbox" class="b-check" name="purge" value="1">
-          Also delete data Vigilant already collected with the permissions you're removing
+          Also delete the history Vigilant built up with the permissions you're removing
         </label>
         <p class="perm-purge-note">
-          Removing: <span id="perm-removing"></span>. Without this box, Vigilant
-          stops reading them straight away but keeps what it already stored
-          (for example wallet history and net-worth charts). Corporation data
-          your corp-mates can also see is kept either way.
+          Removing: <span id="perm-removing"></span>. Either way Vigilant stops
+          reading them straight away and drops their current values (balance,
+          assets, location, …). This box also deletes the history — wallet
+          snapshots and transactions, job history, mining ledger, and their
+          share of your net-worth chart. Corporation data your corp-mates can
+          also see is kept.
         </p>
       </div>
     {% endif %}

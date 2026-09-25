@@ -1,18 +1,23 @@
-"""Delete data Vigilant collected under permissions a user has withdrawn.
+"""Stop using, and optionally delete, data from permissions a user withdrew.
 
-Runs only when the user ticks "also delete data already collected" while
-narrowing a character's permissions (Account page); withdrawing a permission
-without it stops all FUTURE reads — the token no longer carries the scope and
-ESIClient's guard refuses the call — but keeps what was already stored.
+Two tiers, because they answer different questions:
 
-Scope of the purge is the character's OWN data. Corporation-level data (corp
-wallet history, corp inventory) is shared by the whole corporation and may
-have been fetched with another member's token, so it is left alone; the notice
-on the Account page says so.
+* **Live state** — the current-value caches features read as if they were
+  fresh: the dashboard cache columns (wallet balance, location, clones, …),
+  the asset list, the character's corp roles, and the raw ESI response cache.
+  Cleared on EVERY narrowing, purge box or not. Left behind they would keep
+  feeding features with frozen values — net-worth snapshots would record a
+  months-old balance as today's, stockpiles would count assets Vigilant may no
+  longer read, and stale corp roles would keep granting skill-plan edit rights
+  the character can no longer prove.
+* **History** — what Vigilant accumulated over time: wallet snapshots and
+  transactions, industry job history, the mining ledger, and each net-worth
+  row's component. Deleted only when the user ticks "also delete data already
+  collected" (T-064: ask every time).
 
-The character's slice of the raw ESI response cache is cleared on EVERY
-narrowing, purge or not: it is only a cache, and nothing withdrawn should stay
-in it.
+Scope is the character's OWN data. Corporation-level data (corp wallet
+history, corp inventory) is shared by the whole corporation and may have been
+fetched with another member's token, so it is left alone; the picker says so.
 """
 from __future__ import annotations
 
@@ -80,12 +85,10 @@ async def clear_esi_cache(db: AsyncSession, character_id: int) -> int:
     return res.rowcount or 0
 
 
-async def purge_permissions(db: AsyncSession, character_id: int,
-                            keys: Iterable[str]) -> dict[str, int]:
-    """Delete this character's stored data for the given permission keys.
-
-    Caller commits. Returns row counts per table for the audit log.
-    """
+async def clear_live_state(db: AsyncSession, character_id: int,
+                           keys: Iterable[str]) -> dict[str, int]:
+    """Drop the current-value caches fed by the given permissions. Runs on
+    every narrowing. Caller commits. Returns counts for the audit log."""
     keys = set(keys)
     counts: dict[str, int] = {}
     cid = int(character_id)
@@ -109,21 +112,36 @@ async def purge_permissions(db: AsyncSession, character_id: int,
                     setattr(cache, attr, None)
         counts["dashboard_cache_columns"] = len(cleared)
 
-    async def _delete(model, label):
-        res = await db.execute(delete(model).where(model.character_id == cid))
-        counts[label] = res.rowcount or 0
+    if "assets" in keys:
+        counts["asset_cache"] = await _delete(db, CharacterAssetCache, cid)
+    if "corp_roles" in keys:
+        counts["corp_roles"] = await _delete(db, CharacterCorpRoles, cid)
+    counts["esi_cache"] = await clear_esi_cache(db, cid)
+    logger.info("cleared live state for withdrawn permissions %s, character %s: %s",
+                sorted(keys), cid, counts)
+    return counts
+
+
+async def _delete(db: AsyncSession, model, cid: int) -> int:
+    res = await db.execute(delete(model).where(model.character_id == cid))
+    return res.rowcount or 0
+
+
+async def purge_history(db: AsyncSession, character_id: int,
+                        keys: Iterable[str]) -> dict[str, int]:
+    """Delete what Vigilant accumulated under the given permissions. Only when
+    the user asked. Caller commits. Returns counts for the audit log."""
+    keys = set(keys)
+    counts: dict[str, int] = {}
+    cid = int(character_id)
 
     if "wallet" in keys:
-        await _delete(WalletSnapshot, "wallet_snapshots")
-        await _delete(WalletTransaction, "wallet_transactions")
-    if "assets" in keys:
-        await _delete(CharacterAssetCache, "asset_cache")
+        counts["wallet_snapshots"] = await _delete(db, WalletSnapshot, cid)
+        counts["wallet_transactions"] = await _delete(db, WalletTransaction, cid)
     if "industry" in keys:
-        await _delete(IndustryJobHistory, "industry_job_history")
+        counts["industry_job_history"] = await _delete(db, IndustryJobHistory, cid)
     if "mining" in keys:
-        await _delete(MiningLedgerEntry, "mining_ledger_entries")
-    if "corp_roles" in keys:
-        await _delete(CharacterCorpRoles, "corp_roles")
+        counts["mining_ledger_entries"] = await _delete(db, MiningLedgerEntry, cid)
 
     components = [c for k in keys for c in _NETWORTH_COMPONENTS.get(k, ())]
     if components:
@@ -137,6 +155,6 @@ async def purge_permissions(db: AsyncSession, character_id: int,
                                  + NetWorthSnapshot.escrow + NetWorthSnapshot.industry_value))
         counts["net_worth_rows_adjusted"] = res.rowcount or 0
 
-    counts["esi_cache"] = await clear_esi_cache(db, cid)
-    logger.info("purged withdrawn permissions %s for character %s: %s", sorted(keys), cid, counts)
+    logger.info("purged history for withdrawn permissions %s, character %s: %s",
+                sorted(keys), cid, counts)
     return counts

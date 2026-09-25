@@ -45,10 +45,17 @@ def _run(coro):
         asyncio.set_event_loop(None)
 
 
-def _char(cid, user_id, name, scopes, declined="", main=False, refresh="old-refresh"):
+def _access(azp="test"):
+    """An access token issued to ``azp`` (conftest sets EVE_CLIENT_ID=test)."""
+    def b64(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+    return f"{b64({'alg': 'none'})}.{b64({'azp': azp, 'sub': 'CHARACTER:EVE:1'})}.x"
+
+
+def _char(cid, user_id, name, scopes, declined="", main=False, refresh="old-refresh", azp="test"):
     return Character(
         character_id=cid, character_name=name, user_id=user_id, is_main=main,
-        access_token="old-access", refresh_token=refresh,
+        access_token=_access(azp), refresh_token=refresh,
         token_expiry=datetime.now(timezone.utc) + timedelta(hours=1),
         scopes=cat.join_scopes(scopes), declined_scopes=cat.join_scopes(declined),
     )
@@ -169,6 +176,27 @@ def test_picker_for_a_new_visitor_offers_every_permission_everything_ticked(env)
         assert f'value="{p.key}" checked' in r.text, p.key
     assert 'name="intent" value="signup"' in r.text
     assert 'name="csrf_token"' in r.text
+
+
+def test_landing_page_offers_the_picker_before_sso(env):
+    r = env.client().get("/")
+    assert 'href="/auth/connect"' in r.text
+    assert 'href="/auth/login"' in r.text
+
+
+def test_withdrawn_corp_roles_stop_granting_anything(env):
+    """Stale roles gate skill-plan corp edit rights; withdrawing the roles
+    permission must drop them even without the purge box."""
+    async def seed(db):
+        db.add(CharacterCorpRoles(character_id=ALT_ID, roles_json='["Director"]'))
+        c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
+        c.scopes = cat.join_scopes([cat.WALLET, cat.ASSETS, cat.CORP_ROLES])
+        await db.commit()
+    env.q(seed)
+    env.sso_returns(ALT_ID, "Alt Pilot", [cat.WALLET, cat.ASSETS])
+    env.client(_pending("update", ["wallet", "assets"], ALT_ID, user_id=USER_ID)).get(
+        "/auth/callback?code=x&state=S")
+    assert _count(env, CharacterCorpRoles, character_id=ALT_ID) == 0
 
 
 def test_picker_link_can_preselect_one_permission(env):
@@ -295,8 +323,12 @@ def test_narrowing_revokes_the_old_token_and_clears_the_esi_cache(env):
     assert c.refresh_token == "new-refresh"
     assert env.calls["revoked"] == ["old-refresh"]
     assert env.calls["refreshed"] == [ALT_ID]           # the new token was proven
-    # No purge requested: history stays, only the raw ESI cache goes.
+    # No purge requested: history stays...
     assert _count(env, WalletSnapshot, character_id=ALT_ID) == 1
+    # ...but the live value is dropped, so nothing keeps reading it as current.
+    cache = env.q(lambda db: _scalar(db, select(CharacterDashboardCache).where(
+        CharacterDashboardCache.character_id == ALT_ID)))
+    assert cache.wallet is None
     keys = env.q(lambda db: _all_keys(db))
     assert not any(f"CHARACTER:EVE:{ALT_ID}|" in k for k in keys)
     assert any(f"CHARACTER:EVE:{MAIN_ID}|" in k for k in keys)   # other characters untouched
@@ -415,3 +447,35 @@ def test_notice_says_roles_are_unknown_without_the_roles_permission():
     c = _d(1, "Private", [cat.CORP_WALLETS])
     html = _render_notice([c], "corp_wallets", roles={})
     assert "can't check" in html and "Your corporation roles" in html
+
+
+def test_granted_scopes_come_from_the_tokens_own_scp_claim(env, monkeypatch):
+    """The stored scopes must match what ESIClient's guard will allow, and the
+    guard reads the access token's scp claim — so the callback does too."""
+    import app.auth.routes as auth_routes
+
+    def b64(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+    jwt = f"{b64({'alg': 'none'})}.{b64({'sub': 'CHARACTER:EVE:90000057', 'scp': [cat.WALLET]})}.x"
+
+    async def fake_exchange(code):
+        return ({"access_token": jwt, "refresh_token": "r", "expires_in": 1200},
+                {"CharacterID": 90000057, "CharacterName": "Jwt Pilot", "Scopes": ""})
+    monkeypatch.setattr(auth_routes, "_exchange_code", fake_exchange)
+    env.client(_pending("signup", ["wallet"])).get("/auth/callback?code=x&state=S")
+    assert cat.parse_scopes(env.char(90000057).scopes) == {cat.WALLET}
+
+
+def test_tokens_issued_to_another_application_are_never_revoked(env):
+    """The dev DB is seeded from production: a dev change must not send
+    production's refresh token to EVE under dev's credentials."""
+    async def as_prod(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
+        c.access_token = _access(azp="some-other-client")
+        await db.commit()
+    env.q(as_prod)
+    env.sso_returns(ALT_ID, "Alt Pilot", [cat.ASSETS])
+    env.client(_pending("update", ["assets"], ALT_ID, user_id=USER_ID)).get(
+        "/auth/callback?code=x&state=S")
+    assert env.calls["revoked"] == []
+    assert env.char(ALT_ID).refresh_token == "new-refresh"   # the change itself still applies

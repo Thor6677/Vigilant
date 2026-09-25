@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
+from app.auth import scopes as perms
 from app.db.models import get_db, User, StructureTimer, TimerACLGroup, TimerACLEntry, Character
 from app.sde import lookup as sde
 from sqlalchemy.orm import selectinload
@@ -502,9 +503,13 @@ async def acl_search(request: Request, db: AsyncSession = Depends(get_db)):
     from app.esi.client import ESIClient, get_client
 
     # Try authenticated fuzzy search
-    search_scope = "esi-search.search_structures.v1"
+    # The requester's OWN character only. This used to take the first
+    # character on the whole instance with the search scope, so one user's
+    # grant silently served every other user's lookups.
+    search_scope = perms.STRUCTURE_SEARCH
     char_result = await db.execute(
-        select(Character).where(Character.scopes.contains(search_scope)).limit(1)
+        select(Character).where(Character.user_id == request.session["user_id"],
+                                Character.scopes.contains(search_scope)).limit(1)
     )
     char = char_result.scalar_one_or_none()
 
@@ -640,9 +645,13 @@ async def search_owners(request: Request, db: AsyncSession = Depends(get_db)):
     from app.esi.client import ESIClient, get_client
 
     # Try authenticated fuzzy search first
-    search_scope = "esi-search.search_structures.v1"
+    # The requester's OWN character only. This used to take the first
+    # character on the whole instance with the search scope, so one user's
+    # grant silently served every other user's lookups.
+    search_scope = perms.STRUCTURE_SEARCH
     char_result = await db.execute(
-        select(Character).where(Character.scopes.contains(search_scope)).limit(1)
+        select(Character).where(Character.user_id == request.session["user_id"],
+                                Character.scopes.contains(search_scope)).limit(1)
     )
     char = char_result.scalar_one_or_none()
 

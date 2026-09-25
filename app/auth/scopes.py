@@ -141,9 +141,12 @@ PERMISSIONS: tuple[Permission, ...] = (
         "Looks up the names of player-owned structures you have access to.",
         (STRUCTURE_NAMES,), ("Assets, jobs and location show structure names instead of numbers",), icon="⌂"),
     Permission(
-        "structure_search", "Structure search", CHARACTER,
-        "Lets Vigilant search for player structures your character can see.",
-        (STRUCTURE_SEARCH,), ("Timer board: structure lookup",), icon="⌕"),
+        "structure_search", "In-game search", CHARACTER,
+        "Lets Vigilant run your character's in-game search to find corporation "
+        "and alliance names as you type.",
+        (STRUCTURE_SEARCH,), ("Timer board: owner lookup", "Timer access lists"),
+        note="EVE files this under “search structures”. Only your own searches use "
+             "your character — never other users'.", icon="⌕"),
     Permission(
         "waypoints", "Set autopilot waypoints", CHARACTER,
         "Lets Vigilant send a route to your in-game autopilot when you ask it to.",

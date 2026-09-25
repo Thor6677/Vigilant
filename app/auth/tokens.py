@@ -18,6 +18,27 @@ from app.esi.client import get_http_client
 logger = logging.getLogger(__name__)
 
 
+def issued_to_us(access_token: str | None) -> bool:
+    """True iff the token pair was issued to THIS instance's EVE application.
+
+    The access token is a JWT whose ``azp`` claim is the client id it was
+    issued to. Revocation is only ever attempted for our own tokens: the dev
+    instance's database is seeded from production (scripts/dev_seed_tables.py
+    copies ``characters`` whole), so a dev "change permissions" or "remove"
+    would otherwise send production's refresh tokens to EVE under dev's
+    credentials. EVE should refuse that (RFC 7009 binds revocation to the
+    issuing client), but this does not depend on it. Unparseable -> False.
+    """
+    import json
+    try:
+        payload_b64 = (access_token or "").split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        azp = json.loads(base64.urlsafe_b64decode(payload_b64)).get("azp")
+    except Exception:
+        return False
+    return bool(azp) and azp == get_settings().eve_client_id
+
+
 async def revoke_refresh_token(refresh_token: str | None) -> bool:
     """POST the token to EVE's RFC 7009 revocation endpoint. True on success."""
     if not refresh_token:

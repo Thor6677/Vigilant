@@ -32,12 +32,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
-from app.auth.purge import clear_esi_cache, purge_permissions
-from app.auth.tokens import revoke_refresh_token
+from app.auth.purge import clear_live_state, purge_history
+from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
 from app.db.models import AdminAuditLog, Character, User, get_db
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
+from app.esi import scope_guard
 from app.esi.client import ESIClient, TokenRevoked, _do_refresh
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -278,7 +279,11 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     access_token = token_data["access_token"]
     refresh_token = token_data["refresh_token"]
     token_expiry = datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 1200))
-    granted = perms.join_scopes(perms.parse_scopes(verify_data.get("Scopes", "")))
+    # What the token can actually do, from its own `scp` claim — the same source
+    # ESIClient's guard reads, so the stored scopes and the guard never
+    # disagree. /oauth/verify (on CCP's deprecation list) is only a fallback.
+    granted = perms.join_scopes(scope_guard.granted_scopes(access_token)
+                                or perms.parse_scopes(verify_data.get("Scopes", "")))
 
     meta = await _public_metadata(access_token, character_id)
     existing = (await db.execute(
@@ -383,6 +388,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             return RedirectResponse("/auth/login", status_code=303)
 
     old_refresh = existing.refresh_token if existing else None
+    old_is_ours = issued_to_us(existing.access_token) if existing else False
     old_scopes = perms.parse_scopes(existing.scopes) if existing else set()
     if existing is None:
         existing = Character(
@@ -418,7 +424,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     # The superseded token: revoke it at EVE, then prove the new one still
     # refreshes (a revocation that also took the new grant down would
     # otherwise only surface as a failed sync later).
-    if old_refresh and old_refresh != refresh_token:
+    if old_refresh and old_refresh != refresh_token and old_is_ours:
         if await revoke_refresh_token(old_refresh):
             try:
                 await _do_refresh(existing, db)
@@ -430,15 +436,17 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
 
     purged_note = ""
     if removed:
-        await clear_esi_cache(db, character_id)
+        # A permission is withdrawn when ANY of its scopes went away.
+        gone = [p.key for p in perms.PERMISSIONS if set(p.scopes) & removed]
+        # Always: nothing withdrawn keeps feeding features as if it were live.
+        await clear_live_state(db, character_id, gone)
         if pending.get("purge"):
-            gone = [p.key for p in perms.PERMISSIONS if set(p.scopes) & removed]
-            counts = await purge_permissions(db, character_id, gone)
+            counts = await purge_history(db, character_id, gone)
             db.add(AdminAuditLog(
                 user_id=user.id, character_id=character_id, event_type="permissions_purged",
-                detail=", ".join(f"{k}={v}" for k, v in sorted(counts.items()) if v),
+                detail=", ".join(f"{k}={v}" for k, v in sorted(counts.items()) if v) or "nothing stored",
             ))
-            purged_note = " Data collected under the withdrawn permissions was deleted."
+            purged_note = " History collected under the withdrawn permissions was deleted."
         await db.commit()
 
     if request.session.get("flash") is None:
@@ -513,10 +521,12 @@ async def remove_character(character_id: int, request: Request, db: AsyncSession
         return RedirectResponse("/dashboard?error=cannot_remove_main", status_code=303)
 
     old_refresh = char.refresh_token
+    old_is_ours = issued_to_us(char.access_token)
     await db.delete(char)
     await db.commit()
     # Removing a character is withdrawing every permission it granted.
-    await revoke_refresh_token(old_refresh)
+    if old_is_ours:
+        await revoke_refresh_token(old_refresh)
 
     if request.session.get("active_character_id") == character_id:
         # Fall back to the main character.
