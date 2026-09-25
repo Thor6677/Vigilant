@@ -15,6 +15,7 @@ from app.esi.client import ESIClient, refresh_token, get_client_safe
 from app.esi import industry as esi_industry
 from app.esi import universe as esi_universe
 from app.sde import lookup as sde
+from app.auth import status as perm_status
 
 logger = logging.getLogger(__name__)
 
@@ -617,4 +618,10 @@ async def industry_jobs_page(
         "include_completed": inc_completed,
         "char_count_with_scope": len(char_fetch_targets),
         "corp_count_with_scope": len(corp_scope_by_corp),
-        "npc_corps_skipped": npc_corps_list})
+        "npc_corps_skipped": npc_corps_list,
+        # Permission / in-game-role notices (partials/_permission_notice.html).
+        # Corp jobs only concern characters in player corporations — NPC corps
+        # have no jobs to read, whatever the character shares.
+        "perm_chars": chars,
+        "perm_corp_chars": [c for c in chars if (c.corporation_id or 0) >= NPC_CORP_CEILING],
+        "corp_roles": await perm_status.corp_roles_for(db, [c.character_id for c in chars])})

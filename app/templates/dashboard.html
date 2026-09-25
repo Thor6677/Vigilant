@@ -11,6 +11,7 @@
 {% endblock %}
 
 {% block content %}
+{% from "partials/_permission_notice.html" import permission_notice %}
 
 {# ── Big battle banner (lazy-loaded; battles flag only) ───────────────────── #}
 {% if battles_enabled %}
@@ -70,16 +71,14 @@
 {# ── Page Header ──────────────────────────────────────────────────────────── #}
 <div class="b-page-header">
     <h1 class="b-page-title">Dashboard</h1>
-    {% set _reauth_count = characters | selectattr('scopes') | list | length %}
-    {% set _needs_reauth = [] %}
-    {% for c in characters %}{% if 'esi-fittings.read_fittings.v1' not in (c.scopes or '') or 'esi-characters.read_blueprints.v1' not in (c.scopes or '') or 'esi-industry.read_character_mining.v1' not in (c.scopes or '') %}{% if _needs_reauth.append(c) %}{% endif %}{% endif %}{% endfor %}
-    {% if _needs_reauth %}
-    <a href="/auth/add-character" class="b-btn"
+    {% if new_permission_chars %}
+    <a href="/account" class="b-btn"
+       title="Vigilant asks for more than it did when {{ new_permission_chars | map(attribute='character_name') | join(', ') }} {{ 'was' if new_permission_chars | length == 1 else 'were' }} authorized"
        style="flex:none;padding:0.45rem 1rem;border:1px solid var(--accent);color:var(--accent);">
-        ↻ Reauth {{ _needs_reauth | length }}
+        New permissions &middot; {{ new_permission_chars | length }}
     </a>
     {% endif %}
-    <a href="/auth/add-character" class="b-btn"
+    <a href="/auth/connect" class="b-btn"
        style="flex:none;padding:0.45rem 1rem;border:1px solid var(--border);">
         + Add Character
     </a>
@@ -121,21 +120,12 @@
 {% if reauth_chars %}
 <div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
     <span style="color:var(--danger);">
-        Token expired — {% for cid in reauth_chars %}{% for c in characters if c.character_id == cid %}<strong>{{ c.character_name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}, {% endif %}{% endfor %}
+        Authorization expired — {% for cid in reauth_chars %}{% for c in characters if c.character_id == cid %}<strong>{{ c.character_name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}, {% endif %}{% endfor %}. EVE no longer accepts {{ 'its' if reauth_chars | length == 1 else 'their' }} token, so nothing new can be read.
     </span>
-    <a href="/auth/add-character" class="b-link" style="flex-shrink:0;color:var(--danger);">Re-auth →</a>
+    <a href="{% if reauth_chars | length == 1 %}/account/permissions/{{ reauth_chars[0] }}{% else %}/account{% endif %}" class="b-link" style="flex-shrink:0;color:var(--danger);">Renew →</a>
 </div>
 {% endif %}
-{% if needs_contracts_scope or needs_pi_scope %}
-<div class="b-banner" style="margin-bottom:2rem;">
-    <span style="color:var(--accent)">
-        New scopes available —
-        {% if needs_contracts_scope %}<span class="b-badge is-warn" style="margin-left:4px;">Contracts</span>{% endif %}
-        {% if needs_pi_scope %}<span class="b-badge is-warn" style="margin-left:4px;">PI</span>{% endif %}
-    </span>
-    <a href="/auth/add-character" class="b-link" style="flex-shrink:0;">Re-auth →</a>
-</div>
-{% endif %}
+{# Per-feature permission gaps are explained where the feature is (partials/_permission_notice.html). #}
 
 {# ── Skill Training Summary ────────────────────────────────────────────────── #}
 {% set ns_training = namespace(training=0, empty=0, warning=0) %}
@@ -213,7 +203,7 @@
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
                     {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
-                    {% if needs_reauth.get(char.character_id) %}<a href="/auth/add-character" class="b-badge is-danger" style="font-size:8px;text-decoration:none;">RE-AUTH</a>{% endif %}
+                    {% if needs_reauth.get(char.character_id) %}<a href="/account/permissions/{{ char.character_id }}" class="b-badge is-danger" style="font-size:8px;text-decoration:none;" title="EVE no longer accepts this character's authorization">RENEW</a>{% endif %}
                 </div>
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
@@ -246,7 +236,7 @@
         </div>
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
-            <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
+            <a href="/account/permissions/{{ char.character_id }}" class="b-btn" style="font-size:9px;">Permissions</a>
             <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }}?" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
@@ -277,7 +267,7 @@
                     {% elif w == 'paused' %}<span class="b-badge" style="font-size:8px;border:1px solid var(--muted);color:var(--muted);">PAUSED</span>
                     {% elif w == 'critical' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;7d</span>
                     {% elif w == 'warning' %}<span class="b-badge is-warn" style="font-size:8px;">&lt;14d</span>{% endif %}
-                    {% if needs_reauth.get(char.character_id) %}<a href="/auth/add-character" class="b-badge is-danger" style="font-size:8px;text-decoration:none;">RE-AUTH</a>{% endif %}
+                    {% if needs_reauth.get(char.character_id) %}<a href="/account/permissions/{{ char.character_id }}" class="b-badge is-danger" style="font-size:8px;text-decoration:none;" title="EVE no longer accepts this character's authorization">RENEW</a>{% endif %}
                 </div>
                 {% if char.corporation_name %}
                 <div style="display:flex;align-items:center;gap:0.35rem;" class="b-card-sub">
@@ -310,7 +300,7 @@
         </div>
         <div class="b-actions">
             <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
-            <a href="/auth/add-character" class="b-btn" style="font-size:9px;">Re-auth</a>
+            <a href="/account/permissions/{{ char.character_id }}" class="b-btn" style="font-size:9px;">Permissions</a>
             <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }}?" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
         </div>
     </div>
@@ -355,17 +345,14 @@
     {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}{% set has_any_contracts.found = true %}{% endif %}
 {% endfor %}
 
-{% if has_any_contracts.found or needs_contracts_scope %}
+{% set contracts_gap = perm_status.gaps(characters, 'contracts') %}
+{% if has_any_contracts.found or contracts_gap %}
 <div class="b-section">
     <div class="b-section-head">
         <span class="b-label">Contracts</span>
-        {% if needs_contracts_scope %}
-        <a href="/auth/add-character" class="b-link" style="color:var(--accent);">Re-auth →</a>
-        {% endif %}
     </div>
-    {% if needs_contracts_scope %}
-    <div class="b-empty">Re-authorize to view contracts</div>
-    {% elif has_any_contracts.found %}
+    {{ permission_notice(characters, 'contracts', what="their contracts are not shown") }}
+    {% if has_any_contracts.found %}
     {% for char in characters %}
     {% set con = contracts.get(char.character_id) %}
     {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}

@@ -178,7 +178,7 @@ async def skill_planner(
     scope = "esi-skills.read_skills.v1"
     if scope not in char_info["scopes"]:
         return templates.TemplateResponse(request, "skills.html", {"char": char_info,
-            "error": "Skills scope not available — re-authorize this character.",
+            "error": None, "missing_perm": "skills",
             "attributes": None, "queue_items": [], "total_sp": 0,
             "current_time_str": "", "implants": [0]*5})
 

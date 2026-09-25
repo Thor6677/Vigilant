@@ -194,7 +194,7 @@
                 <span>Account</span><span class="b-nav-caret" aria-hidden="true">▾</span>
             </button>
             <div class="b-nav-dropdown-menu is-right" id="nav-menu-account">
-                <a href="/auth/add-character" class="b-nav-dropdown-item is-add">+ Add Character</a>
+                <a href="/auth/connect" class="b-nav-dropdown-item is-add">+ Add Character</a>
                 {% for group in nav_groups %}
                     {% if group['account'] and (not group['admin'] or request.session.get('is_admin')) %}
                 <div class="b-nav-menu-sep"></div>
@@ -247,7 +247,7 @@
         {% endif %}
     {% endfor %}
     <div class="b-mobile-sep"></div>
-    <a href="/auth/add-character" style="color:var(--accent);">+ Add Character</a>
+    <a href="/auth/connect" style="color:var(--accent);">+ Add Character</a>
     <form method="post" action="/auth/logout" style="margin:0;">
         <button type="submit" style="background:none;border:none;cursor:pointer;font:inherit;color:var(--danger);padding:0;text-align:left;width:100%;">Logout</button>
     </form>
@@ -342,7 +342,7 @@
            `account` groups (Admin) are reachable from the account menu. #}
         {% for group in nav_groups %}{% if not group['account'] and (not group['admin'] or request.session.get('is_admin')) %}<a href="{{ group['url'] }}" class="b-footer-link">{{ group['label'] }}</a>{% endif %}{% endfor %}
     </div>
-    <a href="/auth/add-character" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
+    <a href="/auth/connect" class="b-footer-link" style="color:var(--accent);">+ Add Character</a>
 </footer>
 {% endif %}
 

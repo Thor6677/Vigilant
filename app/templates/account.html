@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{#
+  Account › Characters & permissions (app/routes/account.py). One panel per
+  character: what its token lets Vigilant read right now, what the user chose
+  not to share, and what Vigilant has started asking for since the character
+  was authorized. Changing any of it goes through the picker and EVE SSO.
+#}
+{% block title %}Characters &amp; permissions — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Characters &amp; permissions</span></div>
+{% endblock %}
+{% block content %}
+<div class="b-page-header">
+  <h1 class="b-page-title">Characters &amp; permissions</h1>
+  <a href="/auth/connect" class="b-btn is-ghost">+ Add character</a>
+</div>
+
+{% if flash %}
+  <div class="b-banner {% if flash['kind'] == 'danger' %}is-danger{% elif flash['kind'] == 'ok' %}is-ok{% endif %}" role="status">{{ flash['text'] }}</div>
+{% endif %}
+
+<p class="acct-lede">
+  Vigilant can only read what each character allowed — EVE enforces that, and
+  Vigilant refuses to even try anything else. Change it any time; EVE asks you
+  to confirm, and a permission you remove is revoked at EVE, not just here.
+</p>
+
+<div class="acct-list">
+  {% for c in characters %}
+    <div class="b-panel acct-char">
+      <div class="acct-char-head">
+        <img class="acct-portrait" alt="" src="https://images.evetech.net/characters/{{ c['character_id'] }}/portrait?size=64">
+        <div class="acct-char-id">
+          <span class="acct-name">{{ c['character_name'] }}{% if c['is_main'] %} <span class="b-badge">main</span>{% endif %}</span>
+          <span class="b-muted-sm">{{ c['corporation_name'] or '' }}{% if c['alliance_name'] %} · {{ c['alliance_name'] }}{% endif %}</span>
+        </div>
+        <div class="acct-char-stat">
+          {% if c['token_failed'] %}
+            <span class="b-badge is-danger" title="EVE rejected this character's authorization — nothing can be read until it is renewed">authorization expired</span>
+          {% else %}
+            <span class="acct-count"><b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared</span>
+          {% endif %}
+          <a href="/account/permissions/{{ c['character_id'] }}" class="b-btn is-ghost">{% if c['token_failed'] %}Renew{% else %}Change permissions{% endif %}</a>
+        </div>
+      </div>
+
+      <div class="acct-perms">
+        {% for p in perms.PERMISSIONS %}
+          {% set st = c['states'][p.key] %}
+          <span class="acct-perm is-{{ st }}" title="{{ p.summary }}{% if p.in_game_roles %} — needs in-game role: {{ perm_status.roles_text(p.in_game_roles) }}{% endif %}">
+            <span class="acct-perm-dot" aria-hidden="true"></span>{{ p.label }}
+            <span class="visually-hidden">— {% if st == 'granted' %}shared{% elif st == 'declined' %}not shared{% else %}not asked yet{% endif %}</span>
+          </span>
+        {% endfor %}
+      </div>
+
+      <div class="acct-legend">
+        <span class="acct-perm is-granted"><span class="acct-perm-dot"></span>shared</span>
+        <span class="acct-perm is-declined"><span class="acct-perm-dot"></span>you chose not to share</span>
+        {% if c['new'] %}<span class="acct-perm is-new"><span class="acct-perm-dot"></span>new — not asked when this character was added</span>{% endif %}
+      </div>
+
+      {% if c['new'] and not c['token_failed'] %}
+        <p class="acct-note">
+          Vigilant has added {{ c['new'] | length }} permission{{ 's' if c['new'] | length != 1 }}
+          since {{ c['character_name'] }} was authorized. Nothing changes unless you
+          <a class="b-link" href="/account/permissions/{{ c['character_id'] }}">review them</a>.
+        </p>
+      {% endif %}
+      {% if c['extra_scopes'] %}
+        <p class="acct-note">
+          This character's authorization also includes
+          {% for s in c['extra_scopes'] %}<code>{{ s }}</code>{% if not loop.last %}, {% endif %}{% endfor %},
+          which Vigilant no longer uses and never reads. Saving its permissions
+          once drops {{ 'it' if c['extra_scopes'] | length == 1 else 'them' }}.
+        </p>
+      {% endif %}
+
+      {% if not c['is_main'] %}
+        <form method="post" action="/auth/remove/{{ c['character_id'] }}" class="acct-remove"
+              data-confirm="Remove {{ c['character_name'] }} from Vigilant? Its authorization is revoked at EVE.">
+          <button type="submit" class="b-link-btn is-danger">Remove character</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

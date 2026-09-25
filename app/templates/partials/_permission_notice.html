@@ -1,0 +1,75 @@
+{#
+  permission_notice(characters, key, roles_by_char=none, what=none)
+
+  Explains why a feature is missing data for some characters, and keeps the
+  three causes apart (app/auth/status.py):
+
+    permission  — the user did not share it (declined), or the character was
+                  authorized before Vigilant asked for it (new). Link: the
+                  Account picker with this permission pre-ticked.
+    in-game role — shared, but the character lacks the corporation role ESI
+                  requires. Nothing to do in Vigilant; says which role.
+    roles unknown — a corp permission is shared but "Your corporation roles"
+                  is not, so Vigilant cannot tell which of the two it is.
+
+  `characters` are Character rows or dicts with character_id, character_name,
+  scopes, declined_scopes. `roles_by_char` comes from
+  perm_status.corp_roles_for(); pass it only for corporation permissions.
+  `what` completes "…, so <what>." Renders nothing when every character is
+  covered. Import with:
+    {% from "partials/_permission_notice.html" import permission_notice %}
+#}
+{% macro _names(chars) -%}
+  {%- for c in chars -%}<b>{{ c['character_name'] if c is mapping else c.character_name }}</b>{% if not loop.last %}{{ ', ' if loop.revindex > 2 else ' and ' }}{% endif %}{%- endfor -%}
+{%- endmacro %}
+{% macro _cid(c) -%}{{ c['character_id'] if c is mapping else c.character_id }}{%- endmacro %}
+{% macro _share(chars, key, label) -%}
+  {%- if chars | length == 1 -%}
+    <a href="/account/permissions/{{ _cid(chars[0]) }}?add={{ key }}">{{ label }} &rarr;</a>
+  {%- else -%}
+    <a href="/account">{{ label }} &rarr;</a>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro permission_notice(characters, key, roles_by_char=none, what=none) %}
+  {% set p = perms.BY_KEY[key] %}
+  {% set g = perm_status.gaps(characters, key, roles_by_char) %}
+  {% if g %}
+    {% set declined = g.get('declined', []) %}
+    {% set fresh = g.get('new', []) + g.get('partial', []) %}
+    {% set no_role = g.get('role_missing', []) %}
+    {% set unknown = g.get('roles_unknown', []) %}
+    <div class="perm-notice" role="note">
+      {% if declined %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-permission">permission</span>
+          <span>You chose not to share <b>{{ p.label }}</b> for {{ _names(declined) }}{% if what %}, so {{ what }}{% endif %}.</span>
+          {{ _share(declined, key, 'Share it') }}
+        </div>
+      {% endif %}
+      {% if fresh %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-permission">permission</span>
+          <span><b>{{ p.label }}</b> is newer than {{ _names(fresh) }}'s authorization{% if what %}, so {{ what }}{% endif %}.</span>
+          {{ _share(fresh, key, 'Review') }}
+        </div>
+      {% endif %}
+      {% if no_role %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-role">in-game role</span>
+          <span>{{ _names(no_role) }} shared <b>{{ p.label }}</b>, but EVE only answers for characters with the
+            <b>{{ perm_status.roles_text(p.in_game_roles) }}</b> role in their corporation. That is set in game, not here.</span>
+        </div>
+      {% endif %}
+      {% if unknown %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-role">in-game role?</span>
+          <span>{{ _names(unknown) }} shared <b>{{ p.label }}</b>, which needs the
+            <b>{{ perm_status.roles_text(p.in_game_roles) }}</b> role. Vigilant can't check that without
+            <b>Your corporation roles</b>.</span>
+          {{ _share(unknown, 'corp_roles', 'Share roles') }}
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}

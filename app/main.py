@@ -23,6 +23,7 @@ from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
 from app.routes.characters import router as characters_router
+from app.routes.account import router as account_router
 from app.routes.status import router as status_router
 from app.routes.character_detail import router as character_detail_router
 from app.routes.assets import router as assets_router
@@ -114,6 +115,7 @@ def _js_version() -> str:
 # present in sys.modules with their `templates` attribute already built.
 CSS_V = _css_version()
 JS_V = _js_version()
+from app.auth import scopes as _perms, status as _perm_status  # noqa: E402
 for _mod_name, _mod in list(sys.modules.items()):
     if _mod_name.startswith(("app.routes.", "app.auth.")):
         _templates = getattr(_mod, "templates", None)
@@ -126,6 +128,10 @@ for _mod_name, _mod in list(sys.modules.items()):
             _templates.env.globals["nav_groups"] = NAV_GROUPS
             _templates.env.globals["nav_item_active"] = item_active
             _templates.env.globals["nav_group_active"] = group_active
+            # Permission catalog + per-character state for the "missing
+            # permission" notices (partials/_permission_notice.html).
+            _templates.env.globals["perms"] = _perms
+            _templates.env.globals["perm_status"] = _perm_status
 
 settings = get_settings()
 
@@ -199,6 +205,7 @@ app.include_router(auth_router)
 app.include_router(ambient_router)
 app.include_router(dashboard_router)
 app.include_router(characters_router)
+app.include_router(account_router)
 app.include_router(status_router)
 app.include_router(character_detail_router)
 app.include_router(assets_router)
@@ -294,6 +301,8 @@ async def startup():
             "ALTER TABLE characters ADD COLUMN security_status REAL",
             "ALTER TABLE characters ADD COLUMN user_id INTEGER REFERENCES users(id)",
             "ALTER TABLE characters ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0",
+            # Permission picker: scopes the user declined (T-063)
+            "ALTER TABLE characters ADD COLUMN declined_scopes TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE sde_types ADD COLUMN volume REAL",
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",

@@ -1,5 +1,7 @@
 {# Mail list with inline expansion — loaded via htmx on character detail page #}
-{% if mail_error %}
+{% from "partials/_permission_notice.html" import permission_notice %}
+{% if missing_perm %}{{ permission_notice([char], missing_perm) }}
+{% elif mail_error %}
 <div class="b-empty">{{ mail_error }}</div>
 {% elif not mail_headers %}
 <div class="b-empty">No recent mail</div>

@@ -72,27 +72,22 @@
                 <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
                      alt="" class="b-portrait-sm">
                 <a href="/character/{{ char.character_id }}" class="b-link" style="font-size:11px;color:var(--text)">{{ char.character_name }}</a>
-                {% set char_scopes = [] %}
-                {% for scope_name, scope_val in [
-                    ('wallet', 'esi-wallet.read_corporation_wallets.v1'),
-                    ('industry', 'esi-industry.read_corporation_jobs.v1'),
-                    ('orders', 'esi-markets.read_corporation_orders.v1'),
-                    ('structures', 'esi-corporations.read_structures.v1'),
-                    ('contracts', 'esi-contracts.read_corporation_contracts.v1'),
-                    ('members', 'esi-corporations.read_corporation_membership.v1'),
-                ] %}
-                    {% if scope_val in (char.scopes or '') %}
-                        {% if char_scopes.append(scope_name) %}{% endif %}
-                    {% endif %}
-                {% endfor %}
-                {% if char_scopes %}
-                <span class="b-badge" style="margin-left:auto;font-size:8px;color:var(--accent)">{{ char_scopes | join(' · ') }}</span>
-                {% endif %}
+                <a href="/account/permissions/{{ char.character_id }}" class="b-link" style="margin-left:auto;font-size:9px;">permissions</a>
             </div>
             {% endfor %}
         </div>
 
     </div>
+
+    {# What Vigilant can read for this corporation, per corporation permission.
+       Silent for a permission at least one character can use; otherwise says
+       whether a permission or an in-game role is what's missing. #}
+    {% from "partials/_permission_notice.html" import permission_notice %}
+    {% for p in perms.PERMISSIONS if p.group == 'corporation' and p.key != 'corp_roles' %}
+      {% set ns = namespace(ok=false) %}
+      {% for c in corp_chars %}{% if perm_status.character_state(c, p.key, corp_roles) == 'granted' %}{% set ns.ok = true %}{% endif %}{% endfor %}
+      {% if not ns.ok %}{{ permission_notice(corp_chars, p.key, corp_roles, what="that part of this page stays empty") }}{% endif %}
+    {% endfor %}
 
     <!-- Corp Navigation -->
     <div class="b-section" style="margin-bottom:0.75rem;">

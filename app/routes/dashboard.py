@@ -21,7 +21,8 @@ from app.db.cache import cache_stats
 from app.routes.characters import _process_skillqueue, group_skill_data
 from app.utils.perf import perf_log, perf_enabled, ms_since
 from time import perf_counter as _perf_now
-from app.esi.client import ESIClient, refresh_token
+from app.esi.client import ESIClient, ScopeNotGranted, refresh_token
+from app.auth import scopes as perms, status as perm_status
 from app.esi import character as esi_char
 from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
@@ -387,19 +388,19 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
 }
 
 FIELD_SCOPES: dict[str, str] = {
-    "wallet":        "esi-wallet.read_character_wallet.v1",
-    "location":      "esi-location.read_location.v1",
-    "clones":        "esi-clones.read_clones.v1",
-    "notifications": "esi-characters.read_notifications.v1",
-    "contracts":     "esi-contracts.read_character_contracts.v1",
-    "pi":            "esi-planets.manage_planets.v1",
-    "skillqueue":    "esi-skills.read_skillqueue.v1",
+    "wallet":        perms.WALLET,
+    "location":      perms.LOCATION,
+    "clones":        perms.CLONES,
+    "notifications": perms.NOTIFICATIONS,
+    "contracts":     perms.CONTRACTS,
+    "pi":            perms.PLANETS,
+    "skillqueue":    perms.SKILLQUEUE,
     "zkill":         None,   # no ESI scope required
-    "assets":        "esi-assets.read_assets.v1",
-    "roles":         "esi-characters.read_corporation_roles.v1",
-    "transactions":  "esi-wallet.read_character_wallet.v1",   # same scope as wallet balance
-    "orders":        "esi-markets.read_character_orders.v1",
-    "industry":      "esi-industry.read_character_jobs.v1",
+    "assets":        perms.ASSETS,
+    "roles":         perms.CORP_ROLES,
+    "transactions":  perms.WALLET,   # same scope as wallet balance
+    "orders":        perms.ORDERS,
+    "industry":      perms.JOBS,
 }
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
@@ -1757,6 +1758,14 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
             return_exceptions=True,
         )
         for field, result in zip(stale_fields, results):
+            if isinstance(result, ScopeNotGranted):
+                # The guard refused a call this token may not make. Not a sync
+                # failure — the user did not share it — so no warning, which
+                # would otherwise surface as a sync error on the dashboard.
+                logger.info("Field %s skipped for char %s: %s", field, character_id, result)
+                warnings.pop(field, None)
+                field_synced[field] = now.isoformat()
+                continue
             if isinstance(result, Exception):
                 logger.warning("Field %s raised for char %s: %s", field, character_id, result)
                 warnings[field] = f"exception: {type(result).__name__}"
@@ -2597,8 +2606,6 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
 
     # Aggregates
     total_wallet = sum(v for v in wallets.values() if v is not None)
-    needs_contracts_scope = any(v == "no_scope" for v in contracts.values())
-    needs_pi_scope = any(v == "no_scope" for v in pi.values())
 
     # Per-character sync metadata
     now = datetime.now(timezone.utc)
@@ -2615,16 +2622,17 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
 
     any_syncing = any(s == "syncing" for s in sync_statuses.values())
 
-    # Detect characters needing re-auth
-    # Flag if: token refresh failed OR character has fewer scopes than the most-scoped character
-    needs_reauth: dict[int, bool] = {}
-    max_scopes = max((len((c.scopes or "").split()) for c in characters), default=0)
-    for char in characters:
-        cid = char.character_id
-        warns = sync_warnings.get(cid, {})
-        token_failed = any("token_refresh_failed" in str(v) for v in warns.values())
-        missing_scopes = len((char.scopes or "").split()) < max_scopes
-        needs_reauth[cid] = token_failed or missing_scopes
+    # Characters whose authorization EVE rejected (refresh token revoked or
+    # expired). Only that is "re-auth": a character that simply shares fewer
+    # permissions than another one did so on purpose (T-063) — it used to be
+    # flagged here for having fewer scopes than the most-scoped character.
+    needs_reauth: dict[int, bool] = {
+        char.character_id: perm_status.token_failed(sync_warnings.get(char.character_id, {}))
+        for char in characters
+    }
+    # Permissions Vigilant started asking for after a character was authorized.
+    # An offer, not an error: the header links to the Account page.
+    new_permission_chars = [c for c in characters if perm_status.summary(c)["new"]]
 
     # Corporation aggregates
     corp_ids = set()
@@ -2675,14 +2683,13 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "server_status": server_status,
         "zkill": zkill,
         "total_wallet": total_wallet,
-        "needs_contracts_scope": needs_contracts_scope,
-        "needs_pi_scope": needs_pi_scope,
         "sync_statuses": sync_statuses,
         "staleness": staleness_map,
         "last_synced_strs": last_synced_strs,
         "any_syncing": any_syncing,
         "sync_warnings": sync_warnings,
         "needs_reauth": needs_reauth,
+        "new_permission_chars": new_permission_chars,
         "total_corporations": total_corporations,
         "char_rows": char_rows,
         "skill_map": skill_map,

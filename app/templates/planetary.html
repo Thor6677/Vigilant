@@ -27,28 +27,14 @@
     </span>
     {% endif %}
     {% if missing_scope_chars %}
-    <span class="b-badge is-warn" style="padding:0.3rem 0.6rem;" title="These characters need PI scope re-auth">
-        {{ missing_scope_chars | length }} missing scope
+    <span class="b-badge" style="padding:0.3rem 0.6rem;" title="Characters that do not share Planetary industry">
+        {{ missing_scope_chars | length }} not shared
     </span>
     {% endif %}
 </div>
 
-{% if missing_scope_chars %}
-<div class="b-panel b-section" style="padding:0.75rem;border-color:var(--warn);">
-    <div style="font-size:11px;color:var(--muted);margin-bottom:0.3rem;">
-        Missing <code>esi-planets.manage_planets.v1</code> scope — re-auth to see their colonies:
-    </div>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-        {% for char in missing_scope_chars %}
-        <span style="display:inline-flex;align-items:center;gap:0.3rem;font-size:11px;">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32" class="b-portrait-sm" alt="">
-            {{ char.character_name }}
-        </span>
-        {% endfor %}
-        <a href="/auth/add-character" class="b-link" style="color:var(--accent);font-size:11px;margin-left:auto;">Re-auth →</a>
-    </div>
-</div>
-{% endif %}
+{% from "partials/_permission_notice.html" import permission_notice %}
+{{ permission_notice(missing_scope_chars, 'planets', what="their colonies are not listed") }}
 
 <div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
     <form method="get" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">

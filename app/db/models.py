@@ -58,6 +58,12 @@ class Character(Base):
     refresh_token = Column(EncryptedText, nullable=False)
     token_expiry = Column(DateTime, nullable=False)
     scopes = Column(Text, nullable=False, default="")
+    # Catalog scopes the user explicitly left unticked at their last
+    # authorization (app/auth/scopes.py). Distinguishes "you chose not to share
+    # this" from "Vigilant never asked" (characters authorized before a scope
+    # joined the catalog), so the second gets an offer and the first stays
+    # quiet. Space-separated, like `scopes`.
+    declined_scopes = Column(Text, nullable=False, default="")
     is_active = Column(Boolean, default=True)
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))

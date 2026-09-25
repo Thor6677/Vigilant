@@ -1467,7 +1467,7 @@ function showCharImportModal() {
                 return;
             }
             if (!data.characters || !data.characters.length) {
-                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);">No characters with the <code>esi-fittings.read_fittings.v1</code> scope. Re-authorize a character from the <a href="/dashboard" style="color:var(--accent);">dashboard</a>.</div>';
+                body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);">None of your characters share <b>Saved fittings</b>. Choose what each character shares under <a href="/account" style="color:var(--accent);">Account &rsaquo; Characters &amp; permissions</a>.</div>';
                 return;
             }
             var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:0.5rem;">Pick a character:</div>';

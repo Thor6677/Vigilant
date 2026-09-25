@@ -121,7 +121,7 @@ async def character_journal(
     scope = "esi-wallet.read_character_wallet.v1"
     if scope not in (char.scopes or ""):
         return templates.TemplateResponse(request, "journal.html", {"char": char, "entries": [],
-            "error": "Wallet scope not available — re-authorize this character.",
+            "error": None, "missing_perm": "wallet",
             "page": 1, "has_more": False, "category": "all",
             "categories": CATEGORY_LABELS, "is_corp": False, "corp_id": None, "division": None})
 

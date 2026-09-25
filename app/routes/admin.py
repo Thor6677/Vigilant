@@ -756,7 +756,11 @@ async def admin_remove_user(user_id: int, request: Request,
 
     # Delete all characters belonging to this user
     chars_result = await db.execute(select(Character).where(Character.user_id == user_id))
+    # Revoked at EVE after the commit below, so a removed account's tokens do
+    # not live on in database backups (app/auth/tokens.py).
+    to_revoke: list[str] = []
     for char in chars_result.scalars().all():
+        to_revoke.append(char.refresh_token)
         # Clean up associated caches
         await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": char.character_id})
         await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": char.character_id})
@@ -804,6 +808,9 @@ async def admin_remove_user(user_id: int, request: Request,
 
     await db.delete(user)
     await db.commit()
+    from app.auth.tokens import revoke_refresh_token
+    for token in to_revoke:
+        await revoke_refresh_token(token)
 
     await _log_audit(db, "admin_remove_user", admin.id,
                      detail=f"Removed user {user_id} and all associated characters",
@@ -822,10 +829,13 @@ async def admin_remove_character(character_id: int, request: Request,
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Character not found.</div>')
 
     char_name = char.character_name
+    old_refresh = char.refresh_token
     await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": character_id})
     await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": character_id})
     await db.delete(char)
     await db.commit()
+    from app.auth.tokens import revoke_refresh_token
+    await revoke_refresh_token(old_refresh)
 
     await _log_audit(db, "admin_remove_character", admin.id, character_id,
                      f"Removed character {char_name}",

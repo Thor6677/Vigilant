@@ -432,3 +432,87 @@
 .sa-date-val { font-size: 13px; color: var(--text); font-family: monospace; }
 .sa-meta { display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap; }
 .sa-meta-item { display: flex; flex-direction: column; gap: 2px; }
+
+/* ── Permission picker (permissions_picker.html) ───────────────────────── */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.perm-page { max-width: 1100px; margin: 0 auto; }
+.perm-header { display: flex; align-items: center; justify-content: flex-start; gap: 1rem; flex-wrap: wrap; }
+.perm-portrait { width: 64px; height: 64px; border: 1px solid var(--border); }
+.perm-lede { margin: 0.4rem 0 0; max-width: 62ch; font-size: var(--fs-base); line-height: 1.6; color: var(--muted); }
+.perm-lede b { color: var(--text); font-weight: 500; }
+.perm-form { display: flex; flex-direction: column; gap: 1.5rem; }
+.perm-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+.perm-preset { display: flex; flex-direction: column; gap: 0.3rem; text-align: left; padding: 0.75rem 0.9rem; border: 1px solid var(--border); background: linear-gradient(180deg, var(--surface-2), var(--surface-1)); color: var(--text); font-family: inherit; cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-menu); }
+.perm-preset:hover { border-color: var(--glass-border); }
+.perm-preset.is-active { border-color: var(--accent); box-shadow: var(--glow-accent-soft); }
+.perm-preset-label { font-size: 11px; font-weight: 600; letter-spacing: var(--ls-widest); text-transform: uppercase; color: var(--accent); }
+.perm-preset-desc { font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.perm-group { display: flex; flex-direction: column; gap: 0.6rem; }
+.perm-group-head { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; border-bottom: 1px solid var(--glass-border); padding-bottom: 0.4rem; }
+.perm-group-head .b-label { margin: 0; color: var(--accent); }
+.perm-group-note { font-size: var(--fs-sm); color: var(--muted); }
+.perm-group-actions { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; font-size: var(--fs-sm); color: var(--muted); }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.6rem; }
+.perm-card { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.6rem 0.7rem; align-items: start; padding: 0.7rem 0.8rem; border: 1px solid var(--border); background: var(--surface-1); cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.perm-card:hover { border-color: var(--glass-border); }
+.perm-card.is-on { border-color: rgba(200, 169, 81, 0.45); background: linear-gradient(180deg, var(--surface-2), var(--surface-1)); }
+.perm-card.is-write.is-on { border-color: var(--warn); }
+.perm-card.is-locked .perm-toggle { opacity: 0.6; }
+.perm-toggle { margin-top: 2px; }
+.perm-icon { width: 1.4rem; text-align: center; font-size: 14px; color: var(--muted); line-height: 1.2; }
+.perm-card.is-on .perm-icon { color: var(--accent); }
+.perm-body { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.perm-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: var(--fs-base); font-weight: 500; color: var(--text); }
+.perm-summary { font-size: var(--fs-base); line-height: 1.5; color: var(--muted); }
+.perm-role { font-size: var(--fs-sm); color: var(--warn); letter-spacing: 0.02em; }
+.perm-note { font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); font-style: italic; }
+.perm-powers { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.perm-chip { font-size: 9px; letter-spacing: 0.06em; padding: 1px 6px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.perm-scopes > summary { cursor: pointer; font-size: 9px; letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); width: max-content; }
+.perm-scopes > summary:hover { color: var(--text); }
+.perm-scopes code { display: block; margin-top: 0.25rem; font-size: 10px; color: var(--text); word-break: break-all; }
+.perm-purge { border: 1px solid var(--warn); border-left-width: 3px; padding: 0.75rem 0.9rem; background: var(--accent-faint); display: flex; flex-direction: column; gap: 0.4rem; }
+.perm-purge-check { display: flex; gap: 0.55rem; align-items: center; font-size: var(--fs-base); color: var(--text); cursor: pointer; }
+.perm-purge-note { margin: 0; font-size: var(--fs-sm); line-height: 1.6; color: var(--muted); }
+.perm-footer { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 1rem; justify-content: flex-end; padding: 0.75rem 0; background: linear-gradient(0deg, var(--bg) 70%, transparent); }
+.perm-count { margin-right: auto; font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+@media (max-width: 720px) {
+    .perm-presets { grid-template-columns: minmax(0, 1fr); }
+    .perm-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Account › Characters & permissions (account.html) ─────────────────── */
+.acct-lede { margin: -0.5rem 0 1.25rem; max-width: 72ch; font-size: var(--fs-base); line-height: 1.6; color: var(--muted); }
+.acct-list { display: flex; flex-direction: column; gap: 1rem; }
+.acct-char { display: flex; flex-direction: column; }
+.acct-char-head { display: flex; align-items: center; gap: 0.8rem; padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--glass-border); flex-wrap: wrap; }
+.acct-portrait { width: 44px; height: 44px; border: 1px solid var(--border); }
+.acct-char-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.acct-name { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); }
+.acct-char-stat { margin-left: auto; display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+.acct-count { font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+.acct-count b { color: var(--accent); font-weight: 600; }
+.acct-perms { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.75rem 0.8rem 0.4rem; }
+.acct-perm { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 10px; padding: 2px 7px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.acct-perm-dot { width: 6px; height: 6px; background: var(--border); flex: none; }
+.acct-perm.is-granted { color: var(--text); border-color: rgba(51, 170, 85, 0.4); }
+.acct-perm.is-granted .acct-perm-dot { background: var(--success); }
+.acct-perm.is-declined { text-decoration: line-through; text-decoration-color: var(--border); }
+.acct-perm.is-new, .acct-perm.is-partial { color: var(--accent); border-color: rgba(200, 169, 81, 0.4); }
+.acct-perm.is-new .acct-perm-dot, .acct-perm.is-partial .acct-perm-dot { background: var(--accent); }
+.acct-legend { display: flex; flex-wrap: wrap; gap: 0.35rem 0.8rem; padding: 0.2rem 0.8rem 0.7rem; }
+.acct-legend .acct-perm { border: none; padding: 0; font-size: 9px; text-decoration: none; }
+.acct-note { margin: 0; padding: 0.55rem 0.8rem; border-top: 1px solid var(--border); font-size: var(--fs-sm); line-height: 1.6; color: var(--muted); }
+.acct-note code { font-size: 10px; color: var(--text); }
+.acct-remove { margin: 0; padding: 0.5rem 0.8rem; border-top: 1px solid var(--border); text-align: right; }
+.b-link-btn.is-danger { color: var(--danger); }
+
+/* ── Missing-permission notices (partials/_permission_notice.html) ─────── */
+.perm-notice { display: flex; flex-direction: column; gap: 0.3rem; border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--accent-faint); padding: 0.55rem 0.8rem; margin-bottom: 1rem; font-size: var(--fs-base); line-height: 1.55; color: var(--muted); }
+.perm-notice b { color: var(--text); font-weight: 500; }
+.perm-notice a { color: var(--accent); }
+.perm-notice-line { display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: baseline; }
+.perm-notice-kind { font-size: 9px; letter-spacing: var(--ls-wider); text-transform: uppercase; padding: 0 5px; border: 1px solid currentColor; }
+.perm-notice-kind.is-permission { color: var(--accent); }
+.perm-notice-kind.is-role { color: var(--warn); }
+.perm-notice-kind.is-token { color: var(--danger); }

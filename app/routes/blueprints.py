@@ -141,7 +141,7 @@ async def character_blueprints(
     if scope not in (char.scopes or ""):
         return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
-            "error": "Blueprints scope not available — re-authorize this character.",
+            "error": None, "missing_perm": "industry",
             "is_corp": False, "corp_id": None, "filter": filter, "group_by": group_by})
 
     try:
@@ -205,7 +205,7 @@ async def corp_blueprints(
     if not corp_chars:
         return templates.TemplateResponse(request, "blueprints.html", {"char": char_info, "blueprints": [], "groups": {},
             "stats": _compute_stats([]),
-            "error": "No character with corp blueprint access. Requires Director role and re-authorization.",
+            "error": "No character shares Corporation blueprints while holding the in-game Director role — EVE only answers for Directors.",
             "is_corp": True, "corp_id": corp_id, "filter": filter, "group_by": group_by})
 
     try:

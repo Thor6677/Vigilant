@@ -216,7 +216,7 @@ async def character_mining(
     scope = "esi-industry.read_character_mining.v1"
     if scope not in (char.scopes or ""):
         return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
-            "error": "Mining scope not available — re-authorize this character.",
+            "error": None, "missing_perm": "mining",
             "is_corp": False, "corp_id": None, "characters": []})
 
     try:
@@ -270,7 +270,7 @@ async def corp_mining(
 
     if not corp_chars:
         return templates.TemplateResponse(request, "mining.html", {"char": char_info, "data": None,
-            "error": "No characters with mining scope in this corporation. Re-authorize to grant mining permissions.",
+            "error": "None of your characters in this corporation share their Mining ledger. Choose what each character shares under Account › Characters & permissions.",
             "is_corp": True, "corp_id": corp_id,
             "characters": []})
 

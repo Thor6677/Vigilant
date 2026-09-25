@@ -251,7 +251,7 @@
         <div class="stat-row">
             <span class="stat-label">Total SP</span>
             <span class="stat-value">
-                {% if total_trained_sp > 0 %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label">— missing scope</span>{% endif %}
+                {% if total_trained_sp > 0 %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label" title="Skills & skill queue is not shared for this character">— not shared</span>{% endif %}
             </span>
         </div>
 
@@ -588,7 +588,8 @@
     </div>
 
     {% if journal_error == "missing_scope" %}
-    <div class="b-empty">Wallet scope not available — re-auth required.</div>
+    {% from "partials/_permission_notice.html" import permission_notice %}
+    {{ permission_notice([char], 'wallet', what="the journal is not shown") }}
     {% elif journal_error %}
     <div class="b-empty" style="color:var(--danger)">Failed to load journal: {{ journal_error }}</div>
     {% elif not journal %}

@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     eve_sso_auth_url: str = "https://login.eveonline.com/v2/oauth/authorize"
     eve_sso_token_url: str = "https://login.eveonline.com/v2/oauth/token"
     eve_sso_verify_url: str = "https://login.eveonline.com/oauth/verify"
+    # RFC 7009 revocation. Used when a user narrows a character's permissions
+    # or removes it, so the superseded refresh token stops working at EVE too
+    # (it would otherwise stay valid in every old database backup).
+    eve_sso_revoke_url: str = "https://login.eveonline.com/v2/oauth/revoke"
+    # Scope string for plain "Log in": empty = identity only (no `scope`
+    # parameter at all). Logging in never changes what a character has granted;
+    # permissions change only through the picker. Set to "publicData" if EVE
+    # SSO ever refuses a scopeless authorize for some characters (seen in the
+    # wild as an HTTP 400 after character selection).
+    eve_login_scope: str = ""
     eve_esi_base: str = "https://esi.evetech.net/latest"
 
     killmails_enabled: bool = False
