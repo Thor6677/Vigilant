@@ -334,22 +334,35 @@ async def map_page(request: Request):
 
 # ── React built assets ───────────────────────────────────────────────────────
 
+def _serve_from(folder: str, file_path: str):
+    """A file from FRONTEND_DIST/<folder>, or 404 for anything outside it.
+
+    `{file_path:path}` arrives already percent-decoded, so it can hold `..`
+    segments or be absolute — and pathlib's `/` discards the base entirely when
+    the right-hand side is absolute. Resolve both sides and require the result
+    to stay under the folder; resolving also follows symlinks, so a link inside
+    the folder cannot point out of it either.
+    """
+    base = (FRONTEND_DIST / folder).resolve()
+    try:
+        full = (base / file_path).resolve()
+    except (OSError, ValueError):
+        return HTMLResponse("Not found", status_code=404)
+    if full.is_relative_to(base) and full.is_file():
+        return FileResponse(full)
+    return HTMLResponse("Not found", status_code=404)
+
+
 @router.get("/map/assets/{file_path:path}")
 async def map_assets(file_path: str):
     """Serve Vite-built JS/CSS assets."""
-    full = FRONTEND_DIST / "assets" / file_path
-    if full.exists() and full.is_file():
-        return FileResponse(full)
-    return HTMLResponse("Not found", status_code=404)
+    return _serve_from("assets", file_path)
 
 
 @router.get("/map/data/{file_path:path}")
 async def map_data(file_path: str):
     """Serve map data JSON files."""
-    full = FRONTEND_DIST / "data" / file_path
-    if full.exists() and full.is_file():
-        return FileResponse(full)
-    return HTMLResponse("Not found", status_code=404)
+    return _serve_from("data", file_path)
 
 
 # ── K-space runtime map data (ISS-019) ──────────────────────────────────
