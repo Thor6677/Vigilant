@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -796,24 +797,52 @@ def read_json(path: Path):
 
     Never raises: this runs in a loop that must outlive any single bad file,
     including one half-written by a crash.
+
+    Every caller reads from /control, a directory the app can also write, so
+    only a regular file is read: O_NOFOLLOW refuses a symlink, and O_NONBLOCK
+    plus the S_ISREG check keep a FIFO from blocking the loop.
     """
     try:
-        with open(path) as fh:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        with os.fdopen(fd) as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return None
             return json.load(fh)
     except Exception:
         return None
 
 
+# What the app reads: it runs as a different uid and has no write business with
+# these files. Matches what open(..., "w") produced under the default umask.
+_PUBLISHED_MODE = 0o644
+
+
 def write_json_atomic(path: Path, payload: dict) -> None:
-    """Write via a sibling .tmp then rename, so a reader never sees a partial
-    file. The app (Task 4) polls status.json roughly every 2s; without this it
+    """Write via a sibling temp file then rename, so a reader never sees a
+    partial file. The app polls status.json roughly every 2s; without this it
     would eventually read one mid-write and render a parse error as a failure.
-    That polling interval is Task 4's design, not yet built — verify it there
-    rather than assuming this number stays accurate."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w") as fh:
-        json.dump(payload, fh)
-    os.replace(tmp, path)
+
+    The temp file comes from mkstemp: a random name, created with O_EXCL, so it
+    is always a new file. A fixed name in /control would let anything that can
+    write there pre-place a symlink under it and have this write land wherever
+    the link points. os.replace then swaps the directory entry itself and never
+    follows a link at `path`.
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            os.fchmod(fh.fileno(), _PUBLISHED_MODE)
+            json.dump(payload, fh)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def claim_request(control: Path) -> tuple[bool, dict | None]:
@@ -1261,6 +1290,36 @@ def _new_status(**overrides) -> dict:
     return status
 
 
+_ACTIONS = ("update", "rollback")
+
+# The app sends a uuid4; tests use short words. Anything else is not echoed.
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}\Z")
+
+
+def _clean_id(value) -> str | None:
+    """The request id as it may appear in status.json, or None."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    value = str(value)
+    return value if _REQUEST_ID_RE.match(value) else None
+
+
+def _request_fields(request: dict) -> dict:
+    """id, action and to_tag for status.json, each only if it validates.
+
+    request.json is written by the app, and status.json is read back by it and
+    shown to the operator. A field that fails validation is published as None
+    rather than repeated, so nothing reaches a published file unchecked.
+    """
+    action = request.get("action")
+    tag = request.get("tag")
+    return {
+        "id": _clean_id(request.get("id")),
+        "action": action if action in _ACTIONS else None,
+        "to_tag": tag if validate_tag(tag) else None,
+    }
+
+
 def _publish_refusal(request: dict, error: str) -> None:
     """Record a request the loop consumed but never ran.
 
@@ -1269,12 +1328,10 @@ def _publish_refusal(request: dict, error: str) -> None:
     on showing the PREVIOUS run's status, which may well read "success".
     """
     _publish(_new_status(
-        id=request.get("id"),
-        action=request.get("action"),
+        **_request_fields(request),
         state="failed",
         step="failed",
         from_tag=_current_tag(),
-        to_tag=request.get("tag"),
         error=error,
         finished_at=_now_iso(),
     ))
@@ -1290,30 +1347,26 @@ def run_action(request: dict) -> dict:
     """
     action = request.get("action")
     tag = request.get("tag")
-    status = _new_status(
-        id=request.get("id"),
-        action=action,
-        from_tag=_current_tag(),
-        to_tag=tag,
-    )
-    _publish(status)
+    status = _new_status(**_request_fields(request), from_tag=_current_tag())
 
-    # Re-validate on pickup. The heartbeat's target list is UX; this is the
-    # authority, and it must not trust anything the app wrote.
+    # Re-validate on pickup, BEFORE the first publish. The heartbeat's target
+    # list is UX; this is the authority, and it must not trust anything the app
+    # wrote. The errors describe the problem without repeating the value.
     if not validate_tag(tag):
         status.update(
             state="failed", step="failed", finished_at=_now_iso(),
-            error=(f"{tag!r} is not a deployable release tag — only exact "
-                   f"versions like v1.2.3 (prereleases are excluded)."))
+            error=("The requested tag is not a deployable release tag — only "
+                   "exact versions like v1.2.3 (prereleases are excluded)."))
         _publish(status)
         return status
-    if action not in ("update", "rollback"):
+    if action not in _ACTIONS:
         status.update(
             state="failed", step="failed", finished_at=_now_iso(),
-            error=(f"unknown action: {action!r}. This is a bug in Vigilant, "
-                   f"not something you can fix from here."))
+            error=("Unknown action requested. This is a bug in Vigilant, "
+                   "not something you can fix from here."))
         _publish(status)
         return status
+    _publish(status)
     if action == "rollback" and tag not in eligible_rollback_targets(
             _deployed_text(), _current_tag()):
         status.update(
@@ -1860,9 +1913,9 @@ def _tick(seen: list, lock_path: Path,
                 "Please try again.")
         return self_update
 
-    rid = str(request.get("id") or "")
+    rid = _clean_id(request.get("id"))
     if not rid:
-        log.warning("request has no id — refusing")
+        log.warning("request has no usable id — refusing")
         _publish_refusal(
             request, "Request had no id and was refused. This is a bug in "
                      "Vigilant, not something you can fix from here.")

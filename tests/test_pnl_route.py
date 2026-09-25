@@ -16,10 +16,12 @@ import itsdangerous
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from tests.conftest import ensure_user
 from app.db.models import (
     Base,
     Character,
     IndustryJobHistory,
+    User,
     WalletTransaction,
     get_db,
 )
@@ -48,6 +50,7 @@ def _authed_client(user_id=USER_ID):
     base_url because the session cookie is Secure outside debug mode."""
     import app.main as main
 
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(json.dumps({"user_id": user_id}).encode())
     cookie = signer.sign(data).decode()
@@ -84,6 +87,7 @@ def _seeded_app_db(with_jobs=True):
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
             db.add(_make_char())
+            db.add(User(id=USER_ID))
             db.add(WalletTransaction(
                 transaction_id=1, character_id=CHAR_ID,
                 date=datetime(2026, 6, 1), type_id=34, quantity=100,
@@ -191,6 +195,7 @@ def _bare_app_db(extra_rows=()):
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
             db.add(_make_char())
+            db.add(User(id=USER_ID))
             for row in extra_rows:
                 db.add(row)
             await db.commit()

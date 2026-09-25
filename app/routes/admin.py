@@ -21,6 +21,7 @@ from app.db.models import (
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
     UpdateSchedule, UpdateRunReport,
 )
+from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
 from app.esi.rate_limit import rate_limit_tracker
@@ -60,7 +61,8 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
 AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("permissions", "Permissions", ("permissions_changed", "permissions_purged")),
     ("allowlist", "Allowlist", ("admin_allowlist",)),
-    ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character")),
+    ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
+                                 "character_transferred", "user_logout_everywhere")),
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),
@@ -797,6 +799,8 @@ async def admin_set_role(user_id: int, new_role: str, request: Request,
 
     old_role = user.role
     user.role = new_role
+    # The role rides in the session cookie too; make every session re-read it.
+    rotate_session_epoch(user)
     user.is_admin = new_role in ("admin", "manager")  # Keep is_admin in sync for session/nav
     await db.commit()
     await _log_audit(db, "admin_set_role", admin.id,
@@ -1590,6 +1594,8 @@ async def updater_notify_save(request: Request,
     new_url = None
     if webhook_remove is None and webhook_url.strip():
         new_url, problem = update_reports.validate_webhook_url(webhook_url)
+        if not problem:
+            problem = await update_reports.webhook_target_problem(new_url)
         if problem:
             return await refuse(f"webhook: {problem}")
 

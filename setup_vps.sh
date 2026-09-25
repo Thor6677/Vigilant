@@ -28,11 +28,17 @@ usermod -aG docker vigilant
 mkdir -p /opt/vigilant
 chown vigilant:vigilant /opt/vigilant
 
+# .env holds SECRET_KEY and the EVE client secret. On a re-run over an existing
+# install, make sure it is owner-only; a fresh host has none yet (step 2 below).
+if [ -f /opt/vigilant/.env ]; then
+    chmod 600 /opt/vigilant/.env
+fi
+
 echo ""
 echo "=== Setup complete ==="
 echo "Next steps:"
 echo "1. Clone your repo: git clone https://github.com/YOUR_USERNAME/vigilant /opt/vigilant"
-echo "2. Copy .env: cp /opt/vigilant/.env.example /opt/vigilant/.env && chmod 600 /opt/vigilant/.env && nano /opt/vigilant/.env"
+echo "2. Copy .env (created owner-only): install -m 600 /opt/vigilant/.env.example /opt/vigilant/.env && nano /opt/vigilant/.env"
 echo "3. Get SSL cert (run as root, point DNS first):"
 echo "   docker run --rm -p 80:80 certbot/certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com --email YOUR_EMAIL --agree-tos"
 echo "4. Start the app: cd /opt/vigilant && docker compose up -d"

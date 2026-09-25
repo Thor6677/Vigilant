@@ -31,7 +31,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.db.sde_models as sm
-from app.db.models import Base, Character, get_db
+from app.db.models import Base, Character, User, get_db
+from tests.conftest import ensure_user
 
 USER_A = 8101
 USER_B = 8102
@@ -49,6 +50,7 @@ def _authed_client(user_id):
     https base_url because the session cookie is Secure outside debug mode."""
     import app.main as main
 
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(json.dumps({"user_id": user_id}).encode())
     cookie = signer.sign(data).decode()
@@ -68,6 +70,7 @@ def _seeded_db(seed_coro):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
+            db.add_all([User(id=USER_A), User(id=USER_B)])  # the sessions below
             await seed_coro(db)
             await db.commit()
 

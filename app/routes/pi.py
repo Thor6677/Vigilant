@@ -3,6 +3,7 @@
 import json
 import logging
 from datetime import datetime, timezone
+from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -384,7 +385,7 @@ async def planetary_lookup_system(
 
     sys_id = await sde.system_name_to_id(db, name)
     if not sys_id:
-        return HTMLResponse(f'<div class="b-empty">System "{name}" not found.</div>')
+        return HTMLResponse(f'<div class="b-empty">System "{html_escape(name)}" not found.</div>')
 
     sys_info = await sde.system_info(db, sys_id)
 

@@ -28,6 +28,7 @@ call outside what a token carries (app/esi/scope_guard.py).
 """
 import asyncio
 import base64
+import json
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -37,11 +38,12 @@ import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
 from app.auth.purge import clear_live_state, purge_history
+from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
 from app.db.models import AdminAuditLog, Character, CharacterDashboardCache, User, get_db
@@ -259,8 +261,63 @@ async def _allowed_to_register(db: AsyncSession, character_id: int, meta: dict) 
     return False
 
 
+def _owner_hash(access_token: str, verify_data: dict) -> str | None:
+    """Which EVE account owns the character: the token's own `owner` claim,
+    with /oauth/verify's CharacterOwnerHash as the fallback (the same order as
+    the scopes above). None when neither says, which is treated as unknown.
+
+    Not signature-verified, like scope_guard.granted_scopes: the token came
+    straight from the SSO token endpoint over TLS a moment ago.
+    """
+    try:
+        payload_b64 = access_token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        owner = json.loads(base64.urlsafe_b64decode(payload_b64)).get("owner")
+    except Exception:
+        owner = None
+    if not isinstance(owner, str) or not owner:
+        owner = verify_data.get("CharacterOwnerHash")
+    return owner if isinstance(owner, str) and owner else None
+
+
+async def _release_transferred(db: AsyncSession, request: Request, char: Character) -> None:
+    """EVE reports a different account owning this character than the one that
+    registered it: it was transferred. The new owner must not inherit the old
+    owner's Vigilant account, and nothing the old owner's tokens collected may
+    carry over to them.
+
+    So the character leaves the old account entirely — its row (and with it the
+    stored tokens), its live caches and its history — and the caller carries on
+    as if Vigilant had never seen it. The old tokens are not revoked: EVE keeps
+    one authorization per character per application, and revoking could take
+    the new owner's authorization down with it (see the module docstring).
+    Committed here, so the removal stands even if the caller refuses the login.
+    """
+    cid = char.character_id
+    old_user_id = char.user_id
+    everything = [p.key for p in perms.PERMISSIONS]
+    await clear_live_state(db, cid, everything)
+    await purge_history(db, cid, everything)
+    await db.execute(delete(CharacterDashboardCache).where(CharacterDashboardCache.character_id == cid))
+    await db.delete(char)
+    db.add(AdminAuditLog(
+        user_id=old_user_id, character_id=cid, event_type="character_transferred",
+        detail="EVE reports a new owner; removed from the previous account with its stored data",
+        ip_address=request.client.host if request.client else None,
+    ))
+    await db.commit()
+    logger.warning("character %s changed EVE owner; removed from user %s", cid, old_user_id)
+
+
+def _ensure_session_epoch(user: User) -> None:
+    """New accounts, and any older row still without one. Caller commits."""
+    if not user.session_epoch:
+        user.session_epoch = new_session_epoch()
+
+
 def _start_session(request: Request, user: User, character_id: int) -> None:
     request.session["user_id"] = user.id
+    request.session[SESSION_EPOCH_KEY] = user.session_epoch
     request.session["active_character_id"] = character_id
     request.session["is_admin"] = user.role in ("admin", "manager")
     request.session["role"] = user.role
@@ -297,6 +354,15 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     meta = await _public_metadata(access_token, character_id)
     existing = (await db.execute(
         select(Character).where(Character.character_id == character_id))).scalar_one_or_none()
+
+    # Before anything else looks at `existing`: after a transfer it belongs to
+    # the previous owner, and the person signing in now is a newcomer — subject
+    # to the allowlist below like any other.
+    owner_hash = _owner_hash(access_token, verify_data)
+    if (existing is not None and owner_hash and existing.owner_hash
+            and existing.owner_hash != owner_hash):
+        await _release_transferred(db, request, existing)
+        existing = None
 
     if (not existing or not existing.user_id) and not await _allowed_to_register(db, character_id, meta):
         return templates.TemplateResponse(request, "index.html", {
@@ -344,7 +410,10 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         # would end the stored data token too (see the module docstring).
         _apply_metadata(existing, meta)
         existing.character_name = character_name
+        if owner_hash:
+            existing.owner_hash = owner_hash
         user.last_login = datetime.now(timezone.utc)
+        _ensure_session_epoch(user)
         await db.commit()
         _start_session(request, user, character_id)
         if new_account:
@@ -413,6 +482,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     existing.scopes = granted
     existing.declined_scopes = perms.join_scopes(perms.declined_after(requested))
     _apply_metadata(existing, meta)
+    if owner_hash:
+        existing.owner_hash = owner_hash
     # ISS-051: what the last sync found wrong was found with the OLD token. A
     # failed fetch still stamps its field as synced, so without this reset the
     # queued sync below saw nothing stale and "Authorization expired" stayed up
@@ -424,6 +495,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         cache.sync_warnings_json = None
     if intent == SIGNUP:
         user.last_login = datetime.now(timezone.utc)
+        _ensure_session_epoch(user)
 
     granted_set = perms.parse_scopes(granted)
     added = granted_set - old_scopes
@@ -487,6 +559,22 @@ async def logout(request: Request):
     # Clear-Site-Data support (see static/js/notifications.js). F4.
     resp.headers["Clear-Site-Data"] = '"storage"'
     return resp
+
+
+@router.post("/logout-everywhere")
+async def logout_everywhere(request: Request, db: AsyncSession = Depends(get_db)):
+    """Sign this account out on every browser, this one included."""
+    user_id = request.session.get("user_id")
+    if user_id:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is not None:
+            rotate_session_epoch(user)
+            db.add(AdminAuditLog(
+                user_id=user.id, event_type="user_logout_everywhere",
+                ip_address=request.client.host if request.client else None,
+            ))
+            await db.commit()
+    return await logout(request)
 
 
 @router.post("/switch/{character_id}")

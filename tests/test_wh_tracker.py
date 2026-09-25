@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.routes.wh_tracker as wh_tracker
 from app.db.cache import TTL, _ttl_for_path
-from app.db.models import Base, Character, get_db
+from app.db.models import Base, Character, User, get_db
+from tests.conftest import ensure_user
 from app.db.sde_models import SDERegion, SDESystem
 
 USER_ID = 501
@@ -63,6 +64,7 @@ def _authed_client(user_id=USER_ID):
     https base_url because the session cookie is Secure outside debug mode."""
     import app.main as main
 
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(json.dumps({"user_id": user_id}).encode())
     cookie = signer.sign(data).decode()
@@ -99,6 +101,7 @@ def _seeded_app_db():
         async with SessionLocal() as db:
             db.add(_make_char(CHAR_A, "Pilot A"))
             db.add(_make_char(CHAR_B, "Pilot B"))
+            db.add(User(id=USER_ID))
             db.add(SDESystem(system_id=J_SYSTEM_ID, system_name=J_SYSTEM_NAME, security=-1.0))
             db.add(SDESystem(system_id=J_SYSTEM_B_ID, system_name=J_SYSTEM_B_NAME, security=-1.0))
             db.add(SDESystem(system_id=K_SYSTEM_ID, system_name=K_SYSTEM_NAME,

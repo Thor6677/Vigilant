@@ -86,4 +86,9 @@
     </div>
   {% endfor %}
 </div>
+
+<form method="post" action="/auth/logout-everywhere" class="acct-remove"
+      data-confirm="Sign out of Vigilant on every browser and device, this one included?">
+  <button type="submit" class="b-link-btn is-danger">Sign out everywhere</button>
+</form>
 {% endblock %}

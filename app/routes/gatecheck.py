@@ -13,6 +13,7 @@ import json
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -310,4 +311,5 @@ async def war_targets(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 def _err(msg: str) -> str:
-    return f'<div style="padding:0.75rem;color:var(--danger);font-size:11px;">{msg}</div>'
+    """An error line. `msg` is text, not markup — several carry what the user typed."""
+    return f'<div style="padding:0.75rem;color:var(--danger);font-size:11px;">{html_escape(msg)}</div>'

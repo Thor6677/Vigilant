@@ -43,8 +43,15 @@ def env(tmp_path, monkeypatch):
     repeating the dependency-override teardown in each.
     """
     import app.main as main
+    from app.ops import update_reports
 
     monkeypatch.setenv("VIGILANT_CONTROL_DIR", str(tmp_path))
+
+    # Webhook hosts in these tests are made up; resolve them to a public
+    # address so the target check passes without touching DNS.
+    async def resolve_public(host, port):
+        return ["93.184.215.14"]
+    monkeypatch.setattr(update_reports, "_resolve", resolve_public)
 
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
@@ -1046,3 +1053,16 @@ def test_the_panel_says_a_failed_release_will_be_skipped(env):
     body = env.admin().get("/admin/update/status").text
     assert "failed here on" in body
     assert "automatic updates will skip it" in body
+
+
+def test_a_webhook_to_a_non_public_address_is_refused(env, monkeypatch):
+    from app.ops import update_reports
+
+    async def resolve_loopback(host, port):
+        return ["93.184.215.14", "127.0.0.1"]
+    monkeypatch.setattr(update_reports, "_resolve", resolve_loopback)
+    _beat(env.control)
+    r = _save_notify(env.admin(), webhook_url="https://hooks.example/x")
+    assert r.status_code == 400
+    assert "private, local or reserved" in r.text
+    assert _notify_row(env).webhook_url is None

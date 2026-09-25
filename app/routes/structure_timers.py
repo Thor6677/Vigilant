@@ -155,7 +155,8 @@ async def _visible_group_ids(db: AsyncSession, user_id: int) -> set[int] | None:
 
 async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
     """Check if user can edit/delete a timer.
-    Allowed: timer creator, app admins/managers, or in-game Directors."""
+    Allowed: timer creator, app admins/managers, or in-game Directors/CEOs
+    for timers visible to them."""
     if timer.created_by == user_id:
         return True
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -164,6 +165,10 @@ async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
         return False
     if user.role in ("admin", "manager"):
         return True
+    # An in-game Director or CEO may manage timers they can see, never ones an
+    # ACL group hides from them.
+    if not _timer_visible(timer, await _visible_group_ids(db, user_id)):
+        return False
     # Check in-game Director role via ESI
     chars = await db.execute(select(Character).where(Character.user_id == user_id))
     for char in chars.scalars().all():

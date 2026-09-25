@@ -33,7 +33,8 @@ import itsdangerous
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db.models import Base, get_db
+from app.db.models import Base, User, get_db
+from tests.conftest import ensure_user
 from app.db.sde_models import (
     SDEType, SDEGroup, SDEMarketGroup, SDEBlueprintInfo, SDEBlueprintMaterial,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
@@ -321,6 +322,7 @@ def _authed_client():
     tests/test_pnl_route.py (itself from tests/test_networth.py)."""
     import app.main as main
 
+    ensure_user(1)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     data = base64.b64encode(json.dumps({"user_id": 1}).encode())
     cookie = signer.sign(data).decode()
@@ -378,6 +380,7 @@ def _seeded_invention_db(with_invention_chain: bool):
                 db.add(SDEType(type_id=INV_ENCRYPTION_SKILL_ID, type_name="Test Encryption Methods"))
                 db.add(SDEType(type_id=INV_SCIENCE_A_SKILL_ID, type_name="Mechanical Engineering"))
                 db.add(SDEType(type_id=INV_SCIENCE_B_SKILL_ID, type_name="High Energy Physics"))
+            db.add(User(id=1))  # the session _authed_client carries
             await db.commit()
 
     _run(seed())
@@ -512,6 +515,7 @@ def _seeded_tree_db():
             db.add(SDEBlueprintMaterial(blueprint_type_id=TREE_WOLF_BP_ID,
                                         activity_id=1, material_type_id=34,
                                         quantity=200))
+            db.add(User(id=1))  # the session _authed_client carries
             await db.commit()
 
     _run(seed())

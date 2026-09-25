@@ -14,6 +14,7 @@ import itsdangerous
 from fastapi.testclient import TestClient
 
 import app.main as main
+from tests.conftest import ensure_user
 import app.routes.industry as industry
 
 
@@ -23,6 +24,7 @@ _CSRF = "test-csrf-token-0123456789abcdef"
 def _client(user_id: int = 7) -> TestClient:
     """Signed session carrying user_id AND the csrf token the middleware
     checks the X-CSRF-Token header against, so no GET is needed first."""
+    ensure_user(user_id)
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
     payload = {"user_id": user_id, "csrf_token": _CSRF}
     cookie = signer.sign(base64.b64encode(json.dumps(payload).encode())).decode()

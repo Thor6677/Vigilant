@@ -21,8 +21,11 @@ Nothing about whether an update runs is gated on any of this.
 
 Everything above the `# ── Impure half` banner is pure.
 """
+import asyncio
+import ipaddress
 import json
 import logging
+import socket
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -179,6 +182,25 @@ def validate_webhook_url(raw) -> tuple[str | None, str | None]:
     return url, None
 
 
+def address_problem(addr: str) -> str | None:
+    """Why a webhook may not be sent to this IP address, or None if it may.
+
+    Only globally reachable unicast addresses: no loopback, private, shared
+    (CGNAT), link-local (which includes cloud metadata endpoints), reserved,
+    unspecified or multicast. An IPv4 address written as IPv6 is judged as the
+    IPv4 address it is.
+    """
+    try:
+        ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    except ValueError:
+        return "its host does not resolve to an IP address"
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if not ip.is_global or ip.is_multicast:
+        return "its host is a private, local or reserved address"
+    return None
+
+
 def redact_url(url: str | None) -> str:
     """Scheme, host and a masked tail — never the path.
 
@@ -333,6 +355,41 @@ async def _send_discord(title: str, body: str, key: str) -> dict:
     return _delivery(DELIVERY_FAILED, str(result)[:255])
 
 
+async def _resolve(host: str, port: int) -> list[str]:
+    """Every address `host` resolves to."""
+    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [info[4][0] for info in infos]
+
+
+async def webhook_target_problem(url: str) -> str | None:
+    """None if the webhook's host resolves only to public addresses, else why not.
+
+    The webhook is sent from inside the deployment, so a URL naming the host
+    itself, the Docker network or the LAN would have Vigilant make requests
+    there, and the status or error it reports back says what answered. Every
+    address the name resolves to must pass, and it is checked both when the URL
+    is saved and before each send, because what a name resolves to can change.
+    """
+    parts = urlsplit(url)
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return "the URL has an invalid port"
+    if not parts.hostname:
+        return "the URL has no host"
+    try:
+        addrs = await _resolve(parts.hostname, port)
+    except Exception:
+        return "its host name does not resolve"
+    if not addrs:
+        return "its host name does not resolve"
+    for addr in addrs:
+        problem = address_problem(addr)
+        if problem:
+            return problem
+    return None
+
+
 async def post_webhook(url: str, fmt: str, report) -> dict:
     """One webhook POST, as a delivery record. Never raises.
 
@@ -344,6 +401,10 @@ async def post_webhook(url: str, fmt: str, report) -> dict:
     from app.config import user_agent
 
     host = urlsplit(url).hostname or "?"
+    problem = await webhook_target_problem(url)
+    if problem:
+        logger.warning("update report: webhook to %s refused: %s", host, problem)
+        return _delivery(DELIVERY_FAILED, f"not sent: {problem}")
     try:
         async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS,
                                      follow_redirects=False) as client:

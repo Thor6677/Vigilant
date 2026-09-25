@@ -47,9 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -70,7 +70,7 @@ jobs:
           echo "name=ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           push: true
@@ -94,7 +94,7 @@ jobs:
       # (already lowercased from $GITHUB_REPOSITORY) rather than recomputing, so
       # a fork publishes to its own namespace with no edit.
       - name: Build and push updater
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           file: updater/Dockerfile
@@ -116,7 +116,10 @@ jobs:
       # the deliberate escape hatch for building an image you do not want to
       # advertise yet.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        # Third-party actions are pinned to a full commit SHA: this job can
+        # write to the repository and the package registry, and a tag can be
+        # moved. Bump the SHA and the version comment together.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           generate_release_notes: true
           # Tags containing a hyphen (v1.0.0-rc1, -beta, ...) publish as

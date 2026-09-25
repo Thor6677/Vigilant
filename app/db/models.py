@@ -34,12 +34,19 @@ class Base(DeclarativeBase):
 class User(Base):
     """Represents a player account. Identified by their main EVE character."""
     __tablename__ = "users"
+    # A removed account's id is never handed to the next signup. Existing
+    # installs are rebuilt once at startup (app/db/user_ids.py).
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_admin = Column(Boolean, default=False)
     role = Column(String(16), default="user")  # user, manager, admin
+    # Copied into the session cookie at sign-in; a request whose cookie does not
+    # carry the current value is signed out (app/auth/session_guard.py).
+    # Rotating it ends every session the account has.
+    session_epoch = Column(String(32), nullable=True)
 
     characters = relationship("Character", back_populates="user")
 
@@ -74,6 +81,11 @@ class Character(Base):
     # Account ownership — nullable to support migration of pre-existing rows
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     is_main = Column(Boolean, default=False)
+    # EVE SSO's CharacterOwnerHash: which EVE account owns the character. It
+    # changes when the character moves to another account, which is how a
+    # login by the new owner is told apart from the old owner's. Null until
+    # the character next signs in (rows from before this column existed).
+    owner_hash = Column(String, nullable=True)
 
     user = relationship("User", back_populates="characters")
 

@@ -844,11 +844,16 @@ async def intel_kills_detail(
     max_damage = max((a.damage_done or 0) for a in attackers) if attackers else 0
     total_damage = sum(a.damage_done or 0 for a in attackers)
 
+    # Attackers that are this user's own characters link to their character
+    # page; everyone else, other accounts' characters included, links out.
     our_char_ids: set[int] = set()
     att_char_ids = [a.character_id for a in attackers if a.character_id]
     if att_char_ids:
         rows = await db.execute(
-            select(Character.character_id).where(Character.character_id.in_(att_char_ids))
+            select(Character.character_id).where(
+                Character.character_id.in_(att_char_ids),
+                Character.user_id == user_id,
+            )
         )
         our_char_ids = {r[0] for r in rows.all()}
 
@@ -888,5 +893,6 @@ async def intel_kills_detail(
             "total_destroyed": km.total_value or 0,
         },
     )
-    response.headers["Cache-Control"] = "max-age=86400, immutable"
+    # private: the attacker links depend on who is asking.
+    response.headers["Cache-Control"] = "private, max-age=86400, immutable"
     return response
