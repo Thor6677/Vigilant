@@ -39,8 +39,8 @@ _CSRF = "test-csrf-token-boosters-0123456789"
 
 
 def _client():
-    import app.main as main
-    return TestClient(main.app)
+    """Logged in: the fitting search routes are login-only since ISS-044."""
+    return _authed_client()
 
 
 def _authed_client(user_id=USER_A):
@@ -56,11 +56,11 @@ def _authed_client(user_id=USER_A):
 
 
 def _csrf_client():
-    """Signed session carrying just the csrf token, no user_id -- the stats
-    route needs no login, but every POST still needs the CSRF header."""
+    """Signed session for the stats route: login-only since ISS-044, and
+    every POST still needs the CSRF header."""
     import app.main as main
     signer = itsdangerous.TimestampSigner(main.settings.secret_key)
-    payload = {"csrf_token": _CSRF}
+    payload = {"user_id": USER_A, "csrf_token": _CSRF}
     cookie = signer.sign(base64.b64encode(json.dumps(payload).encode())).decode()
     client = TestClient(main.app, base_url="https://testserver")
     client.cookies.set("vigilant_session", cookie)

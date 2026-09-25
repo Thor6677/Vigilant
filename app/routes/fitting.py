@@ -54,17 +54,19 @@ async def fitting_tool(request: Request, db: AsyncSession = Depends(get_db)):
     the builder now only needs the flat folder list for its 'Save to folder'
     picker."""
     user_id = request.session.get("user_id")
-    folders: list[dict] = []
-    if user_id:
-        folder_rows = await db.execute(
-            select(UserFittingFolder)
-            .where(UserFittingFolder.user_id == user_id)
-            .order_by(UserFittingFolder.name)
-        )
-        folders = [
-            {"id": f.id, "parent_id": f.parent_id, "name": f.name}
-            for f in folder_rows.scalars().all()
-        ]
+    if not user_id:
+        # ISS-044: login-only. base.html loads actions.js only for a session,
+        # so a stranger got a builder whose every control was dead.
+        return RedirectResponse("/")
+    folder_rows = await db.execute(
+        select(UserFittingFolder)
+        .where(UserFittingFolder.user_id == user_id)
+        .order_by(UserFittingFolder.name)
+    )
+    folders = [
+        {"id": f.id, "parent_id": f.parent_id, "name": f.name}
+        for f in folder_rows.scalars().all()
+    ]
     path_map = _folder_path_map(folders)
     folder_paths = sorted(
         [{"id": fid, "path": p} for fid, p in path_map.items()],
@@ -353,6 +355,8 @@ async def search_ships(
     q: str = Query("", min_length=2),
     db: AsyncSession = Depends(get_db),
 ):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     results = await sde.search_ships(db, q, limit=15)
     return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
         "search_type": "ship"})
@@ -365,6 +369,8 @@ async def search_modules(
     slot: str = Query(""),
     db: AsyncSession = Depends(get_db),
 ):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     slot_filter = slot if slot in ("high", "mid", "low", "rig", "subsystem") else None
     results = await sde.search_modules(db, q, slot_type=slot_filter, limit=20)
 
@@ -389,6 +395,8 @@ async def search_drones(
     q: str = Query("", min_length=2),
     db: AsyncSession = Depends(get_db),
 ):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     results = await sde.search_drones(db, q, limit=15)
     return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
         "search_type": "drone"})
@@ -396,6 +404,7 @@ async def search_drones(
 
 @router.get("/tools/fitting/search/implants")
 async def search_implants(
+    request: Request,
     q: str = Query("", min_length=2),
     slot: int | None = Query(None, ge=1, le=10),
     db: AsyncSession = Depends(get_db),
@@ -407,6 +416,8 @@ async def search_implants(
     drives a vanilla <input> + <ul> rather than the htmx partial used
     for modules/drones, because each slot picks one item only.
     """
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     # `select`, `SDEType`, `SDETypeDogmaAttribute` are already imported at
     # module scope (sqlalchemy + app.db.sde_models above) — a stray local
     # re-import here used to shadow them with `app.db.models.SDEType`, which
@@ -436,6 +447,7 @@ async def search_implants(
 
 @router.get("/tools/fitting/search/boosters")
 async def search_boosters(
+    request: Request,
     q: str = Query("", min_length=2),
     db: AsyncSession = Depends(get_db),
 ):
@@ -452,6 +464,8 @@ async def search_boosters(
     module doesn't implement. A type_id absent from that lookup (unknown to
     the engine) is simply left out of the results.
     """
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     pattern = f"%{q}%"
     stmt = (
         select(SDEType.type_id)
@@ -489,6 +503,8 @@ async def search_charges(
     q: str = Query("", min_length=2),
     db: AsyncSession = Depends(get_db),
 ):
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     results = await sde.search_charges(db, q, limit=15)
     return templates.TemplateResponse(request, "partials/fitting_search_results.html", {"results": results,
         "search_type": "charge"})
@@ -500,6 +516,8 @@ async def fitting_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Calculate and return fitting stats as an HTML partial."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     try:
         body = await request.json()
     except Exception:
@@ -597,6 +615,8 @@ async def ship_slots(
     db: AsyncSession = Depends(get_db),
 ):
     """Return slot counts for a ship type, including subsystem modifiers."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     attrs = await get_type_dogma_attrs(db, ship_type_id)
     from app.fitting.constants import (
         ATTR_HI_SLOTS, ATTR_MED_SLOTS, ATTR_LOW_SLOTS,
@@ -646,6 +666,8 @@ async def import_eft(
     db: AsyncSession = Depends(get_db),
 ):
     """Parse EFT format text and return fitting state as JSON."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     try:
         body = await request.json()
     except Exception:
@@ -802,6 +824,8 @@ async def export_eft(
     db: AsyncSession = Depends(get_db),
 ):
     """Generate EFT format text from fitting state."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     try:
         body = await request.json()
     except Exception:
@@ -1458,6 +1482,8 @@ async def browse_groups(
     db: AsyncSession = Depends(get_db),
 ):
     """Get child market groups for the browser tree."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     if parent is None:
         # Return the top-level fitting categories
         groups = []
@@ -1481,6 +1507,8 @@ async def browse_items(
     db: AsyncSession = Depends(get_db),
 ):
     """Get items in a market group with fit restriction info."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     items = await sde.get_market_group_items(db, market_group_id)
 
     # Check fit restrictions if a ship is selected
@@ -1503,6 +1531,8 @@ async def browse_path(
     db: AsyncSession = Depends(get_db),
 ):
     """Get breadcrumb path for a market group."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     return await sde.get_market_group_path(db, market_group_id)
 
 
@@ -1514,6 +1544,8 @@ async def check_module_fit(
     db: AsyncSession = Depends(get_db),
 ):
     """Check if a module can fit a specific ship."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     can_fit = await sde.can_module_fit_ship(db, module_type_id, ship_type_id)
     restrictions = await sde.get_module_fit_restrictions(db, module_type_id)
     return {"can_fit": can_fit, "restrictions": restrictions}
@@ -1529,6 +1561,8 @@ async def can_overheat(
     db: AsyncSession = Depends(get_db),
 ):
     """Check which module types can be overheated."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     if not type_ids:
         return {}
     ids = [int(x) for x in type_ids.split(",") if x.strip()]
@@ -1705,6 +1739,8 @@ async def get_charges(
     db: AsyncSession = Depends(get_db),
 ):
     """Get compatible charges for a module."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     return await sde.get_compatible_charges(db, module_type_id)
 
 
@@ -1796,6 +1832,8 @@ async def fitting_info(
     db: AsyncSession = Depends(get_db),
 ):
     """Show essential info about a ship/module/charge — modal body partial."""
+    if not request.session.get("user_id"):   # ISS-044: login-only tool
+        return HTMLResponse("", status_code=401)
     # Type + group
     t = (await db.execute(
         select(SDEType).where(SDEType.type_id == type_id)

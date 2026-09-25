@@ -103,33 +103,21 @@ PUBLIC_LITERAL_GET = {
     "/api/ambient/systems.json",                # login-page ambient backdrop
     "/dashboard/big-battle-banner",             # global battle feed, not per-user
     "/dashboard/recent-battles",                # global battle feed, not per-user
-    "/intel/gatecheck/finder",                  # public gatecamp intel partial
-    "/intel/gatecheck/systems",                 # ^ its SDE autocomplete
     # Local SDE lookups — static game data shipped with the app, no user data.
     "/industry/planetary/lookup/search",
     "/skill-plans/search/ships",
     "/skill-plans/search/skills",
-    # The fitting tool is a public calculator: it renders and computes for
-    # anonymous visitors by design. Its per-user surfaces (saved fits, character
-    # import) gate separately and are not in this set. The `/tools/fitting` and
-    # `/intel/gatecheck` pages themselves are absent here on purpose: they read
-    # the session to personalise, so they carry a gate idiom and this allowlist
-    # — which is only about routes with *no* check — does not apply to them.
-    "/tools/fitting/browse/groups",
-    "/tools/fitting/can-overheat",
-    "/tools/fitting/check-fit",
-    "/tools/fitting/search/boosters",
-    "/tools/fitting/search/charges",
-    "/tools/fitting/search/drones",
-    "/tools/fitting/search/implants",
-    "/tools/fitting/search/modules",
-    "/tools/fitting/search/ships",
-    # Deliberately public utilities (T-047 asked for an explicit decision on
-    # these rather than a default). Neither exposes user data nor makes an
-    # authenticated outbound call. structure-age reads the operator's own
-    # calibration table, which is derived from public EVERef data — if that is
-    # ever reconsidered, this is the line to change.
-    "/tools/discordtime",
+    # The fitting tool, Discord timestamp generator and gate check used to be
+    # listed here as deliberately public (T-047). ISS-044 reversed that: their
+    # pages run on actions.js, which base.html loads only for a session, so a
+    # stranger got pages whose every control was dead. They are login-only now,
+    # partials included — see test_login_only_tools_refuse_anonymous_visitors.
+    #
+    # Deliberately public utility (T-047 asked for an explicit decision rather
+    # than a default). It exposes no user data and makes no authenticated
+    # outbound call. structure-age reads the operator's own calibration table,
+    # which is derived from public EVERef data — if that is ever reconsidered,
+    # this is the line to change.
     "/tools/structure-age",
     "/tools/structure-age/partial",
 }
@@ -304,3 +292,75 @@ def test_the_gate_detection_actually_discriminates():
         r for r in _literal_get_routes() if r.path == "/structure-timers/search/owners"
     )
     assert _GATE_IDIOM.search(_source(owners))
+
+
+# ── ISS-044: login-only tools, and no dead controls for strangers ───────────
+
+_LOGIN_ONLY_PAGES = ("/tools/fitting", "/tools/discordtime", "/intel/gatecheck")
+_LOGIN_ONLY_GETS = (
+    "/tools/fitting/search/ships?q=rifter", "/tools/fitting/search/modules?q=gun",
+    "/tools/fitting/search/drones?q=hob", "/tools/fitting/search/implants?q=snake",
+    "/tools/fitting/search/boosters?q=blue", "/tools/fitting/search/charges?q=emp",
+    "/tools/fitting/ship-slots/587", "/tools/fitting/browse/groups",
+    "/tools/fitting/browse/items/1", "/tools/fitting/browse/path/1",
+    "/tools/fitting/check-fit?module_type_id=1&ship_type_id=587",
+    "/tools/fitting/can-overheat?type_ids=1", "/tools/fitting/charges/1",
+    "/tools/fitting/info/587",
+    "/intel/gatecheck/systems?q=jita", "/intel/gatecheck/finder",
+)
+_LOGIN_ONLY_POSTS = (
+    "/tools/fitting/stats", "/tools/fitting/import-eft", "/tools/fitting/export-eft",
+    "/intel/gatecheck/check", "/intel/gatecheck/wartargets",
+)
+
+
+def test_login_only_tools_refuse_anonymous_visitors():
+    client = _client()
+    for path in _LOGIN_ONLY_PAGES:
+        r = client.get(path)
+        assert r.status_code in (302, 303, 307) and r.headers["location"] == "/", (
+            f"{path} answered {r.status_code} to a stranger — expected a redirect to /")
+    for path in _LOGIN_ONLY_GETS:
+        r = client.get(path)
+        assert r.status_code == 401 and r.text == "", f"{path} answered {r.status_code} anonymously"
+    # Past CSRF (a session with a token but no user) so the gate itself answers.
+    csrf = _client(csrf_token="t")
+    for path in _LOGIN_ONLY_POSTS:
+        r = csrf.post(path, json={}, headers={"X-CSRF-Token": "t"})
+        assert r.status_code == 401, f"POST {path} answered {r.status_code} anonymously"
+
+
+def test_login_only_tool_pages_still_open_for_a_session(nonadmin_user_id):
+    client = _client(user_id=nonadmin_user_id, role="user")
+    for path in _LOGIN_ONLY_PAGES:
+        r = client.get(path)
+        assert r.status_code == 200, f"{path} answered {r.status_code} to a logged-in user"
+        assert "/static/js/actions.js" in r.text
+
+
+# The events static/js/actions.js dispatches (BUBBLE_EVENTS + CAPTURE_EVENTS)
+# plus its data-on-error shortcut.
+_ACTION_BINDING = re.compile(
+    r'\sdata-(?:click|change|input|submit|keydown|mousedown|focus|error|on-error)=')
+
+
+def test_pages_served_to_strangers_need_no_actions_js():
+    """base.html loads actions.js only for a session with user_id. A data-*
+    binding on anything a stranger can open is therefore dead for them —
+    three tool pages shipped exactly like that (ISS-044). Either the page
+    needs no binding, or it gates."""
+    client = _client()
+    offenders = []
+    # Every literal GET, not just the allowlist: the ISS-044 pages carried a
+    # gate idiom (they read the session to personalise) yet still rendered
+    # for strangers, so only asking each route catches that shape.
+    for path in sorted(r.path for r in _literal_get_routes()):
+        if path.startswith("/api/") or path == "/healthz":
+            continue            # JSON, never rendered through base.html
+        r = client.get(path)
+        if (r.status_code == 200 and r.headers.get("content-type", "").startswith("text/html")
+                and _ACTION_BINDING.search(r.text)):
+            offenders.append(f"{path}: {_ACTION_BINDING.search(r.text).group(0).strip()}")
+    assert not offenders, (
+        "Page(s) a logged-out visitor can open use actions.js bindings that "
+        "base.html never loads for them:\n  " + "\n  ".join(offenders))

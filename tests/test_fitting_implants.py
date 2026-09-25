@@ -119,7 +119,7 @@ def test_search_implants_finds_seeded_implant_by_partial_name():
     """
     teardown = _seeded_db(_seed_implants)
     try:
-        r = _client().get("/tools/fitting/search/implants?q=ascend")
+        r = _authed_client(USER_A).get("/tools/fitting/search/implants?q=ascend")
         assert r.status_code == 200
         rows = r.json()
         assert rows == [{"type_id": 19540, "name": "High-grade Ascendancy Alpha", "slot": 1}]
@@ -130,7 +130,7 @@ def test_search_implants_finds_seeded_implant_by_partial_name():
 def test_search_implants_is_case_insensitive_partial_match():
     teardown = _seeded_db(_seed_implants)
     try:
-        r = _client().get("/tools/fitting/search/implants?q=ASCEND")
+        r = _authed_client(USER_A).get("/tools/fitting/search/implants?q=ASCEND")
         assert r.status_code == 200
         assert len(r.json()) == 1
     finally:
@@ -142,10 +142,10 @@ def test_search_implants_slot_filter():
     try:
         # Name matches, but the implant is actually slot 6 — filtering to
         # slot 1 must exclude it.
-        r = _client().get("/tools/fitting/search/implants?q=deadeye&slot=1")
+        r = _authed_client(USER_A).get("/tools/fitting/search/implants?q=deadeye&slot=1")
         assert r.status_code == 200 and r.json() == []
 
-        r = _client().get("/tools/fitting/search/implants?q=deadeye&slot=6")
+        r = _authed_client(USER_A).get("/tools/fitting/search/implants?q=deadeye&slot=6")
         assert r.status_code == 200
         assert len(r.json()) == 1 and r.json()[0]["slot"] == 6
     finally:
@@ -157,7 +157,7 @@ def test_search_implants_excludes_types_without_implantness_row():
     satisfy the join and must not appear even on an exact name hit."""
     teardown = _seeded_db(_seed_implants)
     try:
-        r = _client().get("/tools/fitting/search/implants?q=tritanium")
+        r = _authed_client(USER_A).get("/tools/fitting/search/implants?q=tritanium")
         assert r.status_code == 200 and r.json() == []
     finally:
         teardown()
