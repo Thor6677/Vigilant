@@ -457,7 +457,7 @@ can also apply an update at a time you pick or on a weekly window.
 
 ### In-App Updates (optional, off by default)
 
-Deploy a release from Admin › Overview instead of over SSH. **Off unless you
+Deploy a release from Admin › Updates instead of over SSH. **Off unless you
 explicitly turn it on**, and a default install behaves exactly as if this
 section did not exist.
 
@@ -527,7 +527,7 @@ $EDITOR .env                         # set all three
 docker compose --profile updater up -d
 ```
 
-Then reload Admin › Overview. The panel appears once the sidecar's heartbeat is
+Then reload Admin › Updates. The panel appears once the sidecar's heartbeat is
 less than 60 seconds old; if it stays hidden, the sidecar is not running.
 
 **Running a fork, or a mirrored registry?** Both images are parameterised:
@@ -660,7 +660,7 @@ an in-app update cannot delete the sidecar out from under itself mid-run.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| No panel in Admin › Overview | Sidecar not running, or its heartbeat is stale | `docker compose --profile updater ps`; check `docker logs vigilant-updater-1` |
+| No panel in Admin › Updates | Sidecar not running, or its heartbeat is stale | `docker compose --profile updater ps`; check `docker logs vigilant-updater-1` |
 | Panel says "socket: FAIL" | `DOCKER_GID` does not match this host | `getent group docker \| cut -d: -f3`, correct `.env`, recreate the sidecar |
 | Panel says "git: FAIL" | `/opt/vigilant` not mounted, or not owned by `VIGILANT_UID` | Check the bind mount is `/opt/vigilant:/opt/vigilant` on both sides |
 | Panel says "remote: FAIL" | The sidecar cannot fetch from `origin` — an SSH origin on a non-github host, a private repo, or no outbound network | See [`origin` must be fetchable without credentials](#origin-must-be-fetchable-without-credentials). The check retries by itself every few minutes |
@@ -728,7 +728,7 @@ No external service is needed to see any of it:
 - the **admin audit log** gets a row first, before anything is pushed;
 - admins see a **banner** on every page. A success can be dismissed and goes
   away on its own after a week; a failure, rollback or skip stays until an
-  admin acknowledges it, and links to Admin › Overview, where a paused policy
+  admin acknowledges it, and links to Admin › Updates, where a paused policy
   is resumed. The banner is read from the database, so it is there after the
   restart the update itself causes;
 - the updater panel lists the **last ten runs**, with how each push channel

@@ -1,8 +1,12 @@
 <div class="b-stats" style="margin-bottom:1.5rem;">
-    <div class="b-stat">
-        <div class="b-stat-val">{{ app_version }}</div>
-        <div class="b-stat-label">Version</div>
-    </div>
+    {# Version tile doubles as the pointer to the Updates tab: everything about
+       updates lives there, so Overview only says whether to go and look. #}
+    <a class="b-stat" href="/admin?tab=updates" style="text-decoration:none;color:inherit;">
+        <div class="b-stat-val {% if update_is_newer %}is-accent{% endif %}">{{ app_version }}</div>
+        <div class="b-stat-label">
+            {% if update_is_newer %}{{ update_latest }} available{% else %}Version{% endif %}
+        </div>
+    </a>
     <div class="b-stat">
         <div class="b-stat-val">{{ uptime }}</div>
         <div class="b-stat-label">Uptime</div>
@@ -27,14 +31,6 @@
     </div>
 </div>
 
-{# In-app updater. Rendered INLINE rather than lazily fetched: this section
-   re-fetches itself every 10s, so a placeholder with hx-trigger="load" arrives
-   empty on every refresh and the panel only reappears a round-trip later —
-   which reads as the panel flashing in and out. Still self-gating: with no
-   sidecar running, `available` is false and the panel renders the "no updater"
-   note with no controls. #}
-{% include "partials/updater_panel.html" %}
-
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">System Info</span>
@@ -53,34 +49,4 @@
         <span class="b-row-label">Sync Queue</span>
         <span class="b-row-val">{{ queue_depth }} queued · {{ active_syncs }}/{{ sync_concurrency }} active</span>
     </div>
-</div>
-
-{# Update checker state. Notification-only — deploying, now or on a schedule,
-   belongs to the updater panel above. #}
-<div class="b-panel" style="margin-bottom:1.5rem;">
-    <div class="b-panel-head">
-        <span class="b-label">Updates</span>
-    </div>
-    <div class="b-row">
-        <span class="b-row-label">Running</span>
-        <span class="b-row-val">{{ app_version }}</span>
-    </div>
-    <div class="b-row">
-        <span class="b-row-label">Latest Release</span>
-        <span class="b-row-val">
-            {% if update_latest %}
-                {% if update_url %}<a href="{{ update_url }}" target="_blank" rel="noopener noreferrer">{{ update_latest }}</a>{% else %}{{ update_latest }}{% endif %}
-            {% else %}Unknown{% endif %}
-        </span>
-    </div>
-    <div class="b-row">
-        <span class="b-row-label">Last Checked</span>
-        <span class="b-row-val">{{ update_checked_at }}</span>
-    </div>
-    {% if update_error %}
-    <div class="b-row">
-        <span class="b-row-label">Last Error</span>
-        <span class="b-row-val is-warn">{{ update_error }}</span>
-    </div>
-    {% endif %}
 </div>

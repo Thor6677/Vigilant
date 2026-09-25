@@ -20,13 +20,9 @@
 </div>
 
 <div class="b-tab-strip" id="admin-tabs">
-    <button type="button" class="is-active" data-click="switchTab" data-section="overview">Overview</button>
-    <button type="button" data-click="switchTab" data-section="users">Users</button>
-    <button type="button" data-click="switchTab" data-section="esi">ESI Health</button>
-    <button type="button" data-click="switchTab" data-section="scheduler">Scheduler</button>
-    <button type="button" data-click="switchTab" data-section="database">Database</button>
-    <button type="button" data-click="switchTab" data-section="sde">SDE</button>
-    <button type="button" data-click="switchTab" data-section="audit">Audit Log</button>
+    {% for key, label in sections %}
+    <button type="button" {% if key == initial_section %}class="is-active"{% endif %} data-click="switchTab" data-section="{{ key }}">{{ label }}</button>
+    {% endfor %}
 </div>
 
 {# data-htmx-no-error: this container re-fetches itself every 10s (see
@@ -38,7 +34,7 @@
    app coming back, which is exactly what the updater panel's own opt-out exists
    to prevent — defeated one level up. See tests/test_updater_panel.py. #}
 <div id="admin-content"
-     hx-get="/admin/section/overview"
+     hx-get="/admin/section/{{ initial_section }}"
      hx-trigger="load"
      hx-swap="innerHTML"
      data-htmx-no-error="1">
@@ -46,8 +42,15 @@
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
-var currentSection = 'overview';
+/* initial_section comes from ?tab= and is validated server-side against
+   ADMIN_SECTIONS, so it is always one of the tab keys. tojson, not a bare
+   string, so the value can never break out of the literal. */
+var currentSection = {{ initial_section | tojson }};
 var refreshTimer = null;
+/* Sections that re-fetch themselves, and how often. Updates must stay in
+   here: its panel is idle most of the time and only this refresh notices a
+   new heartbeat, a new release or a report arriving. */
+var refreshSections = {'overview': 10000, 'updates': 10000, 'scheduler': 5000, 'esi': 5000};
 
 function switchTab() {
     var section = this.dataset.section;
@@ -56,10 +59,12 @@ function switchTab() {
     document.querySelectorAll('#admin-tabs button').forEach(function(b) { b.classList.remove('is-active'); });
     el.classList.add('is-active');
     htmx.ajax('GET', '/admin/section/' + section, '#admin-content');
+    /* Keep the tab in the URL so a reload — or the app coming back after an
+       in-app update — lands on the same tab instead of Overview. */
+    try { history.replaceState(null, '', section === 'overview' ? '/admin' : '/admin?tab=' + section); } catch (e) {}
 
     /* Auto-refresh active section */
     if (refreshTimer) clearInterval(refreshTimer);
-    var refreshSections = {'overview': 10000, 'scheduler': 5000, 'esi': 5000};
     var interval = refreshSections[section];
     if (interval) {
         refreshTimer = setInterval(refreshAdminSection, interval);
@@ -75,8 +80,10 @@ function refreshAdminSection() {
     htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
 }
 
-/* Start auto-refresh for overview */
-refreshTimer = setInterval(refreshAdminSection, 10000);
+/* Start auto-refresh for whichever section the page opened on */
+if (refreshSections[currentSection]) {
+    refreshTimer = setInterval(refreshAdminSection, refreshSections[currentSection]);
+}
 
 /* Stop polling the moment the server says this session is gone (401) or no
    longer an admin's (403). A 401 also carries HX-Redirect, which htmx honours

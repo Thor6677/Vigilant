@@ -95,10 +95,32 @@ def _format_duration(seconds: float) -> str:
 
 # ── Main page ────────────────────────────────────────────────────────────────
 
+# Tab order in the console, and the only values ?tab= may take. Anything else
+# falls back to Overview rather than being reflected into the page.
+ADMIN_SECTIONS = (
+    ("overview", "Overview"),
+    ("updates", "Updates"),
+    ("users", "Users"),
+    ("esi", "ESI Health"),
+    ("scheduler", "Scheduler"),
+    ("database", "Database"),
+    ("sde", "SDE"),
+    ("audit", "Audit Log"),
+)
+
+
 @router.get("", response_class=HTMLResponse)
-async def admin_page(request: Request, db: AsyncSession = Depends(get_db),
+async def admin_page(request: Request, tab: str = "overview",
+                     db: AsyncSession = Depends(get_db),
                      admin: User = Depends(require_admin)):
-    return templates.TemplateResponse(request, "admin.html", {})
+    # ?tab= lets a link land on a section directly — the update-report banner
+    # sends admins to ?tab=updates rather than to Overview.
+    if tab not in dict(ADMIN_SECTIONS):
+        tab = "overview"
+    return templates.TemplateResponse(request, "admin.html", {
+        "sections": ADMIN_SECTIONS,
+        "initial_section": tab,
+    })
 
 
 # ── Section endpoints ────────────────────────────────────────────────────────
@@ -136,26 +158,18 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
     esi_status = rate_limit_tracker.overall_status()
 
     # Update checker state (app/ops/update_check.py). None until the first poll.
-    from app.db.models import UpdateStatus
-    upd = (await db.execute(
-        select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+    # Everything else about updates lives on the Updates tab; Overview only
+    # says whether there is anything to look at there.
+    upd = await _update_status_row(db)
+    latest = upd.latest_tag if upd else None
 
-    # Rendered INLINE, not lazily fetched. This section re-fetches itself every
-    # 10s (admin.html), so a placeholder with hx-trigger="load" arrives EMPTY on
-    # every refresh and the panel only reappears a round-trip later — which
-    # reads as the panel flashing in and out every few seconds. Reported from
-    # the browser 2026-09-14. Building the context here costs two file reads and
-    # one row, and the panel now arrives already rendered.
-    updater_ctx = await _updater_context(request, db)
-
-    return templates.TemplateResponse(request, "partials/admin_overview.html", {**updater_ctx, "uptime": _format_duration(uptime_secs),
+    return templates.TemplateResponse(request, "partials/admin_overview.html", {
+        "uptime": _format_duration(uptime_secs),
         # Build tag baked into the image by release CI, or "dev" for a source
         # build. Shown here rather than on /healthz, which is public.
         "app_version": settings.version,
-        "update_latest": upd.latest_tag if upd else None,
-        "update_url": upd.latest_url if upd else None,
-        "update_checked_at": _format_age(upd.checked_at) if upd else "never",
-        "update_error": upd.last_error if upd else None,
+        "update_latest": latest,
+        "update_is_newer": is_newer(latest, settings.version),
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "db_size": _format_bytes(db_size),
         "sde_age_days": sde_age,
@@ -165,6 +179,24 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
         "queue_depth": sched["queue_depth"],
         "active_syncs": sched["sync_concurrency"] - sched["semaphore_available"],
         "sync_concurrency": sched["sync_concurrency"]})
+
+
+@router.get("/section/updates", response_class=HTMLResponse)
+async def admin_updates(request: Request, db: AsyncSession = Depends(get_db),
+                        admin: User = Depends(require_admin)):
+    """The Updates tab: checker state, the in-app updater, scheduling, report
+    channels and run history, in that order.
+
+    The panel is rendered INLINE, not lazily fetched. This section re-fetches
+    itself every 10s (admin.html), so a placeholder with hx-trigger="load"
+    arrives EMPTY on every refresh and the panel only reappears a round-trip
+    later — which reads as the panel flashing in and out every few seconds.
+    Reported from the browser 2026-09-14. Building the context here costs two
+    file reads and one row, and the panel arrives already rendered.
+    """
+    return templates.TemplateResponse(
+        request, "partials/admin_updates.html",
+        await _updater_context(request, db))
 
 
 @router.get("/section/users", response_class=HTMLResponse)
@@ -1066,6 +1098,12 @@ def _require_updater() -> dict:
     return beat
 
 
+async def _update_status_row(db: AsyncSession) -> UpdateStatus | None:
+    """The update checker's single state row, or None before its first poll."""
+    return (await db.execute(
+        select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+
+
 async def _latest_known_tag(db: AsyncSession) -> str | None:
     """The newest release the update checker has seen.
 
@@ -1074,7 +1112,7 @@ async def _latest_known_tag(db: AsyncSession) -> str | None:
     already runs hourly in app/ops/update_check.py. Asking the privileged side
     for it would duplicate that poll and widen what the sidecar knows about.
     """
-    row = (await db.execute(select(UpdateStatus).where(UpdateStatus.id == 1))).scalar_one_or_none()
+    row = await _update_status_row(db)
     return row.latest_tag if row else None
 
 
@@ -1095,7 +1133,8 @@ async def _updater_context(request: Request, db: AsyncSession,
     """
     beat = updater_client.read_heartbeat()
     status = updater_client.read_status()
-    latest = await _latest_known_tag(db)
+    checker = await _update_status_row(db)
+    latest = checker.latest_tag if checker else None
     current = (beat or {}).get("current_tag")
     state = updater_client.run_state(status, datetime.now(timezone.utc))
     # Queued but not yet claimed: status.json still describes the PREVIOUS run.
@@ -1124,6 +1163,15 @@ async def _updater_context(request: Request, db: AsyncSession,
         "targets": (beat or {}).get("targets") or [],
         "current_tag": current,
         "latest_tag": latest,
+        # The update checker's side, which runs with or without the sidecar —
+        # so the panel shows it in both branches. It used to be a second
+        # "Updates" panel on Overview, repeating the version the panel's own
+        # header already showed.
+        "app_version": settings.version,
+        "update_url": checker.latest_url if checker else None,
+        "update_checked_at": _format_age(checker.checked_at) if checker else "never",
+        "update_error": checker.last_error if checker else None,
+        "checker_says_newer": is_newer(latest, settings.version),
         "update_available": bool(latest and current and latest != current),
         "checks": (beat or {}).get("checks") or {},
         "updater_version": (beat or {}).get("version"),

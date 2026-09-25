@@ -371,8 +371,16 @@ def test_account_menu_carries_admin_add_character_and_logout():
     menu = _account_menu(_render_base(is_admin=True))
     assert 'href="/auth/add-character"' in menu
     assert 'href="/admin"' in menu       # Admin group's Console item
-    assert 'href="/status"' in menu      # Admin group's Status item
     assert 'action="/auth/logout"' in menu
+
+
+def test_account_menu_has_no_duplicate_destinations():
+    """/status redirects to /admin, so listing both gave admins two menu rows
+    that land on the same page. Every account-menu link must be distinct."""
+    menu = _account_menu(_render_base(is_admin=True))
+    assert 'href="/status"' not in menu
+    hrefs = re.findall(r'href="([^"]+)"', menu)
+    assert len(hrefs) == len(set(hrefs)), hrefs
 
 
 def test_account_menu_hides_admin_items_from_non_admins():
