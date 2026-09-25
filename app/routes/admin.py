@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 
 from app.db.models import (
     get_db, User, Character, CharacterDashboardCache, WalletSnapshot,
@@ -49,6 +49,39 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
     if not user or user.role not in ("admin", "manager"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+# Audit log filter options (T-068): (key, label, event-type prefixes). An event
+# is in a group when its type equals a prefix or starts with "<prefix>_". The
+# options used to be hand-typed, and three of the six (login, sync_error,
+# token_refresh_failed) named types nothing writes, while most written types had
+# no option. tests/test_admin_audit_filter.py scans every writer and fails when
+# a written type is in no group, or a group matches nothing written.
+AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("permissions", "Permissions", ("permissions_changed", "permissions_purged")),
+    ("allowlist", "Allowlist", ("admin_allowlist",)),
+    ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character")),
+    ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
+    ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
+    ("sde", "SDE updates", ("admin_sde_update",)),
+    ("cache", "Cache purges", ("admin_cache_purge",)),
+)
+_AUDIT_FILTER_PREFIXES = {key: prefixes for key, _label, prefixes in AUDIT_FILTERS}
+
+
+def audit_group(event_type: str) -> str | None:
+    """The filter group an event type falls in, or None."""
+    for key, _label, prefixes in AUDIT_FILTERS:
+        if any(event_type == p or event_type.startswith(p + "_") for p in prefixes):
+            return key
+    return None
+
+
+def _audit_group_clause(prefixes: tuple[str, ...]):
+    # "_" is a LIKE wildcard: escape the ones in each prefix and in the separator.
+    likes = [AdminAuditLog.event_type.like(p.replace("_", r"\_") + r"\_%", escape="\\")
+             for p in prefixes]
+    return or_(AdminAuditLog.event_type.in_(prefixes), *likes)
 
 
 async def _log_audit(db: AsyncSession, event_type: str, user_id: int = None,
@@ -504,8 +537,10 @@ async def admin_audit(request: Request, filter: str = "",
                       db: AsyncSession = Depends(get_db),
                       admin: User = Depends(require_admin)):
     query = select(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(100)
+    if filter not in _AUDIT_FILTER_PREFIXES:
+        filter = ""             # unknown or retired option (e.g. an old "login" link): show all
     if filter:
-        query = query.where(AdminAuditLog.event_type == filter)
+        query = query.where(_audit_group_clause(_AUDIT_FILTER_PREFIXES[filter]))
     result = await db.execute(query)
     events = result.scalars().all()
 
@@ -519,6 +554,7 @@ async def admin_audit(request: Request, filter: str = "",
     return templates.TemplateResponse(request, "partials/admin_audit.html", {"events": events,
         "char_names": char_names,
         "filter": filter,
+        "audit_filters": AUDIT_FILTERS,
         "format_age": _format_age})
 
 
