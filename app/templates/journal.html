@@ -10,19 +10,7 @@
 {% endblock %}
 {% block content %}
 
-{% macro format_isk(amount) %}
-  {%- if amount is none -%}—
-  {%- elif amount >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
-  {%- elif amount >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
-  {%- elif amount >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
-  {%- elif amount >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
-  {%- else -%}{{ "%.0f"|format(amount) }}{%- endif %}
-{% endmacro %}
-
-{% macro format_isk_signed(amount) %}
-  {%- if amount >= 0 -%}+{{ format_isk(amount) }}
-  {%- else -%}{{ format_isk(amount) }}{%- endif %}
-{% endmacro %}
+{% from "partials/_isk_format.html" import format_isk, format_isk_signed %}
 
 {# ── Page Header ──────────────────────────────────────────────────────────── #}
 <div class="b-page-header">
@@ -102,7 +90,7 @@
 {% endfor %}
 <div class="b-stats" style="margin-bottom:1rem;">
     <div class="b-stat">
-        <div class="b-stat-val" style="color:var(--success);">+{{ format_isk(ns.income) }} ISK</div>
+        <div class="b-stat-val" style="color:var(--success);">{{ format_isk_signed(ns.income) }} ISK</div>
         <div class="b-stat-label">Income</div>
     </div>
     <div class="b-stat">

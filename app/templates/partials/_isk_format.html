@@ -1,0 +1,31 @@
+{#
+  ISK amounts for the wallet journals (character and corporation).
+    {% from "partials/_isk_format.html" import format_isk, format_isk_signed %}
+
+  The magnitude picks the unit, so a negative amount shortens like a positive
+  one. T-067: the thresholds used to compare the signed value, so every
+  expense printed raw ("-3780900000 ISK" beside "+3.78B ISK"), and so did the
+  Expenses and Net totals. EVE ISK has 0.01 precision, so an amount under 1 ISK
+  keeps two decimals instead of rounding to "0".
+#}
+{% macro format_isk(amount) %}
+  {%- if amount is none -%}—
+  {%- else -%}
+    {%- set a = amount | abs -%}
+    {%- if a >= 1000000000000 -%}{{ "%.2f"|format(amount / 1000000000000) }}T
+    {%- elif a >= 1000000000 -%}{{ "%.2f"|format(amount / 1000000000) }}B
+    {%- elif a >= 1000000 -%}{{ "%.2f"|format(amount / 1000000) }}M
+    {%- elif a >= 1000 -%}{{ "%.1f"|format(amount / 1000) }}K
+    {%- elif a > 0 and a < 1 -%}{{ "%.2f"|format(amount) }}
+    {%- else -%}{{ "%.0f"|format(amount) }}
+    {%- endif -%}
+  {%- endif %}
+{% endmacro %}
+
+{# "+" only for a real gain; zero reads as "0", not "+0". #}
+{% macro format_isk_signed(amount) %}
+  {%- if amount is none -%}—
+  {%- elif amount > 0 -%}+{{ format_isk(amount) }}
+  {%- else -%}{{ format_isk(amount) }}
+  {%- endif %}
+{% endmacro %}
