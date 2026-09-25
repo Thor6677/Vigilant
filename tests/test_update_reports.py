@@ -76,7 +76,13 @@ def http(monkeypatch):
     FakeClient.built, FakeClient.posts = [], []
     FakeClient.status, FakeClient.raise_with = 200, None
     monkeypatch.setattr(ur.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(ur, "_resolve", _resolve_public)
     return FakeClient
+
+
+async def _resolve_public(host, port):
+    """The made-up webhook hosts resolve to a public address, without DNS."""
+    return ["93.184.215.14"]
 
 
 def _notify(**kw):

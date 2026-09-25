@@ -1594,6 +1594,8 @@ async def updater_notify_save(request: Request,
     new_url = None
     if webhook_remove is None and webhook_url.strip():
         new_url, problem = update_reports.validate_webhook_url(webhook_url)
+        if not problem:
+            problem = await update_reports.webhook_target_problem(new_url)
         if problem:
             return await refuse(f"webhook: {problem}")
 
