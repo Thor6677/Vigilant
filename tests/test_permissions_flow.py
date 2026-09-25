@@ -334,6 +334,31 @@ async def _all_keys(db):
     return [r.key for r in (await db.execute(select(ESICache))).scalars().all()]
 
 
+def test_renewing_clears_what_the_old_token_failed(env):
+    """ISS-051: a failed fetch stamps its field as synced, so the sync queued
+    after a renewal found nothing stale and "Authorization expired" stayed up
+    for as long as an hour."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    async def seed(db):
+        db.add(CharacterDashboardCache(
+            character_id=MAIN_ID,
+            field_synced_json=json.dumps({"wallet": now, "assets": now}),
+            sync_warnings_json=json.dumps({"wallet": perm_status.TOKEN_REVOKED,
+                                           "assets": perm_status.TOKEN_REVOKED})))
+        await db.commit()
+    env.q(seed)
+    env.sso_returns(MAIN_ID, "Main Pilot", cat.ALL_SCOPES)
+    r = env.client(_pending("update", [p.key for p in cat.PERMISSIONS], MAIN_ID,
+                            user_id=USER_ID)).get("/auth/callback?code=x&state=S")
+    assert r.status_code == 303
+    cache = env.q(lambda db: _scalar(db, select(CharacterDashboardCache).where(
+        CharacterDashboardCache.character_id == MAIN_ID)))
+    assert cache.field_synced_json is None          # queued sync re-fetches everything
+    assert not perm_status.token_failed(json.loads(cache.sync_warnings_json or "{}"))
+    assert env.calls["synced"] == [MAIN_ID]
+
+
 def test_narrowing_with_purge_deletes_what_was_collected(env):
     _seed_alt_data(env)
     env.sso_returns(ALT_ID, "Alt Pilot", [cat.ASSETS])

@@ -44,7 +44,7 @@ from app.auth import scopes as perms
 from app.auth.purge import clear_live_state, purge_history
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
-from app.db.models import AdminAuditLog, Character, User, get_db
+from app.db.models import AdminAuditLog, Character, CharacterDashboardCache, User, get_db
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi import scope_guard
@@ -413,6 +413,15 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     existing.scopes = granted
     existing.declined_scopes = perms.join_scopes(perms.declined_after(requested))
     _apply_metadata(existing, meta)
+    # ISS-051: what the last sync found wrong was found with the OLD token. A
+    # failed fetch still stamps its field as synced, so without this reset the
+    # queued sync below saw nothing stale and "Authorization expired" stayed up
+    # for up to an hour after a successful renewal. Same as a manual resync.
+    cache = (await db.execute(select(CharacterDashboardCache).where(
+        CharacterDashboardCache.character_id == character_id))).scalar_one_or_none()
+    if cache is not None:
+        cache.field_synced_json = None
+        cache.sync_warnings_json = None
     if intent == SIGNUP:
         user.last_login = datetime.now(timezone.utc)
 
