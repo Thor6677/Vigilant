@@ -37,7 +37,7 @@ fi
 # Which stack this run targets. Defaults reproduce production exactly; the
 # in-app updater and the throwaway verification stack override them.
 #
-# readonly, and resolved BEFORE .health-env is sourced, on purpose. .health-env
+# readonly, and resolved BEFORE .health-env is read, on purpose. .health-env
 # lives INSIDE the root it describes, so a stale or copied one naming a different
 # stack must not be able to retarget the run. Verified 2026-07-26: without this,
 # a .health-env setting VIGILANT_ROOT produced a split-brain deploy — the
@@ -50,12 +50,54 @@ readonly VIGILANT_COMPOSE_FILE="${VIGILANT_COMPOSE_FILE:-docker-compose.yml}"
 
 cd "$VIGILANT_ROOT"
 
+# .health-env is read as data, never executed. Accepted lines: blank, `# comment`,
+# and `[export ]KEY=value` where value is unquoted [A-Za-z0-9_./:@%+,=-]*, or
+# "double" / 'single' quoted text with no $ ` \ " '. Anything else refuses the
+# whole file, so nothing in it can run a command. Setting a readonly variable
+# still aborts (see below). Kept identical in deploy.sh, rollback.sh and
+# health-check.sh — each re-execs or runs alone, so none can source a shared
+# copy; tests/test_health_env_parsing.py fails if they drift apart.
+load_health_env() {
+    local _he_file="$1" _he_code="$2" _he_line _he_key _he_val _he_export _he_n=0
+    [ -r "$_he_file" ] || return 0
+    while IFS= read -r _he_line || [ -n "$_he_line" ]; do
+        _he_n=$((_he_n + 1))
+        if [[ "$_he_line" =~ ^[[:space:]]*(#.*)?$ ]]; then
+            continue
+        fi
+        if ! [[ "$_he_line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            echo "ERROR: $_he_file line $_he_n is not KEY=value; refusing to read the file." >&2
+            exit "$_he_code"
+        fi
+        _he_export="${BASH_REMATCH[1]}"
+        _he_key="${BASH_REMATCH[2]}"
+        _he_val="${BASH_REMATCH[3]}"
+        case "$_he_val" in
+            \"*\"|\'*\')
+                _he_val="${_he_val:1:${#_he_val}-2}"
+                if [[ "$_he_val" == *[\$\`\\\"\']* ]]; then
+                    echo "ERROR: $_he_file line $_he_n ($_he_key) holds a character the shell would expand; refusing to read the file." >&2
+                    exit "$_he_code"
+                fi ;;
+            *)
+                if ! [[ "$_he_val" =~ ^[A-Za-z0-9_./:@%+,=-]*$ ]]; then
+                    echo "ERROR: $_he_file line $_he_n ($_he_key) must be quoted or plain text; refusing to read the file." >&2
+                    exit "$_he_code"
+                fi ;;
+        esac
+        printf -v "$_he_key" '%s' "$_he_val" || exit "$_he_code"
+        if [ -n "$_he_export" ]; then
+            export "${_he_key?}"
+        fi
+    done < "$_he_file"
+    return 0
+}
+
 # Optional: set MAINTENANCE in an untracked `.health-env` beside the repo root
 # to point at your ops toolkit's maintenance script, silencing the host service
 # monitor for the duration of the deploy. Unset, or not executable, and the step
 # is skipped cleanly.
-# shellcheck disable=SC1091
-[ -r "$VIGILANT_ROOT/.health-env" ] && source "$VIGILANT_ROOT/.health-env"
+load_health_env "$VIGILANT_ROOT/.health-env" 1
 MAINTENANCE="${MAINTENANCE:-}"
 # Tracks compose's own basename(cwd) project-name derivation (verified against
 # production 2026-07-26: no top-level `name:`, no COMPOSE_PROJECT_NAME, no
