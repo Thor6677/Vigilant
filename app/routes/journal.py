@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.models import get_db, Character, AsyncSessionLocal
-from app.esi.client import ESIClient, refresh_token
+from app.esi.client import ESIClient, TokenRevoked, refresh_token
+from app.auth import scopes as perms, status as perm_status
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.routes.corporations import _try_api_call_with_fallback
@@ -269,12 +270,23 @@ async def corp_journal(
     result = await db.execute(select(Character).where(Character.user_id == user_id))
     characters = list(result.scalars().all())
 
-    scope = "esi-wallet.read_corporation_wallets.v1"
-    corp_chars = [c for c in characters if c.corporation_id == corp_id and scope in (c.scopes or "")]
+    in_corp = [c for c in characters if c.corporation_id == corp_id]
+    roles = await perm_status.corp_roles_for(db, [c.character_id for c in in_corp])
+    dead = await perm_status.dead_token_ids(db, [c.character_id for c in in_corp])
+    # Most likely to succeed first — a holder of Accountant / Junior
+    # Accountant / Director, then unknown roles, then the rest; rejected
+    # authorizations last (ISS-050: this was DB order, so the page could
+    # headline an alt that cannot read the journal).
+    corp_chars = perm_status.rank_candidates(
+        [c for c in in_corp if perms.has(c, perms.CORP_WALLETS)],
+        perms.BY_KEY["corp_wallets"].in_game_roles, roles, dead)
+    # Why nobody could read it, when that happens: the shared notice keeps
+    # "not shared" apart from "lacks the in-game role".
+    notice = {"missing_perm": "corp_wallets", "perm_chars": in_corp, "perm_roles": roles}
 
     if not corp_chars:
-        return templates.TemplateResponse(request, "journal.html", {"char": characters[0] if characters else None,
-            "entries": [], "error": "No character with corp wallet access for this corporation.",
+        return templates.TemplateResponse(request, "journal.html", {"char": in_corp[0] if in_corp else (characters[0] if characters else None),
+            "entries": [], "error": None, **notice,
             "page": 1, "has_more": False, "category": "all",
             "categories": CATEGORY_LABELS, "is_corp": True,
             "corp_id": corp_id, "division": division})
@@ -288,31 +300,43 @@ async def corp_journal(
     char = corp_chars[0]
 
     try:
-        # Try each character until one succeeds (handles 403 from missing Director role)
+        # Try every candidate until one reads it. A failure of any kind moves
+        # on: a rejected authorization (SSO 400), a missing in-game role (ESI
+        # 403) or a one-off error on one character says nothing about the
+        # next one. It used to stop at the first non-403 error, so a dead
+        # token on the first alt hid a Director further down (ISS-050).
         all_entries = []
         client = None
-        last_error = None
+        failures: list[str] = []
         for c in corp_chars:
             try:
                 token = await refresh_token(c, db)
                 client = ESIClient(token, db=db)
+                fetched = []
                 for p in range(1, min(page + 1, 4)):
                     raw = await esi_corp.get_corporation_wallet_journal(client, corp_id, division, page=p)
                     if not raw:
                         break
-                    all_entries.extend(raw)
+                    fetched.extend(raw)
                     if len(raw) < 2500:
                         break
-                last_error = None
+                all_entries = fetched
                 char = c  # this is the pilot whose role read the journal
+                failures = []
                 break  # Success
+            except TokenRevoked:
+                failures.append(f"{c.character_name}: authorization expired")
             except Exception as e:
-                last_error = e
-                if "403" not in str(e):
-                    break  # Non-403 error, don't try next char
+                why = "EVE refused (in-game role)" if "403" in str(e) else type(e).__name__
+                failures.append(f"{c.character_name}: {why}")
 
-        if last_error:
-            raise last_error
+        if failures:
+            return templates.TemplateResponse(request, "journal.html", {"char": corp_chars[0], "entries": [],
+                "error": "None of your characters could read this wallet journal — " + "; ".join(failures) + ".",
+                **notice,
+                "page": 1, "has_more": False, "category": "all",
+                "categories": CATEGORY_LABELS, "is_corp": True,
+                "corp_id": corp_id, "division": division})
 
         entity_ids = set()
         for e in all_entries:

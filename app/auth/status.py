@@ -27,6 +27,11 @@ from app.db.models import CharacterCorpRoles
 
 ROLE_MISSING = "role_missing"
 ROLES_UNKNOWN = "roles_unknown"
+# A Director passes every ESI corporation role check (in EVE a director holds
+# all roles), although the spec's x-required-roles never lists it. Checking
+# the listed roles literally told Directors they lacked "Accountant" for data
+# they could read (ISS-050).
+DIRECTOR = "Director"
 
 
 def _attr(char, name):
@@ -38,9 +43,59 @@ def pretty_role(role: str) -> str:
 
 
 def roles_text(roles: Iterable[str]) -> str:
-    """("Accountant", "Junior_Accountant") -> "Accountant or Junior Accountant"."""
-    roles = [pretty_role(r) for r in roles]
-    return " or ".join(roles)
+    """("Accountant", "Junior_Accountant") -> "Accountant, Junior Accountant or
+    Director" — Director always qualifies, so it is always named."""
+    names = [pretty_role(r) for r in roles]
+    if DIRECTOR not in roles:
+        names.append(DIRECTOR)
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+
+
+def holds_role(roles: set[str] | None, required: Iterable[str]) -> bool | None:
+    """Whether a character's in-game roles satisfy a requirement: True, False,
+    or None when its roles are unknown (never synced)."""
+    required = set(required)
+    if not required:
+        return True
+    if roles is None:
+        return None
+    return DIRECTOR in roles or bool(roles & required)
+
+
+def rank_candidates(chars, required: Iterable[str], roles_by_char: dict[int, set[str]],
+                    dead_ids: Iterable[int] = ()) -> list:
+    """Order characters for a corporation ESI call, most likely to succeed
+    first: holds a qualifying role, then roles unknown, then known to lack it;
+    characters whose authorization EVE rejected go last in every tier. Stable,
+    so the original order breaks ties. Nobody is dropped — role data can be up
+    to an hour stale, and trying costs one request."""
+    required = tuple(required)
+    dead = set(dead_ids)
+
+    def key(c):
+        cid = _attr(c, "character_id")
+        held = holds_role(roles_by_char.get(cid), required)
+        return (cid in dead, 0 if held is True else 1 if held is None else 2)
+    return sorted(chars, key=key)
+
+
+async def dead_token_ids(db: AsyncSession, character_ids: Iterable[int]) -> set[int]:
+    """Characters whose last sync found their authorization rejected."""
+    from app.db.models import CharacterDashboardCache
+    ids = [int(c) for c in character_ids]
+    if not ids:
+        return set()
+    rows = (await db.execute(select(
+        CharacterDashboardCache.character_id, CharacterDashboardCache.sync_warnings_json
+    ).where(CharacterDashboardCache.character_id.in_(ids)))).all()
+    out = set()
+    for cid, raw in rows:
+        try:
+            if raw and token_failed(json.loads(raw)):
+                out.add(cid)
+        except (ValueError, TypeError):
+            continue
+    return out
 
 
 async def corp_roles_for(db: AsyncSession, character_ids: Iterable[int]) -> dict[int, set[str]]:
@@ -69,7 +124,7 @@ def character_state(char, key: str, roles_by_char: dict[int, set[str]] | None = 
     cid = _attr(char, "character_id")
     if cid not in roles_by_char:
         return ROLES_UNKNOWN if not perms.has(char, perms.CORP_ROLES) else perms.GRANTED
-    return perms.GRANTED if roles_by_char[cid] & set(perm.in_game_roles) else ROLE_MISSING
+    return perms.GRANTED if holds_role(roles_by_char[cid], perm.in_game_roles) else ROLE_MISSING
 
 
 def gaps(characters, key: str, roles_by_char: dict[int, set[str]] | None = None) -> dict[str, list]:
