@@ -10,6 +10,7 @@ unchanged.
 
 import json
 import time
+from html import escape as html_escape
 
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -139,7 +140,7 @@ async def industry_calculate(
     bp_name = await sde.type_id_to_name(db, type_id) or f"Type {type_id}"
 
     if not materials:
-        return HTMLResponse(f'<div class="b-empty">No manufacturing data for {bp_name}</div>')
+        return HTMLResponse(f'<div class="b-empty">No manufacturing data for {html_escape(bp_name)}</div>')
 
     # Check which materials have blueprints (buildable)
     all_type_ids = {m["type_id"] for m in materials}
@@ -258,11 +259,11 @@ async def industry_component(
     product_name = await sde.type_id_to_name(db, type_id) or f"Type {type_id}"
 
     if not sub_bp:
-        return HTMLResponse(f'<div class="b-empty">{product_name} has no blueprint</div>')
+        return HTMLResponse(f'<div class="b-empty">{html_escape(product_name)} has no blueprint</div>')
 
     materials = await sde.get_blueprint_materials(db, sub_bp)
     if not materials:
-        return HTMLResponse(f'<div class="b-empty">No materials for {product_name}</div>')
+        return HTMLResponse(f'<div class="b-empty">No materials for {html_escape(product_name)}</div>')
 
     all_type_ids = {m["type_id"] for m in materials}
     price_map = await _get_price_map(db, all_type_ids)
@@ -956,7 +957,7 @@ async def compression_calculate(
     result = solve_compression(target, filtered_ore_data, ore_prices, yield_per_ore, mode, mineral_prices)
 
     if result.get("error"):
-        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{result["error"]}</div>')
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{html_escape(result["error"])}</div>')
 
     # Build multibuy text
     multibuy_lines = [f'{ore["name"]} x{ore["quantity"]}' for ore in result["ores"]]
