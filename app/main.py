@@ -507,35 +507,10 @@ async def startup():
         await db.commit()
 
     # ── Encrypt plaintext ESI tokens in-place ──────────────────────────
-    from app.db.encryption import get_fernet
+    from app.db.encryption import migrate_token_encryption
 
     async with AsyncSessionLocal() as db:
-        rows = (await db.execute(text("SELECT id, access_token, refresh_token FROM characters"))).fetchall()
-        fernet = get_fernet()
-        migrated = 0
-        for row in rows:
-            char_id, raw_at, raw_rt = row
-            needs_update = False
-            new_at, new_rt = raw_at, raw_rt
-            try:
-                fernet.decrypt(raw_at.encode())
-            except Exception:
-                new_at = fernet.encrypt(raw_at.encode()).decode()
-                needs_update = True
-            try:
-                fernet.decrypt(raw_rt.encode())
-            except Exception:
-                new_rt = fernet.encrypt(raw_rt.encode()).decode()
-                needs_update = True
-            if needs_update:
-                await db.execute(
-                    text("UPDATE characters SET access_token = :at, refresh_token = :rt WHERE id = :id"),
-                    {"at": new_at, "rt": new_rt, "id": char_id},
-                )
-                migrated += 1
-        if migrated:
-            await db.commit()
-            logging.info("Encrypted tokens for %d characters.", migrated)
+        await migrate_token_encryption(db)
     import asyncio
     # NOT gated by BACKGROUND_JOBS_ENABLED: every page that renders a type or
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
