@@ -1,7 +1,8 @@
 {#
   permission_notice(characters, key, roles_by_char=none, what=none)
+  corp_permission_summary(characters, permission_list, roles_by_char=none, what=none)
 
-  Explains why a feature is missing data for some characters, and keeps the
+  Explain why a feature is missing data for some characters, and keep the
   three causes apart (app/auth/status.py):
 
     permission  — the user did not share it (declined), or the character was
@@ -15,20 +16,57 @@
   `characters` are Character rows or dicts with character_id, character_name,
   scopes, declined_scopes. `roles_by_char` comes from
   perm_status.corp_roles_for(); pass it only for corporation permissions.
-  `what` completes "…, so <what>." Renders nothing when every character is
-  covered. Import with:
-    {% from "partials/_permission_notice.html" import permission_notice %}
+  `what` completes "…, so <what>." Both macros render nothing when every
+  character is covered for every permission passed in. Import with:
+    {% from "partials/_permission_notice.html" import permission_notice, corp_permission_summary %}
+
+  `permission_notice` is for a single permission (skills, journal, industry
+  jobs, …): one box, one key. `corp_permission_summary` is for a corp card
+  that checks several corporation permissions at once (corp_detail.html): it
+  renders at most one box total, and — same rule as the loop it replaced —
+  a permission that at least one character can already use says nothing at
+  all, since the corp card's data comes from whichever character CAN answer
+  for it.
+
+  Everything left over is grouped by the set of characters it affects, so
+  three permissions declined by the same alt read as one line, not three.
+  Declined/new/roles-unknown keep their own Share/Review link (they are
+  actionable); in-game-role gaps never are, so they are consolidated further
+  still: characters named once per distinct set of affected sections, inside
+  a native <details> that starts collapsed (nothing there needs a decision,
+  and collapsing it holds whether or not actionable lines are also showing
+  above it).
 #}
 {% macro _names(chars) -%}
   {%- for c in chars -%}<b>{{ c['character_name'] if c is mapping else c.character_name }}</b>{% if not loop.last %}{{ ', ' if loop.revindex > 2 else ' and ' }}{% endif %}{%- endfor -%}
 {%- endmacro %}
+{% macro _labels(items) -%}
+  {%- for l in items -%}<b>{{ l }}</b>{% if not loop.last %}{{ ', ' if loop.revindex > 2 else ' and ' }}{% endif %}{%- endfor -%}
+{%- endmacro %}
 {% macro _cid(c) -%}{{ c['character_id'] if c is mapping else c.character_id }}{%- endmacro %}
-{% macro _share(chars, key, label) -%}
+{% macro _share(chars, keys, label) -%}
+  {%- set keylist = keys if keys is sequence and keys is not string else [keys] -%}
   {%- if chars | length == 1 -%}
-    <a href="/account/permissions/{{ _cid(chars[0]) }}?add={{ key }}">{{ label }} &rarr;</a>
+    <a href="/account/permissions/{{ _cid(chars[0]) }}?{% for k in keylist %}add={{ k }}{% if not loop.last %}&{% endif %}{% endfor %}">{{ label }} &rarr;</a>
   {%- else -%}
     <a href="/account">{{ label }} &rarr;</a>
   {%- endif -%}
+{%- endmacro %}
+{# Group ``chars`` under the same key as any other call with the same set of
+   character ids — used to fold several permissions affecting the same
+   characters into one line instead of one line each. #}
+{% macro _group_ids(chars) -%}
+  {%- set ids = [] -%}
+  {%- for c in chars -%}{%- set _ = ids.append(_cid(c) | int) -%}{%- endfor -%}
+  {{- ids | sort | join(',') -}}
+{%- endmacro %}
+{% macro _add_group(groups, order, chars, label, key, roles_text) -%}
+  {%- set gkey = _group_ids(chars) -%}
+  {%- if gkey not in groups -%}
+    {%- set _ = groups.update({gkey: {'chars': chars, 'items': []}}) -%}
+    {%- set _ = order.append(gkey) -%}
+  {%- endif -%}
+  {%- set _ = groups[gkey]['items'].append({'label': label, 'key': key, 'roles_text': roles_text}) -%}
 {%- endmacro %}
 
 {% macro permission_notice(characters, key, roles_by_char=none, what=none) %}
@@ -69,6 +107,120 @@
             <b>Your corporation roles</b>.</span>
           {{ _share(unknown, 'corp_roles', 'Share roles') }}
         </div>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}
+
+{% macro corp_permission_summary(characters, permission_list, roles_by_char=none, what=none) %}
+  {% set ns = namespace(
+       decl_groups={}, decl_order=[],
+       fresh_groups={}, fresh_order=[],
+       unk_groups={}, unk_order=[],
+       role_groups={}, role_order=[], role_chars=[], role_char_ids=[], role_count=0) %}
+  {% for key in permission_list %}
+    {% set p = perms.BY_KEY[key] %}
+    {# Same rule the old per-permission loop enforced: a permission that at
+       least one character can already use stays silent for everyone, since
+       the corp card's data comes from whichever character CAN answer for it. #}
+    {% set covered = namespace(ok=false) %}
+    {% for c in characters %}{% if perm_status.character_state(c, key, roles_by_char) == perms.GRANTED %}{% set covered.ok = true %}{% endif %}{% endfor %}
+    {% if not covered.ok %}
+      {% set g = perm_status.gaps(characters, key, roles_by_char) %}
+      {% set declined = g.get('declined', []) %}
+      {% set fresh = g.get('new', []) + g.get('partial', []) %}
+      {% set unknown = g.get('roles_unknown', []) %}
+      {% set no_role = g.get('role_missing', []) %}
+      {% if declined %}{{ _add_group(ns.decl_groups, ns.decl_order, declined, p.label, p.key, none) }}{% endif %}
+      {% if fresh %}{{ _add_group(ns.fresh_groups, ns.fresh_order, fresh, p.label, p.key, none) }}{% endif %}
+      {% if unknown %}{{ _add_group(ns.unk_groups, ns.unk_order, unknown, p.label, 'corp_roles', perm_status.roles_text(p.in_game_roles)) }}{% endif %}
+      {% if no_role %}
+        {{ _add_group(ns.role_groups, ns.role_order, no_role, p.label, none, perm_status.roles_text(p.in_game_roles)) }}
+        {% set ns.role_count = ns.role_count + 1 %}
+        {% for c in no_role %}
+          {% set cid = _cid(c) | int %}
+          {% if cid not in ns.role_char_ids %}
+            {% set _ = ns.role_chars.append(c) %}
+            {% set _ = ns.role_char_ids.append(cid) %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+  {% if ns.decl_order or ns.fresh_order or ns.unk_order or ns.role_count %}
+    <div class="perm-notice" role="note">
+      {% for gkey in ns.decl_order %}
+        {% set grp = ns.decl_groups[gkey] %}
+        {% set labels = grp['items'] | map(attribute='label') | list %}
+        {% set keys = grp['items'] | map(attribute='key') | list %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-permission">permission</span>
+          <span>You chose not to share {{ _labels(labels) }} for {{ _names(grp['chars']) }}{% if what %}, so {{ what }}{% endif %}.</span>
+          {{ _share(grp['chars'], keys, 'Share it') }}
+        </div>
+      {% endfor %}
+      {% for gkey in ns.fresh_order %}
+        {% set grp = ns.fresh_groups[gkey] %}
+        {% set labels = grp['items'] | map(attribute='label') | list %}
+        {% set keys = grp['items'] | map(attribute='key') | list %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-permission">permission</span>
+          <span>{{ _labels(labels) }} {{ 'is' if labels | length == 1 else 'are' }} newer than {{ _names(grp['chars']) }}'s authorization{% if what %}, so {{ what }}{% endif %}.</span>
+          {{ _share(grp['chars'], keys, 'Review') }}
+        </div>
+      {% endfor %}
+      {% for gkey in ns.unk_order %}
+        {% set grp = ns.unk_groups[gkey] %}
+        {% set items = grp['items'] %}
+        <div class="perm-notice-line">
+          <span class="perm-notice-kind is-role">in-game role?</span>
+          {% if items | length == 1 %}
+            <span>{{ _names(grp['chars']) }} shared <b>{{ items[0]['label'] }}</b>, which needs the
+              <b>{{ items[0]['roles_text'] }}</b> role. Vigilant can't check that without
+              <b>Your corporation roles</b>.</span>
+          {% else %}
+            <span>{{ _names(grp['chars']) }} shared {{ _labels(items | map(attribute='label') | list) }}, but Vigilant
+              can't check the in-game role each one needs without <b>Your corporation roles</b>.</span>
+          {% endif %}
+          {{ _share(grp['chars'], 'corp_roles', 'Share roles') }}
+        </div>
+      {% endfor %}
+      {% if ns.role_count %}
+        <details class="perm-notice-roles">
+          <summary><span>{{ ns.role_count }} corporation section{{ 's' if ns.role_count != 1 else '' }} need{{ '' if ns.role_count != 1 else 's' }} an in-game role — {{ _names(ns.role_chars) }}</span></summary>
+          <div class="perm-notice-roles-body">
+            {% if ns.role_order | length > 1 %}
+              {# Different sections lack a role for different characters —
+                 name each subset next to the sections it applies to, since
+                 the summary line's combined name list can't tell them apart. #}
+              {% for gkey in ns.role_order %}
+                {% set grp = ns.role_groups[gkey] %}
+                <p class="perm-role-who">
+                  <span class="perm-notice-kind is-role">in-game role</span>
+                  <span>{{ _names(grp['chars']) }} shared these, but EVE only answers for characters holding:</span>
+                </p>
+                <dl class="perm-role-grid">
+                  {% for item in grp['items'] %}
+                  <dt>{{ item['label'] }}</dt><dd>{{ item['roles_text'] }}</dd>
+                  {% endfor %}
+                </dl>
+              {% endfor %}
+            {% else %}
+              {# One shared set of characters for every gap — already named in
+                 the summary line, so the body only needs to list sections. #}
+              <p class="perm-role-who">
+                <span class="perm-notice-kind is-role">in-game role</span>
+                <span>Shared, but EVE only answers for characters holding:</span>
+              </p>
+              <dl class="perm-role-grid">
+                {% for item in ns.role_groups[ns.role_order[0]]['items'] %}
+                <dt>{{ item['label'] }}</dt><dd>{{ item['roles_text'] }}</dd>
+                {% endfor %}
+              </dl>
+            {% endif %}
+            <p class="perm-notice-roles-foot">Roles are set in game, not in Vigilant.</p>
+          </div>
+        </details>
       {% endif %}
     </div>
   {% endif %}

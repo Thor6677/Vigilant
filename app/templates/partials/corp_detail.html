@@ -79,15 +79,16 @@
 
     </div>
 
-    {# What Vigilant can read for this corporation, per corporation permission.
-       Silent for a permission at least one character can use; otherwise says
-       whether a permission or an in-game role is what's missing. #}
-    {% from "partials/_permission_notice.html" import permission_notice %}
-    {% for p in perms.PERMISSIONS if p.group == 'corporation' and p.key != 'corp_roles' %}
-      {% set ns = namespace(ok=false) %}
-      {% for c in corp_chars %}{% if perm_status.character_state(c, p.key, corp_roles) == 'granted' %}{% set ns.ok = true %}{% endif %}{% endfor %}
-      {% if not ns.ok %}{{ permission_notice(corp_chars, p.key, corp_roles, what="that part of this page stays empty") }}{% endif %}
-    {% endfor %}
+    {# What Vigilant can read for this corporation, across every corporation
+       permission. Silent for a permission at least one character can use;
+       otherwise says whether a permission or an in-game role is what's
+       missing — consolidated into at most one box (ISS-057: this used to
+       stack one full-width box per missing permission). #}
+    {% from "partials/_permission_notice.html" import corp_permission_summary %}
+    {% set corp_perm_keys = perms.PERMISSIONS | selectattr('group', 'equalto', perms.CORPORATION)
+                                               | rejectattr('key', 'equalto', 'corp_roles')
+                                               | map(attribute='key') | list %}
+    {{ corp_permission_summary(corp_chars, corp_perm_keys, corp_roles, what="that data is not shown") }}
 
     <!-- Corp Navigation -->
     <div class="b-section" style="margin-bottom:0.75rem;">
