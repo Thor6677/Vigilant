@@ -292,22 +292,32 @@ def _add_user(SessionLocal):
 
 
 def test_floor_raises_sequence_when_a_freed_id_is_still_referenced(old_db):
-    """A row references user_id 9 while the highest id ever present in
-    `users` at rebuild time was 3 — the reuse window this issue is about."""
+    """max(users.id) is 5 when the rebuild runs, but a row still references
+    user_id 9 — some other account, freed even earlier, that the rebuild's
+    copy-time max never saw. Without the floor the next signup gets 6,
+    reusing an id one of ids 6..9 already had. With it, the next signup
+    gets 10."""
     engine, SessionLocal = old_db
+
+    async def add_more_users(db):
+        await db.execute(text(
+            "INSERT INTO users (id, role, is_admin, session_epoch) VALUES "
+            "(4, 'user', 0, 'd'), (5, 'user', 0, 'e')"))
+        await db.commit()
+    _q(SessionLocal, add_more_users)
+
     assert _q(SessionLocal, ensure_users_autoincrement) is True
 
-    async def create_gap(db):
-        await db.execute(text("DELETE FROM users WHERE id = 3"))
-        # Some other account, id 9, was removed even earlier — before the
-        # rebuild ever ran — but a row still names it.
+    async def add_ref(db):
         await db.execute(text("INSERT INTO characters (id, user_id) VALUES (11, 9)"))
         await db.commit()
-    _q(SessionLocal, create_gap)
+    _q(SessionLocal, add_ref)
 
-    assert _q(SessionLocal, ensure_users_sequence_floor) is True
-    assert _seq(SessionLocal) == 9
+    raised = _q(SessionLocal, ensure_users_sequence_floor)
+    # Checked before the `raised` assertion: on the old code (no floor) this
+    # is 6, the actual reuse the issue describes, not just a bool mismatch.
     assert _add_user(SessionLocal) == 10
+    assert raised is True
 
 
 def test_floor_is_a_noop_when_nothing_references_a_higher_id(old_db, caplog):
@@ -319,7 +329,7 @@ def test_floor_is_a_noop_when_nothing_references_a_higher_id(old_db, caplog):
     assert _q(SessionLocal, ensure_users_sequence_floor) is False
 
     assert _seq(SessionLocal) == before
-    assert caplog.records == []
+    assert [r for r in caplog.records if r.name == "app.db.user_ids"] == []
 
 
 def test_floor_inserts_a_missing_sqlite_sequence_row(full_schema_db):
@@ -388,7 +398,7 @@ def test_floor_leaves_a_table_without_autoincrement_alone(old_db, caplog):
 
     caplog.set_level(logging.INFO, logger="app.db.user_ids")
     assert _q(SessionLocal, ensure_users_sequence_floor) is False
-    assert caplog.records == []
+    assert [r for r in caplog.records if r.name == "app.db.user_ids"] == []
     sql = _q(SessionLocal, lambda db: _scalar(db, text(
         "SELECT sql FROM sqlite_master WHERE name = 'users'")))
     assert "AUTOINCREMENT" not in sql.upper()

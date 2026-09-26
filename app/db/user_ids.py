@@ -16,13 +16,14 @@ out. An account deleted before the rebuild ran, whose id was above that copy-
 time max, left that id free — the next signup after the rebuild would get it
 once, and inherit anything still keyed to it (characters, caches, settings,
 audit attribution). `ensure_users_sequence_floor` closes that gap by raising
-sqlite_sequence to the highest id any scanned column still references, so a
-freed id above that floor is never handed out while something could still
-inherit from it. It says nothing about an id that survives only inside a
-free-text field (an audit log `detail` string naming "user 42", say) rather
-than a column value — that id could still come back once, but there is
-nothing left in the schema for it to inherit, since it was never in a column
-this floor scans in the first place.
+sqlite_sequence to the highest id any scanned column still references. No id
+still held by a scanned column is handed out again. An id no scanned column
+holds any more can still come back once, but there is nothing left in those
+columns for it to inherit — the exception being a free-text field that never
+went through a column at all, such as an admin_audit_log `detail` string
+that reads "Removed user 42": that text survives the removal, and if id 42
+were reissued it would sit next to a description naming the account that had
+it before.
 """
 from __future__ import annotations
 
@@ -82,11 +83,11 @@ async def ensure_users_autoincrement(db: AsyncSession) -> bool:
 # Columns that hold a users.id but aren't discoverable from Base.metadata as
 # a ForeignKey to users.id, and aren't named `user_id` either (that bare-name
 # case is handled directly in _user_reference_columns). Each is written from
-# `admin.id` in app/routes/admin.py: update_schedule.created_by at the
-# schedule-request handler (~line 1464), update_policy.updated_by at the
-# policy-save handler (~line 1545), update_run_report.acknowledged_by at the
-# acknowledge handler (~line 1665), update_notify_settings.updated_by at the
-# notify-settings save handler (~line 1609).
+# `admin.id` in app/routes/admin.py: update_schedule.created_by in the
+# scheduled-update-request handler, update_policy.updated_by in the
+# auto-update-policy save handler, update_run_report.acknowledged_by in the
+# report-acknowledge handler, update_notify_settings.updated_by in the
+# update-notification-settings save handler.
 _EXTRA_USER_REF_COLUMNS = (
     ("update_schedule", "created_by"),
     ("update_policy", "updated_by"),
@@ -99,7 +100,7 @@ def _user_reference_columns() -> set[tuple[str, str]]:
     """Every (table, column) that can hold a users.id — what "referenced
     anywhere" in the module docstring actually means, in code.
 
-    Three sources:
+    Four sources:
       - `users.id` itself.
       - Every column declared with `ForeignKey("users.id")` anywhere in
         Base.metadata — characters, caches, per-user settings, the audit
@@ -111,10 +112,11 @@ def _user_reference_columns() -> set[tuple[str, str]]:
         so they predate — or deliberately skip — the FK.
       - `_EXTRA_USER_REF_COLUMNS`, a short explicit list of admin-attribution
         columns under some other name (see its comment).
-    The app has no tables outside Base.metadata: no raw CREATE TABLE and no
-    Core `Table(...)` definitions other than this module's own rebuild
-    scratch table (app/db/user_ids.py's `_TMP`), which is renamed to `users`
-    before this ever runs, not left standing under its scratch name.
+    Nothing here comes from outside Base.metadata: the app has no raw
+    CREATE TABLE and no Core `Table(...)` definitions. The one CREATE TABLE
+    the app issues at runtime is this module's own rebuild scratch table
+    (`_TMP`, above), which is renamed to `users` — not left standing under
+    its scratch name — before this function ever runs.
     """
     found = {("users", "id")}
     for table in Base.metadata.tables.values():
