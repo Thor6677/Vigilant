@@ -18,7 +18,7 @@ from app.utils.perf import perf_enabled, perf_log
 from app.config import get_settings
 from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
 from app.auth.session_guard import check_session
-from app.db.user_ids import ensure_users_autoincrement
+from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
 from app.db.cache import ESICache  # registers table with Base
 from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta, SDETypeMaterial, SDECompressible, SDEBlueprintInfo, SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial, SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEDogmaAttribute, SDETypeDogmaAttribute, SDEModuleSlot  # registers SDE tables
 from app.sde.loader import ensure_sde_loaded
@@ -401,6 +401,10 @@ async def startup():
             await ensure_users_autoincrement(db)
         except Exception as e:
             logging.warning("users AUTOINCREMENT rebuild failed, table unchanged: %s", e)
+        try:
+            await ensure_users_sequence_floor(db)
+        except Exception as e:
+            logging.warning("users sqlite_sequence floor check failed: %s", e)
 
     # ── Add killmail_attackers columns introduced for /intel/kills ─────
     # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via PRAGMA check.
