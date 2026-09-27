@@ -311,6 +311,7 @@ _LOGIN_ONLY_GETS = (
 _LOGIN_ONLY_POSTS = (
     "/tools/fitting/stats", "/tools/fitting/import-eft", "/tools/fitting/export-eft",
     "/intel/gatecheck/check", "/intel/gatecheck/wartargets",
+    "/dashboard/prefs",
 )
 
 

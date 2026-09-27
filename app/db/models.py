@@ -1211,6 +1211,22 @@ class UpdateNotifySettings(Base):
     updated_at = Column(DateTime, nullable=True)
 
 
+# ── T-070: dashboard view preferences ──
+
+class UserDashboardPrefs(Base):
+    """One row per user: their saved /dashboard view (mode, which account
+    groups and lower sections are collapsed/hidden, the Table view's column
+    set and sort, and the tag filter). See app/dashboard/prefs.py for the
+    schema this JSON blob is validated against — that module is the single
+    source of truth for what's inside `prefs_json`, not this model.
+    """
+    __tablename__ = "user_dashboard_prefs"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    prefs_json = Column(Text, nullable=False, default="{}")
+    updated_at = Column(DateTime, nullable=True)
+
+
 async def ensure_user_fittings_columns(db: AsyncSession) -> None:
     """Add the T-069 columns to an old-shape user_fittings table:
     source_character_id / source_fitting_id (bulk character import — see

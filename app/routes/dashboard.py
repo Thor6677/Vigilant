@@ -2664,6 +2664,21 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         })
     char_rows.sort(key=lambda x: x["wallet"] or 0, reverse=True)
 
+    # T-070: saved view (Compact/Cards, collapsed groups/sections) plus the
+    # pure per-pilot summary Compact mode renders from. One extra query
+    # (load_prefs); build_pilot_summaries is pure dict work over values this
+    # handler already computed above — no extra ESI/DB calls.
+    from app.dashboard.prefs import load_prefs
+    from app.dashboard.summary import build_pilot_summaries
+    dash_prefs = await load_prefs(db, user_id)
+    # Phase 1 only knows how to render compact/cards; anything else (stored by
+    # a later phase 2 build, or rolled back to this one) falls back to cards.
+    dash_mode = dash_prefs["mode"] if dash_prefs["mode"] in ("compact", "cards") else "cards"
+    pilot_summaries = build_pilot_summaries(
+        characters, wallets, locations, clones, skill_map, sync_statuses,
+        staleness_map, last_synced_strs, needs_reauth, contracts, pi, char_groups,
+    )
+
     if perf_enabled():
         perf_log(
             "dashboard",
@@ -2696,7 +2711,10 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "sort": sort,
         "char_groups": char_groups,
         "killmails_enabled": _dashboard_pulse_enabled(),
-        "battles_enabled": _dashboard_battles_enabled()})
+        "battles_enabled": _dashboard_battles_enabled(),
+        "dash_prefs": dash_prefs,
+        "dash_mode": dash_mode,
+        "pilot_summaries": pilot_summaries})
 
 
 # ISS-018: SWR cache for kill-pulse. Keyed by (user_id, days). Each entry
@@ -3312,6 +3330,42 @@ async def save_group_order(request: Request):
     if isinstance(data, list):
         request.session["group_order"] = data
     return JSONResponse({"ok": True})
+
+
+# Guards against a runaway/malicious body before it's even parsed as JSON.
+# The real schema (app/dashboard/prefs.py) is far smaller than this; it's a
+# generous ceiling; not a tuned limit.
+_DASH_PREFS_MAX_BYTES = 8192
+
+
+@router.post("/dashboard/prefs")
+async def save_dashboard_prefs(request: Request, db: AsyncSession = Depends(get_db)):
+    """Save a patch onto the caller's dashboard view prefs (T-070) and return
+    the full resulting prefs as JSON."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _DASH_PREFS_MAX_BYTES:
+                return JSONResponse({"error": "prefs body too large"}, status_code=413)
+        except ValueError:
+            pass  # malformed header; the actual-length check below still catches it
+    body = await request.body()
+    if len(body) > _DASH_PREFS_MAX_BYTES:
+        return JSONResponse({"error": "prefs body too large"}, status_code=413)
+    try:
+        patch = json.loads(body) if body else {}
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    if not isinstance(patch, dict):
+        patch = {}
+
+    from app.dashboard.prefs import save_prefs
+    saved = await save_prefs(db, user_id, patch)
+    return JSONResponse(saved)
 
 
 @router.post("/dashboard/sync/{character_id}")

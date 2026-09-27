@@ -141,6 +141,7 @@ COPY_ALL = (
     # from a "dev" build, so a copied notified_tag is inert there.
     'update_status',
     'user_avoid_entries',
+    'user_dashboard_prefs',
     'user_fitting_folders',
     'user_fittings',
     'user_hunter_watches',

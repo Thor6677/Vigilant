@@ -74,6 +74,7 @@ USER_OWNED_TABLES = (
     "stockpile_targets",
     "dscan_results",
     "kill_alert_events",
+    "user_dashboard_prefs",
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of
