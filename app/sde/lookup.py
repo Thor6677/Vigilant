@@ -15,7 +15,7 @@ from app.db.sde_models import (
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
-    SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute,
+    SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute, SDEMeta,
 )
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h).
@@ -1684,3 +1684,147 @@ async def get_compatible_charges(
 
     return [{"type_id": c.type_id, "type_name": c.type_name, "group_id": c.group_id}
             for c in candidates]
+
+
+async def get_compatible_charges_bulk(
+    db: AsyncSession, module_type_ids: list[int]
+) -> dict[int, list[dict]]:
+    """Batched form of get_compatible_charges — compatible charges for many
+    weapon types in a fixed number of queries instead of one
+    get_compatible_charges call (3 queries) per weapon (T-069: a 173-fit
+    character import can carry dozens of distinct weapon types across all
+    those fits, and import_eft's own cargo-autoload step wants this too).
+    """
+    from app.fitting.constants import CHARGE_GROUP_ATTRS, ATTR_CHARGE_SIZE
+
+    module_type_ids = list({t for t in module_type_ids if t is not None})
+    if not module_type_ids:
+        return {}
+
+    attr_rows = (await db.execute(
+        select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.attribute_id,
+               SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id.in_(module_type_ids))
+        .where(SDETypeDogmaAttribute.attribute_id.in_(CHARGE_GROUP_ATTRS + [ATTR_CHARGE_SIZE]))
+    )).fetchall()
+    attrs_by_module: dict[int, dict[int, float]] = {}
+    for tid, aid, val in attr_rows:
+        attrs_by_module.setdefault(tid, {})[aid] = val
+
+    groups_by_module: dict[int, list[int]] = {}
+    size_by_module: dict[int, int] = {}
+    all_groups: set[int] = set()
+    for tid, attrs in attrs_by_module.items():
+        groups = [int(attrs[a]) for a in CHARGE_GROUP_ATTRS if attrs.get(a) and int(attrs[a]) > 0]
+        if groups:
+            groups_by_module[tid] = groups
+            all_groups.update(groups)
+        if ATTR_CHARGE_SIZE in attrs:
+            size_by_module[tid] = int(attrs[ATTR_CHARGE_SIZE])
+
+    if not all_groups:
+        return {}
+
+    cand_rows = (await db.execute(
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        .where(SDEType.published == True)
+        .where(SDEType.group_id.in_(all_groups))
+    )).fetchall()
+    cand_ids = [c.type_id for c in cand_rows]
+    charge_size_by_id: dict[int, int] = {}
+    if cand_ids:
+        size_rows = (await db.execute(
+            select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.value)
+            .where(SDETypeDogmaAttribute.type_id.in_(cand_ids))
+            .where(SDETypeDogmaAttribute.attribute_id == ATTR_CHARGE_SIZE)
+        )).fetchall()
+        charge_size_by_id = {tid: int(v) for tid, v in size_rows}
+
+    by_group: dict[int, list] = {}
+    for c in cand_rows:
+        by_group.setdefault(c.group_id, []).append(c)
+
+    result: dict[int, list[dict]] = {}
+    for tid, groups in groups_by_module.items():
+        msize = size_by_module.get(tid)
+        seen: set[int] = set()
+        out: list[dict] = []
+        for g in groups:
+            for c in by_group.get(g, []):
+                if c.type_id in seen:
+                    continue
+                if msize is not None and charge_size_by_id.get(c.type_id) != msize:
+                    continue
+                seen.add(c.type_id)
+                out.append({"type_id": c.type_id, "type_name": c.type_name, "group_id": c.group_id})
+        result[tid] = out
+    return result
+
+
+async def get_module_slot_types_bulk(db: AsyncSession, type_ids: list[int]) -> dict[int, str]:
+    """Batched form of the slot-type resolution import_eft does per item:
+    SDEModuleSlot first, then a drone/cargo fallback via group -> category
+    for anything without a module-slot row (fighters, service modules,
+    drones, charges, or an id the SDE doesn't know at all). One request's
+    worth of distinct type_ids resolved in at most 3 queries total, not one
+    (or three) per id — the batching T-069's character import needs.
+    """
+    type_ids = list({t for t in type_ids if t is not None})
+    if not type_ids:
+        return {}
+
+    rows = (await db.execute(
+        select(SDEModuleSlot.type_id, SDEModuleSlot.slot_type)
+        .where(SDEModuleSlot.type_id.in_(type_ids))
+    )).fetchall()
+    slot_map: dict[int, str] = dict(rows)
+
+    missing = [t for t in type_ids if t not in slot_map]
+    if missing:
+        type_rows = (await db.execute(
+            select(SDEType.type_id, SDEType.group_id).where(SDEType.type_id.in_(missing))
+        )).fetchall()
+        group_by_type = dict(type_rows)
+        group_ids = {g for g in group_by_type.values() if g}
+        cat_by_group: dict[int, int] = {}
+        if group_ids:
+            cat_rows = (await db.execute(
+                select(SDEGroup.group_id, SDEGroup.category_id).where(SDEGroup.group_id.in_(group_ids))
+            )).fetchall()
+            cat_by_group = dict(cat_rows)
+        for t in missing:
+            cat_id = cat_by_group.get(group_by_type.get(t))
+            slot_map[t] = "drone" if cat_id == 18 else "cargo"
+    return slot_map
+
+
+async def get_all_market_groups(db: AsyncSession) -> list[dict]:
+    """Every sde_market_groups row — a few hundred at most, so loading the
+    whole table once and walking parent_group_id in memory (T-069's ship
+    class lookup) beats a query per hop up the tree."""
+    rows = (await db.execute(
+        select(SDEMarketGroup.market_group_id, SDEMarketGroup.parent_group_id,
+               SDEMarketGroup.market_group_name)
+    )).fetchall()
+    return [
+        {"market_group_id": r[0], "parent_group_id": r[1], "market_group_name": r[2]}
+        for r in rows
+    ]
+
+
+async def get_sde_version_stamp(db: AsyncSession) -> str:
+    """The SDE version stamp the T-069 DPS cache keys on
+    (app.fitting.engine.dps_cache_key): sde_meta's "last_updated" value,
+    the same ISO timestamp app/sde/loader.py sets on every successful
+    import (needs_update() reads it too, to decide whether a reimport is
+    due). A dogma attribute change only ever reaches a running app through
+    a reimport, which always rewrites this row, so it's a value that
+    changes exactly when a cached DPS number could have gone stale from
+    the data side rather than the fit side. Empty string (never "no such
+    key" — a fresh install with no import yet still has to hash to
+    *something* consistent) if the SDE has never been imported.
+    """
+    row = (await db.execute(
+        select(SDEMeta.value).where(SDEMeta.key == "last_updated")
+    )).scalar_one_or_none()
+    return row or ""

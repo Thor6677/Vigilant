@@ -1488,10 +1488,13 @@ function hideCharImportModal() {
     document.getElementById('charimport-modal').style.display = 'none';
 }
 
+var charImportCharId = null;
+
 function loadCharFittings(charId, btnEl) {
     if (this && this.dataset && this.dataset.charId !== undefined) {
         charId = parseInt(this.dataset.charId, 10);
     }
+    charImportCharId = charId;
     var body = document.getElementById('charimport-body');
     body.innerHTML = '<div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading fittings...</div>';
     fetch('/tools/fitting/import-character/' + charId + '/fittings')
@@ -1529,7 +1532,7 @@ function loadCharFittings(charId, btnEl) {
         });
 }
 
-function _parseEftForCharImport(idx, cb) {
+function _parseEftForCharImport(idx, cb, onError) {
     var f = window._charFittings && window._charFittings[idx];
     if (!f) return;
     fetch('/tools/fitting/import-eft', {
@@ -1539,15 +1542,32 @@ function _parseEftForCharImport(idx, cb) {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        if (data.error) { alert(data.error); return; }
+        if (data.error) { if (onError) onError(data.error); return; }
         cb(f, data);
     });
+}
+
+/* Inline status on the button that was clicked — never a dialog. Flashes
+   `msg` in the danger color, then reverts to the button's own text/colors
+   after a couple of seconds. Shared by charImportLoad's parse-failure path
+   and any other same-shaped flash this modal needs. */
+function _flashButtonError(btn, msg) {
+    var text = btn.textContent, color = btn.style.color, border = btn.style.borderColor;
+    btn.textContent = msg;
+    btn.style.color = 'var(--danger)';
+    btn.style.borderColor = 'var(--danger)';
+    setTimeout(function() {
+        btn.textContent = text;
+        btn.style.color = color;
+        btn.style.borderColor = border;
+    }, 2500);
 }
 
 function charImportLoad(idx) {
     if (this && this.dataset && this.dataset.fitIdx !== undefined) {
         idx = parseInt(this.dataset.fitIdx, 10);
     }
+    var btn = this;
     _parseEftForCharImport(idx, function(f, data) {
         state.shipTypeId = data.ship_type_id;
         state.shipName = data.ship_name;
@@ -1557,46 +1577,51 @@ function charImportLoad(idx) {
         saveState();
         applyState();
         hideCharImportModal();
-    });
+    }, function(errMsg) { _flashButtonError(btn, errMsg); });
 }
 
+/* Saves this one fit through the server-side character-import conversion
+   (T-069) — no EFT round trip, no folder prompt: it lands in the
+   automatic "<character> · in-game" folder under its ship-class
+   subfolder. Status flashes on the button itself. */
 function charImportSave(idx) {
     if (this && this.dataset && this.dataset.fitIdx !== undefined) {
         idx = parseInt(this.dataset.fitIdx, 10);
     }
-    var dl = document.getElementById('fit-folder-options');
-    var folderId = null;
-    if (dl && dl.querySelectorAll('option').length > 0) {
-        var options = [{id: '', label: '(Root)'}];
-        Array.prototype.forEach.call(dl.querySelectorAll('option'), function(opt) {
-            options.push({id: opt.value, label: opt.textContent});
-        });
-        var msg = 'Save to folder:\n0. (Root)';
-        for (var i = 1; i < options.length; i++) msg += '\n' + i + '. ' + options[i].label;
-        msg += '\n\nEnter number:';
-        var choice = prompt(msg, '0');
-        if (choice === null) return;
-        var ix = parseInt(choice, 10);
-        if (isNaN(ix) || ix < 0 || ix >= options.length) { alert('Invalid choice'); return; }
-        if (options[ix].id) folderId = parseInt(options[ix].id, 10);
-    }
-    _parseEftForCharImport(idx, function(f, data) {
-        fetch('/tools/fitting/save', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                ship_type_id: data.ship_type_id,
-                name: f.name || data.fitting_name || 'Unnamed',
-                items: data.items,
-                folder_id: folderId
-            })
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(resp) {
-            if (resp.error) { alert(resp.error); return; }
-            hideCharImportModal();
-            window.location.reload();
-        });
+    var f = window._charFittings && window._charFittings[idx];
+    if (!f || !charImportCharId) return;
+    var btn = this;
+    btn.disabled = true;
+    var savedText = btn.textContent;
+    btn.textContent = 'Saving…';
+    fetch('/tools/fitting/import-character/' + charImportCharId + '/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({fitting_ids: [f.fitting_id]})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(resp) {
+        if (resp.error) {
+            btn.disabled = false;
+            btn.textContent = savedText;
+            _flashButtonError(btn, resp.error);
+            return;
+        }
+        if (resp.failed && resp.failed.length) {
+            btn.textContent = resp.failed[0].reason;
+            btn.style.color = 'var(--danger)';
+            btn.style.borderColor = 'var(--danger)';
+            btn.disabled = false;
+            return;
+        }
+        btn.textContent = resp.imported ? 'Imported' : 'Already imported';
+        btn.style.color = 'var(--muted)';
+        btn.style.borderColor = 'var(--border)';
+    })
+    .catch(function() {
+        btn.disabled = false;
+        btn.textContent = savedText;
+        _flashButtonError(btn, 'Save failed — try again.');
     });
 }
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event, text
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -729,7 +729,17 @@ class UserFittingFolder(Base):
 
 
 class UserFitting(Base):
-    """User-created ship fittings (local to Vigilant, not ESI)."""
+    """User-created ship fittings (local to Vigilant, not ESI).
+
+    No Index() in __table_args__ for source_character_id/source_fitting_id
+    below: `_create_missing_indexes` walks every declared index inside
+    init_db(), which runs before ensure_user_fittings_columns() ever gets a
+    chance to add those columns on an old-shape table — an Index() declared
+    here would make that a CREATE INDEX against columns that don't exist
+    yet, which SQLite refuses and would crash startup on any DB that
+    predates T-069. ensure_user_fittings_columns() creates the index itself,
+    once the columns are there (fresh install or migrated).
+    """
     __tablename__ = "user_fittings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -745,6 +755,25 @@ class UserFitting(Base):
     # "name": str, "side_effects": [effect_id, ...]}, ...}. Keyed by the
     # booster's boosterness attribute, not a small fixed range like implants.
     boosters_json = Column(Text, nullable=False, default="{}")
+    # Bulk character import (T-069): which in-game fit this came from, so a
+    # re-import can skip it instead of duplicating it. No ForeignKey to
+    # characters — a character can be deleted (e.g. transferred away) without
+    # taking the fits it was ever imported from down with it. Both nullable:
+    # a hand-built or one-at-a-time-imported fit (the older import path)
+    # never carries either, and NULL is exactly the "not from a bulk import"
+    # marker the skip-rule query looks for.
+    source_character_id = Column(Integer, nullable=True)
+    source_fitting_id = Column(Integer, nullable=True)
+    # Persistent DPS cache (T-069 follow-up): /tools/fitting/saved/dps used to
+    # run calculate_fitting_stats for every saved fit, concurrently, on every
+    # page view — fine at a handful of fits, 175s of 100%-CPU recompute at
+    # 135 of them. dps_cache_key is a hash of everything that can change the
+    # number (see app.fitting.engine.dps_cache_key); a fit that hasn't
+    # changed since it was last computed just serves dps_cached. Both
+    # nullable so a never-computed fit (including every fit that existed
+    # before this column did) is simply "stale", not an error.
+    dps_cached = Column(Float, nullable=True)
+    dps_cache_key = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -1180,6 +1209,36 @@ class UpdateNotifySettings(Base):
     webhook_last_error = Column(String(255), nullable=True)
     updated_by = Column(Integer, nullable=True)
     updated_at = Column(DateTime, nullable=True)
+
+
+async def ensure_user_fittings_columns(db: AsyncSession) -> None:
+    """Add the T-069 columns to an old-shape user_fittings table:
+    source_character_id / source_fitting_id (bulk character import — see
+    the columns' docstring on UserFitting above), plus the
+    (user_id, source_character_id, source_fitting_id) index the import
+    endpoint's skip-rule query needs; and dps_cached / dps_cache_key (the
+    persistent per-fit DPS cache /tools/fitting/saved/dps reads and writes).
+
+    Idempotent: a fresh install already has all four columns via create_all
+    (they're declared as Column() on the model), so the ALTERs are skipped
+    and only the index gets created; a second call against an already-
+    migrated table is a no-op end to end (PRAGMA sees all four columns, and
+    CREATE INDEX IF NOT EXISTS on an existing index is a no-op).
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(user_fittings)"))).fetchall()}
+    if "source_character_id" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN source_character_id INTEGER"))
+    if "source_fitting_id" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN source_fitting_id INTEGER"))
+    if "dps_cached" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN dps_cached REAL"))
+    if "dps_cache_key" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN dps_cache_key TEXT"))
+    await db.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_user_fittings_source "
+        "ON user_fittings(user_id, source_character_id, source_fitting_id)"
+    ))
+    await db.commit()
 
 
 def _create_missing_indexes(sync_conn) -> None:

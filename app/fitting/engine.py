@@ -12,6 +12,7 @@ Stacking penalty formula (Pyfa-verified):
 References: Pyfa eos/modifiedAttributeDict.py, eos/calc.py, docs/fitting-mechanics.md
 """
 
+import hashlib
 import math
 from collections import defaultdict
 from typing import NamedTuple
@@ -1401,6 +1402,34 @@ async def _build_item_attrs(
         enriched.append((item, attrs))
 
     return enriched, rah_type_ids, warnings
+
+
+# Bump whenever a change here (or in cap_sim.py / boosters.py's bonus math)
+# would change a previously-computed stats result for the same
+# ship+items+implants+boosters. The persistent per-fit DPS cache
+# (app/routes/fitting.py's saved_fittings_dps, T-069 follow-up) keys on
+# this alongside the SDE version stamp, so a bump here — not a data
+# change — is what forces every cached value to recompute instead of
+# quietly serving a number from before the change.
+FITTING_ENGINE_VERSION = "1"
+
+
+def dps_cache_key(
+    ship_type_id: int, items_json: str, implants_json: str, boosters_json: str,
+    sde_stamp: str,
+) -> str:
+    """Cache key for one fit's computed DPS: everything that can change the
+    number, hashed together. `items_json`/`implants_json`/`boosters_json`
+    are hashed as their already-stored JSON text, not re-parsed — saving a
+    fit always rewrites all three, so any real change to what's fitted
+    changes at least one of these strings, and a fit that hasn't been
+    touched hashes identically every time. `sde_stamp` is sde_meta's
+    last_updated value (app.sde.lookup.get_sde_version_stamp) — a dogma
+    attribute change from a fresh SDE import can change DPS without
+    touching the fit at all.
+    """
+    raw = f"{ship_type_id}|{items_json}|{implants_json}|{boosters_json}|{FITTING_ENGINE_VERSION}|{sde_stamp}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 async def calculate_fitting_stats(

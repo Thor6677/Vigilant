@@ -255,6 +255,13 @@ async def fittings_list(
         ship_results = await asyncio.gather(*ship_info_tasks.values())
         ship_data = dict(zip(ship_info_tasks.keys(), ship_results))
 
+        # Local import avoids a circular dep between fittings.py and
+        # fitting.py (the reverse direction — fitting.py importing from
+        # fittings.py — already happens at call time a few lines below in
+        # the character-import routes).
+        from app.routes.fitting import _already_imported_lookup, _normalize_fit_name
+        already_src, already_saved_pairs = await _already_imported_lookup(db, user_id, character_id)
+
         # Parse fittings
         fittings = []
         for raw in raw_fittings:
@@ -262,7 +269,18 @@ async def fittings_list(
             ship_name, ship_slots = ship_data.get(sid, (type_names.get(sid, f"Ship {sid}"), {}))
             if not ship_name or ship_name.startswith("Ship "):
                 ship_name = type_names.get(sid, ship_name)
-            fittings.append(_parse_fitting(raw, type_names, ship_name, ship_slots))
+            fit = _parse_fitting(raw, type_names, ship_name, ship_slots)
+            # Compare against the normalized name the save endpoint actually
+            # stores (stripped, "Unnamed" default) — _parse_fitting's own
+            # "name" is the raw ESI value, unnormalized, and the two must
+            # agree on what "matches" means or this flag and the POST's
+            # skip rule could disagree on the same fit.
+            already_imported = (
+                fit["fitting_id"] in already_src
+                or (sid, _normalize_fit_name(raw.get("name"))) in already_saved_pairs
+            )
+            fit["already_imported"] = already_imported
+            fittings.append(fit)
 
         # Group by ship name
         ship_groups: dict[str, list] = {}
