@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.dashboard import prefs as prefs_mod
 from app.dashboard.prefs import (
-    DEFAULT_PREFS, GAME_WIDE_SECTIONS, MODES, SECTION_KEYS, TABLE_COLUMNS,
+    DEFAULT_PREFS, DEFAULT_TABLE_COLUMNS, GAME_WIDE_SECTIONS, MODES,
+    SECTION_KEYS, TABLE_COLUMNS,
     apply_patch, load_prefs, sanitize, save_prefs,
 )
 from app.db.models import Base, User, UserDashboardPrefs
@@ -26,8 +27,11 @@ def test_default_prefs_are_already_valid():
     assert sanitize(DEFAULT_PREFS) == DEFAULT_PREFS
 
 
-def test_default_table_columns_cover_the_whole_catalog():
-    assert DEFAULT_PREFS["table_columns"] == list(TABLE_COLUMNS)
+def test_default_table_columns_are_a_readable_subset_of_the_catalog():
+    # T-076: the default is a curated subset, not the whole 18-column
+    # catalog — see DEFAULT_TABLE_COLUMNS's own comment in prefs.py.
+    assert DEFAULT_PREFS["table_columns"] == list(DEFAULT_TABLE_COLUMNS)
+    assert set(DEFAULT_TABLE_COLUMNS) <= set(TABLE_COLUMNS)
 
 
 # ── sanitize(): tolerance and validation ─────────────────────────────────────
@@ -97,6 +101,18 @@ def test_sanitize_rejects_malformed_table_sort():
 def test_sanitize_accepts_valid_table_sort():
     out = sanitize({"table_sort": {"key": "wallet", "dir": "desc"}})
     assert out["table_sort"] == {"key": "wallet", "dir": "desc"}
+
+
+def test_sanitize_caps_group_order_length():
+    names = [f"g{i}" for i in range(200)]
+    out = sanitize({"group_order": names})
+    assert len(out["group_order"]) == 64
+    assert out["group_order"] == names[:64]
+
+
+def test_sanitize_truncates_overlong_group_order_names():
+    out = sanitize({"group_order": ["x" * 500]})
+    assert len(out["group_order"][0]) == 100
 
 
 def test_sanitize_caps_tag_filter():
