@@ -7,8 +7,12 @@
   enriched — see _enrich_missing_with_training in
   app/routes/character_detail.py). No script elements here: a swapped-in
   fragment carries a nonce that never matches the page's CSP header
-  (see character_detail.html's own note on this). "Can fly now" collapses
-  via a plain details/summary element, no JS required.
+  (see character_detail.html's own note on this). Both "Can fly now" and
+  "Missing skills" collapse via plain details/summary elements, collapsed
+  by default (T-077: an expanded "Missing skills (29)" list used to push
+  the rest of the character page far down the viewport) — no JS required.
+  `missing_fits` arrives pre-sorted by the route, fewest/shortest missing
+  training first (character_detail.py's character_can_fly()).
 #}
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Can Fly</span></div>
@@ -20,7 +24,7 @@
     {% elif total == 0 %}
     <div class="b-empty">No saved fits yet. <a href="/tools/fitting" class="b-link">Open the builder</a> to save one.</div>
     {% else %}
-    <div style="padding:0.6rem 0.75rem;font-size:11px;color:var(--muted);">Flies {{ can_fly }} of {{ total }} saved fits{% if missing_fits %} &middot; training times are approx. (default attributes){% endif %}</div>
+    <div style="padding:0.6rem 0.75rem;font-size:11px;color:var(--muted);">Flies {{ can_fly }} of {{ total }} saved fits{% if missing_fits %} &middot; {{ missing_fits|length }} need{{ 's' if missing_fits|length == 1 else '' }} skills{% endif %}</div>
 
     {% if can_fly_fits %}
     <details style="margin:0 0.75rem 0.6rem;">
@@ -41,9 +45,12 @@
     {% endif %}
 
     {% if missing_fits %}
-    <div style="margin:0 0.75rem 0.6rem;">
-        <div style="font-size:10px;color:var(--danger);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.4rem;">
+    <details style="margin:0 0.75rem 0.6rem;">
+        <summary style="cursor:pointer;font-size:10px;color:var(--danger);letter-spacing:0.1em;text-transform:uppercase;">
             Missing skills ({{ missing_fits|length }})
+        </summary>
+        <div style="margin:0.4rem 0 0.5rem;font-size:9px;color:var(--muted);">
+            Sorted by fastest to train first. Training times are approx. (default attributes).
         </div>
         {% for f in missing_fits %}
         <div class="b-card" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
@@ -64,7 +71,7 @@
             </div>
         </div>
         {% endfor %}
-    </div>
+    </details>
     {% endif %}
     {% endif %}
 </div>

@@ -1505,7 +1505,9 @@ async def _enrich_missing_with_training(db: AsyncSession, fits: list[dict]) -> N
     """Mutate each fit's `missing` entries in place: add `skill_name` (one
     batched SDE lookup for every skill named across every fit passed in,
     not one per skill) and `time_str` (approx., default attributes — see
-    _CANFLY_DEFAULT_ATTR).
+    _CANFLY_DEFAULT_ATTR). Also sets `fit["missing_training_minutes"]`, the
+    sum across all of that fit's missing entries — T-077's sort key for
+    "fewest/shortest missing training first" (see character_can_fly()).
     """
     all_skill_ids: set[int] = set()
     for f in fits:
@@ -1528,12 +1530,15 @@ async def _enrich_missing_with_training(db: AsyncSession, fits: list[dict]) -> N
     rank_by_skill = {int(tid): (rank or 1.0) for tid, _pri, _sec, rank in meta_rows}
 
     for f in fits:
+        total_minutes = 0.0
         for m in f["missing"]:
             m["skill_name"] = names.get(m["skill_id"], f"Skill {m['skill_id']}")
             rank = rank_by_skill.get(m["skill_id"], 1.0)
             sp = _sp_to_train(m["have"], m["need"], rank)
             minutes = _training_time_minutes(sp, _CANFLY_DEFAULT_ATTR, _CANFLY_DEFAULT_ATTR)
             m["time_str"] = _format_train_duration(minutes)
+            total_minutes += minutes
+        f["missing_training_minutes"] = total_minutes
 
 
 @router.get("/character/{character_id}/can-fly", response_class=HTMLResponse)
@@ -1582,6 +1587,9 @@ async def character_can_fly(
     missing_fits = [f for f in summary["fits"] if not f["can_fly"]]
     can_fly_fits = [f for f in summary["fits"] if f["can_fly"]]
     await _enrich_missing_with_training(db, missing_fits)
+    # T-077: fewest/shortest missing training first -- the most useful
+    # order (closest-to-flyable fits at the top of a collapsed list).
+    missing_fits.sort(key=lambda f: (f["missing_training_minutes"], len(f["missing"])))
 
     return templates.TemplateResponse(request, "partials/character_can_fly.html", {
         "error": None, "no_scope": False,
