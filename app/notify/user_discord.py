@@ -35,6 +35,9 @@ import httpx
 from sqlalchemy import select
 
 from app.db.models import AsyncSessionLocal, UserNotifySettings
+# Importing log_redaction installs the filter that keeps httpx's own request
+# line from printing the URL; redact_request_urls() marks the send.
+from app.notify.log_redaction import redact_request_urls
 # The vetting and the pinned transport are ISS-055's; they are reused as they
 # are so both webhook senders dial exactly the same way and one set of tests
 # (tests/test_webhook_targets.py) covers the socket layer for both.
@@ -352,11 +355,12 @@ async def deliver(url: str, title: str, body: str, alert_type: str) -> Outcome:
     if problem:
         return Outcome(False, f"not sent: {problem}")
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
-                                     trust_env=False,
-                                     transport=_PinnedTransport(addrs)) as client:
-            resp = await client.post(url, json=build_payload(title, body, alert_type),
-                                     headers={"User-Agent": user_agent()})
+        with redact_request_urls():
+            async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
+                                         trust_env=False,
+                                         transport=_PinnedTransport(addrs)) as client:
+                resp = await client.post(url, json=build_payload(title, body, alert_type),
+                                         headers={"User-Agent": user_agent()})
     except Exception as e:
         return Outcome(False, f"{type(e).__name__}"[:255])
     status = resp.status_code

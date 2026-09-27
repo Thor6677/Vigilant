@@ -35,6 +35,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import AdminAuditLog, UpdateNotifySettings, UpdateRunReport, User
+# Importing log_redaction installs the filter that keeps httpx's own request
+# line from printing the webhook URL; redact_request_urls() marks the send.
+from app.notify.log_redaction import redact_request_urls
 
 logger = logging.getLogger(__name__)
 
@@ -515,16 +518,17 @@ async def post_webhook(url: str, fmt: str, report) -> dict:
         # usually a LAN host. httpx happens to ignore environment proxies once
         # it is handed a transport; this makes that a decision, not a side
         # effect.
-        async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS,
-                                     follow_redirects=False, trust_env=False,
-                                     transport=_PinnedTransport(addrs)) as client:
-            if fmt == FORMAT_NTFY:
-                body, headers = ntfy_request(report)
-                resp = await client.post(url, content=body.encode("utf-8"),
-                                         headers={**headers, "User-Agent": user_agent()})
-            else:
-                resp = await client.post(url, json=json_payload(report),
-                                         headers={"User-Agent": user_agent()})
+        with redact_request_urls():
+            async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS,
+                                         follow_redirects=False, trust_env=False,
+                                         transport=_PinnedTransport(addrs)) as client:
+                if fmt == FORMAT_NTFY:
+                    body, headers = ntfy_request(report)
+                    resp = await client.post(url, content=body.encode("utf-8"),
+                                             headers={**headers, "User-Agent": user_agent()})
+                else:
+                    resp = await client.post(url, json=json_payload(report),
+                                             headers={"User-Agent": user_agent()})
     except Exception as e:
         error = scrub(f"{type(e).__name__}: {e}", url)
         logger.warning("update report: webhook to %s failed: %s", host, error)
