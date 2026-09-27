@@ -12,7 +12,7 @@
     .corp-accordion[open] {
         border-color: var(--rule);
     }
-    .corp-accordion summary {
+    .corp-accordion > summary {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -22,11 +22,11 @@
         user-select: none;
         gap: 1rem;
     }
-    .corp-accordion summary::-webkit-details-marker { display: none; }
-    .corp-accordion[open] summary {
+    .corp-accordion > summary::-webkit-details-marker { display: none; }
+    .corp-accordion[open] > summary {
         border-bottom: 2px solid var(--rule);
     }
-    .corp-accordion summary:hover { background: rgba(200,169,81,0.03); }
+    .corp-accordion > summary:hover { background: rgba(200,169,81,0.03); }
     .corp-chevron {
         font-size: 10px;
         color: var(--muted);

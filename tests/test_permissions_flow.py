@@ -839,3 +839,13 @@ def test_corp_journal_explains_every_failure(env, monkeypatch):
     assert r.status_code == 200
     assert "Main Pilot: authorization expired" in r.text
     assert "Alt Pilot: EVE refused (in-game role)" in r.text
+
+
+def test_corp_card_summary_styles_reach_only_the_cards_own_summary():
+    # corporations.html styled `.corp-accordion summary`, which also matched the
+    # role-gap <details> inside the card's permission notice: its line was
+    # pushed to the right edge and got the open card's 2px rule under it.
+    with open("app/templates/corporations.html", encoding="utf-8") as f:
+        page = f.read()
+    assert not re.search(r"\.corp-accordion(\[open\])?\s+summary", page)
+    assert ".corp-accordion > summary {" in page
