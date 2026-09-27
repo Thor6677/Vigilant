@@ -24,6 +24,7 @@ from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
+from app.routes.dashboard_attention import router as dashboard_attention_router
 from app.routes.characters import router as characters_router
 from app.routes.account import router as account_router
 from app.routes.status import router as status_router
@@ -209,6 +210,7 @@ async def healthz():
 app.include_router(auth_router)
 app.include_router(ambient_router)
 app.include_router(dashboard_router)
+app.include_router(dashboard_attention_router)
 app.include_router(characters_router)
 app.include_router(account_router)
 app.include_router(status_router)
