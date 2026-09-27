@@ -52,6 +52,52 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
     return user
 
 
+# Tables a user owns outright: removing the user deletes these rows rather
+# than leaving them behind with a dangling user_id.
+# tests/test_admin_remove_user_cleanup.py sweeps
+# app.db.user_ids._user_reference_columns() against this tuple, NULLABLE_FKS
+# and USER_REFS_HANDLED_ELSEWHERE, so a new user_id column can't be added to
+# a model without also being handled here.
+USER_OWNED_TABLES = (
+    "corp_inventory_thresholds",
+    "corp_contract_thresholds",
+    "user_avoid_entries",
+    "saved_gate_routes",
+    "user_fittings",
+    "user_fitting_folders",
+    "user_map_bookmarks",
+    "user_system_watches",
+    "user_hunter_watches",
+    "hosted_images",  # row only — on-disk files are not touched here
+    "net_worth_snapshots",
+    "stockpile_targets",
+    "dscan_results",
+    "kill_alert_events",
+)
+
+# Where the FK is metadata rather than ownership, null it out instead of
+# dropping the surrounding row.
+NULLABLE_FKS = (
+    ("structure_timers", "created_by"),
+    ("timer_acl_groups", "created_by"),
+    ("registration_allowlist", "added_by"),
+    ("skill_plans", "last_edited_by_user_id"),
+    ("admin_audit_log", "user_id"),
+    ("update_schedule", "created_by"),
+    ("update_policy", "updated_by"),
+    ("update_run_report", "acknowledged_by"),
+    ("update_notify_settings", "updated_by"),
+)
+
+# (table, column) pairs that hold a users.id but aren't touched by the two
+# tuples above because admin_remove_user handles them some other way.
+USER_REFS_HANDLED_ELSEWHERE = {
+    ("users", "id"),            # the row being removed itself
+    ("characters", "user_id"),  # deleted via db.delete(char) below
+    ("skill_plans", "user_id"), # deleted via db.delete(plan), cascading SkillPlanEntry/ACL
+}
+
+
 # Audit log filter options (T-068): (key, label, event-type prefixes). An event
 # is in a group when its type equals a prefix or starts with "<prefix>_". The
 # options used to be hand-typed, and three of the six (login, sync_error,
@@ -850,30 +896,9 @@ async def admin_remove_user(user_id: int, request: Request,
     for plan in owned_plans:
         await db.delete(plan)
 
-    USER_OWNED_TABLES = (
-        "corp_inventory_thresholds",
-        "corp_contract_thresholds",
-        "user_avoid_entries",
-        "saved_gate_routes",
-        "user_fittings",
-        "user_fitting_folders",
-        "user_map_bookmarks",
-        "user_system_watches",
-        "user_hunter_watches",
-        "hosted_images",  # row only — on-disk files are not touched here
-    )
     for tbl in USER_OWNED_TABLES:
         await db.execute(text(f"DELETE FROM {tbl} WHERE user_id = :uid"), {"uid": user_id})
 
-    # Where the FK is metadata rather than ownership, null it out instead
-    # of dropping the surrounding row.
-    NULLABLE_FKS = (
-        ("structure_timers", "created_by"),
-        ("timer_acl_groups", "created_by"),
-        ("registration_allowlist", "added_by"),
-        ("skill_plans", "last_edited_by_user_id"),
-        ("admin_audit_log", "user_id"),
-    )
     for tbl, col in NULLABLE_FKS:
         await db.execute(
             text(f"UPDATE {tbl} SET {col} = NULL WHERE {col} = :uid"),
