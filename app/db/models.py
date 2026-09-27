@@ -110,6 +110,10 @@ class CharacterDashboardCache(Base):
     pi_json = Column(Text, nullable=True)
     skillqueue_json = Column(Text, nullable=True)
     zkill_json = Column(Text, nullable=True)
+    # T-073: JSON {"total_sp": int, "unallocated_sp": int,
+    # "levels": {"<skill_id>": active_skill_level}} from esi-skills.read_skills.v1.
+    # Added to an old-shape table by ensure_dashboard_cache_columns() below.
+    skills_json = Column(Text, nullable=True)
     last_synced = Column(DateTime, nullable=True)      # naive UTC
     sync_status = Column(String(16), nullable=False, default="idle")  # idle | syncing | error
     sync_error = Column(Text, nullable=True)
@@ -1280,6 +1284,66 @@ class DashboardAttentionDismissal(Base):
     fingerprint = Column(String(64), nullable=False)
     dismissed_until = Column(DateTime, nullable=True)  # NULL = until state/fingerprint changes
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+# ── T-073: skill-farm page ───────────────────────────────────────────────────
+class SkillFarmSettings(Base):
+    """One row per user: T-073 skill-farm page settings.
+
+    sales_tax_pct is the OWNER's own editable rate, not a hardcoded game
+    constant — EVE's NPC sales tax is reduced per level of the Accounting
+    skill, so the effective rate differs per pilot/corp and has to be entered
+    rather than assumed (see app/skillfarm/constants.py for the default used
+    to pre-fill a brand-new row).
+    """
+    __tablename__ = "skill_farm_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    # Must match app.skillfarm.constants.DEFAULT_SALES_TAX_PCT — kept as a
+    # plain literal (not an import) to avoid pulling app.skillfarm into
+    # app.db.models; get_settings() always passes the constant explicitly
+    # when creating a row, so this Column-level default is a documentation
+    # fallback, never the actual value new rows get in practice.
+    sales_tax_pct = Column(Float, nullable=False, default=7.5)
+    plex_per_month = Column(Integer, nullable=False, default=500)
+    price_source = Column(String(8), nullable=False, default="sell")  # "sell" | "buy"
+    updated_at = Column(DateTime, nullable=True)
+
+
+class SkillFarmPilot(Base):
+    """One row per farm pilot a user has added to the skill-farm page.
+
+    base_sp is the floor of ALLOCATED SP the owner never wants extracted from
+    this pilot — separate from the game's own 5,000,000 SP hard extraction
+    floor (app/skillfarm/constants.py:SKILL_FLOOR_SP, which the default below
+    matches). A pilot who wants to keep MORE than the bare minimum banked
+    raises this above the game floor; the math never uses less than either.
+    """
+    __tablename__ = "skill_farm_pilots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "character_id", name="uq_skill_farm_pilot"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=False)
+    base_sp = Column(BigInteger, nullable=False, default=5_000_000)
+    updated_at = Column(DateTime, nullable=True)
+
+
+async def ensure_dashboard_cache_columns(db: AsyncSession) -> None:
+    """Add T-073's skills_json column to an old-shape character_dashboard_cache
+    table.
+
+    Idempotent the same way ensure_user_fittings_columns() below is: a fresh
+    install already has the column via create_all (it's declared as Column()
+    on CharacterDashboardCache above), so the ALTER is skipped there; a second
+    call against an already-migrated table is a PRAGMA-guarded no-op.
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(character_dashboard_cache)"))).fetchall()}
+    if "skills_json" not in cols:
+        await db.execute(text("ALTER TABLE character_dashboard_cache ADD COLUMN skills_json TEXT"))
+    await db.commit()
 
 
 async def ensure_user_fittings_columns(db: AsyncSession) -> None:

@@ -43,7 +43,9 @@ _CACHE_COLUMNS: dict[str, tuple[str, ...]] = {
     "wallet": ("wallet",),
     "orders": ("orders_json",),
     "location": ("location_json",),
-    "skills": ("skillqueue_json",),
+    # T-073: skills_json (esi-skills.read_skills.v1) joins skillqueue_json
+    # under the same "skills" permission key — withdrawing it clears both.
+    "skills": ("skillqueue_json", "skills_json"),
     "clones": ("clones_json",),
     "industry": ("industry_json",),
     "planets": ("pi_json",),
@@ -56,7 +58,7 @@ _SYNC_FIELDS: dict[str, tuple[str, ...]] = {
     "orders": ("orders",),
     "assets": ("assets",),
     "location": ("location",),
-    "skills": ("skillqueue",),
+    "skills": ("skillqueue", "skills"),
     "clones": ("clones",),
     "industry": ("industry",),
     "planets": ("pi",),
@@ -170,6 +172,7 @@ async def purge_history(db: AsyncSession, character_id: int,
 PER_CHARACTER_USER_TABLES: tuple[str, ...] = (
     "character_tags",  # T-074: pilot role tags and private note
     "dashboard_attention_dismissals",
+    "skill_farm_pilots",  # T-073
 )
 
 

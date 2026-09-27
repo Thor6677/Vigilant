@@ -18,7 +18,7 @@ from app.utils.perf import perf_enabled, perf_log
 from app.config import get_settings
 from app.db.models import (
     init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns,
-    ensure_user_fittings_skill_reqs_columns,
+    ensure_user_fittings_skill_reqs_columns, ensure_dashboard_cache_columns,
 )
 from app.auth.session_guard import check_session
 from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
@@ -69,6 +69,7 @@ from app.routes.market import router as market_router
 from app.routes.networth import router as networth_router
 from app.routes.stockpiles import router as stockpiles_router
 from app.routes.pnl import router as pnl_router
+from app.routes.skill_farm import router as skill_farm_router
 
 
 def _css_version() -> str:
@@ -260,6 +261,7 @@ app.include_router(market_router)
 app.include_router(networth_router)
 app.include_router(stockpiles_router)
 app.include_router(pnl_router)
+app.include_router(skill_farm_router)
 
 
 def _background_jobs_enabled() -> bool:
@@ -433,6 +435,10 @@ async def startup():
     # ── Can-fly check (T-072): skill-requirement cache columns ──────────
     async with AsyncSessionLocal() as db:
         await ensure_user_fittings_skill_reqs_columns(db)
+
+    # ── Skill farm (T-073): character_dashboard_cache.skills_json column ───
+    async with AsyncSessionLocal() as db:
+        await ensure_dashboard_cache_columns(db)
 
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if
