@@ -6,15 +6,16 @@ import logging
 import re
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Request, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.models import get_db, UserFitting, UserFittingFolder, Character
 from app.sde import lookup as sde
-from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs
+from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs, dps_cache_key
 from app.fitting.compare import build_compare_sections
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
@@ -26,7 +27,6 @@ from app.esi.client import ESIClient, refresh_token
 from app.esi import universe as esi_universe
 from app.esi import character as esi_char
 from app.esi import market as esi_market
-from app.db.models import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -183,52 +183,111 @@ async def saved_fittings_page(request: Request, db: AsyncSession = Depends(get_d
         "total": len(rows)})
 
 
+# Stale fits recomputed per /saved/dps call. ISS-018's original design
+# computed EVERY saved fit, concurrently, on every call — fine at a
+# handful of fits, but calculate_fitting_stats is not cheap (dogma
+# modifier pipeline + stacking penalties per module), and a real 135-fit
+# account measured 175s of 100%-CPU recompute on one call. A small
+# sequential batch keeps any single call fast; the page polls again while
+# "pending" is nonzero to fill in the rest (see fitting_saved.html).
+DPS_STALE_BATCH_SIZE = 8
+
+
+async def _compute_and_cache_dps(
+    db: AsyncSession, fit_id: int, ship_type_id: int,
+    items_json: str, implants_json: str, boosters_json: str, cache_key: str,
+) -> float:
+    """Compute one fit's DPS (with its saved implants/boosters, matching
+    what the builder and compare view would show) and persist it under
+    `cache_key` so the next call can skip it entirely. Never raises —
+    a fit that fails to compute (a since-removed type, malformed JSON on
+    an old row) caches as 0.0 under its current key rather than being
+    retried every single call forever.
+    """
+    try:
+        items = json.loads(items_json) if items_json else []
+    except Exception:
+        items = []
+    try:
+        implants = [rec["type_id"] for rec in _sanitize_implants_map(json.loads(implants_json or "{}")).values()]
+    except Exception:
+        implants = []
+    try:
+        boosters = _booster_entries(_sanitize_boosters_map(json.loads(boosters_json or "{}")))
+    except Exception:
+        boosters = []
+
+    dps = 0.0
+    if items:
+        try:
+            stats = await calculate_fitting_stats(db, ship_type_id, items, implants=implants, boosters=boosters)
+            dps = float(stats.get("total_dps") or 0.0)
+        except Exception as e:
+            logger.info("DPS calc failed for fit %s: %s", fit_id, e)
+            dps = 0.0
+    dps = round(dps, 1)
+
+    await db.execute(
+        update(UserFitting).where(UserFitting.id == fit_id)
+        .values(dps_cached=dps, dps_cache_key=cache_key)
+    )
+    await db.commit()
+    return dps
+
+
 @router.get("/tools/fitting/saved/dps")
 async def saved_fittings_dps(request: Request, db: AsyncSession = Depends(get_db)):
-    """Batched DPS computation for the saved-fits list (ISS-018).
+    """Persistent per-fit DPS cache (T-069 follow-up to ISS-018).
 
-    Returns {fit_id: dps} for every fit owned by the session user.
-    Computed in parallel — each fit gets its own AsyncSessionLocal so
-    they don't contend on a single SQLAlchemy session.
+    Returns {"dps": {fit_id: dps, ...}, "pending": <stale fits left>}.
+    `dps` carries every fit whose cache is still valid (dps_cache_key
+    matches — see app.fitting.engine.dps_cache_key) plus whatever this
+    call just (re)computed; `pending` is how many stale fits are left
+    after this call's batch, for the page to decide whether to ask again.
+
+    Sequential with the one request-scoped session, not
+    asyncio.gather + a session per fit — that concurrency is exactly what
+    turned "compute everything" into a CPU spike large enough to stall the
+    whole app on a real account's worth of fits. asyncio.sleep(0) between
+    fits yields to the event loop so one slow request doesn't starve
+    others on it.
     """
     user_id = request.session.get("user_id")
     if not user_id:
         return {"error": "Not logged in"}
 
+    sde_stamp = await sde.get_sde_version_stamp(db)
+
     fit_rows = await db.execute(
-        select(UserFitting.id, UserFitting.ship_type_id, UserFitting.items_json)
-        .where(UserFitting.user_id == user_id)
+        select(
+            UserFitting.id, UserFitting.ship_type_id, UserFitting.items_json,
+            UserFitting.implants_json, UserFitting.boosters_json,
+            UserFitting.dps_cached, UserFitting.dps_cache_key,
+        ).where(UserFitting.user_id == user_id)
     )
-    fits = [(fid, sid, ij) for fid, sid, ij in fit_rows.all()]
+    fits = fit_rows.all()
     if not fits:
-        return {}
+        return {"dps": {}, "pending": 0}
 
-    async def _dps_for(fit_id: int, ship_type_id: int, items_json: str) -> tuple[int, float]:
-        try:
-            items = json.loads(items_json) if items_json else []
-        except Exception:
-            items = []
-        if not items:
-            return fit_id, 0.0
-        try:
-            async with AsyncSessionLocal() as fdb:
-                stats = await calculate_fitting_stats(fdb, ship_type_id, items)
-            return fit_id, float(stats.get("total_dps") or 0.0)
-        except Exception as e:
-            logger.info("DPS calc failed for fit %s: %s", fit_id, e)
-            return fit_id, 0.0
-
-    results = await asyncio.gather(
-        *[_dps_for(fid, sid, ij) for fid, sid, ij in fits],
-        return_exceptions=True,
-    )
     out: dict[int, float] = {}
-    for r in results:
-        if isinstance(r, Exception):
-            continue
-        fid, dps = r
-        out[fid] = round(dps, 1)
-    return out
+    stale: list[tuple[int, int, str, str, str, str]] = []
+    for row in fits:
+        items_json = row.items_json or "[]"
+        implants_json = row.implants_json or "{}"
+        boosters_json = row.boosters_json or "{}"
+        key = dps_cache_key(row.ship_type_id, items_json, implants_json, boosters_json, sde_stamp)
+        if row.dps_cache_key == key and row.dps_cached is not None:
+            out[row.id] = row.dps_cached
+        else:
+            stale.append((row.id, row.ship_type_id, items_json, implants_json, boosters_json, key))
+
+    batch = stale[:DPS_STALE_BATCH_SIZE]
+    for fit_id, ship_type_id, items_json, implants_json, boosters_json, key in batch:
+        out[fit_id] = await _compute_and_cache_dps(
+            db, fit_id, ship_type_id, items_json, implants_json, boosters_json, key)
+        await asyncio.sleep(0)
+
+    return {"dps": out, "pending": len(stale) - len(batch)}
 
 
 async def _owned_fit_or_none(
@@ -660,6 +719,40 @@ async def ship_slots(
     }
 
 
+def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[int]]) -> list[dict]:
+    """Load a compatible cargo charge onto each empty weapon, then drop the
+    cargo stacks that got used — shared by import_eft (a hand-pasted EFT fit
+    can carry suggested ammo in its Cargo section) and the character
+    bulk-import conversion path (an ESI fitting's suggested ammo/cap
+    boosters/nanite paste sit in the Cargo flag the same way). Pulled out of
+    import_eft so the two paths can't drift apart on this step.
+
+    `compat_by_weapon` is {weapon_type_id: {compatible charge type_id, ...}}
+    — callers batch this once via sde.get_compatible_charges_bulk rather
+    than querying per weapon (see import_eft and _prepare_bulk_import_cache
+    below).
+
+    Pure — no DB access here, so it's cheap to call once per fit even
+    inside a loop over 173 of them.
+    """
+    cargo_charges = [i for i in items if i["slot"] == "cargo"]
+    weapon_items = [
+        i for i in items
+        if i["slot"] in ("high", "med") and not i.get("charge_type_id")
+    ]
+    if cargo_charges and weapon_items:
+        for weapon in weapon_items:
+            compat_ids = compat_by_weapon.get(weapon["type_id"], set())
+            for cargo in cargo_charges:
+                if cargo["type_id"] in compat_ids:
+                    weapon["charge_type_id"] = cargo["type_id"]
+                    weapon["charge_name"] = cargo["type_name"]
+                    break
+
+    loaded_charge_ids = {i.get("charge_type_id") for i in items if i.get("charge_type_id")}
+    return [i for i in items if not (i["slot"] == "cargo" and i["type_id"] in loaded_charge_ids)]
+
+
 @router.post("/tools/fitting/import-eft")
 async def import_eft(
     request: Request,
@@ -716,13 +809,20 @@ async def import_eft(
     if not ship_type_id:
         return {"error": f"Unknown ship: {ship_name}"}
 
-    # Parse items
+    # Parse items. Slot resolution is deferred to one batched pass below
+    # (_slots below) rather than a per-line await, so a fit with dozens of
+    # lines costs a handful of queries total, not one (or three) per line —
+    # the same helper the character bulk-import path uses (T-069). A
+    # comma-separated inline charge ("Module Name, Charge Name") can't be
+    # resolved to high/med until then either, so its raw name rides along
+    # on a parallel list keyed by index rather than living on the item dict
+    # itself — nothing about the item's own shape should depend on how far
+    # through parsing we are.
     items = []
-    current_slot_group = 0  # Track blank-line-separated groups
+    charge_names_eft: list[str | None] = []
     for line in lines[1:]:
         line = line.strip()
         if not line or line.startswith("["):
-            current_slot_group += 1
             continue
 
         # Handle quantity suffix: "Module Name x5"
@@ -752,63 +852,42 @@ async def import_eft(
                            item_name, item_name.encode('unicode_escape').decode())
             continue
 
-        # Determine slot from module slot table
-        slot_type = await sde.get_module_slot_type(db, type_id)
-        if not slot_type:
-            # Check if it's a drone
-            from app.db.sde_models import SDEGroup, SDEType
-            type_result = await db.execute(
-                select(SDEType.group_id).where(SDEType.type_id == type_id)
-            )
-            group_id = type_result.scalar_one_or_none()
-            if group_id:
-                group_result = await db.execute(
-                    select(SDEGroup.category_id).where(SDEGroup.group_id == group_id)
-                )
-                cat_id = group_result.scalar_one_or_none()
-                if cat_id == 18:
-                    slot_type = "drone"
-                elif cat_id == 8:
-                    slot_type = "cargo"
-                else:
-                    slot_type = "cargo"
-            else:
-                slot_type = "cargo"
-
-        item_entry = {
+        items.append({
             "type_id": type_id,
             "type_name": item_name,
-            "slot": slot_type,
             "quantity": quantity,
-        }
+        })
+        charge_names_eft.append(charge_name_eft)
 
-        # Resolve inline charge if present
-        if charge_name_eft and slot_type in ("high", "mid"):
+    # Batched slot resolution (SDEModuleSlot, with the drone/cargo fallback
+    # via group -> category) for every distinct type_id parsed above.
+    slot_map = await sde.get_module_slot_types_bulk(db, [i["type_id"] for i in items])
+    for item in items:
+        item["slot"] = slot_map.get(item["type_id"], "cargo")
+
+    # Resolve inline charges now that slot is known. NOTE: "med", not
+    # "mid" — SDEModuleSlot and the fitting tool's own slot keys both say
+    # "med" (app/sde/loader.py's SLOT_EFFECT_MAP, fitting_tool.html's own
+    # slotTypes list). Comparing against "mid" here used to make this a
+    # silent no-op for every mid-slot weapon — a Capacitor Injector typed
+    # as "Capacitor Injector II, Cap Booster 400" never got the charge.
+    for item, charge_name_eft in zip(items, charge_names_eft):
+        if charge_name_eft and item["slot"] in ("high", "med"):
             charge_id = await sde.type_name_to_id(db, charge_name_eft)
             if charge_id:
-                item_entry["charge_type_id"] = charge_id
-                item_entry["charge_name"] = charge_name_eft
+                item["charge_type_id"] = charge_id
+                item["charge_name"] = charge_name_eft
 
-        items.append(item_entry)
-
-    # Auto-load charges from cargo onto compatible weapons
-    cargo_charges = [i for i in items if i["slot"] == "cargo"]
-    weapon_items = [i for i in items if i["slot"] in ("high", "mid") and not i.get("charge_type_id")]
-    if cargo_charges and weapon_items:
-        for weapon in weapon_items:
-            if weapon.get("charge_type_id"):
-                continue
-            compatible = await sde.get_compatible_charges(db, weapon["type_id"])
-            compat_ids = {c["type_id"] for c in compatible}
-            for cargo in cargo_charges:
-                if cargo["type_id"] in compat_ids:
-                    weapon["charge_type_id"] = cargo["type_id"]
-                    weapon["charge_name"] = cargo["type_name"]
-                    break
-
-    # Remove cargo items that are charges (already loaded onto weapons)
-    loaded_charge_ids = {i.get("charge_type_id") for i in items if i.get("charge_type_id")}
-    items = [i for i in items if not (i["slot"] == "cargo" and i["type_id"] in loaded_charge_ids)]
+    # Auto-load charges from cargo onto compatible weapons — one fit's worth
+    # of weapon types, batched in the same fixed handful of queries the
+    # character bulk-import path uses for all of them at once.
+    weapon_type_ids = [
+        i["type_id"] for i in items
+        if i["slot"] in ("high", "med") and not i.get("charge_type_id")
+    ]
+    compat_by_weapon = await sde.get_compatible_charges_bulk(db, weapon_type_ids)
+    compat_ids_by_weapon = {tid: {c["type_id"] for c in chs} for tid, chs in compat_by_weapon.items()}
+    items = _autoload_cargo_charges(items, compat_ids_by_weapon)
 
     return {
         "ship_type_id": ship_type_id,
@@ -1390,6 +1469,324 @@ async def move_fitting(request: Request, fitting_id: int, db: AsyncSession = Dep
 
 _FITTINGS_SCOPE = "esi-fittings.read_fittings.v1"
 
+# A character keeps well under this many in-game fits; it's headroom for
+# _bounded_int's coercion of the save endpoint's fitting_ids list, not a
+# real-world estimate (the owner this shipped for has 173).
+MAX_BULK_IMPORT_FITTING_IDS = 1000
+
+# Root of the "Ships" market-group tree. Matched by name (parent_group_id
+# IS NULL, market_group_name == "Ships") rather than a hardcoded id: the
+# real SDE's id for it is 4 — the same tree FITTING_ROOT_GROUPS below hangs
+# off of for the module browser — but a synthetic SDE slice in tests builds
+# its own ids, and matching by name is what generalizes to that without
+# special-casing test data.
+SHIPS_MARKET_ROOT_NAME = "Ships"
+
+
+async def _ship_class_map(db: AsyncSession, ship_type_ids) -> dict[int, str]:
+    """{ship_type_id: class name} for the per-character import folders
+    (T-069). The class is the name of the market-group ancestor directly
+    under the Ships root, walking sde_market_groups.parent_group_id up from
+    the ship's own market_group_id — e.g. a Rifter's market_group_id is
+    already "Frigates"; a T3 cruiser's might sit a level or two deeper and
+    has to walk up to find it. Falls back to the ship's SDE group name, then
+    "Other", for hulls with no Ships-rooted market group (structures) —
+    every ship has to land somewhere.
+    """
+    ship_type_ids = [t for t in set(ship_type_ids) if t]
+    if not ship_type_ids:
+        return {}
+
+    groups = await sde.get_all_market_groups(db)
+    by_id = {g["market_group_id"]: g for g in groups}
+    root_id = next(
+        (g["market_group_id"] for g in groups
+         if g["parent_group_id"] is None and g["market_group_name"] == SHIPS_MARKET_ROOT_NAME),
+        None,
+    )
+
+    rows = (await db.execute(
+        select(SDEType.type_id, SDEType.market_group_id, SDEType.group_id)
+        .where(SDEType.type_id.in_(ship_type_ids))
+    )).fetchall()
+    group_names = await _resolve_group_names(db, [r.group_id for r in rows if r.group_id])
+
+    out: dict[int, str] = {}
+    for r in rows:
+        name = None
+        if root_id is not None and r.market_group_id:
+            name = _walk_market_group_to_ships_child(r.market_group_id, by_id, root_id)
+        out[r.type_id] = name or group_names.get(r.group_id) or "Other"
+    return out
+
+
+def _walk_market_group_to_ships_child(start_id: int, by_id: dict, root_id: int) -> str | None:
+    """Walk parent_group_id up from `start_id` until the node just below the
+    Ships root, returning its name — or None if the chain never reaches
+    `root_id` (a cycle guard stops an unexpected loop from hanging)."""
+    cur = start_id
+    seen: set[int] = set()
+    while cur is not None and cur not in seen:
+        seen.add(cur)
+        node = by_id.get(cur)
+        if node is None:
+            return None
+        if node["parent_group_id"] == root_id:
+            return node["market_group_name"]
+        cur = node["parent_group_id"]
+    return None
+
+
+# Canonical ship-class display order (T-069 follow-up) — ESI's own fitting
+# order has no relation to hull size, so "Other" (or any class alphabetically
+# early) could land second in the character-import checklist. One list, used
+# wherever ship classes are grouped for display: import_char_fittings sorts
+# its response by this before returning, and the checklist dialog just
+# preserves array order, so there's only one place that decides the order
+# rather than a copy of this list living in the template's JS too.
+SHIP_CLASS_ORDER = (
+    "Frigates", "Destroyers", "Cruisers", "Battlecruisers", "Battleships",
+    "Capital Ships", "Mining Barges", "Haulers", "Industrial Ships",
+)
+
+
+def _ship_class_sort_key(name: str) -> tuple:
+    """(rank, tiebreak) for sorting ship-class groups: the known classes in
+    SHIP_CLASS_ORDER first (in that order), then anything else
+    alphabetically, then "Other" absolutely last regardless of where it
+    would otherwise alphabetize."""
+    if name == "Other":
+        return (2, "")
+    try:
+        return (0, SHIP_CLASS_ORDER.index(name))
+    except ValueError:
+        return (1, name.lower())
+
+
+async def _find_folder(
+    db: AsyncSession, user_id: int, parent_id: int | None, name: str
+) -> UserFittingFolder | None:
+    """(user, parent, name) lookup with no create-if-missing side effect —
+    for a caller that needs to know whether a folder already exists (e.g.
+    reporting the character-import root folder's id) without creating it
+    just to look. Never touches another user's folders."""
+    name = (name or "Other")[:128]
+    q = (
+        select(UserFittingFolder)
+        .where(UserFittingFolder.user_id == user_id)
+        .where(UserFittingFolder.name == name)
+    )
+    q = q.where(UserFittingFolder.parent_id == parent_id) if parent_id is not None \
+        else q.where(UserFittingFolder.parent_id.is_(None))
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def _get_or_create_folder(
+    db: AsyncSession, user_id: int, parent_id: int | None, name: str
+) -> UserFittingFolder:
+    """Find (user, parent, name) or create it. Shared by the
+    character-import root/class folders below and available to any other
+    caller that wants get-or-create semantics instead of create_folder's
+    always-create endpoint."""
+    existing = await _find_folder(db, user_id, parent_id, name)
+    if existing:
+        return existing
+    folder = UserFittingFolder(user_id=user_id, parent_id=parent_id, name=(name or "Other")[:128])
+    db.add(folder)
+    await db.flush()  # assigns folder.id without committing the whole import
+    return folder
+
+
+def _normalize_fit_name(raw_name) -> str:
+    """The one name normalization every already-imported/skip-rule check
+    (and the save endpoint's own INSERT) must agree on — a fit whose ESI
+    name is None, empty or all-whitespace stores as "Unnamed", same as a
+    hand-saved fit's default. Used identically by import_char_save (what
+    it stores and skips against), import_char_fittings' already_imported
+    flag, and fittings_list's — three separate call sites that used to
+    each roll this inline with a subtly different shape (one skipped the
+    .strip()), which could make a fit "skip" from one endpoint's point of
+    view and not the other's.
+    """
+    return (raw_name or "Unnamed").strip() or "Unnamed"
+
+
+async def _already_imported_lookup(
+    db: AsyncSession, user_id: int, character_id: int
+) -> tuple[set[int], set[tuple[int, str]]]:
+    """The two skip-rule sets (T-069), shared by the fittings-list GET
+    (already_imported flag) and the save POST (what to skip):
+    - source_fitting_ids already recorded for this (user, character) — a
+      prior bulk import of the exact same in-game fit.
+    - (ship_type_id, name) pairs among this user's fits that carry NO
+      source columns at all — a fit saved earlier through the one-at-a-time
+      "Import" path, before source tracking existed, or a hand-built fit
+      that happens to match by name.
+    """
+    src_rows = (await db.execute(
+        select(UserFitting.source_fitting_id)
+        .where(UserFitting.user_id == user_id)
+        .where(UserFitting.source_character_id == character_id)
+        .where(UserFitting.source_fitting_id.isnot(None))
+    )).scalars().all()
+    null_rows = (await db.execute(
+        select(UserFitting.ship_type_id, UserFitting.name)
+        .where(UserFitting.user_id == user_id)
+        .where(UserFitting.source_character_id.is_(None))
+    )).all()
+    return set(src_rows), {(sid, name) for sid, name in null_rows}
+
+
+async def _prepare_bulk_import_cache(db: AsyncSession, raw_fittings: list[dict]) -> dict:
+    """One batched round of SDE lookups covering every fit in
+    `raw_fittings` — the whole point of this function is O(distinct types
+    across the batch) queries, not O(fits). For the owner's 173 fits this is
+    a handful of queries total; see _convert_esi_fit_items below for the
+    per-fit (DB-free) conversion that consumes it.
+    """
+    all_type_ids: set[int] = set()
+    for f in raw_fittings:
+        if f.get("ship_type_id"):
+            all_type_ids.add(f["ship_type_id"])
+        for it in f.get("items", []):
+            all_type_ids.add(it["type_id"])
+
+    names = await sde.type_ids_to_names(db, list(all_type_ids))
+    slots = await sde.get_module_slot_types_bulk(db, list(all_type_ids))
+    weapon_type_ids = [tid for tid, slot in slots.items() if slot in ("high", "med")]
+    compat = await sde.get_compatible_charges_bulk(db, weapon_type_ids)
+    compat_ids = {tid: {c["type_id"] for c in chs} for tid, chs in compat.items()}
+    return {"names": names, "slots": slots, "compat": compat_ids}
+
+
+def _validate_bulk_fit(raw_fit: dict, cache: dict) -> dict | None:
+    """Return what's unresolvable in `raw_fit`, else None.
+
+    Checked before anything touches the DB session (validate-then-insert):
+    a fit that fails here is simply skipped in the loop below, so it can
+    never leave a half-written folder or fitting behind for the ones after
+    it to trip over — there is nothing to roll back because nothing was
+    written. import_eft tolerates an unresolved line by dropping it; this
+    path can't silently drop part of a fit the way that would, since there
+    is no user watching to notice a shorter item list, so an unresolvable
+    type fails the whole fit instead.
+
+    Returns {"unknown_ship": type_id | None, "unknown_items": [type_id,
+    ...]} rather than a finished message — the caller resolves every
+    unknown id across the whole batch in one bulk ESI names lookup and
+    turns this into "Uses items no longer in the game: X, Y" / "Hull not
+    in game data: Z" (real examples from a 173-fit account: 35 fits use
+    unpublished/removed items, 8 use hulls the SDE never carried).
+    """
+    ship_type_id = raw_fit.get("ship_type_id")
+    unknown_ship = ship_type_id if ship_type_id not in cache["names"] else None
+    unknown_items: list[int] = []
+    seen: set[int] = set()
+    for it in raw_fit.get("items", []):
+        tid = it.get("type_id")
+        if tid not in cache["names"] and tid not in seen:
+            seen.add(tid)
+            unknown_items.append(tid)
+    if unknown_ship is None and not unknown_items:
+        return None
+    return {"unknown_ship": unknown_ship, "unknown_items": unknown_items}
+
+
+async def _resolve_unknown_type_names(db: AsyncSession, type_ids) -> dict[int, str]:
+    """Best-effort display names for type ids missing from the local SDE —
+    an item CCP later unpublished/removed, or a hull (GM/test ship) the SDE
+    export never carried — via ESI's public /universe/names/, which can
+    still resolve many of these even though sde_types can't. Public: no
+    scope, no character token (ESIClient("", db=db), same as fitting_info's
+    ESI description lookup above).
+
+    One bulk POST for the whole batch (ESI's own cap is 1000 ids) on the
+    happy path. But /universe/names/ 404s the WHOLE batch if even one id
+    is entirely unknown to ESI (see app/routes/character_detail.py's
+    _sender_names, the established pattern for this) — real accounts mix
+    genuinely nameable removed items with a GM/test hull ESI has never
+    heard of, and treating that 404 as "resolve nothing" would blank out
+    every name in the batch over one bad id. On a 404, falls back to
+    asking for each id alone (bounded concurrency); any other failure
+    (network error, timeout) gives up and returns whatever was resolved
+    so far — the caller falls back to "type <id>" per id that's still
+    missing either way.
+    """
+    ids = sorted({int(t) for t in type_ids if t})
+    if not ids:
+        return {}
+    client = ESIClient("", db=db)
+    names: dict[int, str] = {}
+    for i in range(0, len(ids), 1000):
+        chunk = ids[i:i + 1000]
+        try:
+            rows = await client.post_public("/universe/names/", chunk)
+            for r in rows or []:
+                if r.get("id") is not None and r.get("name"):
+                    names[int(r["id"])] = r["name"]
+            continue
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                logger.info("import-char save: /universe/names failed: %s", e)
+                continue
+        except Exception as e:
+            logger.info("import-char save: /universe/names failed: %s", e)
+            continue
+
+        # 404 = at least one id in this chunk ESI can't name. Ask for each
+        # alone rather than losing every name in the chunk over that one.
+        sem = asyncio.Semaphore(3)
+
+        async def _one(tid: int) -> tuple[int, str | None]:
+            async with sem:
+                try:
+                    rows = await client.post_public("/universe/names/", [tid])
+                    return tid, (rows[0].get("name") if rows else None)
+                except Exception:
+                    return tid, None
+
+        for tid, name in await asyncio.gather(*[_one(t) for t in chunk]):
+            if name:
+                names[tid] = name
+    return names
+
+
+def _describe_unresolvable_fit(validation: dict, names: dict[int, str]) -> str:
+    """{"unknown_ship", "unknown_items"} + resolved names -> the message
+    shown for one failed fit. Falls back to "type <id>" per id ESI (or the
+    fallback lookup itself) couldn't name either."""
+    def _name(tid: int) -> str:
+        return names.get(tid, f"type {tid}")
+
+    parts = []
+    if validation.get("unknown_ship"):
+        parts.append(f"Hull not in game data: {_name(validation['unknown_ship'])}")
+    if validation.get("unknown_items"):
+        parts.append(
+            "Uses items no longer in the game: "
+            + ", ".join(_name(t) for t in validation["unknown_items"])
+        )
+    return "; ".join(parts)
+
+
+def _convert_esi_fit_items(raw_items: list[dict], cache: dict) -> list[dict]:
+    """ESI fitting items -> the fitting tool's saved-items shape, using the
+    batched lookups _prepare_bulk_import_cache already ran for the whole
+    request. Deliberately mirrors import_eft: same slot source (SDE module
+    slot type, not the ESI flag), same cargo-charge autoload step — see
+    tests/test_fitting_char_import.py's equivalence check.
+    """
+    items = []
+    for it in raw_items:
+        tid = it["type_id"]
+        items.append({
+            "type_id": tid,
+            "type_name": cache["names"].get(tid, f"Type {tid}"),
+            "slot": cache["slots"].get(tid, "cargo"),
+            "quantity": it.get("quantity", 1) or 1,
+        })
+    return _autoload_cargo_charges(items, cache["compat"])
+
 
 @router.get("/tools/fitting/import-character/characters")
 async def import_char_list(request: Request, db: AsyncSession = Depends(get_db)):
@@ -1447,20 +1844,174 @@ async def import_char_fittings(
         for item in f.get("items", []):
             all_ids.add(item["type_id"])
     type_names = await sde.type_ids_to_names(db, list(all_ids))
+    ship_classes = await _ship_class_map(db, [f["ship_type_id"] for f in raw])
+    already_src, already_saved_pairs = await _already_imported_lookup(db, user_id, character_id)
 
     fittings = []
     for f in sorted(raw, key=lambda x: (x.get("ship_type_id"), x.get("name", ""))):
         sid = f["ship_type_id"]
         ship_name = type_names.get(sid, f"Ship {sid}")
         parsed = _parse_fitting(f, type_names, ship_name, {})
+        fid = f.get("fitting_id")
+        name = _normalize_fit_name(f.get("name"))
+        already_imported = fid in already_src or (sid, name) in already_saved_pairs
         fittings.append({
-            "fitting_id": f.get("fitting_id"),
-            "name": f.get("name", "Unnamed"),
+            "fitting_id": fid,
+            "name": name,
             "ship_type_id": sid,
             "ship_name": ship_name,
             "eft": _to_eft(parsed),
+            "ship_class": ship_classes.get(sid, "Other"),
+            "module_count": parsed["total_modules"],
+            "already_imported": already_imported,
         })
+    # Canonical class order (see SHIP_CLASS_ORDER) rather than ESI's own
+    # per-fit order — the checklist dialog groups by array order, so
+    # deciding the order here is what keeps "Other" from landing wherever
+    # ESI happened to put its first fit.
+    fittings.sort(key=lambda fit: (_ship_class_sort_key(fit["ship_class"]), fit["ship_name"], fit["name"]))
     return {"fittings": fittings}
+
+
+@router.post("/tools/fitting/import-character/{character_id}/save")
+async def import_char_save(
+    request: Request, character_id: int, db: AsyncSession = Depends(get_db),
+):
+    """Bulk-import a character's in-game fits into Saved Fits (T-069).
+
+    Re-fetches the character's fittings from ESI itself and converts them
+    server-side — the client only ever sends which fits to import, never
+    fitting data, so a crafted body can't plant arbitrary items. Already-
+    imported fits are skipped (never overwritten); a bad type in one fit
+    fails only that fit (see _validate_bulk_fit).
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"error": "Not logged in"}
+    r = await db.execute(
+        select(Character)
+        .where(Character.character_id == character_id)
+        .where(Character.user_id == user_id)
+    )
+    char = r.scalar_one_or_none()
+    if not char:
+        return {"error": "Character not found"}
+    if _FITTINGS_SCOPE not in (char.scopes or ""):
+        return {"error": "Fittings scope missing — re-authorize this character"}
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    want_all = bool(body.get("all"))
+    requested_ids: set[int] | None = None
+    if not want_all:
+        requested_ids = set()
+        raw_ids = body.get("fitting_ids") or []
+        if isinstance(raw_ids, list):
+            for v in raw_ids[:MAX_BULK_IMPORT_FITTING_IDS]:
+                iv = _bounded_int(v)
+                if iv is not None:
+                    requested_ids.add(iv)
+
+    try:
+        token = await refresh_token(char, db)
+        client = ESIClient(token, db=db)
+        raw = await esi_char.get_fittings(client, character_id)
+    except Exception as e:
+        logger.warning("import-char save: ESI fetch failed for %s: %s", character_id, e, exc_info=True)
+        return {"error": f"ESI error: {type(e).__name__}"}
+
+    raw = raw or []
+    failed: list[dict] = []
+    if want_all:
+        selected = raw
+    else:
+        raw_by_id = {f.get("fitting_id"): f for f in raw}
+        selected = [raw_by_id[i] for i in requested_ids if i in raw_by_id]
+        for missing_id in sorted(requested_ids - set(raw_by_id.keys())):
+            failed.append({"name": f"Fitting {missing_id}", "reason": "Not found on character"})
+
+    if not selected:
+        return {"imported": 0, "skipped": 0, "failed": failed, "folder_id": None}
+
+    cache = await _prepare_bulk_import_cache(db, selected)
+    already_src, already_saved_pairs = await _already_imported_lookup(db, user_id, character_id)
+    ship_classes = await _ship_class_map(db, [f.get("ship_type_id") for f in selected])
+
+    # Only PEEK for the root folder here — don't create it. A request where
+    # every fit turns out to be a skip or a failure (e.g. a re-run against
+    # an already-imported character) has no reason to leave behind an empty
+    # "<character> · in-game" folder. char_folder_id gets set for real, via
+    # get-or-create, the first time a fit actually needs it below.
+    existing_root = await _find_folder(db, user_id, None, f"{char.character_name} · in-game")
+    char_folder_id: int | None = existing_root.id if existing_root else None
+
+    imported = 0
+    skipped = 0
+    now = datetime.now(timezone.utc)
+    # One get-or-create per distinct class actually needed, not one per
+    # fit — a 173-fit import might only touch half a dozen ship classes.
+    sub_folder_ids: dict[str, int] = {}
+    # Raw validation failures, named after one bulk ESI lookup resolves
+    # every unknown type id across the whole batch at once — see below.
+    unresolvable: list[dict] = []
+
+    for f in selected:
+        fid = f.get("fitting_id")
+        name = _normalize_fit_name(f.get("name"))
+        ship_type_id = f.get("ship_type_id")
+
+        if fid is not None and fid in already_src:
+            skipped += 1
+            continue
+        if (ship_type_id, name) in already_saved_pairs:
+            skipped += 1
+            continue
+
+        validation = _validate_bulk_fit(f, cache)
+        if validation:
+            unresolvable.append({"name": name, **validation})
+            continue
+
+        items = _convert_esi_fit_items(f.get("items", []), cache)
+
+        if char_folder_id is None:
+            root = await _get_or_create_folder(db, user_id, None, f"{char.character_name} · in-game")
+            char_folder_id = root.id
+        class_name = ship_classes.get(ship_type_id, "Other")
+        if class_name not in sub_folder_ids:
+            sub_folder = await _get_or_create_folder(db, user_id, char_folder_id, class_name)
+            sub_folder_ids[class_name] = sub_folder.id
+
+        fitting = UserFitting(
+            user_id=user_id,
+            folder_id=sub_folder_ids[class_name],
+            name=name[:255],
+            description="",
+            ship_type_id=int(ship_type_id),
+            items_json=json.dumps(items),
+            source_character_id=character_id,
+            source_fitting_id=fid,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(fitting)
+        imported += 1
+
+    await db.commit()
+
+    if unresolvable:
+        unknown_ids: set[int] = set()
+        for u in unresolvable:
+            if u.get("unknown_ship"):
+                unknown_ids.add(u["unknown_ship"])
+            unknown_ids.update(u.get("unknown_items") or [])
+        names = await _resolve_unknown_type_names(db, unknown_ids)
+        for u in unresolvable:
+            failed.append({"name": u["name"], "reason": _describe_unresolvable_fit(u, names)})
+
+    return {"imported": imported, "skipped": skipped, "failed": failed, "folder_id": char_folder_id}
 
 
 # ── Module browser endpoints ─────────────────────────────────────────────

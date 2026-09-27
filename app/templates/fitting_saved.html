@@ -69,6 +69,14 @@
         display:none;
     }
 }
+
+/* A CSS reset elsewhere zeroes <dialog>'s default UA margin, which is what
+   centers a modal dialog on the viewport — without it this rendered pinned
+   to the top-left, with the browser's own near-invisible default backdrop.
+   base.html's #cmdk sets its own ::backdrop the same way; whether it also
+   needs margin:auto wasn't checked here. */
+#charimport-dialog { margin:auto; }
+#charimport-dialog::backdrop { background:rgba(0,0,0,0.55); }
 </style>
 {% endblock %}
 
@@ -80,7 +88,8 @@
             {{ total }} saved fit{{ '' if total == 1 else 's' }}{% if folders %} &middot; {{ folders|length }} folder{{ '' if folders|length == 1 else 's' }}{% endif %}
         </div>
     </div>
-    <div>
+    <div style="display:flex;gap:0.5rem;">
+        <button data-click="openCharImportDialog" class="sf-chip" style="padding:6px 14px;">Import from character</button>
         <a href="/tools/fitting" class="sf-chip is-primary" style="padding:6px 14px;">+ New Fit</a>
     </div>
 </div>
@@ -153,6 +162,17 @@
     {% endfor %}
 </datalist>
 
+{# ── Import from character dialog (T-069) ──────────────────────────────── #}
+<dialog id="charimport-dialog" style="border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0;width:min(560px,92vw);max-height:82vh;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.9rem 1rem;border-bottom:1px solid var(--border);">
+        <span style="font-size:12px;font-weight:600;">Import from character</span>
+        <button data-click="closeCharImportDialog" aria-label="Close" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+    </div>
+    <div id="ci-body" style="padding:1rem;overflow-y:auto;max-height:calc(82vh - 48px);font-size:11px;">
+        <div style="color:var(--muted);">Loading characters...</div>
+    </div>
+</dialog>
+
 <script nonce="{{ request.state.csp_nonce }}">
 (function() {
     var tbody = document.getElementById('sf-tbody');
@@ -164,12 +184,22 @@
        so we render the page first and fetch {fit_id: dps} after. Updates
        both the data-dps attribute (so the existing sort logic picks it
        up on the user's next sort click) and the cell text. */
+    /* T-069 follow-up: the server now caches DPS per fit and only
+       recomputes a small stale batch per call (DPS_STALE_BATCH_SIZE in
+       app/routes/fitting.py), returning {"dps": {...}, "pending": N} —
+       everything already cached comes back on the FIRST call, so only
+       the fits still showing "…" need a further round. Re-requests every
+       DPS_POLL_MS while pending > 0, so a 135-fit account fills in over a
+       few quick calls instead of one that used to take minutes. */
+    var DPS_POLL_MS = 900;
+
     function fillDps() {
         if (!rows.length) return;
         fetch('/tools/fitting/saved/dps', {credentials: 'same-origin'})
-            .then(function(r) { return r.ok ? r.json() : {}; })
-            .then(function(map) {
-                if (!map || map.error) return;
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(resp) {
+                if (!resp || resp.error) return;
+                var map = resp.dps || {};
                 rows.forEach(function(tr) {
                     var fid = tr.dataset.fitId;
                     if (!fid || !(fid in map)) return;
@@ -182,6 +212,7 @@
                             : '—';
                     }
                 });
+                if (resp.pending > 0) setTimeout(fillDps, DPS_POLL_MS);
             })
             .catch(function() { /* leave the … placeholders — non-fatal */ });
     }
@@ -302,19 +333,368 @@ function deleteFit() {
         });
 }
 
-document.getElementById('sf-new-folder').addEventListener('click', function() {
-    var name = prompt('New folder name:');
-    if (!name || !name.trim()) return;
-    fetch('/tools/fitting/folders', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: name.trim()})
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.error) { alert(data.error); return; }
-        window.location.reload();
+/* Guarded: "+ Folder" only renders when there are saved rows, so
+   an empty Saved Fits page has no #sf-new-folder — and this is also the
+   Import-from-character dialog's main entry point, which must keep working
+   on that same empty page (see openCharImportDialog below). An unguarded
+   getElementById(...).addEventListener would throw here and silently skip
+   every top-level statement after it in this block. */
+var _newFolderBtn = document.getElementById('sf-new-folder');
+if (_newFolderBtn) {
+    _newFolderBtn.addEventListener('click', function() {
+        var name = prompt('New folder name:');
+        if (!name || !name.trim()) return;
+        fetch('/tools/fitting/folders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name.trim()})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { alert(data.error); return; }
+            window.location.reload();
+        });
     });
-});
+}
+
+/* ── Import from character (T-069) ───────────────────────────────────────
+   Everything here is lazy — triggered by opening the dialog, not by a
+   page-load statement — so it works identically whether the Saved Fits
+   list is empty or not. Rows are built with createElement/textContent
+   throughout (never innerHTML with fit/ship names spliced in): fit and
+   ship names are player-supplied text. */
+var ciDialog = document.getElementById('charimport-dialog');
+var ciSelectedCharId = null;
+var ciFittings = [];
+
+function openCharImportDialog() {
+    if (!ciDialog) return;
+    if (typeof ciDialog.showModal === 'function') ciDialog.showModal();
+    else ciDialog.setAttribute('open', '');
+    ciRenderCharacterPicker();
+}
+
+function closeCharImportDialog() {
+    if (!ciDialog) return;
+    if (typeof ciDialog.close === 'function') ciDialog.close();
+    else ciDialog.removeAttribute('open');
+}
+
+function ciClear(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function ciRenderCharacterPicker() {
+    var body = document.getElementById('ci-body');
+    ciClear(body);
+    var loading = document.createElement('div');
+    loading.style.color = 'var(--muted)';
+    loading.textContent = 'Loading characters...';
+    body.appendChild(loading);
+
+    fetch('/tools/fitting/import-character/characters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            ciClear(body);
+            var chars = data.characters || [];
+            if (!chars.length) {
+                var msg = document.createElement('div');
+                msg.style.color = 'var(--muted)';
+                msg.textContent = 'None of your characters share Saved fittings. Grant it from Account › Characters & permissions.';
+                body.appendChild(msg);
+                return;
+            }
+            var label = document.createElement('label');
+            label.style.display = 'block';
+            label.style.marginBottom = '0.5rem';
+            label.style.color = 'var(--muted)';
+            label.textContent = 'Character';
+            var select = document.createElement('select');
+            select.id = 'ci-char-select';
+            select.style.width = '100%';
+            select.style.padding = '6px 8px';
+            select.style.background = 'var(--bg)';
+            select.style.border = '1px solid var(--border)';
+            select.style.color = 'var(--text)';
+            select.style.fontFamily = 'inherit';
+            select.style.fontSize = '11px';
+            var placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Choose a character…';
+            select.appendChild(placeholder);
+            chars.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                select.appendChild(opt);
+            });
+            select.setAttribute('data-change', 'ciOnCharacterChange');
+            label.appendChild(select);
+            body.appendChild(label);
+            var listArea = document.createElement('div');
+            listArea.id = 'ci-list-area';
+            body.appendChild(listArea);
+        })
+        .catch(function() {
+            ciClear(body);
+            var err = document.createElement('div');
+            err.style.color = 'var(--danger)';
+            err.textContent = 'Failed to load characters.';
+            body.appendChild(err);
+        });
+}
+
+function ciOnCharacterChange() {
+    var select = document.getElementById('ci-char-select');
+    var listArea = document.getElementById('ci-list-area');
+    if (!select || !listArea) return;
+    ciClear(listArea);
+    ciSelectedCharId = select.value ? parseInt(select.value, 10) : null;
+    if (!ciSelectedCharId) return;
+
+    var loading = document.createElement('div');
+    loading.style.color = 'var(--muted)';
+    loading.style.marginTop = '0.5rem';
+    loading.textContent = 'Loading fittings…';
+    listArea.appendChild(loading);
+
+    fetch('/tools/fitting/import-character/' + ciSelectedCharId + '/fittings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            ciClear(listArea);
+            if (data.error) {
+                var err = document.createElement('div');
+                err.style.color = 'var(--danger)';
+                err.textContent = data.error;
+                listArea.appendChild(err);
+                return;
+            }
+            ciFittings = data.fittings || [];
+            ciRenderChecklist(listArea);
+        })
+        .catch(function() {
+            ciClear(listArea);
+            var err = document.createElement('div');
+            err.style.color = 'var(--danger)';
+            err.textContent = 'Failed to load fittings.';
+            listArea.appendChild(err);
+        });
+}
+
+function ciRenderChecklist(listArea) {
+    if (!ciFittings.length) {
+        var none = document.createElement('div');
+        none.style.color = 'var(--muted)';
+        none.style.marginTop = '0.5rem';
+        none.textContent = 'No in-game fittings found for this character.';
+        listArea.appendChild(none);
+        return;
+    }
+
+    var toolbar = document.createElement('div');
+    toolbar.style.display = 'flex';
+    toolbar.style.gap = '0.5rem';
+    toolbar.style.margin = '0.6rem 0';
+    toolbar.style.flexWrap = 'wrap';
+
+    var search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = 'Filter by fit or ship name…';
+    search.setAttribute('aria-label', 'Filter fittings');
+    search.style.flex = '1';
+    search.style.minWidth = '160px';
+    search.style.padding = '5px 8px';
+    search.style.background = 'var(--bg)';
+    search.style.border = '1px solid var(--border)';
+    search.style.color = 'var(--text)';
+    search.style.fontFamily = 'inherit';
+    search.style.fontSize = '11px';
+
+    var selectAllLabel = document.createElement('label');
+    selectAllLabel.style.display = 'flex';
+    selectAllLabel.style.alignItems = 'center';
+    selectAllLabel.style.gap = '0.3rem';
+    selectAllLabel.style.whiteSpace = 'nowrap';
+    var selectAll = document.createElement('input');
+    selectAll.type = 'checkbox';
+    selectAllLabel.appendChild(selectAll);
+    selectAllLabel.appendChild(document.createTextNode('Select all'));
+
+    toolbar.appendChild(search);
+    toolbar.appendChild(selectAllLabel);
+    listArea.appendChild(toolbar);
+
+    var groups = {};
+    var order = [];
+    ciFittings.forEach(function(f) {
+        var cls = f.ship_class || 'Other';
+        if (!groups[cls]) { groups[cls] = []; order.push(cls); }
+        groups[cls].push(f);
+    });
+
+    var checkboxes = [];
+    order.forEach(function(cls) {
+        var fieldset = document.createElement('fieldset');
+        fieldset.style.border = '1px solid var(--border)';
+        fieldset.style.margin = '0 0 0.6rem 0';
+        fieldset.style.padding = '0.4rem 0.6rem';
+        var legend = document.createElement('legend');
+        legend.style.color = 'var(--muted)';
+        legend.style.fontSize = '9px';
+        legend.style.letterSpacing = '0.1em';
+        legend.style.textTransform = 'uppercase';
+        legend.textContent = cls;
+        fieldset.appendChild(legend);
+
+        groups[cls].forEach(function(f) {
+            var row = document.createElement('label');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '0.5rem';
+            row.style.padding = '0.3rem 0';
+            row.dataset.ciName = (f.name || '').toLowerCase();
+            row.dataset.ciShip = (f.ship_name || '').toLowerCase();
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = f.fitting_id;
+            if (f.already_imported) cb.disabled = true;
+            else checkboxes.push(cb);
+            row.appendChild(cb);
+
+            var text = document.createElement('span');
+            text.style.flex = '1';
+            text.style.minWidth = '0';
+            text.style.overflow = 'hidden';
+            text.style.textOverflow = 'ellipsis';
+            text.style.whiteSpace = 'nowrap';
+            text.textContent = (f.name || 'Unnamed') + ' — ' + (f.ship_name || '') +
+                ' (' + (f.module_count || 0) + ' modules)';
+            row.appendChild(text);
+
+            if (f.already_imported) {
+                var badge = document.createElement('span');
+                badge.style.fontSize = '9px';
+                badge.style.color = 'var(--muted)';
+                badge.style.border = '1px solid var(--border)';
+                badge.style.padding = '1px 5px';
+                badge.style.textTransform = 'uppercase';
+                badge.style.letterSpacing = '0.08em';
+                badge.textContent = 'Imported';
+                row.appendChild(badge);
+            }
+
+            fieldset.appendChild(row);
+        });
+        listArea.appendChild(fieldset);
+    });
+
+    search.addEventListener('input', function() {
+        var q = search.value.trim().toLowerCase();
+        listArea.querySelectorAll('fieldset label').forEach(function(row) {
+            var hay = row.dataset.ciName + ' ' + row.dataset.ciShip;
+            row.style.display = (!q || hay.indexOf(q) >= 0) ? '' : 'none';
+        });
+    });
+
+    selectAll.addEventListener('change', function() {
+        checkboxes.forEach(function(cb) {
+            if (cb.closest('label').style.display !== 'none') cb.checked = selectAll.checked;
+        });
+        // Setting .checked in code fires no 'change' event on the
+        // checkboxes themselves, so the Import button's label/enabled
+        // state (refreshImportLabel, declared below — hoisted within this
+        // function, and this callback only ever runs later, on click)
+        // would otherwise never react to a select-all.
+        refreshImportLabel();
+    });
+
+    var actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.alignItems = 'center';
+    actions.style.gap = '0.75rem';
+    actions.style.marginTop = '0.75rem';
+
+    var importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'sf-chip is-primary';
+    importBtn.style.padding = '6px 14px';
+    importBtn.textContent = 'Import fits';
+    actions.appendChild(importBtn);
+
+    var status = document.createElement('div');
+    status.id = 'ci-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.style.color = 'var(--muted)';
+    actions.appendChild(status);
+
+    listArea.appendChild(actions);
+
+    function refreshImportLabel() {
+        var n = checkboxes.filter(function(cb) { return cb.checked; }).length;
+        importBtn.textContent = n ? 'Import ' + n + ' fit' + (n === 1 ? '' : 's') : 'Import fits';
+        importBtn.disabled = n === 0;
+    }
+    checkboxes.forEach(function(cb) { cb.addEventListener('change', refreshImportLabel); });
+    refreshImportLabel();
+
+    importBtn.addEventListener('click', function() {
+        var ids = checkboxes.filter(function(cb) { return cb.checked; })
+            .map(function(cb) { return parseInt(cb.value, 10); });
+        if (!ids.length) return;
+        importBtn.disabled = true;
+        status.textContent = 'Importing…';
+        fetch('/tools/fitting/import-character/' + ciSelectedCharId + '/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({fitting_ids: ids})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                status.style.color = 'var(--danger)';
+                status.textContent = data.error;
+                importBtn.disabled = false;
+                return;
+            }
+            ciClear(listArea);
+            var summary = document.createElement('div');
+            summary.setAttribute('role', 'status');
+            summary.setAttribute('aria-live', 'polite');
+            summary.style.fontSize = '11px';
+            var line = document.createElement('div');
+            line.textContent = 'Imported ' + data.imported + ', skipped ' + data.skipped +
+                (data.failed && data.failed.length ? ', failed ' + data.failed.length : '') + '.';
+            summary.appendChild(line);
+            if (data.failed && data.failed.length) {
+                var list = document.createElement('ul');
+                list.style.margin = '0.4rem 0 0 1rem';
+                list.style.color = 'var(--danger)';
+                data.failed.forEach(function(f) {
+                    var li = document.createElement('li');
+                    li.textContent = f.name + ': ' + f.reason;
+                    list.appendChild(li);
+                });
+                summary.appendChild(list);
+            }
+            listArea.appendChild(summary);
+
+            var doneBtn = document.createElement('button');
+            doneBtn.type = 'button';
+            doneBtn.className = 'sf-chip is-primary';
+            doneBtn.style.padding = '6px 14px';
+            doneBtn.style.marginTop = '0.75rem';
+            doneBtn.textContent = 'Done';
+            doneBtn.addEventListener('click', function() { window.location.reload(); });
+            listArea.appendChild(doneBtn);
+        })
+        .catch(function() {
+            status.style.color = 'var(--danger)';
+            status.textContent = 'Import failed — try again.';
+            importBtn.disabled = false;
+        });
+    });
+}
 </script>
 {% endblock %}

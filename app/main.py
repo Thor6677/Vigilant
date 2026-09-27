@@ -16,7 +16,7 @@ from app.middleware.htmx_redirect import HTMXRedirectMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
-from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache
+from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns
 from app.auth.session_guard import check_session
 from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
 from app.db.cache import ESICache  # registers table with Base
@@ -415,6 +415,13 @@ async def startup():
         if "security_status" not in cols:
             await db.execute(text("ALTER TABLE killmail_attackers ADD COLUMN security_status REAL"))
         await db.commit()
+
+    # ── Fitting tool (T-069): user_fittings source + DPS-cache columns ──
+    # Must run after init_db() (the table has to exist) — see
+    # ensure_user_fittings_columns's docstring for why this can't be a
+    # plain Index() on the model instead.
+    async with AsyncSessionLocal() as db:
+        await ensure_user_fittings_columns(db)
 
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if
