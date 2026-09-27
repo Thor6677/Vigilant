@@ -1,20 +1,31 @@
-"""T-076 Part A item 2: the compact row grid.
+"""T-076 Part A item 2 / T-078: the compact row grid.
 
-One shared CSS grid template — no row carries its own inline
-`grid-template-columns`, and the class-level rule defines the fixed tracks
-(dot, portrait, name, location, ship, wallet, training, flags) once. Flags
-render on one line (`flex-wrap: nowrap`, not `wrap`), and the wallet cell is
-right-aligned with tabular figures.
+One shared CSS grid template per breakpoint — no row carries its own inline
+`grid-template-columns`, and the class-level rules define the tracks (dot,
+portrait, name, location, ship, wallet, training, flags) once each. Flags
+render on one line at the base and <=1000px tiers (`flex-wrap: nowrap`), but
+wrap onto a second line at the <=760px tier, where location/ship/training
+are gone and there's a fixed-width flags column to wrap inside instead of
+overflowing it. The wallet cell is right-aligned with tabular figures at
+every tier.
+
+T-078 also fixed a row-to-row column-drift bug: each `.dash-compact-row` is
+its own independent grid container, so a bare `auto` or bare `Nfr` track
+resolves its base size from THAT row's own content, shifting every track
+after it. Every flexible track is now `minmax(0, Nfr)` (explicit zero
+minimum) and flags is a fixed px width instead of `auto` — see the CSS
+comment in dashboard.html and test_grid_tracks_by_breakpoint below.
 
 Row markup (content block) is checked via the render_full harness; the
-shared CSS rule itself lives in dashboard.html's `head` block, which that
-harness never renders (it calls the `content` block directly) — those
+shared CSS rules themselves live in dashboard.html's `head` block, which
+that harness never renders (it calls the `content` block directly) — those
 assertions go through the real route instead, mirroring
 tests/test_dashboard_route_render.py's client fixture.
 """
 import asyncio
 import base64
 import json
+import os
 import re
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -88,21 +99,124 @@ def test_every_row_shares_the_same_class_and_no_row_count_mismatch():
     assert len(rows) == len(CHARACTERS)
 
 
-def test_shared_grid_template_definition_has_eight_tracks(client):
-    """Two CSS rules define `.dash-compact-row`'s grid-template-columns —
-    the base 8-track layout and the <=480px responsive override (5 tracks,
-    checked separately below) — both class-level, never per-row inline
-    (see test_no_compact_row_carries_an_inline_grid_template)."""
+def _tracks(raw):
+    # minmax(0, 1.2fr) has an internal space — collapse it before splitting
+    # on whitespace so it counts as one track, not two.
+    return re.sub(r"\(([^)]*)\)", lambda m: m.group(0).replace(" ", ""), raw).strip().split()
+
+
+def _media_block(html, px):
+    """Balanced-brace extraction of one `@media (max-width: Npx) { ... }`
+    block, so its `.dash-compact-row` rule (and any sibling rules, e.g.
+    `.dash-compact-ship { display: none; }`) is tied to ITS OWN breakpoint —
+    not just matched by source order against some other regex, which would
+    stay green even if a breakpoint's rules were reordered or duplicated."""
+    marker = f"@media (max-width: {px}px)"
+    start = html.index(marker)
+    brace_start = html.index("{", start)
+    depth = 0
+    for i in range(brace_start, len(html)):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[start:i + 1]
+    raise AssertionError(f"unbalanced {marker} block")
+
+
+def _row_tracks(css_block):
+    m = re.search(r"\.dash-compact-row\s*\{[^}]*grid-template-columns:([^;]+);", css_block)
+    assert m is not None, f"no .dash-compact-row rule in block: {css_block!r}"
+    return _tracks(m.group(1))
+
+
+# A content-dependent track: a bare `auto` (not `minmax(0, auto)`/inside a
+# minmax call) or a bare `Nfr` with no explicit zero minimum. Either one
+# resolves its base size from that particular row's own content — see the
+# CSS comment in dashboard.html for why that causes row-to-row column drift.
+_BARE_AUTO_OR_FR = re.compile(r"(?<!minmax\()\bauto\b|^\d*\.?\d*fr$")
+
+
+def test_grid_tracks_by_breakpoint(client):
+    """T-078: pins the exact track list at each breakpoint (not just a
+    count), and enforces the anti-drift rule the CSS comment documents —
+    every track in the 8-track and 7-track tiers is either `Npx` or
+    `minmax(0, Nfr)`, never a bare `auto` or a bare `Nfr` (both of which
+    resolve their size from that one row's own content — see
+    test_grid_tracks_by_breakpoint)."""
     client.post("/dashboard/prefs", json={"mode": "compact"})
     html = client.get("/dashboard").text
-    matches = re.findall(r"\.dash-compact-row\s*\{[^}]*grid-template-columns:([^;]+);", html)
-    assert len(matches) == 2, f"expected base + responsive .dash-compact-row rules, found {len(matches)}"
-    # minmax(140px, 1.2fr) has an internal space — collapse it before
-    # splitting on whitespace so it counts as one track, not two.
-    base_tracks = re.sub(r"\(([^)]*)\)", lambda m: m.group(0).replace(" ", ""), matches[0]).strip().split()
+
+    base_m = re.search(r"\.dash-compact-row\s*\{[^}]*grid-template-columns:([^;]+);", html)
+    assert base_m is not None
+    base_tracks = _tracks(base_m.group(1))
     assert len(base_tracks) == 8, f"expected 8 grid tracks (dot/portrait/name/loc/ship/wallet/training/flags), got {base_tracks}"
-    mobile_tracks = matches[1].strip().split()
-    assert len(mobile_tracks) == 5, f"expected 5 tracks (dot/portrait/name/wallet/flags) under the phone breakpoint, got {mobile_tracks}"
+
+    mid_block = _media_block(html, 1000)
+    assert ".dash-compact-ship" in mid_block and "display: none" in mid_block.replace(";", "")
+    mid_tracks = _row_tracks(mid_block)
+    assert len(mid_tracks) == 7, f"expected 7 tracks (dot/portrait/name/loc/wallet/training/flags) under <=1000px, got {mid_tracks}"
+
+    small_block = _media_block(html, 760)
+    for cls in (".dash-compact-loc", ".dash-compact-ship", ".dash-compact-training"):
+        assert cls in small_block, f"{cls} must be hidden under <=760px"
+    small_tracks = _row_tracks(small_block)
+    assert len(small_tracks) == 5, f"expected 5 tracks (dot/portrait/name/wallet/flags) under <=760px, got {small_tracks}"
+
+    # No content-dependent track in the base or 7-track tier.
+    for tier_name, tracks in (("base", base_tracks), ("<=1000px", mid_tracks)):
+        for t in tracks:
+            assert not _BARE_AUTO_OR_FR.search(t), (
+                f"{tier_name} tier track {t!r} is content-dependent (bare auto/fr) "
+                "and will drift row to row"
+            )
+    # The 5-track tier keeps `auto` deliberately for wallet (brief: "wallet
+    # auto, right-aligned"), which is safe there ONLY because the track
+    # after it (flags) is a fixed px width — assert that explicitly.
+    assert small_tracks[3] == "auto", f"expected wallet (4th track) to stay auto, got {small_tracks}"
+    assert re.fullmatch(r"\d+px", small_tracks[4]), (
+        f"flags (last track) must be a fixed px width for wallet's right edge to stay constant, got {small_tracks[4]!r}"
+    )
+
+
+def test_responsive_breakpoints_are_1000_and_760px():
+    """T-078: the exact breakpoints the fix documents — a >760px scroll gap
+    between 481px and ~760px was the bug (fixed tracks totalling >380px with
+    no override in that range), so these two values are load-bearing, not
+    arbitrary."""
+    content_html = render_full("custom", dash_mode="compact")
+    assert "@media (max-width: 1000px)" not in content_html  # head block, not content
+
+    with open(
+        os.path.join(os.path.dirname(__file__), "..", "app", "templates", "dashboard.html")
+    ) as f:
+        source = f.read()
+    assert "@media (max-width: 1000px)" in source
+    assert "@media (max-width: 760px)" in source
+    assert "@media (max-width: 480px)" not in source, "old phone-only breakpoint should be gone, replaced by 760px"
+
+
+def test_every_compact_row_carries_a_left_border():
+    """T-078: every row gets a 3px left border — transparent when there's no
+    warning state, coloured as before when there is one — so columns line
+    up across warned and unwarned rows alike (previously unwarned rows had
+    no border-left at all and sat 3px left of the others)."""
+    html = render_full("custom", dash_mode="compact")
+    rows = re.findall(r'<a[^>]*class="dash-compact-row"[^>]*style="([^"]*)"', html)
+    assert len(rows) == len(CHARACTERS)
+    saw_transparent = False
+    saw_colored = False
+    for style in rows:
+        assert re.search(r"border-left:3px solid", style), f"row missing a left border: {style!r}"
+        if "border-left:3px solid transparent" in style:
+            saw_transparent = True
+        else:
+            saw_colored = True
+    # The fixture set has both warned and unwarned pilots — prove both
+    # branches of the new else clause actually render, not just one.
+    assert saw_transparent, "expected at least one row with no warning (transparent border)"
+    assert saw_colored, "expected at least one row with a warning (coloured border)"
 
 
 def test_flags_render_on_one_line_not_wrapped(client):
