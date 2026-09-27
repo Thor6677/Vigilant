@@ -87,6 +87,78 @@
   {% endfor %}
 </div>
 
+{# ── Discord alerts (T-075) ── the URL is write-only: never rendered back,
+   the field is empty on every load, blank keeps the saved one. #}
+<div class="b-panel acct-discord" id="discord-alerts">
+  <div class="b-panel-head">
+    <span class="b-label">Discord alerts</span>
+    {% if notify['set'] %}
+      <span class="b-badge {% if not notify['enabled'] %}is-danger{% endif %}">{% if notify['enabled'] %}on{% else %}paused{% endif %}</span>
+    {% endif %}
+  </div>
+  <p class="acct-note acct-discord-status">
+    {% if notify['set'] %}
+      Webhook set · <span class="mono">{{ notify['masked'] }}</span>
+      {% if notify['last_at'] %}
+        · last delivery {{ notify['last_at'] }}:
+        {% if notify['last_ok'] %}<span class="is-ok">ok</span>{% else %}<span class="is-danger">{{ notify['last_error'] or 'failed' }}</span>{% endif %}
+      {% elif notify['last_error'] %}
+        · <span class="is-danger">{{ notify['last_error'] }}</span>
+      {% else %}
+        · nothing sent yet
+      {% endif %}
+      {% if notify['dropped'] %}· {{ notify['dropped'] }} dropped by the rate cap since start-up{% endif %}
+    {% else %}
+      Not set. In Discord: channel settings › Integrations › Webhooks › New webhook › Copy URL.
+      Alerts you tick below are posted there as they happen — the same ones the bell shows you.
+    {% endif %}
+  </p>
+
+  <form method="post" action="/account/notifications/discord" class="acct-discord-form" autocomplete="off">
+    <label for="discord-webhook-url" class="acct-discord-label">{% if notify['set'] %}Replace URL{% else %}Webhook URL{% endif %}</label>
+    <input id="discord-webhook-url" name="discord_webhook_url" type="password" class="b-input" maxlength="300"
+           autocomplete="new-password" spellcheck="false"
+           placeholder="{% if notify['set'] %}leave blank to keep the current one{% else %}https://discord.com/api/webhooks/…{% endif %}">
+    {% if notify['set'] %}
+      <label class="acct-discord-check">
+        <input type="checkbox" name="enabled" class="b-check" {% if notify['enabled'] %}checked{% endif %}> Send alerts (untick to pause without removing the webhook)
+      </label>
+    {% endif %}
+    <div class="acct-discord-groups">
+      {% for group, items in notify['groups'] %}
+        <fieldset class="acct-discord-group">
+          <legend class="b-label">{{ group }}</legend>
+          {% for key, label in items %}
+            <label class="acct-discord-check">
+              <input type="checkbox" name="alert_types" value="{{ key }}" class="b-check" {% if key in notify['chosen'] %}checked{% endif %}> {{ label }}
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+    </div>
+    <div class="acct-discord-actions">
+      <button type="submit" class="b-btn is-ghost">Save</button>
+    </div>
+  </form>
+  {% if notify['set'] %}
+    <div class="acct-discord-actions is-secondary">
+      <form method="post" action="/account/notifications/discord/test">
+        <button type="submit" class="b-btn is-ghost">Send test message</button>
+      </form>
+      <form method="post" action="/account/notifications/discord/remove"
+            data-confirm="Remove your Discord webhook from Vigilant? Nothing more is sent until you paste a new one.">
+        <button type="submit" class="b-link-btn is-danger">Remove</button>
+      </form>
+    </div>
+  {% endif %}
+  <p class="acct-note">
+    The URL is stored encrypted and never shown again. Messages can't ping
+    @everyone or roles, repeats are held back for 30 minutes, and at most
+    20 messages go out every 10 minutes. If Discord reports the webhook gone,
+    sending stops until you paste a new one.
+  </p>
+</div>
+
 <form method="post" action="/auth/logout-everywhere" class="acct-remove"
       data-confirm="Sign out of Vigilant on every browser and device, this one included?">
   <button type="submit" class="b-link-btn is-danger">Sign out everywhere</button>

@@ -29,6 +29,7 @@ from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
 from app.notify.discord import send_discord_alert
+from app.notify.user_discord import send_user_discord_alert
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -99,6 +100,12 @@ def _emit_notification(user_id: int, event: dict, relay: bool = True):
         task = asyncio.create_task(send_discord_alert(title, body, alert_type))
         _discord_relay_tasks.add(task)
         task.add_done_callback(_discord_relay_tasks.discard)
+        # T-075: the user's own webhook, same fire-and-forget pattern. The
+        # full event goes along for types whose emitter sets no title.
+        user_task = asyncio.create_task(send_user_discord_alert(
+            user_id, title, body, alert_type, event.get("key"), event=event))
+        _discord_relay_tasks.add(user_task)
+        user_task.add_done_callback(_discord_relay_tasks.discard)
     except RuntimeError:
         # No running event loop (e.g. called outside an async context in a
         # test) — nothing to schedule against, just skip the relay.

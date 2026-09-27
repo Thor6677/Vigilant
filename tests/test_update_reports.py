@@ -381,11 +381,17 @@ def test_emit_notification_without_relay_never_schedules_discord(monkeypatch):
     from app.routes import dashboard
 
     scheduled = []
+    user_scheduled = []
 
     async def spy(*a, **k):
         scheduled.append(a or k)
 
+    async def user_spy(*a, **k):
+        user_scheduled.append(a or k)
+
     monkeypatch.setattr(dashboard, "send_discord_alert", spy)
+    # T-075 added a per-user relay at the same point; it must obey relay=False too.
+    monkeypatch.setattr(dashboard, "send_user_discord_alert", user_spy)
 
     async def go():
         dashboard._emit_notification(-7, {"type": "auto_update", "title": "t"}, relay=False)
@@ -394,6 +400,7 @@ def test_emit_notification_without_relay_never_schedules_discord(monkeypatch):
     _run(go())
     dashboard._notification_events.pop(-7, None)
     assert len(scheduled) == 1                      # only the relayed one
+    assert len(user_scheduled) == 1
 
 
 def test_an_unconfigured_discord_is_left_out_of_the_record(control):

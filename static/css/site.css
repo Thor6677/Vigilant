@@ -507,6 +507,25 @@
 .acct-remove { margin: 0; padding: 0.5rem 0.8rem; border-top: 1px solid var(--border); text-align: right; }
 .b-link-btn.is-danger { color: var(--danger); }
 
+/* ── Account › Discord alerts (T-075, account.html #discord-alerts) ───── */
+.acct-discord { margin-top: 1.25rem; display: flex; flex-direction: column; }
+.acct-discord .acct-note { border-top: none; }
+.acct-discord-status .mono { color: var(--text); word-break: break-all; }
+.acct-discord-status .is-ok { color: var(--success); }
+.acct-discord-status .is-danger { color: var(--danger); }
+.acct-discord-form { display: flex; flex-direction: column; gap: 0.6rem; margin: 0; padding: 0.6rem 0.8rem; border-top: 1px solid var(--border); }
+.acct-discord-label { font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--muted); }
+.acct-discord-form > .b-input { max-width: 32rem; width: 100%; }
+.acct-discord-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0.6rem 1.2rem; }
+.acct-discord-group { margin: 0; padding: 0; border: none; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.acct-discord-group > legend { padding: 0; margin-bottom: 0.25rem; }
+.acct-discord-check { display: flex; align-items: flex-start; gap: 0.55rem; font-size: var(--fs-base); line-height: 1.45; color: var(--text); cursor: pointer; }
+.acct-discord-check > input { flex: none; margin: 3px 0 0; }
+.acct-discord-actions { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+.acct-discord-actions .b-btn { flex: none; border: 1px solid var(--border); }
+.acct-discord-actions.is-secondary { padding: 0.5rem 0.8rem; border-top: 1px solid var(--border); }
+.acct-discord-actions form { margin: 0; }
+
 /* ── Missing-permission notices (partials/_permission_notice.html) ─────── */
 .perm-notice { display: flex; flex-direction: column; gap: 0.3rem; border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--accent-faint); padding: 0.55rem 0.8rem; margin-bottom: 1rem; font-size: var(--fs-base); line-height: 1.55; color: var(--muted); }
 .perm-notice b { color: var(--text); font-weight: 500; }
