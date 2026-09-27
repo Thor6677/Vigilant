@@ -142,6 +142,33 @@ def test_instance_relay_never_logs_the_webhook_url(monkeypatch, caplog):
                      'HTTP Request: POST https://discord.com/… "HTTP/1.1 204 No Content"')
 
 
+def test_instance_relay_failure_line_never_carries_the_exception_text(monkeypatch, caplog):
+    """A client error whose message quotes the URL: the relay's own warning
+    records the exception class only, in one line, with no traceback."""
+    class Settings:
+        discord_webhook_url = DISCORD_HOOK
+        discord_alert_types = "structure_attack"
+
+    def explode(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"cannot reach {request.url}", request=request)
+
+    monkeypatch.setattr(discord_notify, "get_settings", lambda: Settings())
+    monkeypatch.setattr(discord_notify, "_last_sent", {})
+    monkeypatch.setattr(discord_notify.httpx, "AsyncClient",
+                        functools.partial(httpx.AsyncClient, transport=httpx.MockTransport(explode)))
+    caplog.set_level(logging.DEBUG)
+
+    result = _run(discord_notify.send_discord_alert("Under attack", "Astrahus", "structure_attack"))
+
+    assert result == "failed: ConnectError"
+    ours = [rec for rec in caplog.records if rec.name == discord_notify.__name__]
+    assert len(ours) == 1
+    assert ours[0].levelno == logging.WARNING and ours[0].exc_info is None
+    assert ours[0].getMessage() == "discord alert relay: failed to send type=structure_attack: ConnectError"
+    assert not any(TOKEN in rec.getMessage() or "/api/webhooks/" in rec.getMessage()
+                   for rec in caplog.records)
+
+
 @pytest.mark.parametrize("fmt", [ur.FORMAT_NTFY, ur.FORMAT_JSON])
 def test_update_report_webhook_never_logs_the_topic(monkeypatch, caplog, fmt):
     seen = []

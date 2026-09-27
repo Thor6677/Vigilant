@@ -113,6 +113,8 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
             )
             return f"failed: HTTP {resp.status_code}"
     except Exception as e:
-        logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, e)
+        # The exception's class only, never its text: a client error's message
+        # can quote the URL it was made to, and that URL is the credential.
+        logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, type(e).__name__)
         return f"failed: {type(e).__name__}"
     return SENT
