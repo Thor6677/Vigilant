@@ -79,6 +79,7 @@ USER_OWNED_TABLES = (
     "dashboard_attention_dismissals",
     "skill_farm_settings",  # T-073
     "skill_farm_pilots",    # T-073 — also in PER_CHARACTER_USER_TABLES (app/auth/purge.py)
+    "user_dashboard_prefs",
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of
