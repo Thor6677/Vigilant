@@ -67,12 +67,22 @@ below without updating every consumer:
                          training flags are mutually exclusive with each
                          other; a pilot can carry one of each kind plus RENEW)
 
-Two more keys ride along but are NOT frozen — they pass through the route's
-own `contracts`/`pi` dicts untouched (whatever shape those already have:
-None, "no_scope", or a dict) purely as a convenience for a later stream that
-wants them; nothing in T-070 reads them back:
+A few more keys ride along but are NOT frozen — they pass through untouched
+(or default to a documented empty shape) purely as a convenience for a later
+stream that wants them; nothing in T-070 reads any of these back:
 
-    contracts, pi
+    contracts, pi         — the route's own `contracts`/`pi` dicts (T-070):
+                             None, "no_scope", or a dict.
+    wallet_delta           — T-076: an app.dashboard.walletdelta entry
+                             ({"direction": "up"|"down"|"flat", "amount"}),
+                             or None if there's no 7-day-old snapshot to
+                             diff against. Threaded through so Compact rows,
+                             Cards and Table can all show the same arrow
+                             without recomputing it.
+    tags                   — T-076: an app.tags.load_character_tags() entry
+                             ({"tags": [...], "note": str|None}), or the
+                             empty shape {"tags": [], "note": None} when the
+                             caller passes nothing.
 """
 from __future__ import annotations
 
@@ -97,6 +107,8 @@ def build_pilot_summaries(
     contracts: dict,
     pi: dict,
     char_groups: dict,
+    wallet_deltas: dict | None = None,
+    tags_by_char: dict | None = None,
 ) -> dict[int, dict]:
     """Build one summary dict per character. Pure — no I/O, no `datetime.now()`;
     every value here is read straight from what the caller already computed."""
@@ -168,5 +180,7 @@ def build_pilot_summaries(
             # Provisional — not frozen, see module docstring.
             "contracts": contracts.get(cid) if contracts else None,
             "pi": pi.get(cid) if pi else None,
+            "wallet_delta": wallet_deltas.get(cid) if wallet_deltas else None,
+            "tags": (tags_by_char.get(cid) if tags_by_char else None) or {"tags": [], "note": None},
         }
     return out

@@ -18,10 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import UserDashboardPrefs
 
-# Phase 1 (T-070) renders only "compact" and "cards". A stored/posted mode of
-# "detailed" or "table" is accepted and round-trips (so phase 2 doesn't need a
-# migration), but the dashboard route falls back to Cards for anything it
-# doesn't yet know how to render.
+# T-076: all four now render. (Phase 1 / T-070 only rendered "compact" and
+# "cards"; a stored "detailed"/"table" mode round-tripped without a
+# migration, and the route fell back to Cards for either.)
 MODES = ("compact", "cards", "detailed", "table")
 
 # The dashboard's lower sections, matched to what dashboard.html actually
@@ -43,20 +42,36 @@ TABLE_COLUMNS = ("pilot", "account", "corporation", "system", "ship", "wallet",
                   "jobs", "orders", "escrow", "clones", "last_sync", "tags",
                   "can_fly")
 
+# T-076: the Table view's default column set — a readable starting subset,
+# not the whole catalog (a fresh table with all 18 columns is unreadable on
+# a phone and most of them are Detailed-mode-only data nobody asked to see
+# by default). Anyone who wants more picks them from the column picker,
+# which persists to this same key.
+DEFAULT_TABLE_COLUMNS = (
+    "pilot", "account", "system", "ship", "wallet", "wallet_7d",
+    "queue_end", "pi", "last_sync",
+)
+
 DEFAULT_PREFS: dict[str, Any] = {
     "mode": "cards",
     "collapsed_groups": [],
     "collapsed_sections": [],
     "hidden_sections": [],
-    "table_columns": list(TABLE_COLUMNS),
+    "table_columns": list(DEFAULT_TABLE_COLUMNS),
     "table_sort": {"key": "pilot", "dir": "asc"},
     "tag_filter": [],
+    # T-076: persisted order of account groups on the dashboard — replaces
+    # the old session-only `group_order`. See app/routes/dashboard.py's
+    # one-time migration out of the session on load.
+    "group_order": [],
 }
 
 _MAX_COLLAPSED_GROUPS = 64
 _MAX_GROUP_NAME_LEN = 100
 _MAX_TAGS = 16
 _MAX_TAG_LEN = 24
+_MAX_GROUP_ORDER = 64
+_MAX_GROUP_ORDER_NAME_LEN = 100
 
 
 def _clean_str_list(value: Any, max_items: int, max_len: int) -> list[str] | None:
@@ -113,6 +128,7 @@ _VALIDATORS = {
     "table_columns": lambda v: _clean_subset(v, TABLE_COLUMNS),
     "table_sort": _clean_table_sort,
     "tag_filter": lambda v: _clean_str_list(v, _MAX_TAGS, _MAX_TAG_LEN),
+    "group_order": lambda v: _clean_str_list(v, _MAX_GROUP_ORDER, _MAX_GROUP_ORDER_NAME_LEN),
 }
 
 

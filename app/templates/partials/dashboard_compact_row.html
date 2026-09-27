@@ -7,11 +7,17 @@
    the other flags are plain badges here, never links, precisely so this can
    be a single anchor). `.dash-compact-loc`, `.dash-compact-ship` and
    `.dash-compact-training` are hidden under the dashboard.html media query's
-   breakpoint — the same one doubles as the phone layout. The name column
-   flexes (min-width:0) rather than holding a fixed 110px, so it shrinks
-   instead of forcing horizontal scroll once those three are gone.
+   breakpoint — the same one doubles as the phone layout.
+
+   T-076: the row is now a CSS grid (`.dash-compact-row`, one shared template
+   defined once in dashboard.html's <style>) with fixed tracks, so columns
+   line up across every row regardless of name length — no per-row inline
+   grid-template-columns here, ever (tests/test_dashboard_compact_grid.py
+   checks that). `tags` and `wallet_delta` are optional (default empty/None)
+   so every existing call site (and the golden-comparison harness) keeps
+   working unchanged.
 #}
-{% from "partials/_pilot_card.html" import format_isk %}
+{% from "partials/_pilot_card.html" import format_isk, wallet_arrow %}
 
 {% macro _flag_color(sev) %}
   {%- if sev == 'red' -%}var(--danger)
@@ -21,25 +27,31 @@
   {%- endif %}
 {% endmacro %}
 
-{% macro pilot_row(s) %}
+{% macro pilot_row(s, wallet_delta=none, tags=none) %}
 {% set warn = s.training.warning %}
 <a href="/character/{{ s.character_id }}" class="dash-compact-row" data-char-id="{{ s.character_id }}"
-   style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.6rem;text-decoration:none;color:inherit;border-bottom:1px solid var(--border);
+   style="text-decoration:none;color:inherit;border-bottom:1px solid var(--border);
           {% if s.needs_reauth %}border-left:3px solid var(--danger);{% elif warn == 'empty' %}border-left:3px solid var(--danger);{% elif warn == 'paused' %}border-left:3px solid var(--muted);{% elif warn == 'critical' %}border-left:3px solid #c97a20;{% elif warn == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
-    <span class="b-dot" style="width:7px;height:7px;flex-shrink:0;{% if s.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
+    <span class="b-dot" style="width:7px;height:7px;{% if s.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
     <img src="https://images.evetech.net/characters/{{ s.character_id }}/portrait?size=64" alt=""
-         style="width:24px;height:24px;border-radius:2px;flex-shrink:0;">
-    <span style="font-size:11px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.name }}</span>
-    <span class="dash-compact-loc" style="font-size:10px;color:var(--muted);min-width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+         style="width:24px;height:24px;border-radius:2px;">
+    <span style="font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ s.name }}
+        {% if tags and tags.tags %}
+        {% for t in tags.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-left:3px;">{{ t }}</span>{% endfor %}
+        {% endif %}
+    </span>
+    <span class="dash-compact-loc" style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {% if s.security is not none %}[{{ "%.1f"|format(s.security) }}] {% endif %}{{ s.system_name or "Unknown" }}
     </span>
-    <span class="dash-compact-ship" style="font-size:10px;color:var(--muted);min-width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+    <span class="dash-compact-ship" style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ s.ship_name or "" }}
     </span>
-    <span style="font-size:11px;color:var(--accent);min-width:80px;flex-shrink:0;text-align:right;">
+    <span class="dash-compact-wallet" style="font-size:11px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         {% if s.wallet is not none %}{{ format_isk(s.wallet) }}{% else %}&mdash;{% endif %}
+        {% if wallet_delta %}<span style="font-size:9px;margin-left:0.25rem;">{{ wallet_arrow(wallet_delta) }}</span>{% endif %}
     </span>
-    <span class="dash-compact-training" style="flex:1;min-width:110px;display:flex;flex-direction:column;gap:2px;">
+    <span class="dash-compact-training" style="display:flex;flex-direction:column;gap:2px;overflow:hidden;">
         {% if s.training.skill %}
         <span style="font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.training.skill }} {{ s.training.level }}{% if s.training.queue_left_str %} &middot; {{ s.training.queue_left_str }}{% endif %}</span>
         <div class="b-progress" style="height:3px;"><div class="b-progress-fill {% if warn == 'critical' %}is-crit{% elif warn == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ s.training.progress_pct }}%"></div></div>
@@ -51,7 +63,7 @@
         <span style="font-size:10px;color:var(--muted);">&mdash;</span>
         {% endif %}
     </span>
-    <span style="display:flex;flex-wrap:wrap;gap:3px;flex-shrink:0;max-width:120px;justify-content:flex-end;">
+    <span class="dash-compact-flags">
         {% for f in s.flags %}
         <span class="b-badge" style="font-size:8px;border:1px solid {{ _flag_color(f.sev) }};color:{{ _flag_color(f.sev) }};white-space:nowrap;">{{ f.label }}</span>
         {% endfor %}

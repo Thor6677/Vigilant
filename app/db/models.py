@@ -124,6 +124,17 @@ class CharacterDashboardCache(Base):
 class WalletSnapshot(Base):
     """Periodic snapshots of a character's wallet balance for historical charting."""
     __tablename__ = "wallet_snapshots"
+    __table_args__ = (
+        # T-076: the Dashboard's 7-day wallet-change arrow (every mode) and
+        # its per-pilot sparkline (Detailed/Table) both filter by
+        # character_id + a recorded_at cutoff and want only the newest/
+        # oldest matching row(s) per character. The lone character_id index
+        # below made that a per-character scan of most of the table on an
+        # account with a year of accumulated snapshots. `_create_missing_
+        # indexes` (app/db/models.py) deploys this to already-existing
+        # tables too, not just fresh installs.
+        Index("ix_wallet_snapshots_char_recorded", "character_id", "recorded_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
