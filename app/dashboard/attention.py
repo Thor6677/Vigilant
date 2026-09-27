@@ -82,18 +82,23 @@ about training-account counts with (`group_skill_data` in
 |---|---|---|---|---|
 | red | Re-auth | `needs_reauth` | Renew -> `/account/permissions/{cid}` | never |
 | red | Account idle | no pilot on the account is training (see "Account grouping") | Skills -> the paused pilot's page if there is one, else the first counted pilot's | never |
-| red | PI expired | any planet's `expiry_time` <= now | Planets -> `/industry/planetary` | yes, to grey after `AGE_OUT_DAYS` |
+| red | PI expired | any planet's `expiry_time` <= now, and not expired more than `PI_ABANDONED_DAYS` ago | Planets -> `/industry/planetary` | yes, to grey after `AGE_OUT_DAYS`; dropped entirely (no item at all) once past `PI_ABANDONED_DAYS` — an abandoned colony, not something to act on |
 | amber | PI ending soon | any planet's `expiry_time` within 24h (pi.py's "critical" <1h band and "warning" <24h band both collapse to this one amber signal here — the brief's own 24h amber threshold already covers pi.py's tighter 1h one) | Planets -> `/industry/planetary` | no (resolves into red or clears on its own) |
 | amber | Skill queue critical | `skill_warning` == "critical" (<=7 days by whole-day floor, i.e. up to but not including 8 days) | Skills | no |
 | gold | Skill queue warning | `skill_warning` == "warning" (<=14 days, i.e. up to but not including 15 days) | Skills | no |
 | gold | Jobs ready to deliver | any cached job has `status == "ready"` | Jobs -> `/industry/jobs` | yes, to grey after `AGE_OUT_DAYS` |
-| grey | Sync stale / erroring | `sync_status == "error"`, or staleness is "critical" or "never" (own copy of `STALE_*_SECONDS`); suppressed entirely when the same pilot already has the red re-auth item (redundant), or while `sync_status == "syncing"` | Sync -> POST `/dashboard/sync/{cid}` | n/a |
+| grey | Sync stale / erroring | `sync_status == "error"`, or staleness is "critical" or "never" (own copy of `STALE_*_SECONDS`); suppressed entirely when the same pilot already has the red re-auth item (redundant), or while `sync_status == "syncing"` | Sync -> POST `/dashboard/sync/{cid}`, unless `SYNC_STALE_COLLAPSE_MIN` or more pilots qualify at once, in which case they collapse into one `sync_stale:many` item naming up to 3 pilots + a count of the rest, dismiss-only (no action button — a per-pilot sync button doesn't fit one row) | n/a |
 
 Sort: severity (red, amber, gold, grey), then `since` oldest first, then
 character name, then key (stable tiebreak). A `since` of `None` (onset not
 tracked — most of the point conditions above have no persisted "when did
 this start" data) sorts **last** within its severity tier: we'd rather
 under-claim age than fabricate it.
+
+Display truncation (showing at most 8 items, with the rest behind a
+`<details>` "Show all N") is a route/template concern, not this module's —
+see `app.routes.dashboard_attention` and `partials/dashboard_attention.html`.
+This module always returns the full, untruncated list.
 
 ## `since` per signal
 
@@ -105,7 +110,9 @@ best-effort:
   opened, exact).
 - Skill queue critical/warning: `queue_end` minus 8 / 15 days (when the
   queue crossed into that band, exact given `skill_warning`'s own thresholds).
-- Sync stale: `last_synced` (the last time we know things were fine).
+- Sync stale: `last_synced` (the last time we know things were fine); the
+  collapsed `sync_stale:many` item is `None` — there is no single onset for
+  a set of pilots that individually went stale at different times.
 - Reauth, account idle: `None` — nothing records when the authorization died
   or an account's last pilot stopped training.
 - Jobs ready: `industry_synced_at`, i.e. the last time the industry field was
@@ -124,6 +131,14 @@ the display text. Age-out changes severity and text but **never** `key` or
 `fingerprint` — a dismissal recorded while an item was red/gold still applies
 after it quietly ages to grey, because the underlying state hasn't
 structurally changed, only gotten older.
+
+One exception: PI abandonment (`PI_ABANDONED_DAYS`) DOES change the
+fingerprint on a multi-planet `pi_expired` item, because the abandoned
+planet is filtered out of the hashed set entirely, not just re-labelled —
+unlike the red-to-grey age-out above, this is a real change to which
+planets are being aggregated. An "until it changes" dismissal on such an
+item lapses the moment one of its planets crosses into abandoned, and the
+item reappears (with a smaller count) for whatever's left.
 """
 from __future__ import annotations
 
@@ -152,6 +167,21 @@ STALE_CRITICAL_SECONDS = 1800  # 30 min
 AGE_OUT_DAYS = 7
 AGE_OUT = timedelta(days=AGE_OUT_DAYS)
 
+# PI extractors that expired more than this many days ago are abandoned
+# colonies, not attention items -- dropped before aggregation, never shown
+# at any severity (not even grey). Distinct from AGE_OUT_DAYS, which only
+# steps a still-counted expired extractor down to grey; this is the point
+# past which it stops being surfaced at all. T-077.
+PI_ABANDONED_DAYS = 14
+PI_ABANDONED = timedelta(days=PI_ABANDONED_DAYS)
+
+# 3 or more pilots sharing the grey "sync stale/erroring" signal at once
+# collapse into a single dismiss-only summary item instead of one row each
+# -- a per-pilot sync button doesn't fit that row, and this is exactly the
+# "31 items" complaint the T-077 brief was filed for. See
+# _sync_stale_candidates / _sync_stale_items.
+SYNC_STALE_COLLAPSE_MIN = 3
+
 _SEVERITY_ORDER = {"red": 0, "amber": 1, "gold": 2, "grey": 3}
 
 # Sort sentinel: a `since` of None sorts after every known `since` within the
@@ -164,12 +194,17 @@ class AttentionItem:
     key: str
     fingerprint: str
     severity: str  # red | amber | gold | grey
-    character_id: int
+    # None only for the collapsed "N pilots have stale data" item — it has
+    # no single character behind it.
+    character_id: int | None
     character_name: str
     text: str
-    action_label: str
-    action_url: str
-    action_method: str  # "get" | "post"
+    # None/None/None for the collapsed "N pilots have stale data" item only
+    # (SYNC_STALE_COLLAPSE_MIN+ pilots) -- it has no single target to act on,
+    # so the partial renders dismiss controls only, no action button.
+    action_label: str | None
+    action_url: str | None
+    action_method: str | None  # "get" | "post" | None
     since: datetime | None
 
 
@@ -341,6 +376,75 @@ def _account_idle_items(pilots: list[dict], now: datetime) -> list[AttentionItem
     return out
 
 
+def _sync_stale_candidates(pilots: list[dict], now: datetime) -> list[dict]:
+    """Pilots whose sync data is stale or erroring right now (the grey
+    signal), minus any already carrying the red re-auth item (redundant —
+    a dead token IS why sync is failing) or currently mid-sync (not stale,
+    just busy). Each candidate carries its own resolved `text`/`since` so
+    both the per-pilot and collapsed renderings below share one
+    computation."""
+    out: list[dict] = []
+    for p in pilots:
+        if p.get("needs_reauth") or p.get("sync_status") == "syncing":
+            continue
+        status = p.get("sync_status", "idle")
+        last_synced = p.get("last_synced")
+        stale = staleness(now, last_synced)
+        if status != "error" and stale not in ("critical", "never"):
+            continue
+        err = (p.get("sync_error") or "")[:120]
+        if status == "error":
+            text = "sync failing" + (f": {err}" if err else "")
+        elif stale == "never":
+            text = "never synced"
+        else:
+            text = f"data is stale ({_ago(now, last_synced)})"
+        out.append({
+            "character_id": p["character_id"],
+            "character_name": p["character_name"],
+            "status": status, "err": err, "stale": stale,
+            "text": text, "since": last_synced,
+        })
+    return out
+
+
+def _sync_stale_items(pilots: list[dict], now: datetime) -> list[AttentionItem]:
+    """One grey item per stale/erroring pilot, unless SYNC_STALE_COLLAPSE_MIN
+    or more qualify at once, in which case they collapse into a single
+    dismiss-only item (key `sync_stale:many`) naming up to 3 pilots plus a
+    count of the rest. No action button on the collapsed item — per-pilot
+    sync buttons don't fit one summary row."""
+    candidates = _sync_stale_candidates(pilots, now)
+    if len(candidates) < SYNC_STALE_COLLAPSE_MIN:
+        return [
+            AttentionItem(
+                key=f"sync_stale:{c['character_id']}",
+                fingerprint=_fp("sync", c["status"], c["err"], c["stale"]),
+                severity="grey", character_id=c["character_id"], character_name=c["character_name"],
+                text=c["text"],
+                action_label="Sync", action_url=f"/dashboard/sync/{c['character_id']}", action_method="post",
+                since=c["since"],
+            )
+            for c in candidates
+        ]
+
+    names = sorted(c["character_name"] for c in candidates)
+    shown = names[:3]
+    remaining = len(names) - len(shown)
+    text = f"{len(candidates)} pilots have stale data — {', '.join(shown)}"
+    if remaining > 0:
+        text += f" and {remaining} more"
+    fp = _fp("sync_many", *sorted(str(c["character_id"]) for c in candidates))
+    return [AttentionItem(
+        key="sync_stale:many",
+        fingerprint=fp,
+        severity="grey", character_id=None, character_name="",
+        text=text,
+        action_label=None, action_url=None, action_method=None,
+        since=None,
+    )]
+
+
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
@@ -402,6 +506,8 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
                     continue
                 label = planet.get("system_name") or f"Planet {planet.get('planet_id')}"
                 if warn == "expired":
+                    if (now - exp_dt) > PI_ABANDONED:
+                        continue  # abandoned colony -- not an attention item
                     expired.append((planet.get("planet_id"), exp_dt, label))
                 elif warn in ("critical", "warning"):
                     urgent.append((planet.get("planet_id"), exp_dt, label))
@@ -471,29 +577,11 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
                     since=since,
                 ))
 
-        # ── sync stale / erroring (grey) ────────────────────────────────────
-        # Suppressed when the pilot already carries the red re-auth item
-        # (redundant — a dead token IS why sync is failing), and while a sync
-        # is actively in flight (not "stale", just busy).
-        if not p.get("needs_reauth") and p.get("sync_status") != "syncing":
-            status = p.get("sync_status", "idle")
-            last_synced = p.get("last_synced")
-            stale = staleness(now, last_synced)
-            if status == "error" or stale in ("critical", "never"):
-                err = (p.get("sync_error") or "")[:120]
-                if status == "error":
-                    text = "sync failing" + (f": {err}" if err else "")
-                elif stale == "never":
-                    text = "never synced"
-                else:
-                    text = f"data is stale ({_ago(now, last_synced)})"
-                items.append(AttentionItem(
-                    key=f"sync_stale:{cid}",
-                    fingerprint=_fp("sync", status, err, stale),
-                    severity="grey", character_id=cid, character_name=name, text=text,
-                    action_label="Sync", action_url=f"/dashboard/sync/{cid}", action_method="post",
-                    since=last_synced,
-                ))
+    # ── sync stale / erroring (grey) ────────────────────────────────────────
+    # A separate pass over all pilots (not inside the per-pilot loop above)
+    # because whether this collapses into one item depends on how many
+    # pilots qualify at once -- see _sync_stale_items.
+    items.extend(_sync_stale_items(pilots, now))
 
     items.sort(key=lambda it: (
         _SEVERITY_ORDER[it.severity],

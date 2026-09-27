@@ -372,6 +372,27 @@ def test_get_renders_view_state_with_chips_and_note():
         assert 'id="char-tags"' in r.text
         assert "Cyno" in r.text and "Hauler" in r.text
         assert "reliable" in r.text
+        # T-077: the note is CSS-truncated, not server-sliced -- the full
+        # text is still in the DOM (once in the visible span, once in its
+        # title tip, once more in the hidden edit form's input value).
+        assert r.text.count("reliable") == 3
+        assert 'title="reliable"' in r.text
+        # Compact view state: no big bordered section any more.
+        assert 'class="b-empty"' not in r.text
+    finally:
+        teardown()
+
+
+def test_get_renders_compact_none_and_edit_button_with_no_tags():
+    teardown, _SessionLocal = _seeded_app_db()
+    try:
+        client = _client(USER_ID)
+        r = client.get(f"/character/{CHAR_ID}/tags")
+        assert r.status_code == 200
+        assert 'id="char-tags"' in r.text
+        assert "none" in r.text
+        assert "tags-edit-btn" in r.text
+        assert "Edit" in r.text
     finally:
         teardown()
 

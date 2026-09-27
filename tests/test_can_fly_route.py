@@ -235,11 +235,55 @@ def test_can_fly_and_missing_sections_render(monkeypatch):
         assert r.status_code == 200
         html = r.text
         assert "Flies 1 of 2 saved fits" in html
+        assert "1 needs skills" in html          # T-077 headline
         assert "Can fly now" in html
         assert "Missing skills" in html
         assert "Test Gunnery Skill" in html
         assert "approx." in html
         assert "/tools/fitting?load=" in html
         assert "<script" not in html
+        # Both groups are collapsed <details>, not open by default (T-077).
+        assert html.count("<details") == 2
+        assert "<details open" not in html
+    finally:
+        teardown()
+
+
+SHIP_TYPE_ID_2 = 99205
+SKILL_ID_2 = 33105
+
+
+def test_missing_fits_sorted_fastest_training_first(monkeypatch):
+    """T-077: 'Missing skills' orders fits by the fewest/shortest missing
+    training first -- a fit needing one skill at level 1 must render before
+    one needing a skill at level 5, both starting from untrained."""
+    teardown, SessionLocal = _seeded_db(n_fits=1)  # "Test Fit 0" needs SKILL_ID level 5
+    try:
+        async def _add_fast_fit(db):
+            db.add(sm.SDEType(type_id=SHIP_TYPE_ID_2, type_name="Fast Ship"))
+            db.add(sm.SDEType(type_id=SKILL_ID_2, type_name="Quick Skill"))
+            db.add(sm.SDETypeSkillReq(type_id=SHIP_TYPE_ID_2, skill_type_id=SKILL_ID_2, required_level=1))
+            db.add(UserFitting(
+                user_id=USER_A, folder_id=None, name="Fast Fit",
+                ship_type_id=SHIP_TYPE_ID_2, items_json="[]",
+                implants_json="{}", boosters_json="{}",
+            ))
+            await db.commit()
+
+        async def _wrapped():
+            async with SessionLocal() as db:
+                await _add_fast_fit(db)
+        _run_async(_wrapped)
+
+        async def _levels(db, char):
+            return {SKILL_ID: 0, SKILL_ID_2: 0}  # untrained on both
+        monkeypatch.setattr(cd.fitting_mod, "_character_skills_map", _levels)
+
+        client = _authed_client(USER_A)
+        r = client.get(f"/character/{CHAR_A}/can-fly")
+        assert r.status_code == 200
+        html = r.text
+        assert "2 need skills" in html
+        assert html.index("Quick Skill") < html.index("Test Gunnery Skill")
     finally:
         teardown()

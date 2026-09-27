@@ -3,10 +3,16 @@ complete isolation from the page/route code.
 
 Vocabulary:
   * "allocated" SP -- SP applied to a trained skill; what a Skill Extractor
-    can actually pull from. ``total_sp - unallocated_sp``.
+    can actually pull from. Equal to ESI's own ``total_sp`` as-is (T-077:
+    ``total_sp`` already excludes unallocated SP -- confirmed against live
+    data, where it equalled the sum of ``skillpoints_in_skill`` across every
+    trained skill -- so it must never be reduced by ``unallocated_sp`` again;
+    see app/skillfarm/rows.py:build_pilot_row, which used to do exactly
+    that).
   * "unallocated" SP -- SP banked but not yet applied to any skill (e.g. left
     over from a remap). Never extractable, shown separately on the page, and
-    never counted toward ``injectors_ready``.
+    never counted toward ``injectors_ready`` -- and never subtracted from
+    ``total_sp`` either, since it was never included there to begin with.
 
 Known caveat (report-only, not fixed here): ESI's ``total_sp`` reflects
 skills as trained so far; it does not credit progress the character is
@@ -29,8 +35,9 @@ def injectors_ready(allocated_sp: int, base_sp: int) -> int:
     """How many Large Skill Injectors' worth of ALLOCATED SP sit above both
     the pilot's own ``base_sp`` floor and the game's hard 5,000,000 floor.
 
-    Callers must pass ALLOCATED SP (``total_sp - unallocated_sp``), never the
-    raw ESI ``total_sp`` -- unallocated SP can never be extracted.
+    Callers pass ESI's ``total_sp`` as-is (T-077: it already excludes
+    unallocated SP -- do NOT subtract ``unallocated_sp`` from it again, see
+    the module docstring).
     """
     floor = max(int(base_sp), SKILL_FLOOR_SP)
     surplus = int(allocated_sp) - floor

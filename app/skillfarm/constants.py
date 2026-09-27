@@ -19,8 +19,9 @@ from __future__ import annotations
 # 5,500,000 total SP; using one always removes exactly 500,000 SP; SP can
 # never drop below 5,000,000; and UNALLOCATED SP doesn't count toward
 # either check and can't itself be extracted -- exactly why this module's
-# math (app/skillfarm/math.py) always works in ALLOCATED SP
-# (total_sp - unallocated_sp), never raw total_sp. The two numbers below are
+# math (app/skillfarm/math.py) always works in ALLOCATED SP, which (T-077)
+# is ESI's own ``total_sp`` as-is -- it already excludes unallocated SP, so
+# it is never reduced by ``unallocated_sp`` again. The two numbers below are
 # not independent -- 5,500,000 - 500,000 = 5,000,000, i.e. an extraction can
 # never take a pilot below the floor, only exactly to it or above.
 SKILL_EXTRACTOR_MIN_SP = 5_500_000
