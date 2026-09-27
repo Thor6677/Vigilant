@@ -56,6 +56,10 @@ SKIP = (
     # and one that inherited the webhook would page the operator for dev runs.
     'update_notify_settings',
     'update_run_report',
+    # T-075: each user's own Discord webhook. Copying it would have a dev
+    # instance post its alerts into real users' channels, so dev starts with
+    # no per-user webhooks at all.
+    'user_notify_settings',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).

@@ -1260,3 +1260,27 @@ async def init_db():
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+# ── T-075: per-user Discord webhook for alerts ────────────────────────────────
+
+class UserNotifySettings(Base):
+    """One user's own Discord webhook for the alerts the bell shows them.
+
+    The webhook URL is the whole credential (anyone holding it can post to the
+    channel), so it is encrypted at rest, never rendered back into a page and
+    never logged in full — see app/notify/user_discord.py. `alert_types` is the
+    comma-separated opt-in list; an alert of a type not in it is never sent.
+    `enabled` is cleared when Discord says the webhook no longer exists, and
+    set again when a new URL is saved.
+    """
+    __tablename__ = "user_notify_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    discord_webhook_url = Column(EncryptedText, nullable=True)
+    alert_types = Column(Text, nullable=False, default="")
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_at = Column(DateTime, nullable=True)
+    last_ok = Column(Boolean, nullable=True)
+    last_error = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
