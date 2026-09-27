@@ -8,14 +8,51 @@
 {% if killmails_enabled %}
 <script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endif %}
+{% if dash_mode == 'compact' %}
+{# Scoped to Compact mode: a mode switch is always a full page reload (see
+   setDashMode()), so this never needs to be present for a mode the page
+   isn't currently rendering — and its absence otherwise keeps the literal
+   string "dash-compact-row" (which a bare CSS rule would still contain, in
+   a selector, even with no compact markup on the page) out of Cards/
+   Detailed/Table's rendered HTML; tests/test_dashboard_route_render.py
+   checks exactly that. #}
 <style nonce="{{ request.state.csp_nonce }}">
+/* T-076: one shared CSS grid template for every compact row (dot, portrait,
+ * name, location, ship, wallet, training, flags) — fixed tracks instead of
+ * the T-070 flex row, whose flexing name column let columns drift out of
+ * alignment row to row. ~34px target row height: 24px portrait + ~5px
+ * padding top/bottom. */
+.dash-compact-row {
+    display: grid;
+    grid-template-columns: 11px 24px minmax(140px, 1.2fr) 150px 120px 110px 1fr auto;
+    align-items: center;
+    column-gap: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    min-height: 34px;
+}
+.dash-compact-wallet {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.dash-compact-flags {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 3px;
+    overflow: hidden;
+    justify-content: flex-end;
+}
 /* T-070 Compact mode: this breakpoint doubles as the phone layout. Wide
  * enough to cover the ~390px/412-414px phones a fixed 400px cutoff would
- * otherwise miss on one side or the other. */
+ * otherwise miss on one side or the other. Dropped tracks free their grid
+ * columns entirely (unlike `display:none` alone, which would leave gaps for
+ * auto-placement to reflow other cells into) — the row re-templates to just
+ * dot, portrait, name, wallet, flags. */
 @media (max-width: 480px) {
     .dash-compact-loc, .dash-compact-ship, .dash-compact-training { display: none; }
+    .dash-compact-row { grid-template-columns: 11px 24px 1fr 110px auto; }
 }
 </style>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -39,10 +76,38 @@
 {% set collapsed_sections = dash_prefs.collapsed_sections %}
 {% set hidden_sections = dash_prefs.hidden_sections %}
 {% set collapsed_groups = dash_prefs.collapsed_groups %}
-{# Compact-mode-only defaults (T-070 task 5): NOT persisted, apply only to
-   the initial render of this mode. Reloading in Compact always starts here
-   again; Cards mode never sees these two overrides. #}
-{% set compact_force_collapsed = ('combat_profile', 'recent_kills') %}
+{# Compact-mode-only defaults (T-070 task 5, extended T-076): NOT persisted,
+   apply only to the initial render of this mode. Reloading in Compact always
+   starts here again; Cards mode never sees these overrides. Wealth by
+   Character joins the list in T-076: Compact's rows already show each
+   pilot's wallet (plus its 7d arrow), so the breakdown is redundant until
+   asked for. #}
+{% set compact_force_collapsed = ('combat_profile', 'recent_kills', 'wealth') %}
+
+{# T-076: new per-pilot extras. Defaulted to empty here (rather than
+   required in every context dict) so tests/_dashboard_fixture.py's
+   hand-built harness — which doesn't set any of these — keeps rendering
+   Cards exactly as before; the real route always passes them. #}
+{% set wallet_deltas = wallet_deltas if wallet_deltas is defined else {} %}
+{% set tags_by_char = tags_by_char if tags_by_char is defined else {} %}
+{% set detail_by_char = detail_by_char if detail_by_char is defined else {} %}
+{% set tag_vocab = tag_vocab if tag_vocab is defined else [] %}
+{# `active_tag_filter` (when the route passes it) is already stripped of any
+   tag no longer in the user's vocabulary — see dashboard()'s own note.
+   Falling back to `dash_prefs.tag_filter` verbatim only happens when a
+   caller (a render-harness test) doesn't pass the cleaned version at all. #}
+{% set active_tag_filter = active_tag_filter if active_tag_filter is defined else (dash_prefs.tag_filter if dash_prefs.tag_filter is defined else []) %}
+{% set table_rows = table_rows if table_rows is defined else [] %}
+{% set farm_info = farm_info if farm_info is defined else none %}
+{% set pilot_grid_characters = pilot_grid_characters if pilot_grid_characters is defined else characters %}
+{% set pilot_grid_groups = pilot_grid_groups if pilot_grid_groups is defined else char_groups %}
+{% set TABLE_COLUMNS = TABLE_COLUMNS if TABLE_COLUMNS is defined else dash_prefs.table_columns %}
+{# Filtering itself (ANY-match, case-insensitive) happens server-side in
+   app/routes/dashboard.py before `characters`/`char_groups` ever reach this
+   template — `characters` here already holds only the visible pilots, and
+   any account group left with none is already absent from `char_groups`.
+   This block only renders the filter bar / chips / "Filtered by:" indicator
+   from `tag_vocab` + `active_tag_filter`. #}
 
 {# ── Big battle banner (lazy-loaded; battles flag only) ───────────────────── #}
 {% if battles_enabled %}
@@ -170,36 +235,56 @@
     </div>
 </div>
 
+{# ── Tag filter bar (T-076) — hidden entirely when the user has no tags ──── #}
+{% if tag_vocab %}
+<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.6rem;flex-wrap:wrap;">
+    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Tags:</span>
+    {% for tag, count in tag_vocab %}
+    <button type="button" class="b-btn" data-click="toggleTagFilter" data-tag="{{ tag }}"
+            style="flex:none;padding:2px 8px;font-size:10px;border:1px solid {% if tag.lower() in (active_tag_filter | map('lower') | list) %}var(--accent){% else %}var(--border){% endif %};{% if tag.lower() in (active_tag_filter | map('lower') | list) %}color:var(--accent);{% endif %}">{{ tag }} <span class="b-muted-sm">{{ count }}</span></button>
+    {% endfor %}
+    {% if active_tag_filter %}
+    <span style="font-size:10px;color:var(--muted);">Filtered by:
+        {% for t in active_tag_filter %}<strong style="color:var(--text);">{{ t }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
+        <button type="button" class="b-link" data-click="clearTagFilter" style="font-size:10px;background:none;border:none;padding:0;cursor:pointer;color:var(--accent);">&times;</button>
+    </span>
+    {% endif %}
+</div>
+{% endif %}
+
 {# ── Sort Controls ──────────────────────────────────────────────────────── #}
 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
     <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
     {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
     <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}
-    {% if sort == 'custom' and dash_mode == 'cards' %}
+    {% if sort == 'custom' and dash_mode == 'cards' and not active_tag_filter %}
     <button id="edit-mode-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;" data-click="toggleEditMode">Edit</button>
     <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);display:none;">+ Add Account</button>
     <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
     {% endif %}
+    {% if farm_info %}
+    <a href="/tools/skill-farm" class="b-link" style="font-size:10px;margin-left:0.5rem;">Skill farm &middot; {{ farm_info.ready_now }} injector{{ 's' if farm_info.ready_now != 1 else '' }} ready</a>
+    {% endif %}
     <span style="flex:1;"></span>
     <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
-    {% for label, value in [('Compact', 'compact'), ('Cards', 'cards')] %}
+    {% for label, value in [('Compact', 'compact'), ('Cards', 'cards'), ('Detailed', 'detailed'), ('Table', 'table')] %}
     <button type="button" class="b-btn" data-click="setDashMode" data-mode="{{ value }}"
             style="padding:2px 8px;font-size:10px;border:1px solid {% if dash_mode == value %}var(--accent){% else %}var(--border){% endif %};{% if dash_mode == value %}color:var(--accent);{% endif %}">{{ label }}</button>
     {% endfor %}
 </div>
 
-{# ── Pilots: Cards (default, faithful to the pre-T-070 layout) or Compact ─── #}
+{# ── Pilots: Compact / Cards+Detailed / Table ─────────────────────────────── #}
 {% if dash_mode == 'compact' %}
 {% if sort == 'custom' %}
 <div id="groups-container">
-{% for group_name, group_chars in char_groups.items() %}
+{% for group_name, group_chars in pilot_grid_groups.items() %}
 {% set is_group_collapsed = group_name in collapsed_groups %}
 <div class="b-section group-section" data-group="{{ group_name }}">
     {{ group_header(group_name, group_chars, wallets, skill_map, pilot_summaries, is_group_collapsed, false) }}
     <div class="dash-compact-group-body" data-group="{{ group_name }}" style="{% if is_group_collapsed %}display:none;{% endif %}">
     {% for char in group_chars %}
-    {{ pilot_row(pilot_summaries.get(char.character_id, {})) }}
+    {{ pilot_row(pilot_summaries.get(char.character_id, {}), wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id)) }}
     {% endfor %}
     </div>
 </div>
@@ -207,15 +292,20 @@
 </div>
 {% else %}
 <div class="b-section">
-    {% for char in characters %}
-    {{ pilot_row(pilot_summaries.get(char.character_id, {})) }}
+    {% for char in pilot_grid_characters %}
+    {{ pilot_row(pilot_summaries.get(char.character_id, {}), wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id)) }}
     {% endfor %}
 </div>
 {% endif %}
+
+{% elif dash_mode == 'table' %}
+{% include "partials/dashboard_table.html" %}
+
 {% else %}
+{# Cards and Detailed share this markup — Detailed just also passes `detail`. #}
 {% if sort == 'custom' %}
 <div id="groups-container">
-{% for group_name, group_chars in char_groups.items() %}
+{% for group_name, group_chars in pilot_grid_groups.items() %}
 {% set is_group_collapsed = group_name in collapsed_groups %}
 <div class="b-section group-section" data-group="{{ group_name }}">
     {{ group_header(group_name, group_chars, wallets, skill_map, pilot_summaries, is_group_collapsed, true) }}
@@ -227,7 +317,7 @@
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
     {% endfor %}
     </div>
 </div>
@@ -236,14 +326,14 @@
 {% else %}
 <div class="b-section">
     <div class="b-grid-3">
-    {% for char in characters %}
+    {% for char in pilot_grid_characters %}
     {% set loc = locations.get(char.character_id) %}
     {% set wallet = wallets.get(char.character_id) %}
     {% set sk = skill_map.get(char.character_id, {}) %}
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
     {% endfor %}
     </div>
 </div>
@@ -273,7 +363,7 @@
 {# ── Wealth Breakdown ─────────────────────────────────────────────────────── #}
 {% set sec = 'wealth' %}
 {% set sec_hidden = sec in hidden_sections %}
-{% set sec_collapsed = sec in collapsed_sections %}
+{% set sec_collapsed = (sec in collapsed_sections) or (dash_mode == 'compact' and sec in compact_force_collapsed) %}
 {% if sec_present[sec] %}
 <div class="b-section dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
@@ -574,6 +664,114 @@ function postDashPrefs(patch) {
 function setDashMode() {
     var mode = this.dataset.mode;
     postDashPrefs({ mode: mode }).then(function () { window.location.reload(); });
+}
+
+// ── T-076: tag filter — server round-trip like setDashMode, so tag TEXT
+// never has to be matched or rendered by JS at all (no innerHTML over it). ──
+var dashTagFilter = {{ active_tag_filter | tojson }}.slice();
+function toggleTagFilter() {
+    var tag = this.dataset.tag;
+    var lower = tag.toLowerCase();
+    var idx = -1;
+    for (var i = 0; i < dashTagFilter.length; i++) {
+        if (dashTagFilter[i].toLowerCase() === lower) { idx = i; break; }
+    }
+    if (idx === -1) dashTagFilter.push(tag); else dashTagFilter.splice(idx, 1);
+    postDashPrefs({ tag_filter: dashTagFilter }).then(function () { window.location.reload(); });
+}
+function clearTagFilter() {
+    postDashPrefs({ tag_filter: [] }).then(function () { window.location.reload(); });
+}
+
+// ── T-076: Table mode — column picker + client-side header sort ────────────
+var TABLE_COLUMN_ORDER = {{ TABLE_COLUMNS | tojson }};
+var dashTableSort = {{ dash_prefs.table_sort | tojson }};
+
+function sortDashTable() {
+    var col = this.dataset.col;
+    var dir = (dashTableSort.key === col && dashTableSort.dir === 'asc') ? 'desc' : 'asc';
+    dashTableSort = { key: col, dir: dir };
+    _applyDashTableSort();
+    postDashPrefs({ table_sort: dashTableSort });
+}
+
+function _applyDashTableSort() {
+    var table = document.getElementById('dash-table');
+    if (!table) return;
+    var headRow = table.querySelector('thead tr');
+    var ths = headRow ? Array.prototype.slice.call(headRow.children) : [];
+    var colIndex = -1;
+    ths.forEach(function (th, i) {
+        var isSorted = th.dataset.col === dashTableSort.key;
+        th.style.color = isSorted ? 'var(--accent)' : 'var(--muted)';
+        if (isSorted) colIndex = i;
+    });
+    if (colIndex === -1) return;
+    var tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    // Account dividers only make sense while sorted by account — a
+    // client-side re-sort by any other column drops them; reloading (or
+    // sorting back to Account) is what restores them, server-rendered.
+    Array.prototype.slice.call(tbody.querySelectorAll('tr.dash-table-divider')).forEach(function (d) { d.remove(); });
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-char-id]'));
+    rows.sort(function (a, b) {
+        var av = a.children[colIndex].dataset.sortValue;
+        var bv = b.children[colIndex].dataset.sortValue;
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var cmp;
+        if (!isNaN(an) && !isNaN(bn)) {
+            cmp = an - bn;
+        } else {
+            cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+        }
+        return dashTableSort.dir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+}
+
+(function () {
+    var btn = document.getElementById('table-columns-btn');
+    var picker = document.getElementById('table-columns-picker');
+    if (btn && picker) {
+        btn.addEventListener('click', function () {
+            picker.style.display = picker.style.display === 'none' ? 'flex' : 'none';
+        });
+    }
+    var checks = document.querySelectorAll('.table-col-check');
+    checks.forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var cols = TABLE_COLUMN_ORDER.filter(function (key) {
+                var el = document.querySelector('.table-col-check[value="' + key + '"]');
+                return el && el.checked;
+            });
+            postDashPrefs({ table_columns: cols }).then(function () { window.location.reload(); });
+        });
+    });
+})();
+
+// ── T-076: can-fly badge — lazy, Detailed/Table only, so page render is
+// never slowed by it. GET /dashboard/can-fly returns
+// {character_id: {"can_fly", "total"} | "no_scope" | "pending"}. ──────────
+if (dashMode === 'detailed' || dashMode === 'table') {
+    fetch('/dashboard/can-fly')
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (data) {
+            document.querySelectorAll('[data-canfly-slot]').forEach(function (el) {
+                var cid = el.getAttribute('data-canfly-slot');
+                var v = data[cid];
+                var textEl = el.querySelector('[data-canfly-text]');
+                if (!textEl || v === undefined) return;
+                if (v === 'no_scope') {
+                    textEl.textContent = '—';
+                    textEl.title = 'needs the skills permission';
+                } else if (v === 'pending') {
+                    textEl.textContent = '…';
+                } else if (v && typeof v === 'object') {
+                    textEl.textContent = 'flies ' + v.can_fly + ' / ' + v.total + ' fits';
+                }
+            });
+        })
+        .catch(function () { /* best-effort — placeholders just stay as rendered */ });
 }
 
 // A collapsed/hidden lazily-loaded section never got an hx-get attribute in

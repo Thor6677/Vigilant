@@ -93,12 +93,23 @@ def test_saved_compact_mode_renders_compact_rows_name_sort(client):
     assert "dash-compact-row" in r.text
 
 
-def test_a_stored_table_mode_falls_back_to_cards(client):
-    """Phase 1 only renders compact/cards; "table" is a valid stored value
-    (phase 2's mode) but must not 500 or blank the page."""
+def test_a_stored_table_mode_renders_the_table(client):
+    """T-076: all four modes render for real now — a stored "table" mode
+    (round-tripped without rendering since T-070) now shows the actual
+    table, not a Cards fallback."""
     r = client.post("/dashboard/prefs", json={"mode": "table"})
     assert r.json()["mode"] == "table"
     r = client.get("/dashboard")
     assert r.status_code == 200
-    assert 'class="b-card"' in r.text
+    assert 'id="dash-table"' in r.text
+    assert 'class="b-card"' not in r.text
     assert "dash-compact-row" not in r.text
+
+
+def test_a_stored_detailed_mode_renders_cards_with_extra_rows(client):
+    r = client.post("/dashboard/prefs", json={"mode": "detailed"})
+    assert r.json()["mode"] == "detailed"
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    assert 'class="b-card"' in r.text
+    assert 'data-canfly-slot' in r.text
