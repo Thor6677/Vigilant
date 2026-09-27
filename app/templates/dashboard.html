@@ -8,11 +8,41 @@
 {% if killmails_enabled %}
 <script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endif %}
+<style nonce="{{ request.state.csp_nonce }}">
+/* T-070 Compact mode: this breakpoint doubles as the phone layout. Wide
+ * enough to cover the ~390px/412-414px phones a fixed 400px cutoff would
+ * otherwise miss on one side or the other. */
+@media (max-width: 480px) {
+    .dash-compact-loc, .dash-compact-ship, .dash-compact-training { display: none; }
+}
+</style>
 {% endblock %}
 
 {% block content %}
 {% from "partials/_permission_notice.html" import permission_notice %}
 {% from "partials/_pilot_card.html" import format_isk, sec_cls, pilot_card %}
+{% from "partials/dashboard_group_header.html" import group_header %}
+{% from "partials/dashboard_compact_row.html" import pilot_row %}
+{% from "partials/dashboard_section_shell.html" import section_toolbar %}
+
+{# T-070: saved view state. `dash_prefs`/`dash_mode`/`pilot_summaries` come
+   from dashboard()'s one load_prefs() call + build_pilot_summaries() — see
+   app/dashboard/prefs.py and app/dashboard/summary.py. GAME_WIDE and the
+   section label map mirror app/dashboard/prefs.py's GAME_WIDE_SECTIONS /
+   SECTION_KEYS; keep both in sync if that module's tuples change. #}
+{% set game_wide_keys = ['battles', 'activity', 'kill_pulse'] %}
+{% set section_labels = {
+    'wealth': 'Wealth by Character', 'contracts': 'Contracts',
+    'battles': 'Major Fleet Battles', 'activity': 'Activity',
+    'kill_pulse': 'Pilot Pulse', 'combat_profile': 'Combat Profile',
+    'recent_kills': 'Recent Kills'} %}
+{% set collapsed_sections = dash_prefs.collapsed_sections %}
+{% set hidden_sections = dash_prefs.hidden_sections %}
+{% set collapsed_groups = dash_prefs.collapsed_groups %}
+{# Compact-mode-only defaults (T-070 task 5): NOT persisted, apply only to
+   the initial render of this mode. Reloading in Compact always starts here
+   again; Cards mode never sees these two overrides. #}
+{% set compact_force_collapsed = ('combat_profile', 'recent_kills') %}
 
 {# ── Big battle banner (lazy-loaded; battles flag only) ───────────────────── #}
 {% if battles_enabled %}
@@ -94,6 +124,9 @@
     </div>
 </div>
 
+{# ── Attention strip mount (T-070; endpoint built by another stream) ──────── #}
+<div id="dash-attention" hx-get="/dashboard/attention" hx-trigger="load" hx-swap="outerHTML" data-htmx-no-error="1"></div>
+
 {# ── Re-auth Banner ──────────────────────────────────────────────────────── #}
 {% set reauth_chars = [] %}
 {% for cid, val in needs_reauth.items() if val %}{% if reauth_chars.append(cid) %}{% endif %}{% endfor %}
@@ -143,28 +176,50 @@
     {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
     <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}
-    {% if sort == 'custom' %}
+    {% if sort == 'custom' and dash_mode == 'cards' %}
     <button id="edit-mode-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;" data-click="toggleEditMode">Edit</button>
     <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);display:none;">+ Add Account</button>
     <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
     {% endif %}
+    <span style="flex:1;"></span>
+    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
+    {% for label, value in [('Compact', 'compact'), ('Cards', 'cards')] %}
+    <button type="button" class="b-btn" data-click="setDashMode" data-mode="{{ value }}"
+            style="padding:2px 8px;font-size:10px;border:1px solid {% if dash_mode == value %}var(--accent){% else %}var(--border){% endif %};{% if dash_mode == value %}color:var(--accent);{% endif %}">{{ label }}</button>
+    {% endfor %}
 </div>
 
-{# ── Character Cards ─────────────────────────────────────────────────────── #}
+{# ── Pilots: Cards (default, faithful to the pre-T-070 layout) or Compact ─── #}
+{% if dash_mode == 'compact' %}
 {% if sort == 'custom' %}
 <div id="groups-container">
 {% for group_name, group_chars in char_groups.items() %}
+{% set is_group_collapsed = group_name in collapsed_groups %}
 <div class="b-section group-section" data-group="{{ group_name }}">
-    <div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;">
-        <div class="edit-mode-only" style="display:none;flex-direction:column;gap:2px;flex-shrink:0;">
-            <button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button>
-            <button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button>
-        </div>
-        <span class="group-label b-label" data-group="{{ group_name }}">{{ group_name }}</span>
-        <input class="group-label-input" type="text" value="{{ group_name }}" data-original="{{ group_name }}" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;">
-        <span class="b-muted-sm">{{ group_chars | length }}</span>
+    {{ group_header(group_name, group_chars, wallets, skill_map, pilot_summaries, is_group_collapsed, false) }}
+    <div class="dash-compact-group-body" data-group="{{ group_name }}" style="{% if is_group_collapsed %}display:none;{% endif %}">
+    {% for char in group_chars %}
+    {{ pilot_row(pilot_summaries.get(char.character_id, {})) }}
+    {% endfor %}
     </div>
-    <div class="sortable-group b-grid-3" data-group="{{ group_name }}">
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="b-section">
+    {% for char in characters %}
+    {{ pilot_row(pilot_summaries.get(char.character_id, {})) }}
+    {% endfor %}
+</div>
+{% endif %}
+{% else %}
+{% if sort == 'custom' %}
+<div id="groups-container">
+{% for group_name, group_chars in char_groups.items() %}
+{% set is_group_collapsed = group_name in collapsed_groups %}
+<div class="b-section group-section" data-group="{{ group_name }}">
+    {{ group_header(group_name, group_chars, wallets, skill_map, pilot_summaries, is_group_collapsed, true) }}
+    <div class="sortable-group b-grid-3" data-group="{{ group_name }}" style="{% if is_group_collapsed %}display:none;{% endif %}">
     {% for char in group_chars %}
     {% set loc = locations.get(char.character_id) %}
     {% set wallet = wallets.get(char.character_id) %}
@@ -193,13 +248,39 @@
     </div>
 </div>
 {% endif %}
+{% endif %}
+
+{# ── Presence flags for every lower section (T-070) ───────────────────────── #}
+{% set has_any_contracts = namespace(found=false) %}
+{% for char in characters %}
+    {% set con = contracts.get(char.character_id) %}
+    {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}{% set has_any_contracts.found = true %}{% endif %}
+{% endfor %}
+{% set contracts_gap = perm_status.gaps(characters, 'contracts') %}
+{% set has_zkill = namespace(found=false) %}
+{% for char in characters %}
+    {% if zkill.get(char.character_id) %}{% set has_zkill.found = true %}{% endif %}
+{% endfor %}
+{% set sec_present = {
+    'wealth': char_rows | length > 0,
+    'contracts': (has_any_contracts.found or contracts_gap) and true,
+    'battles': battles_enabled,
+    'activity': killmails_enabled,
+    'kill_pulse': killmails_enabled,
+    'combat_profile': killmails_enabled,
+    'recent_kills': has_zkill.found} %}
 
 {# ── Wealth Breakdown ─────────────────────────────────────────────────────── #}
-{% if char_rows %}
-<div class="b-section">
-    <div class="b-section-head">
+{% set sec = 'wealth' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = sec in collapsed_sections %}
+{% if sec_present[sec] %}
+<div class="b-section dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Wealth by Character</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     {% for row in char_rows %}
     {% set pct = ((row.wallet or 0) / total_wallet * 100) if total_wallet > 0 else 0 %}
     <div class="b-table-row">
@@ -219,22 +300,21 @@
         </div>
     </div>
     {% endfor %}
+    </div>
 </div>
 {% endif %}
 
 {# ── Contracts ───────────────────────────────────────────────────────────── #}
-{% set has_any_contracts = namespace(found=false) %}
-{% for char in characters %}
-    {% set con = contracts.get(char.character_id) %}
-    {% if con and con is mapping and (con.outstanding_count > 0 or con.in_progress_count > 0) %}{% set has_any_contracts.found = true %}{% endif %}
-{% endfor %}
-
-{% set contracts_gap = perm_status.gaps(characters, 'contracts') %}
-{% if has_any_contracts.found or contracts_gap %}
-<div class="b-section">
-    <div class="b-section-head">
+{% set sec = 'contracts' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = sec in collapsed_sections %}
+{% if sec_present[sec] %}
+<div class="b-section dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Contracts</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     {{ permission_notice(characters, 'contracts', what="their contracts are not shown") }}
     {% if has_any_contracts.found %}
     {% for char in characters %}
@@ -258,73 +338,138 @@
     {% else %}
     <div class="b-empty">No active contracts</div>
     {% endif %}
+    </div>
 </div>
 {% endif %}
 
+{# ── Game-wide sections: Battles / Activity / Pilot Pulse (T-070 task 5) ───
+   Individually collapsible/hideable in Cards. In Compact they're
+   consolidated into one "N game-wide sections hidden · Show" line — a
+   render-time default (not persisted; see the module-level note above) so
+   no hx-get fires for any of the three until the pilot explicitly asks. #}
+{% set gamewide_count = namespace(n=0) %}
+{% if sec_present['battles'] %}{% set gamewide_count.n = gamewide_count.n + 1 %}{% endif %}
+{% if sec_present['activity'] %}{% set gamewide_count.n = gamewide_count.n + 1 %}{% endif %}
+{% if sec_present['kill_pulse'] %}{% set gamewide_count.n = gamewide_count.n + 1 %}{% endif %}
+{% if dash_mode == 'compact' and gamewide_count.n > 0 %}
+<div class="b-table-row" id="dash-gamewide-line" style="font-size:10px;color:var(--muted);">
+    <span>{{ gamewide_count.n }} game-wide section{{ 's' if gamewide_count.n != 1 else '' }} hidden</span>
+    <button type="button" class="b-link" data-click="showGameWideSections"
+            style="font-size:10px;margin-left:0.4rem;background:none;border:none;padding:0;cursor:pointer;color:var(--accent);">Show</button>
+</div>
+{% endif %}
+<div id="dash-gamewide-container" style="{% if dash_mode == 'compact' %}display:none;{% endif %}">
+
 {# ── Major Fleet Battles across New Eden (lazy-loaded; battles flag only) ─── #}
-{% if battles_enabled %}
-<div id="dashboard-recent-battles"
-     hx-get="/dashboard/recent-battles"
-     hx-trigger="load"
-     hx-swap="innerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Major Fleet Battles in New Eden · 7d</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+{% set sec = 'battles' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = sec in collapsed_sections %}
+{% set sec_defer = sec_collapsed or sec_hidden or dash_mode == 'compact' %}
+{% if sec_present[sec] %}
+<div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
+        <span class="b-label" style="font-size:9px;color:var(--muted);">Major Fleet Battles</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
+    </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    <div id="dashboard-recent-battles"
+         {% if not sec_defer %}hx-get="/dashboard/recent-battles" hx-trigger="load"{% else %}data-dash-src="/dashboard/recent-battles" data-dash-trigger="load"{% endif %}
+         hx-swap="innerHTML">
+        <div class="b-section">
+            <div class="b-section-head"><span class="b-label">Major Fleet Battles in New Eden · 7d</span></div>
+            <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+        </div>
+    </div>
     </div>
 </div>
 {% endif %}
 
 {# ── Activity (lazy-loaded; killmails feature) — PCU + ISK destroyed overlay #}
-{% if killmails_enabled %}
-<div id="dashboard-activity"
-     hx-get="/dashboard/activity?window=24h"
-     hx-trigger="load"
-     hx-swap="outerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Activity</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+{% set sec = 'activity' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = sec in collapsed_sections %}
+{% set sec_defer = sec_collapsed or sec_hidden or dash_mode == 'compact' %}
+{% if sec_present[sec] %}
+<div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
+        <span class="b-label" style="font-size:9px;color:var(--muted);">Activity</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
+    </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    <div id="dashboard-activity"
+         {% if not sec_defer %}hx-get="/dashboard/activity?window=24h" hx-trigger="load"{% else %}data-dash-src="/dashboard/activity?window=24h" data-dash-trigger="load"{% endif %}
+         hx-swap="outerHTML">
+        <div class="b-section">
+            <div class="b-section-head"><span class="b-label">Activity</span></div>
+            <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+        </div>
+    </div>
     </div>
 </div>
 {% endif %}
 
 {# ── Pilot Pulse (lazy-loaded; killmails feature) — analytics across all chars #}
-{% if killmails_enabled %}
-<div id="dashboard-kill-pulse"
-     hx-get="/dashboard/kill-pulse"
-     hx-trigger="load"
-     hx-swap="innerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+{% set sec = 'kill_pulse' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = sec in collapsed_sections %}
+{% set sec_defer = sec_collapsed or sec_hidden or dash_mode == 'compact' %}
+{% if sec_present[sec] %}
+<div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
+        <span class="b-label" style="font-size:9px;color:var(--muted);">Pilot Pulse</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
+    </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    <div id="dashboard-kill-pulse"
+         {% if not sec_defer %}hx-get="/dashboard/kill-pulse" hx-trigger="load"{% else %}data-dash-src="/dashboard/kill-pulse" data-dash-trigger="load"{% endif %}
+         hx-swap="innerHTML">
+        <div class="b-section">
+            <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
+            <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+        </div>
+    </div>
     </div>
 </div>
+{% endif %}
+</div>{# /#dash-gamewide-container #}
 
-<div id="dashboard-combat-profile"
-     hx-get="/dashboard/combat-profile"
-     hx-trigger="load"
-     hx-swap="innerHTML"
-     style="margin-bottom:0.75rem;">
-    <div class="b-section">
-        <div class="b-section-head"><span class="b-label">Your Pilots Combat Profile</span></div>
-        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+{# ── Your Pilots Combat Profile (lazy-loaded; killmails feature) — a PILOT
+   section, not game-wide: it starts collapsed by default in Compact
+   (task 5) but is never folded into the "game-wide" consolidation above. #}
+{% set sec = 'combat_profile' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = (sec in collapsed_sections) or (dash_mode == 'compact' and sec in compact_force_collapsed) %}
+{% set sec_defer = sec_collapsed or sec_hidden %}
+{% if sec_present[sec] %}
+<div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
+    <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
+        <span class="b-label" style="font-size:9px;color:var(--muted);">Combat Profile</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
+    </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    <div id="dashboard-combat-profile"
+         {% if not sec_defer %}hx-get="/dashboard/combat-profile" hx-trigger="load"{% else %}data-dash-src="/dashboard/combat-profile" data-dash-trigger="load"{% endif %}
+         hx-swap="innerHTML">
+        <div class="b-section">
+            <div class="b-section-head"><span class="b-label">Your Pilots Combat Profile</span></div>
+            <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+        </div>
+    </div>
     </div>
 </div>
 {% endif %}
 
-{# ── zKillboard ──────────────────────────────────────────────────────────── #}
-{% set has_zkill = namespace(found=false) %}
-{% for char in characters %}
-    {% if zkill.get(char.character_id) %}{% set has_zkill.found = true %}{% endif %}
-{% endfor %}
-
-{% if has_zkill.found %}
-<div class="b-section">
-    <div class="b-section-head">
+{# ── zKillboard (not lazy — already in `zkill`; starts collapsed in Compact) #}
+{% set sec = 'recent_kills' %}
+{% set sec_hidden = sec in hidden_sections %}
+{% set sec_collapsed = (sec in collapsed_sections) or (dash_mode == 'compact' and sec in compact_force_collapsed) %}
+{% if sec_present[sec] %}
+<div class="b-section dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}">
+    <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Recent Kills · zKillboard</span>
+        <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
+    <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     {% for char in characters %}
     {% set kills = zkill.get(char.character_id, []) %}
     {% if kills %}
@@ -342,8 +487,25 @@
     </div>
     {% endif %}
     {% endfor %}
+    </div>
 </div>
 {% endif %}
+
+{# ── Hidden sections footer ────────────────────────────────────────────────
+   Game-wide sections don't get a footer entry in Compact — the dedicated
+   "N game-wide sections hidden" line above already covers them. #}
+{% set footer_hidden = [] %}
+{% for key in ['wealth', 'contracts', 'battles', 'activity', 'kill_pulse', 'combat_profile', 'recent_kills'] %}
+    {% if sec_present[key] and key in hidden_sections and not (dash_mode == 'compact' and key in game_wide_keys) %}
+        {% if footer_hidden.append(key) %}{% endif %}
+    {% endif %}
+{% endfor %}
+<div id="dash-hidden-footer" class="b-table-row" style="font-size:10px;color:var(--muted);{% if not footer_hidden %}display:none;{% endif %}">
+    <span id="dash-hidden-footer-text">
+        Hidden:
+        {% for key in footer_hidden %}<span data-dash-hidden-item="{{ key }}">{{ section_labels[key] }} <button type="button" class="b-link" data-click="showDashSection" data-section="{{ key }}" style="font-size:10px;background:none;border:none;padding:0;cursor:pointer;color:var(--accent);">show</button></span>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    </span>
+</div>
 
 {# ── Cache Stats ─────────────────────────────────────────────────────────── #}
 <div>
@@ -366,6 +528,196 @@
             </div>
         </div>
     </div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* T-070: dashboard view state — mode toggle, collapsible account groups,
+ * collapsible/hideable lower sections. Lives here (this page's own always-
+ * rendered, nonced script), not in static/js/actions.js — that file is out
+ * of this stream's scope — and never inside an htmx-swapped partial, which
+ * would carry the FRAGMENT's nonce and simply not run under this app's CSP.
+ * Buttons still dispatch through data-click (actions.js's own delegation
+ * listener covers any element with that attribute, including ones this
+ * script creates later), so nothing here is an inline onclick=.
+ */
+var dashMode = {{ dash_mode | tojson }};
+var DASH_SECTION_LABELS = {{ section_labels | tojson }};
+var DASH_GAME_WIDE = {{ game_wide_keys | tojson }};
+var editMode = typeof editMode !== 'undefined' ? editMode : false;
+
+// The PERSISTED collapse/hide state — seeded from dash_prefs, never from the
+// DOM. This matters because Compact mode renders combat_profile/recent_kills
+// pre-collapsed as a render-time DEFAULT (see `compact_force_collapsed` in
+// the template) without that ever being in dash_prefs.collapsed_sections.
+// Reading section state back off the DOM (as an earlier draft of this did)
+// would launder that mode default into a real, persisted collapse the next
+// time *anything* here got toggled — so every mutation below updates these
+// two arrays directly and posts exactly them, and never re-derives them by
+// scanning [data-dash-body]/[data-dash-section] elements' current style.
+var dashCollapsedSections = {{ collapsed_sections | tojson }}.slice();
+var dashHiddenSections = {{ hidden_sections | tojson }}.slice();
+
+// Every prefs save goes through one promise chain so two quick toggles
+// (e.g. collapse a group, then hide a section) can never race — the second
+// save always starts from the first save's committed state.
+var dashPrefsQueue = Promise.resolve();
+function postDashPrefs(patch) {
+    dashPrefsQueue = dashPrefsQueue.then(function () {
+        return fetch('/dashboard/prefs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+    }).catch(function () { /* best-effort; the view still works this load */ });
+    return dashPrefsQueue;
+}
+
+function setDashMode() {
+    var mode = this.dataset.mode;
+    postDashPrefs({ mode: mode }).then(function () { window.location.reload(); });
+}
+
+// A collapsed/hidden lazily-loaded section never got an hx-get attribute in
+// the first place (data-dash-src holds the URL instead) — wiring it up here,
+// on first expand/show, is what keeps its network request from firing while
+// it's closed.
+function activateLazy(body) {
+    if (!body) return;
+    var el = body.hasAttribute && body.hasAttribute('data-dash-src')
+        ? body : body.querySelector('[data-dash-src]');
+    if (!el) return;
+    var src = el.getAttribute('data-dash-src');
+    var trigger = el.getAttribute('data-dash-trigger') || 'load';
+    el.removeAttribute('data-dash-src');
+    el.removeAttribute('data-dash-trigger');
+    el.setAttribute('hx-get', src);
+    el.setAttribute('hx-trigger', trigger);
+    if (window.htmx) window.htmx.process(el);
+}
+
+function _arrAdd(arr, key) { if (arr.indexOf(key) === -1) arr.push(key); }
+function _arrRemove(arr, key) {
+    var i = arr.indexOf(key);
+    if (i !== -1) arr.splice(i, 1);
+}
+
+function persistSectionState() {
+    postDashPrefs({
+        collapsed_sections: dashCollapsedSections.slice(),
+        hidden_sections: dashHiddenSections.slice(),
+    });
+}
+
+function refreshHiddenFooter() {
+    var footer = document.getElementById('dash-hidden-footer');
+    var textEl = document.getElementById('dash-hidden-footer-text');
+    if (!footer || !textEl) return;
+    var items = dashHiddenSections.filter(function (key) {
+        return !(dashMode === 'compact' && DASH_GAME_WIDE.indexOf(key) !== -1);
+    });
+    if (!items.length) { footer.style.display = 'none'; return; }
+    footer.style.display = '';
+    textEl.textContent = '';
+    textEl.appendChild(document.createTextNode('Hidden: '));
+    items.forEach(function (key, i) {
+        var span = document.createElement('span');
+        span.dataset.dashHiddenItem = key;
+        span.appendChild(document.createTextNode((DASH_SECTION_LABELS[key] || key) + ' '));
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'b-link';
+        btn.dataset.click = 'showDashSection';
+        btn.dataset.section = key;
+        btn.style.cssText = 'font-size:10px;background:none;border:none;padding:0;cursor:pointer;color:var(--accent);';
+        btn.textContent = 'show';
+        span.appendChild(btn);
+        textEl.appendChild(span);
+        if (i < items.length - 1) textEl.appendChild(document.createTextNode(' · '));
+    });
+}
+
+function toggleDashSection() {
+    var wrap = this.closest('[data-dash-section]');
+    if (!wrap) return;
+    var key = wrap.dataset.dashSection;
+    var body = wrap.querySelector('[data-dash-body="' + key + '"]');
+    if (!body) return;
+    var willExpand = body.style.display === 'none';
+    body.style.display = willExpand ? '' : 'none';
+    this.textContent = willExpand ? '▾' : '▸';
+    if (willExpand) {
+        activateLazy(body);
+        _arrRemove(dashCollapsedSections, key);
+    } else {
+        _arrAdd(dashCollapsedSections, key);
+    }
+    persistSectionState();
+}
+
+function hideDashSection() {
+    var wrap = this.closest('[data-dash-section]');
+    if (!wrap) return;
+    wrap.style.display = 'none';
+    _arrAdd(dashHiddenSections, wrap.dataset.dashSection);
+    refreshHiddenFooter();
+    persistSectionState();
+}
+
+function showDashSection() {
+    var key = this.dataset.section;
+    var wrap = document.querySelector('[data-dash-section="' + key + '"]');
+    if (!wrap) return;
+    wrap.style.display = '';
+    var body = wrap.querySelector('[data-dash-body="' + key + '"]');
+    if (body && body.style.display !== 'none') activateLazy(body);
+    _arrRemove(dashHiddenSections, key);
+    refreshHiddenFooter();
+    persistSectionState();
+}
+
+// Compact mode's own default (not persisted — see the template's note by
+// `compact_force_collapsed`): reveals all three game-wide sections at once
+// and kicks off whichever of their loads haven't fired yet. Skips any of
+// the three a pilot separately HID via the toolbar (dashHiddenSections) —
+// "Show" only means "these are no longer game-wide-consolidated", never
+// "un-hide something I explicitly hid".
+function showGameWideSections() {
+    var line = document.getElementById('dash-gamewide-line');
+    var container = document.getElementById('dash-gamewide-container');
+    if (line) line.style.display = 'none';
+    if (container) {
+        container.style.display = '';
+        container.querySelectorAll('[data-dash-section]').forEach(function (wrap) {
+            if (wrap.style.display === 'none') return;  // individually hidden — leave it
+            var key = wrap.dataset.dashSection;
+            var body = wrap.querySelector('[data-dash-body="' + key + '"]');
+            if (body && body.style.display !== 'none') activateLazy(body);
+        });
+    }
+}
+
+function persistGroupState() {
+    var collapsed = [];
+    document.querySelectorAll('.group-section').forEach(function (sec) {
+        var body = sec.querySelector('.sortable-group, .dash-compact-group-body');
+        if (body && body.style.display === 'none') collapsed.push(sec.dataset.group);
+    });
+    postDashPrefs({ collapsed_groups: collapsed });
+}
+
+function toggleDashGroup() {
+    if (editMode) return;  // label click means rename while editing; leave layout alone
+    var section = this.closest('.group-section');
+    if (!section) return;
+    var body = section.querySelector('.sortable-group, .dash-compact-group-body');
+    if (!body) return;
+    var summary = section.querySelector('.dash-group-summary');
+    var willCollapse = body.style.display !== 'none';
+    body.style.display = willCollapse ? 'none' : '';
+    if (summary) summary.style.display = willCollapse ? '' : 'none';
+    this.textContent = willCollapse ? '▸' : '▾';
+    persistGroupState();
+}
+</script>
 
 <script nonce="{{ request.state.csp_nonce }}">
 /* Charts for the two htmx-loaded panels below.
@@ -574,6 +926,12 @@ setInterval(updateEveTime, 10000);
 <script nonce="{{ request.state.csp_nonce }}">
 var editMode = false;
 var sortables = [];
+// Groups force-expanded for the duration of an edit session (see below) —
+// restored back to collapsed on "Done", so a chevron click on some OTHER
+// group afterwards (persistGroupState() reads collapse state straight off
+// the DOM, deliberately — see its own comment) can't launder the temporary
+// force-expand into a real, persisted "this group is expanded now".
+var forceExpandedGroups = [];
 
 function toggleEditMode() {
     editMode = !editMode;
@@ -588,6 +946,20 @@ function toggleEditMode() {
         document.querySelectorAll('.group-label').forEach(function(el) { el.style.cursor = 'pointer'; el.title = 'Click to rename'; });
         document.querySelectorAll('[data-char-id]').forEach(function(el) { el.style.cursor = 'grab'; });
         sortables.forEach(function(s) { s.option('disabled', false); });
+        // Drag reorder needs every card visible — force-expand any group the
+        // pilot had collapsed, for the duration of this edit session only.
+        forceExpandedGroups = [];
+        document.querySelectorAll('.group-section').forEach(function(sec) {
+            var body = sec.querySelector('.sortable-group');
+            if (body && body.style.display === 'none') {
+                forceExpandedGroups.push(sec.dataset.group);
+                body.style.display = '';
+                var summary = sec.querySelector('.dash-group-summary');
+                if (summary) summary.style.display = 'none';
+                var toggleBtn = sec.querySelector('.dash-group-toggle');
+                if (toggleBtn) toggleBtn.textContent = '▾';
+            }
+        });
     } else {
         btn.textContent = 'Edit';
         btn.style.borderColor = 'var(--border)';
@@ -597,6 +969,18 @@ function toggleEditMode() {
         document.querySelectorAll('.group-label').forEach(function(el) { el.style.cursor = ''; el.title = ''; });
         document.querySelectorAll('[data-char-id]').forEach(function(el) { el.style.cursor = ''; });
         sortables.forEach(function(s) { s.option('disabled', true); });
+        // Put back exactly the groups this edit session force-expanded.
+        document.querySelectorAll('.group-section').forEach(function(sec) {
+            if (forceExpandedGroups.indexOf(sec.dataset.group) === -1) return;
+            var body = sec.querySelector('.sortable-group');
+            if (!body) return;
+            body.style.display = 'none';
+            var summary = sec.querySelector('.dash-group-summary');
+            if (summary) summary.style.display = '';
+            var toggleBtn = sec.querySelector('.dash-group-toggle');
+            if (toggleBtn) toggleBtn.textContent = '▸';
+        });
+        forceExpandedGroups = [];
     }
 }
 

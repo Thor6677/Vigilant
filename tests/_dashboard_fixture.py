@@ -14,11 +14,14 @@ normalized.
 """
 from __future__ import annotations
 
+import copy
 import re
 from datetime import datetime, timezone
 
 import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.auth import scopes as perms
+from app.dashboard.prefs import DEFAULT_PREFS
+from app.dashboard.summary import build_pilot_summaries
 from app.db.models import Character
 from app.routes import dashboard as dash_mod
 from app.routes.characters import group_skill_data
@@ -188,6 +191,13 @@ def build_context(sort: str) -> dict:
         })
     char_rows.sort(key=lambda x: x["wallet"] or 0, reverse=True)
 
+    dash_prefs = copy.deepcopy(DEFAULT_PREFS)
+    pilot_summaries = build_pilot_summaries(
+        CHARACTERS, WALLETS, LOCATIONS, CLONES,
+        {c.character_id: dict(char=c, **SKILL_MAP[c.character_id]) for c in CHARACTERS},
+        SYNC_STATUSES, STALENESS, LAST_SYNCED_STRS, NEEDS_REAUTH, {}, {}, char_groups,
+    )
+
     return {
         "request": _FakeRequest(),
         "characters": characters,
@@ -215,6 +225,9 @@ def build_context(sort: str) -> dict:
         "char_groups": char_groups,
         "killmails_enabled": False,
         "battles_enabled": False,
+        "dash_prefs": dash_prefs,
+        "dash_mode": "cards",
+        "pilot_summaries": pilot_summaries,
     }
 
 
@@ -222,6 +235,21 @@ def render_content(sort: str) -> str:
     template = dash_mod.templates.env.get_template("dashboard.html")
     ctx = template.new_context(vars=build_context(sort))
     return "".join(template.blocks["content"](ctx))
+
+
+def render_full(sort: str, **overrides) -> str:
+    """Like render_content(), but lets a caller override/merge any context
+    key — dash_mode, killmails_enabled/battles_enabled (the game-wide
+    sections are all gated off by default in build_context()), or a patch
+    onto dash_prefs via the special `prefs_patch` kwarg."""
+    ctx = build_context(sort)
+    prefs_patch = overrides.pop("prefs_patch", None)
+    ctx.update(overrides)
+    if prefs_patch:
+        ctx["dash_prefs"] = {**ctx["dash_prefs"], **prefs_patch}
+    template = dash_mod.templates.env.get_template("dashboard.html")
+    tctx = template.new_context(vars=ctx)
+    return "".join(template.blocks["content"](tctx))
 
 
 _WS_RE = re.compile(r"\s+")
