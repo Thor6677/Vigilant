@@ -1211,6 +1211,39 @@ class UpdateNotifySettings(Base):
     updated_at = Column(DateTime, nullable=True)
 
 
+# ── T-074: pilot tags and private notes ──────────────────────────────────────
+
+class CharacterTag(Base):
+    """A user's own role tags and one-line private note for one of their
+    pilots (e.g. "Cyno", "Hauler", "our scout, watch for burn").
+
+    One row per (user_id, character_id) — validation (app/tags.py) keeps this
+    small: at most 8 tags, each 1-24 chars, note at most 280 chars. `tags_json`
+    is a JSON array of strings rather than a child table; a pilot's tag list
+    is always read and written whole, never queried by individual tag from
+    SQL, so the extra table and join would buy nothing. `user_tag_vocabulary()`
+    in app/tags.py is what the dashboard's tag filter reads instead of a
+    dedicated tags table.
+
+    Scoped to the owning user, not shared account-wide or with other users of
+    the same character — two accounts that both hold a transferred character
+    keep their own tags on it. A row with no tags and no note is deleted
+    rather than kept around empty (app/tags.py:save_character_tags), so a
+    character with neither is simply absent here.
+    """
+    __tablename__ = "character_tags"
+    __table_args__ = (
+        UniqueConstraint("user_id", "character_id", name="uq_character_tags_user_char"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=False)
+    tags_json = Column(Text, nullable=False, default="[]")
+    note = Column(String(280), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 async def ensure_user_fittings_columns(db: AsyncSession) -> None:
     """Add the T-069 columns to an old-shape user_fittings table:
     source_character_id / source_fitting_id (bulk character import — see

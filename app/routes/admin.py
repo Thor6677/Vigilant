@@ -60,6 +60,7 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
 # and USER_REFS_HANDLED_ELSEWHERE, so a new user_id column can't be added to
 # a model without also being handled here.
 USER_OWNED_TABLES = (
+    "character_tags",
     "corp_inventory_thresholds",
     "corp_contract_thresholds",
     "user_avoid_entries",
