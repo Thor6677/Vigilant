@@ -22,11 +22,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.dashboard.attention import (
     AGE_OUT_DAYS,
+    PI_ABANDONED_DAYS,
     PI_EXPIRY_AMBER_SECONDS,
     SKILL_QUEUE_CRITICAL_DAYS,
     SKILL_QUEUE_WARNING_DAYS,
     STALE_CRITICAL_SECONDS,
     STALE_WARNING_SECONDS,
+    SYNC_STALE_COLLAPSE_MIN,
     build_attention,
     skill_queue_state,
     staleness,
@@ -323,6 +325,36 @@ def test_pi_expired_ages_out_to_grey_after_seven_days():
     assert fresh_items[0].key == aged_items[0].key.replace(":2", ":1")
 
 
+def test_pi_expired_more_than_pi_abandoned_days_is_dropped_entirely():
+    """Past PI_ABANDONED_DAYS, an expired extractor is an abandoned colony,
+    not an attention item — no red, no grey, nothing at all (T-077)."""
+    just_inside = _pilot(cid=1, pi=[_planet(1, -(PI_ABANDONED_DAYS * 86400 - 3600))])
+    just_outside = _pilot(cid=2, pi=[_planet(1, -(PI_ABANDONED_DAYS * 86400 + 3600))])
+
+    inside_items = build_attention([just_inside], NOW)
+    outside_items = build_attention([just_outside], NOW)
+
+    assert [i.key for i in inside_items] == ["pi_expired:1"]
+    assert inside_items[0].severity == "grey"  # still past AGE_OUT_DAYS, just not abandoned
+    assert outside_items == []
+
+
+def test_pi_expired_abandoned_planet_is_filtered_out_of_a_mixed_set():
+    """One abandoned extractor (>14d) alongside one merely-aged one (7-14d)
+    on the same pilot: the abandoned one drops out of the count/since, the
+    other still surfaces grey."""
+    fresh_expired = _planet(1, -(AGE_OUT_DAYS * 86400 + 3600))         # aged, grey
+    abandoned = _planet(2, -(PI_ABANDONED_DAYS * 86400 + 3600))        # abandoned, dropped
+    p = _pilot(pi=[fresh_expired, abandoned])
+    items = build_attention([p], NOW)
+    item = next(i for i in items if i.key == "pi_expired:1")
+    assert item.severity == "grey"
+    # Singular phrasing ("extractor", not "extractors") -- only the one
+    # non-abandoned extractor was counted, the abandoned one is invisible.
+    assert "extractors" not in item.text
+    assert item.since == NOW - timedelta(seconds=AGE_OUT_DAYS * 86400 + 3600)
+
+
 def test_pi_thresholds_pin_against_recompute_expiry():
     from app.routes.pi import _recompute_expiry
 
@@ -402,6 +434,70 @@ def test_sync_stale_beyond_critical_is_grey():
 def test_sync_suppressed_while_actively_syncing():
     p = _pilot(sync_status="syncing", last_synced=NOW - timedelta(days=5))
     assert build_attention([p], NOW) == []
+
+
+# ── sync stale collapse (T-077) ──────────────────────────────────────────────
+
+def _stale_pilot(cid, name):
+    return _pilot(cid=cid, name=name, sync_status="idle",
+                  last_synced=NOW - timedelta(seconds=STALE_CRITICAL_SECONDS + 1))
+
+
+def test_below_collapse_threshold_stays_per_pilot():
+    pilots = [_stale_pilot(i, f"Pilot {i}") for i in range(1, SYNC_STALE_COLLAPSE_MIN)]
+    items = build_attention(pilots, NOW)
+    keys = sorted(i.key for i in items)
+    assert keys == [f"sync_stale:{i}" for i in range(1, SYNC_STALE_COLLAPSE_MIN)]
+
+
+def test_at_collapse_threshold_becomes_one_grey_item():
+    pilots = [_stale_pilot(i, f"Pilot {i}") for i in range(1, SYNC_STALE_COLLAPSE_MIN + 1)]
+    items = build_attention(pilots, NOW)
+    stale_items = [i for i in items if i.key.startswith("sync_stale")]
+    assert len(stale_items) == 1
+    item = stale_items[0]
+    assert item.key == "sync_stale:many"
+    assert item.severity == "grey"
+    assert f"{SYNC_STALE_COLLAPSE_MIN} pilots have stale data" in item.text
+    assert item.action_label is None
+    assert item.action_url is None
+    assert item.action_method is None
+
+
+def test_collapsed_item_names_up_to_three_pilots_then_the_rest():
+    pilots = [_stale_pilot(i, name) for i, name in
+              enumerate(["Amy", "Bo", "Cy", "Deb", "Eli"], start=1)]
+    items = build_attention(pilots, NOW)
+    item = next(i for i in items if i.key == "sync_stale:many")
+    assert item.text == "5 pilots have stale data — Amy, Bo, Cy and 2 more"
+
+
+def test_collapsed_item_fingerprint_is_over_sorted_character_ids():
+    pilots_a = [_stale_pilot(i, f"Pilot {i}") for i in (1, 2, 3)]
+    pilots_b = [_stale_pilot(i, f"Pilot {i}") for i in (3, 2, 1)]  # same set, different order
+    fp_a = next(i for i in build_attention(pilots_a, NOW) if i.key == "sync_stale:many").fingerprint
+    fp_b = next(i for i in build_attention(pilots_b, NOW) if i.key == "sync_stale:many").fingerprint
+    assert fp_a == fp_b
+
+    pilots_c = [_stale_pilot(i, f"Pilot {i}") for i in (1, 2, 4)]  # different set
+    fp_c = next(i for i in build_attention(pilots_c, NOW) if i.key == "sync_stale:many").fingerprint
+    assert fp_c != fp_a
+
+
+def test_collapse_is_suppressed_by_reauth_and_syncing_same_as_per_pilot():
+    pilots = [
+        _stale_pilot(1, "Amy"),
+        _stale_pilot(2, "Bo"),
+        _pilot(cid=3, name="Cy", needs_reauth=True,
+               sync_status="idle", last_synced=NOW - timedelta(seconds=STALE_CRITICAL_SECONDS + 1)),
+        _pilot(cid=4, name="Deb", sync_status="syncing", last_synced=NOW - timedelta(days=5)),
+    ]
+    items = build_attention(pilots, NOW)
+    # Only Amy and Bo actually qualify as stale candidates (Cy is suppressed
+    # by re-auth, Deb is mid-sync) -- below SYNC_STALE_COLLAPSE_MIN, so both
+    # stay per-pilot rather than collapsing.
+    stale_keys = sorted(i.key for i in items if i.key.startswith("sync_stale"))
+    assert stale_keys == ["sync_stale:1", "sync_stale:2"]
 
 
 def test_staleness_thresholds_pin_against_dashboard():
@@ -593,6 +689,62 @@ def test_get_renders_an_item(attn_client):
     assert 'id="dash-attention"' in r.text
     assert "Sample Pilot" in r.text
     assert "no pilot on this account is training" in r.text
+
+
+def test_more_than_eight_items_render_the_rest_inside_a_details(attn_client):
+    """T-077: the dev instance showed 31 items at once. Past
+    MAX_VISIBLE_ATTENTION_ITEMS (8), the rest render inside a collapsed
+    <details> rather than every row rendering open."""
+    from app.routes.dashboard_attention import MAX_VISIBLE_ATTENTION_ITEMS
+
+    _seed_user(attn_client, 1)
+    n = MAX_VISIBLE_ATTENTION_ITEMS + 3
+    for i in range(n):
+        _seed_character(
+            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes="",
+            cache={"last_synced": datetime.now(timezone.utc).replace(tzinfo=None),
+                   "sync_warnings_json": json.dumps({"wallet": "token_revoked"})},
+        )
+    attn_client.login(1)
+    r = attn_client.get("/dashboard/attention")
+    assert r.status_code == 200
+    # All n rows are present in the markup (native <details> just hides the
+    # overflow ones until opened, doesn't remove them from the response).
+    assert r.text.count('class="da-row"') == n
+    assert "<details" in r.text
+    assert f"Show all {n}" in r.text
+    assert f"Needs attention · {n}" in r.text
+
+
+def test_dismissing_an_overflow_item_re_renders_the_details_open(attn_client):
+    """T-077: dismissing a row that came from inside the collapsed
+    <details> must re-render it OPEN, so clearing several overflow items in
+    a row doesn't mean re-opening it after every single dismiss."""
+    from app.routes.dashboard_attention import MAX_VISIBLE_ATTENTION_ITEMS
+
+    _seed_user(attn_client, 1)
+    n = MAX_VISIBLE_ATTENTION_ITEMS + 3
+    for i in range(n):
+        _seed_character(
+            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes="",
+            cache={"last_synced": datetime.now(timezone.utc).replace(tzinfo=None),
+                   "sync_warnings_json": json.dumps({"wallet": "token_revoked"})},
+        )
+    attn_client.login(1)
+
+    # Pilot 08 (cid 108) sorts into the overflow tail (alphabetically after
+    # the first 8: Pilot 00..Pilot 07).
+    r = attn_client.post("/dashboard/attention/dismiss",
+                         data={"key": "reauth:108", "for": "24h", "expanded": "1"})
+    assert r.status_code == 200
+    assert "<details class=\"da-more\" open>" in r.text
+
+    # Without the flag (e.g. a dismiss from one of the first 8), it stays closed.
+    r2 = attn_client.post("/dashboard/attention/dismiss",
+                          data={"key": "reauth:100", "for": "24h"})
+    assert r2.status_code == 200
+    assert "<details class=\"da-more\" open>" not in r2.text
+    assert "<details class=\"da-more\">" in r2.text
 
 
 def test_dismiss_unknown_key_is_refused(attn_client):

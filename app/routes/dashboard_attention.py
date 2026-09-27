@@ -27,6 +27,13 @@ templates = Jinja2Templates(directory="app/templates")
 
 _DISMISS_DURATIONS = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "change": None}
 
+# T-077: the strip showed as many as 31 items on the dev instance (24
+# pilots on 8 accounts) -- past this many, the rest render inside a
+# collapsed <details> ("Show all N") instead of every row rendering open.
+# Purely a display concern: build_attention() itself always returns the
+# full, untruncated list; the partial does the slicing.
+MAX_VISIBLE_ATTENTION_ITEMS = 8
+
 
 def _attention_age(since: datetime | None) -> str | None:
     """Display-time age for the partial ('6h', '2d', ...). Recomputed against
@@ -171,6 +178,21 @@ async def _visible_items(db: AsyncSession, user_id: int, items: list[AttentionIt
     return [it for it in items if it.key not in active_keys]
 
 
+def _render_attention(
+    request: Request, items: list[AttentionItem], expanded: bool = False,
+) -> HTMLResponse:
+    """Split `items` into the first MAX_VISIBLE_ATTENTION_ITEMS (rendered
+    open) and the rest (rendered inside a collapsed <details>), so both
+    handlers below truncate the same way. `expanded` re-renders that
+    <details> open — set when a dismiss came from inside it, so clearing
+    several overflow items in a row doesn't mean re-opening it each time."""
+    return templates.TemplateResponse(request, "partials/dashboard_attention.html", {
+        "items": items[:MAX_VISIBLE_ATTENTION_ITEMS],
+        "overflow_items": items[MAX_VISIBLE_ATTENTION_ITEMS:],
+        "expanded": expanded,
+    })
+
+
 @router.get("/dashboard/attention", response_class=HTMLResponse)
 async def dashboard_attention(request: Request, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
@@ -186,7 +208,7 @@ async def dashboard_attention(request: Request, db: AsyncSession = Depends(get_d
         # exactly like it did before this ticket.
         return HTMLResponse("")
 
-    return templates.TemplateResponse(request, "partials/dashboard_attention.html", {"items": visible})
+    return _render_attention(request, visible)
 
 
 @router.post("/dashboard/attention/dismiss", response_class=HTMLResponse)
@@ -194,6 +216,7 @@ async def dismiss_attention_item(
     request: Request,
     key: str = Form(...),
     for_: str = Form(..., alias="for"),
+    expanded: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
     user_id = request.session.get("user_id")
@@ -240,4 +263,4 @@ async def dismiss_attention_item(
     remaining = [it for it in visible if it.key != key]
     if not remaining:
         return HTMLResponse("")
-    return templates.TemplateResponse(request, "partials/dashboard_attention.html", {"items": remaining})
+    return _render_attention(request, remaining, expanded=bool(expanded))
