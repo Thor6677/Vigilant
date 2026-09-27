@@ -1228,7 +1228,12 @@ class SkillFarmSettings(Base):
     __tablename__ = "skill_farm_settings"
 
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    sales_tax_pct = Column(Float, nullable=False, default=8.0)
+    # Must match app.skillfarm.constants.DEFAULT_SALES_TAX_PCT — kept as a
+    # plain literal (not an import) to avoid pulling app.skillfarm into
+    # app.db.models; get_settings() always passes the constant explicitly
+    # when creating a row, so this Column-level default is a documentation
+    # fallback, never the actual value new rows get in practice.
+    sales_tax_pct = Column(Float, nullable=False, default=7.5)
     plex_per_month = Column(Integer, nullable=False, default=500)
     price_source = Column(String(8), nullable=False, default="sell")  # "sell" | "buy"
     updated_at = Column(DateTime, nullable=True)
