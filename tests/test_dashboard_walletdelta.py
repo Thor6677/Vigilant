@@ -81,6 +81,44 @@ def test_load_wallet_baselines_is_one_statement(db_factory):
     assert result[CID_NO_CURRENT_WALLET] == 10.0
 
 
+def test_load_wallet_baselines_chunks_past_the_union_all_limit(db_factory):
+    """SQLite caps a compound SELECT at 500 terms by default. 450 character
+    ids must still come back correct — chunked into
+    ceil(450/_MAX_IDS_PER_STATEMENT) statements (3, at 200/chunk) rather
+    than one 450-branch UNION ALL."""
+    SessionLocal, engine = db_factory
+    naive_now = NOW.replace(tzinfo=None)
+    n_ids = 450
+    character_ids = list(range(1001, 1001 + n_ids))
+
+    async def _seed():
+        async with SessionLocal() as db:
+            for cid in character_ids:
+                db.add(WalletSnapshot(character_id=cid, balance=float(cid), recorded_at=naive_now - timedelta(days=8)))
+            await db.commit()
+    asyncio.run(_seed())
+
+    statements = []
+
+    def _listener(conn, cursor, statement, parameters, context, executemany):
+        if "wallet_snapshots" in statement.lower():
+            statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _listener)
+    try:
+        async def _run():
+            async with SessionLocal() as db:
+                return await load_wallet_baselines(db, character_ids, now=NOW)
+        result = asyncio.run(_run())
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _listener)
+
+    assert len(statements) == 3, f"expected 3 chunked statements for {n_ids} ids, got {len(statements)}"
+    assert len(result) == n_ids
+    for cid in character_ids:
+        assert result[cid] == float(cid)
+
+
 def test_load_wallet_baselines_empty_ids_returns_empty_without_a_query(db_factory):
     SessionLocal, engine = db_factory
 

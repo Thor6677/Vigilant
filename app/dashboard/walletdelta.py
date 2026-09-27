@@ -20,6 +20,12 @@ query measures ~1.3ms — see tests/test_dashboard_walletdelta_perf.py for
 both the EXPLAIN QUERY PLAN and the timing. `build_wallet_deltas()` is
 pure: it just diffs those baselines against each pilot's already-loaded
 current wallet.
+
+A UNION ALL'd SELECT is capped by SQLite's compound-select limit (500 terms
+by default), so `load_wallet_baselines()` chunks `character_ids` into
+groups of `_MAX_IDS_PER_STATEMENT` and issues one statement per chunk,
+merging the results. At every pilot count this ticket's numbers are about
+(dozens, not hundreds), that's still exactly one statement.
 """
 from __future__ import annotations
 
@@ -31,6 +37,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import WalletSnapshot
 
 WALLET_DELTA_WINDOW = timedelta(days=7)
+# SQLite's default compound-select limit is 500 terms; stay well clear of it.
+_MAX_IDS_PER_STATEMENT = 200
 
 
 def _build_wallet_baselines_stmt(character_ids: list[int], cutoff: datetime):
@@ -65,9 +73,11 @@ async def load_wallet_baselines(
     db: AsyncSession, character_ids: list[int], now: datetime | None = None,
 ) -> dict[int, float]:
     """{character_id: balance} for the most recent WalletSnapshot at or
-    before `now - 7d`, for every id in `character_ids`, in ONE statement.
-    A character with no snapshot that old (new to Vigilant, or Vigilant
-    itself younger than a week) is simply absent from the result."""
+    before `now - 7d`, for every id in `character_ids`, in ONE statement —
+    or, past `_MAX_IDS_PER_STATEMENT` ids, one statement per chunk (see the
+    module docstring). A character with no snapshot that old (new to
+    Vigilant, or Vigilant itself younger than a week) is simply absent from
+    the result."""
     if not character_ids:
         return {}
     now = now or datetime.now(timezone.utc)
@@ -75,8 +85,12 @@ async def load_wallet_baselines(
     if cutoff.tzinfo is not None:
         cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
 
-    rows = (await db.execute(_build_wallet_baselines_stmt(character_ids, cutoff))).all()
-    return {cid: balance for cid, balance in rows if balance is not None}
+    out: dict[int, float] = {}
+    for i in range(0, len(character_ids), _MAX_IDS_PER_STATEMENT):
+        chunk = character_ids[i:i + _MAX_IDS_PER_STATEMENT]
+        rows = (await db.execute(_build_wallet_baselines_stmt(chunk, cutoff))).all()
+        out.update((cid, balance) for cid, balance in rows if balance is not None)
+    return out
 
 
 def build_wallet_deltas(

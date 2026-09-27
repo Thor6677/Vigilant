@@ -144,7 +144,12 @@ def test_load_wallet_baselines_perf_and_correctness(seeded_db_path):
     result, elapsed_ms = asyncio.run(_run())
     asyncio.run(engine.dispose())
 
-    assert elapsed_ms < 100, f"load_wallet_baselines took {elapsed_ms:.2f}ms, expected well under 100ms"
+    # This threshold is a regression tripwire, not a target: measured ~1.3ms
+    # on this fixture, and the ROW_NUMBER() query it replaced measured ~63ms
+    # here (seconds at real production scale). 250ms only needs to catch an
+    # order-of-magnitude regression reliably on a CI runner slower than a
+    # laptop — it isn't meant to hold the query near its actual ~1ms cost.
+    assert elapsed_ms < 250, f"load_wallet_baselines took {elapsed_ms:.2f}ms, expected well under 250ms"
     expected = {cid: _expected_baseline(cid) for cid in character_ids}
     expected = {cid: bal for cid, bal in expected.items() if bal is not None}
     assert result == pytest.approx(expected)

@@ -78,6 +78,33 @@ def test_load_latest_networth_is_one_statement_and_picks_the_newest_row(db_facto
     assert CID_NO_HISTORY not in result
 
 
+def test_load_latest_networth_chunks_past_the_union_all_limit(db_factory):
+    """SQLite caps a compound SELECT at 500 terms by default. 450 character
+    ids must still come back correct — chunked into
+    ceil(450/_MAX_IDS_PER_STATEMENT) statements (3, at 200/chunk) rather
+    than one 450-branch UNION ALL."""
+    SessionLocal, engine = db_factory
+    n_ids = 450
+    character_ids = list(range(2001, 2001 + n_ids))
+
+    async def _seed():
+        async with SessionLocal() as db:
+            for cid in character_ids:
+                db.add(NetWorthSnapshot(character_id=cid, date=NOW.date(), total=float(cid)))
+            await db.commit()
+    asyncio.run(_seed())
+
+    async def _run():
+        async with SessionLocal() as db:
+            return await load_latest_networth(db, character_ids)
+
+    result, statements = _count_statements(engine, "net_worth_snapshots", _run())
+    assert len(statements) == 3, f"expected 3 chunked statements for {n_ids} ids, got {len(statements)}"
+    assert len(result) == n_ids
+    for cid in character_ids:
+        assert result[cid] == float(cid)
+
+
 def test_load_latest_networth_empty_ids_returns_empty_without_a_query(db_factory):
     SessionLocal, _ = db_factory
 

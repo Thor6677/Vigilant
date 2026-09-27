@@ -25,6 +25,10 @@ SPARKLINE_WINDOW = timedelta(days=7)
 # of returning every ~2-minute snapshot (~126k rows for 24 pilots measured on
 # a real install) for Python to group. See load_wallet_sparkline_points.
 SPARKLINE_BUCKET = timedelta(hours=3)
+# SQLite's default compound-select limit is 500 terms; stay well clear of it.
+# See _build_latest_networth_stmt's docstring — load_latest_networth() chunks
+# character_ids by this many per UNION ALL statement.
+_MAX_IDS_PER_STATEMENT = 200
 
 
 def _format_duration(seconds: float) -> str:
@@ -176,6 +180,11 @@ def _build_latest_networth_stmt(character_ids: list[int]):
     (character_id, date) already gives each branch's `ORDER BY date DESC
     LIMIT 1` its own index seek for free (SEARCH ... USING INDEX
     sqlite_autoindex_net_worth_snapshots_1).
+
+    Callers get a single chunk of at most `_MAX_IDS_PER_STATEMENT` ids —
+    load_latest_networth() does the chunking (see its docstring), same as
+    app.dashboard.walletdelta.load_wallet_baselines, to stay clear of
+    SQLite's compound-select term limit.
     """
     return union_all(*[
         select(
@@ -194,11 +203,17 @@ def _build_latest_networth_stmt(character_ids: list[int]):
 
 async def load_latest_networth(db: AsyncSession, character_ids: list[int]) -> dict[int, float]:
     """{character_id: total} for each character's most recent
-    NetWorthSnapshot (one daily row per character), in ONE statement."""
+    NetWorthSnapshot (one daily row per character), in ONE statement — or,
+    past `_MAX_IDS_PER_STATEMENT` ids, one statement per chunk (SQLite caps
+    a UNION ALL at 500 terms; see _build_latest_networth_stmt)."""
     if not character_ids:
         return {}
-    rows = (await db.execute(_build_latest_networth_stmt(character_ids))).all()
-    return {cid: total for cid, total in rows if total is not None}
+    out: dict[int, float] = {}
+    for i in range(0, len(character_ids), _MAX_IDS_PER_STATEMENT):
+        chunk = character_ids[i:i + _MAX_IDS_PER_STATEMENT]
+        rows = (await db.execute(_build_latest_networth_stmt(chunk))).all()
+        out.update((cid, total) for cid, total in rows if total is not None)
+    return out
 
 
 async def load_wallet_sparkline_points(
