@@ -152,6 +152,27 @@
         if (arrow) arrow.textContent = wasHidden ? '\u25BE' : '\u25B8';
     };
 
+    // Quick-add chip for the pilot tags editor (T-074) \u2014 appends a suggested
+    // or already-used tag into the comma-separated tags input without
+    // submitting anything. Final validation (length, characters, the 8-tag
+    // cap, dedupe) happens server-side on Save; this only saves typing and
+    // skips a tag already present (case-insensitive).
+    //
+    //   data-add-tag     \u2014 the tag text to insert.
+    //   data-tags-input  \u2014 id of the text input to append into.
+    window.addQuickTag = window.addQuickTag || function () {
+        var tag = this.dataset && this.dataset.addTag;
+        var inputId = this.dataset && this.dataset.tagsInput;
+        var input = inputId ? document.getElementById(inputId) : null;
+        if (!input || !tag) return;
+        var current = input.value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+        var exists = current.some(function (t) { return t.toLowerCase() === tag.toLowerCase(); });
+        if (exists) return;
+        current.push(tag);
+        input.value = current.join(', ');
+        input.focus();
+    };
+
     // Was: onerror="this.src='...'; this.onerror=null;" — swap in a fallback
     // image once, and do not loop if the fallback 404s too. Dispatched by
     // name through data-on-error, alongside the built-in "hide".

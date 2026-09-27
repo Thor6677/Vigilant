@@ -28,6 +28,7 @@ from app.routes.characters import router as characters_router
 from app.routes.account import router as account_router
 from app.routes.status import router as status_router
 from app.routes.character_detail import router as character_detail_router
+from app.routes.character_tags import router as character_tags_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
@@ -213,6 +214,7 @@ app.include_router(characters_router)
 app.include_router(account_router)
 app.include_router(status_router)
 app.include_router(character_detail_router)
+app.include_router(character_tags_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
