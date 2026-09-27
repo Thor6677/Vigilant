@@ -107,6 +107,10 @@ ALERT_TYPES: tuple[str, ...] = tuple(key for _, items in ALERT_TYPE_GROUPS for k
 ALERT_LABELS: dict[str, str] = {key: label for _, items in ALERT_TYPE_GROUPS for key, label in items}
 DEFAULT_ALERT_TYPES: tuple[str, ...] = ("structure_attack", "structure_fuel", "pi_expiring", "stockpile_low")
 _TYPE_ALIASES = {"structure_alert": "structure_attack"}
+# The Account page's test message is not an alert type anyone opts in to, so
+# it is not in ALERT_TYPES; it still needs a footer label that reads as one.
+TEST_TYPE = "test"
+_EXTRA_LABELS: dict[str, str] = {TEST_TYPE: "Test message"}
 
 
 def parse_alert_types(raw: str | None) -> list[str]:
@@ -308,7 +312,7 @@ def _kill_alert_text(event: dict) -> tuple[str, str, str]:
 
 
 def build_payload(title: str, body: str, alert_type: str) -> dict:
-    label = ALERT_LABELS.get(alert_type) or alert_type
+    label = ALERT_LABELS.get(alert_type) or _EXTRA_LABELS.get(alert_type) or alert_type
     return {
         "username": "Vigilant",
         "embeds": [{
@@ -459,7 +463,7 @@ async def send_test_message(db, user_id: int, url: str) -> Outcome:
         outcome = await deliver(
             url, "Test message",
             "Vigilant can reach this channel. Alerts you opted in to will arrive here.",
-            "test")
+            TEST_TYPE)
     except Exception as e:
         outcome = Outcome(False, type(e).__name__)
     if not outcome.ok:

@@ -291,3 +291,15 @@ def test_install_is_idempotent_and_covers_every_httpcore_logger():
                 if isinstance(f, log_redaction.RedactRequestUrlFilter)]
         assert len(mine) == 1, name
     assert {"httpx", "httpcore.connection", "httpcore.http11"} <= set(log_redaction.LOGGER_NAMES)
+
+
+# ── The test message's footer ────────────────────────────────────────────────
+
+def test_test_message_footer_reads_as_a_label():
+    payload = user_discord.build_payload("Test message", "hello", user_discord.TEST_TYPE)
+    assert payload["embeds"][0]["footer"]["text"] == "Vigilant · Test message"
+    # An opted-in type keeps its own label; an unknown one falls back to its name.
+    assert user_discord.build_payload("t", "b", "structure_attack")["embeds"][0]["footer"]["text"] \
+        == "Vigilant · " + user_discord.ALERT_LABELS["structure_attack"]
+    assert user_discord.build_payload("t", "b", "mystery")["embeds"][0]["footer"]["text"] \
+        == "Vigilant · mystery"
