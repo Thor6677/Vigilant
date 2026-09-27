@@ -307,6 +307,7 @@ _LOGIN_ONLY_GETS = (
     "/tools/fitting/can-overheat?type_ids=1", "/tools/fitting/charges/1",
     "/tools/fitting/info/587",
     "/intel/gatecheck/systems?q=jita", "/intel/gatecheck/finder",
+    "/character/1/can-fly",   # T-072
 )
 _LOGIN_ONLY_POSTS = (
     "/tools/fitting/stats", "/tools/fitting/import-eft", "/tools/fitting/export-eft",

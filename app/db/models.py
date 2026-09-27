@@ -774,6 +774,14 @@ class UserFitting(Base):
     # before this column did) is simply "stale", not an error.
     dps_cached = Column(Float, nullable=True)
     dps_cache_key = Column(String, nullable=True)
+    # Persistent skill-requirement cache (T-072's can-fly check): the same
+    # idea as dps_cached/dps_cache_key above, but for "which skills at which
+    # level does this fit need" rather than DPS. Keyed by
+    # app.fitting.canfly.skill_reqs_cache_key, which hashes ship + items +
+    # the SDE version stamp — no FITTING_ENGINE_VERSION, since nothing here
+    # runs the dogma/stacking pipeline that constant guards.
+    skill_reqs_json = Column(Text, nullable=True)
+    skill_reqs_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -1238,6 +1246,27 @@ async def ensure_user_fittings_columns(db: AsyncSession) -> None:
         "CREATE INDEX IF NOT EXISTS ix_user_fittings_source "
         "ON user_fittings(user_id, source_character_id, source_fitting_id)"
     ))
+    await db.commit()
+
+
+# ── T-072: can-fly skill-requirement cache columns ──────────────────────────
+
+async def ensure_user_fittings_skill_reqs_columns(db: AsyncSession) -> None:
+    """Add skill_reqs_json / skill_reqs_key to an old-shape user_fittings
+    table — same idempotent PRAGMA-guarded pattern as
+    ensure_user_fittings_columns above, for the T-072 can-fly check's
+    persistent requirement cache (app.fitting.canfly.can_fly_summary).
+
+    A fresh install already has both columns via create_all (they're
+    declared as Column() on UserFitting), so this is a no-op there; a
+    second call against an already-migrated table is also a no-op (PRAGMA
+    sees both columns already present).
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(user_fittings)"))).fetchall()}
+    if "skill_reqs_json" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN skill_reqs_json TEXT"))
+    if "skill_reqs_key" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN skill_reqs_key VARCHAR(64)"))
     await db.commit()
 
 
