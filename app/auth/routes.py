@@ -42,7 +42,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
-from app.auth.purge import clear_live_state, purge_history
+from app.auth.purge import clear_live_state, purge_character_user_rows, purge_history
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
@@ -299,6 +299,7 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     await clear_live_state(db, cid, everything)
     await purge_history(db, cid, everything)
     await db.execute(delete(CharacterDashboardCache).where(CharacterDashboardCache.character_id == cid))
+    await purge_character_user_rows(db, cid)
     await db.delete(char)
     db.add(AdminAuditLog(
         user_id=old_user_id, character_id=cid, event_type="character_transferred",
@@ -616,6 +617,7 @@ async def remove_character(character_id: int, request: Request, db: AsyncSession
 
     old_refresh = char.refresh_token
     old_is_ours = issued_to_us(char.access_token)
+    await purge_character_user_rows(db, character_id)
     await db.delete(char)
     await db.commit()
     # Removing a character is withdrawing every permission it granted.

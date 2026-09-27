@@ -21,6 +21,7 @@ from app.db.models import (
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
     UpdateSchedule, UpdateRunReport,
 )
+from app.auth.purge import purge_character_user_rows
 from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
@@ -884,6 +885,7 @@ async def admin_remove_user(user_id: int, request: Request,
         # Clean up associated caches
         await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": char.character_id})
         await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": char.character_id})
+        await purge_character_user_rows(db, char.character_id)
         await db.delete(char)
 
     # Delete user-owned data so the user row's removal doesn't leave orphans
@@ -931,6 +933,7 @@ async def admin_remove_character(character_id: int, request: Request,
     old_refresh = char.refresh_token if issued_to_us(char.access_token) else None
     await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": character_id})
     await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": character_id})
+    await purge_character_user_rows(db, character_id)
     await db.delete(char)
     await db.commit()
     await revoke_refresh_token(old_refresh)   # None (not ours) is a no-op
