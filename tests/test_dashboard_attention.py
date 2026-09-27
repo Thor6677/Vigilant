@@ -39,6 +39,7 @@ def _pilot(cid=1, name="Pilot One", **kw):
     base = {
         "character_id": cid,
         "character_name": name,
+        "account_group": None,
         "needs_reauth": False,
         "skillqueue": None,
         "pi": None,
@@ -97,18 +98,24 @@ def test_reauth_suppresses_the_grey_sync_item():
 
 # ── skill queue ──────────────────────────────────────────────────────────────
 
-def test_empty_queue_is_red():
+def test_solo_empty_queue_is_account_idle_red():
+    """A pilot with no account_group is its own account (see the account-
+    grouping tests below), so an empty queue still surfaces — just under the
+    account_idle key/text, not a per-pilot 'empty queue' one."""
     p = _pilot(skillqueue=[])
     items = build_attention([p], NOW)
-    assert [i.key for i in items] == ["queue_empty:1"]
+    assert [i.key for i in items] == ["account_idle:1"]
     assert items[0].severity == "red"
     assert items[0].since is None
+    assert items[0].text == "no pilot on this account is training"
 
 
 def test_all_finished_queue_is_paused_not_empty():
     """The exact shape advisor flagged: every cached entry already finished
     gives pending=[] internally, but the RAW queue is non-empty, so the card
-    (and this) shows 'paused', not 'empty'."""
+    (and skill_queue_state) reports 'paused', not 'empty'. Both still roll
+    up into the same account_idle item — paused and empty are no longer
+    told apart at the item level, only at the pure-helper level."""
     stale_entry = _sq_entry(finish_in_days=-5, start_in_days=-10)
     warning, queue_end = skill_queue_state([stale_entry], NOW)
     assert warning == "paused"
@@ -116,15 +123,18 @@ def test_all_finished_queue_is_paused_not_empty():
 
     p = _pilot(skillqueue=[stale_entry])
     items = build_attention([p], NOW)
-    assert [i.key for i in items] == ["queue_paused:1"]
-    assert items[0].severity == "grey"
+    assert [i.key for i in items] == ["account_idle:1"]
+    assert items[0].severity == "red"
 
 
 def test_paused_when_no_finish_date_at_all():
     entry = {"skill_id": 1, "finished_level": 1, "start_date": NOW.isoformat()}
+    warning, _ = skill_queue_state([entry], NOW)
+    assert warning == "paused"
+
     p = _pilot(skillqueue=[entry])
     items = build_attention([p], NOW)
-    assert [i.key for i in items] == ["queue_paused:1"]
+    assert [i.key for i in items] == ["account_idle:1"]
 
 
 @pytest.mark.parametrize("finish_in_days,expected", [
@@ -159,6 +169,99 @@ def test_skill_queue_critical_pins_against_the_real_skill_warning():
         queue = [{"finish_date": queue_end.isoformat()}]
         assert skill_queue_state(queue, NOW)[0] == expected
         assert skill_warning(queue, queue_end) == expected
+
+
+# ── account grouping (the queue-idle signal is per-account, not per-pilot) ──
+
+def _training_entry():
+    """A queue that reads as 'ok' — nowhere near critical/warning."""
+    return [_sq_entry(finish_in_days=SKILL_QUEUE_WARNING_DAYS + 10)]
+
+
+def _idle_entry():
+    return []
+
+
+def test_account_with_one_training_pilot_and_two_idle_gives_no_item():
+    pilots = [
+        _pilot(cid=1, name="Main", account_group="Acct A", skillqueue=_training_entry()),
+        _pilot(cid=2, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=3, name="Alt Two", account_group="Acct A", skillqueue=_idle_entry()),
+    ]
+    items = build_attention(pilots, NOW)
+    assert not any(i.key.startswith("account_idle") for i in items)
+
+
+def test_account_all_idle_gives_exactly_one_red_item():
+    pilots = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Alt Two", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=3, name="Alt Three", account_group="Acct A", skillqueue=_idle_entry()),
+    ]
+    items = build_attention(pilots, NOW)
+    idle = [i for i in items if i.key.startswith("account_idle")]
+    assert len(idle) == 1
+    assert idle[0].key == "account_idle:Acct A"
+    assert idle[0].severity == "red"
+    assert idle[0].character_name == "Acct A"
+
+
+def test_account_idle_prefers_a_paused_pilot_as_the_action_target():
+    paused_entry = [{"skill_id": 1, "finished_level": 1, "start_date": NOW.isoformat()}]
+    pilots = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Alt Two (paused)", account_group="Acct A", skillqueue=paused_entry),
+    ]
+    items = build_attention(pilots, NOW)
+    idle = next(i for i in items if i.key.startswith("account_idle"))
+    assert idle.character_id == 2
+    assert idle.action_url == "/character/2/skills"
+
+
+def test_ungrouped_pilots_each_count_as_their_own_account():
+    pilots = [
+        _pilot(cid=1, name="Solo One", account_group=None, skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Solo Two", account_group=None, skillqueue=_idle_entry()),
+    ]
+    items = build_attention(pilots, NOW)
+    idle_keys = sorted(i.key for i in items if i.key.startswith("account_idle"))
+    assert idle_keys == ["account_idle:1", "account_idle:2"]
+
+
+def test_account_idle_ignores_no_scope_pilots():
+    # A no_scope alt never counts toward "training", and can't save an
+    # otherwise-idle account.
+    pilots = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Alt Two", account_group="Acct A", skillqueue="no_scope"),
+    ]
+    items = build_attention(pilots, NOW)
+    idle = [i for i in items if i.key.startswith("account_idle")]
+    assert len(idle) == 1
+    assert idle[0].character_id == 1  # the only scoped pilot
+
+
+def test_account_with_every_pilot_no_scope_gives_no_item():
+    pilots = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue="no_scope"),
+        _pilot(cid=2, name="Alt Two", account_group="Acct A", skillqueue=None),
+    ]
+    assert build_attention(pilots, NOW) == []
+
+
+def test_account_idle_fingerprint_uses_pilot_ids_and_states():
+    pilots_a = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Alt Two", account_group="Acct A", skillqueue=_idle_entry()),
+    ]
+    pilots_b = [
+        _pilot(cid=1, name="Alt One", account_group="Acct A", skillqueue=_idle_entry()),
+        _pilot(cid=2, name="Alt Two", account_group="Acct A",
+               skillqueue=[{"skill_id": 1, "finished_level": 1, "start_date": NOW.isoformat()}]),  # now paused
+    ]
+    fp_a = next(i for i in build_attention(pilots_a, NOW) if i.key.startswith("account_idle")).fingerprint
+    fp_b = next(i for i in build_attention(pilots_b, NOW) if i.key.startswith("account_idle")).fingerprint
+    assert fp_a != fp_b
 
 
 # ── PI ───────────────────────────────────────────────────────────────────────
@@ -329,7 +432,7 @@ def test_sort_order_is_severity_then_since_then_name():
     # which then break the tie alphabetically by name (Amy before Bo).
     assert keys[0] == "pi_expired:4"
     assert keys[1] == "reauth:2"
-    assert keys[2] == "queue_empty:3"
+    assert keys[2] == "account_idle:3"
     assert keys[3] == "jobs_ready:1"   # gold
     assert keys[4] == "sync_stale:5"   # grey
 
@@ -489,7 +592,7 @@ def test_get_renders_an_item(attn_client):
     assert r.status_code == 200
     assert 'id="dash-attention"' in r.text
     assert "Sample Pilot" in r.text
-    assert "skill queue is empty" in r.text
+    assert "no pilot on this account is training" in r.text
 
 
 def test_dismiss_unknown_key_is_refused(attn_client):
@@ -498,7 +601,7 @@ def test_dismiss_unknown_key_is_refused(attn_client):
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
     r = attn_client.post("/dashboard/attention/dismiss",
-                         data={"key": "queue_empty:999999", "for": "24h"})
+                         data={"key": "account_idle:999999", "for": "24h"})
     assert r.status_code == 404
 
 
@@ -511,7 +614,7 @@ def test_dismiss_another_users_key_is_refused(attn_client):
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
     r = attn_client.post("/dashboard/attention/dismiss",
-                         data={"key": "queue_empty:200", "for": "24h"})
+                         data={"key": "account_idle:200", "for": "24h"})
     assert r.status_code == 404
 
 
@@ -521,7 +624,7 @@ def test_dismiss_invalid_duration_is_rejected(attn_client):
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
     r = attn_client.post("/dashboard/attention/dismiss",
-                         data={"key": "queue_empty:100", "for": "next-tuesday"})
+                         data={"key": "account_idle:100", "for": "next-tuesday"})
     assert r.status_code == 400
 
 
@@ -531,12 +634,12 @@ def test_dismiss_24h_hides_then_lapses(attn_client):
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
 
-    assert "skill queue is empty" in attn_client.get("/dashboard/attention").text
+    assert "no pilot on this account is training" in attn_client.get("/dashboard/attention").text
 
     r = attn_client.post("/dashboard/attention/dismiss",
-                         data={"key": "queue_empty:100", "for": "24h"})
+                         data={"key": "account_idle:100", "for": "24h"})
     assert r.status_code == 200
-    assert "skill queue is empty" not in r.text
+    assert "no pilot on this account is training" not in r.text
 
     r2 = attn_client.get("/dashboard/attention")
     assert r2.status_code == 200
@@ -553,7 +656,7 @@ def test_dismiss_24h_hides_then_lapses(attn_client):
     _run(expire_it())
 
     r3 = attn_client.get("/dashboard/attention")
-    assert "skill queue is empty" in r3.text
+    assert "no pilot on this account is training" in r3.text
 
     async def count_rows():
         async with attn_client.SessionLocal() as db:
@@ -567,7 +670,7 @@ def test_dismiss_7d_hides_for_a_week(attn_client):
     _seed_character(attn_client, cid=100, user_id=1, scopes=SQ_SCOPE,
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
-    attn_client.post("/dashboard/attention/dismiss", data={"key": "queue_empty:100", "for": "7d"})
+    attn_client.post("/dashboard/attention/dismiss", data={"key": "account_idle:100", "for": "7d"})
 
     from app.db.models import DashboardAttentionDismissal
 
@@ -635,7 +738,7 @@ def test_purge_on_character_removal_deletes_the_dismissal(attn_client):
     _seed_character(attn_client, cid=100, user_id=1, scopes=SQ_SCOPE,
                     cache=_fresh(skillqueue_json=json.dumps([])))
     attn_client.login(1)
-    attn_client.post("/dashboard/attention/dismiss", data={"key": "queue_empty:100", "for": "7d"})
+    attn_client.post("/dashboard/attention/dismiss", data={"key": "account_idle:100", "for": "7d"})
 
     from app.auth.purge import purge_character_user_rows
     from app.db.models import DashboardAttentionDismissal

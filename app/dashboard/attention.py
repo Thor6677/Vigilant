@@ -23,6 +23,9 @@ hand — no ESI calls, no per-pilot query. Each dict:
 
     character_id       int
     character_name     str
+    account_group      str | None                    — Character.account_group, with the UI's own
+                                                         "Ungrouped" default folded to None by the route
+                                                         (see "Account grouping" below)
     needs_reauth       bool                          — perm_status.token_failed(sync_warnings)
     skillqueue         list[dict] | "no_scope" | None — raw skillqueue_json (ESI shape: skill_id,
                                                          finished_level, start_date, finish_date)
@@ -45,18 +48,45 @@ feeds it — matches `app.routes.dashboard._build_data_from_caches`'s own
 convention — and produces no item for that signal. `None` means the scope is
 held but nothing has synced yet; also no item (nothing to warn about yet).
 
+## Account grouping
+
+EVE only lets one pilot per account train at a time, so with N alts on one
+account, N-1 of them show an idle skill queue *by design* — that isn't a
+per-pilot problem, it's normal. Per-pilot "queue empty"/"queue paused" items
+would flood a multi-account owner's strip with one false alarm per idle alt
+(the owner this shipped for: 24 pilots on 8 accounts, ~16 idle alts on a
+healthy day). So the queue-idle signal is evaluated **per account**, not per
+pilot, using the same `account_group` the Dashboard itself already reasons
+about training-account counts with (`group_skill_data` in
+`app.routes.characters`):
+
+- Pilots sharing a truthy `account_group` are one account.
+- A pilot with no `account_group` (`None` — the route folds the UI's default
+  "Ungrouped" to this) is its own account, keyed by its `character_id`. This
+  is deliberate: several different real EVE accounts can all sit at the
+  default "Ungrouped" bucket before their owner organizes them, and treating
+  that string as one account would wrongly fold unrelated accounts together.
+- Within an account, only pilots that *have* the skill queue scope
+  (`skillqueue` not in `("no_scope", None)`) count. An account where every
+  pilot lacks the scope produces nothing (nothing to warn about).
+- An account is **training** if any counted pilot's `skill_queue_state` is
+  `ok`, `warning`, or `critical`. A training account produces no idle item —
+  amber/gold still fire per training pilot exactly as before, they're just no
+  longer gated on the whole-account check.
+- An account with **no** training pilot produces exactly **one** red
+  `account_idle` item, never one per idle pilot.
+
 ## Rules
 
 | Severity | Signal | Condition | Action | Ages out? |
 |---|---|---|---|---|
 | red | Re-auth | `needs_reauth` | Renew -> `/account/permissions/{cid}` | never |
-| red | Empty skill queue | raw `skillqueue` list is empty | Skills -> `/character/{cid}/skills` | never |
+| red | Account idle | no pilot on the account is training (see "Account grouping") | Skills -> the paused pilot's page if there is one, else the first counted pilot's | never |
 | red | PI expired | any planet's `expiry_time` <= now | Planets -> `/industry/planetary` | yes, to grey after `AGE_OUT_DAYS` |
 | amber | PI ending soon | any planet's `expiry_time` within 24h (pi.py's "critical" <1h band and "warning" <24h band both collapse to this one amber signal here — the brief's own 24h amber threshold already covers pi.py's tighter 1h one) | Planets -> `/industry/planetary` | no (resolves into red or clears on its own) |
 | amber | Skill queue critical | `skill_warning` == "critical" (<=7 days by whole-day floor, i.e. up to but not including 8 days) | Skills | no |
 | gold | Skill queue warning | `skill_warning` == "warning" (<=14 days, i.e. up to but not including 15 days) | Skills | no |
 | gold | Jobs ready to deliver | any cached job has `status == "ready"` | Jobs -> `/industry/jobs` | yes, to grey after `AGE_OUT_DAYS` |
-| grey | Skill queue paused | `skill_warning` == "paused" (queue non-empty but no pending entry has a finish date, e.g. every entry already finished) | Skills | n/a (already lowest) |
 | grey | Sync stale / erroring | `sync_status == "error"`, or staleness is "critical" or "never" (own copy of `STALE_*_SECONDS`); suppressed entirely when the same pilot already has the red re-auth item (redundant), or while `sync_status == "syncing"` | Sync -> POST `/dashboard/sync/{cid}` | n/a |
 
 Sort: severity (red, amber, gold, grey), then `since` oldest first, then
@@ -76,8 +106,8 @@ best-effort:
 - Skill queue critical/warning: `queue_end` minus 8 / 15 days (when the
   queue crossed into that band, exact given `skill_warning`'s own thresholds).
 - Sync stale: `last_synced` (the last time we know things were fine).
-- Reauth, empty queue, paused queue: `None` — nothing records when the
-  authorization died or the queue ran dry.
+- Reauth, account idle: `None` — nothing records when the authorization died
+  or an account's last pilot stopped training.
 - Jobs ready: `industry_synced_at`, i.e. the last time the industry field was
   synced — a **lower bound**, not the job's actual completion time, because
   the cached job dict has neither `job_id` nor `end_date` (see the docstring
@@ -260,10 +290,62 @@ def pi_expiry_state(expiry_time_raw: str | None, now: datetime) -> tuple[str | N
     return "ok", expiry_dt
 
 
+def _account_idle_items(pilots: list[dict], now: datetime) -> list[AttentionItem]:
+    """One red item per account with no training pilot (see "Account
+    grouping" in the module docstring). Pilots without the skill queue scope
+    don't count either way; an account where none of them hold it produces
+    nothing."""
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for p in pilots:
+        grp = p.get("account_group")
+        key = grp if grp else f"\x00solo:{p['character_id']}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(p)
+
+    out: list[AttentionItem] = []
+    for key in order:
+        members = groups[key]
+        grp = members[0].get("account_group")
+
+        scoped: list[tuple[dict, str]] = []
+        for m in members:
+            sq = m.get("skillqueue")
+            if sq in ("no_scope", None):
+                continue
+            label, _ = skill_queue_state(sq, now)
+            scoped.append((m, label))
+
+        if not scoped:
+            continue  # nobody on this account shares the skill queue scope
+        if any(label in ("ok", "warning", "critical") for _, label in scoped):
+            continue  # somebody on this account is training
+
+        paused = next((m for m, label in scoped if label == "paused"), None)
+        target = paused or scoped[0][0]
+        fp = _fp("idle", *sorted(f"{m['character_id']}:{label}" for m, label in scoped))
+
+        out.append(AttentionItem(
+            key=f"account_idle:{grp or target['character_id']}",
+            fingerprint=fp,
+            severity="red",
+            character_id=target["character_id"],
+            character_name=grp or target["character_name"],
+            text="no pilot on this account is training",
+            action_label="Skills", action_url=f"/character/{target['character_id']}/skills",
+            action_method="get",
+            since=None,
+        ))
+    return out
+
+
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
     items: list[AttentionItem] = []
+    items.extend(_account_idle_items(pilots, now))
 
     for p in pilots:
         cid = p["character_id"]
@@ -281,20 +363,13 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
                 since=None,
             ))
 
-        # ── skill queue: empty (red) / critical (amber) / warning (gold) /
-        #    paused (grey) ────────────────────────────────────────────────────
+        # ── skill queue: critical (amber) / warning (gold), per training
+        #    pilot. "empty"/"paused"/"ok" produce no per-pilot item — the
+        #    account-level idle check below covers the whole-account case. ──
         sq = p.get("skillqueue")
         if sq not in ("no_scope", None):
             warning, queue_end = skill_queue_state(sq, now)
-            if warning == "empty":
-                items.append(AttentionItem(
-                    key=f"queue_empty:{cid}", fingerprint=_fp("empty"),
-                    severity="red", character_id=cid, character_name=name,
-                    text="skill queue is empty",
-                    action_label="Skills", action_url=f"/character/{cid}/skills", action_method="get",
-                    since=None,
-                ))
-            elif warning == "critical":
+            if warning == "critical":
                 since = queue_end - timedelta(days=SKILL_QUEUE_CRITICAL_DAYS + 1) if queue_end else None
                 items.append(AttentionItem(
                     key=f"queue_critical:{cid}",
@@ -314,16 +389,7 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
                     action_label="Skills", action_url=f"/character/{cid}/skills", action_method="get",
                     since=since,
                 ))
-            elif warning == "paused":
-                qlen = len(sq)
-                items.append(AttentionItem(
-                    key=f"queue_paused:{cid}", fingerprint=_fp("paused", str(qlen)),
-                    severity="grey", character_id=cid, character_name=name,
-                    text=f"skill queue is paused ({qlen} queued)",
-                    action_label="Skills", action_url=f"/character/{cid}/skills", action_method="get",
-                    since=None,
-                ))
-            # "ok" -> no item
+            # "empty"/"paused"/"ok" -> handled per-account below, not here
 
         # ── PI: expired (red, ages to grey) / ending soon (amber) ──────────
         pi = p.get("pi")

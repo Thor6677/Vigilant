@@ -72,6 +72,7 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
     rows = (await db.execute(
         select(
             Character.character_id, Character.character_name, Character.scopes,
+            Character.account_group,
             CharacterDashboardCache.sync_warnings_json,
             CharacterDashboardCache.skillqueue_json,
             CharacterDashboardCache.pi_json,
@@ -84,14 +85,22 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
             CharacterDashboardCache,
             CharacterDashboardCache.character_id == Character.character_id,
         ).where(Character.user_id == user_id)
+        # Same ordering the Dashboard's own "custom" sort uses (app.routes.
+        # dashboard.dashboard()) — the account-idle rule picks its target
+        # pilot as "the first one", and this is what makes that mean
+        # something instead of "whatever order SQLite felt like".
+        .order_by(Character.account_group, Character.sort_order)
     )).all()
 
     pilots: list[dict] = []
-    for (cid, name, scopes, sync_warnings_raw, skillqueue_raw, pi_raw, industry_raw,
+    for (cid, name, scopes, account_group, sync_warnings_raw, skillqueue_raw, pi_raw, industry_raw,
          field_synced_raw, last_synced, sync_status, sync_error) in rows:
         scopes = scopes or ""
         sync_warnings = _parse_json(sync_warnings_raw) or {}
         field_synced = _parse_json(field_synced_raw) or {}
+        # "Ungrouped" is the column's own default, not a real account — see
+        # the "Account grouping" note in app.dashboard.attention's docstring.
+        account_group = None if not account_group or account_group == "Ungrouped" else account_group
 
         industry_synced_at = None
         raw_ts = field_synced.get("industry")
@@ -114,6 +123,7 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
         pilots.append({
             "character_id": cid,
             "character_name": name,
+            "account_group": account_group,
             "needs_reauth": perm_status.token_failed(sync_warnings),
             "skillqueue": skillqueue,
             "pi": pi,
