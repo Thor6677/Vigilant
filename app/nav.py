@@ -203,6 +203,17 @@ NAV_GROUPS = [
                     "Sync-time \"stockpile low\" alerts (24h dedup)",
                 ],
             ),
+            _item(
+                "Skill Farm", "/tools/skill-farm",
+                [("prefix", "/tools/skill-farm")],
+                desc="Track how many Large Skill Injectors your farm pilots are ready to produce from banked SP, how fast each is banking more from its live skill queue, and whether extracting beats paying for Omega at current Jita prices.",
+                features=[
+                    "Injectors ready now, from ALLOCATED skill points only",
+                    "SP/hour from the character's own live skill queue",
+                    "Monthly profit: injector sales minus PLEX subscription cost",
+                    "Editable sales tax, PLEX/month, and sell/buy price source",
+                ],
+            ),
         ],
     },
 

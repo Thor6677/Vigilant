@@ -74,6 +74,8 @@ USER_OWNED_TABLES = (
     "stockpile_targets",
     "dscan_results",
     "kill_alert_events",
+    "skill_farm_settings",  # T-073
+    "skill_farm_pilots",    # T-073 — also in PER_CHARACTER_USER_TABLES (app/auth/purge.py)
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of

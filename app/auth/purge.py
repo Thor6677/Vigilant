@@ -43,7 +43,9 @@ _CACHE_COLUMNS: dict[str, tuple[str, ...]] = {
     "wallet": ("wallet",),
     "orders": ("orders_json",),
     "location": ("location_json",),
-    "skills": ("skillqueue_json",),
+    # T-073: skills_json (esi-skills.read_skills.v1) joins skillqueue_json
+    # under the same "skills" permission key — withdrawing it clears both.
+    "skills": ("skillqueue_json", "skills_json"),
     "clones": ("clones_json",),
     "industry": ("industry_json",),
     "planets": ("pi_json",),
@@ -56,7 +58,7 @@ _SYNC_FIELDS: dict[str, tuple[str, ...]] = {
     "orders": ("orders",),
     "assets": ("assets",),
     "location": ("location",),
-    "skills": ("skillqueue",),
+    "skills": ("skillqueue", "skills"),
     "clones": ("clones",),
     "industry": ("industry",),
     "planets": ("pi",),
@@ -167,7 +169,9 @@ async def purge_history(db: AsyncSession, character_id: int,
 # self-removal, admin remove-character, admin remove-user, and an EVE owner
 # change (_release_transferred). Rows keyed by user_id alone are covered on
 # user removal by USER_OWNED_TABLES in app/routes/admin.py instead.
-PER_CHARACTER_USER_TABLES: tuple[str, ...] = ()
+PER_CHARACTER_USER_TABLES: tuple[str, ...] = (
+    "skill_farm_pilots",  # T-073
+)
 
 
 async def purge_character_user_rows(db: AsyncSession, character_id: int) -> int:

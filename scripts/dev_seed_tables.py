@@ -90,6 +90,8 @@ COPY_ALL = (
     'player_count_snapshots',
     'registration_allowlist',
     'saved_gate_routes',
+    'skill_farm_pilots',
+    'skill_farm_settings',
     'sde_blueprint_info',
     'sde_blueprint_invention',
     'sde_blueprint_invention_materials',

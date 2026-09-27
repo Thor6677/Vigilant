@@ -42,6 +42,55 @@ async def get_hub_sell_price(
         return None
 
 
+async def get_hub_buy_price(
+    client: ESIClient, region_id: int, station_id: int, type_id: int,
+) -> float | None:
+    """Get the highest buy order for a type at a specific trade hub station.
+
+    Mirrors get_hub_sell_price above (max instead of min) -- added for T-073's
+    skill-farm page, which lets the owner price Skill Extractors / Large
+    Skill Injectors off either side of the book.
+    """
+    try:
+        orders = await client.get_public(
+            f"/markets/{region_id}/orders/",
+            params={"type_id": type_id, "order_type": "buy"},
+        )
+        if not isinstance(orders, list):
+            return None
+        station_orders = [o for o in orders if o.get("location_id") == station_id]
+        if not station_orders:
+            return None
+        return max(o["price"] for o in station_orders)
+    except Exception:
+        return None
+
+
+async def get_region_price(
+    client: ESIClient, region_id: int, type_id: int, order_type: str,
+) -> float | None:
+    """Lowest sell (order_type="sell") or highest buy ("buy") for a type,
+    anywhere in the given region -- no station filter.
+
+    For items that trade at a normal trade hub, get_hub_sell_price /
+    get_hub_buy_price (station-scoped) are the right call; this is for
+    PLEX (T-073), which has no per-station order book of its own -- every
+    PLEX order in the game routes through one shared, region-wide market
+    (see app/skillfarm/constants.py:PLEX_REGION_ID).
+    """
+    try:
+        orders = await client.get_public(
+            f"/markets/{region_id}/orders/",
+            params={"type_id": type_id, "order_type": order_type},
+        )
+        if not isinstance(orders, list) or not orders:
+            return None
+        prices = [o["price"] for o in orders]
+        return min(prices) if order_type == "sell" else max(prices)
+    except Exception:
+        return None
+
+
 async def get_hub_prices_batch(
     client: ESIClient,
     hub_key: str,

@@ -1,0 +1,168 @@
+{# Settings + pilot table + add-pilot form + totals — the innerHTML of
+   #skill-farm-content. Returned standalone by the settings/add/edit/remove
+   endpoints so the whole section refreshes in place, settings and form
+   inputs reset to server-fresh values along with it.
+
+   No script elements in this file: htmx-swapped fragments render without
+   the page's CSP nonce (a nonced inline script block only runs on the
+   initial, full-page load), so every control here is a plain hx-*
+   attribute (handled by htmx.js, already loaded site-wide) rather than
+   inline JS. #}
+
+{% if error %}
+<div class="b-empty" style="color:var(--danger);margin-bottom:0.75rem;">{{ error }}</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Settings</span></div>
+    <div style="padding:0.75rem;">
+        <form hx-post="/tools/skill-farm/settings" hx-target="#skill-farm-content" hx-swap="innerHTML">
+            <div class="sf-settings-grid">
+                <div>
+                    <span class="sf-field-label">Sales tax %</span>
+                    <input type="number" name="sales_tax_pct" class="sf-num" min="0" max="100" step="0.1"
+                           value="{{ settings.sales_tax_pct }}">
+                </div>
+                <div>
+                    <span class="sf-field-label">PLEX / month (Omega)</span>
+                    <input type="number" name="plex_per_month" class="sf-num" min="0" max="10000" step="1"
+                           value="{{ settings.plex_per_month }}">
+                </div>
+                <div>
+                    <span class="sf-field-label">Price source</span>
+                    <select name="price_source" class="sf-select">
+                        <option value="sell" {% if settings.price_source == "sell" %}selected{% endif %}>Lowest sell</option>
+                        <option value="buy" {% if settings.price_source == "buy" %}selected{% endif %}>Highest buy</option>
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="b-btn">Save</button>
+                </div>
+            </div>
+        </form>
+        <p class="sf-note-text">
+            {{ extractor_name }}: {{ extractor_price_str }} &middot;
+            {{ lsi_name }}: {{ lsi_price_str }} &middot;
+            PLEX: {{ plex_price_str }}
+            (Jita 4-4 {{ settings.price_source }} price; PLEX from the Global PLEX Market, not any single station — cached up to 15 minutes).
+            Sales tax is your own effective NPC rate — Vigilant can't read your Accounting skill level from ESI, so enter it yourself.
+        </p>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Farm Pilots</span></div>
+    <div style="padding:0.75rem;">
+        {% if not rows %}
+        <div class="b-empty">No farm pilots added yet. Add one below.</div>
+        {% else %}
+        <div style="overflow-x:auto;">
+        <table class="sf-table">
+            <thead>
+                <tr>
+                    <th>Pilot</th>
+                    <th>Total SP</th>
+                    <th>Unallocated</th>
+                    <th>Base SP</th>
+                    <th>Ready now</th>
+                    <th>SP/hour</th>
+                    <th>Next injector in</th>
+                    <th>Monthly profit</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ r.character_name }}</td>
+                    {% if r.status == "no_scope" %}
+                    <td colspan="7" class="sf-note">Needs the skills permission</td>
+                    {% elif r.status == "waiting" %}
+                    <td colspan="7" class="sf-note">Waiting for first sync</td>
+                    {% else %}
+                    <td>{{ '{:,}'.format(r.total_sp) }}</td>
+                    <td>{{ '{:,}'.format(r.unallocated_sp) }}</td>
+                    <td>
+                        <form hx-post="/tools/skill-farm/pilots/{{ r.id }}/base-sp"
+                              hx-target="#skill-farm-content" hx-swap="innerHTML"
+                              hx-trigger="change, submit">
+                            <input type="number" name="base_sp" class="sf-input" min="0" max="1000000000"
+                                   step="1" value="{{ r.base_sp }}">
+                        </form>
+                    </td>
+                    <td>
+                        {{ r.ready_now }}{% if r.ready_isk %}<br><span class="sf-note">{{ r.ready_isk_str }}</span>{% endif %}
+                    </td>
+                    <td>{{ '{:,.0f}'.format(r.rate_per_hour) }}</td>
+                    <td>{{ r.eta_str }}</td>
+                    <td class="{% if r.profit and r.profit > 0 %}sf-profit{% elif r.profit and r.profit < 0 %}sf-loss{% endif %}">
+                        {{ r.profit_str }}
+                    </td>
+                    {% endif %}
+                    <td>
+                        <button type="button" class="b-btn sf-del"
+                                hx-delete="/tools/skill-farm/pilots/{{ r.id }}"
+                                hx-target="#skill-farm-content" hx-swap="innerHTML"
+                                hx-confirm="Remove this farm pilot?"
+                                title="Remove pilot">&times;</button>
+                    </td>
+                </tr>
+                {% if r.notes %}
+                <tr>
+                    <td colspan="9" class="sf-note">{{ r.notes|join(" · ") }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Total</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        {{ totals.ready_now }}{% if totals.ready_isk %}<br><span class="sf-note">{{ totals_ready_isk_str }}</span>{% endif %}
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td class="{% if totals.profit and totals.profit > 0 %}sf-profit{% elif totals.profit and totals.profit < 0 %}sf-loss{% endif %}">
+                        {{ totals_profit_str }}
+                    </td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Add a farm pilot</span></div>
+    <div style="padding:0.75rem;">
+        {% if not eligible %}
+        <div class="b-empty">Every one of your characters is already added.</div>
+        {% else %}
+        <form hx-post="/tools/skill-farm/pilots" hx-target="#skill-farm-content" hx-swap="innerHTML">
+            <div class="sf-add-grid">
+                <div>
+                    <span class="sf-field-label">Character</span>
+                    <select name="character_id" class="sf-select">
+                        {% for c in eligible %}
+                        <option value="{{ c.character_id }}">{{ c.character_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <span class="sf-field-label">Base SP (never extracted)</span>
+                    <input type="number" name="base_sp" class="sf-num" min="0" max="1000000000"
+                           step="1" value="{{ default_base_sp }}">
+                </div>
+                <div>
+                    <button type="submit" class="b-btn">Add farm pilot</button>
+                </div>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+</div>

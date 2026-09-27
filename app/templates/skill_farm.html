@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Skill Farm — Industry — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/industry">Industry</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Skill Farm</span>
+</div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .sf-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .sf-table th {
+        font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+        color:var(--muted); padding:0.4rem 0.6rem; border-bottom:1px solid var(--border);
+        text-align:right;
+    }
+    .sf-table th:first-child { text-align:left; }
+    .sf-table td {
+        padding:0.45rem 0.6rem; border-bottom:1px solid var(--border);
+        color:var(--text); text-align:right;
+    }
+    .sf-table td:first-child { text-align:left; }
+    .sf-table tfoot td { font-weight:600; border-top:2px solid var(--border); border-bottom:none; }
+    .sf-input {
+        width:100px; padding:0.35rem 0.5rem; background:var(--bg);
+        border:1px solid var(--border); color:var(--text); font:inherit; font-size:12px; text-align:right;
+    }
+    .sf-input:focus { outline:none; border-color:var(--accent); }
+    .sf-note { color:var(--muted); font-size:10px; }
+    .sf-profit { color:#93c47d; }
+    .sf-loss { color:#e06666; }
+    .sf-del { padding:2px 9px; font-size:13px; line-height:1; }
+    .sf-settings-grid { display:grid; grid-template-columns:140px 160px 160px auto; gap:0.5rem; align-items:end; }
+    .sf-add-grid { display:grid; grid-template-columns:1fr 180px auto; gap:0.5rem; align-items:end; }
+    @media (max-width:640px) {
+        .sf-settings-grid { grid-template-columns:1fr; }
+        .sf-add-grid { grid-template-columns:1fr; }
+    }
+    .sf-field-label {
+        font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);
+        margin-bottom:0.2rem; display:block;
+    }
+    .sf-select, .sf-num {
+        width:100%; padding:0.5rem 0.7rem; background:var(--bg);
+        border:1px solid var(--border); color:var(--text); font:inherit; font-size:13px;
+    }
+    .sf-note-text { color:var(--muted); font-size:10px; line-height:1.5; margin-top:0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Skill Farm</h1>
+        <p style="color:var(--muted);font-size:10px;margin:0.25rem 0 0;">
+            How many Large Skill Injectors your farm pilots are ready to produce, how fast each is banking more, and whether extracting beats paying for Omega at current Jita prices.
+        </p>
+    </div>
+</div>
+
+<div id="skill-farm-content">
+    {% include "partials/skill_farm_content.html" %}
+</div>
+{% endblock %}

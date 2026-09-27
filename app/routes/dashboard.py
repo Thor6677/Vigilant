@@ -379,6 +379,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "contracts":     300,   # ESI max-age: 300s
     "pi":            600,   # ESI max-age: 600s
     "skillqueue":    120,   # ESI max-age: 120s
+    "skills":       3600,   # T-073: total SP / trained levels change slowly
     "zkill":        3600,   # zkillboard — 1h is plenty
     "assets":       3600,   # ESI max-age: 3600s
     "roles":        3600,   # corp roles — rarely change, cached for permission checks
@@ -395,6 +396,7 @@ FIELD_SCOPES: dict[str, str] = {
     "contracts":     perms.CONTRACTS,
     "pi":            perms.PLANETS,
     "skillqueue":    perms.SKILLQUEUE,
+    "skills":        perms.SKILLS,   # T-073
     "zkill":         None,   # no ESI scope required
     "assets":        perms.ASSETS,
     "roles":         perms.CORP_ROLES,
@@ -412,6 +414,7 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "contracts":     "contracts_json",
     "pi":            "pi_json",
     "skillqueue":    "skillqueue_json",
+    "skills":        "skills_json",   # T-073
     "zkill":         "zkill_json",
     "assets":        None,
     "roles":         None,   # roles stored in CharacterCorpRoles (separate table)
@@ -1026,6 +1029,38 @@ async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def fetch_skills_data(characters: list[Character], db: AsyncSession) -> dict:
+    """T-073: total/unallocated SP + per-skill active level, for the
+    skill-farm page's injector math and (later) dashboard can-fly badges
+    (app/character_skills.py reads the stored skills_json this writes).
+    """
+    async def _get(char):
+        if not _has_scope(char, perms.SKILLS):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char)
+        if not client:
+            return char.character_id, None, err
+        try:
+            payload = await esi_char.get_skills(client, char.character_id)
+            skills = payload.get("skills") or [] if isinstance(payload, dict) else []
+            levels = {
+                str(s["skill_id"]): s.get("active_skill_level", 0)
+                for s in skills
+                if isinstance(s, dict) and s.get("skill_id") is not None
+            }
+            summary = {
+                "total_sp": (payload.get("total_sp", 0) if isinstance(payload, dict) else 0),
+                "unallocated_sp": (payload.get("unallocated_sp", 0) if isinstance(payload, dict) else 0),
+                "levels": levels,
+            }
+            return char.character_id, summary, None
+        except Exception as e:
+            logger.warning("Skills fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
 def _dashboard_pulse_enabled() -> bool:
     from app.config import get_settings as _gs
     cfg = _gs()
@@ -1579,6 +1614,7 @@ _FIELD_FETCHERS = {
     "contracts":     fetch_contracts_data,
     "pi":            fetch_pi_data,
     "skillqueue":    fetch_skillqueue_data,
+    "skills":        fetch_skills_data,   # T-073
     "zkill":         fetch_zkillboard_data,
     "assets":        fetch_assets_data,
     "roles":         fetch_corp_roles_data,
