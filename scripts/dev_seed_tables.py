@@ -75,6 +75,7 @@ COPY_ALL = (
     'corp_contract_thresholds',
     'corp_inventory_thresholds',
     'corp_wallet_snapshots',
+    'dashboard_attention_dismissals',
     'detected_battles',
     'dscan_results',
     'esi_rate_limit_events',

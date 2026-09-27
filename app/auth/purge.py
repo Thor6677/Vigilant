@@ -169,6 +169,7 @@ async def purge_history(db: AsyncSession, character_id: int,
 # user removal by USER_OWNED_TABLES in app/routes/admin.py instead.
 PER_CHARACTER_USER_TABLES: tuple[str, ...] = (
     "character_tags",  # T-074: pilot role tags and private note
+    "dashboard_attention_dismissals",
 )
 
 

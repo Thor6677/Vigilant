@@ -230,6 +230,22 @@ def test_character_tags_routes_require_a_session():
     assert r.status_code == 401 and r.text == "", f"POST {path} answered {r.status_code} anonymously"
 
 
+def test_dashboard_attention_strip_requires_a_session():
+    """T-071: the needs-attention strip reads per-character cache data — a
+    stranger must get nothing, not an empty-but-served strip."""
+    r = _client().get("/dashboard/attention")
+    assert r.status_code == 401
+    assert r.text == ""
+
+    # Past CSRF (a session with a token but no user) so the route's own gate
+    # is what answers — same pattern as the login-only-tools POSTs below.
+    csrf = _client(csrf_token="t")
+    r = csrf.post("/dashboard/attention/dismiss", data={"key": "x", "for": "24h"},
+                  headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401
+    assert r.text == ""
+
+
 def test_status_telemetry_is_not_readable_without_a_session():
     for path in ("/status/data", "/status/chart.json"):
         r = _client().get(path)

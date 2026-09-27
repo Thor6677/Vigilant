@@ -1,0 +1,79 @@
+{# T-071 needs-attention strip. Root keeps id="dash-attention" so the
+   dashboard's hx-get="/dashboard/attention" mount (and every later
+   hx-post="/dashboard/attention/dismiss" swap) can outerHTML-swap it again.
+   Only ever rendered with at least one item — the route returns an empty
+   200 body otherwise, so this template never has to render its own empty
+   state. #}
+<style nonce="{{ request.state.csp_nonce }}">
+  #dash-attention .da-row {
+    display: grid;
+    grid-template-columns: 3px minmax(0, 1fr) auto;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border);
+  }
+  #dash-attention .da-row:last-child { border-bottom: none; }
+  #dash-attention .da-stripe { align-self: stretch; }
+  #dash-attention .da-body { min-width: 0; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+  #dash-attention .da-line { font-size: 11px; color: var(--text); overflow-wrap: anywhere; }
+  #dash-attention .da-pilot { color: var(--muted); }
+  #dash-attention .da-age { font-size: 9px; color: var(--muted); }
+  #dash-attention .da-actions { display: flex; align-items: center; gap: 4px; padding: 6px 8px; flex-wrap: wrap; justify-content: flex-end; }
+  #dash-attention .da-action-btn {
+    flex: none; padding: 2px 8px; border: 1px solid var(--border); background: none;
+    color: var(--muted); font-size: 9px; font-family: inherit; cursor: pointer;
+    text-decoration: none; white-space: nowrap;
+  }
+  #dash-attention .da-action-btn:hover { color: var(--text); border-color: var(--text); }
+  #dash-attention .da-dismiss { display: flex; gap: 2px; }
+  #dash-attention .da-dismiss button {
+    font-size: 8px; padding: 1px 5px; border: 1px solid var(--border); background: none;
+    color: var(--muted); font-family: inherit; cursor: pointer;
+  }
+  #dash-attention .da-dismiss button:hover { color: var(--text); border-color: var(--text); }
+  @media (max-width: 400px) {
+    #dash-attention .da-row { grid-template-columns: 3px minmax(0, 1fr); }
+    #dash-attention .da-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  }
+</style>
+
+<div class="b-section" id="dash-attention">
+  <div class="b-section-head">
+    <span class="b-label">Needs attention · {{ items | length }}</span>
+  </div>
+  {% for item in items %}
+  <div class="da-row">
+    <div class="da-stripe" style="background:{% if item.severity == 'red' %}var(--danger){% elif item.severity == 'amber' %}#c97a20{% elif item.severity == 'gold' %}var(--accent){% else %}var(--muted){% endif %};"></div>
+    <div class="da-body">
+      <div class="da-line"><span class="da-pilot">{{ item.character_name }}</span> · {{ item.text }}</div>
+      {% set age = attention_age(item.since) %}
+      {% if age %}<span class="da-age">{{ age }}</span>{% endif %}
+    </div>
+    <div class="da-actions">
+      {% if item.action_method == 'post' %}
+      <form method="POST" action="{{ item.action_url }}">
+        <button type="submit" class="da-action-btn">{{ item.action_label }}</button>
+      </form>
+      {% else %}
+      <a href="{{ item.action_url }}" class="da-action-btn">{{ item.action_label }}</a>
+      {% endif %}
+      <div class="da-dismiss">
+        <form method="POST" action="/dashboard/attention/dismiss" hx-post="/dashboard/attention/dismiss" hx-target="#dash-attention" hx-swap="outerHTML">
+          <input type="hidden" name="key" value="{{ item.key }}">
+          <input type="hidden" name="for" value="24h">
+          <button type="submit" title="Dismiss for 24 hours">24h</button>
+        </form>
+        <form method="POST" action="/dashboard/attention/dismiss" hx-post="/dashboard/attention/dismiss" hx-target="#dash-attention" hx-swap="outerHTML">
+          <input type="hidden" name="key" value="{{ item.key }}">
+          <input type="hidden" name="for" value="7d">
+          <button type="submit" title="Dismiss for 7 days">7d</button>
+        </form>
+        <form method="POST" action="/dashboard/attention/dismiss" hx-post="/dashboard/attention/dismiss" hx-target="#dash-attention" hx-swap="outerHTML">
+          <input type="hidden" name="key" value="{{ item.key }}">
+          <input type="hidden" name="for" value="change">
+          <button type="submit" title="Dismiss until this changes">∞</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>

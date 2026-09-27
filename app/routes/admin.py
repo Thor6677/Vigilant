@@ -76,6 +76,7 @@ USER_OWNED_TABLES = (
     "dscan_results",
     "kill_alert_events",
     "user_notify_settings",  # T-075: the user's own Discord webhook
+    "dashboard_attention_dismissals",
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of

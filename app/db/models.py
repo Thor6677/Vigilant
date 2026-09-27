@@ -1252,6 +1252,36 @@ class CharacterTag(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+# ── T-071: dashboard needs-attention strip ──────────────────────────────────
+
+class DashboardAttentionDismissal(Base):
+    """One user's dismissal of one needs-attention item (see
+    app/dashboard/attention.py for how items and their `fingerprint`s are
+    built).
+
+    Unique on (user_id, item_key) — dismissing the same key again just
+    replaces the row. `fingerprint` is the server's own hash of the state
+    that produced the item at the moment of dismissal, never anything the
+    client sends; the route only honours a dismissal while a freshly
+    recomputed item for that key still hashes to the same value, so an
+    "until it changes" dismissal (`dismissed_until` NULL) lapses the moment
+    the underlying state moves, and a timed one (24h/7d) lapses early too if
+    the state changes before it would otherwise expire.
+    """
+    __tablename__ = "dashboard_attention_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_key", name="uq_dashboard_attention_dismissal"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=True)
+    item_key = Column(String(128), nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    dismissed_until = Column(DateTime, nullable=True)  # NULL = until state/fingerprint changes
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 async def ensure_user_fittings_columns(db: AsyncSession) -> None:
     """Add the T-069 columns to an old-shape user_fittings table:
     source_character_id / source_fitting_id (bulk character import — see
