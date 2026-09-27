@@ -70,6 +70,7 @@ COPY_ALL = (
     'character_corp_roles',
     'character_dashboard_cache',
     'character_kill_ingest',
+    'character_tags',
     'characters',
     'corp_contract_thresholds',
     'corp_inventory_thresholds',

@@ -215,6 +215,21 @@ def test_structure_timer_sde_searches_require_a_session():
         assert r.status_code == 401, f"{path} answered {r.status_code} anonymously"
 
 
+def test_character_tags_routes_require_a_session():
+    """T-074 pilot tags. Both routes take a path param, so they're outside
+    the literal-GET sweep above — asserted explicitly instead. Ownership
+    (IDOR) is covered in tests/test_tags.py, which runs against a seeded DB;
+    this only needs a session to be missing."""
+    path = "/character/999999/tags"
+    r = _client().get(path)
+    assert r.status_code == 401 and r.text == "", f"GET {path} answered {r.status_code} anonymously"
+
+    # Past CSRF (a session with a token but no user) so the gate itself answers.
+    csrf = _client(csrf_token="t")
+    r = csrf.post(path, data={"tags": "Cyno", "note": ""}, headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401 and r.text == "", f"POST {path} answered {r.status_code} anonymously"
+
+
 def test_status_telemetry_is_not_readable_without_a_session():
     for path in ("/status/data", "/status/chart.json"):
         r = _client().get(path)

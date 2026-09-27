@@ -167,7 +167,9 @@ async def purge_history(db: AsyncSession, character_id: int,
 # self-removal, admin remove-character, admin remove-user, and an EVE owner
 # change (_release_transferred). Rows keyed by user_id alone are covered on
 # user removal by USER_OWNED_TABLES in app/routes/admin.py instead.
-PER_CHARACTER_USER_TABLES: tuple[str, ...] = ()
+PER_CHARACTER_USER_TABLES: tuple[str, ...] = (
+    "character_tags",  # T-074: pilot role tags and private note
+)
 
 
 async def purge_character_user_rows(db: AsyncSession, character_id: int) -> int:

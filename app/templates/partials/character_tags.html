@@ -1,0 +1,91 @@
+{#
+  Pilot tags + private note (T-074).
+
+  Mounted on the character detail page via:
+    <div id="char-tags" hx-get="/character/{id}/tags" hx-trigger="load" hx-swap="outerHTML"></div>
+  (that mount point is owned by another stream — this file is never edited
+  to add it). POST re-renders this same partial for the htmx outerHTML swap.
+
+  View state (chips + muted note) is always rendered. The edit form lives in
+  #tags-edit-{{ character_id }}, hidden by default and toggled open/closed by
+  the existing `togglePanel` handler in static/js/actions.js — no inline
+  event handlers, CSP-safe. On a validation error the POST re-render passes
+  edit_open=True so the message and what was typed stay visible instead of
+  collapsing back to the view state.
+
+  Quick-add chips (suggested tags, plus tags already used on other pilots,
+  minus whatever is already on this one) use the addQuickTag handler in
+  actions.js, which only edits the text input client-side — nothing is
+  written until Save posts back here and it's revalidated server-side.
+
+  All user text (tags, note) is plain Jinja interpolation, autoescaped —
+  never innerHTML.
+#}
+<div id="char-tags" class="b-section">
+  <div class="b-section-head">
+    <span class="b-label">Tags</span>
+    <button type="button" class="b-btn is-ghost"
+            data-click="togglePanel" data-toggle-panel="tags-edit-{{ character_id }}">
+      Edit
+    </button>
+  </div>
+
+  <div class="tags-view">
+    {% if tags %}
+      <div class="tags-chips">
+        {% for t in tags %}<span class="b-badge">{{ t }}</span>{% endfor %}
+      </div>
+    {% else %}
+      <p class="b-empty">No tags</p>
+    {% endif %}
+    {% if note %}
+      <p class="tags-note b-muted">{{ note }}</p>
+    {% endif %}
+  </div>
+
+  <div id="tags-edit-{{ character_id }}" class="tags-edit"
+       style="{% if not edit_open %}display:none;{% endif %}">
+    {% if error %}
+      <p class="tags-error is-danger">{{ error }}</p>
+    {% endif %}
+    <form hx-post="/character/{{ character_id }}/tags" hx-target="#char-tags" hx-swap="outerHTML">
+      <label for="tags-input-{{ character_id }}" class="b-row-label">Tags (comma-separated, up to 8)</label>
+      <input id="tags-input-{{ character_id }}" name="tags" type="text" class="b-input"
+             value="{{ tags_input_value }}" maxlength="240" autocomplete="off"
+             placeholder="Cyno, Hauler, Indy">
+
+      {% if quick_add_tags %}
+        <div class="tags-quick-add">
+          {% for t in quick_add_tags %}
+            <button type="button" class="b-badge tags-quick-chip"
+                    data-click="addQuickTag" data-add-tag="{{ t }}"
+                    data-tags-input="tags-input-{{ character_id }}">+ {{ t }}</button>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <label for="note-input-{{ character_id }}" class="b-row-label">Private note</label>
+      <input id="note-input-{{ character_id }}" name="note" type="text" class="b-input"
+             value="{{ note_input_value }}" maxlength="280" autocomplete="off"
+             placeholder="One line, visible only to you">
+
+      <div class="tags-edit-actions">
+        <button type="submit" class="b-btn is-primary">Save</button>
+        <button type="button" class="b-btn is-ghost"
+                data-click="togglePanel" data-toggle-panel="tags-edit-{{ character_id }}">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  #char-tags .tags-chips,
+  #char-tags .tags-quick-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #char-tags .tags-quick-chip { background: none; cursor: pointer; color: var(--muted); border-color: var(--border); }
+  #char-tags .tags-quick-chip:hover { color: var(--text); border-color: var(--muted); }
+  #char-tags .tags-note { margin-top: 6px; font-size: var(--fs-sm); }
+  #char-tags .tags-edit { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  #char-tags .tags-edit input.b-input { width: 100%; box-sizing: border-box; }
+  #char-tags .tags-edit-actions { display: flex; gap: 8px; }
+  #char-tags .tags-error { margin: 0; }
+</style>
