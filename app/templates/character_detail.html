@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "partials/_entity_links.html" import entity_links %}
 {% block title %}{{ char.character_name }} — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 <div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">{{ char.character_name }}</span></div>
@@ -213,8 +212,37 @@
     </div>
 </div>
 
-{# ── Cross-links ─────────────────────────────────────────────────────────── #}
-<div style="margin-bottom:0.75rem;">{{ entity_links("character", char.character_id, char.character_name, current="overview") }}</div>
+{# ── Info Bar (T-072) ─────────────────────────────────────────────────────── #}
+<div class="b-stats" style="margin-bottom:1rem;">
+    <div class="b-stat">
+        <div class="b-stat-val">{% if total_trained_sp is not none %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}—{% endif %}</div>
+        <div class="b-stat-label">Total SP</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{% if unallocated_sp is not none %}{{ "{:,.0f}".format(unallocated_sp) }}{% else %}—{% endif %}</div>
+        <div class="b-stat-label">Unallocated SP</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">
+            {% if char.security_status is not none %}
+                {% set sec = char.security_status %}
+                <span class="sec-status {% if sec >= 0 %}positive{% elif sec < -5 %}negative{% else %}neutral{% endif %}">{{ "%.2f"|format(sec) }}</span>
+            {% else %}—{% endif %}
+        </div>
+        <div class="b-stat-label">Security Status</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val">{% if has_implants_scope %}{{ implants|length if implants else "none" }}{% else %}—{% endif %}</div>
+        <div class="b-stat-label">Implants</div>
+    </div>
+    <div class="b-stat">
+        <div class="b-stat-val" style="font-size:12px;">{{ last_synced_str or "—" }}</div>
+        <div class="b-stat-label">Last Synced</div>
+    </div>
+</div>
+
+{# ── Tags mount (T-074, endpoint owned by another stream) ─────────────────── #}
+<div id="char-tags" hx-get="/character/{{ char.character_id }}/tags" hx-trigger="load" hx-swap="outerHTML"></div>
 
 {# ── Tab Strip ───────────────────────────────────────────────────────────── #}
 {% set _cid = char.character_id %}
@@ -225,6 +253,22 @@
     <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
     <a href="/character/{{ _cid }}/journal">Journal</a>
     <a href="/character/{{ _cid }}/mining">Mining</a>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;padding:0 0.85rem;">
+        <a href="/intel/entity/character/{{ _cid }}" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">Stats</a>
+        <a href="https://zkillboard.com/character/{{ _cid }}/" target="_blank" rel="noopener" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">zKillboard ↗</a>
+    </span>
+</div>
+
+{# ── Can Fly (T-072; lazy-loaded) ─────────────────────────────────────────── #}
+<div id="can-fly-panel"
+     hx-get="/character/{{ char.character_id }}/can-fly"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-bottom:1.5rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Can Fly</span></div>
+        <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
+    </div>
 </div>
 
 {# ── Character Overview ───────────────────────────────────────────────────────── #}
@@ -251,7 +295,7 @@
         <div class="stat-row">
             <span class="stat-label">Total SP</span>
             <span class="stat-value">
-                {% if total_trained_sp > 0 %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label" title="Skills & skill queue is not shared for this character">— not shared</span>{% endif %}
+                {% if total_trained_sp is not none %}{{ "{:,.0f}".format(total_trained_sp) }}{% else %}<span class="stat-label" title="Skills & skill queue is not shared for this character">— not shared</span>{% endif %}
             </span>
         </div>
 

@@ -16,7 +16,10 @@ from app.middleware.htmx_redirect import HTMXRedirectMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
-from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns
+from app.db.models import (
+    init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns,
+    ensure_user_fittings_skill_reqs_columns,
+)
 from app.auth.session_guard import check_session
 from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
 from app.db.cache import ESICache  # registers table with Base
@@ -424,6 +427,10 @@ async def startup():
     # plain Index() on the model instead.
     async with AsyncSessionLocal() as db:
         await ensure_user_fittings_columns(db)
+
+    # ── Can-fly check (T-072): skill-requirement cache columns ──────────
+    async with AsyncSessionLocal() as db:
+        await ensure_user_fittings_skill_reqs_columns(db)
 
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if

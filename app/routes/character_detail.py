@@ -25,6 +25,14 @@ from app.utils.perf import perf_log, perf_enabled, ms_since
 from time import perf_counter as _perf_now
 from dateutil import parser as iso_parser
 
+from app.routes.dashboard import _age_str
+from app.routes import fitting as fitting_mod
+from app.fitting import canfly
+from app.db.sde_models import SDESkillInfo
+from app.routes.skills import (
+    ATTR_ID_MAP, _sp_to_train, _training_time_minutes, _format_duration as _format_train_duration,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["character_detail"])
@@ -372,25 +380,33 @@ async def character_detail(
     # isolated sessions internally so the request session is never shared).
     scopes = char.scopes or ""
 
-    async def _fetch_trained_sp() -> int:
+    async def _fetch_trained_sp() -> tuple[int | None, int | None]:
+        """(total_trained_sp, unallocated_sp) from the same ESI response the
+        overview always fetches for the skills total — T-072's info bar
+        reuses it rather than making a second call. None/None (not 0/0)
+        for "missing scope" or "fetch failed", so the template can tell
+        that apart from a character that genuinely has 0 unallocated SP.
+        """
         if "esi-skills.read_skills.v1" not in scopes:
-            return 0
+            return None, None
         try:
             async with AsyncSessionLocal() as tdb:
                 c = (await tdb.execute(
                     select(Character).where(Character.character_id == character_id)
                 )).scalar_one_or_none()
                 if not c:
-                    return 0
+                    return None, None
                 token = await refresh_token(c, tdb)
             client = ESIClient(token)
             client.cache_enabled = True
             raw = await client.get(f"/characters/{character_id}/skills/")
             if raw and isinstance(raw, dict):
-                return sum(s.get("skillpoints_in_skill", 0) for s in raw.get("skills", []))
+                total = sum(s.get("skillpoints_in_skill", 0) for s in raw.get("skills", []))
+                unallocated = raw.get("unallocated_sp", 0)
+                return total, unallocated
         except Exception as e:
             logger.warning("Failed to fetch total SP for char %s: %s", character_id, e)
-        return 0
+        return None, None
 
     async def _fetch_implants_clones() -> tuple[list, list]:
         impl_out: list = []
@@ -578,7 +594,7 @@ async def character_detail(
 
         asyncio.create_task(_bday_backfill())
 
-    (total_trained_sp,
+    (sp_res,
      implants_clones_res,
      wallet_journal_res,
      corp_history,
@@ -589,11 +605,20 @@ async def character_detail(
         _fetch_corp_history(),
         _fetch_chart_data(),
     )
+    total_trained_sp, unallocated_sp = sp_res
     implants, jump_clones = implants_clones_res
     journal, journal_error = wallet_journal_res
     _mark("fanout")
 
     current_wallet = cache.wallet if cache else None
+    # T-072 info bar: implants scope tells "—" (not fetched/no scope) apart
+    # from "none" (fetched, character genuinely has no implants) — `implants`
+    # alone is `[]` for either case. Last synced reuses the dashboard's own
+    # age-string formatting so the two pages read the same way.
+    has_implants_scope = any(
+        s in scopes for s in ("esi-clones.read_implants.v1", "esi-clones.read_clones.v1")
+    )
+    last_synced_str = _age_str(cache.last_synced) if cache else None
 
     from app.config import get_settings as _get_settings_km
     _km_cfg = _get_settings_km()
@@ -614,6 +639,9 @@ async def character_detail(
         "corp_history": corp_history,
         "total_sp_in_queue": total_sp_in_queue,
         "total_trained_sp": total_trained_sp,
+        "unallocated_sp": unallocated_sp,
+        "has_implants_scope": has_implants_scope,
+        "last_synced_str": last_synced_str,
         "queue_remaining": queue_remaining,
         "zkill": zkill,
         "kills": kills,
@@ -1462,3 +1490,100 @@ async def character_kill_stats(
         "ts_datasets": ts_datasets,
         "ts_weeks": ts_weeks,
         "backfill_complete": backfill_complete})
+
+
+# ── T-072: Can Fly panel ─────────────────────────────────────────────────────
+
+# No cached per-character attribute source exists outside a dedicated ESI
+# call (app/routes/skills.py's own live fetch, which this partial does not
+# make — see the docstring below). Training times here always use the
+# un-remapped base value for every attribute and are labelled "approx.".
+_CANFLY_DEFAULT_ATTR = 17.0
+
+
+async def _enrich_missing_with_training(db: AsyncSession, fits: list[dict]) -> None:
+    """Mutate each fit's `missing` entries in place: add `skill_name` (one
+    batched SDE lookup for every skill named across every fit passed in,
+    not one per skill) and `time_str` (approx., default attributes — see
+    _CANFLY_DEFAULT_ATTR).
+    """
+    all_skill_ids: set[int] = set()
+    for f in fits:
+        for m in f["missing"]:
+            all_skill_ids.add(m["skill_id"])
+    if not all_skill_ids:
+        return
+
+    names = await sde.type_ids_to_names(db, list(all_skill_ids))
+
+    meta_rows = (await db.execute(
+        select(SDESkillInfo.type_id, SDESkillInfo.primary_attr,
+               SDESkillInfo.secondary_attr, SDESkillInfo.rank)
+        .where(SDESkillInfo.type_id.in_(all_skill_ids))
+    )).all()
+    # primary_attr/secondary_attr are raw dogma attribute ids (164..168);
+    # ATTR_ID_MAP's index doesn't matter while every attribute defaults to
+    # the same value, but is kept so a future cached-attribute source only
+    # has to change _CANFLY_DEFAULT_ATTR's lookup, not this shape.
+    rank_by_skill = {int(tid): (rank or 1.0) for tid, _pri, _sec, rank in meta_rows}
+
+    for f in fits:
+        for m in f["missing"]:
+            m["skill_name"] = names.get(m["skill_id"], f"Skill {m['skill_id']}")
+            rank = rank_by_skill.get(m["skill_id"], 1.0)
+            sp = _sp_to_train(m["have"], m["need"], rank)
+            minutes = _training_time_minutes(sp, _CANFLY_DEFAULT_ATTR, _CANFLY_DEFAULT_ATTR)
+            m["time_str"] = _format_train_duration(minutes)
+
+
+@router.get("/character/{character_id}/can-fly", response_class=HTMLResponse)
+async def character_can_fly(
+    character_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Overview partial (T-072), hx-loaded lazily: does this character have
+    the skills to fly each of the user's saved fits.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    char_result = await db.execute(
+        select(Character).where(Character.character_id == character_id, Character.user_id == user_id)
+    )
+    char = char_result.scalar_one_or_none()
+    if not char:
+        return HTMLResponse("", status_code=404)
+
+    if "esi-skills.read_skills.v1" not in (char.scopes or ""):
+        return templates.TemplateResponse(request, "partials/character_can_fly.html", {
+            "error": None, "no_scope": True,
+            "total": 0, "can_fly": 0, "can_fly_fits": [], "missing_fits": []})
+
+    # Looked up through the module (not imported by name) so a test's
+    # monkeypatch on app.routes.fitting._character_skills_map is seen here.
+    levels: dict[int, int] = {}
+    try:
+        levels = await fitting_mod._character_skills_map(db, char)
+    except Exception as e:
+        logger.info("can-fly: skills fetch failed for char %s: %s", character_id, e)
+        levels = {}
+
+    if not levels:
+        # Never "0 of N" — an empty/failed skills fetch reads as "we
+        # couldn't check this", not "this character knows nothing".
+        return templates.TemplateResponse(request, "partials/character_can_fly.html", {
+            "error": "Could not load this character's trained skills right now.",
+            "no_scope": False,
+            "total": 0, "can_fly": 0, "can_fly_fits": [], "missing_fits": []})
+
+    summary = await canfly.can_fly_summary(db, user_id, levels)
+    missing_fits = [f for f in summary["fits"] if not f["can_fly"]]
+    can_fly_fits = [f for f in summary["fits"] if f["can_fly"]]
+    await _enrich_missing_with_training(db, missing_fits)
+
+    return templates.TemplateResponse(request, "partials/character_can_fly.html", {
+        "error": None, "no_scope": False,
+        "total": summary["total"], "can_fly": summary["can_fly"],
+        "can_fly_fits": can_fly_fits, "missing_fits": missing_fits})
