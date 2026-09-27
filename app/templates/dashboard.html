@@ -21,10 +21,29 @@
  * name, location, ship, wallet, training, flags) — fixed tracks instead of
  * the T-070 flex row, whose flexing name column let columns drift out of
  * alignment row to row. ~34px target row height: 24px portrait + ~5px
- * padding top/bottom. */
+ * padding top/bottom.
+ *
+ * T-078: each `.dash-compact-row` is its OWN grid container (one per <a>,
+ * not one shared grid with implicit rows). Two non-fixed track keywords
+ * both resolve their size from THAT row's own content, and either one
+ * shifts every fixed track after it — verified on dev at 1437px: loc's
+ * left edge varied 488-538px across rows before this fix.
+ *   - A bare `1fr` is shorthand for `minmax(auto, 1fr)`: its "auto" minimum
+ *     is a min-content measurement of that row's own text (training's
+ *     skill-queue line, in the base grid), which differs pilot to pilot.
+ *   - `auto` alone (flags, originally) sizes to that row's own max-content
+ *     — a row with two badges claims more width than a row with none.
+ * Every track below is therefore EITHER a fixed `Npx` OR `minmax(0, Nfr)`
+ * (explicit, content-independent zero minimum) — never a bare `auto` or a
+ * bare `Nfr` — so the free-space pool split between the flexible tracks is
+ * the same geometric split for every row regardless of what it contains,
+ * and column edges line up exactly. Flags is fixed-width and clips/wraps
+ * (`overflow:hidden` / `flex-wrap`) rather than sized to its own content,
+ * for the same reason. tests/test_dashboard_compact_grid.py's
+ * test_grid_tracks_by_breakpoint enforces this. */
 .dash-compact-row {
     display: grid;
-    grid-template-columns: 11px 24px minmax(140px, 1.2fr) 150px 120px 110px 1fr auto;
+    grid-template-columns: 11px 24px minmax(0, 1.2fr) 150px 120px 110px minmax(0, 1fr) 130px;
     align-items: center;
     column-gap: 0.6rem;
     padding: 0.4rem 0.6rem;
@@ -40,16 +59,44 @@
     gap: 3px;
     overflow: hidden;
     justify-content: flex-end;
+    min-width: 0;
 }
-/* T-070 Compact mode: this breakpoint doubles as the phone layout. Wide
- * enough to cover the ~390px/412-414px phones a fixed 400px cutoff would
- * otherwise miss on one side or the other. Dropped tracks free their grid
- * columns entirely (unlike `display:none` alone, which would leave gaps for
- * auto-placement to reflow other cells into) — the row re-templates to just
- * dot, portrait, name, wallet, flags. */
-@media (max-width: 480px) {
+/* T-078: two responsive tiers below the 8-track desktop grid. Before this,
+ * the only override was a <=480px phone-only rule — from 481px up to ~760px
+ * the fixed 150+120+110px (loc/ship/wallet) tracks alone summed past 380px
+ * and forced horizontal PAGE scroll (measured: scrollWidth 631 at a 497px
+ * viewport). Both tiers below are class-level (never per-row inline — see
+ * test_no_compact_row_carries_an_inline_grid_template) and dropped tracks
+ * free their grid columns entirely (unlike `display:none` alone, which
+ * would leave gaps for auto-placement to reflow other cells into).
+ * `.b-main` (design-system/css/components.css) is centered with a flat
+ * 2rem horizontal padding and no persistent side nav, so a row's available
+ * width is simply the viewport minus that ~64px at every breakpoint below.
+ *
+ *   >1000px    : full 8 tracks — dot, portrait, name, loc, ship, wallet,
+ *                training, flags (unchanged from T-076, flags now fixed).
+ *   761-1000px : drop ship only — loc, wallet and training still fit — down
+ *                to 7 tracks: dot, portrait, name, loc, wallet, training,
+ *                flags.
+ *   <=760px    : drop loc, ship and training too (this also covers the old
+ *                phone breakpoint) — 5 tracks: dot, portrait, name, wallet,
+ *                flags. Name is `minmax(0, 1fr)` with ellipsis; wallet is
+ *                `auto` sized to its own content (still right-aligned)
+ *                instead of a fixed 110px, since there's no ship/training
+ *                column left to share space with — safe here specifically
+ *                because flags (the only track after it) is now a FIXED
+ *                90px, so wallet's right edge is still a constant distance
+ *                from the row's right edge on every row; flags wraps onto a
+ *                2nd line inside that fixed width instead of overflowing.
+ */
+@media (max-width: 1000px) {
+    .dash-compact-ship { display: none; }
+    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1.2fr) 150px 110px minmax(0, 1fr) 130px; }
+}
+@media (max-width: 760px) {
     .dash-compact-loc, .dash-compact-ship, .dash-compact-training { display: none; }
-    .dash-compact-row { grid-template-columns: 11px 24px 1fr 110px auto; }
+    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1fr) auto 90px; }
+    .dash-compact-flags { flex-wrap: wrap; }
 }
 </style>
 {% endif %}
@@ -1262,12 +1309,95 @@ document.addEventListener('DOMContentLoaded', function() {
         var section = document.createElement('div');
         section.className = 'b-section group-section';
         section.dataset.group = name;
-        section.innerHTML = '<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;"><div class="edit-mode-only" style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;"><button type="button" class="group-move-up b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button><button type="button" class="group-move-down b-btn" style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button></div><span class="group-label b-label" data-group="'+name+'" style="cursor:pointer;">'+name+'</span><input class="group-label-input" type="text" value="'+name+'" data-original="'+name+'" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;"><span class="b-muted-sm">0</span></div><div class="sortable-group b-grid-3" data-group="'+name+'" style="min-height:40px;border:1px dashed var(--border);padding:0.5rem;"></div>';
+
+        // Built with createElement + textContent, never innerHTML — `name`
+        // is unescaped prompt() input (ISS-065), and this mirrors the
+        // group-header partial's current markup (chevron before the name,
+        // count pinned right via margin-left:auto), not the pre-T-076 shape.
+        var head = document.createElement('div');
+        head.className = 'b-section-head';
+        head.style.cssText = 'display:flex;align-items:center;gap:0.5rem;';
+        head.dataset.group = name;
+
+        var editWrap = document.createElement('div');
+        editWrap.className = 'edit-mode-only';
+        // Created while already in edit mode, so shown immediately — unlike
+        // the partial's server-rendered default (display:none, revealed by
+        // toggleEditMode()), which a page-load-time group needs but this
+        // one doesn't.
+        editWrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;flex-shrink:0;';
+        var upBtn = document.createElement('button');
+        upBtn.type = 'button';
+        upBtn.className = 'group-move-up b-btn';
+        upBtn.style.cssText = 'flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;';
+        upBtn.textContent = '▲';
+        var downBtn = document.createElement('button');
+        downBtn.type = 'button';
+        downBtn.className = 'group-move-down b-btn';
+        downBtn.style.cssText = 'flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;';
+        downBtn.textContent = '▼';
+        editWrap.appendChild(upBtn);
+        editWrap.appendChild(downBtn);
+
+        var toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'dash-group-toggle b-btn';
+        toggleBtn.dataset.click = 'toggleDashGroup';
+        toggleBtn.dataset.group = name;
+        toggleBtn.title = 'Collapse ' + name;
+        toggleBtn.style.cssText = 'flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;';
+        toggleBtn.textContent = '▾';
+
+        var label = document.createElement('span');
+        label.className = 'group-label b-label';
+        label.dataset.group = name;
+        // Every OTHER `.group-label` got this pair from toggleEditMode()'s
+        // own querySelectorAll pass when edit mode was entered — this one
+        // is created afterwards, so it needs it applied directly.
+        label.style.cursor = 'pointer';
+        label.title = 'Click to rename';
+        label.textContent = name;
+
+        var input = document.createElement('input');
+        input.className = 'group-label-input';
+        input.type = 'text';
+        input.value = name;
+        input.dataset.original = name;
+        input.style.cssText = 'display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;';
+
+        // Matches the group-header partial's collapsed-summary span — empty
+        // and hidden here since a brand-new group starts expanded with 0
+        // pilots, but present so the markup shape (and toggleDashGroup's/
+        // persistGroupState's optional-but-expected lookup of it) matches.
+        var summary = document.createElement('span');
+        summary.className = 'dash-group-summary';
+        summary.style.cssText = 'margin-left:0.5rem;font-size:10px;color:var(--muted);display:none;';
+
+        var count = document.createElement('span');
+        count.className = 'b-muted-sm';
+        count.style.cssText = 'flex:none;margin-left:auto;';
+        count.textContent = '0';
+
+        head.appendChild(editWrap);
+        head.appendChild(toggleBtn);
+        head.appendChild(label);
+        head.appendChild(input);
+        head.appendChild(summary);
+        head.appendChild(count);
+
+        var body = document.createElement('div');
+        body.className = 'sortable-group b-grid-3';
+        body.dataset.group = name;
+        body.style.cssText = 'min-height:40px;border:1px dashed var(--border);padding:0.5rem;';
+
+        section.appendChild(head);
+        section.appendChild(body);
         container.appendChild(section);
-        attachLabelEdit(section.querySelector('.group-label'));
-        section.querySelector('.group-move-up').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'up'); });
-        section.querySelector('.group-move-down').addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'down'); });
-        var ns = Sortable.create(section.querySelector('.sortable-group'), {group: 'characters', animation: 150, ghostClass: 'opacity-30', disabled: false, onEnd: scheduleSave});
+
+        attachLabelEdit(label);
+        upBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'up'); });
+        downBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); moveGroup(this, 'down'); });
+        var ns = Sortable.create(body, {group: 'characters', animation: 150, ghostClass: 'opacity-30', disabled: false, onEnd: scheduleSave});
         sortables.push(ns);
     });
     function attachLabelEdit(label) {

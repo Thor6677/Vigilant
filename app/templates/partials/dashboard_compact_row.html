@@ -5,17 +5,25 @@
 
    The whole row is one <a> (no nested <a>/<form>/<button> inside — RENEW and
    the other flags are plain badges here, never links, precisely so this can
-   be a single anchor). `.dash-compact-loc`, `.dash-compact-ship` and
-   `.dash-compact-training` are hidden under the dashboard.html media query's
-   breakpoint — the same one doubles as the phone layout.
+   be a single anchor). `.dash-compact-loc` and `.dash-compact-ship` are
+   hidden at dashboard.html's <=1000px breakpoint (ship only) and <=760px
+   breakpoint (loc, ship and training); the <=760px tier doubles as the
+   phone layout.
 
    T-076: the row is now a CSS grid (`.dash-compact-row`, one shared template
-   defined once in dashboard.html's <style>) with fixed tracks, so columns
-   line up across every row regardless of name length — no per-row inline
+   per breakpoint, defined in dashboard.html's <style>) with tracks that are
+   always either a fixed px or `minmax(0, Nfr)` (T-078), so columns line up
+   across every row regardless of content length — no per-row inline
    grid-template-columns here, ever (tests/test_dashboard_compact_grid.py
-   checks that). `tags` and `wallet_delta` are optional (default empty/None)
-   so every existing call site (and the golden-comparison harness) keeps
-   working unchanged.
+   checks that). Every cell also carries its own `min-width:0` so its
+   content can't force the grid item wider than its track. `tags` and
+   `wallet_delta` are optional (default empty/None) so every existing call
+   site (and the golden-comparison harness) keeps working unchanged.
+
+   T-078: the row also always carries a 3px `border-left` — transparent
+   when there's no warning state, coloured when there is one — so an
+   unwarned row's content lines up with a warned row's instead of sitting
+   3px further left.
 #}
 {% from "partials/_pilot_card.html" import format_isk, wallet_arrow %}
 
@@ -31,7 +39,7 @@
 {% set warn = s.training.warning %}
 <a href="/character/{{ s.character_id }}" class="dash-compact-row" data-char-id="{{ s.character_id }}"
    style="text-decoration:none;color:inherit;border-bottom:1px solid var(--border);
-          {% if s.needs_reauth %}border-left:3px solid var(--danger);{% elif warn == 'empty' %}border-left:3px solid var(--danger);{% elif warn == 'paused' %}border-left:3px solid var(--muted);{% elif warn == 'critical' %}border-left:3px solid #c97a20;{% elif warn == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
+          {% if s.needs_reauth %}border-left:3px solid var(--danger);{% elif warn == 'empty' %}border-left:3px solid var(--danger);{% elif warn == 'paused' %}border-left:3px solid var(--muted);{% elif warn == 'critical' %}border-left:3px solid #c97a20;{% elif warn == 'warning' %}border-left:3px solid var(--accent);{% else %}border-left:3px solid transparent;{% endif %}">
     <span class="b-dot" style="width:7px;height:7px;{% if s.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
     <img src="https://images.evetech.net/characters/{{ s.character_id }}/portrait?size=64" alt=""
          style="width:24px;height:24px;border-radius:2px;">
@@ -41,17 +49,17 @@
         {% for t in tags.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-left:3px;">{{ t }}</span>{% endfor %}
         {% endif %}
     </span>
-    <span class="dash-compact-loc" style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+    <span class="dash-compact-loc" style="font-size:10px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {% if s.security is not none %}[{{ "%.1f"|format(s.security) }}] {% endif %}{{ s.system_name or "Unknown" }}
     </span>
-    <span class="dash-compact-ship" style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+    <span class="dash-compact-ship" style="font-size:10px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ s.ship_name or "" }}
     </span>
-    <span class="dash-compact-wallet" style="font-size:11px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+    <span class="dash-compact-wallet" style="font-size:11px;color:var(--accent);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         {% if s.wallet is not none %}{{ format_isk(s.wallet) }}{% else %}&mdash;{% endif %}
         {% if wallet_delta %}<span style="font-size:9px;margin-left:0.25rem;">{{ wallet_arrow(wallet_delta) }}</span>{% endif %}
     </span>
-    <span class="dash-compact-training" style="display:flex;flex-direction:column;gap:2px;overflow:hidden;">
+    <span class="dash-compact-training" style="display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;">
         {% if s.training.skill %}
         <span style="font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.training.skill }} {{ s.training.level }}{% if s.training.queue_left_str %} &middot; {{ s.training.queue_left_str }}{% endif %}</span>
         <div class="b-progress" style="height:3px;"><div class="b-progress-fill {% if warn == 'critical' %}is-crit{% elif warn == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ s.training.progress_pct }}%"></div></div>
