@@ -364,3 +364,24 @@ def test_pages_served_to_strangers_need_no_actions_js():
     assert not offenders, (
         "Page(s) a logged-out visitor can open use actions.js bindings that "
         "base.html never loads for them:\n  " + "\n  ".join(offenders))
+
+
+# ── T-075: the Account page's Discord-alert routes ───────────────────────────
+
+_DISCORD_ALERT_POSTS = (
+    "/account/notifications/discord",
+    "/account/notifications/discord/test",
+    "/account/notifications/discord/remove",
+)
+
+
+def test_discord_alert_routes_refuse_anonymous_visitors():
+    """Past CSRF (a session with a token but no user) so the gate answers:
+    401 for an htmx caller, a redirect home for a plain form post."""
+    csrf = _client(csrf_token="t")
+    for path in _DISCORD_ALERT_POSTS:
+        r = csrf.post(path, data={}, headers={"X-CSRF-Token": "t", "HX-Request": "true"})
+        assert r.status_code == 401, f"POST {path} answered {r.status_code} to an anonymous htmx caller"
+        r = csrf.post(path, data={}, headers={"X-CSRF-Token": "t"})
+        assert r.status_code == 303 and r.headers["location"] == "/", (
+            f"POST {path} answered {r.status_code} to an anonymous form post")
