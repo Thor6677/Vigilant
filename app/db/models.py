@@ -1,9 +1,15 @@
+import asyncio
+import logging
+import time
+
 from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event, text
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -110,6 +116,10 @@ class CharacterDashboardCache(Base):
     pi_json = Column(Text, nullable=True)
     skillqueue_json = Column(Text, nullable=True)
     zkill_json = Column(Text, nullable=True)
+    # T-073: JSON {"total_sp": int, "unallocated_sp": int,
+    # "levels": {"<skill_id>": active_skill_level}} from esi-skills.read_skills.v1.
+    # Added to an old-shape table by ensure_dashboard_cache_columns() below.
+    skills_json = Column(Text, nullable=True)
     last_synced = Column(DateTime, nullable=True)      # naive UTC
     sync_status = Column(String(16), nullable=False, default="idle")  # idle | syncing | error
     sync_error = Column(Text, nullable=True)
@@ -120,6 +130,25 @@ class CharacterDashboardCache(Base):
 class WalletSnapshot(Base):
     """Periodic snapshots of a character's wallet balance for historical charting."""
     __tablename__ = "wallet_snapshots"
+    __table_args__ = (
+        # T-076: the Dashboard's 7-day wallet-change arrow (every mode) and
+        # its per-pilot sparkline (Detailed/Table) both filter by
+        # character_id + a recorded_at cutoff and want only the newest/
+        # oldest matching row(s) per character. The lone character_id index
+        # below made that a per-character scan of most of the table on an
+        # account with a year of accumulated snapshots.
+        #
+        # T-080: building this against an already-large table is itself slow
+        # (measured 5.35s against 1.9M rows) — too slow to run inline at
+        # startup on an upgrade (see the deploy health-check timing note on
+        # _DEFERRED_STARTUP_INDEXES below), so `_create_missing_indexes`
+        # skips it for an EXISTING table and `create_wallet_snapshot_index_
+        # background()` builds it after the app is already serving. A FRESH
+        # install still gets it immediately: `Base.metadata.create_all`
+        # emits this index's DDL as part of `CREATE TABLE` for a table that
+        # doesn't exist yet, so the deferral never applies there.
+        Index("ix_wallet_snapshots_char_recorded", "character_id", "recorded_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     character_id = Column(Integer, ForeignKey("characters.character_id"), nullable=False, index=True)
@@ -774,6 +803,14 @@ class UserFitting(Base):
     # before this column did) is simply "stale", not an error.
     dps_cached = Column(Float, nullable=True)
     dps_cache_key = Column(String, nullable=True)
+    # Persistent skill-requirement cache (T-072's can-fly check): the same
+    # idea as dps_cached/dps_cache_key above, but for "which skills at which
+    # level does this fit need" rather than DPS. Keyed by
+    # app.fitting.canfly.skill_reqs_cache_key, which hashes ship + items +
+    # the SDE version stamp — no FITTING_ENGINE_VERSION, since nothing here
+    # runs the dogma/stacking pipeline that constant guards.
+    skill_reqs_json = Column(Text, nullable=True)
+    skill_reqs_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -1211,6 +1248,147 @@ class UpdateNotifySettings(Base):
     updated_at = Column(DateTime, nullable=True)
 
 
+# ── T-074: pilot tags and private notes ──────────────────────────────────────
+
+class CharacterTag(Base):
+    """A user's own role tags and one-line private note for one of their
+    pilots (e.g. "Cyno", "Hauler", "our scout, watch for burn").
+
+    One row per (user_id, character_id) — validation (app/tags.py) keeps this
+    small: at most 8 tags, each 1-24 chars, note at most 280 chars. `tags_json`
+    is a JSON array of strings rather than a child table; a pilot's tag list
+    is always read and written whole, never queried by individual tag from
+    SQL, so the extra table and join would buy nothing. `user_tag_vocabulary()`
+    in app/tags.py is what the dashboard's tag filter reads instead of a
+    dedicated tags table.
+
+    Scoped to the owning user, not shared account-wide or with other users of
+    the same character — two accounts that both hold a transferred character
+    keep their own tags on it. A row with no tags and no note is deleted
+    rather than kept around empty (app/tags.py:save_character_tags), so a
+    character with neither is simply absent here.
+    """
+    __tablename__ = "character_tags"
+    __table_args__ = (
+        UniqueConstraint("user_id", "character_id", name="uq_character_tags_user_char"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=False)
+    tags_json = Column(Text, nullable=False, default="[]")
+    note = Column(String(280), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# ── T-071: dashboard needs-attention strip ──────────────────────────────────
+
+class DashboardAttentionDismissal(Base):
+    """One user's dismissal of one needs-attention item (see
+    app/dashboard/attention.py for how items and their `fingerprint`s are
+    built).
+
+    Unique on (user_id, item_key) — dismissing the same key again just
+    replaces the row. `fingerprint` is the server's own hash of the state
+    that produced the item at the moment of dismissal, never anything the
+    client sends; the route only honours a dismissal while a freshly
+    recomputed item for that key still hashes to the same value, so an
+    "until it changes" dismissal (`dismissed_until` NULL) lapses the moment
+    the underlying state moves, and a timed one (24h/7d) lapses early too if
+    the state changes before it would otherwise expire.
+    """
+    __tablename__ = "dashboard_attention_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_key", name="uq_dashboard_attention_dismissal"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=True)
+    item_key = Column(String(128), nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    dismissed_until = Column(DateTime, nullable=True)  # NULL = until state/fingerprint changes
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+# ── T-073: skill-farm page ───────────────────────────────────────────────────
+class SkillFarmSettings(Base):
+    """One row per user: T-073 skill-farm page settings.
+
+    sales_tax_pct is the OWNER's own editable rate, not a hardcoded game
+    constant — EVE's NPC sales tax is reduced per level of the Accounting
+    skill, so the effective rate differs per pilot/corp and has to be entered
+    rather than assumed (see app/skillfarm/constants.py for the default used
+    to pre-fill a brand-new row).
+    """
+    __tablename__ = "skill_farm_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    # Must match app.skillfarm.constants.DEFAULT_SALES_TAX_PCT — kept as a
+    # plain literal (not an import) to avoid pulling app.skillfarm into
+    # app.db.models; get_settings() always passes the constant explicitly
+    # when creating a row, so this Column-level default is a documentation
+    # fallback, never the actual value new rows get in practice.
+    sales_tax_pct = Column(Float, nullable=False, default=7.5)
+    plex_per_month = Column(Integer, nullable=False, default=500)
+    price_source = Column(String(8), nullable=False, default="sell")  # "sell" | "buy"
+    updated_at = Column(DateTime, nullable=True)
+
+
+class SkillFarmPilot(Base):
+    """One row per farm pilot a user has added to the skill-farm page.
+
+    base_sp is the floor of ALLOCATED SP the owner never wants extracted from
+    this pilot — separate from the game's own 5,000,000 SP hard extraction
+    floor (app/skillfarm/constants.py:SKILL_FLOOR_SP, which the default below
+    matches). A pilot who wants to keep MORE than the bare minimum banked
+    raises this above the game floor; the math never uses less than either.
+    """
+    __tablename__ = "skill_farm_pilots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "character_id", name="uq_skill_farm_pilot"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    character_id = Column(Integer, nullable=False)
+    base_sp = Column(BigInteger, nullable=False, default=5_000_000)
+    updated_at = Column(DateTime, nullable=True)
+
+
+async def ensure_dashboard_cache_columns(db: AsyncSession) -> None:
+    """Add T-073's skills_json column to an old-shape character_dashboard_cache
+    table.
+
+    Idempotent the same way ensure_user_fittings_columns() below is: a fresh
+    install already has the column via create_all (it's declared as Column()
+    on CharacterDashboardCache above), so the ALTER is skipped there; a second
+    call against an already-migrated table is a PRAGMA-guarded no-op.
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(character_dashboard_cache)"))).fetchall()}
+    if "skills_json" not in cols:
+        await db.execute(text("ALTER TABLE character_dashboard_cache ADD COLUMN skills_json TEXT"))
+    await db.commit()
+
+
+
+
+# ── T-070: dashboard view preferences ──
+
+class UserDashboardPrefs(Base):
+    """One row per user: their saved /dashboard view (mode, which account
+    groups and lower sections are collapsed/hidden, the Table view's column
+    set and sort, and the tag filter). See app/dashboard/prefs.py for the
+    schema this JSON blob is validated against — that module is the single
+    source of truth for what's inside `prefs_json`, not this model.
+    """
+    __tablename__ = "user_dashboard_prefs"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    prefs_json = Column(Text, nullable=False, default="{}")
+    updated_at = Column(DateTime, nullable=True)
+
+
 async def ensure_user_fittings_columns(db: AsyncSession) -> None:
     """Add the T-069 columns to an old-shape user_fittings table:
     source_character_id / source_fitting_id (bulk character import — see
@@ -1241,6 +1419,38 @@ async def ensure_user_fittings_columns(db: AsyncSession) -> None:
     await db.commit()
 
 
+# ── T-072: can-fly skill-requirement cache columns ──────────────────────────
+
+async def ensure_user_fittings_skill_reqs_columns(db: AsyncSession) -> None:
+    """Add skill_reqs_json / skill_reqs_key to an old-shape user_fittings
+    table — same idempotent PRAGMA-guarded pattern as
+    ensure_user_fittings_columns above, for the T-072 can-fly check's
+    persistent requirement cache (app.fitting.canfly.can_fly_summary).
+
+    A fresh install already has both columns via create_all (they're
+    declared as Column() on UserFitting), so this is a no-op there; a
+    second call against an already-migrated table is also a no-op (PRAGMA
+    sees both columns already present).
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(user_fittings)"))).fetchall()}
+    if "skill_reqs_json" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN skill_reqs_json TEXT"))
+    if "skill_reqs_key" not in cols:
+        await db.execute(text("ALTER TABLE user_fittings ADD COLUMN skill_reqs_key VARCHAR(64)"))
+    await db.commit()
+
+
+# T-080: indexes built here run inline at startup, before the app answers
+# /healthz. Building ix_wallet_snapshots_char_recorded against an
+# already-large wallet_snapshots table measured 5.35s (1.9M rows) — the
+# deploy health check only retries for ~20s (scripts/health-check.sh), so a
+# bigger production table risks a failed deploy and an automatic revert.
+# Named indexes in here are built by create_wallet_snapshot_index_
+# background() instead, once the app is already serving. See that
+# function's docstring for what still works before it's built.
+_DEFERRED_STARTUP_INDEXES = frozenset({"ix_wallet_snapshots_char_recorded"})
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never
@@ -1248,6 +1458,8 @@ def _create_missing_indexes(sync_conn) -> None:
     # checkfirst CREATE — idempotent for already-present indexes.
     for table in Base.metadata.tables.values():
         for index in table.indexes:
+            if index.name in _DEFERRED_STARTUP_INDEXES:
+                continue
             index.create(bind=sync_conn, checkfirst=True)
 
 
@@ -1257,6 +1469,83 @@ async def init_db():
         await conn.run_sync(_create_missing_indexes)
 
 
+async def create_wallet_snapshot_index_background(delay: float = 5.0) -> None:
+    """T-080: build ix_wallet_snapshots_char_recorded off the startup path.
+
+    _create_missing_indexes() (above) deliberately skips this index for an
+    already-existing wallet_snapshots table — building it inline blocked
+    startup for 5.35s against a 1.9M-row table in the planner's measurement,
+    against a ~20s health-check budget on deploy. This function is the other
+    half: called as a fire-and-forget background task a few seconds after
+    startup (see app/main.py), well after the app is already answering
+    /healthz.
+
+    Until this index exists (a fresh install never hits this — see the
+    comment on the Index() declaration on WalletSnapshot), the per-character
+    seek queries in app.dashboard.walletdelta.load_wallet_baselines and
+    app.dashboard.detail.load_wallet_sparkline_points still work: both
+    filter by an exact character_id, which the older, always-present
+    `ix_wallet_snapshots_character_id` (character_id alone) already answers
+    with an index seek — bounded to that one character's own rows, never a
+    full-table scan — just without the recorded_at range folded into the
+    same seek, so each per-character branch has to walk and sort its own
+    rows instead of landing directly on the cutoff. Measured on a 300k-row/
+    24-character fixture (tests/test_dashboard_walletdelta_perf.py,
+    tests/test_dashboard_detail_perf.py): load_wallet_baselines goes from
+    ~1.3ms (composite index) to ~31ms (character_id-only), and
+    load_wallet_sparkline_points from ~40ms to ~53ms — both still well
+    under what the ROW_NUMBER()/every-row queries they replaced cost (~63ms
+    and ~149ms respectively on the same fixture), just not as fast as with
+    the composite index. If this background build fails outright, that
+    slower-but-still-bounded state is where the dashboard stays until the
+    next restart retries it — see the WARNING log line below.
+
+    `CREATE INDEX IF NOT EXISTS` makes a second run (a retry, or a second
+    call in tests) a no-op. Never raises: a failure here costs a missing
+    optimization, not a broken app, so it's one WARNING line, not a
+    traceback that could take anything else down with it.
+    """
+    if delay:
+        await asyncio.sleep(delay)
+    started = time.monotonic()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_wallet_snapshots_char_recorded "
+                "ON wallet_snapshots (character_id, recorded_at)"
+            ))
+        log.info(
+            "Built ix_wallet_snapshots_char_recorded in %.2fs",
+            time.monotonic() - started,
+        )
+    except Exception as e:
+        log.warning("ix_wallet_snapshots_char_recorded background build failed: %s", e)
+
+
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+# ── T-075: per-user Discord webhook for alerts ────────────────────────────────
+
+class UserNotifySettings(Base):
+    """One user's own Discord webhook for the alerts the bell shows them.
+
+    The webhook URL is the whole credential (anyone holding it can post to the
+    channel), so it is encrypted at rest, never rendered back into a page and
+    never logged in full — see app/notify/user_discord.py. `alert_types` is the
+    comma-separated opt-in list; an alert of a type not in it is never sent.
+    `enabled` is cleared when Discord says the webhook no longer exists, and
+    set again when a new URL is saved.
+    """
+    __tablename__ = "user_notify_settings"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    discord_webhook_url = Column(EncryptedText, nullable=True)
+    alert_types = Column(Text, nullable=False, default="")
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_at = Column(DateTime, nullable=True)
+    last_ok = Column(Boolean, nullable=True)
+    last_error = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, nullable=True)

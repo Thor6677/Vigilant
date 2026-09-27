@@ -215,6 +215,52 @@ def test_structure_timer_sde_searches_require_a_session():
         assert r.status_code == 401, f"{path} answered {r.status_code} anonymously"
 
 
+def test_character_tags_routes_require_a_session():
+    """T-074 pilot tags. Both routes take a path param, so they're outside
+    the literal-GET sweep above — asserted explicitly instead. Ownership
+    (IDOR) is covered in tests/test_tags.py, which runs against a seeded DB;
+    this only needs a session to be missing."""
+    path = "/character/999999/tags"
+    r = _client().get(path)
+    assert r.status_code == 401 and r.text == "", f"GET {path} answered {r.status_code} anonymously"
+
+    # Past CSRF (a session with a token but no user) so the gate itself answers.
+    csrf = _client(csrf_token="t")
+    r = csrf.post(path, data={"tags": "Cyno", "note": ""}, headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401 and r.text == "", f"POST {path} answered {r.status_code} anonymously"
+
+
+def test_dashboard_attention_strip_requires_a_session():
+    """T-071: the needs-attention strip reads per-character cache data — a
+    stranger must get nothing, not an empty-but-served strip."""
+    r = _client().get("/dashboard/attention")
+    assert r.status_code == 401
+    assert r.text == ""
+
+    # Past CSRF (a session with a token but no user) so the route's own gate
+    # is what answers — same pattern as the login-only-tools POSTs below.
+    csrf = _client(csrf_token="t")
+    r = csrf.post("/dashboard/attention/dismiss", data={"key": "x", "for": "24h"},
+                  headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401
+    assert r.text == ""
+
+
+def test_dashboard_can_fly_endpoint_requires_a_session():
+    """T-076: the lazy Detailed/Table can-fly badge — a stranger must never
+    see even the shape of another account's fits/skills."""
+    r = _client().get("/dashboard/can-fly")
+    assert r.status_code == 401
+
+
+def test_dashboard_group_order_requires_a_session():
+    """T-076: group order moved from the session into prefs — the POST that
+    saves it must gate the same as /dashboard/prefs does."""
+    csrf = _client(csrf_token="t")
+    r = csrf.post("/dashboard/group-order", json=["Alpha", "Bravo"], headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401
+
+
 def test_status_telemetry_is_not_readable_without_a_session():
     for path in ("/status/data", "/status/chart.json"):
         r = _client().get(path)
@@ -307,10 +353,13 @@ _LOGIN_ONLY_GETS = (
     "/tools/fitting/can-overheat?type_ids=1", "/tools/fitting/charges/1",
     "/tools/fitting/info/587",
     "/intel/gatecheck/systems?q=jita", "/intel/gatecheck/finder",
+    "/character/1/can-fly",   # T-072
 )
 _LOGIN_ONLY_POSTS = (
     "/tools/fitting/stats", "/tools/fitting/import-eft", "/tools/fitting/export-eft",
     "/intel/gatecheck/check", "/intel/gatecheck/wartargets",
+    "/dashboard/prefs",
+    "/dashboard/group-order",   # T-076: moved from session-only to gated + persisted
 )
 
 
@@ -364,3 +413,24 @@ def test_pages_served_to_strangers_need_no_actions_js():
     assert not offenders, (
         "Page(s) a logged-out visitor can open use actions.js bindings that "
         "base.html never loads for them:\n  " + "\n  ".join(offenders))
+
+
+# ── T-075: the Account page's Discord-alert routes ───────────────────────────
+
+_DISCORD_ALERT_POSTS = (
+    "/account/notifications/discord",
+    "/account/notifications/discord/test",
+    "/account/notifications/discord/remove",
+)
+
+
+def test_discord_alert_routes_refuse_anonymous_visitors():
+    """Past CSRF (a session with a token but no user) so the gate answers:
+    401 for an htmx caller, a redirect home for a plain form post."""
+    csrf = _client(csrf_token="t")
+    for path in _DISCORD_ALERT_POSTS:
+        r = csrf.post(path, data={}, headers={"X-CSRF-Token": "t", "HX-Request": "true"})
+        assert r.status_code == 401, f"POST {path} answered {r.status_code} to an anonymous htmx caller"
+        r = csrf.post(path, data={}, headers={"X-CSRF-Token": "t"})
+        assert r.status_code == 303 and r.headers["location"] == "/", (
+            f"POST {path} answered {r.status_code} to an anonymous form post")

@@ -1172,7 +1172,7 @@ async def search_charges(db: AsyncSession, query: str, limit: int = 15) -> list[
 
 
 async def get_module_slot_type(db: AsyncSession, type_id: int) -> str | None:
-    """Get the slot type for a module (high/mid/low/rig/subsystem)."""
+    """Get the slot type for a module (high/med/low/rig/subsystem)."""
     result = await db.execute(
         select(SDEModuleSlot.slot_type).where(SDEModuleSlot.type_id == type_id)
     )

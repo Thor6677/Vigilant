@@ -1,0 +1,77 @@
+{#
+  Can Fly panel (T-072) — hx-loaded partial for /character/{id}/can-fly.
+
+  Context: error, no_scope, total, can_fly, can_fly_fits, missing_fits.
+  Each fit dict: id, name, ship_type_id, ship_name, folder, can_fly, missing
+  (missing entries carry skill_id, have, need, skill_name, time_str once
+  enriched — see _enrich_missing_with_training in
+  app/routes/character_detail.py). No script elements here: a swapped-in
+  fragment carries a nonce that never matches the page's CSP header
+  (see character_detail.html's own note on this). Both "Can fly now" and
+  "Missing skills" collapse via plain details/summary elements, collapsed
+  by default (T-077: an expanded "Missing skills (29)" list used to push
+  the rest of the character page far down the viewport) — no JS required.
+  `missing_fits` arrives pre-sorted by the route, fewest/shortest missing
+  training first (character_detail.py's character_can_fly()).
+#}
+<div class="b-section">
+    <div class="b-section-head"><span class="b-label">Can Fly</span></div>
+
+    {% if error %}
+    <div class="b-empty" style="color:var(--danger);">{{ error }}</div>
+    {% elif no_scope %}
+    <div class="b-empty">This character needs the skills permission to check saved fits.</div>
+    {% elif total == 0 %}
+    <div class="b-empty">No saved fits yet. <a href="/tools/fitting" class="b-link">Open the builder</a> to save one.</div>
+    {% else %}
+    <div style="padding:0.6rem 0.75rem;font-size:11px;color:var(--muted);">Flies {{ can_fly }} of {{ total }} saved fits{% if missing_fits %} &middot; {{ missing_fits|length }} need{{ 's' if missing_fits|length == 1 else '' }} skills{% endif %}</div>
+
+    {% if can_fly_fits %}
+    <details style="margin:0 0.75rem 0.6rem;">
+        <summary style="cursor:pointer;font-size:10px;color:var(--success);letter-spacing:0.1em;text-transform:uppercase;">
+            Can fly now ({{ can_fly_fits|length }})
+        </summary>
+        <div style="margin-top:0.4rem;">
+            {% for f in can_fly_fits %}
+            <div class="b-row">
+                <a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;">
+                    {{ f.ship_name }} &mdash; {{ f.name }}
+                </a>
+                <span class="b-row-val is-muted">{{ f.folder if f.folder else "—" }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+
+    {% if missing_fits %}
+    <details style="margin:0 0.75rem 0.6rem;">
+        <summary style="cursor:pointer;font-size:10px;color:var(--danger);letter-spacing:0.1em;text-transform:uppercase;">
+            Missing skills ({{ missing_fits|length }})
+        </summary>
+        <div style="margin:0.4rem 0 0.5rem;font-size:9px;color:var(--muted);">
+            Sorted by fastest to train first. Training times are approx. (default attributes).
+        </div>
+        {% for f in missing_fits %}
+        <div class="b-card" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;">
+                <a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ f.ship_name }} &mdash; {{ f.name }}
+                </a>
+                <span style="font-size:9px;color:var(--muted);white-space:nowrap;">{{ f.folder if f.folder else "—" }}</span>
+            </div>
+            <div style="margin-top:0.4rem;display:flex;flex-direction:column;gap:0.25rem;">
+                {% for m in f.missing %}
+                <div style="font-size:10px;color:var(--muted);">
+                    {{ m.skill_name }} {{ m.have }} &rarr; {{ m.need }}
+                    <span style="color:var(--border);">&middot;</span>
+                    {{ m.time_str }} approx.
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </details>
+    {% endif %}
+    {% endif %}
+</div>

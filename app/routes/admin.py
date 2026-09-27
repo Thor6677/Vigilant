@@ -21,6 +21,7 @@ from app.db.models import (
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
     UpdateSchedule, UpdateRunReport,
 )
+from app.auth.purge import purge_character_user_rows
 from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
@@ -50,6 +51,58 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
     if not user or user.role not in ("admin", "manager"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+# Tables a user owns outright: removing the user deletes these rows rather
+# than leaving them behind with a dangling user_id.
+# tests/test_admin_remove_user_cleanup.py sweeps
+# app.db.user_ids._user_reference_columns() against this tuple, NULLABLE_FKS
+# and USER_REFS_HANDLED_ELSEWHERE, so a new user_id column can't be added to
+# a model without also being handled here.
+USER_OWNED_TABLES = (
+    "character_tags",
+    "corp_inventory_thresholds",
+    "corp_contract_thresholds",
+    "user_avoid_entries",
+    "saved_gate_routes",
+    "user_fittings",
+    "user_fitting_folders",
+    "user_map_bookmarks",
+    "user_system_watches",
+    "user_hunter_watches",
+    "hosted_images",  # row only — on-disk files are not touched here
+    "net_worth_snapshots",
+    "stockpile_targets",
+    "dscan_results",
+    "kill_alert_events",
+    "user_notify_settings",  # T-075: the user's own Discord webhook
+    "dashboard_attention_dismissals",
+    "skill_farm_settings",  # T-073
+    "skill_farm_pilots",    # T-073 — also in PER_CHARACTER_USER_TABLES (app/auth/purge.py)
+    "user_dashboard_prefs",
+)
+
+# Where the FK is metadata rather than ownership, null it out instead of
+# dropping the surrounding row.
+NULLABLE_FKS = (
+    ("structure_timers", "created_by"),
+    ("timer_acl_groups", "created_by"),
+    ("registration_allowlist", "added_by"),
+    ("skill_plans", "last_edited_by_user_id"),
+    ("admin_audit_log", "user_id"),
+    ("update_schedule", "created_by"),
+    ("update_policy", "updated_by"),
+    ("update_run_report", "acknowledged_by"),
+    ("update_notify_settings", "updated_by"),
+)
+
+# (table, column) pairs that hold a users.id but aren't touched by the two
+# tuples above because admin_remove_user handles them some other way.
+USER_REFS_HANDLED_ELSEWHERE = {
+    ("users", "id"),            # the row being removed itself
+    ("characters", "user_id"),  # deleted via db.delete(char) below
+    ("skill_plans", "user_id"), # deleted via db.delete(plan), cascading SkillPlanEntry/ACL
+}
 
 
 # Audit log filter options (T-068): (key, label, event-type prefixes). An event
@@ -838,6 +891,7 @@ async def admin_remove_user(user_id: int, request: Request,
         # Clean up associated caches
         await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": char.character_id})
         await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": char.character_id})
+        await purge_character_user_rows(db, char.character_id)
         await db.delete(char)
 
     # Delete user-owned data so the user row's removal doesn't leave orphans
@@ -850,30 +904,9 @@ async def admin_remove_user(user_id: int, request: Request,
     for plan in owned_plans:
         await db.delete(plan)
 
-    USER_OWNED_TABLES = (
-        "corp_inventory_thresholds",
-        "corp_contract_thresholds",
-        "user_avoid_entries",
-        "saved_gate_routes",
-        "user_fittings",
-        "user_fitting_folders",
-        "user_map_bookmarks",
-        "user_system_watches",
-        "user_hunter_watches",
-        "hosted_images",  # row only — on-disk files are not touched here
-    )
     for tbl in USER_OWNED_TABLES:
         await db.execute(text(f"DELETE FROM {tbl} WHERE user_id = :uid"), {"uid": user_id})
 
-    # Where the FK is metadata rather than ownership, null it out instead
-    # of dropping the surrounding row.
-    NULLABLE_FKS = (
-        ("structure_timers", "created_by"),
-        ("timer_acl_groups", "created_by"),
-        ("registration_allowlist", "added_by"),
-        ("skill_plans", "last_edited_by_user_id"),
-        ("admin_audit_log", "user_id"),
-    )
     for tbl, col in NULLABLE_FKS:
         await db.execute(
             text(f"UPDATE {tbl} SET {col} = NULL WHERE {col} = :uid"),
@@ -906,6 +939,7 @@ async def admin_remove_character(character_id: int, request: Request,
     old_refresh = char.refresh_token if issued_to_us(char.access_token) else None
     await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": character_id})
     await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": character_id})
+    await purge_character_user_rows(db, character_id)
     await db.delete(char)
     await db.commit()
     await revoke_refresh_token(old_refresh)   # None (not ours) is a no-op

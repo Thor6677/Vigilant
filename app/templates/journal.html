@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "partials/_entity_links.html" import entity_links %}
 {% block title %}{% if is_corp %}CORP {% endif %}JOURNAL — VIGILANT{% endblock %}
 {% block breadcrumbs %}
 {% if is_corp and corp_id %}
@@ -29,9 +28,6 @@
 </div>
 
 {% if char and not is_corp %}
-{# ── Cross-links ─────────────────────────────────────────────────────────── #}
-<div style="margin-bottom:0.75rem;">{{ entity_links("character", char.character_id, char.character_name, current="journal") }}</div>
-
 {% set _cid = char.character_id %}
 <div class="b-tab-strip">
     <a href="/character/{{ _cid }}">Overview</a>
@@ -40,6 +36,10 @@
     <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
     <a href="/character/{{ _cid }}/journal" class="is-active">Journal</a>
     <a href="/character/{{ _cid }}/mining">Mining</a>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;padding:0 0.85rem;">
+        <a href="/intel/entity/character/{{ _cid }}" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">Stats</a>
+        <a href="https://zkillboard.com/character/{{ _cid }}/" target="_blank" rel="noopener" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">zKillboard ↗</a>
+    </span>
 </div>
 {% endif %}
 

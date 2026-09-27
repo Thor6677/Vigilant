@@ -1,0 +1,91 @@
+{# T-076 Table mode.
+
+   `table_rows` (app/dashboard/table.py) is already built AND already sorted
+   server-side by `dash_prefs.table_sort` — the initial render never depends
+   on JS running first. Account divider rows are inserted here too, for the
+   same reason, only when sorted by "account" (rows are already grouped by
+   it in that case; a namespace tracks the previous row's account across the
+   loop).
+
+   The column picker posts a prefs patch and reloads the page (same pattern
+   as `setDashMode`) rather than reshuffling columns purely in JS, and it
+   keeps this file free of any `innerHTML` over tag/account text. The
+   header click-to-sort handler and the column-picker wiring both live in
+   dashboard.html's own page-level nonced script block — never here. This
+   file is `{% include %}`'d straight into that page (never htmx-swapped on
+   its own), but carries no script element of its own regardless, per the
+   v1.7.0 CSP rule for everything under partials/.
+#}
+{% set column_labels = {
+    'pilot': 'Pilot', 'account': 'Account', 'corporation': 'Corporation',
+    'system': 'System', 'ship': 'Ship', 'wallet': 'Wallet', 'wallet_7d': '7d',
+    'net_worth': 'Net Worth', 'queue_end': 'Queue End', 'training': 'Training',
+    'pi': 'PI', 'jobs': 'Jobs', 'orders': 'Orders', 'escrow': 'Escrow',
+    'clones': 'Clones', 'last_sync': 'Last Sync', 'tags': 'Tags', 'can_fly': 'Can Fly'} %}
+{% set active_columns = dash_prefs.table_columns %}
+{% set current_sort = dash_prefs.table_sort %}
+
+<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:0.5rem;">
+    <button type="button" id="table-columns-btn" class="b-btn" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Columns</button>
+</div>
+<div id="table-columns-picker" style="display:none;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.5rem;padding:0.5rem;border:1px solid var(--border);">
+    {% for key in TABLE_COLUMNS %}
+    <label style="font-size:10px;color:var(--muted);display:flex;align-items:center;gap:0.3rem;cursor:pointer;">
+        <input type="checkbox" class="table-col-check" value="{{ key }}" {% if key in active_columns %}checked{% endif %}>
+        {{ column_labels.get(key, key) }}
+    </label>
+    {% endfor %}
+</div>
+
+{% set _numeric_columns = ('wallet', 'wallet_7d', 'net_worth', 'queue_end', 'pi', 'jobs', 'orders', 'escrow', 'clones', 'last_sync', 'can_fly') %}
+<div class="b-section" style="overflow:auto;max-height:70vh;">
+    {# `position:sticky` goes on each <th>, not the <tr> — sticky on a row
+       element is unreliable across browsers, and this container (not the
+       page) is the sticky/scroll context, since it's the nearest ancestor
+       with its own scrollbar (max-height + overflow:auto above). #}
+    <table id="dash-table" class="b-table" style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+            <tr>
+                {% for key in active_columns %}
+                <th data-click="sortDashTable" data-col="{{ key }}"
+                    data-sort-type="{{ 'num' if key in _numeric_columns else 'str' }}"
+                    style="position:sticky;top:0;background:var(--bg);z-index:1;text-align:left;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;color:{% if current_sort.key == key %}var(--accent){% else %}var(--muted){% endif %};">
+                    {{ column_labels.get(key, key) }}{% if current_sort.key == key %} {{ '▲' if current_sort.dir == 'asc' else '▼' }}{% endif %}
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+        {% set ns = namespace(prev_account=none) %}
+        {% for row in table_rows %}
+        {% if current_sort.key == 'account' and row.account != ns.prev_account %}
+        <tr class="dash-table-divider"><td colspan="{{ active_columns | length }}" style="padding:0.3rem 0.6rem;background:var(--border);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">{{ row.account }}</td></tr>
+        {% set ns.prev_account = row.account %}
+        {% endif %}
+        <tr data-char-id="{{ row.character_id }}" data-account="{{ row.account }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
+            {% for key in active_columns %}
+            {% if key == 'tags' %}
+            <td data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
+                {% for t in row.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-right:2px;">{{ t }}</span>{% endfor %}
+            </td>
+            {% elif key == 'can_fly' %}
+            <td data-sort-value="{{ row.cells.can_fly.sort }}" data-canfly-slot="{{ row.character_id }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);"><span data-canfly-text>{{ row.cells.can_fly.text }}</span></td>
+            {% elif key == 'pilot' %}
+            <td data-sort-value="{{ row.cells.pilot.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">
+                <a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>
+                {% if row.flags %}<span style="margin-left:0.3rem;">{% for f in row.flags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);">{{ f.label }}</span>{% endfor %}</span>{% endif %}
+            </td>
+            {% elif key in ('wallet', 'wallet_7d', 'net_worth', 'escrow') %}
+            <td data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">{{ row.cells[key].text }}</td>
+            {% else %}
+            <td data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{{ row.cells[key].text }}</td>
+            {% endif %}
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if not table_rows %}
+    <div class="b-empty">No pilots to show</div>
+    {% endif %}
+</div>

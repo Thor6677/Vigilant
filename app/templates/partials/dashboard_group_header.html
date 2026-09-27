@@ -1,0 +1,60 @@
+{# T-070: collapsible account-group header, shared between Cards and Compact.
+
+   Cards mode must "stay faithful to today": groups start expanded, and the
+   only new thing this adds is the collapse chevron itself — no visual change
+   when a group isn't collapsed. The existing Edit-mode move-up/down/rename
+   controls (drag reorder lives in dashboard.html's own script, against
+   [data-char-id] cards — this header never touches that) are untouched;
+   `show_edit_controls` just says whether to render them at all (Cards only —
+   Compact mode has no drag/rename UI, see the T-070 report for why).
+
+   T-076 fix: `.b-section-head` (design-system/css/components.css) sets
+   `justify-content: space-between`, and `.b-btn` (the class every button
+   here carries) defaults to `flex: 1`. The chevron button added by T-070
+   never overrode that, so it grew to consume the whole row's free space —
+   an empty full-width bar with the ▾ glyph lost somewhere inside it, and
+   the name + count shoved off to one side. Every button below now sets
+   `flex:none` explicitly, restoring "name at the left (chevron immediately
+   before it, collapsed summary inline after it in muted text), count at
+   the right" — the pre-T-070 look, chevron aside.
+#}
+{% from "partials/_pilot_card.html" import format_isk %}
+
+{% macro group_header(group_name, group_chars, wallets, skill_map, pilot_summaries, is_collapsed, show_edit_controls) %}
+{% set ns = namespace(wallet_total=0, training_ok=0, flagged=0, soonest_end=none, soonest_str=none) %}
+{% for c in group_chars %}
+    {% set cid = c.character_id %}
+    {% set w = wallets.get(cid) %}
+    {% if w %}{% set ns.wallet_total = ns.wallet_total + w %}{% endif %}
+    {% set sk = skill_map.get(cid, {}) %}
+    {% if sk.get('current_skill') %}{% set ns.training_ok = ns.training_ok + 1 %}{% endif %}
+    {% set s = pilot_summaries.get(cid, {}) %}
+    {% if s.get('flags') %}{% set ns.flagged = ns.flagged + 1 %}{% endif %}
+    {% set qend = sk.get('queue_end') %}
+    {% if qend and (ns.soonest_end is none or qend < ns.soonest_end) %}
+        {% set ns.soonest_end = qend %}
+        {% set ns.soonest_str = sk.get('time_remaining_str') %}
+    {% endif %}
+{% endfor %}
+<div class="b-section-head" style="display:flex;align-items:center;gap:0.5rem;" data-group="{{ group_name }}">
+    {% if show_edit_controls %}
+    <div class="edit-mode-only" style="display:none;flex-direction:column;gap:2px;flex-shrink:0;">
+        <button type="button" class="group-move-up b-btn" style="flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▲</button>
+        <button type="button" class="group-move-down b-btn" style="flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button>
+    </div>
+    {% endif %}
+    <button type="button" class="dash-group-toggle b-btn" data-click="toggleDashGroup" data-group="{{ group_name }}"
+            title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ group_name }}"
+            style="flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
+    <span class="group-label b-label" data-group="{{ group_name }}">{{ group_name }}</span>
+    {% if show_edit_controls %}
+    <input class="group-label-input" type="text" value="{{ group_name }}" data-original="{{ group_name }}" style="display:none;font-size:11px;font-weight:600;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:2px 6px;font-family:inherit;width:150px;">
+    {% endif %}
+    <span class="dash-group-summary" style="margin-left:0.5rem;font-size:10px;color:var(--muted);{% if not is_collapsed %}display:none;{% endif %}">
+        {{ group_chars | length }} pilot{{ 's' if group_chars | length != 1 else '' }} &middot;
+        {{ format_isk(ns.wallet_total) }} &middot;
+        training {{ ns.training_ok }}/{{ group_chars | length }}{% if ns.flagged %} &middot; {{ ns.flagged }} flagged{% endif %}{% if ns.soonest_str %} &middot; next queue ends {{ ns.soonest_str }}{% endif %}
+    </span>
+    <span class="b-muted-sm" style="flex:none;margin-left:auto;">{{ group_chars | length }}</span>
+</div>
+{% endmacro %}

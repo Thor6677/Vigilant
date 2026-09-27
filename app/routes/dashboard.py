@@ -29,6 +29,7 @@ from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
 from app.notify.discord import send_discord_alert
+from app.notify.user_discord import send_user_discord_alert
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -99,6 +100,12 @@ def _emit_notification(user_id: int, event: dict, relay: bool = True):
         task = asyncio.create_task(send_discord_alert(title, body, alert_type))
         _discord_relay_tasks.add(task)
         task.add_done_callback(_discord_relay_tasks.discard)
+        # T-075: the user's own webhook, same fire-and-forget pattern. The
+        # full event goes along for types whose emitter sets no title.
+        user_task = asyncio.create_task(send_user_discord_alert(
+            user_id, title, body, alert_type, event.get("key"), event=event))
+        _discord_relay_tasks.add(user_task)
+        user_task.add_done_callback(_discord_relay_tasks.discard)
     except RuntimeError:
         # No running event loop (e.g. called outside an async context in a
         # test) — nothing to schedule against, just skip the relay.
@@ -379,6 +386,7 @@ FIELD_CACHE_SECONDS: dict[str, int] = {
     "contracts":     300,   # ESI max-age: 300s
     "pi":            600,   # ESI max-age: 600s
     "skillqueue":    120,   # ESI max-age: 120s
+    "skills":       3600,   # T-073: total SP / trained levels change slowly
     "zkill":        3600,   # zkillboard — 1h is plenty
     "assets":       3600,   # ESI max-age: 3600s
     "roles":        3600,   # corp roles — rarely change, cached for permission checks
@@ -395,6 +403,7 @@ FIELD_SCOPES: dict[str, str] = {
     "contracts":     perms.CONTRACTS,
     "pi":            perms.PLANETS,
     "skillqueue":    perms.SKILLQUEUE,
+    "skills":        perms.SKILLS,   # T-073
     "zkill":         None,   # no ESI scope required
     "assets":        perms.ASSETS,
     "roles":         perms.CORP_ROLES,
@@ -412,6 +421,7 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "contracts":     "contracts_json",
     "pi":            "pi_json",
     "skillqueue":    "skillqueue_json",
+    "skills":        "skills_json",   # T-073
     "zkill":         "zkill_json",
     "assets":        None,
     "roles":         None,   # roles stored in CharacterCorpRoles (separate table)
@@ -1026,6 +1036,38 @@ async def fetch_skillqueue_data(characters: list[Character], db: AsyncSession) -
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
 
+async def fetch_skills_data(characters: list[Character], db: AsyncSession) -> dict:
+    """T-073: total/unallocated SP + per-skill active level, for the
+    skill-farm page's injector math and (later) dashboard can-fly badges
+    (app/character_skills.py reads the stored skills_json this writes).
+    """
+    async def _get(char):
+        if not _has_scope(char, perms.SKILLS):
+            return char.character_id, None, "missing_scope"
+        client, err = await _client_for(char)
+        if not client:
+            return char.character_id, None, err
+        try:
+            payload = await esi_char.get_skills(client, char.character_id)
+            skills = payload.get("skills") or [] if isinstance(payload, dict) else []
+            levels = {
+                str(s["skill_id"]): s.get("active_skill_level", 0)
+                for s in skills
+                if isinstance(s, dict) and s.get("skill_id") is not None
+            }
+            summary = {
+                "total_sp": (payload.get("total_sp", 0) if isinstance(payload, dict) else 0),
+                "unallocated_sp": (payload.get("unallocated_sp", 0) if isinstance(payload, dict) else 0),
+                "levels": levels,
+            }
+            return char.character_id, summary, None
+        except Exception as e:
+            logger.warning("Skills fetch failed for char %s: %s", char.character_id, e)
+            return char.character_id, None, f"esi_error: {type(e).__name__}"
+
+    return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
+
+
 def _dashboard_pulse_enabled() -> bool:
     from app.config import get_settings as _gs
     cfg = _gs()
@@ -1579,6 +1621,7 @@ _FIELD_FETCHERS = {
     "contracts":     fetch_contracts_data,
     "pi":            fetch_pi_data,
     "skillqueue":    fetch_skillqueue_data,
+    "skills":        fetch_skills_data,   # T-073
     "zkill":         fetch_zkillboard_data,
     "assets":        fetch_assets_data,
     "roles":         fetch_corp_roles_data,
@@ -2575,6 +2618,24 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     # Build skill_map for per-character lookup in template
     skill_map = {item["char"].character_id: item for item in skill_data}
 
+    # T-076: saved view (mode, collapsed groups/sections, table columns/sort,
+    # tag filter, group order). Loaded here (rather than where T-070 first
+    # added it, right before the render) because "custom" sort's group_rank
+    # below now reads dash_prefs["group_order"] instead of the session.
+    from app.dashboard.prefs import MODES, TABLE_COLUMNS, load_prefs, save_prefs
+    dash_prefs = await load_prefs(db, user_id)
+    dash_mode = dash_prefs["mode"] if dash_prefs["mode"] in MODES else "cards"
+
+    # One-time migration: group order used to live only in the session
+    # (T-070). If prefs have never been given one but this session still
+    # carries the old value, adopt and persist it once, then drop it from
+    # the session — every later request reads dash_prefs["group_order"]
+    # only. A prefs row with an explicit empty list (the user actually
+    # cleared/never touched ordering) is left alone, not re-migrated.
+    if not dash_prefs.get("group_order") and request.session.get("group_order"):
+        dash_prefs = await save_prefs(db, user_id, {"group_order": request.session["group_order"]})
+        request.session.pop("group_order", None)
+
     # Sort characters
     if sort == "name":
         characters = sorted(characters, key=lambda c: c.character_name.lower())
@@ -2586,8 +2647,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         from datetime import datetime as _dt
         characters = sorted(characters, key=lambda c: skill_map.get(c.character_id, {}).get("queue_end") or _dt.max.replace(tzinfo=timezone.utc))
     else:  # custom (default)
-        # Use saved group order from session if available
-        saved_group_order = request.session.get("group_order", [])
+        saved_group_order = dash_prefs.get("group_order") or []
         group_rank = {name: idx for idx, name in enumerate(saved_group_order)}
         characters = sorted(characters, key=lambda c: (
             group_rank.get(c.account_group or "Ungrouped", 999),
@@ -2664,6 +2724,123 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         })
     char_rows.sort(key=lambda x: x["wallet"] or 0, reverse=True)
 
+    # T-070: the pure per-pilot summary Compact/Cards/Detailed/Table all
+    # render from. build_pilot_summaries is pure dict work over values this
+    # handler already computed above — no extra ESI/DB calls.
+    from app.dashboard.summary import build_pilot_summaries
+    from app.tags import load_character_tags, user_tag_vocabulary
+
+    # T-076: 7-day wallet-change arrow, every mode. ONE batched query for
+    # every pilot (never one per pilot) — see app/dashboard/walletdelta.py.
+    from app.dashboard.walletdelta import build_wallet_deltas, load_wallet_baselines
+    wallet_baselines = await load_wallet_baselines(db, character_ids)
+    wallet_deltas = build_wallet_deltas(wallets, wallet_baselines)
+
+    tags_by_char = await load_character_tags(db, user_id)
+    tag_vocab = await user_tag_vocabulary(db, user_id)
+    # A persisted filter tag that no longer exists (its last pilot was
+    # untagged, or the vocabulary just changed) is dropped at read time
+    # rather than trusted — otherwise a stale filter could hide every pilot
+    # with no visible chip left to clear it from.
+    _vocab_lower = {t.lower() for t, _ in tag_vocab}
+    active_tag_filter = [t for t in (dash_prefs.get("tag_filter") or []) if t.lower() in _vocab_lower]
+
+    # T-076: the "Skill farm · N injectors ready" link — every mode, not
+    # just Detailed/Table (it's a small nav aid, not per-pilot detail data).
+    # Cache-only (skills_json already in char_caches) — no ESI on this path.
+    from app.dashboard.farm import load_farm_summary
+    farm_info = await load_farm_summary(db, user_id, characters, char_caches)
+
+    pilot_summaries = build_pilot_summaries(
+        characters, wallets, locations, clones, skill_map, sync_statuses,
+        staleness_map, last_synced_strs, needs_reauth, contracts, pi, char_groups,
+        wallet_deltas=wallet_deltas, tags_by_char=tags_by_char,
+    )
+
+    # T-076: any-match tag filter. Scoped to the pilot-list render only (the
+    # four view modes) — Wealth/Contracts/Recent Kills and the header
+    # aggregates (total wallet, corp count, re-auth banner) still reflect
+    # every pilot, so hiding a pilot from the grid never quietly changes a
+    # number elsewhere on the page.
+    if active_tag_filter:
+        _filter_lower = {t.lower() for t in active_tag_filter}
+
+        def _matches_filter(char) -> bool:
+            row_tags = tags_by_char.get(char.character_id, {}).get("tags") or []
+            return bool({t.lower() for t in row_tags} & _filter_lower)
+
+        visible_characters = [c for c in characters if _matches_filter(c)]
+        visible_char_groups = {
+            name: [c for c in chars if _matches_filter(c)]
+            for name, chars in char_groups.items()
+        }
+        visible_char_groups = {k: v for k, v in visible_char_groups.items() if v}
+    else:
+        visible_characters = characters
+        visible_char_groups = char_groups
+
+    # T-076: Detailed/Table-only extras (PI colonies/expiry, industry jobs,
+    # market escrow, net worth, wallet sparkline, synced SP) — never
+    # computed for Compact/Cards, which don't render any of it (perf: see
+    # the report for render timings per mode).
+    detail_by_char: dict[int, dict] = {}
+    table_rows: list = []
+    if dash_mode in ("detailed", "table"):
+        from app.character_skills import skill_summary as _skill_summary
+        from app.dashboard.detail import (
+            industry_detail, load_latest_networth, load_wallet_sparkline_points,
+            market_detail, pi_detail, sp_detail, wallet_sparkline_svg,
+        )
+        from app.dashboard.table import build_table_row, sort_table_rows
+
+        networth_map = await load_latest_networth(db, character_ids)
+        sparkline_map = await load_wallet_sparkline_points(db, character_ids)
+
+        for char in visible_characters:
+            cid = char.character_id
+            cache = char_caches.get(cid)
+            scopes = char.scopes or ""
+            industry_raw = (
+                json.loads(cache.industry_json)
+                if cache and cache.industry_json and perms.JOBS in scopes else None
+            )
+            orders_raw = (
+                json.loads(cache.orders_json)
+                if cache and cache.orders_json and perms.ORDERS in scopes else None
+            )
+            sk_summary = _skill_summary(char, cache)
+            spark_points = sparkline_map.get(cid, [])
+            farm_row = farm_info["by_character"].get(cid) if farm_info else None
+            detail_by_char[cid] = {
+                "pi": pi_detail(pi.get(cid)),
+                "industry": industry_detail(industry_raw),
+                "market": market_detail(orders_raw),
+                "net_worth": networth_map.get(cid),
+                "wallet_sparkline": wallet_sparkline_svg(spark_points),
+                # The SAME 7d delta the Wallet row's arrow shows (never the
+                # sparkline's own endpoint-to-endpoint delta, which can
+                # disagree — its window is "whatever snapshots exist in the
+                # last 7 days", not "at or before exactly 7 days ago").
+                "wallet_sparkline_delta": wallet_deltas.get(cid),
+                "sp": sp_detail(sk_summary),
+                "farm": farm_row,
+            }
+
+        if dash_mode == "table":
+            rows = [
+                build_table_row(
+                    pilot_summaries.get(char.character_id, {"character_id": char.character_id}),
+                    detail_by_char.get(char.character_id),
+                    tags_by_char.get(char.character_id),
+                    wallet_deltas.get(char.character_id),
+                    skill_map.get(char.character_id, {}).get("queue_end"),
+                    last_synced=(char_caches.get(char.character_id).last_synced
+                                 if char_caches.get(char.character_id) else None),
+                )
+                for char in visible_characters
+            ]
+            table_rows = sort_table_rows(rows, dash_prefs.get("table_sort") or {"key": "pilot", "dir": "asc"})
+
     if perf_enabled():
         perf_log(
             "dashboard",
@@ -2696,7 +2873,26 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "sort": sort,
         "char_groups": char_groups,
         "killmails_enabled": _dashboard_pulse_enabled(),
-        "battles_enabled": _dashboard_battles_enabled()})
+        "battles_enabled": _dashboard_battles_enabled(),
+        "dash_prefs": dash_prefs,
+        "dash_mode": dash_mode,
+        "pilot_summaries": pilot_summaries,
+        "wallet_deltas": wallet_deltas,
+        "tags_by_char": tags_by_char,
+        "tag_vocab": tag_vocab,
+        "detail_by_char": detail_by_char,
+        "table_rows": table_rows,
+        "farm_info": farm_info,
+        # T-076: the tag-filtered pilot list/groups, scoped to the four view
+        # modes only — Wealth/Contracts/Recent Kills and the header
+        # aggregates above (total wallet, corp count, re-auth banner) still
+        # use the full `characters`/`char_groups`.
+        "pilot_grid_characters": visible_characters,
+        "pilot_grid_groups": visible_char_groups,
+        "TABLE_COLUMNS": TABLE_COLUMNS,
+        # The vocabulary-cleaned filter (stale tags dropped) — see the note
+        # above active_tag_filter's definition.
+        "active_tag_filter": active_tag_filter})
 
 
 # ISS-018: SWR cache for kill-pulse. Keyed by (user_id, days). Each entry
@@ -3306,12 +3502,104 @@ async def dashboard_big_battle_banner(request: Request):
 
 
 @router.post("/dashboard/group-order")
-async def save_group_order(request: Request):
-    """Save the visual order of account groups in the session."""
+async def save_group_order(request: Request, db: AsyncSession = Depends(get_db)):
+    """T-076: save the visual order of account groups to the user's dashboard
+    prefs (`group_order`) — replaces the T-070 session-only version. See
+    dashboard()'s one-time migration for a session value saved before this
+    shipped."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     data = await request.json()
     if isinstance(data, list):
-        request.session["group_order"] = data
+        from app.dashboard.prefs import save_prefs
+        await save_prefs(db, user_id, {"group_order": data})
     return JSONResponse({"ok": True})
+
+
+# Guards against a runaway/malicious body before it's even parsed as JSON.
+# The real schema (app/dashboard/prefs.py) is far smaller than this; it's a
+# generous ceiling; not a tuned limit.
+_DASH_PREFS_MAX_BYTES = 8192
+
+
+@router.post("/dashboard/prefs")
+async def save_dashboard_prefs(request: Request, db: AsyncSession = Depends(get_db)):
+    """Save a patch onto the caller's dashboard view prefs (T-070) and return
+    the full resulting prefs as JSON."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _DASH_PREFS_MAX_BYTES:
+                return JSONResponse({"error": "prefs body too large"}, status_code=413)
+        except ValueError:
+            pass  # malformed header; the actual-length check below still catches it
+    body = await request.body()
+    if len(body) > _DASH_PREFS_MAX_BYTES:
+        return JSONResponse({"error": "prefs body too large"}, status_code=413)
+    try:
+        patch = json.loads(body) if body else {}
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    if not isinstance(patch, dict):
+        patch = {}
+
+    from app.dashboard.prefs import save_prefs
+    saved = await save_prefs(db, user_id, patch)
+    return JSONResponse(saved)
+
+
+@router.get("/dashboard/can-fly")
+async def dashboard_can_fly(request: Request, db: AsyncSession = Depends(get_db)):
+    """T-076: the Detailed/Table "can fly" badge, loaded lazily (a page-level
+    fetch, never part of dashboard()'s own render) so it can never slow the
+    initial page load. Returns, for every one of the CALLER'S OWN characters
+    only:
+        {character_id: {"can_fly": int, "total": int} | "no_scope" | "pending"}
+    "no_scope" — the character never shared esi-skills.read_skills.v1.
+    "pending"  — the scope is held but skills haven't synced yet (mirrors
+                 app.character_skills.skill_summary's None case).
+    Calls app.fitting.canfly.can_fly_summary once per character (it warms
+    its own per-fit skill-requirement cache on UserFitting rows on its own
+    first call this process makes, and every later call — any character,
+    any user — reads that same warm cache); see the report for timings.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    from app.character_skills import skill_levels, skill_summary
+    from app.fitting.canfly import can_fly_summary
+
+    result = await db.execute(select(Character).where(Character.user_id == user_id))
+    characters = result.scalars().all()
+    if not characters:
+        return JSONResponse({})
+
+    character_ids = [c.character_id for c in characters]
+    cache_result = await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(character_ids))
+    )
+    char_caches = {c.character_id: c for c in cache_result.scalars().all()}
+
+    out: dict[int, object] = {}
+    for char in characters:
+        summary = skill_summary(char, char_caches.get(char.character_id))
+        if summary == "no_scope":
+            out[char.character_id] = "no_scope"
+            continue
+        if summary is None:
+            out[char.character_id] = "pending"
+            continue
+        levels = skill_levels(summary)
+        fly = await can_fly_summary(db, user_id, levels)
+        out[char.character_id] = {"can_fly": fly["can_fly"], "total": fly["total"]}
+
+    return JSONResponse(out)
 
 
 @router.post("/dashboard/sync/{character_id}")

@@ -56,6 +56,10 @@ SKIP = (
     # and one that inherited the webhook would page the operator for dev runs.
     'update_notify_settings',
     'update_run_report',
+    # T-075: each user's own Discord webhook. Copying it would have a dev
+    # instance post its alerts into real users' channels, so dev starts with
+    # no per-user webhooks at all.
+    'user_notify_settings',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).
@@ -66,10 +70,12 @@ COPY_ALL = (
     'character_corp_roles',
     'character_dashboard_cache',
     'character_kill_ingest',
+    'character_tags',
     'characters',
     'corp_contract_thresholds',
     'corp_inventory_thresholds',
     'corp_wallet_snapshots',
+    'dashboard_attention_dismissals',
     'detected_battles',
     'dscan_results',
     'esi_rate_limit_events',
@@ -90,6 +96,8 @@ COPY_ALL = (
     'player_count_snapshots',
     'registration_allowlist',
     'saved_gate_routes',
+    'skill_farm_pilots',
+    'skill_farm_settings',
     'sde_blueprint_info',
     'sde_blueprint_invention',
     'sde_blueprint_invention_materials',
@@ -141,6 +149,7 @@ COPY_ALL = (
     # from a "dev" build, so a copied notified_tag is inert there.
     'update_status',
     'user_avoid_entries',
+    'user_dashboard_prefs',
     'user_fitting_folders',
     'user_fittings',
     'user_hunter_watches',

@@ -1,0 +1,24 @@
+{# T-070: shared collapse/hide toolbar for the dashboard's lower sections.
+
+   Renders just the two small buttons (collapse chevron, hide ✕) — never a
+   label, so it composes into a section's EXISTING header (Wealth, Contracts,
+   Recent Kills — all rendered by dashboard.html itself) without duplicating
+   anything, and sits in its own slim strip above a lazy-loaded section
+   (Battles/Activity/Pilot Pulse/Combat Profile), whose OWN header is inside
+   the htmx-swapped partial and out of this file's reach.
+
+   Both buttons dispatch through data-click (static/js/actions.js's
+   delegation convention); the handler functions themselves are declared in
+   dashboard.html's own always-rendered, nonced script block, not in
+   actions.js (this stream doesn't touch that shared file) and not inside
+   any htmx-swapped partial — a script element in a fragment like this one
+   carries a mismatched nonce and never runs under this app's CSP.
+#}
+{% macro section_toolbar(key, label, is_collapsed, is_hidden) %}
+<button type="button" class="dash-sec-toggle b-btn" data-click="toggleDashSection" data-section="{{ key }}"
+        title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}"
+        style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
+<button type="button" class="dash-sec-hide b-btn" data-click="hideDashSection" data-section="{{ key }}"
+        title="Hide {{ label }}"
+        style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">✕</button>
+{% endmacro %}

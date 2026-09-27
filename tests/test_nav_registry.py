@@ -670,9 +670,10 @@ def test_landing_grids_built_from_registry():
         assert expected in intel_names
 
     industry_names = [c["name"] for c in INDUSTRY_TOOLS]
-    assert len(industry_names) == 8 and "Manufacturing" in industry_names
+    assert len(industry_names) == 9 and "Manufacturing" in industry_names
     assert "Build Finder" in industry_names
     assert "Stockpiles" in industry_names
+    assert "Skill Farm" in industry_names
     # The economy pillar moved to the (non-landing) Market group.
     for moved in ("LP Store ROI", "Trading P&L", "Appraisal"):
         assert moved not in industry_names

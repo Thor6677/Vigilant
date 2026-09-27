@@ -16,7 +16,11 @@ from app.middleware.htmx_redirect import HTMXRedirectMiddleware
 from app.utils.perf import perf_enabled, perf_log
 
 from app.config import get_settings
-from app.db.models import init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns
+from app.db.models import (
+    init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns,
+    ensure_user_fittings_skill_reqs_columns, ensure_dashboard_cache_columns,
+    create_wallet_snapshot_index_background,
+)
 from app.auth.session_guard import check_session
 from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
 from app.db.cache import ESICache  # registers table with Base
@@ -24,10 +28,12 @@ from app.db.sde_models import SDEType, SDESystem, SDEJump, SDEStation, SDERegion
 from app.sde.loader import ensure_sde_loaded
 from app.auth.routes import router as auth_router
 from app.routes.dashboard import router as dashboard_router, _background_scheduler
+from app.routes.dashboard_attention import router as dashboard_attention_router
 from app.routes.characters import router as characters_router
 from app.routes.account import router as account_router
 from app.routes.status import router as status_router
 from app.routes.character_detail import router as character_detail_router
+from app.routes.character_tags import router as character_tags_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
@@ -64,6 +70,7 @@ from app.routes.market import router as market_router
 from app.routes.networth import router as networth_router
 from app.routes.stockpiles import router as stockpiles_router
 from app.routes.pnl import router as pnl_router
+from app.routes.skill_farm import router as skill_farm_router
 
 
 def _css_version() -> str:
@@ -209,10 +216,12 @@ async def healthz():
 app.include_router(auth_router)
 app.include_router(ambient_router)
 app.include_router(dashboard_router)
+app.include_router(dashboard_attention_router)
 app.include_router(characters_router)
 app.include_router(account_router)
 app.include_router(status_router)
 app.include_router(character_detail_router)
+app.include_router(character_tags_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
@@ -253,6 +262,7 @@ app.include_router(market_router)
 app.include_router(networth_router)
 app.include_router(stockpiles_router)
 app.include_router(pnl_router)
+app.include_router(skill_farm_router)
 
 
 def _background_jobs_enabled() -> bool:
@@ -423,6 +433,14 @@ async def startup():
     async with AsyncSessionLocal() as db:
         await ensure_user_fittings_columns(db)
 
+    # ── Can-fly check (T-072): skill-requirement cache columns ──────────
+    async with AsyncSessionLocal() as db:
+        await ensure_user_fittings_skill_reqs_columns(db)
+
+    # ── Skill farm (T-073): character_dashboard_cache.skills_json column ───
+    async with AsyncSessionLocal() as db:
+        await ensure_dashboard_cache_columns(db)
+
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if
     # the table already has duplicates; we delete dups first, then the
@@ -527,6 +545,15 @@ async def startup():
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
     # immediately because the tables are already populated.
     asyncio.create_task(ensure_sde_loaded())
+
+    # T-080: ix_wallet_snapshots_char_recorded, off the blocking startup
+    # path — see create_wallet_snapshot_index_background()'s docstring.
+    # NOT gated by BACKGROUND_JOBS_ENABLED: this is a one-shot schema fix-up
+    # for data that's already on disk, not an ESI sync job, and a dev/test
+    # instance with BACKGROUND_JOBS_ENABLED=false still benefits from it (a
+    # seeded dev DB's wallet_snapshots table is small, so it's cheap either
+    # way — CREATE INDEX IF NOT EXISTS makes it a no-op past the first run).
+    asyncio.create_task(create_wallet_snapshot_index_background())
 
     if not _background_jobs_enabled():
         logging.info(

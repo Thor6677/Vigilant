@@ -25,7 +25,7 @@ import json
 import logging
 from typing import Iterable
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.cache import ESICache
@@ -43,7 +43,9 @@ _CACHE_COLUMNS: dict[str, tuple[str, ...]] = {
     "wallet": ("wallet",),
     "orders": ("orders_json",),
     "location": ("location_json",),
-    "skills": ("skillqueue_json",),
+    # T-073: skills_json (esi-skills.read_skills.v1) joins skillqueue_json
+    # under the same "skills" permission key — withdrawing it clears both.
+    "skills": ("skillqueue_json", "skills_json"),
     "clones": ("clones_json",),
     "industry": ("industry_json",),
     "planets": ("pi_json",),
@@ -56,7 +58,7 @@ _SYNC_FIELDS: dict[str, tuple[str, ...]] = {
     "orders": ("orders",),
     "assets": ("assets",),
     "location": ("location",),
-    "skills": ("skillqueue",),
+    "skills": ("skillqueue", "skills"),
     "clones": ("clones",),
     "industry": ("industry",),
     "planets": ("pi",),
@@ -158,3 +160,29 @@ async def purge_history(db: AsyncSession, character_id: int,
     logger.info("purged history for withdrawn permissions %s, character %s: %s",
                 sorted(keys), cid, counts)
     return counts
+
+
+# Tables that hold a user's own rows about one of their characters (tags,
+# notes, farm settings, dismissed alerts), keyed by a character_id column.
+# Every path that takes a character off an account calls
+# purge_character_user_rows, so a feature only has to list its table here:
+# self-removal, admin remove-character, admin remove-user, and an EVE owner
+# change (_release_transferred). Rows keyed by user_id alone are covered on
+# user removal by USER_OWNED_TABLES in app/routes/admin.py instead.
+PER_CHARACTER_USER_TABLES: tuple[str, ...] = (
+    "character_tags",  # T-074: pilot role tags and private note
+    "dashboard_attention_dismissals",
+    "skill_farm_pilots",  # T-073
+)
+
+
+async def purge_character_user_rows(db: AsyncSession, character_id: int) -> int:
+    """Delete one character's rows from every PER_CHARACTER_USER_TABLES table.
+    Returns the number of rows deleted. Doesn't commit; the caller's removal
+    commits it together with the character row."""
+    total = 0
+    for table in PER_CHARACTER_USER_TABLES:
+        res = await db.execute(
+            text(f"DELETE FROM {table} WHERE character_id = :cid"), {"cid": character_id})
+        total += res.rowcount or 0
+    return total
