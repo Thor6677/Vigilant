@@ -61,6 +61,38 @@ def test_sp_until_next_injector_right_after_one_ready():
     assert farm_math.sp_until_next_injector(SKILL_FLOOR_SP + 500_000, SKILL_FLOOR_SP) == LARGE_SKILL_INJECTOR_SP
 
 
+def test_t077_regression_allocated_sp_is_total_sp_not_total_minus_unallocated():
+    """Real dev numbers (T-077): total_sp 231,404,353, unallocated_sp 78,971,
+    base_sp 5,000,000, training at 2,160 SP/h.
+
+    ESI's total_sp ALREADY excludes unallocated SP, so the allocated figure
+    passed to injectors_ready/sp_until_next_injector must be total_sp AS-IS
+    -- never total_sp - unallocated_sp. Subtracting unallocated_sp again
+    (the bug) understated the surplus and reported "3d 8h" to the next
+    injector instead of the correct ~44.3h (95,647 SP short at 2,160 SP/h)."""
+    total_sp = 231_404_353
+    unallocated_sp = 78_971
+    base_sp = 5_000_000
+    rate_per_hour = 2_160
+
+    # The fix: pass total_sp as-is.
+    assert farm_math.injectors_ready(total_sp, base_sp) == 452
+    sp_needed = farm_math.sp_until_next_injector(total_sp, base_sp)
+    assert sp_needed == 95_647
+    eta_hours = farm_math.hours_until_next_injector(sp_needed, rate_per_hour)
+    assert round(eta_hours, 1) == 44.3
+
+    # The bug this guards against: subtracting unallocated_sp a second time
+    # (it's already excluded from total_sp) understates the surplus and
+    # reports the wrong, longer ETA -- ~80.8h ("3d 8h") instead of ~44.3h.
+    buggy_allocated = total_sp - unallocated_sp
+    buggy_sp_needed = farm_math.sp_until_next_injector(buggy_allocated, base_sp)
+    buggy_eta_hours = farm_math.hours_until_next_injector(buggy_sp_needed, rate_per_hour)
+    assert buggy_sp_needed != sp_needed
+    assert round(buggy_eta_hours, 1) != round(eta_hours, 1)
+    assert round(buggy_eta_hours, 1) == 80.8
+
+
 # ── sp_per_hour / training state ────────────────────────────────────────────
 
 def _entry(start, finish, training_start_sp, level_end_sp):

@@ -77,9 +77,14 @@ def build_pilot_row(
 
     total_sp = int(summary.get("total_sp") or 0)
     unallocated_sp = int(summary.get("unallocated_sp") or 0)
-    # Extraction can only pull from ALLOCATED sp -- unallocated is banked but
-    # untrained and never counted toward injectors_ready (T-073 spec).
-    allocated_sp = total_sp - unallocated_sp
+    # T-077 fix: ESI's total_sp ALREADY excludes unallocated SP (confirmed
+    # against live dev data -- total_sp equalled the sum of
+    # skillpoints_in_skill across every trained skill, with unallocated
+    # reported separately). Subtracting unallocated_sp again here double-
+    # counted it, understating allocated SP and overstating "next injector
+    # in". unallocated_sp is kept only as its own separately-displayed,
+    # informational figure -- never subtracted from total_sp.
+    allocated_sp = total_sp
 
     ready_now = farm_math.injectors_ready(allocated_sp, base_sp)
     sp_needed = farm_math.sp_until_next_injector(allocated_sp, base_sp)
