@@ -1,9 +1,15 @@
+import asyncio
+import logging
+import time
+
 from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Date, Boolean, Text, Float, ForeignKey, Index, UniqueConstraint, event, text
 from app.db.encryption import EncryptedText
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -130,9 +136,17 @@ class WalletSnapshot(Base):
         # character_id + a recorded_at cutoff and want only the newest/
         # oldest matching row(s) per character. The lone character_id index
         # below made that a per-character scan of most of the table on an
-        # account with a year of accumulated snapshots. `_create_missing_
-        # indexes` (app/db/models.py) deploys this to already-existing
-        # tables too, not just fresh installs.
+        # account with a year of accumulated snapshots.
+        #
+        # T-080: building this against an already-large table is itself slow
+        # (measured 5.35s against 1.9M rows) — too slow to run inline at
+        # startup on an upgrade (see the deploy health-check timing note on
+        # _DEFERRED_STARTUP_INDEXES below), so `_create_missing_indexes`
+        # skips it for an EXISTING table and `create_wallet_snapshot_index_
+        # background()` builds it after the app is already serving. A FRESH
+        # install still gets it immediately: `Base.metadata.create_all`
+        # emits this index's DDL as part of `CREATE TABLE` for a table that
+        # doesn't exist yet, so the deferral never applies there.
         Index("ix_wallet_snapshots_char_recorded", "character_id", "recorded_at"),
     )
 
@@ -1426,6 +1440,17 @@ async def ensure_user_fittings_skill_reqs_columns(db: AsyncSession) -> None:
     await db.commit()
 
 
+# T-080: indexes built here run inline at startup, before the app answers
+# /healthz. Building ix_wallet_snapshots_char_recorded against an
+# already-large wallet_snapshots table measured 5.35s (1.9M rows) — the
+# deploy health check only retries for ~20s (scripts/health-check.sh), so a
+# bigger production table risks a failed deploy and an automatic revert.
+# Named indexes in here are built by create_wallet_snapshot_index_
+# background() instead, once the app is already serving. See that
+# function's docstring for what still works before it's built.
+_DEFERRED_STARTUP_INDEXES = frozenset({"ix_wallet_snapshots_char_recorded"})
+
+
 def _create_missing_indexes(sync_conn) -> None:
     # create_all skips tables that already exist, so any Index() added
     # to an existing model (or `index=True` on a new column) never
@@ -1433,6 +1458,8 @@ def _create_missing_indexes(sync_conn) -> None:
     # checkfirst CREATE — idempotent for already-present indexes.
     for table in Base.metadata.tables.values():
         for index in table.indexes:
+            if index.name in _DEFERRED_STARTUP_INDEXES:
+                continue
             index.create(bind=sync_conn, checkfirst=True)
 
 
@@ -1440,6 +1467,59 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_create_missing_indexes)
+
+
+async def create_wallet_snapshot_index_background(delay: float = 5.0) -> None:
+    """T-080: build ix_wallet_snapshots_char_recorded off the startup path.
+
+    _create_missing_indexes() (above) deliberately skips this index for an
+    already-existing wallet_snapshots table — building it inline blocked
+    startup for 5.35s against a 1.9M-row table in the planner's measurement,
+    against a ~20s health-check budget on deploy. This function is the other
+    half: called as a fire-and-forget background task a few seconds after
+    startup (see app/main.py), well after the app is already answering
+    /healthz.
+
+    Until this index exists (a fresh install never hits this — see the
+    comment on the Index() declaration on WalletSnapshot), the per-character
+    seek queries in app.dashboard.walletdelta.load_wallet_baselines and
+    app.dashboard.detail.load_wallet_sparkline_points still work: both
+    filter by an exact character_id, which the older, always-present
+    `ix_wallet_snapshots_character_id` (character_id alone) already answers
+    with an index seek — bounded to that one character's own rows, never a
+    full-table scan — just without the recorded_at range folded into the
+    same seek, so each per-character branch has to walk and sort its own
+    rows instead of landing directly on the cutoff. Measured on a 300k-row/
+    24-character fixture (tests/test_dashboard_walletdelta_perf.py,
+    tests/test_dashboard_detail_perf.py): load_wallet_baselines goes from
+    ~1.3ms (composite index) to ~31ms (character_id-only), and
+    load_wallet_sparkline_points from ~40ms to ~53ms — both still well
+    under what the ROW_NUMBER()/every-row queries they replaced cost (~63ms
+    and ~149ms respectively on the same fixture), just not as fast as with
+    the composite index. If this background build fails outright, that
+    slower-but-still-bounded state is where the dashboard stays until the
+    next restart retries it — see the WARNING log line below.
+
+    `CREATE INDEX IF NOT EXISTS` makes a second run (a retry, or a second
+    call in tests) a no-op. Never raises: a failure here costs a missing
+    optimization, not a broken app, so it's one WARNING line, not a
+    traceback that could take anything else down with it.
+    """
+    if delay:
+        await asyncio.sleep(delay)
+    started = time.monotonic()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_wallet_snapshots_char_recorded "
+                "ON wallet_snapshots (character_id, recorded_at)"
+            ))
+        log.info(
+            "Built ix_wallet_snapshots_char_recorded in %.2fs",
+            time.monotonic() - started,
+        )
+    except Exception as e:
+        log.warning("ix_wallet_snapshots_char_recorded background build failed: %s", e)
 
 
 async def get_db() -> AsyncSession:

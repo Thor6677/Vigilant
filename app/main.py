@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.db.models import (
     init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns,
     ensure_user_fittings_skill_reqs_columns, ensure_dashboard_cache_columns,
+    create_wallet_snapshot_index_background,
 )
 from app.auth.session_guard import check_session
 from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
@@ -544,6 +545,15 @@ async def startup():
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
     # immediately because the tables are already populated.
     asyncio.create_task(ensure_sde_loaded())
+
+    # T-080: ix_wallet_snapshots_char_recorded, off the blocking startup
+    # path — see create_wallet_snapshot_index_background()'s docstring.
+    # NOT gated by BACKGROUND_JOBS_ENABLED: this is a one-shot schema fix-up
+    # for data that's already on disk, not an ESI sync job, and a dev/test
+    # instance with BACKGROUND_JOBS_ENABLED=false still benefits from it (a
+    # seeded dev DB's wallet_snapshots table is small, so it's cheap either
+    # way — CREATE INDEX IF NOT EXISTS makes it a no-op past the first run).
+    asyncio.create_task(create_wallet_snapshot_index_background())
 
     if not _background_jobs_enabled():
         logging.info(
