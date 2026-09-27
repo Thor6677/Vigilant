@@ -551,3 +551,21 @@ def test_page_render_shows_modules_under_slot_headings(monkeypatch):
         assert citadel_block.index("Service Slots") < citadel_block.index("Test Render Service Module")
     finally:
         teardown()
+
+
+def test_ship_slot_counts_read_the_right_dogma_attributes(monkeypatch):
+    # 12 is lowSlots and 14 is hiSlots. They were read the other way round,
+    # so a ship with 2 highs and 4 lows showed "High Slots 2/4" with two
+    # phantom empty slots and "Low Slots 4/2".
+    async def fake_get_type(client, type_id):
+        return {"name": "Test Hull", "dogma_attributes": [
+            {"attribute_id": 12, "value": 4.0},
+            {"attribute_id": 13, "value": 3.0},
+            {"attribute_id": 14, "value": 2.0},
+            {"attribute_id": 1137, "value": 3.0},
+        ]}
+
+    monkeypatch.setattr(fittings_mod.esi_universe, "get_type", fake_get_type)
+    name, slots = asyncio.run(fittings_mod._get_ship_info(None, 1))
+    assert name == "Test Hull"
+    assert slots == {"high": 2, "med": 3, "low": 4, "rig": 3}

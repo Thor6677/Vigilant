@@ -97,10 +97,11 @@ SLOT_LABELS = {
     "drone": "Drones", "cargo": "Cargo", "fighter": "Fighters",
 }
 
-# Dogma attribute IDs for ship slot counts
-DGMA_HI = 12
+# Dogma attribute IDs for ship slot counts (12 lowSlots, 13 medSlots,
+# 14 hiSlots, 1137 rigSlots, per ESI's /dogma/attributes/{id}/).
+DGMA_HI = 14
 DGMA_MED = 13
-DGMA_LOW = 14
+DGMA_LOW = 12
 DGMA_RIG = 1137
 
 
