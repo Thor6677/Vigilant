@@ -24,6 +24,9 @@ import time
 import httpx
 
 from app.config import get_settings
+# Importing log_redaction installs the filter that keeps httpx's own request
+# line from printing the webhook URL; redact_request_urls() marks the send.
+from app.notify.log_redaction import redact_request_urls
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +104,17 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
 
     payload = {"content": f"**{title}**\n{body}" if body else f"**{title}**"}
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            resp = await client.post(webhook_url, json=payload)
-            if resp.status_code not in (200, 204):
-                logger.warning(
-                    "discord alert relay: HTTP %s posting type=%s", resp.status_code, alert_type
-                )
-                return f"failed: HTTP {resp.status_code}"
+        with redact_request_urls():
+            async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+                resp = await client.post(webhook_url, json=payload)
+        if resp.status_code not in (200, 204):
+            logger.warning(
+                "discord alert relay: HTTP %s posting type=%s", resp.status_code, alert_type
+            )
+            return f"failed: HTTP {resp.status_code}"
     except Exception as e:
-        logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, e)
+        # The exception's class only, never its text: a client error's message
+        # can quote the URL it was made to, and that URL is the credential.
+        logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, type(e).__name__)
         return f"failed: {type(e).__name__}"
     return SENT

@@ -35,6 +35,9 @@ import httpx
 from sqlalchemy import select
 
 from app.db.models import AsyncSessionLocal, UserNotifySettings
+# Importing log_redaction installs the filter that keeps httpx's own request
+# line from printing the URL; redact_request_urls() marks the send.
+from app.notify.log_redaction import redact_request_urls
 # The vetting and the pinned transport are ISS-055's; they are reused as they
 # are so both webhook senders dial exactly the same way and one set of tests
 # (tests/test_webhook_targets.py) covers the socket layer for both.
@@ -104,6 +107,10 @@ ALERT_TYPES: tuple[str, ...] = tuple(key for _, items in ALERT_TYPE_GROUPS for k
 ALERT_LABELS: dict[str, str] = {key: label for _, items in ALERT_TYPE_GROUPS for key, label in items}
 DEFAULT_ALERT_TYPES: tuple[str, ...] = ("structure_attack", "structure_fuel", "pi_expiring", "stockpile_low")
 _TYPE_ALIASES = {"structure_alert": "structure_attack"}
+# The Account page's test message is not an alert type anyone opts in to, so
+# it is not in ALERT_TYPES; it still needs a footer label that reads as one.
+TEST_TYPE = "test"
+_EXTRA_LABELS: dict[str, str] = {TEST_TYPE: "Test message"}
 
 
 def parse_alert_types(raw: str | None) -> list[str]:
@@ -305,7 +312,7 @@ def _kill_alert_text(event: dict) -> tuple[str, str, str]:
 
 
 def build_payload(title: str, body: str, alert_type: str) -> dict:
-    label = ALERT_LABELS.get(alert_type) or alert_type
+    label = ALERT_LABELS.get(alert_type) or _EXTRA_LABELS.get(alert_type) or alert_type
     return {
         "username": "Vigilant",
         "embeds": [{
@@ -352,11 +359,12 @@ async def deliver(url: str, title: str, body: str, alert_type: str) -> Outcome:
     if problem:
         return Outcome(False, f"not sent: {problem}")
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
-                                     trust_env=False,
-                                     transport=_PinnedTransport(addrs)) as client:
-            resp = await client.post(url, json=build_payload(title, body, alert_type),
-                                     headers={"User-Agent": user_agent()})
+        with redact_request_urls():
+            async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
+                                         trust_env=False,
+                                         transport=_PinnedTransport(addrs)) as client:
+                resp = await client.post(url, json=build_payload(title, body, alert_type),
+                                         headers={"User-Agent": user_agent()})
     except Exception as e:
         return Outcome(False, f"{type(e).__name__}"[:255])
     status = resp.status_code
@@ -455,7 +463,7 @@ async def send_test_message(db, user_id: int, url: str) -> Outcome:
         outcome = await deliver(
             url, "Test message",
             "Vigilant can reach this channel. Alerts you opted in to will arrive here.",
-            "test")
+            TEST_TYPE)
     except Exception as e:
         outcome = Outcome(False, type(e).__name__)
     if not outcome.ok:
