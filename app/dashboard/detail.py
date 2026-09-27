@@ -14,13 +14,21 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, cast, func, literal, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dashboard.attention import pi_expiry_state
 from app.db.models import NetWorthSnapshot, WalletSnapshot
 
 SPARKLINE_WINDOW = timedelta(days=7)
+# T-080: bucket the window into 3h buckets (at most ~56 points/pilot) instead
+# of returning every ~2-minute snapshot (~126k rows for 24 pilots measured on
+# a real install) for Python to group. See load_wallet_sparkline_points.
+SPARKLINE_BUCKET = timedelta(hours=3)
+# SQLite's default compound-select limit is 500 terms; stay well clear of it.
+# See _build_latest_networth_stmt's docstring — load_latest_networth() chunks
+# character_ids by this many per UNION ALL statement.
+_MAX_IDS_PER_STATEMENT = 200
 
 
 def _format_duration(seconds: float) -> str:
@@ -155,32 +163,81 @@ def sparkline_delta(points: list[tuple[datetime, float]]) -> dict | None:
 
 # ── I/O: one batched statement each, for every character at once ────────────
 
+def _build_latest_networth_stmt(character_ids: list[int]):
+    """The query itself, split out of load_latest_networth() so
+    tests/test_dashboard_detail_perf.py can run EXPLAIN QUERY PLAN on
+    exactly what production executes. `character_ids` must be non-empty —
+    the public function handles the empty-list short-circuit.
+
+    T-080: same UNION ALL-of-per-character-seeks shape as
+    app.dashboard.walletdelta._build_wallet_baselines_stmt, for the same
+    reason — a ROW_NUMBER() window here scans every NetWorthSnapshot row
+    for the given characters before it can rank anything, with no date
+    bound at all. NetWorthSnapshot writes once a day per character (not
+    every ~2 minutes like WalletSnapshot), so this was never close to
+    wallet_snapshots' cost — but the fix is the same one line of reasoning,
+    it's just as cheap to apply, and NetWorthSnapshot's composite PK
+    (character_id, date) already gives each branch's `ORDER BY date DESC
+    LIMIT 1` its own index seek for free (SEARCH ... USING INDEX
+    sqlite_autoindex_net_worth_snapshots_1).
+
+    Callers get a single chunk of at most `_MAX_IDS_PER_STATEMENT` ids —
+    load_latest_networth() does the chunking (see its docstring), same as
+    app.dashboard.walletdelta.load_wallet_baselines, to stay clear of
+    SQLite's compound-select term limit.
+    """
+    return union_all(*[
+        select(
+            literal(cid).label("character_id"),
+            (
+                select(NetWorthSnapshot.total)
+                .where(NetWorthSnapshot.character_id == cid)
+                .order_by(NetWorthSnapshot.date.desc())
+                .limit(1)
+                .scalar_subquery()
+            ).label("total"),
+        )
+        for cid in character_ids
+    ])
+
+
 async def load_latest_networth(db: AsyncSession, character_ids: list[int]) -> dict[int, float]:
     """{character_id: total} for each character's most recent
-    NetWorthSnapshot (one daily row per character) — one statement via a
-    ROW_NUMBER() window, not one query per pilot."""
+    NetWorthSnapshot (one daily row per character), in ONE statement — or,
+    past `_MAX_IDS_PER_STATEMENT` ids, one statement per chunk (SQLite caps
+    a UNION ALL at 500 terms; see _build_latest_networth_stmt)."""
     if not character_ids:
         return {}
-    row_number = (
-        func.row_number()
-        .over(partition_by=NetWorthSnapshot.character_id, order_by=NetWorthSnapshot.date.desc())
-        .label("rn")
-    )
-    subq = (
-        select(NetWorthSnapshot.character_id, NetWorthSnapshot.total, row_number)
-        .where(NetWorthSnapshot.character_id.in_(character_ids))
-        .subquery()
-    )
-    rows = (await db.execute(select(subq.c.character_id, subq.c.total).where(subq.c.rn == 1))).all()
-    return {cid: total for cid, total in rows}
+    out: dict[int, float] = {}
+    for i in range(0, len(character_ids), _MAX_IDS_PER_STATEMENT):
+        chunk = character_ids[i:i + _MAX_IDS_PER_STATEMENT]
+        rows = (await db.execute(_build_latest_networth_stmt(chunk))).all()
+        out.update((cid, total) for cid, total in rows if total is not None)
+    return out
 
 
 async def load_wallet_sparkline_points(
     db: AsyncSession, character_ids: list[int], now: datetime | None = None,
 ) -> dict[int, list[tuple[datetime, float]]]:
     """{character_id: [(recorded_at, balance), ...]} (chronological) over the
-    last 7 days, for every id in `character_ids`, in ONE statement — every
-    row is fetched together and grouped in Python, not queried per pilot."""
+    last 7 days, for every id in `character_ids`, in ONE statement.
+
+    T-080: a real install writes a WalletSnapshot roughly every 2 minutes, so
+    the naive "every row in the window" query measured ~126k rows for 24
+    pilots, all shipped to Python just to be grouped by character. Downsample
+    in SQL instead: bucket the window into SPARKLINE_BUCKET-wide buckets and
+    keep only the last (highest recorded_at) balance per
+    (character_id, bucket), via SQLite's documented "bare column" behaviour —
+    a bare, non-aggregated, non-GROUP-BY column in a query with a single
+    MIN()/MAX() takes its value from the row that produced that MIN/MAX. At
+    most ~56 points per pilot come back, not ~4200.
+
+    The WHERE clause alone (character_id IN (...) AND recorded_at >= cutoff)
+    is what makes SQLite seek ix_wallet_snapshots_char_recorded per
+    character id instead of scanning the table; GROUP BY only reduces what
+    comes back afterwards. See tests/test_dashboard_detail_perf.py for the
+    EXPLAIN QUERY PLAN and timing.
+    """
     if not character_ids:
         return {}
     now = now or datetime.now(timezone.utc)
@@ -188,15 +245,31 @@ async def load_wallet_sparkline_points(
     if cutoff.tzinfo is not None:
         cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
 
-    rows = (
-        await db.execute(
-            select(WalletSnapshot.character_id, WalletSnapshot.recorded_at, WalletSnapshot.balance)
-            .where(WalletSnapshot.character_id.in_(character_ids))
-            .where(WalletSnapshot.recorded_at >= cutoff)
-            .order_by(WalletSnapshot.character_id, WalletSnapshot.recorded_at)
-        )
-    ).all()
+    rows = (await db.execute(_build_wallet_sparkline_stmt(character_ids, cutoff))).all()
     out: dict[int, list[tuple[datetime, float]]] = {}
     for cid, recorded_at, balance in rows:
         out.setdefault(cid, []).append((recorded_at, balance))
     return out
+
+
+def _build_wallet_sparkline_stmt(character_ids: list[int], cutoff: datetime):
+    """The query itself, split out of load_wallet_sparkline_points() so
+    tests/test_dashboard_detail_perf.py can run EXPLAIN QUERY PLAN on
+    exactly what production executes. `character_ids` must be non-empty —
+    the public function handles the empty-list short-circuit."""
+    bucket_seconds = int(SPARKLINE_BUCKET.total_seconds())
+    epoch_secs = cast(func.strftime("%s", WalletSnapshot.recorded_at), Integer)
+    # `.op("/")` (SQL integer division), not Python's `/` — SQLAlchemy's `/`
+    # on an Integer coerces the RHS to NUMERIC to mimic Python true-division,
+    # which would turn the bucket into a near-unique fraction per row and
+    # defeat the GROUP BY entirely.
+    bucket = epoch_secs.op("/")(bucket_seconds).label("bucket")
+    latest_at = func.max(WalletSnapshot.recorded_at)
+
+    return (
+        select(WalletSnapshot.character_id, latest_at.label("recorded_at"), WalletSnapshot.balance)
+        .where(WalletSnapshot.character_id.in_(character_ids))
+        .where(WalletSnapshot.recorded_at >= cutoff)
+        .group_by(WalletSnapshot.character_id, bucket)
+        .order_by(WalletSnapshot.character_id, latest_at)
+    )
