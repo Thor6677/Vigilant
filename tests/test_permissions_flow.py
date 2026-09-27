@@ -8,6 +8,7 @@ requested, what gets stored, what is revoked, and what is deleted.
 import asyncio
 import base64
 import json
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -470,6 +471,168 @@ def test_notice_says_roles_are_unknown_without_the_roles_permission():
     assert "can't check" in html and "Your corporation roles" in html
 
 
+# ── ISS-057: one consolidated box per corp card, not one per permission ─────
+
+CORP_PERM_KEYS = [p.key for p in cat.PERMISSIONS if p.group == cat.CORPORATION and p.key != "corp_roles"]
+ALL_CORP_SCOPES = [s for p in cat.PERMISSIONS if p.group == cat.CORPORATION for s in p.scopes]
+
+
+def _render_summary(characters, permission_list, roles=None):
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=True)
+    env.globals.update(perms=cat, perm_status=perm_status)
+    tmpl = env.from_string(
+        '{% from "partials/_permission_notice.html" import corp_permission_summary %}'
+        '{{ corp_permission_summary(chars, keys, roles, what="that part of this page stays empty") }}')
+    return tmpl.render(chars=characters, keys=permission_list, roles=roles)
+
+
+def test_summary_is_silent_when_every_permission_is_covered():
+    """The loop's original rule survives the rewrite: a permission at least
+    one character can use says nothing, and here every permission can be."""
+    c = _d(1, "Boss", ALL_CORP_SCOPES)
+    assert _render_summary([c], CORP_PERM_KEYS, roles={1: {"Director"}}).strip() == ""
+
+
+def test_summary_is_silent_for_a_permission_covered_by_another_character():
+    """A single Director covers every role-gated permission for the whole
+    corp card, even though the alt alongside them holds no roles at all —
+    the card's data comes from whoever CAN answer, not from everyone."""
+    director = _d(1, "Boss", ALL_CORP_SCOPES)
+    alt = _d(2, "Alt Pilot", ALL_CORP_SCOPES)
+    html = _render_summary([director, alt], CORP_PERM_KEYS, roles={1: {"Director"}, 2: set()})
+    assert html.strip() == ""
+
+
+def test_summary_consolidates_six_role_gaps_into_one_box():
+    """The reported case: two characters with no corp roles at all, so all
+    six role-gated corporation permissions come back short. That used to be
+    six stacked .perm-notice boxes; now it is exactly one."""
+    alt = _d(1, "Alt Pilot", ALL_CORP_SCOPES)
+    ops = _d(2, "Nightly Ops", ALL_CORP_SCOPES)
+    html = _render_summary([alt, ops], CORP_PERM_KEYS, roles={1: set(), 2: set()})
+    assert html.count('class="perm-notice"') == 1
+    assert html.count("Alt Pilot") == 1
+    assert html.count("Nightly Ops") == 1
+    for label in ("Corporation wallets", "Corporation market orders", "Corporation industry jobs",
+                  "Corporation structures", "Corporation assets", "Corporation blueprints"):
+        assert label in html
+    assert "6 corporation sections need an in-game role" in html
+    assert "<details" in html and "Roles are set in game, not in Vigilant." in html
+
+
+def test_summary_orders_actionable_lines_before_role_gaps():
+    """Declined, roles-unknown and an in-game-role gap all at once: the two
+    actionable causes (with their links) must read before the role list."""
+    decliner = _d(1, "Decliner", [], declined=[cat.CORP_WALLETS])
+    private = _d(2, "Private", [cat.CORP_WALLETS])
+    clerk = _d(3, "Clerk", [cat.CORP_ORDERS, cat.CORP_ROLES])
+    html = _render_summary([decliner, private, clerk], CORP_PERM_KEYS, roles={3: set()})
+    assert "You chose not to share" in html
+    assert "can't check" in html and "Share roles" in html
+    assert "6 corporation sections need an in-game role" not in html
+    assert "corporation section" in html
+    decl_idx = html.index("You chose not to share")
+    unknown_idx = html.index("can't check")
+    role_idx = html.index("corporation section")
+    assert decl_idx < role_idx and unknown_idx < role_idx
+
+
+def test_summary_groups_role_gaps_by_character_set():
+    """Different character sets missing roles for different sections get
+    their own named line, and permissions declined outright by one of them
+    fold into a single actionable line rather than one line each."""
+    others_scopes = [s for k in ("corp_members", "corp_structures", "corp_contracts",
+                                  "corp_assets", "corp_blueprints")
+                     for s in cat.BY_KEY[k].scopes] + [cat.CORP_ROLES]
+    everyone = _d(1, "Has No Roles", ALL_CORP_SCOPES)
+    partial = _d(2, "Partial Alt", others_scopes,
+                 declined=[cat.CORP_WALLETS, cat.CORP_ORDERS, cat.CORP_JOBS])
+    roles = {1: set(), 2: set()}
+    html = _render_summary([everyone, partial], CORP_PERM_KEYS, roles=roles)
+
+    # One declined line covers all three permissions Partial Alt turned down.
+    decl_lines = re.findall(r'<div class="perm-notice-line">\s*<span class="perm-notice-kind is-permission">'
+                             r'permission</span>\s*<span>You chose not to share (.*?)</span>', html, re.S)
+    assert len(decl_lines) == 1
+    assert "Corporation wallets" in decl_lines[0] and "Corporation industry jobs" in decl_lines[0]
+
+    # Role gaps split into the two character sets that actually hold each
+    # permission: Has No Roles alone for the three Partial Alt declined,
+    # both of them for the three permissions they share.
+    who_lines = re.findall(r'<p class="perm-role-who">(.*?)</p>', html, re.S)
+    assert len(who_lines) == 2
+    solo = next(w for w in who_lines if "Partial Alt" not in w)
+    shared = next(w for w in who_lines if "Partial Alt" in w)
+    assert "Has No Roles" in solo and "Has No Roles" in shared
+    assert html.count("<dt>") == 6
+
+
+def test_single_notice_import_unaffected_by_new_summary_macro():
+    """corp_permission_summary lives in the same file as permission_notice;
+    importing both must not change what a single-permission page renders."""
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=True)
+    env.globals.update(perms=cat, perm_status=perm_status)
+    tmpl = env.from_string(
+        '{% from "partials/_permission_notice.html" import permission_notice, corp_permission_summary %}'
+        '{{ permission_notice(chars, key, roles) }}')
+    c = _d(1, "Clerk", [cat.CORP_WALLETS, cat.CORP_ROLES])
+    html = tmpl.render(chars=[c], key="corp_wallets", roles={1: {"Trader"}})
+    assert "Accountant, Junior Accountant or Director" in html
+    assert "perm-notice-roles" not in html and "<details" not in html
+
+
+def test_corp_detail_page_wires_the_summary_macro_in():
+    """End-to-end through the real route and template, not just the macro in
+    isolation: /corporations/{id}/detail must actually call
+    corp_permission_summary with the key list corp_detail.html builds. A
+    typo in that selectattr/rejectattr chain would render nothing here while
+    every macro-level test above kept passing."""
+    import app.main as main
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp.name}")
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    corp_id, uid, cid = 98000123, 90999, 910001
+
+    async def seed():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            db.add(User(id=uid, role="user"))
+            db.add(Character(
+                character_id=cid, character_name="Wallet Watcher", user_id=uid,
+                corporation_id=corp_id, is_main=True,
+                access_token=_access(), refresh_token="r",
+                token_expiry=datetime.now(timezone.utc) + timedelta(hours=1),
+                scopes=cat.CORP_WALLETS, declined_scopes="",
+            ))
+            await db.commit()
+    _run(seed())
+
+    async def override_get_db():
+        async with SessionLocal() as session:
+            yield session
+    main.app.dependency_overrides[get_db] = override_get_db
+    try:
+        signer = itsdangerous.TimestampSigner(main.settings.secret_key)
+        cookie = signer.sign(base64.b64encode(json.dumps({"user_id": uid}).encode())).decode()
+        client = TestClient(main.app, base_url="https://testserver")
+        client.cookies.set("vigilant_session", cookie)
+        r = client.get(f"/corporations/{corp_id}/detail")
+    finally:
+        main.app.dependency_overrides.pop(get_db, None)
+
+    assert r.status_code == 200
+    # Corp wallets: shared, but roles unknown (no CharacterCorpRoles row and
+    # no corp_roles scope) -> one "in-game role?" line with its Share link.
+    # The other seven corp permissions were never asked for this character
+    # -> one folded "permission" line, not seven.
+    assert r.text.count('class="perm-notice"') == 1
+    assert r.text.count('perm-notice-kind is-permission') == 1
+    assert "Share roles" in r.text
+
+
 def test_granted_scopes_come_from_the_tokens_own_scp_claim(env, monkeypatch):
     """The stored scopes must match what ESIClient's guard will allow, and the
     guard reads the access token's scp claim — so the callback does too."""
@@ -676,3 +839,13 @@ def test_corp_journal_explains_every_failure(env, monkeypatch):
     assert r.status_code == 200
     assert "Main Pilot: authorization expired" in r.text
     assert "Alt Pilot: EVE refused (in-game role)" in r.text
+
+
+def test_corp_card_summary_styles_reach_only_the_cards_own_summary():
+    # corporations.html styled `.corp-accordion summary`, which also matched the
+    # role-gap <details> inside the card's permission notice: its line was
+    # pushed to the right edge and got the open card's 2px rule under it.
+    with open("app/templates/corporations.html", encoding="utf-8") as f:
+        page = f.read()
+    assert not re.search(r"\.corp-accordion(\[open\])?\s+summary", page)
+    assert ".corp-accordion > summary {" in page

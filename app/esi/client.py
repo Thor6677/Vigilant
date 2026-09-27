@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config import get_settings, user_agent
 from app.db.models import Character
 from app.db.cache import cache_get, cache_set
+from app.db.encryption import is_fernet_shaped
 from app.esi.rate_limit import rate_limit_tracker, log_event
 from app.esi import scope_guard
 from app.esi.scope_guard import ScopeNotGranted  # noqa: F401  (re-exported for callers)
@@ -163,6 +164,15 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
 
 
 async def _do_refresh(character: Character, db: AsyncSession) -> str:
+    if is_fernet_shaped(character.refresh_token):
+        # EncryptedText.process_result_value returns undecryptable ciphertext
+        # as-is rather than raising, so a token wrapped under a SECRET_KEY we
+        # no longer have reaches here looking like a string. Sending it to
+        # SSO would just earn an invalid_grant after a network round trip —
+        # short-circuit straight to the same outcome (TokenRevoked) that
+        # a 400/401 from SSO produces below.
+        raise TokenRevoked("stored refresh_token is ciphertext from a previous SECRET_KEY")
+
     credentials = base64.b64encode(
         f"{settings.eve_client_id}:{settings.eve_client_secret}".encode()
     ).decode()

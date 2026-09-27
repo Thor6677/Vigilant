@@ -11,6 +11,7 @@ Uses the SSO-stubbed environment from test_permissions_flow.py, whose users
 start with no epoch, like accounts from before epochs existed.
 """
 import asyncio
+import logging
 import os
 import tempfile
 
@@ -19,7 +20,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import AdminAuditLog, Base, User
-from app.db.user_ids import ensure_users_autoincrement
+from app.db.user_ids import ensure_users_autoincrement, ensure_users_sequence_floor
 from tests.test_permissions_flow import (  # noqa: F401 — `env` is a fixture
     MAIN_ID, OTHER_ID, USER_ID, _pending, _scalar, env,
 )
@@ -249,6 +250,155 @@ def test_rebuild_refuses_a_table_with_columns_it_does_not_know(old_db):
         await db.commit()
     _q(SessionLocal, add_col)
     assert _q(SessionLocal, ensure_users_autoincrement) is False
+    sql = _q(SessionLocal, lambda db: _scalar(db, text(
+        "SELECT sql FROM sqlite_master WHERE name = 'users'")))
+    assert "AUTOINCREMENT" not in sql.upper()
+
+
+# ── The floor: ids freed *before* the rebuild are not handed out either ────
+#
+# The rebuild above only stops reuse of ids that were still present in
+# `users` when it ran. An id above that copy-time max, freed by a deletion
+# that happened earlier still, is untouched by the rebuild — sqlite_sequence
+# never learned about it. `ensure_users_sequence_floor` is what raises the
+# sequence to cover that gap.
+
+@pytest.fixture
+def full_schema_db(tmp_path):
+    """A brand-new install: every mapped table, AUTOINCREMENT from create_all."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'full.db'}")
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    _run(setup())
+    yield engine, SessionLocal
+    _run(engine.dispose())
+
+
+def _seq(SessionLocal):
+    return _q(SessionLocal, lambda db: _scalar(db, text(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'users'")))
+
+
+def _add_user(SessionLocal):
+    async def go(db):
+        u = User()
+        db.add(u)
+        await db.commit()
+        return u.id
+    return _q(SessionLocal, go)
+
+
+def test_floor_raises_sequence_when_a_freed_id_is_still_referenced(old_db):
+    """max(users.id) is 5 when the rebuild runs, but a row still references
+    user_id 9 — some other account, freed even earlier, that the rebuild's
+    copy-time max never saw. Without the floor the next signup gets 6,
+    reusing an id one of ids 6..9 already had. With it, the next signup
+    gets 10."""
+    engine, SessionLocal = old_db
+
+    async def add_more_users(db):
+        await db.execute(text(
+            "INSERT INTO users (id, role, is_admin, session_epoch) VALUES "
+            "(4, 'user', 0, 'd'), (5, 'user', 0, 'e')"))
+        await db.commit()
+    _q(SessionLocal, add_more_users)
+
+    assert _q(SessionLocal, ensure_users_autoincrement) is True
+
+    async def add_ref(db):
+        await db.execute(text("INSERT INTO characters (id, user_id) VALUES (11, 9)"))
+        await db.commit()
+    _q(SessionLocal, add_ref)
+
+    raised = _q(SessionLocal, ensure_users_sequence_floor)
+    # Checked before the `raised` assertion: on the old code (no floor) this
+    # is 6, the actual reuse the issue describes, not just a bool mismatch.
+    assert _add_user(SessionLocal) == 10
+    assert raised is True
+
+
+def test_floor_is_a_noop_when_nothing_references_a_higher_id(old_db, caplog):
+    engine, SessionLocal = old_db
+    assert _q(SessionLocal, ensure_users_autoincrement) is True
+    before = _seq(SessionLocal)
+
+    caplog.set_level(logging.INFO, logger="app.db.user_ids")
+    assert _q(SessionLocal, ensure_users_sequence_floor) is False
+
+    assert _seq(SessionLocal) == before
+    assert [r for r in caplog.records if r.name == "app.db.user_ids"] == []
+
+
+def test_floor_inserts_a_missing_sqlite_sequence_row(full_schema_db):
+    engine, SessionLocal = full_schema_db
+
+    async def setup(db):
+        db.add_all([User(), User(), User(), User(), User()])  # ids 1..5
+        await db.commit()
+        await db.execute(text("DELETE FROM sqlite_sequence WHERE name = 'users'"))
+        # A row naming an id above the current max, as if that account had
+        # already been removed with no sequence row ever recorded for it.
+        await db.execute(text(
+            "INSERT INTO admin_audit_log (user_id, event_type) VALUES (9, 'probe')"))
+        await db.commit()
+    _q(SessionLocal, setup)
+
+    assert _q(SessionLocal, ensure_users_sequence_floor) is True
+    assert _seq(SessionLocal) == 9
+    assert _add_user(SessionLocal) == 10
+
+
+def test_floor_is_idempotent(old_db):
+    engine, SessionLocal = old_db
+    _q(SessionLocal, ensure_users_autoincrement)
+
+    async def create_gap(db):
+        await db.execute(text("DELETE FROM users WHERE id = 3"))
+        await db.execute(text("INSERT INTO characters (id, user_id) VALUES (11, 9)"))
+        await db.commit()
+    _q(SessionLocal, create_gap)
+
+    assert _q(SessionLocal, ensure_users_sequence_floor) is True
+    assert _q(SessionLocal, ensure_users_sequence_floor) is False
+    assert _seq(SessionLocal) == 9
+
+
+def test_floor_skips_a_column_missing_from_an_older_table(old_db):
+    """A table the metadata scan knows about, but that predates one of its
+    scanned columns, must be skipped rather than raising "no such column"."""
+    engine, SessionLocal = old_db
+
+    async def setup(db):
+        # hosted_images exists here without its user_id column yet.
+        await db.execute(text("CREATE TABLE hosted_images (id VARCHAR(12) PRIMARY KEY)"))
+        await db.commit()
+    _q(SessionLocal, setup)
+    assert _q(SessionLocal, ensure_users_autoincrement) is True
+
+    async def create_gap(db):
+        await db.execute(text("DELETE FROM users WHERE id = 3"))
+        await db.execute(text("INSERT INTO characters (id, user_id) VALUES (11, 9)"))
+        await db.commit()
+    _q(SessionLocal, create_gap)
+
+    assert _q(SessionLocal, ensure_users_sequence_floor) is True
+    assert _seq(SessionLocal) == 9
+
+
+def test_floor_leaves_a_table_without_autoincrement_alone(old_db, caplog):
+    engine, SessionLocal = old_db
+
+    async def add_ref(db):
+        await db.execute(text("INSERT INTO characters (id, user_id) VALUES (11, 9)"))
+        await db.commit()
+    _q(SessionLocal, add_ref)
+
+    caplog.set_level(logging.INFO, logger="app.db.user_ids")
+    assert _q(SessionLocal, ensure_users_sequence_floor) is False
+    assert [r for r in caplog.records if r.name == "app.db.user_ids"] == []
     sql = _q(SessionLocal, lambda db: _scalar(db, text(
         "SELECT sql FROM sqlite_master WHERE name = 'users'")))
     assert "AUTOINCREMENT" not in sql.upper()

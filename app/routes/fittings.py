@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
@@ -22,6 +23,9 @@ templates = Jinja2Templates(directory="app/templates")
 
 # ── Slot flag mapping ─────────────────────────────────────────────────────────
 
+# Legacy integer inventory flags — kept as a fallback. The live ESI fittings
+# endpoint (per its OpenAPI spec) hands back the string enum below instead,
+# but old cached data or a future ESI regression could still hand us ints.
 SLOT_CATEGORY = {}
 for f in range(11, 19): SLOT_CATEGORY[f] = "low"
 for f in range(19, 27): SLOT_CATEGORY[f] = "med"
@@ -32,17 +36,72 @@ SLOT_CATEGORY[87] = "drone"
 SLOT_CATEGORY[5] = "cargo"
 SLOT_CATEGORY[158] = "fighter"
 
-SLOT_ORDER = {"high": 0, "med": 1, "low": 2, "rig": 3, "subsystem": 4, "drone": 5, "cargo": 6, "fighter": 7}
+# String flag → category. Exact matches for the bay-style flags, prefix
+# matches for the numbered slot flags (HiSlot0-7, MedSlot0-7, ...) since the
+# trailing digit is the slot index, not part of the category.
+_STRING_FLAG_EXACT = {
+    "Cargo": "cargo",
+    "DroneBay": "drone",
+    "FighterBay": "fighter",
+    "Invalid": "cargo",
+}
+_STRING_FLAG_PREFIXES = [
+    ("HiSlot", "high"),
+    ("MedSlot", "med"),
+    ("LoSlot", "low"),
+    ("RigSlot", "rig"),
+    ("ServiceSlot", "service"),
+    ("SubSystemSlot", "subsystem"),
+]
+
+
+def _category_for_flag(flag) -> str:
+    """Map a raw ESI item flag (string enum or legacy int) to a display group."""
+    if isinstance(flag, str):
+        if flag in _STRING_FLAG_EXACT:
+            return _STRING_FLAG_EXACT[flag]
+        for prefix, cat in _STRING_FLAG_PREFIXES:
+            if flag.startswith(prefix):
+                return cat
+        return "cargo"  # unrecognized string flag
+    return SLOT_CATEGORY.get(flag, "cargo")  # legacy integer flag, or unknown
+
+
+_TRAILING_DIGITS = re.compile(r"(\d+)$")
+
+
+def _slot_index(flag) -> int:
+    """Numeric slot index used only to order items within one group.
+
+    Both flag shapes already sort correctly on their own value within a
+    single category (HiSlot0..7, or the legacy contiguous int ranges), so
+    this just needs one consistent key across the two: the trailing digits
+    of a string flag, or the int itself. Flags with no digit (Cargo,
+    DroneBay, FighterBay, Invalid) sort first within their group.
+    """
+    if isinstance(flag, str):
+        m = _TRAILING_DIGITS.search(flag)
+        return int(m.group(1)) if m else 0
+    if isinstance(flag, int):
+        return flag
+    return 0
+
+
+SLOT_ORDER = {
+    "high": 0, "med": 1, "low": 2, "rig": 3, "subsystem": 4, "service": 5,
+    "drone": 6, "cargo": 7, "fighter": 8,
+}
 SLOT_LABELS = {
     "high": "High Slots", "med": "Mid Slots", "low": "Low Slots",
-    "rig": "Rigs", "subsystem": "Subsystems", "drone": "Drones",
-    "cargo": "Cargo", "fighter": "Fighters",
+    "rig": "Rigs", "subsystem": "Subsystems", "service": "Service Slots",
+    "drone": "Drones", "cargo": "Cargo", "fighter": "Fighters",
 }
 
-# Dogma attribute IDs for ship slot counts
-DGMA_HI = 12
+# Dogma attribute IDs for ship slot counts (12 lowSlots, 13 medSlots,
+# 14 hiSlots, 1137 rigSlots, per ESI's /dogma/attributes/{id}/).
+DGMA_HI = 14
 DGMA_MED = 13
-DGMA_LOW = 14
+DGMA_LOW = 12
 DGMA_RIG = 1137
 
 
@@ -51,18 +110,21 @@ def _parse_fitting(raw: dict, type_names: dict, ship_name: str, ship_slots: dict
     groups: dict[str, list] = {k: [] for k in SLOT_ORDER}
 
     for item in raw.get("items", []):
-        cat = SLOT_CATEGORY.get(item.get("flag"), "cargo")
+        flag = item.get("flag")
+        cat = _category_for_flag(flag)
         name = type_names.get(item["type_id"], f"Type {item['type_id']}")
         groups[cat].append({
             "type_id": item["type_id"],
             "name": name,
             "quantity": item.get("quantity", 1),
-            "flag": item.get("flag"),
+            "flag": flag,
         })
 
-    # Sort within each group by flag
+    # Sort within each group by slot index (from the flag), then by name.
+    # Works whether the fit's items carry the string flag enum, the legacy
+    # int flags, or (in theory) a mix of the two across items.
     for cat in groups:
-        groups[cat].sort(key=lambda x: (x.get("flag") or 0, x["name"]))
+        groups[cat].sort(key=lambda x: (_slot_index(x.get("flag")), x["name"]))
 
     return {
         "fitting_id": raw.get("fitting_id"),
@@ -86,22 +148,32 @@ def _to_eft(fit: dict) -> str:
             lines.append(item["name"])
         lines.append("")  # blank line between groups
 
-    drones = fit["groups"].get("drone", [])
-    if drones:
-        for item in drones:
+    # Service modules only exist on structure fits — unlike the slot
+    # categories above, skip the block (and its blank line) entirely when
+    # there are none, so a plain ship's EFT text is unchanged from before
+    # service slots existed.
+    service_items = fit["groups"].get("service", [])
+    if service_items:
+        for item in service_items:
+            lines.append(item["name"])
+        lines.append("")
+
+    # Drones, fighters and cargo carry stack quantities ("Name xN") rather
+    # than one line per unit — the fitting tool's own EFT import expects the
+    # same "xN" suffix for these bay-style groups. The import parser has no
+    # dedicated fighter slot (it falls back to treating an unrecognized item
+    # category as cargo), so a fighter line round-trips as a cargo item
+    # rather than vanishing, which is what dropping it outright used to do.
+    for cat in ["drone", "fighter", "cargo"]:
+        items = fit["groups"].get(cat, [])
+        if not items:
+            continue
+        for item in items:
             if item["quantity"] > 1:
                 lines.append(f"{item['name']} x{item['quantity']}")
             else:
                 lines.append(item["name"])
         lines.append("")
-
-    cargo = fit["groups"].get("cargo", [])
-    if cargo:
-        for item in cargo:
-            if item["quantity"] > 1:
-                lines.append(f"{item['name']} x{item['quantity']}")
-            else:
-                lines.append(item["name"])
 
     return "\n".join(lines).rstrip()
 

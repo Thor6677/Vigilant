@@ -517,6 +517,25 @@
 .perm-notice-kind.is-role { color: var(--warn); }
 .perm-notice-kind.is-token { color: var(--danger); }
 
+/* ISS-057: a corp card's in-game-role gaps, consolidated into one collapsed
+   <details> instead of one .perm-notice box per missing role. Chevron
+   pattern matches .updater-policy below. */
+.perm-notice-roles { margin-top: 0.15rem; }
+.perm-notice-roles > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; color: var(--warn); }
+.perm-notice-roles > summary::-webkit-details-marker { display: none; }
+.perm-notice-roles > summary::before { content: '▸'; display: inline-block; color: var(--muted); transition: transform var(--dur-fast); }
+.perm-notice-roles[open] > summary::before { transform: rotate(90deg); }
+.perm-notice-roles-body { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.3rem; }
+.perm-role-who { margin: 0.3rem 0 0; display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem; align-items: baseline; }
+.perm-role-grid { display: grid; grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr); gap: 0.15rem 0.7rem; margin: 0 0 0.3rem; }
+.perm-role-grid dt { margin: 0; color: var(--text); font-weight: 500; }
+.perm-role-grid dd { margin: 0; color: var(--muted); }
+.perm-notice-roles-foot { margin: 0.15rem 0 0; color: var(--muted); font-size: var(--fs-sm); letter-spacing: var(--ls-wider); text-transform: uppercase; }
+@media (max-width: 480px) {
+    .perm-role-grid { grid-template-columns: minmax(0, 1fr); gap: 0 0.7rem; }
+    .perm-role-grid dd { margin: 0 0 0.3rem; }
+}
+
 /* ── Admin › Updates (partials/updater_panel.html) ─────────────────────── */
 /* T-061: the panel used to borrow .b-card (the character-card style, hover
    lift included) and b-card-head / updater-* classes that had no rules at all,

@@ -29,6 +29,7 @@ import socket
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -361,33 +362,135 @@ async def _resolve(host: str, port: int) -> list[str]:
     return [info[4][0] for info in infos]
 
 
-async def webhook_target_problem(url: str) -> str | None:
-    """None if the webhook's host resolves only to public addresses, else why not.
+async def vetted_addresses(url: str) -> tuple[str | None, list[str]]:
+    """(problem, addresses): every address the webhook's host resolves to, if
+    all of them are public; otherwise why the webhook may not be sent.
 
     The webhook is sent from inside the deployment, so a URL naming the host
     itself, the Docker network or the LAN would have Vigilant make requests
     there, and the status or error it reports back says what answered. Every
     address the name resolves to must pass, and it is checked both when the URL
     is saved and before each send, because what a name resolves to can change.
+
+    The send connects to the addresses returned here and to nothing else. If
+    it resolved the name again for itself, a name whose answer changes between
+    the two lookups would slip a non-public address past the check.
     """
     parts = urlsplit(url)
     try:
         port = parts.port or (443 if parts.scheme == "https" else 80)
     except ValueError:
-        return "the URL has an invalid port"
+        return "the URL has an invalid port", []
     if not parts.hostname:
-        return "the URL has no host"
+        return "the URL has no host", []
     try:
-        addrs = await _resolve(parts.hostname, port)
+        resolved = await _resolve(parts.hostname, port)
     except Exception:
-        return "its host name does not resolve"
-    if not addrs:
-        return "its host name does not resolve"
-    for addr in addrs:
+        return "its host name does not resolve", []
+    if not resolved:
+        return "its host name does not resolve", []
+    addrs: list[str] = []
+    for addr in resolved:
         problem = address_problem(addr)
         if problem:
-            return problem
-    return None
+            return problem, []
+        if addr not in addrs:
+            addrs.append(addr)
+    return None, addrs
+
+
+async def webhook_target_problem(url: str) -> str | None:
+    """None if the webhook's host resolves only to public addresses, else why not."""
+    problem, _ = await vetted_addresses(url)
+    return problem
+
+
+class _PinnedBackend(httpcore.AsyncNetworkBackend):
+    """A network backend that connects only to the addresses it was given.
+
+    httpcore asks its backend to connect to the URL's host *name*, and the
+    stock backend resolves that name itself. This one ignores the name and
+    dials the vetted addresses instead, so the name is resolved exactly once
+    per send, by vetted_addresses(). Everything above the socket still sees
+    the original name: the pool starts TLS with it as server_hostname, so the
+    certificate is verified against it and it goes out as the SNI.
+
+    The addresses are tried in order, each with an equal share of the connect
+    timeout, so a dual-stack host whose IPv6 is unreachable from here still
+    gets its IPv4 address tried within the same budget.
+    """
+
+    def __init__(self, addrs: list[str]):
+        self._addrs = list(addrs)
+        self._inner = httpcore.AnyIOBackend()
+
+    async def connect_tcp(self, host: str, port: int, timeout: float | None = None,
+                          local_address: str | None = None,
+                          socket_options=None) -> httpcore.AsyncNetworkStream:
+        if not self._addrs:
+            raise httpcore.ConnectError("no vetted address to connect to")
+        share = None if timeout is None else timeout / len(self._addrs)
+        error: Exception | None = None
+        for addr in self._addrs:
+            try:
+                return await self._inner.connect_tcp(
+                    addr, port, timeout=share, local_address=local_address,
+                    socket_options=socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                error = e
+        assert error is not None
+        raise error
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise httpcore.ConnectError("unix sockets are not webhook targets")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class _ResponseStream(httpx.AsyncByteStream):
+    def __init__(self, stream):
+        self._stream = stream
+
+    async def __aiter__(self):
+        async for chunk in self._stream:
+            yield chunk
+
+    async def aclose(self) -> None:
+        if hasattr(self._stream, "aclose"):
+            await self._stream.aclose()
+
+
+class _PinnedTransport(httpx.AsyncBaseTransport):
+    """The stock transport's request translation, on a pool that dials through
+    _PinnedBackend.
+
+    httpx does not expose its pool's network backend, so the pool is built
+    here. Only http/1.1 is needed, and no retries: one attempt per address is
+    the whole policy.
+    """
+
+    def __init__(self, addrs: list[str]):
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            network_backend=_PinnedBackend(addrs))
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        req = httpcore.Request(
+            method=request.method,
+            url=httpcore.URL(scheme=request.url.raw_scheme, host=request.url.raw_host,
+                             port=request.url.port, target=request.url.raw_path),
+            headers=request.headers.raw,
+            content=request.stream,
+            extensions=request.extensions,
+        )
+        resp = await self._pool.handle_async_request(req)
+        return httpx.Response(status_code=resp.status, headers=resp.headers,
+                              stream=_ResponseStream(resp.stream),
+                              extensions=resp.extensions)
+
+    async def aclose(self) -> None:
+        await self._pool.aclose()
 
 
 async def post_webhook(url: str, fmt: str, report) -> dict:
@@ -401,13 +504,20 @@ async def post_webhook(url: str, fmt: str, report) -> dict:
     from app.config import user_agent
 
     host = urlsplit(url).hostname or "?"
-    problem = await webhook_target_problem(url)
+    problem, addrs = await vetted_addresses(url)
     if problem:
         logger.warning("update report: webhook to %s refused: %s", host, problem)
         return _delivery(DELIVERY_FAILED, f"not sent: {problem}")
     try:
+        # trust_env=False: an HTTP(S)_PROXY from the environment would have the
+        # proxy connect wherever it likes, by name, which is exactly the
+        # lookup the pinned transport exists to avoid; and the proxy itself is
+        # usually a LAN host. httpx happens to ignore environment proxies once
+        # it is handed a transport; this makes that a decision, not a side
+        # effect.
         async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS,
-                                     follow_redirects=False) as client:
+                                     follow_redirects=False, trust_env=False,
+                                     transport=_PinnedTransport(addrs)) as client:
             if fmt == FORMAT_NTFY:
                 body, headers = ntfy_request(report)
                 resp = await client.post(url, content=body.encode("utf-8"),
