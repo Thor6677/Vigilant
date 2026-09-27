@@ -23,6 +23,7 @@ from app.db.sde_models import (
     SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute, SDEDogmaAttribute,
     SDETypeSkillReq,
 )
+from app.sde.loader import SLOT_EFFECT_MAP
 from app.esi.client import ESIClient, refresh_token
 from app.esi import universe as esi_universe
 from app.esi import character as esi_char
@@ -421,6 +422,17 @@ async def search_ships(
         "search_type": "ship"})
 
 
+# Slot keys the fitting tool's search boxes send via ?slot=. Built from
+# SLOT_EFFECT_MAP's own values (app/sde/loader.py) rather than a second
+# hard-coded tuple, so this can't drift from the SDE loader's slot keys
+# again — that drift is exactly how ISS-059 happened: the mid-slot box sends
+# "med" (SDEModuleSlot's own slot_type), but this allow-list only had "mid".
+# "mid" is still accepted and mapped to "med" as an alias, in case anything
+# ever sends the more natural-sounding spelling.
+ALLOWED_SEARCH_SLOTS = set(SLOT_EFFECT_MAP.values())
+_SEARCH_SLOT_ALIASES = {"mid": "med"}
+
+
 @router.get("/tools/fitting/search/modules", response_class=HTMLResponse)
 async def search_modules(
     request: Request,
@@ -430,7 +442,8 @@ async def search_modules(
 ):
     if not request.session.get("user_id"):   # ISS-044: login-only tool
         return HTMLResponse("", status_code=401)
-    slot_filter = slot if slot in ("high", "mid", "low", "rig", "subsystem") else None
+    slot = _SEARCH_SLOT_ALIASES.get(slot, slot)
+    slot_filter = slot if slot in ALLOWED_SEARCH_SLOTS else None
     results = await sde.search_modules(db, q, slot_type=slot_filter, limit=20)
 
     # Attach slot type and fitting info to each result
