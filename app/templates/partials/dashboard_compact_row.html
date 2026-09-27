@@ -47,9 +47,9 @@
     <span class="dash-compact-ship" style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ s.ship_name or "" }}
     </span>
-    <span class="dash-compact-wallet" style="font-size:11px;color:var(--accent);">
+    <span class="dash-compact-wallet" style="font-size:11px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         {% if s.wallet is not none %}{{ format_isk(s.wallet) }}{% else %}&mdash;{% endif %}
-        {% if wallet_delta %}<br><span style="font-size:9px;">{{ wallet_arrow(wallet_delta) }}</span>{% endif %}
+        {% if wallet_delta %}<span style="font-size:9px;margin-left:0.25rem;">{{ wallet_arrow(wallet_delta) }}</span>{% endif %}
     </span>
     <span class="dash-compact-training" style="display:flex;flex-direction:column;gap:2px;overflow:hidden;">
         {% if s.training.skill %}

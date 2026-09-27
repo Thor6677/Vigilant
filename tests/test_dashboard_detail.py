@@ -121,3 +121,48 @@ def test_sparkline_delta_direction_and_amount():
     assert down == {"direction": "down", "amount": 50.0}
     flat = sparkline_delta([(NOW - timedelta(days=1), 100.0), (NOW, 100.0)])
     assert flat == {"direction": "flat", "amount": 0.0}
+
+
+# ── Detailed mode: the card template's own detail block, actually rendered ──
+# with real values — tests above only prove the pure functions in isolation.
+
+def test_detailed_card_renders_every_row_when_all_data_is_present():
+    from tests._dashboard_fixture import render_full
+    detail = {
+        "pi": {"colonies": 3, "expiry_str": "2d 1h", "expired": False},
+        "industry": {"active": 4, "ready": 1},
+        "market": {"open_orders": 2, "escrow": 500_000.0},
+        "net_worth": 12_000_000.0,
+        "wallet_sparkline": '<svg viewBox="0 0 100 28" width="100" height="28"></svg>',
+        "wallet_sparkline_delta": {"direction": "up", "amount": 250_000.0},
+        "sp": {"total_sp": 5_000_000, "unallocated_sp": 250_000},
+        "farm": {"injectors_ready": 3},
+    }
+    html = render_full("custom", dash_mode="detailed", detail_by_char={1001: detail})
+    assert "PI: 3 colon" in html and "2d 1h" in html
+    assert "Industry: 4 active" in html and "1 ready" in html
+    assert "Market: 2 open order" in html
+    assert "Net worth:" in html and "12.00M ISK" in html
+    assert "<svg" in html
+    assert "SP: 5,000,000 total / 250,000 unallocated" in html
+    assert 'data-canfly-slot="1001"' in html
+    assert "Skill farm" in html and "3 injector" in html
+
+
+def test_detailed_card_sp_no_scope_shows_dash_with_tooltip():
+    from tests._dashboard_fixture import render_full
+    html = render_full("custom", dash_mode="detailed", detail_by_char={1001: {"sp": "no_scope"}})
+    assert 'title="needs the skills permission"' in html
+    assert "SP: &mdash;" in html
+
+
+def test_detailed_card_sp_pending_shows_ellipsis():
+    from tests._dashboard_fixture import render_full
+    html = render_full("custom", dash_mode="detailed", detail_by_char={1001: {"sp": None}})
+    assert "SP: &hellip;" in html
+
+
+def test_detailed_card_farm_row_only_for_farm_pilots():
+    from tests._dashboard_fixture import render_full
+    html = render_full("custom", dash_mode="detailed", detail_by_char={1001: {"farm": None}})
+    assert "Skill farm" not in html

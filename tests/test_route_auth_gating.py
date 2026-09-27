@@ -246,6 +246,21 @@ def test_dashboard_attention_strip_requires_a_session():
     assert r.text == ""
 
 
+def test_dashboard_can_fly_endpoint_requires_a_session():
+    """T-076: the lazy Detailed/Table can-fly badge — a stranger must never
+    see even the shape of another account's fits/skills."""
+    r = _client().get("/dashboard/can-fly")
+    assert r.status_code == 401
+
+
+def test_dashboard_group_order_requires_a_session():
+    """T-076: group order moved from the session into prefs — the POST that
+    saves it must gate the same as /dashboard/prefs does."""
+    csrf = _client(csrf_token="t")
+    r = csrf.post("/dashboard/group-order", json=["Alpha", "Bravo"], headers={"X-CSRF-Token": "t"})
+    assert r.status_code == 401
+
+
 def test_status_telemetry_is_not_readable_without_a_session():
     for path in ("/status/data", "/status/chart.json"):
         r = _client().get(path)
@@ -344,6 +359,7 @@ _LOGIN_ONLY_POSTS = (
     "/tools/fitting/stats", "/tools/fitting/import-eft", "/tools/fitting/export-eft",
     "/intel/gatecheck/check", "/intel/gatecheck/wartargets",
     "/dashboard/prefs",
+    "/dashboard/group-order",   # T-076: moved from session-only to gated + persisted
 )
 
 

@@ -109,35 +109,46 @@
     {# T-076 Detailed mode: accent-tinted extra rows. `detail` is None in
        every other mode, so this block (and the b-card-detail wrapper it
        lives in) simply doesn't exist there — Cards' markup is untouched. #}
+    {% set d_pi = detail.get('pi') %}
+    {% set d_industry = detail.get('industry') %}
+    {% set d_market = detail.get('market') %}
+    {% set d_net_worth = detail.get('net_worth') %}
+    {% set d_sparkline = detail.get('wallet_sparkline') %}
+    {% set d_sparkline_delta = detail.get('wallet_sparkline_delta') %}
+    {% set d_sp = detail.get('sp') %}
+    {% set d_farm = detail.get('farm') %}
+    {# `.get(...)` throughout — `detail` is a plain dict, and Jinja's dotted
+       access on a dict returns Undefined (not Python None) for a key that
+       simply isn't there, which `is not none` then treats as truthy. #}
     <div class="b-card-detail" style="background:rgba(200,169,81,0.07);border-top:1px dashed var(--border);padding:0.4rem 0.75rem;display:flex;flex-direction:column;gap:3px;">
-        {% if detail.pi %}
-        <div style="font-size:9px;color:var(--muted);">PI: {{ detail.pi.colonies }} colon{{ 'y' if detail.pi.colonies == 1 else 'ies' }} &middot; next {{ detail.pi.expiry_str }}</div>
+        {% if d_pi %}
+        <div style="font-size:9px;color:var(--muted);">PI: {{ d_pi.colonies }} colon{{ 'y' if d_pi.colonies == 1 else 'ies' }} &middot; next {{ d_pi.expiry_str }}</div>
         {% endif %}
-        {% if detail.industry %}
-        <div style="font-size:9px;color:var(--muted);">Industry: {{ detail.industry.active }} active &middot; {{ detail.industry.ready }} ready</div>
+        {% if d_industry %}
+        <div style="font-size:9px;color:var(--muted);">Industry: {{ d_industry.active }} active &middot; {{ d_industry.ready }} ready</div>
         {% endif %}
-        {% if detail.market %}
-        <div style="font-size:9px;color:var(--muted);">Market: {{ detail.market.open_orders }} open order{{ 's' if detail.market.open_orders != 1 else '' }} &middot; {{ format_isk(detail.market.escrow) }} escrow</div>
+        {% if d_market %}
+        <div style="font-size:9px;color:var(--muted);">Market: {{ d_market.open_orders }} open order{{ 's' if d_market.open_orders != 1 else '' }} &middot; {{ format_isk(d_market.escrow) }} escrow</div>
         {% endif %}
-        {% if detail.net_worth is not none %}
-        <div style="font-size:9px;color:var(--muted);">Net worth: {{ format_isk(detail.net_worth) }}</div>
+        {% if d_net_worth is not none %}
+        <div style="font-size:9px;color:var(--muted);">Net worth: {{ format_isk(d_net_worth) }}</div>
         {% endif %}
-        {% if detail.wallet_sparkline %}
+        {% if d_sparkline %}
         <div style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:0.4rem;">Wallet:
-            <span style="display:inline-flex;">{{ detail.wallet_sparkline | safe }}</span>
-            {% if detail.wallet_sparkline_delta %}{{ wallet_arrow(detail.wallet_sparkline_delta) }}{% endif %}
+            <span style="display:inline-flex;">{{ d_sparkline | safe }}</span>
+            {% if d_sparkline_delta %}{{ wallet_arrow(d_sparkline_delta) }}{% endif %}
         </div>
         {% endif %}
-        {% if detail.sp == 'no_scope' %}
+        {% if d_sp == 'no_scope' %}
         <div style="font-size:9px;color:var(--muted);" title="needs the skills permission">SP: &mdash;</div>
-        {% elif detail.sp is none %}
+        {% elif d_sp is none %}
         <div style="font-size:9px;color:var(--muted);">SP: &hellip;</div>
-        {% elif detail.sp %}
-        <div style="font-size:9px;color:var(--muted);">SP: {{ "{:,}".format(detail.sp.total_sp) }} total / {{ "{:,}".format(detail.sp.unallocated_sp) }} unallocated</div>
+        {% elif d_sp %}
+        <div style="font-size:9px;color:var(--muted);">SP: {{ "{:,}".format(d_sp.total_sp) }} total / {{ "{:,}".format(d_sp.unallocated_sp) }} unallocated</div>
         {% endif %}
         <div style="font-size:9px;color:var(--muted);" data-canfly-slot="{{ char.character_id }}">Can fly: <span data-canfly-text>&hellip;</span></div>
-        {% if detail.farm %}
-        <div style="font-size:9px;color:var(--accent);"><a href="/tools/skill-farm" style="color:inherit;">Skill farm &middot; {{ detail.farm.injectors_ready }} injector{{ 's' if detail.farm.injectors_ready != 1 else '' }} ready</a></div>
+        {% if d_farm %}
+        <div style="font-size:9px;color:var(--accent);"><a href="/tools/skill-farm" style="color:inherit;">Skill farm &middot; {{ d_farm.injectors_ready }} injector{{ 's' if d_farm.injectors_ready != 1 else '' }} ready</a></div>
         {% endif %}
     </div>
     {% endif %}

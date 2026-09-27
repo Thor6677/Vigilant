@@ -18,6 +18,7 @@ from app.auth import scopes as perms
 from app.db.models import (
     Base, Character, CharacterDashboardCache, User, UserFitting, get_db,
 )
+from app.db.sde_models import SDETypeSkillReq
 
 CSRF = "test-csrf-token"
 USER_A = 811
@@ -79,6 +80,15 @@ def client():
                 user_id=USER_A, name="Rookie Fit", ship_type_id=587,  # Rifter
                 items_json="[]",
             ))
+            # A second fit that DOES have a real skill requirement (level 3)
+            # the seeded character's empty `levels` dict (level 0 for
+            # everything) never meets — proves the count actually reflects
+            # can_fly_summary's evaluation, not just "how many fits exist".
+            db.add(UserFitting(
+                user_id=USER_A, name="Advanced Fit", ship_type_id=588,
+                items_json="[]",
+            ))
+            db.add(SDETypeSkillReq(type_id=588, skill_type_id=3300, required_level=3))
             await db.commit()
     asyncio.run(seed())
 
@@ -109,7 +119,7 @@ def test_can_fly_endpoint_returns_shapes_for_every_state(client):
     assert data[str(CHAR_NO_SCOPE)] == "no_scope"
     assert data[str(CHAR_SCOPED_PENDING)] == "pending"
     scoped = data[str(CHAR_SCOPED_SYNCED)]
-    assert scoped == {"can_fly": 1, "total": 1}
+    assert scoped == {"can_fly": 1, "total": 2}  # Rookie Fit yes, Advanced Fit no (needs skill 3300 lvl 3)
 
 
 def test_can_fly_endpoint_is_scoped_to_the_callers_own_characters(client):

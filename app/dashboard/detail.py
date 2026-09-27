@@ -135,10 +135,16 @@ def wallet_sparkline_svg(points: list[tuple[datetime, float]], width: int = 100,
 
 def sparkline_delta(points: list[tuple[datetime, float]]) -> dict | None:
     """The same {"direction", "amount"} shape app.dashboard.walletdelta
-    produces, derived from the endpoints of the sparkline's own window —
-    kept independent so a pilot's card can show a sparkline even on a day
-    the 7d-exact baseline query missed (e.g. the oldest point in range is
-    6 days old, not exactly 7)."""
+    produces, derived from the endpoints of the sparkline's own window
+    instead of the exact-7d baseline query.
+
+    NOT what the route wires up next to the sparkline — a Detailed card
+    shows one wallet delta (app.dashboard.walletdelta's, the same figure
+    the Wallet row's arrow uses), never two numbers that could disagree
+    because their windows differ slightly (the sparkline's oldest point
+    might be 6 days old, not exactly 7). Kept as a tested, independent pure
+    function for a caller that genuinely wants the sparkline's own window
+    reflected back, rather than deleted outright."""
     if not points or len(points) < 2:
         return None
     first, last = points[0][1], points[-1][1]

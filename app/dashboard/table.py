@@ -38,6 +38,13 @@ def _lower(s: str | None) -> str:
     return (s or "").lower()
 
 
+# A large but finite epoch timestamp (year 3000) for "no queue end" / "never
+# synced" sort values. `float("inf")` round-trips through Jinja's `tojson`
+# as the *string* "Infinity", which `parseFloat` reads back as `NaN` in the
+# page's client-side sort — a finite sentinel avoids that entirely.
+_FAR_FUTURE_TS = 32_503_680_000.0
+
+
 def _delta_text(delta: dict | None) -> str:
     if not delta:
         return ""
@@ -60,14 +67,20 @@ def build_table_row(
     tags_row: dict | None,
     wallet_delta: dict | None,
     queue_end: datetime | None,
+    last_synced: datetime | None = None,
 ) -> dict:
     """`summary` is one build_pilot_summaries() entry. `detail` is that
     pilot's app.dashboard.detail extras (None outside Detailed/Table, or for
     a pilot with nothing synced yet — every column below tolerates that).
     `tags_row` is a load_character_tags() entry or None. `queue_end` is the
     raw datetime app.routes.characters.group_skill_data's skill_map already
-    carries per character (`skill_map[cid]["queue_end"]`) — used only for
-    a correct chronological sort, since `training.finish_str` is text.
+    carries per character (`skill_map[cid]["queue_end"]`) — used only for a
+    correct chronological sort, since `training.finish_str` is text.
+    `last_synced` is the raw datetime off CharacterDashboardCache.last_synced
+    (the same value `app.routes.dashboard._age_str` formats into
+    `sync.last_str`) — same reason: sorting "Last Sync" by its display text
+    ("5m ago" vs "2h ago" vs "1d ago") would sort lexically, not
+    chronologically.
     """
     tags_row = tags_row or {"tags": [], "note": None}
     detail = detail or {}
@@ -103,7 +116,7 @@ def build_table_row(
         "net_worth": {"text": _isk(net_worth) if net_worth is not None else "—", "sort": net_worth if net_worth is not None else -1.0},
         "queue_end": {
             "text": training.get("finish_str") or "—",
-            "sort": queue_end.timestamp() if queue_end else float("inf"),
+            "sort": queue_end.timestamp() if queue_end else _FAR_FUTURE_TS,
         },
         "training": {"text": training_text, "sort": _lower(training.get("skill"))},
         "pi": {"text": pi["expiry_str"] if pi else "—", "sort": pi["colonies"] if pi else 0},
@@ -114,7 +127,10 @@ def build_table_row(
             "text": f"{clones['count']} clone{'s' if clones.get('count') != 1 else ''}" if clones.get("count") is not None else "—",
             "sort": clones.get("count") or 0,
         },
-        "last_sync": {"text": sync.get("last_str") or "never", "sort": _lower(sync.get("last_str")) or "￿"},
+        "last_sync": {
+            "text": sync.get("last_str") or "never",
+            "sort": last_synced.timestamp() if last_synced else -1.0,
+        },
         "tags": {"text": ", ".join(tags_list), "sort": _lower(", ".join(tags_list))},
         "can_fly": {"text": "…", "sort": 0},
     }

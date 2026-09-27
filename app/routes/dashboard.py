@@ -2789,7 +2789,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         from app.character_skills import skill_summary as _skill_summary
         from app.dashboard.detail import (
             industry_detail, load_latest_networth, load_wallet_sparkline_points,
-            market_detail, pi_detail, sp_detail, sparkline_delta, wallet_sparkline_svg,
+            market_detail, pi_detail, sp_detail, wallet_sparkline_svg,
         )
         from app.dashboard.table import build_table_row, sort_table_rows
 
@@ -2817,7 +2817,11 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
                 "market": market_detail(orders_raw),
                 "net_worth": networth_map.get(cid),
                 "wallet_sparkline": wallet_sparkline_svg(spark_points),
-                "wallet_sparkline_delta": sparkline_delta(spark_points),
+                # The SAME 7d delta the Wallet row's arrow shows (never the
+                # sparkline's own endpoint-to-endpoint delta, which can
+                # disagree — its window is "whatever snapshots exist in the
+                # last 7 days", not "at or before exactly 7 days ago").
+                "wallet_sparkline_delta": wallet_deltas.get(cid),
                 "sp": sp_detail(sk_summary),
                 "farm": farm_row,
             }
@@ -2830,6 +2834,8 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
                     tags_by_char.get(char.character_id),
                     wallet_deltas.get(char.character_id),
                     skill_map.get(char.character_id, {}).get("queue_end"),
+                    last_synced=(char_caches.get(char.character_id).last_synced
+                                 if char_caches.get(char.character_id) else None),
                 )
                 for char in visible_characters
             ]

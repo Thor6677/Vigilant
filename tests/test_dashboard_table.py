@@ -5,7 +5,7 @@ picker, sort, and account divider rows).
 from datetime import datetime, timezone
 
 from app.dashboard import prefs as prefs_mod
-from app.dashboard.table import build_table_row, sort_table_rows
+from app.dashboard.table import _FAR_FUTURE_TS, build_table_row, sort_table_rows
 from tests._dashboard_fixture import CHARACTERS, render_full
 
 SUMMARY = {
@@ -63,12 +63,24 @@ def test_build_table_row_tags_and_wallet_delta():
     assert row["cells"]["wallet_7d"]["sort"] == 250_000.0
 
 
+def test_build_table_row_last_sync_sort_uses_raw_datetime_not_display_text():
+    dt = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    row = build_table_row(SUMMARY, None, None, None, None, last_synced=dt)
+    assert row["cells"]["last_sync"]["sort"] == dt.timestamp()
+    assert row["cells"]["last_sync"]["text"] == "5m ago"  # from SUMMARY's sync.last_str
+    row_never = build_table_row(SUMMARY, None, None, None, None, last_synced=None)
+    assert row_never["cells"]["last_sync"]["sort"] == -1.0
+
+
 def test_build_table_row_queue_end_sort_uses_raw_datetime():
     dt = datetime(2026, 10, 1, tzinfo=timezone.utc)
     row = build_table_row(SUMMARY, None, None, None, dt)
     assert row["cells"]["queue_end"]["sort"] == dt.timestamp()
     row_none = build_table_row(SUMMARY, None, None, None, None)
-    assert row_none["cells"]["queue_end"]["sort"] == float("inf")
+    # A finite sentinel, not float("inf") — that round-trips through Jinja's
+    # tojson as the literal string "Infinity", which the page's client-side
+    # sort (parseFloat) reads back as NaN.
+    assert row_none["cells"]["queue_end"]["sort"] == _FAR_FUTURE_TS
 
 
 # ── sort_table_rows ──────────────────────────────────────────────────────────

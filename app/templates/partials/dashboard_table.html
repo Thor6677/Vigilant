@@ -37,13 +37,19 @@
     {% endfor %}
 </div>
 
-<div class="b-section" style="overflow-x:auto;">
+{% set _numeric_columns = ('wallet', 'wallet_7d', 'net_worth', 'queue_end', 'pi', 'jobs', 'orders', 'escrow', 'clones', 'last_sync', 'can_fly') %}
+<div class="b-section" style="overflow:auto;max-height:70vh;">
+    {# `position:sticky` goes on each <th>, not the <tr> — sticky on a row
+       element is unreliable across browsers, and this container (not the
+       page) is the sticky/scroll context, since it's the nearest ancestor
+       with its own scrollbar (max-height + overflow:auto above). #}
     <table id="dash-table" class="b-table" style="width:100%;border-collapse:collapse;font-size:11px;">
         <thead>
-            <tr style="position:sticky;top:0;background:var(--bg);z-index:1;">
+            <tr>
                 {% for key in active_columns %}
                 <th data-click="sortDashTable" data-col="{{ key }}"
-                    style="text-align:left;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;color:{% if current_sort.key == key %}var(--accent){% else %}var(--muted){% endif %};">
+                    data-sort-type="{{ 'num' if key in _numeric_columns else 'str' }}"
+                    style="position:sticky;top:0;background:var(--bg);z-index:1;text-align:left;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;color:{% if current_sort.key == key %}var(--accent){% else %}var(--muted){% endif %};">
                     {{ column_labels.get(key, key) }}{% if current_sort.key == key %} {{ '▲' if current_sort.dir == 'asc' else '▼' }}{% endif %}
                 </th>
                 {% endfor %}
@@ -56,7 +62,7 @@
         <tr class="dash-table-divider"><td colspan="{{ active_columns | length }}" style="padding:0.3rem 0.6rem;background:var(--border);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">{{ row.account }}</td></tr>
         {% set ns.prev_account = row.account %}
         {% endif %}
-        <tr data-char-id="{{ row.character_id }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
+        <tr data-char-id="{{ row.character_id }}" data-account="{{ row.account }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
             {% for key in active_columns %}
             {% if key == 'tags' %}
             <td data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">

@@ -701,32 +701,53 @@ function _applyDashTableSort() {
     var headRow = table.querySelector('thead tr');
     var ths = headRow ? Array.prototype.slice.call(headRow.children) : [];
     var colIndex = -1;
+    var sortType = 'str';
     ths.forEach(function (th, i) {
         var isSorted = th.dataset.col === dashTableSort.key;
         th.style.color = isSorted ? 'var(--accent)' : 'var(--muted)';
-        if (isSorted) colIndex = i;
+        if (isSorted) { colIndex = i; sortType = th.dataset.sortType || 'str'; }
     });
     if (colIndex === -1) return;
     var tbody = table.querySelector('tbody');
     if (!tbody) return;
-    // Account dividers only make sense while sorted by account — a
-    // client-side re-sort by any other column drops them; reloading (or
-    // sorting back to Account) is what restores them, server-rendered.
+
     Array.prototype.slice.call(tbody.querySelectorAll('tr.dash-table-divider')).forEach(function (d) { d.remove(); });
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-char-id]'));
     rows.sort(function (a, b) {
         var av = a.children[colIndex].dataset.sortValue;
         var bv = b.children[colIndex].dataset.sortValue;
-        var an = parseFloat(av), bn = parseFloat(bv);
         var cmp;
-        if (!isNaN(an) && !isNaN(bn)) {
-            cmp = an - bn;
+        if (sortType === 'num') {
+            cmp = parseFloat(av) - parseFloat(bv);
         } else {
             cmp = av < bv ? -1 : (av > bv ? 1 : 0);
         }
         return dashTableSort.dir === 'asc' ? cmp : -cmp;
     });
     rows.forEach(function (r) { tbody.appendChild(r); });
+
+    // Sorting by Account restores the divider rows (built fresh here, not
+    // just left over from the server render — the sort above may have
+    // reordered the client rows independent of what the server sent);
+    // sorting by anything else leaves them out entirely, matching the
+    // server's own rendering rule.
+    if (dashTableSort.key === 'account') {
+        var prevAccount = null;
+        rows.forEach(function (row) {
+            var acct = row.dataset.account || '';
+            if (acct !== prevAccount) {
+                var divider = document.createElement('tr');
+                divider.className = 'dash-table-divider';
+                var td = document.createElement('td');
+                td.colSpan = ths.length;
+                td.style.cssText = 'padding:0.3rem 0.6rem;background:var(--border);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);';
+                td.textContent = acct;  // textContent, never innerHTML — account names are user text
+                divider.appendChild(td);
+                tbody.insertBefore(divider, row);
+                prevAccount = acct;
+            }
+        });
+    }
 }
 
 (function () {
