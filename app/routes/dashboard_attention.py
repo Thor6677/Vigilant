@@ -141,7 +141,7 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
             "sync_error": sync_error,
             "last_synced": _aware(last_synced),
             # ISS-069: per-field staleness, from rows already in hand.
-            "staleness": staleness_of(now, scopes, field_synced),
+            "staleness": staleness_of(now, scopes, field_synced, _aware(last_synced)),
             "no_perms": not has_permissions(scopes),
         })
 

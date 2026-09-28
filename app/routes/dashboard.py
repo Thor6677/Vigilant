@@ -457,6 +457,7 @@ def _staleness(char: Character, cache: CharacterDashboardCache | None,
     return _staleness_for(
         now or datetime.now(timezone.utc), char.scopes,
         cache.field_synced_json if cache else None,
+        cache.last_synced if cache else None,
     )
 
 

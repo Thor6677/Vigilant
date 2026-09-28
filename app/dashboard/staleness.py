@@ -117,15 +117,20 @@ def classify(overdue_seconds: float) -> str:
 
 
 def staleness(now: datetime, scopes: str | None,
-              field_synced: str | dict | None) -> str:
+              field_synced: str | dict | None,
+              last_synced: datetime | None = None) -> str:
     """fresh | warning | critical | never, from the pilot's granted fields.
 
-    `field_synced` is the raw field_synced_json (str or dict). A cache row that
-    doesn't exist yet is `field_synced=None`, which reads as "never"."""
+    `field_synced` is the raw field_synced_json (str or dict). A granted field
+    with no stamp (newly added, or field_synced_json was reset) falls back to
+    `last_synced` (the cache row's column; naive means UTC) as its stamp, so
+    such a pilot ages normally. "never" only when a granted field has no stamp
+    AND there is no `last_synced` either (nothing has ever synced)."""
     synced = parse_field_synced(field_synced)
+    fallback = _aware(last_synced) if last_synced is not None else None
     worst = None
     for field in granted_fields(scopes):
-        ts = synced.get(field)
+        ts = synced.get(field) or fallback
         if ts is None:
             return "never"
         overdue = (now - ts).total_seconds() - FIELD_CACHE_SECONDS[field]
