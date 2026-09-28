@@ -190,6 +190,6 @@ def test_admin_loads_chart_js_at_page_level():
     is subject to exactly the same rule as an inline block, so it has to be
     requested by the page."""
     body = _read(os.path.join(TEMPLATES, "admin.html"))
-    tag = re.search(r'<script[^>]*src="[^"]*chart\.js[^"]*"[^>]*>', body)
+    tag = re.search(r'<script[^>]*src="[^"]*chart[^"]*\.js"[^>]*>', body)
     assert tag, "admin.html does not load Chart.js at page level"
     assert "nonce=" in tag.group(0), tag.group(0)
