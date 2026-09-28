@@ -340,9 +340,16 @@ def _catalog_scopes(scopes) -> set[str]:
     return perms.parse_scopes(scopes) & set(perms.ALL_SCOPES)
 
 
-async def _probe_stored_token(db: AsyncSession, character_id: int) -> set[str] | None:
-    """ISS-068: refresh a registered character's STORED token and return the
-    scopes it carries now, or None when it no longer refreshes at all.
+PROBE_OK = "ok"             # refreshed; the scopes it carries now come with it
+PROBE_REVOKED = "revoked"   # EVE refused the refresh token: the stored token is dead
+PROBE_UNKNOWN = "unknown"   # anything else (network, SSO 5xx/429, DB): no verdict
+
+
+async def _probe_stored_token(db: AsyncSession, character_id: int
+                              ) -> tuple[str, set[str] | None, str | None]:
+    """ISS-068: refresh a registered character's STORED token and say what
+    became of it: ``(PROBE_OK, scopes it carries now, None)``,
+    ``(PROBE_REVOKED, None, None)`` or ``(PROBE_UNKNOWN, None, error type)``.
 
     * Forced, not refresh_token(): that hands back the stored access token
       while it has more than five minutes left, and an access token's claims
@@ -358,8 +365,11 @@ async def _probe_stored_token(db: AsyncSession, character_id: int) -> set[str] |
       that commit must carry the rotated token and nothing else. The caller
       runs this before it has written anything, so it holds no write lock.
 
-    Any failure returns None. The caller then treats the stored token as gone,
-    because the one it has just been given is the only one known to work.
+    Only TokenRevoked (SSO's 400/401, or a token sealed under an old
+    SECRET_KEY) means dead. Any other failure proves nothing about the token:
+    a network blip must not be what narrows a live pilot, which would be the
+    ISS-068 incident all over again. The caller keeps the stored token then,
+    and a token that really is dead still shows up as Renew on the dashboard.
     """
     from app.esi import client as esi_client
     from app.routes.dashboard import _get_token_lock
@@ -369,18 +379,18 @@ async def _probe_stored_token(db: AsyncSession, character_id: int) -> set[str] |
             char = (await probe_db.execute(select(Character).where(
                 Character.character_id == character_id))).scalar_one_or_none()
             if char is None:
-                return None
+                return PROBE_UNKNOWN, None, "character row missing"
             try:
                 # Writes the rotated token and its scp claim to the row, and commits.
                 await esi_client._do_refresh(char, probe_db)
             except esi_client.TokenRevoked as exc:
                 logger.info("character %s: stored token no longer refreshes (%s)", character_id, exc)
-                return None
+                return PROBE_REVOKED, None, None
             except Exception as exc:
                 logger.warning("character %s: stored-token check failed: %s",
                                character_id, type(exc).__name__)
-                return None
-            return perms.parse_scopes(char.scopes)
+                return PROBE_UNKNOWN, None, type(exc).__name__
+            return PROBE_OK, perms.parse_scopes(char.scopes), None
 
 
 @router.get("/callback")
@@ -510,21 +520,27 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     # first ask whether the stored authorization still works. If it does and
     # still covers everything, keep it and treat this as a login: the new
     # token is dropped, never revoked (EVE keeps one authorization per
-    # character per application; see the module docstring). If it is dead, or
-    # EVE has already narrowed it, the new token is the only working one: take
-    # it as before, and say so. Only this case costs an extra SSO call.
+    # character per application; see the module docstring). If EVE revoked
+    # it, or has already narrowed it, the new token is the only working one:
+    # take it as before, and say so. If the check itself failed, nothing is
+    # known, so nothing changes. Only this case costs an extra SSO call.
     kept_scopes: set[str] | None = None
+    check_failed = None       # set when the stored token was kept unchecked
     narrowed_because = None
     if (intent in (SIGNUP, ADD) and existing is not None and existing.user_id
             and _catalog_scopes(old_scopes) - _catalog_scopes(granted)):
-        probed = await _probe_stored_token(db, character_id)
-        if probed is not None:
+        verdict, probed, check_failed = await _probe_stored_token(db, character_id)
+        if verdict == PROBE_OK:
             # The probe committed in its own session; pick up the rotated token.
             await db.refresh(existing)
-        if probed is not None and _catalog_scopes(old_scopes) <= probed:
-            kept_scopes = probed
+            if _catalog_scopes(old_scopes) <= probed:
+                kept_scopes = probed
+            else:
+                narrowed_because = "narrowed"
+        elif verdict == PROBE_REVOKED:
+            narrowed_because = "dead"
         else:
-            narrowed_because = "dead" if probed is None else "narrowed"
+            kept_scopes = old_scopes
 
     if intent == SIGNUP:
         if existing and existing.user_id:
@@ -560,18 +576,24 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             user.last_login = datetime.now(timezone.utc)
             _ensure_session_epoch(user)
         dropped = _catalog_scopes(old_scopes) - _catalog_scopes(granted)
+        why_kept = (f"could not check the stored authorization with EVE ({check_failed})"
+                    if check_failed else "stored authorization still works")
         db.add(AdminAuditLog(
             user_id=user.id, character_id=character_id, event_type="permissions_kept",
             detail=(f"{intent}: new grant would have removed {len(dropped)} scopes; "
-                    f"stored authorization still works, kept ({len(kept_scopes)} scopes)"),
+                    f"{why_kept}, kept ({len(kept_scopes)} scopes)"),
             ip_address=request.client.host if request.client else None,
         ))
         await db.commit()
         shared = len(perms.keys_for_scopes(kept_scopes))
-        _flash(request, "ok",
-               f"Nothing about what {character_name} shares was changed: it still shares "
-               f"{shared} permission{'s' if shared != 1 else ''}. To change what it shares, "
-               f"use Change permissions next to {character_name} below.")
+        still = (f"it still shares {shared} permission{'s' if shared != 1 else ''}. To change "
+                 f"what it shares, use Change permissions next to {character_name} below.")
+        if check_failed:
+            _flash(request, "warn", f"Vigilant couldn't check {character_name}'s existing "
+                                    f"authorization with EVE just now, so nothing about what it "
+                                    f"shares was changed: {still}")
+        else:
+            _flash(request, "ok", f"Nothing about what {character_name} shares was changed: {still}")
         _picker_session(request, intent, user, character_id)
         _queue_sync(character_id)
         return RedirectResponse("/account", status_code=303)

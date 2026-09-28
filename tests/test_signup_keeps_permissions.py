@@ -49,7 +49,10 @@ class _Resp:
         self._body = body
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{self.status_code}", request=httpx.Request("POST", "https://sso.invalid/token"),
+                response=httpx.Response(self.status_code))
 
     def json(self):
         return self._body
@@ -67,6 +70,14 @@ def rejected(data):
 
 def unreachable(data):
     raise httpx.ConnectError("no route to SSO")
+
+
+def throttled(data):
+    return _Resp(429, {"error": "slow down"})     # not 5xx, so no retry backoff
+
+
+def garbled(data):
+    return _Resp(200, {"unexpected": True})       # no access_token in a 200
 
 
 @pytest.fixture
@@ -253,13 +264,42 @@ def test_narrower_signup_takes_the_new_grant_when_the_stored_token_is_revoked(en
     _assert_new_grant_taken_with_a_warning(env, r, "no longer worked", "stored token no longer refreshed")
 
 
-def test_narrower_signup_takes_the_new_grant_when_eve_cannot_be_reached(env, sso_refresh):
-    """Any refresh failure: the new token is the only one known to work."""
+@pytest.mark.parametrize("respond", [unreachable, throttled, garbled],
+                         ids=["connect-error", "sso-429", "sso-garbled"])
+def test_a_check_that_fails_without_a_verdict_keeps_everything(env, sso_refresh, respond):
+    """Only a revoked token proves the stored authorization is dead. A network
+    blip or an SSO hiccup proves nothing, and narrowing a live pilot on one
+    would be the ISS-068 incident again: keep everything, and say the check
+    could not be made. A token that really is dead still shows as Renew."""
     _seed_live_state(env, MAIN_ID)
-    sso_refresh["respond"] = unreachable
+    before = env.char(MAIN_ID)
+    sso_refresh["respond"] = respond
     env.sso_returns(MAIN_ID, "Main Pilot", SKILLS)
+
     r = env.client(_pending("signup", ["skills"])).get(CALLBACK)
-    _assert_new_grant_taken_with_a_warning(env, r, "no longer worked", "stored token no longer refreshed")
+
+    assert r.status_code == 303 and r.headers["location"] == "/account"
+    assert len(sso_refresh["calls"]) == 1
+    after = env.char(MAIN_ID)
+    assert after.scopes == before.scopes
+    assert after.declined_scopes == before.declined_scopes
+    assert after.refresh_token == "old-refresh" and after.access_token == before.access_token
+    assert env.calls["revoked"] == []
+    cache = _cache(env, MAIN_ID)
+    assert cache.wallet == 1e9
+    assert json.loads(cache.field_synced_json) == {"wallet": SYNCED_AT}
+    assert any(f"CHARACTER:EVE:{MAIN_ID}|" in k for k in _esi_keys(env))
+    assert _count(env, CharacterCorpRoles, character_id=MAIN_ID) == 1
+    events = _audit(env, MAIN_ID)
+    assert [e for e, _u, _d in events] == ["permissions_kept"]
+    assert "could not check the stored authorization" in events[0][2]
+    session = env.session_of(r)
+    assert session["user_id"] == USER_ID
+    flash = session["flash"]
+    assert flash["kind"] == "warn"
+    assert "couldn't check Main Pilot's existing authorization with EVE" in flash["text"]
+    assert f"still shares {len(cat.PERMISSIONS)} permissions" in flash["text"]
+    assert env.calls["synced"] == [MAIN_ID]
 
 
 def test_narrower_signup_takes_the_new_grant_when_eve_already_narrowed_it(env, sso_refresh):
