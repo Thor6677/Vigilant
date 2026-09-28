@@ -8,7 +8,7 @@
    refused it. The chart has been blank since then. Loading it here, with the
    page's own nonce, is what every other chart page does (dashboard,
    character_detail, mining_ledger, market_type, networth, pnl). #}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 {% endblock %}
 {% block breadcrumbs %}
 <div class="b-breadcrumbs"><a href="/dashboard">Dashboard</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Admin</span></div>

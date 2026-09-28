@@ -10,7 +10,7 @@
 
 {% block head %}
 {% if has_rows and monthly.labels %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 {% endif %}
 <style nonce="{{ request.state.csp_nonce }}">
     .pnl-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:0.75rem; }
