@@ -16,7 +16,7 @@
 </div>
 
 {% if flash %}
-  <div class="b-banner {% if flash['kind'] == 'danger' %}is-danger{% elif flash['kind'] == 'ok' %}is-ok{% endif %}" role="status">{{ flash['text'] }}</div>
+  <div class="b-banner {% if flash['kind'] == 'danger' %}is-danger{% elif flash['kind'] == 'ok' %}is-ok{% elif flash['kind'] == 'warn' %}is-warn{% endif %}" role="status"><span>{{ flash['text'] }}</span>{% if flash['href'] %}<a class="b-link" href="{{ flash['href'] }}">{{ flash['link'] }}</a>{% endif %}</div>
 {% endif %}
 
 <p class="acct-lede">

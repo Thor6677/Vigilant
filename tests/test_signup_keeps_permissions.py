@@ -167,6 +167,8 @@ def test_minimal_signup_on_a_registered_pilot_changes_nothing(env, sso_refresh):
     assert session["flash"]["kind"] == "ok"
     assert "Nothing about what Main Pilot shares was changed" in session["flash"]["text"]
     assert f"still shares {len(cat.PERMISSIONS)} permissions" in session["flash"]["text"]
+    assert session["flash"]["href"] == f"/account/permissions/{MAIN_ID}"
+    assert session["flash"]["link"] == "Change permissions"
     assert env.calls["synced"] == [MAIN_ID]
 
 
@@ -252,7 +254,8 @@ def _assert_new_grant_taken_with_a_warning(env, r, reason_text, audit_note):
     assert flash["kind"] == "warn"
     assert "Main Pilot now shares fewer permissions: 1 instead of" in flash["text"]
     assert reason_text in flash["text"]
-    assert "Change permissions" in flash["text"]
+    assert flash["href"] == f"/account/permissions/{MAIN_ID}"
+    assert flash["link"] == "Change permissions"
 
 
 def test_narrower_signup_takes_the_new_grant_when_the_stored_token_is_revoked(env, sso_refresh):
@@ -298,6 +301,7 @@ def test_a_check_that_fails_without_a_verdict_keeps_everything(env, sso_refresh,
     flash = session["flash"]
     assert flash["kind"] == "warn"
     assert "couldn't check Main Pilot's existing authorization with EVE" in flash["text"]
+    assert flash["href"] == f"/account/permissions/{MAIN_ID}"
     assert f"still shares {len(cat.PERMISSIONS)} permissions" in flash["text"]
     assert env.calls["synced"] == [MAIN_ID]
 
@@ -393,6 +397,46 @@ def test_login_and_new_characters_never_probe(env, sso_refresh):
 def test_the_kept_event_is_filed_under_permissions():
     from app.routes.admin import audit_group
     assert audit_group("permissions_kept") == "permissions"
+
+
+# ── Flashes are seen: Account, a link, an amber warning ─────────────────────
+
+@pytest.mark.parametrize("intent,session", [("signup", {}), ("add", {"user_id": USER_ID})])
+def test_a_picker_flow_with_something_to_say_ends_on_account(env, sso_refresh, intent, session):
+    """Only Account renders flashes. "EVE did not grant" used to be set and
+    then sent to the Dashboard, where it was never shown."""
+    env.sso_returns(90000081, "Partial Grant", [cat.WALLET])     # asked for wallet + skills
+    r = env.client(_pending(intent, ["wallet", "skills"], **session)).get(CALLBACK)
+    assert r.headers["location"] == "/account"
+    flash = env.session_of(r)["flash"]
+    assert flash["kind"] == "warn" and flash["text"].startswith("EVE did not grant: ")
+
+
+def test_a_picker_flow_with_nothing_to_say_still_ends_on_the_dashboard(env, sso_refresh):
+    env.sso_returns(90000082, "Full Grant", cat.scopes_for(["wallet", "skills"]))
+    r = env.client(_pending("signup", ["wallet", "skills"])).get(CALLBACK)
+    assert r.headers["location"] == "/dashboard"
+    assert "flash" not in env.session_of(r)
+
+
+def test_account_renders_a_flash_link_and_the_amber_warning(env):
+    flash = {"kind": "warn", "text": "Alt <b>Pilot</b> now shares fewer permissions.",
+             "href": f"/account/permissions/{ALT_ID}", "link": "Change permissions"}
+    html = env.client({"user_id": USER_ID, "flash": flash}).get("/account").text
+    assert '<div class="b-banner is-warn" role="status">' in html
+    assert "Alt &lt;b&gt;Pilot&lt;/b&gt; now shares" in html          # autoescaped
+    assert f'<a class="b-link" href="/account/permissions/{ALT_ID}">Change permissions</a>' in html
+
+
+def test_account_renders_a_plain_flash_without_a_link(env):
+    html = env.client({"user_id": USER_ID, "flash": {"kind": "ok", "text": "Saved."}}).get("/account").text
+    assert '<div class="b-banner is-ok" role="status"><span>Saved.</span></div>' in html
+
+
+def test_warn_banners_are_amber():
+    css = open("design-system/css/components.css", encoding="utf-8").read()
+    rule = re.search(r"\.b-banner\.is-warn\s*\{([^}]*)\}", css)
+    assert rule and "#c97a20" in rule.group(1)
 
 
 # ── The doors ───────────────────────────────────────────────────────────────

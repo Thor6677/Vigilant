@@ -98,9 +98,15 @@ def _sso_redirect(request: Request, intent: str, keys: list[str] | None = None,
     return RedirectResponse(f"{settings.eve_sso_auth_url}?{urlencode(params)}", status_code=303)
 
 
-def _flash(request: Request, kind: str, text: str) -> None:
-    """One-shot message shown by the next page that renders flashes (Account)."""
-    request.session["flash"] = {"kind": kind, "text": text}
+def _flash(request: Request, kind: str, text: str,
+           href: str | None = None, link: str | None = None) -> None:
+    """One-shot message shown by the next page that renders flashes (Account).
+    ``href``/``link``: an optional action link after the text. Pass paths
+    built here, never anything a user typed."""
+    flash = {"kind": kind, "text": text}
+    if href:
+        flash.update(href=href, link=link or href)
+    request.session["flash"] = flash
 
 
 @router.get("/login")
@@ -586,14 +592,15 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         ))
         await db.commit()
         shared = len(perms.keys_for_scopes(kept_scopes))
-        still = (f"it still shares {shared} permission{'s' if shared != 1 else ''}. To change "
-                 f"what it shares, use Change permissions next to {character_name} below.")
+        still = f"it still shares {shared} permission{'s' if shared != 1 else ''}."
+        change = {"href": f"/account/permissions/{character_id}", "link": "Change permissions"}
         if check_failed:
             _flash(request, "warn", f"Vigilant couldn't check {character_name}'s existing "
                                     f"authorization with EVE just now, so nothing about what it "
-                                    f"shares was changed: {still}")
+                                    f"shares was changed: {still}", **change)
         else:
-            _flash(request, "ok", f"Nothing about what {character_name} shares was changed: {still}")
+            _flash(request, "ok", f"Nothing about what {character_name} shares was changed: {still}",
+                   **change)
         _picker_session(request, intent, user, character_id)
         _queue_sync(character_id)
         return RedirectResponse("/account", status_code=303)
@@ -679,13 +686,15 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                "just gave replaced it." if narrowed_because == "dead" else
                "EVE had already limited its authorization to what you just chose.")
         _flash(request, "warn",
-               f"{character_name} now shares fewer permissions: {now} instead of {before}. {why} "
-               f"To share more again, use Change permissions next to {character_name} below.")
+               f"{character_name} now shares fewer permissions: {now} instead of {before}. {why}",
+               href=f"/account/permissions/{character_id}", link="Change permissions")
 
     _picker_session(request, intent, user, character_id)
     _queue_sync(character_id)
-    return RedirectResponse("/account" if intent == UPDATE or narrowed_because else "/dashboard",
-                            status_code=303)
+    # Only Account renders flashes: any picker flow that has something to say
+    # (a narrowing, "EVE did not grant …") goes there, or it is never seen.
+    shown_on_account = intent == UPDATE or request.session.get("flash") is not None
+    return RedirectResponse("/account" if shown_on_account else "/dashboard", status_code=303)
 
 
 def _picker_session(request: Request, intent: str, user: User, character_id: int) -> None:
