@@ -112,7 +112,7 @@ USER_REFS_HANDLED_ELSEWHERE = {
 # no option. tests/test_admin_audit_filter.py scans every writer and fails when
 # a written type is in no group, or a group matches nothing written.
 AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("permissions", "Permissions", ("permissions_changed", "permissions_purged")),
+    ("permissions", "Permissions", ("permissions_changed", "permissions_purged", "permissions_kept")),
     ("allowlist", "Allowlist", ("admin_allowlist",)),
     ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
                                  "character_transferred", "user_logout_everywhere")),
