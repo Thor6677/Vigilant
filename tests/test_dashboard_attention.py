@@ -651,8 +651,19 @@ def _seed_character(client, *, cid: int, user_id: int, name="Pilot One",
 SQ_SCOPE = "esi-skills.read_skillqueue.v1"
 
 
-def _fresh(**extra):
-    return {"last_synced": datetime.now(timezone.utc).replace(tzinfo=None), **extra}
+def _synced_now(scopes: str) -> str:
+    """field_synced_json with every field the scopes grant synced just now."""
+    from app.dashboard.staleness import granted_fields
+    stamp = datetime.now(timezone.utc).isoformat()
+    return json.dumps({f: stamp for f in granted_fields(scopes)})
+
+
+def _fresh(scopes: str = SQ_SCOPE, **extra):
+    return {
+        "last_synced": datetime.now(timezone.utc).replace(tzinfo=None),
+        "field_synced_json": _synced_now(scopes),
+        **extra,
+    }
 
 
 def test_get_requires_a_session(attn_client):
@@ -670,9 +681,8 @@ def test_dismiss_requires_a_session(attn_client):
 def test_get_is_empty_when_nothing_needs_attention(attn_client):
     _seed_user(attn_client, 1)
     _seed_character(attn_client, cid=100, user_id=1, scopes=SQ_SCOPE,
-                    cache={"skillqueue_json": json.dumps([_sq_entry(30)]),
-                           "sync_status": "idle",
-                           "last_synced": datetime.now(timezone.utc).replace(tzinfo=None)})
+                    cache=_fresh(SQ_SCOPE, skillqueue_json=json.dumps([_sq_entry(30)]),
+                                 sync_status="idle"))
     attn_client.login(1)
     r = attn_client.get("/dashboard/attention")
     assert r.status_code == 200
@@ -682,7 +692,7 @@ def test_get_is_empty_when_nothing_needs_attention(attn_client):
 def test_get_renders_an_item(attn_client):
     _seed_user(attn_client, 1)
     _seed_character(attn_client, cid=100, user_id=1, name="Sample Pilot",
-                    scopes=SQ_SCOPE, cache=_fresh(skillqueue_json=json.dumps([])))
+                    scopes=SQ_SCOPE, cache=_fresh(SQ_SCOPE, skillqueue_json=json.dumps([])))
     attn_client.login(1)
     r = attn_client.get("/dashboard/attention")
     assert r.status_code == 200
@@ -701,9 +711,8 @@ def test_more_than_eight_items_render_the_rest_inside_a_details(attn_client):
     n = MAX_VISIBLE_ATTENTION_ITEMS + 3
     for i in range(n):
         _seed_character(
-            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes="",
-            cache={"last_synced": datetime.now(timezone.utc).replace(tzinfo=None),
-                   "sync_warnings_json": json.dumps({"wallet": "token_revoked"})},
+            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes=SQ_SCOPE,
+            cache=_fresh(SQ_SCOPE, sync_warnings_json=json.dumps({"wallet": "token_revoked"})),
         )
     attn_client.login(1)
     r = attn_client.get("/dashboard/attention")
@@ -726,9 +735,8 @@ def test_dismissing_an_overflow_item_re_renders_the_details_open(attn_client):
     n = MAX_VISIBLE_ATTENTION_ITEMS + 3
     for i in range(n):
         _seed_character(
-            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes="",
-            cache={"last_synced": datetime.now(timezone.utc).replace(tzinfo=None),
-                   "sync_warnings_json": json.dumps({"wallet": "token_revoked"})},
+            attn_client, cid=100 + i, user_id=1, name=f"Pilot {i:02d}", scopes=SQ_SCOPE,
+            cache=_fresh(SQ_SCOPE, sync_warnings_json=json.dumps({"wallet": "token_revoked"})),
         )
     attn_client.login(1)
 
@@ -906,3 +914,60 @@ def test_purge_on_character_removal_deletes_the_dismissal(attn_client):
     deleted, after = _run(check_and_purge())
     assert deleted == 1
     assert after == []
+
+
+# ── v1.7.1: ISS-069 no-permissions / per-field staleness, ISS-062 banners ────
+
+def test_route_no_permissions_pilot_gets_the_permissions_item(attn_client):
+    _seed_user(attn_client, 1)
+    _seed_character(attn_client, cid=100, user_id=1, name="Test Alt", scopes="",
+                    cache={"last_synced": datetime.now(timezone.utc).replace(tzinfo=None)})
+    attn_client.login(1)
+    r = attn_client.get("/dashboard/attention")
+    assert r.status_code == 200
+    assert "shares no permissions" in r.text
+    assert "/account/permissions/100" in r.text
+    assert "stale" not in r.text and "never synced" not in r.text
+
+
+def test_route_hourly_only_pilot_is_not_stale_at_45_minutes(attn_client):
+    now = datetime.now(timezone.utc)
+    scope = "esi-clones.read_clones.v1"
+    fs = json.dumps({"clones": (now - timedelta(minutes=45)).isoformat(),
+                     "zkill": (now - timedelta(minutes=45)).isoformat()})
+    _seed_user(attn_client, 1)
+    _seed_character(attn_client, cid=100, user_id=1, scopes=scope,
+                    cache={"last_synced": (now - timedelta(minutes=45)).replace(tzinfo=None),
+                           "field_synced_json": fs})
+    attn_client.login(1)
+    r = attn_client.get("/dashboard/attention")
+    assert r.status_code == 200 and r.text == ""
+
+
+def test_route_structure_banners_drop_old_alerts(attn_client):
+    from app.routes import dashboard as dash_mod
+    dash_mod._structure_banner_cache.clear()
+    now = datetime.now(timezone.utc)
+
+    def notif(nid, ntype, age):
+        return {"notification_id": nid, "type": ntype, "text": "",
+                "timestamp": (now - age).isoformat().replace("+00:00", "Z")}
+
+    notifs = {"notifications": [
+        notif(1, "TowerAlertMsg", timedelta(days=18)),      # too old
+        notif(2, "StructureUnderAttack", timedelta(hours=1)),  # fresh
+        notif(3, "StructureFuelAlert", timedelta(days=3)),  # kept (7 d)
+        notif(4, "StructureFuelAlert", timedelta(days=9)),  # too old
+    ]}
+    _seed_user(attn_client, 1)
+    _seed_character(attn_client, cid=100, user_id=1, scopes="",
+                    cache={"notifications_json": json.dumps(notifs)})
+    attn_client.login(1)
+    r = attn_client.get("/alerts/structure-banners")
+    assert r.status_code == 200
+    labels = dash_mod._STRUCTURE_ALERT_LABELS
+    assert labels["StructureUnderAttack"] in r.text
+    assert labels["StructureFuelAlert"] in r.text
+    assert labels["TowerAlertMsg"] not in r.text
+    assert r.text.count(labels["StructureFuelAlert"]) == 1
+    dash_mod._structure_banner_cache.clear()

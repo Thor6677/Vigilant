@@ -6,14 +6,17 @@ caller passes `now`), so it can be tested with arbitrary times. The route
 (`app/routes/dashboard_attention.py`) is the only place that touches the
 database, the session or the real clock.
 
-Every threshold here is a deliberate copy of an existing one elsewhere in the
-app (skill queue: `app.routes.characters.skill_warning`; PI: `pi._recompute_
-expiry`; staleness: `app.routes.dashboard.STALE_*_SECONDS`) rather than an
-import, because those originals read `datetime.now()` internally and would
-make this module's output depend on when the test runs instead of the `now`
-it's given. `tests/test_dashboard_attention.py` pins every constant below
-against the module it was copied from, so drift there fails a test instead of
-silently forking the two definitions.
+The skill-queue and PI thresholds here are deliberate copies of existing ones
+elsewhere in the app (skill queue: `app.routes.characters.skill_warning`; PI:
+`pi._recompute_expiry`) rather than imports, because those originals read
+`datetime.now()` internally and would make this module's output depend on when
+the test runs instead of the `now` it's given. `tests/test_dashboard_
+attention.py` pins those constants against the module they were copied from,
+so drift there fails a test instead of silently forking the two definitions.
+
+Sync staleness is NOT a copy any more (ISS-069): both this module and the
+Dashboard route use the one pure implementation in `app.dashboard.staleness`,
+which takes `now` explicitly and imports nothing from `app.routes.*`.
 
 ## pilot input shape
 
@@ -34,7 +37,9 @@ hand — no ESI calls, no per-pilot query. Each dict:
                                                          is ignored — recomputed here from expiry_time,
                                                          same reason as pi.py's own _recompute_expiry)
     industry_jobs      list[dict] | "no_scope" | None — raw industry_json jobs (activity_id,
-                                                         blueprint_type_id, product_type_id, runs, status)
+                                                         blueprint_type_id, product_type_id, runs, status,
+                                                         and since ISS-064 job_id + end_date, which rows
+                                                         cached earlier lack until their next hourly sync)
     industry_synced_at datetime | None (aware UTC)    — field_synced_json["industry"]; see the jobs-ready
                                                          row in the rules table below for why this is used
     sync_status        str                            — "idle" | "syncing" | "error" (the route folds a
@@ -42,6 +47,11 @@ hand — no ESI calls, no per-pilot query. Each dict:
                                                          matching dashboard()'s own sync_statuses map)
     sync_error         str | None
     last_synced         datetime | None (aware UTC)
+    staleness          str (optional)                 — fresh | warning | critical | never, computed by the
+                                                         route via app.dashboard.staleness from the pilot's
+                                                         granted fields; absent -> judged from last_synced
+                                                         alone (the pre-ISS-069 rule)
+    no_perms           bool (optional)                — the pilot shares no permissions at all
 
 `"no_scope"` for a field means the character never shared the permission that
 feeds it — matches `app.routes.dashboard._build_data_from_caches`'s own
@@ -86,8 +96,9 @@ about training-account counts with (`group_skill_data` in
 | amber | PI ending soon | any planet's `expiry_time` within 24h (pi.py's "critical" <1h band and "warning" <24h band both collapse to this one amber signal here — the brief's own 24h amber threshold already covers pi.py's tighter 1h one) | Planets -> `/industry/planetary` | no (resolves into red or clears on its own) |
 | amber | Skill queue critical | `skill_warning` == "critical" (<=7 days by whole-day floor, i.e. up to but not including 8 days) | Skills | no |
 | gold | Skill queue warning | `skill_warning` == "warning" (<=14 days, i.e. up to but not including 15 days) | Skills | no |
-| gold | Jobs ready to deliver | any cached job has `status == "ready"` | Jobs -> `/industry/jobs` | yes, to grey after `AGE_OUT_DAYS` |
-| grey | Sync stale / erroring | `sync_status == "error"`, or staleness is "critical" or "never" (own copy of `STALE_*_SECONDS`); suppressed entirely when the same pilot already has the red re-auth item (redundant), or while `sync_status == "syncing"` | Sync -> POST `/dashboard/sync/{cid}`, unless `SYNC_STALE_COLLAPSE_MIN` or more pilots qualify at once, in which case they collapse into one `sync_stale:many` item naming up to 3 pilots + a count of the rest, dismiss-only (no action button — a per-pilot sync button doesn't fit one row) | n/a |
+| gold | Jobs ready to deliver | any cached job has `status == "ready"`, or is "active" with an `end_date` that has passed (finished between hourly syncs) | Jobs -> `/industry/jobs` | yes, to grey after `AGE_OUT_DAYS` |
+| grey | No permissions | `no_perms` (the pilot shares nothing, so nothing syncs) | Permissions -> `/account/permissions/{cid}`; never folded into the stale collapse, and such a pilot never produces the stale item | n/a |
+| grey | Sync stale / erroring | `sync_status == "error"`, or staleness is "critical" or "never" (`app.dashboard.staleness`: how overdue the most-overdue granted field is); suppressed entirely when the same pilot already has the red re-auth item (redundant), or while `sync_status == "syncing"` | Sync -> POST `/dashboard/sync/{cid}`, unless `SYNC_STALE_COLLAPSE_MIN` or more pilots qualify at once, in which case they collapse into one `sync_stale:many` item naming up to 3 pilots + a count of the rest, dismiss-only (no action button — a per-pilot sync button doesn't fit one row) | n/a |
 
 Sort: severity (red, amber, gold, grey), then `since` oldest first, then
 character name, then key (stable tiebreak). A `since` of `None` (onset not
@@ -115,13 +126,12 @@ best-effort:
   a set of pilots that individually went stale at different times.
 - Reauth, account idle: `None` — nothing records when the authorization died
   or an account's last pilot stopped training.
-- Jobs ready: `industry_synced_at`, i.e. the last time the industry field was
-  synced — a **lower bound**, not the job's actual completion time, because
-  the cached job dict has neither `job_id` nor `end_date` (see the docstring
-  note in the route module). Documented as an out-of-scope gap in the T-071
-  report: the cache trim in `app.routes.dashboard.fetch_industry_jobs_data`
-  would need both fields for a precise timestamp and for a `job_id`-based
-  fingerprint instead of the tuple-based one used here.
+- Jobs ready: the earliest `end_date` among the ready jobs (exact). For cache
+  rows written before ISS-064 (no `job_id`/`end_date` yet) it falls back to
+  `industry_synced_at`, the last industry sync — a lower bound — and to the
+  old tuple-based fingerprint, until the next hourly sync rewrites the row.
+  The job_id fingerprint differs from the tuple one, so each previously
+  dismissed "jobs ready" item reappears once after that sync.
 
 ## Fingerprints and age-out
 
@@ -146,9 +156,13 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-# ── Thresholds — each one is a documented copy, not an import; see the
-#    module docstring for why, and tests/test_dashboard_attention.py for the
-#    pin against the original. ────────────────────────────────────────────────
+from app.dashboard import staleness as _shared_staleness
+from app.dashboard.staleness import STALE_CRITICAL_SECONDS, STALE_WARNING_SECONDS  # noqa: F401  (re-exported)
+
+# ── Thresholds — each one is a documented copy, not an import (except the
+#    staleness ones, which come from app.dashboard.staleness); see the module
+#    docstring for why, and tests/test_dashboard_attention.py for the pin
+#    against the original. ────────────────────────────────────────────────
 
 # app.routes.characters.skill_warning
 SKILL_QUEUE_CRITICAL_DAYS = 7   # <=7 whole days remaining -> "critical"
@@ -157,10 +171,6 @@ SKILL_QUEUE_WARNING_DAYS = 14   # <=14 whole days remaining -> "warning"
 # app.routes.pi._recompute_expiry (its "critical" <1h and "warning" <24h bands
 # both fall inside this module's single amber PI signal — see rules table)
 PI_EXPIRY_AMBER_SECONDS = 86400  # 24h
-
-# app.routes.dashboard.STALE_WARNING_SECONDS / STALE_CRITICAL_SECONDS
-STALE_WARNING_SECONDS = 900    # 15 min
-STALE_CRITICAL_SECONDS = 1800  # 30 min
 
 # How long an event-like item (PI expired, job ready) stays at its original
 # severity before dropping to grey. Named per the brief's ageing-rules ask.
@@ -249,15 +259,47 @@ def _remaining(now: datetime, until: datetime) -> str:
 
 
 def staleness(now: datetime, last_synced: datetime | None) -> str:
-    """Own copy of app.routes.dashboard._staleness — see module docstring."""
+    """Age-only staleness for a pilot dict that carries no precomputed
+    `staleness` (the pre-ISS-069 rule). Same thresholds and classifier as
+    app.dashboard.staleness, which the route uses for the real per-field
+    answer."""
     if last_synced is None:
         return "never"
-    age = (now - last_synced).total_seconds()
-    if age > STALE_CRITICAL_SECONDS:
-        return "critical"
-    if age > STALE_WARNING_SECONDS:
-        return "warning"
-    return "fresh"
+    return _shared_staleness.classify((now - last_synced).total_seconds())
+
+
+def _pilot_staleness(p: dict, now: datetime) -> str:
+    pre = p.get("staleness")
+    if pre in ("fresh", "warning", "critical", "never"):
+        return pre
+    return staleness(now, p.get("last_synced"))
+
+
+def _parse_job_end(job: dict) -> datetime | None:
+    raw = job.get("end_date")
+    if not raw:
+        return None
+    try:
+        return _parse_iso(str(raw))
+    except (ValueError, TypeError):
+        return None
+
+
+def _ready_jobs(jobs: list, now: datetime) -> list[dict]:
+    """Jobs to deliver: ESI's "ready", or "active" past its end_date (it
+    finished between hourly syncs)."""
+    out = []
+    for j in jobs:
+        if not isinstance(j, dict):
+            continue
+        status = j.get("status")
+        if status == "ready":
+            out.append(j)
+        elif status == "active":
+            end = _parse_job_end(j)
+            if end is not None and end <= now:
+                out.append(j)
+    return out
 
 
 def skill_queue_state(raw_queue: list | None, now: datetime) -> tuple[str, datetime | None]:
@@ -387,9 +429,11 @@ def _sync_stale_candidates(pilots: list[dict], now: datetime) -> list[dict]:
     for p in pilots:
         if p.get("needs_reauth") or p.get("sync_status") == "syncing":
             continue
+        if p.get("no_perms"):
+            continue  # nothing is shared, so nothing syncs (own grey item)
         status = p.get("sync_status", "idle")
         last_synced = p.get("last_synced")
-        stale = staleness(now, last_synced)
+        stale = _pilot_staleness(p, now)
         if status != "error" and stale not in ("critical", "never"):
             continue
         err = (p.get("sync_error") or "")[:120]
@@ -552,14 +596,21 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
         # ── industry jobs ready to deliver (gold, ages to grey) ─────────────
         jobs = p.get("industry_jobs")
         if jobs not in ("no_scope", None):
-            ready = [j for j in jobs if j.get("status") == "ready"]
+            ready = _ready_jobs(jobs, now)
             if ready:
-                fp = _fp("ready", *sorted(
-                    f"{j.get('activity_id')}:{j.get('blueprint_type_id')}:"
-                    f"{j.get('product_type_id')}:{j.get('runs')}"
-                    for j in ready
-                ))
-                since = p.get("industry_synced_at")
+                if all(j.get("job_id") is not None for j in ready):
+                    # ISS-064: fingerprint on the job ids, date from end_date.
+                    fp = _fp("ready", *sorted(f"job:{j['job_id']}" for j in ready))
+                    ends = [e for e in (_parse_job_end(j) for j in ready) if e is not None]
+                    since = min(ends) if ends else p.get("industry_synced_at")
+                else:
+                    # Row cached before ISS-064: status-only, as before.
+                    fp = _fp("ready", *sorted(
+                        f"{j.get('activity_id')}:{j.get('blueprint_type_id')}:"
+                        f"{j.get('product_type_id')}:{j.get('runs')}"
+                        for j in ready
+                    ))
+                    since = p.get("industry_synced_at")
                 aged = since is not None and (now - since) > AGE_OUT
                 sev = "grey" if aged else "gold"
                 if aged:
@@ -576,6 +627,20 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
                     action_label="Jobs", action_url="/industry/jobs", action_method="get",
                     since=since,
                 ))
+
+    # ── no permissions (grey) ───────────────────────────────────────────────
+    for p in pilots:
+        if p.get("no_perms"):
+            items.append(AttentionItem(
+                key=f"no_perms:{p['character_id']}",
+                fingerprint=_fp("no_perms"),
+                severity="grey",
+                character_id=p["character_id"], character_name=p["character_name"],
+                text="shares no permissions",
+                action_label="Permissions",
+                action_url=f"/account/permissions/{p['character_id']}", action_method="get",
+                since=None,
+            ))
 
     # ── sync stale / erroring (grey) ────────────────────────────────────────
     # A separate pass over all pilots (not inside the per-pilot loop above)

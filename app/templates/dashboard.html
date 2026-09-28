@@ -364,7 +364,7 @@
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none, (no_perms or {}).get(char.character_id, false)) }}
     {% endfor %}
     </div>
 </div>
@@ -380,7 +380,7 @@
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none, (no_perms or {}).get(char.character_id, false)) }}
     {% endfor %}
     </div>
 </div>

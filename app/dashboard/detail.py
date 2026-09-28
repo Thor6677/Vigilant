@@ -74,15 +74,42 @@ def pi_detail(planets, now: datetime | None = None) -> dict | None:
     return {"colonies": len(planets), "expiry_str": expiry_str, "expired": any_expired}
 
 
-def industry_detail(jobs) -> dict | None:
+def industry_detail(jobs, now: datetime | None = None) -> dict | None:
     """`jobs` is the raw industry_json list (trimmed: activity_id,
-    blueprint_type_id, product_type_id, runs, status — no end_date, see
-    CharacterDashboardCache.industry_json). None for no_scope/not-synced/empty."""
+    blueprint_type_id, product_type_id, runs, status, plus job_id/end_date
+    since ISS-064; rows cached earlier lack the last two until their next
+    hourly industry sync). None for no_scope/not-synced/empty.
+
+    With `now`, an "active" job whose `end_date` has passed counts as ready
+    (it finished between hourly syncs), the same rule the attention strip
+    uses; without it, only ESI's own "ready" status counts."""
     if not isinstance(jobs, list) or not jobs:
         return None
-    active = sum(1 for j in jobs if isinstance(j, dict) and j.get("status") == "active")
-    ready = sum(1 for j in jobs if isinstance(j, dict) and j.get("status") == "ready")
+    active = ready = 0
+    for j in jobs:
+        if not isinstance(j, dict):
+            continue
+        status = j.get("status")
+        if status == "active" and now is not None and _job_finished(j, now):
+            status = "ready"
+        if status == "active":
+            active += 1
+        elif status == "ready":
+            ready += 1
     return {"active": active, "ready": ready}
+
+
+def _job_finished(job: dict, now: datetime) -> bool:
+    raw = job.get("end_date")
+    if not raw:
+        return False
+    try:
+        end = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return end <= now
 
 
 def market_detail(orders) -> dict | None:

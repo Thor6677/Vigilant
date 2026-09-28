@@ -68,6 +68,7 @@ def build_table_row(
     wallet_delta: dict | None,
     queue_end: datetime | None,
     last_synced: datetime | None = None,
+    no_perms: bool = False,
 ) -> dict:
     """`summary` is one build_pilot_summaries() entry. `detail` is that
     pilot's app.dashboard.detail extras (None outside Detailed/Table, or for
@@ -134,6 +135,14 @@ def build_table_row(
         "tags": {"text": ", ".join(tags_list), "sort": _lower(", ".join(tags_list))},
         "can_fly": {"text": "…", "sort": 0},
     }
+
+    if no_perms:
+        # ISS-069: no sync age for a pilot that shares nothing; link to where
+        # permissions are granted instead.
+        cells["last_sync"] = {
+            "text": "no permissions", "sort": -1.0,
+            "href": f"/account/permissions/{summary['character_id']}",
+        }
 
     return {
         "character_id": summary["character_id"],
