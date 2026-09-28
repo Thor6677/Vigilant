@@ -1448,7 +1448,25 @@ async def ensure_user_fittings_skill_reqs_columns(db: AsyncSession) -> None:
 # Named indexes in here are built by create_wallet_snapshot_index_
 # background() instead, once the app is already serving. See that
 # function's docstring for what still works before it's built.
-_DEFERRED_STARTUP_INDEXES = frozenset({"ix_wallet_snapshots_char_recorded"})
+#
+# ISS-061 adds the two dscan_results indexes (declared at the end of this
+# file): production's row count for that table is unknown, so they take the
+# same deferred path rather than risk the blocking one.
+_DEFERRED_INDEX_DDL: dict[str, str] = {
+    "ix_wallet_snapshots_char_recorded": (
+        "CREATE INDEX IF NOT EXISTS ix_wallet_snapshots_char_recorded "
+        "ON wallet_snapshots (character_id, recorded_at)"
+    ),
+    "ix_dscan_results_expires_at": (
+        "CREATE INDEX IF NOT EXISTS ix_dscan_results_expires_at "
+        "ON dscan_results (expires_at)"
+    ),
+    "ix_dscan_results_user_created": (
+        "CREATE INDEX IF NOT EXISTS ix_dscan_results_user_created "
+        "ON dscan_results (user_id, created_at)"
+    ),
+}
+_DEFERRED_STARTUP_INDEXES = frozenset(_DEFERRED_INDEX_DDL)
 
 
 def _create_missing_indexes(sync_conn) -> None:
@@ -1504,22 +1522,25 @@ async def create_wallet_snapshot_index_background(delay: float = 5.0) -> None:
     call in tests) a no-op. Never raises: a failure here costs a missing
     optimization, not a broken app, so it's one WARNING line, not a
     traceback that could take anything else down with it.
+
+    ISS-061: it now builds every index in _DEFERRED_INDEX_DDL, one after
+    the other, each in its own transaction so the write lock is released
+    between them, and each logged (or failing) on its own. The name stays
+    because app/main.py and the T-080 tests call it. Until the dscan_results
+    indexes exist, the d-scan list query falls back to a scan of the table
+    and app.routes.dscan.purge_expired_dscans() waits for them before
+    purging anything.
     """
     if delay:
         await asyncio.sleep(delay)
-    started = time.monotonic()
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_wallet_snapshots_char_recorded "
-                "ON wallet_snapshots (character_id, recorded_at)"
-            ))
-        log.info(
-            "Built ix_wallet_snapshots_char_recorded in %.2fs",
-            time.monotonic() - started,
-        )
-    except Exception as e:
-        log.warning("ix_wallet_snapshots_char_recorded background build failed: %s", e)
+    for name, ddl in _DEFERRED_INDEX_DDL.items():
+        started = time.monotonic()
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(ddl))
+            log.info("Built %s in %.2fs", name, time.monotonic() - started)
+        except Exception as e:
+            log.warning("%s background build failed: %s", name, e)
 
 
 async def get_db() -> AsyncSession:
@@ -1581,3 +1602,15 @@ class CharacterPurge(Base):
     reason = Column(String(32), nullable=False)         # purge.REMOVAL_REASONS
     created_at = Column(DateTime, nullable=False,
                         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+# ── ISS-061: d-scan retention indexes ────────────────────────────────────────
+# expires_at serves the daily purge of expired d-scans
+# (app/routes/dscan.py:purge_expired_dscans); (user_id, created_at) serves the
+# user's own list (WHERE user_id = ? AND expires_at > ? ORDER BY created_at
+# DESC) and admin_remove_user's DELETE ... WHERE user_id = ?. A fresh install
+# gets both from create_all with the table; an existing table gets them after
+# startup from create_wallet_snapshot_index_background(), since both are in
+# _DEFERRED_INDEX_DDL.
+Index("ix_dscan_results_expires_at", DScanResult.expires_at)
+Index("ix_dscan_results_user_created", DScanResult.user_id, DScanResult.created_at)

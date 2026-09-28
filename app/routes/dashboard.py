@@ -2479,6 +2479,18 @@ async def _background_scheduler():
                 from app.auth.purge import run_due_purges
                 _background_scheduler._character_purge_task = asyncio.create_task(run_due_purges())
 
+            # ISS-061: daily batched purge of expired d-scans. Left unstamped
+            # while rows remain (or its index isn't built yet), so it carries
+            # on next minute instead of next day.
+            if not hasattr(_background_scheduler, '_last_dscan_purge') or \
+               (now - _background_scheduler._last_dscan_purge).total_seconds() >= 86400:
+                try:
+                    from app.routes.dscan import purge_expired_dscans
+                    if await purge_expired_dscans():
+                        _background_scheduler._last_dscan_purge = now
+                except Exception as e:
+                    logger.warning("D-scan purge error: %s", e)
+
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
                 try:

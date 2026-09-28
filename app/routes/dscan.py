@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 import secrets
 import string
@@ -12,13 +13,14 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 
 from app.db.models import get_db, DScanResult, AsyncSessionLocal
 from app.esi.client import ESIClient
 from app.sde import lookup as sde
 
 router = APIRouter(tags=["intel"])
+logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="app/templates")
 
 # ── Ship categorization by group_id ───────────────────────────────────────────
@@ -647,3 +649,53 @@ async def intel_extend(scan_id: str, request: Request, db: AsyncSession = Depend
     dscan.expires_at = datetime.now(timezone.utc) + delta
     await db.commit()
     return RedirectResponse(f"/intel/{scan_id}", status_code=303)
+
+
+# ── ISS-061: expired d-scan purge ────────────────────────────────────────────
+# Before this, an expired d-scan was only deleted when someone opened its link
+# again (intel_view above), so every paste ever made stayed in the database.
+# The background scheduler calls purge_expired_dscans() once a day.
+
+DSCAN_PURGE_BATCH = 500
+# Per call. A backlog bigger than this (the first run on an old install)
+# carries on at the scheduler's next tick, a minute later.
+DSCAN_PURGE_MAX_BATCHES = 40
+DSCAN_PURGE_PAUSE_SECONDS = 0.05
+_EXPIRES_INDEX = "ix_dscan_results_expires_at"
+
+
+async def purge_expired_dscans(now: datetime | None = None, *, session_factory=None) -> bool:
+    """Delete expired d-scans in batches of DSCAN_PURGE_BATCH, one short
+    transaction each, at most DSCAN_PURGE_MAX_BATCHES per call. Rows carry the
+    whole paste, so a batch is kept small to keep the write lock short.
+
+    Returns True once no expired row is left; False when it stopped early,
+    either at the batch cap or because ix_dscan_results_expires_at isn't built
+    yet (models.create_wallet_snapshot_index_background builds it after
+    startup). Without that index each batch would scan the whole table.
+    """
+    factory = session_factory or AsyncSessionLocal
+    now = now or datetime.now(timezone.utc)
+    deleted = 0
+    async with factory() as db:
+        ready = (await db.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"),
+            {"n": _EXPIRES_INDEX})).first()
+        if ready is None:
+            logger.info("d-scan purge waiting for %s to be built", _EXPIRES_INDEX)
+            return False
+        expired = (select(DScanResult.id).where(DScanResult.expires_at < now)
+                   .limit(DSCAN_PURGE_BATCH))
+        stmt = (delete(DScanResult).where(DScanResult.id.in_(expired))
+                .execution_options(synchronize_session=False))
+        for _ in range(DSCAN_PURGE_MAX_BATCHES):
+            n = (await db.execute(stmt)).rowcount or 0
+            await db.commit()
+            deleted += n
+            if n < DSCAN_PURGE_BATCH:
+                if deleted:
+                    logger.info("d-scan purge removed %d expired row(s)", deleted)
+                return True
+            await asyncio.sleep(DSCAN_PURGE_PAUSE_SECONDS)
+    logger.info("d-scan purge removed %d expired row(s); more remain, continuing next tick", deleted)
+    return False
