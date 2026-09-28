@@ -64,7 +64,7 @@
 {% include "status_data.html" %}
 
 <!-- Chart.js -->
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
   const initialData = {{ chart_data | safe }};

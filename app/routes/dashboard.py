@@ -28,7 +28,7 @@ from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
-from app.notify.discord import send_discord_alert
+from app.notify.discord import relay_user_alert
 from app.notify.user_discord import send_user_discord_alert
 
 router = APIRouter(tags=["dashboard"])
@@ -97,7 +97,10 @@ def _emit_notification(user_id: int, event: dict, relay: bool = True):
     title = event.get("title") or alert_type
     body = event.get("body") or ""
     try:
-        task = asyncio.create_task(send_discord_alert(title, body, alert_type))
+        # Instance channel: admin/manager events only unless
+        # DISCORD_RELAY_SCOPE=all (ISS-063); the role check is async.
+        task = asyncio.create_task(relay_user_alert(
+            user_id, title, body, alert_type))
         _discord_relay_tasks.add(task)
         task.add_done_callback(_discord_relay_tasks.discard)
         # T-075: the user's own webhook, same fire-and-forget pattern. The

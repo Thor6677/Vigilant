@@ -248,7 +248,7 @@ def test_partial_carries_data_only_and_page_breaks_lines_on_gaps():
     assert 'data-chart="{{ wallet_history|tojson|forceescape }}"' in partial
     with open(os.path.join(ROOT, "app/templates/corporations.html"), encoding="utf-8") as fh:
         page = fh.read()
-    assert "chart.js@" in page
+    assert "/static/vendor/chart-" in page
     assert "window.corpWalletRange = function" in page
     assert re.search(r"spanGaps:\s*false", page), "a gap must break the line, never be bridged"
     assert "corp-detail-" in page and "htmx:afterSwap" in page

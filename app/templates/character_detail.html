@@ -5,8 +5,8 @@
 {% endblock %}
 
 {% block head %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chartjs-adapter-date-fns-3.0.0.bundle.min.js"></script>
 <style nonce="{{ request.state.csp_nonce }}">
     /* .range-btn lives in static/css/site.css (T-039: identical across 3 templates) */
     .tx-amount-pos { color: var(--success); }

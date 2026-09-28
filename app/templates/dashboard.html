@@ -3,10 +3,10 @@
 
 {% block head %}
 {% if sort == 'custom' %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/sortablejs-1.15.3.min.js"></script>
 {% endif %}
 {% if killmails_enabled %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 {% endif %}
 {% if dash_mode == 'compact' %}
 {# Scoped to Compact mode: a mode switch is always a full page reload (see

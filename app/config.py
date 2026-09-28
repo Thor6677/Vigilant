@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # relaying alerts the moment DISCORD_WEBHOOK is set for unrelated reasons.
     discord_webhook_url: str = ""  # optional — unset means the relay no-ops
     discord_alert_types: str = "structure_attack,structure_fuel"  # comma-separated opt-in list
+    # Whose alerts the instance relay above carries: "admins" (default) posts
+    # only events of admin/manager accounts; "all" posts every user's. Other
+    # users are served by their own webhook (Account page). An unknown value is
+    # treated as "admins".
+    discord_relay_scope: str = "admins"
 
     # Contact address advertised in the outbound HTTP User-Agent. Third-party
     # APIs (ESI, zKillboard, EVE-Offline, EVE-Scout) require a real contact so
