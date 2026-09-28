@@ -21,11 +21,14 @@ def test_every_registered_table_exists_with_a_character_id_column():
 
 
 def test_every_removal_path_calls_the_hook():
+    # ISS-060: the four paths share one removal helper, and it is the helper
+    # that calls the hook.
     from app.auth.routes import _release_transferred, remove_character
     from app.routes.admin import admin_remove_character, admin_remove_user
     for fn in (remove_character, _release_transferred, admin_remove_character, admin_remove_user):
-        assert "purge_character_user_rows(" in inspect.getsource(fn), (
-            f"{fn.__name__} takes a character off an account but doesn't call purge_character_user_rows")
+        assert "remove_character_from_account(" in inspect.getsource(fn), (
+            f"{fn.__name__} takes a character off an account but doesn't call remove_character_from_account")
+    assert "purge_character_user_rows(" in inspect.getsource(purge.remove_character_from_account)
 
 
 def test_deletes_only_the_given_characters_rows(monkeypatch):

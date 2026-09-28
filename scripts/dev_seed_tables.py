@@ -60,6 +60,9 @@ SKIP = (
     # instance post its alerts into real users' channels, so dev starts with
     # no per-user webhooks at all.
     'user_notify_settings',
+    # ISS-060: production's queue of pending character purges. Those belong
+    # to removals made on production; dev starts with an empty queue.
+    'character_purges',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).

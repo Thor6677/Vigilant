@@ -78,9 +78,22 @@
       {% endif %}
 
       {% if not c['is_main'] %}
+        {# ISS-060: ask every time whether the history goes too; unticked by
+           default, like the permission picker's purge box. #}
         <form method="post" action="/auth/remove/{{ c['character_id'] }}" class="acct-remove"
-              data-confirm="Remove {{ c['character_name'] }} from Vigilant? Its authorization is revoked at EVE.">
+              style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.5rem 1rem;text-align:left;"
+              data-confirm="Remove {{ c['character_name'] }} from Vigilant? Its authorization is revoked at EVE, and its current data, tags and notes are deleted. Its history is deleted only if you ticked the box.">
+          <label class="perm-purge-check" style="flex:1 1 16rem;font-size:var(--fs-sm);">
+            <input type="checkbox" class="b-check" name="delete_history" value="1">
+            Also delete the history Vigilant collected for it
+          </label>
           <button type="submit" class="b-link-btn is-danger">Remove character</button>
+          <p class="acct-note" style="flex:1 1 100%;border-top:none;padding:0;">
+            History means wallet snapshots and transactions, job history, the
+            mining ledger and its net-worth rows. Left unticked, it is kept and
+            shows again if this character is added to Vigilant later, by you or
+            by a future owner.
+          </p>
         </form>
       {% endif %}
     </div>

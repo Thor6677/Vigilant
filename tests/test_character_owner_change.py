@@ -129,7 +129,12 @@ def test_new_owner_does_not_sign_into_the_old_account(env, monkeypatch):
     assert char.scopes == ""
     assert _count(env, WalletSnapshot, character_id=ALT_ID) == 0
     assert _count(env, CharacterDashboardCache, character_id=ALT_ID) == 0
+    # ISS-060: the ESI response cache is cleared by the background purge the
+    # removal queued, not in the sign-in request (it's a scan of a big table).
+    assert env.q(lambda db: _all_cache_keys(db, ALT_ID)) != []
+    env.q(_run_due_purges)
     assert env.q(lambda db: _all_cache_keys(db, ALT_ID)) == []
+    assert env.char(ALT_ID).user_id == new_user
     # The old owner's other character is untouched.
     assert env.char(MAIN_ID).user_id == USER_ID
     # Recorded against the account that lost it.
@@ -184,6 +189,15 @@ def test_the_allowlist_still_applies_to_the_new_owner(env, monkeypatch):
     assert "user_id" not in env.session_of(r)
     # The old account has lost it regardless.
     assert env.char(ALT_ID) is None
+
+
+async def _run_due_purges(db):
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.auth import purge
+    later = datetime.now(timezone.utc) + purge.PURGE_DELAY + timedelta(seconds=1)
+    return await purge.run_due_purges(
+        now=later, session_factory=async_sessionmaker(db.bind, expire_on_commit=False))
 
 
 async def _events(db, event_type):

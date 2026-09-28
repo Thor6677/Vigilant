@@ -1549,3 +1549,35 @@ class UserNotifySettings(Base):
     last_ok = Column(Boolean, nullable=True)
     last_error = Column(String(255), nullable=True)
     updated_at = Column(DateTime, nullable=True)
+
+
+# ── ISS-060: pending character purges ────────────────────────────────────────
+
+class CharacterPurge(Base):
+    """The unfinished half of taking a character off an account.
+
+    Every removal path (app/auth/purge.py:remove_character_from_account)
+    deletes the character row and its small live state in the request and
+    records one of these. The background purge (purge.run_due_purges) does
+    the rest: the character's ESI response cache entries and, when
+    `delete_history` is set, its history, in small batches. It deletes this
+    row when it is done.
+
+    A table rather than an in-memory queue, so a deploy can land mid-purge:
+    after the restart the scheduler picks the row up again and repeats the
+    deletes, which are idempotent, from the start.
+
+    One row per character. Removing it again before its purge ran moves
+    `removed_at` on (so the purge also waits out any sync the newer removal
+    interrupted), and `delete_history` stays set if either removal asked for
+    it. No user_id column on purpose: admin_remove_user deletes or nulls
+    every user_id column in the same request that records these rows.
+    """
+    __tablename__ = "character_purges"
+
+    character_id = Column(Integer, primary_key=True, autoincrement=False)
+    removed_at = Column(DateTime, nullable=False)       # naive UTC
+    delete_history = Column(Boolean, nullable=False, default=False)
+    reason = Column(String(32), nullable=False)         # purge.REMOVAL_REASONS
+    created_at = Column(DateTime, nullable=False,
+                        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

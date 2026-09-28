@@ -21,7 +21,9 @@ from app.db.models import (
     AdminAuditLog, RegistrationAllowlist, AsyncSessionLocal, UpdateStatus,
     UpdateSchedule, UpdateRunReport,
 )
-from app.auth.purge import purge_character_user_rows
+from app.auth.purge import (
+    REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, remove_character_from_account,
+)
 from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
 from app.esi.client import get_etag_cache_stats
@@ -115,7 +117,8 @@ AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("permissions", "Permissions", ("permissions_changed", "permissions_purged")),
     ("allowlist", "Allowlist", ("admin_allowlist",)),
     ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
-                                 "character_transferred", "user_logout_everywhere")),
+                                 "character_transferred", "user_logout_everywhere",
+                                 "character_purge")),  # ISS-060: background clean-up after a removal
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),
@@ -888,11 +891,8 @@ async def admin_remove_user(user_id: int, request: Request,
     for char in chars_result.scalars().all():
         if issued_to_us(char.access_token):
             to_revoke.append(char.refresh_token)
-        # Clean up associated caches
-        await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": char.character_id})
-        await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": char.character_id})
-        await purge_character_user_rows(db, char.character_id)
-        await db.delete(char)
+        # ISS-060: live state now; ESI cache and history in the background.
+        await remove_character_from_account(db, char, reason=REASON_ADMIN_USER, delete_history=True)
 
     # Delete user-owned data so the user row's removal doesn't leave orphans
     # behind. Skill plans go through the ORM so SkillPlanEntry + SkillPlanACL
@@ -937,10 +937,8 @@ async def admin_remove_character(character_id: int, request: Request,
     char_name = char.character_name
     from app.auth.tokens import issued_to_us, revoke_refresh_token
     old_refresh = char.refresh_token if issued_to_us(char.access_token) else None
-    await db.execute(text("DELETE FROM character_dashboard_cache WHERE character_id = :cid"), {"cid": character_id})
-    await db.execute(text("DELETE FROM character_asset_cache WHERE character_id = :cid"), {"cid": character_id})
-    await purge_character_user_rows(db, character_id)
-    await db.delete(char)
+    # ISS-060: live state now; ESI cache and history in the background.
+    await remove_character_from_account(db, char, reason=REASON_ADMIN_CHARACTER, delete_history=True)
     await db.commit()
     await revoke_refresh_token(old_refresh)   # None (not ours) is a no-op
 

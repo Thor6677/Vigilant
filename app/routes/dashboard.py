@@ -1909,6 +1909,13 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     cache.last_synced = now
     cache.sync_status = "idle"
     cache.sync_error = None
+    # ISS-060: if the character was removed while this sync ran (and maybe
+    # linked to a new owner since), write nothing it fetched for the old one.
+    from app.auth.purge import sync_must_not_write
+    if await sync_must_not_write(db, character_id, now):
+        await db.rollback()
+        logger.info("Sync for char %s dropped: character removed while it ran", character_id)
+        return
     await db.commit()
 
     # Detect notification events by comparing old vs new data
@@ -2463,6 +2470,14 @@ async def _background_scheduler():
                     _background_scheduler._last_esi_events_gc = now
                 except Exception as e:
                     logger.warning("ESI events GC error: %s", e)
+
+            # ISS-060: finish removed characters' clean-up (app/auth/purge.py),
+            # including any a restart interrupted. Its own task, so a large
+            # purge never holds up this loop; one runs at a time.
+            _purge_task = getattr(_background_scheduler, '_character_purge_task', None)
+            if _purge_task is None or _purge_task.done():
+                from app.auth.purge import run_due_purges
+                _background_scheduler._character_purge_task = asyncio.create_task(run_due_purges())
 
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
