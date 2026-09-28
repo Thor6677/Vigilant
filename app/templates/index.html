@@ -21,11 +21,14 @@
         </div>
         {% endif %}
         <div style="padding:1.5rem;display:flex;flex-direction:column;gap:0.75rem;align-items:center;">
-            {# Two doors. New visitors choose what to share BEFORE EVE SSO; a
-               returning user's "Log in" is identity only and never changes what
-               a character shares (app/auth/routes.py). #}
-            <a href="/auth/connect" class="b-btn is-primary" style="width:100%;text-align:center;">New here? Choose what to share</a>
-            <a href="/auth/login" class="b-btn is-ghost" style="width:100%;text-align:center;">Log in with EVE Online SSO</a>
+            {# Two doors. A returning user's "Log in" is identity only and never
+               changes what a character shares; new visitors choose what to
+               share BEFORE EVE SSO (app/auth/routes.py). Log in is the primary
+               one (ISS-068): with signup first, returning users took the "new
+               here" door and its Minimal preset, and narrowed a registered
+               pilot's permissions to nothing. #}
+            <a href="/auth/login" class="b-btn is-primary" style="width:100%;text-align:center;">Log in with EVE Online SSO</a>
+            <a href="/auth/connect" class="b-btn is-ghost" style="width:100%;text-align:center;">New here? Choose what to share</a>
             <span class="b-muted-sm" style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;">SSO · EVE-authorized third-party · no passwords stored</span>
         </div>
     </div>

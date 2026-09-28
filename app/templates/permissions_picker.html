@@ -41,6 +41,13 @@
           on EVE's own page next, and pick the character there. You can change
           this any time under <b>Account &rsaquo; Characters &amp; permissions</b>.
         </p>
+        {% if intent == 'signup' %}
+          {# ISS-068: returning users land here from the landing page too. #}
+          <p class="perm-lede perm-returning">
+            Already use Vigilant? <a class="b-link" href="/auth/login">Log in instead</a>
+            — logging in never changes what a character shares.
+          </p>
+        {% endif %}
       </div>
     {% endif %}
   </div>

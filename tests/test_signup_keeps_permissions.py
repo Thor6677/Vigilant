@@ -16,6 +16,7 @@ HTTP client _do_refresh uses, so the real refresh code runs.
 """
 import base64
 import json
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -352,3 +353,27 @@ def test_login_and_new_characters_never_probe(env, sso_refresh):
 def test_the_kept_event_is_filed_under_permissions():
     from app.routes.admin import audit_group
     assert audit_group("permissions_kept") == "permissions"
+
+
+# ── The doors ───────────────────────────────────────────────────────────────
+
+def test_landing_page_makes_log_in_the_primary_door(env):
+    html = env.client().get("/").text
+    login = re.search(r'<a href="/auth/login" class="b-btn ([^"]*)"', html)
+    signup = re.search(r'<a href="/auth/connect" class="b-btn ([^"]*)"', html)
+    assert login and signup
+    assert login.group(1) == "is-primary" and signup.group(1) == "is-ghost"
+    assert login.start() < signup.start()
+
+
+def test_signup_picker_points_returning_users_to_log_in(env):
+    html = env.client().get("/auth/connect").text
+    assert 'name="intent" value="signup"' in html
+    assert "Already use Vigilant?" in html
+    assert re.search(r'Already use Vigilant\?\s*<a class="b-link" href="/auth/login">Log in instead</a>', html)
+    assert "logging in never changes what a character shares" in html
+
+
+def test_add_and_update_pickers_do_not_offer_log_in(env):
+    assert "Already use Vigilant?" not in env.user().get("/auth/connect").text
+    assert "Already use Vigilant?" not in env.user().get(f"/account/permissions/{ALT_ID}").text
