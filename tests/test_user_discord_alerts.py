@@ -241,7 +241,7 @@ def test_emit_notification_schedules_the_user_relay_only_when_relaying(monkeypat
         global_calls.append((a, k))
 
     monkeypatch.setattr(dashboard, "send_user_discord_alert", user_spy)
-    monkeypatch.setattr(dashboard, "send_discord_alert", global_spy)
+    monkeypatch.setattr(dashboard, "relay_user_alert", global_spy)
 
     async def go():
         dashboard._emit_notification(-75, {"type": "auto_update", "title": "t"}, relay=False)
