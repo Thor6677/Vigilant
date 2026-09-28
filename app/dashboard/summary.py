@@ -109,6 +109,7 @@ def build_pilot_summaries(
     char_groups: dict,
     wallet_deltas: dict | None = None,
     tags_by_char: dict | None = None,
+    no_perms: dict | None = None,
 ) -> dict[int, dict]:
     """Build one summary dict per character. Pure — no I/O, no `datetime.now()`;
     every value here is read straight from what the caller already computed."""
@@ -127,6 +128,8 @@ def build_pilot_summaries(
         stale = staleness.get(cid, "never") if staleness else "never"
         last_str = last_synced_strs.get(cid) if last_synced_strs else None
         reauth = bool(needs_reauth.get(cid)) if needs_reauth else False
+        # ISS-069: a pilot sharing no permissions has no sync age to show.
+        pilot_no_perms = bool(no_perms.get(cid)) if no_perms else False
         training_warning = sk.get("warning", "error")
 
         flags: list[dict] = []
@@ -137,7 +140,9 @@ def build_pilot_summaries(
             flags.append({"label": "RENEW", "sev": "red"})
         # Mirrors the card's retry-button condition exactly: nothing fires
         # while a sync is in flight, whatever the staleness says.
-        if sync_status != "syncing":
+        if pilot_no_perms:
+            flags.append({"label": "NO PERMISSIONS", "sev": "grey"})
+        elif sync_status != "syncing":
             if sync_status == "error":
                 flags.append({"label": "SYNC ERROR", "sev": "red"})
             elif stale in ("critical", "warning"):
@@ -174,6 +179,7 @@ def build_pilot_summaries(
                 "status": sync_status,
                 "last_str": last_str,
                 "stale": stale,
+                "no_perms": pilot_no_perms,
             },
             "needs_reauth": reauth,
             "flags": flags,
