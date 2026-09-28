@@ -44,7 +44,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
-from app.auth.purge import clear_live_state, purge_character_user_rows, purge_history
+from app.auth.purge import (
+    REASON_SELF, REASON_TRANSFER, clear_live_state, purge_history, remove_character_from_account,
+)
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
@@ -300,15 +302,15 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     one authorization per character per application, and revoking could take
     the new owner's authorization down with it (see the module docstring).
     Committed here, so the removal stands even if the caller refuses the login.
+
+    ISS-060: the history is deleted during this request, in short batches,
+    because the caller links the character to its new owner straight after;
+    only the ESI response cache is left to the background purge
+    (app/auth/purge.py explains both).
     """
     cid = char.character_id
     old_user_id = char.user_id
-    everything = [p.key for p in perms.PERMISSIONS]
-    await clear_live_state(db, cid, everything)
-    await purge_history(db, cid, everything)
-    await db.execute(delete(CharacterDashboardCache).where(CharacterDashboardCache.character_id == cid))
-    await purge_character_user_rows(db, cid)
-    await db.delete(char)
+    await remove_character_from_account(db, char, reason=REASON_TRANSFER, delete_history=True)
     db.add(AdminAuditLog(
         user_id=old_user_id, character_id=cid, event_type="character_transferred",
         detail="EVE reports a new owner; removed from the previous account with its stored data",
@@ -755,7 +757,16 @@ async def switch_character(character_id: int, request: Request, db: AsyncSession
 
 
 @router.post("/remove/{character_id}")
-async def remove_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+async def remove_character(character_id: int, request: Request,
+                           delete_history: str = Form(""),
+                           db: AsyncSession = Depends(get_db)):
+    """Remove one of your own characters (never the main).
+
+    Its live data, tags and notes go now and its ESI response cache shortly
+    after. Its history goes too only when the Account page's "also delete the
+    history" box was ticked (`delete_history=1`); unticked by default, and the
+    dashboard card's compact form never sends it (ISS-060).
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/dashboard", status_code=303)
@@ -776,8 +787,8 @@ async def remove_character(character_id: int, request: Request, db: AsyncSession
 
     old_refresh = char.refresh_token
     old_is_ours = issued_to_us(char.access_token)
-    await purge_character_user_rows(db, character_id)
-    await db.delete(char)
+    await remove_character_from_account(db, char, reason=REASON_SELF,
+                                        delete_history=delete_history == "1")
     await db.commit()
     # Removing a character is withdrawing every permission it granted.
     if old_is_ours:
