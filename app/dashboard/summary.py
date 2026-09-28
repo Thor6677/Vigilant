@@ -127,6 +127,8 @@ def build_pilot_summaries(
         sync_status = sync_statuses.get(cid, "idle") if sync_statuses else "idle"
         stale = staleness.get(cid, "never") if staleness else "never"
         last_str = last_synced_strs.get(cid) if last_synced_strs else None
+        if stale == "never":
+            last_str = None  # "never" shows no age, in every mode
         reauth = bool(needs_reauth.get(cid)) if needs_reauth else False
         # ISS-069: a pilot sharing no permissions has no sync age to show.
         pilot_no_perms = bool(no_perms.get(cid)) if no_perms else False

@@ -99,7 +99,7 @@ def test_route_and_attention_give_identical_answers():
                         (FAST_SCOPES, 5), (FAST_SCOPES, 3600 + 901), ("", 5)]:
         char = SimpleNamespace(scopes=scopes)
         fs = _all_granted(scopes, age)
-        cache = SimpleNamespace(field_synced_json=fs)
+        cache = SimpleNamespace(field_synced_json=fs, last_synced=None)
         route_answer = dash_mod._staleness(char, cache, NOW)
         attn_answer = attn._pilot_staleness(
             {"staleness": st.staleness(NOW, scopes, fs)}, NOW)
@@ -428,3 +428,72 @@ def test_banner_cutoffs_are_named_constants():
     assert dash_mod._BANNER_ATTACK_MAX_AGE == timedelta(hours=48)
     assert dash_mod._BANNER_FUEL_MAX_AGE == timedelta(days=7)
     assert dash_mod._BANNER_REINFORCE_FALLBACK_AGE == timedelta(hours=48)
+
+
+# ── ISS-069 follow-up: a granted field with no stamp falls back to last_synced
+
+def _missing_skills(age_s: float = 5):
+    """Every granted field stamped, except `skills` (added in v1.7.0)."""
+    scopes = perms.WALLET + " " + perms.SKILLS
+    ages = {f: age_s for f in st.granted_fields(scopes) if f != "skills"}
+    return scopes, _synced(ages)
+
+
+def test_missing_field_with_old_last_synced_is_critical():
+    scopes, fs = _missing_skills()
+    old = (NOW - timedelta(days=64)).replace(tzinfo=None)  # naive = UTC, like the column
+    assert st.staleness(NOW, scopes, fs, old) == "critical"
+
+
+def test_missing_field_with_recent_last_synced_is_fresh():
+    scopes, fs = _missing_skills()
+    assert st.staleness(NOW, scopes, fs, (NOW - timedelta(minutes=1)).replace(tzinfo=None)) == "fresh"
+    # A reset field_synced on a just-synced pilot is fresh too.
+    assert st.staleness(NOW, scopes, None, NOW - timedelta(minutes=1)) == "fresh"
+
+
+def test_missing_field_without_last_synced_is_never():
+    scopes, fs = _missing_skills()
+    assert st.staleness(NOW, scopes, fs, None) == "never"
+    assert st.staleness(NOW, scopes, fs) == "never"
+
+
+def test_route_passes_last_synced_through():
+    scopes, fs = _missing_skills()
+    old = (NOW - timedelta(days=64)).replace(tzinfo=None)
+    char = SimpleNamespace(scopes=scopes)
+    cache = SimpleNamespace(field_synced_json=fs, last_synced=old)
+    assert dash_mod._staleness(char, cache, NOW) == "critical"
+
+
+def test_card_never_shows_green_dot_with_resync_form():
+    from tests._dashboard_fixture import STALENESS, LAST_SYNCED_STRS
+    import re
+    for stale in ("fresh", "warning", "critical", "never"):
+        stales = {c.character_id: stale for c in CHARACTERS}
+        ages = {c.character_id: "64d ago" for c in CHARACTERS}
+        html = render_full("name", dash_mode="cards", staleness=stales, last_synced_strs=ages,
+                           sync_statuses={c.character_id: "idle" for c in CHARACTERS})
+        for m in re.finditer(r'<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Sync</span>.*?</div>', html, re.S):
+            cell = m.group(0)
+            has_form = "/dashboard/sync/" in cell
+            assert not ("is-ok" in cell and has_form), stale
+            if stale == "never":
+                assert "64d ago" not in cell and "never" in cell and has_form
+            if stale in ("warning", "critical"):
+                assert "is-warn" in cell and has_form
+            if stale == "fresh":
+                assert "is-ok" in cell and not has_form
+
+
+def test_summary_and_table_show_never_without_an_age():
+    ctx = build_context("custom")
+    stales = dict(ctx["staleness"])
+    stales[NP_ID] = "never"
+    summaries = build_pilot_summaries(
+        CHARACTERS, ctx["wallets"], ctx["locations"], ctx["clones"], ctx["skill_map"],
+        ctx["sync_statuses"], stales, {NP_ID: "64d ago"}, ctx["needs_reauth"], {}, {}, ctx["char_groups"],
+    )
+    assert summaries[NP_ID]["sync"]["last_str"] is None
+    row = build_table_row(summaries[NP_ID], None, None, None, None, last_synced=NOW)
+    assert row["cells"]["last_sync"]["text"] == "never"
