@@ -45,6 +45,24 @@ SENT = "sent"
 NOT_SENT_NO_WEBHOOK = "not sent: DISCORD_WEBHOOK_URL is not set"
 NOT_SENT_TYPE_OFF = "not sent: alert type not in DISCORD_ALERT_TYPES"
 NOT_SENT_SUPPRESSED = "not sent: repeat within the suppression window"
+NOT_SENT_SCOPE = "not sent: account is outside DISCORD_RELAY_SCOPE"
+
+# DISCORD_RELAY_SCOPE values. Anything else is treated as "admins" (the safe
+# reading: fewer people's pilot names in the shared channel) and logged once.
+SCOPE_ADMINS = "admins"
+SCOPE_ALL = "all"
+_RELAY_ROLES = ("admin", "manager")
+_warned_scopes: set[str] = set()
+
+
+def relay_scope() -> str:
+    raw = (get_settings().discord_relay_scope or "").strip().lower()
+    if raw in (SCOPE_ADMINS, SCOPE_ALL):
+        return raw
+    if raw not in _warned_scopes:
+        _warned_scopes.add(raw)
+        logger.warning("DISCORD_RELAY_SCOPE has an unknown value; using %r", SCOPE_ADMINS)
+    return SCOPE_ADMINS
 
 
 def _enabled_types(raw: str) -> set[str]:
@@ -118,3 +136,30 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
         logger.warning("discord alert relay: failed to send type=%s: %s", alert_type, type(e).__name__)
         return f"failed: {type(e).__name__}"
     return SENT
+
+
+async def relay_user_alert(user_id: int, title: str, body: str, alert_type: str,
+                           key: str | None = None) -> str:
+    """The instance relay for one user's alert (the path `_emit_notification`
+    takes). With DISCORD_RELAY_SCOPE=admins (the default) only an admin or
+    manager account's events are posted; "all" posts everyone's.
+
+    The dedup identity includes the user, so one user's alert never suppresses
+    another user's alert of the same type and title. Fails closed: if the role
+    cannot be read, nothing is posted. Never raises, like send_discord_alert.
+    Update reports call send_discord_alert directly and do not pass through here.
+    """
+    try:
+        if relay_scope() == SCOPE_ADMINS and delivers(alert_type):
+            # Local import: the models module is heavy and this module is not.
+            from app.db.models import AsyncSessionLocal, User
+            async with AsyncSessionLocal() as db:
+                user = await db.get(User, user_id)
+            if user is None or user.role not in _RELAY_ROLES:
+                return NOT_SENT_SCOPE
+        return await send_discord_alert(
+            title, body, alert_type, key=f"{user_id}:{key or title}")
+    except Exception as e:
+        logger.warning("discord alert relay: scope check failed type=%s: %s",
+                       alert_type, type(e).__name__)
+        return f"failed: {type(e).__name__}"

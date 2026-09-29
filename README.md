@@ -819,8 +819,9 @@ All settings are read from `.env`:
 | `ADMIN_CHARACTER_ID` | *(unset)* | EVE character id of the owner. Only the account owning this character is auto-promoted to admin — see [First-User Admin Bootstrap](#first-user-admin-bootstrap). Unset means no one is promoted |
 | `CONTACT_EMAIL` | *(the project's issue tracker URL)* | Contact sent in the `User-Agent` on outbound requests to ESI, zKillboard, and other third-party APIs. These operators require a reachable contact. **Self-hosters should set their own address** so they can be reached about their own instance's traffic |
 | `DISCORD_WEBHOOK` | *(unset)* | Ops/backfill progress pings. No-op when unset |
-| `DISCORD_WEBHOOK_URL` | *(unset)* | User-facing alert relay (structure attacks, fuel alerts). Deliberately separate from `DISCORD_WEBHOOK` — don't alias them. No-op when unset |
+| `DISCORD_WEBHOOK_URL` | *(unset)* | Instance alert relay (structure attacks, fuel alerts); see `DISCORD_RELAY_SCOPE` for whose alerts it carries. Deliberately separate from `DISCORD_WEBHOOK` — don't alias them. No-op when unset |
 | `DISCORD_ALERT_TYPES` | `structure_attack,structure_fuel` | Comma-separated opt-in list gating which alert types the relay sends. Update-related types: `update_available` (a newer release exists) and `auto_update` (how each scheduled or automatic update ended — see [How you find out what happened](#how-you-find-out-what-happened); a webhook or ntfy topic for the same reports is set in the updater panel, not here) |
+| `DISCORD_RELAY_SCOPE` | `admins` | Whose alerts the instance relay (`DISCORD_WEBHOOK_URL`) carries. `admins` posts only events of admin and manager accounts; `all` posts every user's, pilot names included. Other users get their alerts through their own webhook on the Account page, which this setting does not affect. Update reports are not affected either. An unknown value is treated as `admins` |
 | `WANDERER_URL` | *(unset)* | Link to your own Wanderer wormhole-mapper instance. Adds a "Wanderer" item to the Map nav group; unset omits the item entirely |
 
 ---

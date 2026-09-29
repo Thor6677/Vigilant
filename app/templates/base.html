@@ -16,7 +16,7 @@
        since every htmx consumer already lives inside a user_id-gated block
        or an authed-only route/template. #}
     {% if request.session.get('user_id') %}
-    <script nonce="{{ request.state.csp_nonce }}" src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/htmx-1.9.12.min.js"></script>
     <script nonce="{{ request.state.csp_nonce }}">
     /* htmx re-creates any script element it finds in swapped-in content and
        appends it to the document, which makes it an INLINE script as far as

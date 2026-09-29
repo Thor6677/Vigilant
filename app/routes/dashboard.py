@@ -28,7 +28,7 @@ from app.esi import universe as esi_universe
 from app.esi import assets as esi_assets
 from app.esi import corporation as esi_corp
 from app.sde import lookup as sde
-from app.notify.discord import send_discord_alert
+from app.notify.discord import relay_user_alert
 from app.notify.user_discord import send_user_discord_alert
 
 router = APIRouter(tags=["dashboard"])
@@ -97,7 +97,10 @@ def _emit_notification(user_id: int, event: dict, relay: bool = True):
     title = event.get("title") or alert_type
     body = event.get("body") or ""
     try:
-        task = asyncio.create_task(send_discord_alert(title, body, alert_type))
+        # Instance channel: admin/manager events only unless
+        # DISCORD_RELAY_SCOPE=all (ISS-063); the role check is async.
+        task = asyncio.create_task(relay_user_alert(
+            user_id, title, body, alert_type))
         _discord_relay_tasks.add(task)
         task.add_done_callback(_discord_relay_tasks.discard)
         # T-075: the user's own webhook, same fire-and-forget pattern. The
@@ -376,41 +379,15 @@ def _get_token_lock(character_id: int) -> asyncio.Lock:
 # Resets on container restart; cleared for a character on re-auth.
 _corp_403_cache: set[tuple[int, int]] = set()
 
-# ── ESI cache timers (seconds) — from ESI swagger Cache-Control: max-age ─────
-# https://esi.evetech.net/latest/swagger.json
-FIELD_CACHE_SECONDS: dict[str, int] = {
-    "wallet":        120,   # ESI max-age: 120s
-    "location":       60,   # ESI max-age:   5s  — 60s is adequate for a dashboard
-    "clones":       3600,   # ESI max-age: 3600s
-    "notifications": 600,   # ESI max-age: 600s — feeds structure-alert banners
-    "contracts":     300,   # ESI max-age: 300s
-    "pi":            600,   # ESI max-age: 600s
-    "skillqueue":    120,   # ESI max-age: 120s
-    "skills":       3600,   # T-073: total SP / trained levels change slowly
-    "zkill":        3600,   # zkillboard — 1h is plenty
-    "assets":       3600,   # ESI max-age: 3600s
-    "roles":        3600,   # corp roles — rarely change, cached for permission checks
-    "transactions": 3600,   # wallet fills — immutable; hourly incremental page-back is plenty
-    "orders":       3600,   # ESI max-age: 1200s; hourly is enough for net-worth escrow
-    "industry":     3600,   # ESI max-age: 300s; hourly is enough for WIP valuation
-}
-
-FIELD_SCOPES: dict[str, str] = {
-    "wallet":        perms.WALLET,
-    "location":      perms.LOCATION,
-    "clones":        perms.CLONES,
-    "notifications": perms.NOTIFICATIONS,
-    "contracts":     perms.CONTRACTS,
-    "pi":            perms.PLANETS,
-    "skillqueue":    perms.SKILLQUEUE,
-    "skills":        perms.SKILLS,   # T-073
-    "zkill":         None,   # no ESI scope required
-    "assets":        perms.ASSETS,
-    "roles":         perms.CORP_ROLES,
-    "transactions":  perms.WALLET,   # same scope as wallet balance
-    "orders":        perms.ORDERS,
-    "industry":      perms.JOBS,
-}
+# ISS-069: the cache-window and scope tables moved to app.dashboard.staleness
+# (imported here so every existing `from app.routes.dashboard import ...` keeps
+# working); it is the one place the staleness rule and the scheduler share.
+from app.dashboard.staleness import (  # noqa: E402
+    FIELD_CACHE_SECONDS, FIELD_SCOPES,
+    STALE_WARNING_SECONDS, STALE_CRITICAL_SECONDS,
+    has_permissions as _has_permissions,
+    staleness as _staleness_for,
+)
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
 _FIELD_DB_COLUMN: dict[str, str | None] = {
@@ -429,11 +406,6 @@ _FIELD_DB_COLUMN: dict[str, str | None] = {
     "orders":        "orders_json",     # T-041: net-worth escrow valuation
     "industry":      "industry_json",   # T-041: net-worth WIP valuation
 }
-
-# UI staleness thresholds (based on last_synced, for indicator colours)
-STALE_WARNING_SECONDS = 900   # 15 min: yellow indicator
-STALE_CRITICAL_SECONDS = 1800  # 30 min: red indicator + manual resync button
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -478,16 +450,18 @@ def _age_str(last_synced: datetime | None) -> str | None:
     return f"{int(age // 86400)}d ago"
 
 
-def _staleness(last_synced: datetime | None) -> str:
-    if last_synced is None:
-        return "never"
-    ls = last_synced if last_synced.tzinfo else last_synced.replace(tzinfo=timezone.utc)
-    age = (datetime.now(timezone.utc) - ls).total_seconds()
-    if age > STALE_CRITICAL_SECONDS:
-        return "critical"
-    if age > STALE_WARNING_SECONDS:
-        return "warning"
-    return "fresh"
+def _staleness(char: Character, cache: CharacterDashboardCache | None,
+               now: datetime | None = None) -> str:
+    """fresh | warning | critical | never for one pilot (ISS-069).
+
+    Judged from the pilot's own granted fields, not the age of the last sync;
+    the rule lives in app.dashboard.staleness and is shared with the
+    needs-attention strip."""
+    return _staleness_for(
+        now or datetime.now(timezone.utc), char.scopes,
+        cache.field_synced_json if cache else None,
+        cache.last_synced if cache else None,
+    )
 
 
 def _any_field_stale(char: Character, cache: CharacterDashboardCache | None) -> bool:
@@ -1599,6 +1573,10 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 "product_type_id": j.get("product_type_id"),
                 "runs": int(j.get("runs") or 0),
                 "status": j.get("status"),
+                # ISS-064: the attention strip fingerprints on job_id and
+                # dates "ready" from end_date (ESI's ISO string, kept as-is).
+                "job_id": j.get("job_id"),
+                "end_date": j.get("end_date"),
             } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
             try:
                 await _persist_completed_jobs(db, char.character_id, jobs or [])
@@ -1909,6 +1887,13 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     cache.last_synced = now
     cache.sync_status = "idle"
     cache.sync_error = None
+    # ISS-060: if the character was removed while this sync ran (and maybe
+    # linked to a new owner since), write nothing it fetched for the old one.
+    from app.auth.purge import sync_must_not_write
+    if await sync_must_not_write(db, character_id, now):
+        await db.rollback()
+        logger.info("Sync for char %s dropped: character removed while it ran", character_id)
+        return
     await db.commit()
 
     # Detect notification events by comparing old vs new data
@@ -2464,6 +2449,26 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("ESI events GC error: %s", e)
 
+            # ISS-060: finish removed characters' clean-up (app/auth/purge.py),
+            # including any a restart interrupted. Its own task, so a large
+            # purge never holds up this loop; one runs at a time.
+            _purge_task = getattr(_background_scheduler, '_character_purge_task', None)
+            if _purge_task is None or _purge_task.done():
+                from app.auth.purge import run_due_purges
+                _background_scheduler._character_purge_task = asyncio.create_task(run_due_purges())
+
+            # ISS-061: daily batched purge of expired d-scans. Left unstamped
+            # while rows remain (or its index isn't built yet), so it carries
+            # on next minute instead of next day.
+            if not hasattr(_background_scheduler, '_last_dscan_purge') or \
+               (now - _background_scheduler._last_dscan_purge).total_seconds() >= 86400:
+                try:
+                    from app.routes.dscan import purge_expired_dscans
+                    if await purge_expired_dscans():
+                        _background_scheduler._last_dscan_purge = now
+                except Exception as e:
+                    logger.warning("D-scan purge error: %s", e)
+
             # Daily WalletSnapshot cleanup
             if _last_cleanup is None or (now - _last_cleanup).total_seconds() >= 86400:
                 try:
@@ -2670,6 +2675,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     # Per-character sync metadata
     now = datetime.now(timezone.utc)
     sync_statuses, staleness_map, last_synced_strs = {}, {}, {}
+    no_perms_map: dict[int, bool] = {}
     for char in characters:
         cid = char.character_id
         cache = char_caches.get(cid)
@@ -2677,7 +2683,8 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         # Treat queued-but-not-yet-started characters as syncing so the HTMX
         # poller stays active for the full batch.
         sync_statuses[cid] = "syncing" if cid in _queued_sync else db_status
-        staleness_map[cid] = _staleness(cache.last_synced if cache else None)
+        staleness_map[cid] = _staleness(char, cache, now)
+        no_perms_map[cid] = not _has_permissions(char.scopes)
         last_synced_strs[cid] = _age_str(cache.last_synced if cache else None)
 
     any_syncing = any(s == "syncing" for s in sync_statuses.values())
@@ -2755,6 +2762,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         characters, wallets, locations, clones, skill_map, sync_statuses,
         staleness_map, last_synced_strs, needs_reauth, contracts, pi, char_groups,
         wallet_deltas=wallet_deltas, tags_by_char=tags_by_char,
+        no_perms=no_perms_map,
     )
 
     # T-076: any-match tag filter. Scoped to the pilot-list render only (the
@@ -2813,7 +2821,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
             farm_row = farm_info["by_character"].get(cid) if farm_info else None
             detail_by_char[cid] = {
                 "pi": pi_detail(pi.get(cid)),
-                "industry": industry_detail(industry_raw),
+                "industry": industry_detail(industry_raw, now),
                 "market": market_detail(orders_raw),
                 "net_worth": networth_map.get(cid),
                 "wallet_sparkline": wallet_sparkline_svg(spark_points),
@@ -2836,6 +2844,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
                     skill_map.get(char.character_id, {}).get("queue_end"),
                     last_synced=(char_caches.get(char.character_id).last_synced
                                  if char_caches.get(char.character_id) else None),
+                    no_perms=no_perms_map.get(char.character_id, False),
                 )
                 for char in visible_characters
             ]
@@ -2862,6 +2871,7 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
         "total_wallet": total_wallet,
         "sync_statuses": sync_statuses,
         "staleness": staleness_map,
+        "no_perms": no_perms_map,
         "last_synced_strs": last_synced_strs,
         "any_syncing": any_syncing,
         "sync_warnings": sync_warnings,
@@ -3681,6 +3691,74 @@ def _parse_notif_text(text: str) -> dict:
     return fields
 
 
+# ISS-062: how long a cached ESI notification may keep a structure banner up.
+# (_STRUCTURE_BANNER_TTL above is only the render-cache TTL, not an age limit.)
+# Attack/destroyed alerts use the same 48 h window as the Discord relay's
+# first-sync seeding; fuel/services alerts stay a week because the condition
+# can persist; reinforce alerts live until their timer has passed (+ grace),
+# or 48 h when the notification text carries no parseable timer.
+_BANNER_ATTACK_MAX_AGE = timedelta(hours=48)
+_BANNER_FUEL_MAX_AGE = timedelta(days=7)
+_BANNER_REINFORCE_FALLBACK_AGE = timedelta(hours=48)
+_BANNER_REINFORCE_GRACE = timedelta(hours=2)
+_BANNER_ATTACK_TYPES = {
+    "StructureUnderAttack", "StructureDestroyed", "TowerAlertMsg", "OrbitalAttacked",
+}
+_BANNER_FUEL_TYPES = {
+    "StructureFuelAlert", "StructureServicesOffline", "TowerResourceAlertMsg",
+}
+_BANNER_REINFORCE_TYPES = {"StructureLostShields", "StructureLostArmor"}
+
+_FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+
+
+def _parse_notif_timestamp(raw) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _reinforce_timer_end(n: dict, ts: datetime) -> datetime | None:
+    """End of the reinforcement timer, from the notification's `timeLeft`
+    (100 ns ticks). ESI reports it as the time remaining when the notification
+    was sent, so the end is timestamp + timeLeft; a value too large to be a
+    duration is treated as an absolute FILETIME instead."""
+    raw = _parse_notif_text(n.get("text", "")).get("timeLeft")
+    if raw is None:
+        return None
+    try:
+        ticks = int(raw)
+    except ValueError:
+        return None
+    if ticks <= 0:
+        return None
+    try:
+        if ticks > 10 ** 16:  # ~317 years as a duration: an absolute FILETIME
+            return _FILETIME_EPOCH + timedelta(microseconds=ticks // 10)
+        return ts + timedelta(microseconds=ticks // 10)
+    except OverflowError:
+        return None
+
+
+def _structure_banner_live(ntype: str, n: dict, now: datetime) -> bool:
+    """False once a structure notification is too old to keep a banner up."""
+    ts = _parse_notif_timestamp(n.get("timestamp"))
+    if ts is None:
+        return False  # can't age it, so don't let it linger forever
+    if ntype in _BANNER_ATTACK_TYPES:
+        return now - ts <= _BANNER_ATTACK_MAX_AGE
+    if ntype in _BANNER_FUEL_TYPES:
+        return now - ts <= _BANNER_FUEL_MAX_AGE
+    if ntype in _BANNER_REINFORCE_TYPES:
+        end = _reinforce_timer_end(n, ts)
+        if end is not None:
+            return now <= end + _BANNER_REINFORCE_GRACE
+        return now - ts <= _BANNER_REINFORCE_FALLBACK_AGE
+    return True
+
+
 @router.get("/alerts/structure-banners", response_class=HTMLResponse)
 async def structure_alert_banners(request: Request, db: AsyncSession = Depends(get_db)):
     """Return persistent banner HTML for active structure/fuel alerts."""
@@ -3722,6 +3800,7 @@ async def structure_alert_banners(request: Request, db: AsyncSession = Depends(g
     BANNER_TYPES = DANGER_TYPES | WARN_TYPES
 
     # Collect all banner-worthy notifications, dedup by (type, timestamp)
+    _banner_now = datetime.now(timezone.utc)
     seen_keys: dict[tuple, dict] = {}  # (type, timestamp) -> first notification data
     for cache in caches:
         if not cache.notifications_json:
@@ -3735,6 +3814,8 @@ async def structure_alert_banners(request: Request, db: AsyncSession = Depends(g
         for n in data.get("notifications", []):
             ntype = n.get("type", "")
             if ntype not in BANNER_TYPES:
+                continue
+            if not _structure_banner_live(ntype, n, _banner_now):
                 continue
             dedup_key = (ntype, n.get("timestamp", ""))
             if dedup_key in seen_keys:

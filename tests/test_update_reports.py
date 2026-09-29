@@ -359,10 +359,10 @@ def test_discord_gets_one_message_and_the_bell_gets_the_event(control, monkeypat
     async def spy(*args, **kwargs):
         calls.append(kwargs or args)
         return discord.SENT
-    # Both references: the relay inside _emit_notification binds the name at
+    # Both references: the relay inside _emit_notification binds its name at
     # import, so patching only the module attribute would miss a double send.
     monkeypatch.setattr("app.notify.discord.send_discord_alert", spy)
-    monkeypatch.setattr(dashboard, "send_discord_alert", spy)
+    monkeypatch.setattr(dashboard, "relay_user_alert", spy)
     dashboard._notification_events.pop(admin_user, None)
 
     # tick() runs inside an event loop, so _emit_notification's relay WOULD
@@ -389,7 +389,7 @@ def test_emit_notification_without_relay_never_schedules_discord(monkeypatch):
     async def user_spy(*a, **k):
         user_scheduled.append(a or k)
 
-    monkeypatch.setattr(dashboard, "send_discord_alert", spy)
+    monkeypatch.setattr(dashboard, "relay_user_alert", spy)
     # T-075 added a per-user relay at the same point; it must obey relay=False too.
     monkeypatch.setattr(dashboard, "send_user_discord_alert", user_spy)
 

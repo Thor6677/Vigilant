@@ -8,7 +8,9 @@ permissions:
   character Vigilant has never seen gets an account and is sent to the picker.
 * ``POST /auth/authorize`` with intent ``signup`` / ``add`` — from the
   permission picker (``GET /auth/connect``): SSO is asked for exactly the
-  permissions the user ticked, nothing else.
+  permissions the user ticked, nothing else. For a character that already
+  belongs to an account, a NARROWER selection is only applied when the stored
+  authorization no longer works; otherwise it is kept, as on a login (ISS-068).
 * ``POST /auth/authorize`` with intent ``update`` — from the Account page:
   re-authorize one character with a new selection. EVE issues a new
   authorization limited to exactly that selection; Vigilant replaces the old
@@ -38,11 +40,13 @@ import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
-from app.auth.purge import clear_live_state, purge_character_user_rows, purge_history
+from app.auth.purge import (
+    REASON_SELF, REASON_TRANSFER, clear_live_state, purge_history, remove_character_from_account,
+)
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
 from app.config import get_settings
@@ -96,9 +100,15 @@ def _sso_redirect(request: Request, intent: str, keys: list[str] | None = None,
     return RedirectResponse(f"{settings.eve_sso_auth_url}?{urlencode(params)}", status_code=303)
 
 
-def _flash(request: Request, kind: str, text: str) -> None:
-    """One-shot message shown by the next page that renders flashes (Account)."""
-    request.session["flash"] = {"kind": kind, "text": text}
+def _flash(request: Request, kind: str, text: str,
+           href: str | None = None, link: str | None = None) -> None:
+    """One-shot message shown by the next page that renders flashes (Account).
+    ``href``/``link``: an optional action link after the text. Pass paths
+    built here, never anything a user typed."""
+    flash = {"kind": kind, "text": text}
+    if href:
+        flash.update(href=href, link=link or href)
+    request.session["flash"] = flash
 
 
 @router.get("/login")
@@ -292,15 +302,15 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     one authorization per character per application, and revoking could take
     the new owner's authorization down with it (see the module docstring).
     Committed here, so the removal stands even if the caller refuses the login.
+
+    ISS-060: the history is deleted during this request, in short batches,
+    because the caller links the character to its new owner straight after;
+    only the ESI response cache is left to the background purge
+    (app/auth/purge.py explains both).
     """
     cid = char.character_id
     old_user_id = char.user_id
-    everything = [p.key for p in perms.PERMISSIONS]
-    await clear_live_state(db, cid, everything)
-    await purge_history(db, cid, everything)
-    await db.execute(delete(CharacterDashboardCache).where(CharacterDashboardCache.character_id == cid))
-    await purge_character_user_rows(db, cid)
-    await db.delete(char)
+    await remove_character_from_account(db, char, reason=REASON_TRANSFER, delete_history=True)
     db.add(AdminAuditLog(
         user_id=old_user_id, character_id=cid, event_type="character_transferred",
         detail="EVE reports a new owner; removed from the previous account with its stored data",
@@ -329,6 +339,66 @@ def _queue_sync(character_id: int) -> None:
     if character_id not in _queued_sync:
         _queued_sync[character_id] = datetime.now(timezone.utc)
         asyncio.create_task(_sync_task(character_id))
+
+
+def _catalog_scopes(scopes) -> set[str]:
+    """The scopes that feed one of the catalog's permissions. A scope older
+    releases asked for and nothing reads (scopes.extra_scopes) is not something
+    a character "shares", so losing it never counts as narrowing."""
+    return perms.parse_scopes(scopes) & set(perms.ALL_SCOPES)
+
+
+PROBE_OK = "ok"             # refreshed; the scopes it carries now come with it
+PROBE_REVOKED = "revoked"   # EVE refused the refresh token: the stored token is dead
+PROBE_UNKNOWN = "unknown"   # anything else (network, SSO 5xx/429, DB): no verdict
+
+
+async def _probe_stored_token(db: AsyncSession, character_id: int
+                              ) -> tuple[str, set[str] | None, str | None]:
+    """ISS-068: refresh a registered character's STORED token and say what
+    became of it: ``(PROBE_OK, scopes it carries now, None)``,
+    ``(PROBE_REVOKED, None, None)`` or ``(PROBE_UNKNOWN, None, error type)``.
+
+    * Forced, not refresh_token(): that hands back the stored access token
+      while it has more than five minutes left, and an access token's claims
+      are fixed when it is issued, so it cannot show whether the authorization
+      at EVE has changed since. Expiry is no evidence either way: access
+      tokens last twenty minutes, so an idle pilot's is always in the past.
+    * Under the per-character locks the sync layer takes, outer then inner
+      (dashboard._client_for -> client.refresh_token). EVE rotates refresh
+      tokens, so a scheduler refresh racing this one would leave one side with
+      a token EVE has already retired. The row is read with both held for the
+      same reason.
+    * In its own session on the request's engine: the refresh commits, and
+      that commit must carry the rotated token and nothing else. The caller
+      runs this before it has written anything, so it holds no write lock.
+
+    Only TokenRevoked (SSO's 400/401, or a token sealed under an old
+    SECRET_KEY) means dead. Any other failure proves nothing about the token:
+    a network blip must not be what narrows a live pilot, which would be the
+    ISS-068 incident all over again. The caller keeps the stored token then,
+    and a token that really is dead still shows up as Renew on the dashboard.
+    """
+    from app.esi import client as esi_client
+    from app.routes.dashboard import _get_token_lock
+
+    async with _get_token_lock(character_id), esi_client._get_refresh_lock(character_id):
+        async with AsyncSession(db.bind, expire_on_commit=False) as probe_db:
+            char = (await probe_db.execute(select(Character).where(
+                Character.character_id == character_id))).scalar_one_or_none()
+            if char is None:
+                return PROBE_UNKNOWN, None, "character row missing"
+            try:
+                # Writes the rotated token and its scp claim to the row, and commits.
+                await esi_client._do_refresh(char, probe_db)
+            except esi_client.TokenRevoked as exc:
+                logger.info("character %s: stored token no longer refreshes (%s)", character_id, exc)
+                return PROBE_REVOKED, None, None
+            except Exception as exc:
+                logger.warning("character %s: stored-token check failed: %s",
+                               character_id, type(exc).__name__)
+                return PROBE_UNKNOWN, None, type(exc).__name__
+            return PROBE_OK, perms.parse_scopes(char.scopes), None
 
 
 @router.get("/callback")
@@ -444,6 +514,42 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         # Character is already owned by a different account — reject.
         return RedirectResponse("/dashboard?error=character_claimed", status_code=303)
 
+    # What the character carried before this callback. Read before the probe
+    # below, which may rewrite the row: the audit row and the live-state
+    # clearing are about what the pilot had, not what EVE left it with.
+    old_scopes = perms.parse_scopes(existing.scopes) if existing else set()
+
+    # ── ISS-068: signup/add must not quietly narrow a registered character ──
+    # Below, the picker's grant replaces the stored token. For a character that
+    # already belongs to an account, a NARROWER grant from signup or add is far
+    # more likely a returning user who took the "new here" door (whose Minimal
+    # preset reads "Just log in") than a decision to share less; that decision
+    # has its own flow, with a confirmation, on the Account page (UPDATE). So
+    # first ask whether the stored authorization still works. If it does and
+    # still covers everything, keep it and treat this as a login: the new
+    # token is dropped, never revoked (EVE keeps one authorization per
+    # character per application; see the module docstring). If EVE revoked
+    # it, or has already narrowed it, the new token is the only working one:
+    # take it as before, and say so. If the check itself failed, nothing is
+    # known, so nothing changes. Only this case costs an extra SSO call.
+    kept_scopes: set[str] | None = None
+    check_failed = None       # set when the stored token was kept unchecked
+    narrowed_because = None
+    if (intent in (SIGNUP, ADD) and existing is not None and existing.user_id
+            and _catalog_scopes(old_scopes) - _catalog_scopes(granted)):
+        verdict, probed, check_failed = await _probe_stored_token(db, character_id)
+        if verdict == PROBE_OK:
+            # The probe committed in its own session; pick up the rotated token.
+            await db.refresh(existing)
+            if _catalog_scopes(old_scopes) <= probed:
+                kept_scopes = probed
+            else:
+                narrowed_because = "narrowed"
+        elif verdict == PROBE_REVOKED:
+            narrowed_because = "dead"
+        else:
+            kept_scopes = old_scopes
+
     if intent == SIGNUP:
         if existing and existing.user_id:
             user = (await db.execute(select(User).where(User.id == existing.user_id))).scalar_one_or_none()
@@ -466,7 +572,41 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             request.session.clear()
             return RedirectResponse("/auth/login", status_code=303)
 
-    old_scopes = perms.parse_scopes(existing.scopes) if existing else set()
+    if kept_scopes is not None:
+        # Exactly what a login does to an existing character: identity and
+        # metadata only. Token, scopes, declined scopes, live caches and sync
+        # state all stay as they were.
+        existing.character_name = character_name
+        _apply_metadata(existing, meta)
+        if owner_hash:
+            existing.owner_hash = owner_hash
+        if intent == SIGNUP:
+            user.last_login = datetime.now(timezone.utc)
+            _ensure_session_epoch(user)
+        dropped = _catalog_scopes(old_scopes) - _catalog_scopes(granted)
+        why_kept = (f"could not check the stored authorization with EVE ({check_failed})"
+                    if check_failed else "stored authorization still works")
+        db.add(AdminAuditLog(
+            user_id=user.id, character_id=character_id, event_type="permissions_kept",
+            detail=(f"{intent}: new grant would have removed {len(dropped)} scopes; "
+                    f"{why_kept}, kept ({len(kept_scopes)} scopes)"),
+            ip_address=request.client.host if request.client else None,
+        ))
+        await db.commit()
+        shared = len(perms.keys_for_scopes(kept_scopes))
+        still = f"it still shares {shared} permission{'s' if shared != 1 else ''}."
+        change = {"href": f"/account/permissions/{character_id}", "link": "Change permissions"}
+        if check_failed:
+            _flash(request, "warn", f"Vigilant couldn't check {character_name}'s existing "
+                                    f"authorization with EVE just now, so nothing about what it "
+                                    f"shares was changed: {still}", **change)
+        else:
+            _flash(request, "ok", f"Nothing about what {character_name} shares was changed: {still}",
+                   **change)
+        _picker_session(request, intent, user, character_id)
+        _queue_sync(character_id)
+        return RedirectResponse("/account", status_code=303)
+
     if existing is None:
         existing = Character(
             character_id=character_id, character_name=character_name,
@@ -505,7 +645,9 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     db.add(AdminAuditLog(
         user_id=user.id, character_id=character_id, event_type="permissions_changed",
         detail=(f"{intent}: +{len(added)} -{len(removed)} scopes"
-                + (f"; EVE did not grant {len(not_granted)}" if not_granted else "")),
+                + (f"; EVE did not grant {len(not_granted)}" if not_granted else "")
+                + {"dead": "; stored token no longer refreshed",
+                   "narrowed": "; stored token already narrowed at EVE"}.get(narrowed_because, "")),
         ip_address=request.client.host if request.client else None,
     ))
     await db.commit()
@@ -537,16 +679,35 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                    "scope may not be enabled on this Vigilant instance's EVE application.")
         elif intent == UPDATE:
             _flash(request, "ok", f"Permissions for {character_name} updated.{purged_note}")
+    if narrowed_because:
+        # ISS-068, second half: the narrower grant had to be taken. Never
+        # silently, and this outranks any other message.
+        before = len(perms.keys_for_scopes(old_scopes))
+        now = len(perms.keys_for_scopes(granted_set))
+        why = ("The authorization Vigilant had stored for it no longer worked, so the one you "
+               "just gave replaced it." if narrowed_because == "dead" else
+               "EVE had already limited its authorization to what you just chose.")
+        _flash(request, "warn",
+               f"{character_name} now shares fewer permissions: {now} instead of {before}. {why}",
+               href=f"/account/permissions/{character_id}", link="Change permissions")
 
+    _picker_session(request, intent, user, character_id)
+    _queue_sync(character_id)
+    # Only Account renders flashes: any picker flow that has something to say
+    # (a narrowing, "EVE did not grant …") goes there, or it is never seen.
+    shown_on_account = intent == UPDATE or request.session.get("flash") is not None
+    return RedirectResponse("/account" if shown_on_account else "/dashboard", status_code=303)
+
+
+def _picker_session(request: Request, intent: str, user: User, character_id: int) -> None:
+    """Session state at the end of a picker flow: a signup logs in as the
+    character's owner; add and update stay in the account already logged in."""
     if intent == SIGNUP:
         _start_session(request, user, character_id)
     else:
         request.session["active_character_id"] = character_id
         request.session["is_admin"] = user.role in ("admin", "manager")
         request.session["role"] = user.role
-
-    _queue_sync(character_id)
-    return RedirectResponse("/account" if intent == UPDATE else "/dashboard", status_code=303)
 
 
 @router.post("/logout")
@@ -596,7 +757,16 @@ async def switch_character(character_id: int, request: Request, db: AsyncSession
 
 
 @router.post("/remove/{character_id}")
-async def remove_character(character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+async def remove_character(character_id: int, request: Request,
+                           delete_history: str = Form(""),
+                           db: AsyncSession = Depends(get_db)):
+    """Remove one of your own characters (never the main).
+
+    Its live data, tags and notes go now and its ESI response cache shortly
+    after. Its history goes too only when the Account page's "also delete the
+    history" box was ticked (`delete_history=1`); unticked by default, and the
+    dashboard card's compact form never sends it (ISS-060).
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         return RedirectResponse("/dashboard", status_code=303)
@@ -617,8 +787,8 @@ async def remove_character(character_id: int, request: Request, db: AsyncSession
 
     old_refresh = char.refresh_token
     old_is_ours = issued_to_us(char.access_token)
-    await purge_character_user_rows(db, character_id)
-    await db.delete(char)
+    await remove_character_from_account(db, char, reason=REASON_SELF,
+                                        delete_history=delete_history == "1")
     await db.commit()
     # Removing a character is withdrawing every permission it granted.
     if old_is_ours:

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import scopes as perms
 from app.auth import status as perm_status
 from app.dashboard.attention import AttentionItem, build_attention
+from app.dashboard.staleness import has_permissions, staleness as staleness_of
 from app.db.models import Character, CharacterDashboardCache, DashboardAttentionDismissal, get_db
 from app.routes.dashboard import _queued_sync
 
@@ -139,6 +140,9 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
             "sync_status": effective_status,
             "sync_error": sync_error,
             "last_synced": _aware(last_synced),
+            # ISS-069: per-field staleness, from rows already in hand.
+            "staleness": staleness_of(now, scopes, field_synced, _aware(last_synced)),
+            "no_perms": not has_permissions(scopes),
         })
 
     return pilots, now

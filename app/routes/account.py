@@ -2,9 +2,10 @@
 
 Where a user sees, per character, exactly which permissions its token carries
 — and changes them. Changing goes back through EVE SSO (app/auth/routes.py,
-intent "update"): widening needs EVE's consent, and narrowing is done with a
-fresh, smaller token plus revocation of the old one, so the promise holds at
-EVE and not only inside Vigilant.
+intent "update"): EVE asks for consent and issues a new token limited to the
+new selection, which replaces the stored one. The old token is NOT revoked:
+EVE keeps one authorization per character per application, and revoking any
+of its tokens ends all of them, the new one included (see app/auth/routes.py).
 """
 from __future__ import annotations
 

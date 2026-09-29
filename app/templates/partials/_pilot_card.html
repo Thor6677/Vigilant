@@ -61,7 +61,7 @@
   {%- endif %}
 {% endmacro %}
 
-{% macro pilot_card(char, loc, wallet, sk, w, char_needs_reauth, cd, char_sync, char_stale, char_last_sync, delta=none, tags=none, detail=none) %}
+{% macro pilot_card(char, loc, wallet, sk, w, char_needs_reauth, cd, char_sync, char_stale, char_last_sync, delta=none, tags=none, detail=none, char_no_perms=false) %}
 <div class="b-card" data-char-id="{{ char.character_id }}"
      style="{% if char_needs_reauth %}border-left:3px solid var(--danger);border-right:3px solid var(--danger);{% elif w == 'empty' %}border-left:3px solid var(--danger);{% elif w == 'paused' %}border-left:3px solid var(--muted);{% elif w == 'critical' %}border-left:3px solid #c97a20;{% elif w == 'warning' %}border-left:3px solid var(--accent);{% endif %}">
     <div class="b-card-top">
@@ -103,7 +103,7 @@
         {% if sk.progress_pct > 0 %}<div style="padding:0 0.75rem 0.4rem;"><div class="b-progress"><div class="b-progress-fill {% if w == 'critical' %}is-crit{% elif w == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ sk.progress_pct }}%"></div></div></div>{% endif %}
         {% elif w == 'paused' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val b-muted-sm">Paused ({{ sk.queue_length }} queued)</span></div>
         {% elif w == 'empty' %}<div class="b-row" style="border-bottom:none;"><span class="b-row-label">Training</span><span class="b-row-val is-danger" style="font-size:10px;">Empty queue</span></div>{% endif %}
-        <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Sync</span><span style="display:flex;align-items:center;gap:0.5rem;">{% if char_sync == 'syncing' %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.3rem;"><span class="spin-anim">◌</span> syncing</span>{% elif char_sync == 'error' %}<span class="b-row-val is-danger">✕</span>{% elif char_last_sync %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.35rem;"><span class="b-dot {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-ok{% endif %}"></span>{{ char_last_sync }}</span>{% else %}<span class="b-row-val is-muted">never</span>{% endif %}{% if char_sync != 'syncing' and (char_stale in ('critical', 'warning', 'never') or char_sync == 'error') %}<form method="POST" action="/dashboard/sync/{{ char.character_id }}" style="line-height:1;"><button type="submit" class="b-btn" style="flex:none;padding:1px 6px;border:1px solid var(--border);font-size:9px;">↺</button></form>{% endif %}</span></div>
+        <div class="b-row" style="border-bottom:none;"><span class="b-row-label">Sync</span><span style="display:flex;align-items:center;gap:0.5rem;">{% if char_no_perms %}<a href="/account/permissions/{{ char.character_id }}" class="b-row-val is-muted" style="text-decoration:underline;" title="This pilot shares no permissions, so nothing is synced">no permissions</a>{% elif char_sync == 'syncing' %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.3rem;"><span class="spin-anim">◌</span> syncing</span>{% elif char_sync == 'error' %}<span class="b-row-val is-danger">✕</span>{% elif char_last_sync and char_stale != 'never' %}<span class="b-row-val is-muted" style="display:flex;align-items:center;gap:0.35rem;"><span class="b-dot {% if char_stale == 'critical' %}is-warn{% elif char_stale == 'warning' %}is-warn{% else %}is-ok{% endif %}"></span>{{ char_last_sync }}</span>{% else %}<span class="b-row-val is-muted">never</span>{% endif %}{% if not char_no_perms and char_sync != 'syncing' and (char_stale in ('critical', 'warning', 'never') or char_sync == 'error') %}<form method="POST" action="/dashboard/sync/{{ char.character_id }}" style="line-height:1;"><button type="submit" class="b-btn" style="flex:none;padding:1px 6px;border:1px solid var(--border);font-size:9px;">↺</button></form>{% endif %}</span></div>
     </div>
     {% if detail %}
     {# T-076 Detailed mode: accent-tinted extra rows. `detail` is None in
@@ -155,7 +155,7 @@
     <div class="b-actions">
         <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
         <a href="/account/permissions/{{ char.character_id }}" class="b-btn" style="font-size:9px;">Permissions</a>
-        <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }}?" style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
+        <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }} from Vigilant? Its authorization is revoked at EVE, and its current data, tags and notes are deleted. Its history is kept; to delete that too, remove it from the Account page instead." style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
     </div>
 </div>
 {% endmacro %}

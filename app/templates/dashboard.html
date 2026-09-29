@@ -3,10 +3,10 @@
 
 {% block head %}
 {% if sort == 'custom' %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/sortablejs-1.15.3.min.js"></script>
 {% endif %}
 {% if killmails_enabled %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 {% endif %}
 {% if dash_mode == 'compact' %}
 {# Scoped to Compact mode: a mode switch is always a full page reload (see
@@ -364,7 +364,7 @@
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none, (no_perms or {}).get(char.character_id, false)) }}
     {% endfor %}
     </div>
 </div>
@@ -380,7 +380,7 @@
     {% set w = sk.get('warning', 'error') %}
     {% set cd = clones.get(char.character_id) %}
     {% set char_sync = sync_statuses.get(char.character_id, 'idle') %}{% set char_stale = staleness.get(char.character_id, 'never') %}{% set char_last_sync = last_synced_strs.get(char.character_id) %}
-    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none) }}
+    {{ pilot_card(char, loc, wallet, sk, w, needs_reauth.get(char.character_id), cd, char_sync, char_stale, char_last_sync, wallet_deltas.get(char.character_id), tags_by_char.get(char.character_id), detail_by_char.get(char.character_id) if dash_mode == 'detailed' else none, (no_perms or {}).get(char.character_id, false)) }}
     {% endfor %}
     </div>
 </div>

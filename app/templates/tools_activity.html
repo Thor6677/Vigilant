@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block head %}
-<script nonce="{{ request.state.csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script nonce="{{ request.state.csp_nonce }}" src="/static/vendor/chart-4.4.0.umd.js"></script>
 <style nonce="{{ request.state.csp_nonce }}">
     .ta-windows { display:flex; gap:0.25rem; flex-wrap:wrap; }
     .ta-windows .b-btn { padding:3px 10px; font-size:10px; }
