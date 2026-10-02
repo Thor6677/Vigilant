@@ -81,7 +81,7 @@ from sqlalchemy import delete, exists, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.scopes import parse_scopes
+from app.auth.scopes import PERMISSIONS, parse_scopes
 from app.db.cache import ESICache
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
@@ -180,12 +180,14 @@ async def clear_live_state(db: AsyncSession, character_id: int,
 async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
     """Clear a character's ESI response cache after a narrowing (ISS-072).
 
-    Scheduled by the SSO callback to run after its response, in its own
-    session on `bind` (the request's engine). It is the removal purge's
-    batched clear: a read-only key scan, then deletes by key in short
-    transactions. It never writes to character_purges, which would tell the
-    resync the callback queued to drop its results (sync_must_not_write).
-    Failures are logged, never raised: the response has already gone.
+    Scheduled by the SSO callback to run after its response, and by
+    schedule_esi_cache_clear after a narrowing noticed at token refresh
+    (ISS-078), in its own session on `bind` (the caller's engine). It is the
+    removal purge's batched clear: a read-only key scan, then deletes by key
+    in short transactions. It never writes to character_purges, which would
+    tell the resync the callback queued to drop its results
+    (sync_must_not_write). Failures are logged, never raised: nobody is
+    waiting on it.
     Returns the number of entries deleted, or None if it failed.
     """
     cid = int(character_id)
@@ -198,6 +200,54 @@ async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
         return None
     logger.info("cleared %s ESI cache entries after narrowing, character %s", deleted, cid)
     return deleted
+
+
+def withdrawn_keys(removed_scopes: Iterable[str]) -> list[str]:
+    """The permissions a narrowing withdraws: each one that lost ANY of its
+    scopes. Shared by the SSO callback and the refresh path (ISS-078)."""
+    removed = set(removed_scopes)
+    return [p.key for p in PERMISSIONS if set(p.scopes) & removed]
+
+
+async def clear_after_refresh_narrowing(db: AsyncSession, character: Character,
+                                        lost: Iterable[str]) -> list[str]:
+    """EVE narrowed a character's authorization on its own and a token
+    refresh just noticed (ISS-078): the stored scopes already lost `lost`.
+
+    Clears the withdrawn permissions' live state exactly as a user's
+    narrowing does (clear_live_state) and writes the audit row. Never
+    history: only the user can ask for that. Doesn't commit; the refresh
+    commits it with the new token and scopes, so nothing ever sees the
+    narrower scopes beside the withdrawn values. The caller schedules the
+    ESI cache clear once that commit is in (schedule_esi_cache_clear).
+    Returns the withdrawn permission keys.
+    """
+    lost = set(lost)
+    gone = withdrawn_keys(lost)
+    await clear_live_state(db, character.character_id, gone)
+    db.add(AdminAuditLog(
+        user_id=character.user_id, character_id=character.character_id,
+        event_type="permissions_changed",
+        detail=(f"refresh: EVE narrowed the stored authorization: -{len(lost)} scopes; "
+                f"withdrawn: {', '.join(gone) or 'none'}; history kept"),
+    ))
+    return gone
+
+
+# Post-refresh ESI cache clears in flight. The event loop holds tasks only
+# weakly, so one nobody references can vanish before it runs.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def schedule_esi_cache_clear(bind, character_id: int) -> asyncio.Task:
+    """Run clear_esi_cache_in_background as a task of its own, for a caller
+    with no response to hang it on (the refresh path, ISS-078). Returns the
+    task; it is held here until it finishes."""
+    task = asyncio.get_running_loop().create_task(
+        clear_esi_cache_in_background(bind, character_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 async def _delete(db: AsyncSession, model, cid: int) -> int:

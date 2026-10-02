@@ -843,8 +843,10 @@ def test_refresh_keeps_stored_scopes_equal_to_the_token(env, monkeypatch):
     monkeypatch.setattr(client_mod, "get_http_client", lambda: HC())
 
     async def go(db):
+        from app.auth import purge
         c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
         await client_mod._do_refresh(c, db)
+        await asyncio.gather(*purge._background_tasks)   # ISS-078's cache clear
         return c.scopes
     assert env.q(go) == cat.ASSETS
 
