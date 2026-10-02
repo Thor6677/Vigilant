@@ -255,3 +255,38 @@ def test_admin_purge_keeps_rows_that_expire_later_the_same_day(gc_env, admin_cli
     assert r.status_code == 200
     assert "Purged 1 expired cache entries." in r.text
     assert _keys(gc_env) == {"later-today", "tomorrow"}
+
+
+def _audit_details(env):
+    async def go():
+        async with env.SessionLocal() as db:
+            rows = (await db.execute(text(
+                "SELECT detail FROM admin_audit_log WHERE event_type = 'admin_cache_purge'"))).all()
+            return [r[0] for r in rows]
+    return asyncio.run(go())
+
+
+def test_admin_purge_writes_no_audit_row_when_another_cleanup_is_running(gc_env, admin_client, monkeypatch):
+    monkeypatch.setattr(cache_mod, "_gc_running", True)
+    r = admin_client.post("/admin/action/cache-purge")
+    assert r.status_code == 200
+    assert "already running" in r.text
+    assert _audit_details(gc_env) == []
+
+
+def test_admin_purge_audit_notes_an_early_stop(gc_env, admin_client, monkeypatch):
+    real = cache_mod.cache_gc_run
+
+    async def capped(now=None, max_seconds=None, batch_rows=None):
+        return await real(now, 0, 10)  # stop after one 10-row batch
+    monkeypatch.setattr(cache_mod, "cache_gc_run", capped)
+    _seed(gc_env, expired=25, live=0, expired_at=datetime(2026, 6, 15, 11, 0))
+    r = admin_client.post("/admin/action/cache-purge")
+    assert "more remain" in r.text
+    assert _audit_details(gc_env) == ["Purged 10 expired cache entries (stopped early; more remain)"]
+
+
+def test_admin_purge_audit_for_a_complete_run(gc_env, admin_client):
+    _seed(gc_env, expired=2, live=0, expired_at=datetime(2026, 6, 15, 11, 0))
+    admin_client.post("/admin/action/cache-purge")
+    assert _audit_details(gc_env) == ["Purged 2 expired cache entries"]

@@ -822,9 +822,13 @@ async def admin_cache_purge(request: Request, db: AsyncSession = Depends(get_db)
     gc = await cache_gc_run(max_seconds=20)
     deleted = gc.removed
 
-    await _log_audit(db, "admin_cache_purge", admin.id,
-                     detail=f"Purged {deleted} expired cache entries",
-                     ip=request.client.host if request.client else None)
+    # Nothing happened when another clean-up held the GC, so no audit row.
+    if not gc.skipped:
+        detail = f"Purged {deleted} expired cache entries"
+        if not gc.complete:
+            detail += " (stopped early; more remain)"
+        await _log_audit(db, "admin_cache_purge", admin.id, detail=detail,
+                         ip=request.client.host if request.client else None)
 
     if gc.skipped:
         note = "A cache clean-up is already running; try again shortly."
