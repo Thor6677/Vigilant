@@ -1,7 +1,11 @@
+import asyncio
 import json
 import hashlib
+import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, String, Text, DateTime, select, delete, func
+from sqlalchemy import Column, String, Text, DateTime, select, delete, func, text, bindparam
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Base
 
@@ -188,22 +192,83 @@ async def cache_set(db: AsyncSession | None, path: str, data, params: dict = Non
         pass  # cache writes must never break the caller
 
 
-async def cache_gc() -> int:
+# ISS-073: the GC deletes in small transactions so SQLite's single write lock is
+# never held for long (a long gap can leave a very large backlog of expired rows).
+GC_BATCH_ROWS = 5000
+GC_BATCH_PAUSE_SECONDS = 0.1
+_GC_BATCH_SQL = (
+    "DELETE FROM esi_cache WHERE rowid IN "
+    "(SELECT rowid FROM esi_cache WHERE expires_at < :now LIMIT :n)"
+)
+_gc_running = False  # at most one GC at a time (scheduler task vs admin purge)
+
+gc_log = logging.getLogger(__name__)
+
+
+async def _between_gc_batches() -> None:
+    """The pause between two batches (a seam the tests use to act mid-run)."""
+    await asyncio.sleep(GC_BATCH_PAUSE_SECONDS)
+
+
+@dataclass
+class GCResult:
+    removed: int = 0
+    complete: bool = True   # False: stopped early (time cap, error or skipped)
+    skipped: bool = False   # another GC was already running
+
+
+async def cache_gc_run(now: datetime | None = None, max_seconds: float | None = None,
+                       batch_rows: int | None = None) -> GCResult:
+    """Delete expired cache rows in batches; never raises.
+
+    One short transaction per batch with a pause between them. `now` is a naive
+    UTC datetime (default: the current time). `max_seconds` caps the run so a
+    caller can stay responsive; the rest is left for the next run. Rows already
+    deleted by committed batches always count.
+    """
+    global _gc_running
+    if _gc_running:
+        return GCResult(0, False, True)
+    _gc_running = True
+    result = GCResult()
+    try:
+        if now is None:
+            now = datetime.now(timezone.utc)
+        if now.tzinfo is not None:
+            now = now.astimezone(timezone.utc).replace(tzinfo=None)
+        n = batch_rows or GC_BATCH_ROWS
+        stmt = text(_GC_BATCH_SQL).bindparams(bindparam("now", type_=DateTime))
+        deadline = time.monotonic() + max_seconds if max_seconds is not None else None
+        from app.db.models import AsyncSessionLocal
+        try:
+            while True:
+                async with AsyncSessionLocal() as db:
+                    res = await db.execute(stmt, {"now": now, "n": n})
+                    await db.commit()
+                    got = res.rowcount or 0
+                result.removed += got
+                if got < n:
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    result.complete = False
+                    break
+                await _between_gc_batches()
+        except Exception as e:
+            result.complete = False
+            gc_log.warning("ESI cache GC stopped after %d rows: %s", result.removed, e)
+        return result
+    finally:
+        _gc_running = False
+
+
+async def cache_gc(now: datetime | None = None, max_seconds: float | None = None) -> int:
     """Delete expired cache rows. Returns number of rows removed.
 
     Without this, expired rows accumulate forever — they're only ever cleaned
     on a read miss for the same key, which never happens for keys that are
     never read again.
     """
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    from app.db.models import AsyncSessionLocal
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(delete(ESICache).where(ESICache.expires_at < now))
-            await db.commit()
-            return result.rowcount or 0
-    except Exception:
-        return 0
+    return (await cache_gc_run(now, max_seconds)).removed
 
 
 _CACHE_STATS_MEMO: dict = {"at": None, "val": None}

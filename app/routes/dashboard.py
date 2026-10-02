@@ -2112,6 +2112,17 @@ async def _clean_stuck_characters():
     return stuck_cids
 
 
+async def _run_cache_gc() -> None:
+    """Hourly batched ESI cache GC, run as its own task (ISS-073). Never raises."""
+    try:
+        from app.db.cache import cache_gc
+        removed = await cache_gc()
+        if removed:
+            logger.info("ESI cache GC removed %d expired rows", removed)
+    except Exception as e:
+        logger.warning("Cache GC error: %s", e)
+
+
 async def _background_scheduler():
     """Runs forever. Every 60s, find all characters with stale fields and sync them.
 
@@ -2171,16 +2182,14 @@ async def _background_scheduler():
                     logger.warning("Corp wallet snapshot error: %s", e)
 
             # ESI cache GC (every hour) — drops rows whose expires_at has passed.
+            # ISS-073: its own task (like the character purge below), so a big
+            # backlog never holds up this loop; app.db.cache allows one GC at a time.
             if not hasattr(_background_scheduler, '_last_cache_gc') or \
                (now - _background_scheduler._last_cache_gc).total_seconds() >= 3600:
-                try:
-                    from app.db.cache import cache_gc
-                    removed = await cache_gc()
-                    if removed:
-                        logger.info("ESI cache GC removed %d expired rows", removed)
+                _gc_task = getattr(_background_scheduler, '_cache_gc_task', None)
+                if _gc_task is None or _gc_task.done():
                     _background_scheduler._last_cache_gc = now
-                except Exception as e:
-                    logger.warning("Cache GC error: %s", e)
+                    _background_scheduler._cache_gc_task = asyncio.create_task(_run_cache_gc())
 
             # Daily PRAGMA optimize (T-038) — incremental planner-stat upkeep.
             # analysis_limit bounds the work so this is a sub-second write txn
