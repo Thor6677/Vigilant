@@ -1662,6 +1662,26 @@ async def _sync_task(character_id: int):
             await _sync_task_inner(character_id)
 
 
+async def _record_sync_failure(db: AsyncSession, character_id: int, message: str) -> None:
+    """ISS-084: mark a sync that stopped before its own commit as failed,
+    and commit nothing else.
+
+    The session may still hold the sync's results, pending or already
+    flushed into its open write transaction. Committing them here would skip
+    the removal (ISS-060) and narrowing (ISS-079) checks that guard the
+    sync's own commit, so they are rolled back first, and the cache row is
+    read afresh to carry the status alone.
+    """
+    await db.rollback()
+    cache = (await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
+    )).scalar_one_or_none()
+    if cache:
+        cache.sync_status = "error"
+        cache.sync_error = message
+        await db.commit()
+
+
 async def _sync_task_inner(character_id: int):
     """Inner sync body — always resets DB sync_status on exit."""
     async with AsyncSessionLocal() as db:
@@ -1705,9 +1725,7 @@ async def _sync_task_inner(character_id: int):
             logger.warning("Sync for char %s timed out after %ds", character_id, _SYNC_TIMEOUT)
             try:
                 if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = f"timeout after {_SYNC_TIMEOUT}s"
-                    await db.commit()
+                    await _record_sync_failure(db, character_id, f"timeout after {_SYNC_TIMEOUT}s")
             except Exception:
                 pass
         except (asyncio.CancelledError, BaseException) as e:
@@ -1717,23 +1735,14 @@ async def _sync_task_inner(character_id: int):
             logger.warning("Sync for char %s cancelled/crashed: %s", character_id, type(e).__name__)
             try:
                 if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = f"{type(e).__name__}: {str(e)[:300]}"
-                    await db.commit()
+                    await _record_sync_failure(db, character_id, f"{type(e).__name__}: {str(e)[:300]}")
             except Exception:
                 pass
             if isinstance(e, asyncio.CancelledError):
                 raise  # re-raise so asyncio cancellation propagates
         except Exception as e:
             try:
-                cache_result = await db.execute(
-                    select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
-                )
-                cache = cache_result.scalar_one_or_none()
-                if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = str(e)[:500]
-                    await db.commit()
+                await _record_sync_failure(db, character_id, str(e)[:500])
             except Exception:
                 pass
         finally:
