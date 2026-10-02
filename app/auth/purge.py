@@ -249,29 +249,51 @@ def withdrawn_keys(removed_scopes: Iterable[str]) -> list[str]:
     return [p.key for p in PERMISSIONS if set(p.scopes) & removed]
 
 
-async def clear_after_refresh_narrowing(db: AsyncSession, character: Character,
-                                        lost: Iterable[str]) -> list[str]:
+async def clear_after_refresh_narrowing(bind, character_id: int,
+                                        lost: Iterable[str]) -> list[str] | None:
     """EVE narrowed a character's authorization on its own and a token
-    refresh just noticed (ISS-078): the stored scopes already lost `lost`.
+    refresh just noticed (ISS-078): the stored scopes lost `lost`.
 
-    Clears the withdrawn permissions' live state exactly as a user's
-    narrowing does (clear_live_state) and writes the audit row. Never
-    history: only the user can ask for that. Doesn't commit; the refresh
-    commits it with the new token and scopes, so nothing ever sees the
-    narrower scopes beside the withdrawn values. The caller schedules the
-    ESI cache clear once that commit is in (schedule_esi_cache_clear).
-    Returns the withdrawn permission keys.
+    Runs after the refresh has committed the rotated token and the narrower
+    scopes, in its own session on `bind`, never the refresh caller's. EVE
+    rotates refresh tokens, so the old one is already dead: nothing here may
+    stand between the new one and the database. Clears the withdrawn
+    permissions' live state exactly as a user's narrowing does
+    (clear_live_state) and writes the audit row, in one commit. Never
+    history: only the user can ask for that. A failure is logged, never
+    raised, and leaves the caller's session alone. The moment in which the
+    narrower scopes sit beside values not yet cleared is covered by the
+    writers' own check (scopes_withdrawn).
+
+    Then schedules the ESI cache clear, with the user's corp-contract entries
+    when those were withdrawn (ISS-077). It runs either way: it doesn't
+    depend on the live-state clear. Returns the withdrawn permission keys,
+    or None if the clean-up failed.
     """
+    cid = int(character_id)
     lost = set(lost)
     gone = withdrawn_keys(lost)
-    await clear_live_state(db, character.character_id, gone)
-    db.add(AdminAuditLog(
-        user_id=character.user_id, character_id=character.character_id,
-        event_type="permissions_changed",
-        detail=(f"refresh: EVE narrowed the stored authorization: -{len(lost)} scopes; "
-                f"withdrawn: {', '.join(gone) or 'none'}; history kept"),
-    ))
-    return gone
+    patterns: tuple[str, ...] = ()
+    done = True
+    try:
+        async with AsyncSession(bind, expire_on_commit=False) as db:
+            owner = (await db.execute(select(Character.user_id, Character.corporation_id)
+                                      .where(Character.character_id == cid))).first()
+            user_id, corporation_id = owner if owner else (None, None)
+            patterns = narrowing_cache_patterns(user_id, corporation_id, gone)
+            await clear_live_state(db, cid, gone)
+            db.add(AdminAuditLog(
+                user_id=user_id, character_id=cid, event_type="permissions_changed",
+                detail=(f"refresh: EVE narrowed the stored authorization: -{len(lost)} scopes; "
+                        f"withdrawn: {', '.join(gone) or 'none'}; history kept"),
+            ))
+            await db.commit()
+    except Exception as e:
+        done = False
+        logger.warning("clean-up after EVE narrowed character %s at refresh failed: %s: %s",
+                       cid, type(e).__name__, e)
+    schedule_esi_cache_clear(bind, cid, patterns)
+    return gone if done else None
 
 
 # Post-refresh ESI cache clears in flight. The event loop holds tasks only

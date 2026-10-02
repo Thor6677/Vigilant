@@ -14,6 +14,7 @@ stub of SSO's token endpoint, so the real refresh code runs.
 """
 import asyncio
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -155,6 +156,46 @@ def test_a_refresh_that_comes_back_wider_only_updates_the_scopes(env, sso_refres
     assert s["synced"] == ["assets", "roles", "wallet"]
     assert s["esi_keys"] == sorted([ALT_KEY, MAIN_KEY])
     assert s["audit"] == []
+
+
+def test_a_failed_clean_up_never_costs_the_rotated_token(env, sso_refresh, monkeypatch, caplog):
+    """EVE rotates refresh tokens: once SSO has answered, the old one is dead.
+    So the new token and scopes are committed first, on their own, and the
+    clean-up runs after in a session of its own. If it fails, it is logged,
+    the refresh still succeeds, and the caller's objects are left as they
+    were (nothing rolled back or expired under it)."""
+    _seed(env, [cat.WALLET, cat.ASSETS])
+    sso_refresh["respond"] = refreshes_with(ALT_ID, [cat.WALLET])
+    stored_when_clearing = []
+
+    async def broken(db, character_id, keys):
+        stored_when_clearing.append((await db.execute(select(Character.refresh_token).where(
+            Character.character_id == character_id))).scalar())
+        raise RuntimeError("clean-up broke")
+    monkeypatch.setattr(purge, "clear_live_state", broken)
+    caplog.set_level(logging.WARNING)
+
+    async def go(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == ALT_ID))
+        token = await client_mod.refresh_token(c, db)
+        await _drain()
+        # Plain attribute reads: an expired object would lazy-load and fail here.
+        return token, (c.access_token, c.refresh_token, cat.parse_scopes(c.scopes),
+                       c.user_id, c.character_name)
+    token, seen = env.q(go)
+
+    stored = env.char(ALT_ID)
+    assert token == stored.access_token == seen[0]
+    assert stored.refresh_token == seen[1] == "rotated-refresh"
+    assert cat.parse_scopes(stored.scopes) == seen[2] == {cat.WALLET}
+    assert seen[3:] == (USER_ID, "Alt Pilot")
+    # The rotated token was already stored when the clean-up ran.
+    assert stored_when_clearing == ["rotated-refresh"]
+    # The clean-up itself didn't happen, and said so.
+    s = _state(env)
+    assert s["asset_cache"] is True and s["audit"] == []
+    assert any("clean-up broke" in r.getMessage() and str(ALT_ID) in r.getMessage()
+               for r in caplog.records if r.levelno >= logging.WARNING)
 
 
 def test_a_refresh_with_an_unreadable_token_clears_nothing(env, sso_refresh):
