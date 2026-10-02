@@ -66,7 +66,14 @@ async def _fetch_character_jobs(char: Character, include_completed: bool) -> tup
         return char, [], "missing_scope"
     try:
         async with AsyncSessionLocal() as char_db:
-            token = await refresh_token(char, char_db)
+            # ISS-081: the caller's Character belongs to another session; refresh
+            # the pilot's own row as loaded by THIS one.
+            fresh = (await char_db.execute(
+                select(Character).where(Character.character_id == char.character_id)
+            )).scalar_one_or_none()
+            if fresh is None:
+                raise ValueError(f"Character {char.character_id} not found")
+            token = await refresh_token(fresh, char_db)
             client = ESIClient(token, db=char_db)
             jobs = await esi_industry.get_character_jobs(
                 client, char.character_id, include_completed=include_completed,
