@@ -117,6 +117,13 @@ def test_batch_deletes_use_an_index():
     asyncio.run(go())
 
 
+def test_narrowing_purge_batches_only_tables_the_index_check_covers():
+    """ISS-072: purge_history (the narrowing's "also delete" box) runs the
+    same batched DELETE, so its tables must be ones checked above."""
+    tables = {t for ts in purge._HISTORY_ROWS.values() for t in ts}
+    assert tables and tables <= set(purge.HISTORY_TABLES)
+
+
 # ── Seeding helpers ──────────────────────────────────────────────────────────
 
 async def _fresh_engine():

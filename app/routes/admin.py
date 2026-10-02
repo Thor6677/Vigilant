@@ -96,6 +96,9 @@ NULLABLE_FKS = (
     ("update_policy", "updated_by"),
     ("update_run_report", "acknowledged_by"),
     ("update_notify_settings", "updated_by"),
+    # ISS-070: the account that removed a character with its history kept. The
+    # record outlives the account and then binds the history by EVE owner alone.
+    ("kept_character_histories", "user_id"),
 )
 
 # (table, column) pairs that hold a users.id but aren't touched by the two
@@ -118,7 +121,8 @@ AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("allowlist", "Allowlist", ("admin_allowlist",)),
     ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
                                  "character_transferred", "user_logout_everywhere",
-                                 "character_purge")),  # ISS-060: background clean-up after a removal
+                                 "character_purge",    # ISS-060: background clean-up after a removal
+                                 "kept_history")),     # ISS-070: kept history on a re-add
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),

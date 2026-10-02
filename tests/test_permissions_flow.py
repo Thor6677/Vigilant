@@ -8,6 +8,7 @@ requested, what gets stored, what is revoked, and what is deleted.
 import asyncio
 import base64
 import json
+import logging
 import re
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -17,7 +18,7 @@ import itsdangerous
 import pytest
 from fastapi.testclient import TestClient
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth import scopes as cat
@@ -25,7 +26,7 @@ from app.auth import status as perm_status
 from app.db.cache import ESICache
 from app.db.models import (
     AdminAuditLog, Base, Character, CharacterCorpRoles, CharacterDashboardCache,
-    User, WalletSnapshot, get_db,
+    CharacterPurge, User, WalletSnapshot, WalletTransaction, get_db,
 )
 
 USER_ID = 601
@@ -112,8 +113,8 @@ def env(monkeypatch):
                      "Scopes": " ".join(scopes)})
         monkeypatch.setattr(auth_routes, "_exchange_code", fake_exchange)
 
-    def client(session: dict | None = None):
-        c = TestClient(main.app, base_url="https://testserver", raise_server_exceptions=False,
+    def client(session: dict | None = None, raise_errors: bool = False):
+        c = TestClient(main.app, base_url="https://testserver", raise_server_exceptions=raise_errors,
                        follow_redirects=False)
         if session is not None:
             signer = itsdangerous.TimestampSigner(main.settings.secret_key)
@@ -141,6 +142,7 @@ def env(monkeypatch):
 
     e = Env()
     e.client, e.session_of, e.q, e.char, e.calls, e.sso_returns = client, session_of, q, char, calls, sso_returns
+    e.engine = engine
     e.user = lambda: client({"user_id": USER_ID})
     yield e
     main.app.dependency_overrides.pop(get_db, None)
@@ -375,6 +377,162 @@ def test_narrowing_with_purge_deletes_what_was_collected(env):
 
 async def _events(db):
     return (await db.execute(select(AdminAuditLog.event_type))).all()
+
+
+# ── ISS-072: narrowing keeps big scans and deletes off the write lock ───────
+# esi_cache is large, and finding one character's rows in it means a
+# leading-wildcard LIKE over the whole table. The narrowing request must not
+# hold SQLite's one write lock through that: the clear runs after the
+# response, as a read-only key scan and then deletes by key in small batches.
+
+def _sql_log(env) -> list[str]:
+    """Every statement the test database runs from here on, whitespace
+    collapsed and upper-cased."""
+    seen: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        seen.append(" ".join(statement.split()).upper())
+    event.listen(env.engine.sync_engine, "before_cursor_execute", record)
+    return seen
+
+
+def _like_deletes_on_esi_cache(sql: list[str]) -> list[str]:
+    return [s for s in sql if s.startswith("DELETE") and "ESI_CACHE" in s and " LIKE " in s]
+
+
+def _narrow_alt(env, purge=False, **client_kw):
+    """Withdraw the alt's wallet permission (assets stay) through the real callback."""
+    env.sso_returns(ALT_ID, "Alt Pilot", [cat.ASSETS])
+    return env.client(_pending("update", ["assets"], ALT_ID, purge=purge, user_id=USER_ID),
+                      **client_kw).get("/auth/callback?code=x&state=S")
+
+
+def test_narrowing_leaves_the_esi_cache_clear_out_of_the_request(env, monkeypatch):
+    import app.auth.routes as auth_routes
+    _seed_alt_data(env)
+    handed_off = []
+
+    async def record_only(bind, character_id):
+        handed_off.append((bind, character_id))
+    monkeypatch.setattr(auth_routes, "clear_esi_cache_in_background", record_only, raising=False)
+    sql = _sql_log(env)
+
+    r = _narrow_alt(env)
+
+    assert r.status_code == 303 and r.headers["location"] == "/account"
+    # The request itself never touched esi_cache...
+    assert not [s for s in sql if "ESI_CACHE" in s]
+    assert any(f"CHARACTER:EVE:{ALT_ID}|" in k for k in env.q(_all_keys))
+    # ...it handed the clear to a post-response task on the same database.
+    assert handed_off == [(env.engine, ALT_ID)]
+    # The rest of the live state is small and still goes inline.
+    cache = env.q(lambda db: _scalar(db, select(CharacterDashboardCache).where(
+        CharacterDashboardCache.character_id == ALT_ID)))
+    assert cache.wallet is None
+
+
+def test_the_background_clear_removes_exactly_that_characters_entries(env):
+    _seed_alt_data(env)
+    lookalike = int(f"{ALT_ID}1")          # starts with the alt's id
+    stays = {
+        f"def:@CHARACTER:EVE:{MAIN_ID}|/characters/{MAIN_ID}/wallet/",         # from _seed_alt_data
+        f"ghi:@CHARACTER:EVE:{MAIN_ID}|/characters/{ALT_ID}/",                  # alt's id, main's token
+        f"jkl:@CHARACTER:EVE:{lookalike}|/characters/{lookalike}/wallet/",
+        "mno:/universe/types/34/",                                              # public, no principal
+    }
+    goes = f"pqr:@CHARACTER:EVE:{ALT_ID}|/characters/{ALT_ID}/assets/"
+
+    async def seed(db):
+        for key in (stays - {f"def:@CHARACTER:EVE:{MAIN_ID}|/characters/{MAIN_ID}/wallet/"}) | {goes}:
+            db.add(ESICache(key=key, data="1", expires_at=datetime(2030, 1, 1)))
+        await db.commit()
+    env.q(seed)
+    sql = _sql_log(env)
+
+    r = _narrow_alt(env)
+
+    assert r.status_code == 303
+    assert set(env.q(_all_keys)) == stays
+    # Found with a read-only scan and deleted by key, never a LIKE DELETE.
+    assert _like_deletes_on_esi_cache(sql) == []
+
+
+def test_a_failed_background_clear_is_logged_and_the_change_stands(env, monkeypatch, caplog):
+    import app.auth.purge as purge
+    _seed_alt_data(env)
+
+    async def locked(db, cid):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(purge, "_clear_esi_cache_batched", locked)
+    caplog.set_level(logging.INFO, logger="app.auth.purge")
+
+    # raise_errors: an exception escaping the task would surface here.
+    r = _narrow_alt(env, raise_errors=True)
+
+    assert r.status_code == 303 and r.headers["location"] == "/account"
+    assert cat.parse_scopes(env.char(ALT_ID).scopes) == {cat.ASSETS}
+    assert "updated" in env.session_of(r)["flash"]["text"]
+    failures = [rec for rec in caplog.records
+                if rec.name == "app.auth.purge" and rec.levelno >= logging.WARNING
+                and str(ALT_ID) in rec.getMessage() and "database is locked" in rec.getMessage()]
+    assert failures, [rec.getMessage() for rec in caplog.records]
+
+
+def test_narrowing_queues_no_removal_purge_so_its_resync_still_commits(env):
+    """A pending character_purges row means "removed" to sync_must_not_write,
+    and the resync the callback queues would then throw its results away."""
+    import app.auth.purge as purge
+    _seed_alt_data(env)
+    sync_started = datetime.now(timezone.utc) - timedelta(seconds=5)
+
+    r = _narrow_alt(env, purge=True)
+
+    assert r.status_code == 303
+    assert _count(env, CharacterPurge) == 0
+    assert env.calls["synced"] == [ALT_ID]
+    assert env.q(lambda db: purge.sync_must_not_write(db, ALT_ID, sync_started)) is False
+
+
+def test_purge_on_narrowing_deletes_history_in_batches(env, monkeypatch):
+    import app.auth.purge as purge
+    monkeypatch.setattr(purge, "PURGE_BATCH_ROWS", 4)
+
+    async def instant():
+        return None
+    monkeypatch.setattr(purge, "_between_batches", instant)
+
+    async def seed(db):
+        for i in range(10):
+            db.add(WalletSnapshot(character_id=ALT_ID, balance=float(i),
+                                  recorded_at=datetime(2026, 9, 1) + timedelta(hours=i)))
+        for i in range(3):
+            db.add(WalletSnapshot(character_id=MAIN_ID, balance=float(i),
+                                  recorded_at=datetime(2026, 9, 1) + timedelta(hours=i)))
+        for i in range(5):
+            db.add(WalletTransaction(transaction_id=7000 + i, character_id=ALT_ID,
+                                     date=datetime(2026, 9, 1), type_id=34, quantity=1,
+                                     unit_price=5.0, is_buy=True))
+        await db.commit()
+    env.q(seed)
+    sql = _sql_log(env)
+
+    r = _narrow_alt(env, purge=True)
+
+    assert r.status_code == 303
+    assert _count(env, WalletSnapshot, character_id=ALT_ID) == 0
+    assert _count(env, WalletTransaction, character_id=ALT_ID) == 0
+    assert _count(env, WalletSnapshot, character_id=MAIN_ID) == 3      # another pilot's stay
+    snapshot_deletes = [s for s in sql if s.startswith("DELETE FROM WALLET_SNAPSHOTS")]
+    # 10 rows, 4 at a time: 4 + 4 + 2, each its own short statement.
+    assert len(snapshot_deletes) == 3, snapshot_deletes
+    assert all("ROWID IN (SELECT ROWID FROM WALLET_SNAPSHOTS" in s and "LIMIT" in s
+               for s in snapshot_deletes)
+    tx_deletes = [s for s in sql if s.startswith("DELETE FROM WALLET_TRANSACTIONS")]
+    assert len(tx_deletes) == 2 and all("LIMIT" in s for s in tx_deletes)
+    # The audit row still reports what went.
+    detail = env.q(lambda db: _scalar(db, select(AdminAuditLog.detail).where(
+        AdminAuditLog.event_type == "permissions_purged")))
+    assert "wallet_snapshots=10" in detail and "wallet_transactions=5" in detail
 
 
 def test_update_with_the_wrong_character_changes_nothing(env):

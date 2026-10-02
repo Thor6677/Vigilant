@@ -30,14 +30,13 @@ call outside what a token carries (app/esi/scope_guard.py).
 """
 import asyncio
 import base64
-import json
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -45,7 +44,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
 from app.auth.purge import (
-    REASON_SELF, REASON_TRANSFER, clear_live_state, purge_history, remove_character_from_account,
+    REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, finish_relink,
+    owner_from_token, purge_history, remove_character_from_account, settle_history_for_relink,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -279,14 +279,7 @@ def _owner_hash(access_token: str, verify_data: dict) -> str | None:
     Not signature-verified, like scope_guard.granted_scopes: the token came
     straight from the SSO token endpoint over TLS a moment ago.
     """
-    try:
-        payload_b64 = access_token.split(".")[1]
-        payload_b64 += "=" * (-len(payload_b64) % 4)
-        owner = json.loads(base64.urlsafe_b64decode(payload_b64)).get("owner")
-    except Exception:
-        owner = None
-    if not isinstance(owner, str) or not owner:
-        owner = verify_data.get("CharacterOwnerHash")
+    owner = owner_from_token(access_token) or verify_data.get("CharacterOwnerHash")
     return owner if isinstance(owner, str) and owner else None
 
 
@@ -402,7 +395,8 @@ async def _probe_stored_token(db: AsyncSession, character_id: int
 
 
 @router.get("/callback")
-async def callback(request: Request, code: str, state: str, db: AsyncSession = Depends(get_db)):
+async def callback(request: Request, code: str, state: str, background_tasks: BackgroundTasks,
+                   db: AsyncSession = Depends(get_db)):
     saved_state = request.session.get("oauth_state")
     if not saved_state or saved_state != state:
         raise HTTPException(status_code=400, detail="Invalid OAuth state.")
@@ -460,9 +454,14 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             existing.user_id = user.id
             existing.is_main = True
         else:
-            # A character Vigilant has never seen. The login token carries no
+            # A character Vigilant has no row for. The login token carries no
             # permissions; keep it so the row is valid, and send the user
             # straight to the picker to choose what to share.
+            # ISS-070: first, any history left under this id goes unless it is
+            # provably back with its owner. This account is new, so only the
+            # same EVE owner keeps it. Before User(): the deletes commit.
+            relink = await settle_history_for_relink(db, character_id, owner_hash=owner_hash,
+                                                     user_id=None)
             user = User()
             db.add(user)
             await db.flush()
@@ -473,6 +472,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
                 scopes=granted, declined_scopes="",
             )
             db.add(existing)
+            await finish_relink(db, relink, user_id=user.id,
+                                ip=request.client.host if request.client else None)
             new_account = True
         # Deliberately NOT touching access_token / refresh_token / scopes on an
         # existing character: logging in must never change what it shares.
@@ -513,6 +514,15 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
     if intent == ADD and existing and existing.user_id and existing.user_id != current_user_id:
         # Character is already owned by a different account — reject.
         return RedirectResponse("/dashboard?error=character_claimed", status_code=303)
+
+    # ISS-070: a new characters row is about to be created below. Any history
+    # left under this id goes first unless it is provably back with its owner.
+    # Here, before a signup's User() is added: the deletes commit as they go.
+    relink = None
+    if existing is None:
+        relink = await settle_history_for_relink(
+            db, character_id, owner_hash=owner_hash,
+            user_id=current_user_id if intent == ADD else None)
 
     # What the character carried before this callback. Read before the probe
     # below, which may rewrite the row: the audit row and the live-state
@@ -615,6 +625,8 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             token_expiry=token_expiry, scopes=granted, declined_scopes="",
         )
         db.add(existing)
+        await finish_relink(db, relink, user_id=user.id,
+                            ip=request.client.host if request.client else None)
     existing.user_id = user.id
     existing.character_name = character_name
     existing.access_token = access_token
@@ -662,6 +674,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         # Always: nothing withdrawn keeps feeding features as if it were live.
         await clear_live_state(db, character_id, gone)
         if pending.get("purge"):
+            # In batches that each commit, so the write lock is never held long.
             counts = await purge_history(db, character_id, gone)
             db.add(AdminAuditLog(
                 user_id=user.id, character_id=character_id, event_type="permissions_purged",
@@ -669,6 +682,12 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             ))
             purged_note = " History collected under the withdrawn permissions was deleted."
         await db.commit()
+        # ISS-072: the ESI response cache goes after the response, in its own
+        # session: finding its rows scans a large table. Never through
+        # character_purges, which would make the resync queued below drop its
+        # results. Lost on a restart, that is safe: the scope guard refuses a
+        # withdrawn scope before any cache is read (app/auth/purge.py).
+        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id)
 
     if request.session.get("flash") is None:
         if not_granted:

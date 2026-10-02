@@ -1643,3 +1643,31 @@ class CharacterPurge(Base):
 # _DEFERRED_INDEX_DDL.
 Index("ix_dscan_results_expires_at", DScanResult.expires_at)
 Index("ix_dscan_results_user_created", DScanResult.user_id, DScanResult.created_at)
+
+
+# ── ISS-070: kept history owners ─────────────────────────────────────────────
+
+class KeptCharacterHistory(Base):
+    """Whose kept history this is, for a character removed with its history kept.
+
+    Self-removal with the history box unticked leaves the character's history
+    (app/auth/purge.py HISTORY_TABLES) keyed by character_id alone. This row
+    remembers who it belongs to. When the character is linked again, the
+    history stays only if the re-add proves it is back with the same owner:
+    the same EVE account (owner_hash), or, when either side's owner is
+    unknown, the same Vigilant account (user_id). Otherwise it is deleted
+    before the link (purge.settle_history_for_relink).
+
+    Deleted in the request that links the character again, and by any removal
+    that deletes the history. `user_id` is nulled when that account is
+    removed (NULLABLE_FKS in app/routes/admin.py), so the row then binds by
+    owner alone.
+    """
+    __tablename__ = "kept_character_histories"
+
+    character_id = Column(Integer, primary_key=True, autoincrement=False)
+    # EVE's CharacterOwnerHash when it was removed; null when unknown.
+    owner_hash = Column(String, nullable=True)
+    # The Vigilant account that removed it.
+    user_id = Column(Integer, nullable=True)
+    removed_at = Column(DateTime, nullable=False)       # naive UTC
