@@ -29,7 +29,7 @@ def pytest_configure(config):
     """
     import asyncio
 
-    from app.db.models import Base, engine
+    from app.db.models import Base, engine, ensure_wal
     import app.db.sde_models  # noqa: F401 — registers the sde_* tables on Base
 
     async def _create_schema():
@@ -39,6 +39,8 @@ def pytest_configure(config):
         # loop, and a connection pinned to this one would be unusable there.
         await engine.dispose()
 
+    # ISS-075: the engine hook no longer sets WAL, so do it here like startup.
+    ensure_wal()
     asyncio.run(_create_schema())
 
 

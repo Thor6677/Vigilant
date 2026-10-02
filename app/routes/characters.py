@@ -16,12 +16,12 @@ from app.sde import lookup as sde
 router = APIRouter(tags=["characters"])
 
 
-def skill_warning(queue: list, queue_end: datetime | None) -> str:
+def skill_warning(queue: list, queue_end: datetime | None, now: datetime | None = None) -> str:
     if not queue:
         return "empty"
     if queue_end is None:
         return "paused"
-    days = (queue_end - datetime.now(timezone.utc)).days
+    days = (queue_end - (now or datetime.now(timezone.utc))).days
     if days <= 7:
         return "critical"
     if days <= 14:

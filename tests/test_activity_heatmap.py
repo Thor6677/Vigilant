@@ -263,8 +263,19 @@ def _fresh_cache():
     return player_stats
 
 
-def test_cache_key_includes_mode_scope_and_region(session_factory):
+class _PinnedDT(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return NOW.replace(tzinfo=tz) if tz else NOW
+
+
+def test_cache_key_includes_mode_scope_and_region(session_factory, monkeypatch):
     player_stats = _fresh_cache()
+    # The seeded kills sit inside the 90-day window only around NOW, and these
+    # helpers read the real clock; pin it so the test does not age out.
+    import app.intel.activity_heatmap as heatmap_mod
+    monkeypatch.setattr(player_stats, "datetime", _PinnedDT)
+    monkeypatch.setattr(heatmap_mod, "datetime", _PinnedDT)
 
     async def call():
         async with session_factory() as s:

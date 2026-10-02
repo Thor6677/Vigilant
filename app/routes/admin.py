@@ -816,18 +816,27 @@ async def admin_player_count_status(
 @router.post("/action/cache-purge", response_class=HTMLResponse)
 async def admin_cache_purge(request: Request, db: AsyncSession = Depends(get_db),
                             admin: User = Depends(require_admin)):
-    result = await db.execute(
-        text("DELETE FROM esi_cache WHERE expires_at < :now"),
-        {"now": datetime.now(timezone.utc).isoformat()},
-    )
-    await db.commit()
-    deleted = result.rowcount
+    # ISS-071/073: the same batched GC as the hourly job, capped so the request
+    # stays short (stored times are naive UTC; the GC binds them as DateTime).
+    from app.db.cache import cache_gc_run
+    gc = await cache_gc_run(max_seconds=20)
+    deleted = gc.removed
 
-    await _log_audit(db, "admin_cache_purge", admin.id,
-                     detail=f"Purged {deleted} expired cache entries",
-                     ip=request.client.host if request.client else None)
+    # Nothing happened when another clean-up held the GC, so no audit row.
+    if not gc.skipped:
+        detail = f"Purged {deleted} expired cache entries"
+        if not gc.complete:
+            detail += " (stopped early; more remain)"
+        await _log_audit(db, "admin_cache_purge", admin.id, detail=detail,
+                         ip=request.client.host if request.client else None)
 
-    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">Purged {deleted} expired cache entries.</div>')
+    if gc.skipped:
+        note = "A cache clean-up is already running; try again shortly."
+    elif not gc.complete:
+        note = f"Purged {deleted} expired cache entries; more remain, and the hourly clean-up will continue."
+    else:
+        note = f"Purged {deleted} expired cache entries."
+    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">{note}</div>')
 
 
 # ── User management actions ──────────────────────────────────────────────────

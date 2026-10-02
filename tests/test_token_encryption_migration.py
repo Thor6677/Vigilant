@@ -63,7 +63,7 @@ def _use_key(monkeypatch, key: str) -> None:
 
 async def _insert_character(session_factory, char_id: int, access_token, refresh_token):
     from datetime import datetime, timezone
-    from sqlalchemy import text
+    from sqlalchemy import DateTime, bindparam, text
 
     async with session_factory() as s:
         await s.execute(
@@ -72,13 +72,13 @@ async def _insert_character(session_factory, char_id: int, access_token, refresh
                 "(id, character_id, character_name, access_token, refresh_token, "
                 "token_expiry, scopes, declined_scopes) "
                 "VALUES (:id, :cid, 'Test Pilot', :at, :rt, :exp, '', '')"
-            ),
+            ).bindparams(bindparam("exp", type_=DateTime)),
             {
                 "id": char_id,
                 "cid": 1_000_000 + char_id,
                 "at": access_token,
                 "rt": refresh_token,
-                "exp": datetime.now(timezone.utc),
+                "exp": datetime.now(timezone.utc).replace(tzinfo=None),
             },
         )
         await s.commit()

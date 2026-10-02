@@ -21,7 +21,10 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 def _sqlite_pragmas(dbapi_connection, connection_record):
     if "sqlite" in str(engine.url):
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # ISS-075: busy_timeout FIRST, so every later statement waits up to 10 s
+        # for a lock instead of the driver's 5 s default. journal_mode=WAL is
+        # persistent in the database file and is set once by ensure_wal() at
+        # startup, not on every new connection.
         cursor.execute("PRAGMA busy_timeout=10000")
         cursor.execute("PRAGMA synchronous=NORMAL")
         # 256MB memory-mapped read region. Pages stay in OS page cache
@@ -31,6 +34,28 @@ def _sqlite_pragmas(dbapi_connection, connection_record):
         cursor.execute("PRAGMA mmap_size=268435456")
         cursor.execute("PRAGMA cache_size=-20000")  # 20MB page cache per connection
         cursor.close()
+
+
+def ensure_wal(db_url: str | None = None) -> str:
+    """Put the SQLite database file in WAL mode and return the resulting mode.
+
+    WAL is stored in the file header, so it only needs setting once rather than
+    on every pooled connection (ISS-075). Uses its own short-lived synchronous
+    connection with a 10 s busy timeout. Returns "" for a non-SQLite URL.
+    """
+    import sqlite3
+    from sqlalchemy.engine import make_url
+
+    url = make_url(db_url or settings.database_url)
+    if not url.drivername.startswith("sqlite") or not url.database or url.database == ":memory:":
+        return ""
+    conn = sqlite3.connect(url.database, timeout=10)
+    try:
+        conn.execute("PRAGMA busy_timeout=10000")
+        row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        return (row[0] if row else "").lower()
+    finally:
+        conn.close()
 
 
 class Base(DeclarativeBase):

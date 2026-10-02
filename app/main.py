@@ -277,6 +277,16 @@ def _background_jobs_enabled() -> bool:
 @app.on_event("startup")
 async def startup():
     from sqlalchemy import text
+    # ISS-075: set WAL once, before anything else touches the DB.
+    from app.db.models import ensure_wal
+    try:
+        _mode = ensure_wal()
+        if _mode == "wal":
+            logging.info("SQLite journal mode: wal")
+        elif _mode:
+            logging.warning("SQLite journal mode is %r, expected 'wal'", _mode)
+    except Exception as _wal_exc:
+        logging.warning("Could not set WAL journal mode: %s", _wal_exc)
     # One-time migration: drop the pre-v2 killmail tables if they still carry
     # the old `raw_json` column fingerprint. This runs once on first deploy of
     # the redesigned schema, then becomes a no-op forever after.
