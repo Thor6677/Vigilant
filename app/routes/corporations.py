@@ -1175,7 +1175,14 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
                     try:
                         async with AsyncSessionLocal() as sess:
                             char = scope_chars["contracts"][0]
-                            token = await refresh_token(char, sess)
+                            # ISS-081: the caller's Character belongs to another session; refresh
+                            # the pilot's own row as loaded by THIS one.
+                            fresh = (await sess.execute(
+                                select(Character).where(Character.character_id == char.character_id)
+                            )).scalar_one_or_none()
+                            if fresh is None:
+                                raise ValueError(f"Character {char.character_id} not found")
+                            token = await refresh_token(fresh, sess)
                             client = ESIClient(token, db=sess)
                             items = await esi_corp.get_corporation_contract_items(client, corp_id, cid)
                             if isinstance(items, list):

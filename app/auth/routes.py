@@ -335,8 +335,28 @@ def _start_session(request: Request, user: User, character_id: int) -> None:
 def _queue_sync(character_id: int) -> None:
     from app.routes.dashboard import _sync_task, _queued_sync
     if character_id not in _queued_sync:
-        _queued_sync[character_id] = datetime.now(timezone.utc)
-        asyncio.create_task(_sync_task(character_id))
+        marked = datetime.now(timezone.utc)
+        _queued_sync[character_id] = marked
+        asyncio.create_task(_run_queued_sync(character_id, marked, _sync_task))
+
+
+async def _run_queued_sync(character_id: int, marked: datetime, sync_task) -> None:
+    """Run a queued sync and free its _queued_sync entry when it ends (ISS-080).
+
+    Without this, only the scheduler's own batches freed entries, so the
+    scheduler skipped the pilot for up to the 5-minute unstick after any login.
+    The entry is freed on success, failure or cancellation. When another sync
+    already held the pilot's lock, sync_task returns at once having done
+    nothing; freeing the entry then lets the scheduler's next pass pick the
+    pilot up. An entry the scheduler has re-marked since (a different
+    timestamp) belongs to its batch and is left alone.
+    """
+    try:
+        await sync_task(character_id)
+    finally:
+        from app.routes.dashboard import _queued_sync
+        if _queued_sync.get(character_id) is marked:
+            _queued_sync.pop(character_id, None)
 
 
 def _catalog_scopes(scopes) -> set[str]:
