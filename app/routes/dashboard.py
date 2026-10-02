@@ -1357,6 +1357,7 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
     async def _get(char):
         if not _has_scope(char, "esi-wallet.read_character_wallet.v1"):
             return char.character_id, 0, "missing_scope"
+        row_id = char.id   # the link this fetch is for (ISS-082), read before its token
         client, err = await _client_for(char)
         if not client:
             return char.character_id, 0, err
@@ -1397,14 +1398,17 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                 stmt = sqlite_insert(WalletTransaction).values(rows)
                 stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
                 await tdb.execute(stmt)
-                # ISS-079: this page may have come from the old token of a
-                # narrowing that withdrew the wallet. Asked after the INSERT,
-                # which holds the write lock until we commit or roll back.
-                from app.auth.purge import scopes_withdrawn
+                # ISS-079/082: this page may have come from the old token of
+                # a narrowing that withdrew the wallet, or of a link that has
+                # since ended (removed, or now another EVE owner's). Asked
+                # after the INSERT, which holds the write lock until we
+                # commit or roll back.
+                from app.auth.purge import fetch_must_not_write
                 cid = char.character_id
-                if await scopes_withdrawn(tdb, cid, (perms.WALLET,)):
+                if await fetch_must_not_write(tdb, cid, row_id, (perms.WALLET,)):
                     await tdb.rollback()
-                    logger.info("Wallet transactions for char %s dropped: permission withdrawn", cid)
+                    logger.info("Wallet transactions for char %s dropped: permission withdrawn "
+                                "or character unlinked while fetched", cid)
                     return cid, 0, None
                 await tdb.commit()
 
@@ -1457,7 +1461,7 @@ async def fetch_orders_data(characters: list[Character], db: AsyncSession) -> di
 
 
 async def _persist_completed_jobs(db: AsyncSession, character_id: int,
-                                   jobs: list[dict]) -> int:
+                                   jobs: list[dict], *, row_id: int | None = None) -> int:
     """Persist delivered manufacturing/reaction jobs with build cost valued
     at completion date (Industry P&L, T-041 item 2). Idempotent via
     insert-or-ignore on job_id; NULL build_costs retry valuation here on
@@ -1559,14 +1563,18 @@ async def _persist_completed_jobs(db: AsyncSession, character_id: int,
         if cost is not None:
             row.build_cost, row.cost_basis = cost, basis
 
-    # ISS-079: the jobs may have come from the old token of a narrowing that
-    # withdrew industry. Asked after the flush, which holds the write lock
-    # until we commit or roll back.
-    from app.auth.purge import scopes_withdrawn
+    # ISS-079/082: the jobs may have come from the old token of a narrowing
+    # that withdrew industry, or, given the characters row `row_id` the fetch
+    # started from, of a link that has since ended (removed, or now another
+    # EVE owner's). Asked after the flush, which holds the write lock until
+    # we commit or roll back.
+    from app.auth.purge import fetch_must_not_write, scopes_withdrawn
     await db.flush()
-    if await scopes_withdrawn(db, character_id, (perms.JOBS,)):
+    if (await fetch_must_not_write(db, character_id, row_id, (perms.JOBS,)) if row_id is not None
+            else await scopes_withdrawn(db, character_id, (perms.JOBS,))):
         await db.rollback()
-        logger.info("Completed jobs for char %s dropped: permission withdrawn", character_id)
+        logger.info("Completed jobs for char %s dropped: permission withdrawn "
+                    "or character unlinked while fetched", character_id)
         return 0
     await db.commit()
     return inserted
@@ -1586,6 +1594,7 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
     async def _get(char):
         if not _has_scope(char, "esi-industry.read_character_jobs.v1"):
             return char.character_id, None, "missing_scope"
+        row_id = char.id   # the link this fetch is for (ISS-082), read before its token
         client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
@@ -1610,7 +1619,7 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 # rollback) can't roll back or expire anything another pilot
                 # in the same call holds.
                 async with AsyncSession(db.bind, expire_on_commit=False) as jdb:
-                    await _persist_completed_jobs(jdb, cid, jobs or [])
+                    await _persist_completed_jobs(jdb, cid, jobs or [], row_id=row_id)
             except Exception as e:
                 logger.warning("Completed jobs persist failed for char %s: %s", cid, e)
             return cid, trimmed, None

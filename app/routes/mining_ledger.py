@@ -97,7 +97,7 @@ async def _fetch_chars_mining(chars: list[Character], db: AsyncSession):
         async with AsyncSessionLocal() as char_db:
             token = await refresh_token(c, char_db)
             client = ESIClient(token, db=char_db)
-            entries = await _sync_and_fetch_mining(client, c.character_id, char_db)
+            entries = await _sync_and_fetch_mining(client, c.character_id, char_db, row_id=c.id)
             return c.character_id, c.character_name, entries
 
     results = await asyncio.gather(*[_fetch_one(c) for c in chars], return_exceptions=True)
