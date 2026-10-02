@@ -46,7 +46,7 @@ from app.auth import scopes as perms
 from app.auth.purge import (
     REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, finish_relink,
     narrowing_cache_patterns, owner_from_token, purge_history, remove_character_from_account,
-    settle_history_for_relink, withdrawn_keys,
+    removal_cache_patterns, settle_history_for_relink, withdrawn_keys,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -284,7 +284,8 @@ def _owner_hash(access_token: str, verify_data: dict) -> str | None:
     return owner if isinstance(owner, str) and owner else None
 
 
-async def _release_transferred(db: AsyncSession, request: Request, char: Character) -> None:
+async def _release_transferred(db: AsyncSession, request: Request, char: Character,
+                               background_tasks: BackgroundTasks) -> None:
     """EVE reports a different account owning this character than the one that
     registered it: it was transferred. The new owner must not inherit the old
     owner's Vigilant account, and nothing the old owner's tokens collected may
@@ -304,6 +305,7 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     """
     cid = char.character_id
     old_user_id = char.user_id
+    cache_patterns = removal_cache_patterns(char)
     await remove_character_from_account(db, char, reason=REASON_TRANSFER, delete_history=True)
     db.add(AdminAuditLog(
         user_id=old_user_id, character_id=cid, event_type="character_transferred",
@@ -311,6 +313,8 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
         ip_address=request.client.host if request.client else None,
     ))
     await db.commit()
+    # ISS-077: the old owner's cached corp contracts, after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
     logger.warning("character %s changed EVE owner; removed from user %s", cid, old_user_id)
 
 
@@ -429,7 +433,7 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
     owner_hash = _owner_hash(access_token, verify_data)
     if (existing is not None and owner_hash and existing.owner_hash
             and existing.owner_hash != owner_hash):
-        await _release_transferred(db, request, existing)
+        await _release_transferred(db, request, existing, background_tasks)
         existing = None
 
     if (not existing or not existing.user_id) and not await _allowed_to_register(db, character_id, meta):
@@ -782,7 +786,7 @@ async def switch_character(character_id: int, request: Request, db: AsyncSession
 
 
 @router.post("/remove/{character_id}")
-async def remove_character(character_id: int, request: Request,
+async def remove_character(character_id: int, request: Request, background_tasks: BackgroundTasks,
                            delete_history: str = Form(""),
                            db: AsyncSession = Depends(get_db)):
     """Remove one of your own characters (never the main).
@@ -812,9 +816,12 @@ async def remove_character(character_id: int, request: Request,
 
     old_refresh = char.refresh_token
     old_is_ours = issued_to_us(char.access_token)
+    cache_patterns = removal_cache_patterns(char)
     await remove_character_from_account(db, char, reason=REASON_SELF,
                                         delete_history=delete_history == "1")
     await db.commit()
+    # ISS-077: the user's cached corp contracts, after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
     # Removing a character is withdrawing every permission it granted.
     if old_is_ours:
         await revoke_refresh_token(old_refresh)

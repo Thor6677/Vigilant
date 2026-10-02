@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Form
+from fastapi import APIRouter, BackgroundTasks, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,8 @@ from app.db.models import (
     UpdateSchedule, UpdateRunReport,
 )
 from app.auth.purge import (
-    REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, remove_character_from_account,
+    REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, clear_esi_cache_in_background,
+    remove_character_from_account, removal_cache_patterns, user_cache_patterns,
 )
 from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
@@ -880,7 +881,7 @@ async def admin_set_role(user_id: int, new_role: str, request: Request,
 
 
 @router.post("/action/remove-user/{user_id}", response_class=HTMLResponse)
-async def admin_remove_user(user_id: int, request: Request,
+async def admin_remove_user(user_id: int, request: Request, background_tasks: BackgroundTasks,
                             db: AsyncSession = Depends(get_db),
                             admin: User = Depends(require_admin)):
     if user_id == admin.id:
@@ -928,6 +929,10 @@ async def admin_remove_user(user_id: int, request: Request,
 
     await db.delete(user)
     await db.commit()
+    # ISS-077: everything cached under the user's own principal (their corp
+    # contracts), after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None,
+                              user_cache_patterns(user_id))
     for token in to_revoke:
         await revoke_refresh_token(token)
 
@@ -940,6 +945,7 @@ async def admin_remove_user(user_id: int, request: Request,
 
 @router.post("/action/remove-character/{character_id}", response_class=HTMLResponse)
 async def admin_remove_character(character_id: int, request: Request,
+                                 background_tasks: BackgroundTasks,
                                  db: AsyncSession = Depends(get_db),
                                  admin: User = Depends(require_admin)):
     result = await db.execute(select(Character).where(Character.character_id == character_id))
@@ -951,8 +957,11 @@ async def admin_remove_character(character_id: int, request: Request,
     from app.auth.tokens import issued_to_us, revoke_refresh_token
     old_refresh = char.refresh_token if issued_to_us(char.access_token) else None
     # ISS-060: live state now; ESI cache and history in the background.
+    cache_patterns = removal_cache_patterns(char)
     await remove_character_from_account(db, char, reason=REASON_ADMIN_CHARACTER, delete_history=True)
     await db.commit()
+    # ISS-077: the user's cached corp contracts, after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
     await revoke_refresh_token(old_refresh)   # None (not ours) is a no-op
 
     await _log_audit(db, "admin_remove_character", admin.id, character_id,

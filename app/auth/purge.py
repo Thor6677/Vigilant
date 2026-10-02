@@ -46,6 +46,11 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   character, and the character row itself are deleted, and a pending purge is
   recorded in `character_purges`. Token revocation stays with each caller
   (a transfer never revokes; see app/auth/routes.py's module docstring).
+* Right after the response, each caller clears the corp contracts its user
+  has cached for the character's corporation (removal_cache_patterns; for
+  admin remove-user, everything under that user's principal). Those are
+  keyed by user, not character, so the background purge can't find them
+  once the row is gone (ISS-077).
 * In the background (run_due_purges, from the scheduler): the character's
   ESI response cache and, when asked, its history. Both can be large — a
   year of wallet snapshots is ~260k rows, and finding a character's
@@ -215,10 +220,12 @@ async def clear_live_state(db: AsyncSession, character_id: int,
     return counts
 
 
-async def clear_esi_cache_in_background(bind, character_id: int,
+async def clear_esi_cache_in_background(bind, character_id: int | None,
                                         extra_patterns: Iterable[str] = ()) -> int | None:
     """Clear a character's ESI response cache after a narrowing (ISS-072),
     plus any entries matching `extra_patterns` (narrowing_cache_patterns).
+    With `character_id` None, only the patterns: a removal, whose own
+    entries the background purge clears (removal_cache_patterns).
 
     Scheduled by the SSO callback to run after its response, and by
     schedule_esi_cache_clear after a narrowing noticed at token refresh
@@ -230,16 +237,36 @@ async def clear_esi_cache_in_background(bind, character_id: int,
     waiting on it.
     Returns the number of entries deleted, or None if it failed.
     """
-    cid = int(character_id)
+    cid = None if character_id is None else int(character_id)
+    extra_patterns = tuple(extra_patterns)
+    if cid is None and not extra_patterns:
+        return 0
     try:
         async with AsyncSession(bind, expire_on_commit=False) as db:
-            deleted = await _clear_esi_cache_batched(db, cid, tuple(extra_patterns))
+            deleted = await _clear_esi_cache_batched(db, cid, extra_patterns)
     except Exception as e:
-        logger.warning("ESI cache clear after narrowing failed for character %s: %s: %s",
-                       cid, type(e).__name__, e)
+        logger.warning("ESI cache clear failed for character %s %s: %s: %s",
+                       cid, extra_patterns, type(e).__name__, e)
         return None
-    logger.info("cleared %s ESI cache entries after narrowing, character %s", deleted, cid)
+    logger.info("cleared %s ESI cache entries, character %s %s", deleted, cid, extra_patterns)
     return deleted
+
+
+def removal_cache_patterns(char: Character) -> tuple[str, ...]:
+    """ISS-077 on the removal path: the user's corp-contract entries for the
+    character's corporation, when it shared corp contracts. Taking a
+    character off an account withdraws everything it granted. Read it before
+    the removal (the row goes); the caller clears it after its commit with
+    clear_esi_cache_in_background(bind, None, patterns), never inside the
+    request's write transaction."""
+    return narrowing_cache_patterns(char.user_id, char.corporation_id,
+                                    withdrawn_keys(parse_scopes(char.scopes)))
+
+
+def user_cache_patterns(user_id: int) -> tuple[str, ...]:
+    """Every entry cached under a user's own principal, for removing the
+    whole user (admin remove-user)."""
+    return (principal_key_pattern(user_principal(user_id), ""),)
 
 
 def withdrawn_keys(removed_scopes: Iterable[str]) -> list[str]:
@@ -520,7 +547,7 @@ async def _delete_in_batches(db: AsyncSession, table: str, cid: int, *,
         await _between_batches()
 
 
-async def _clear_esi_cache_batched(db: AsyncSession, cid: int,
+async def _clear_esi_cache_batched(db: AsyncSession, cid: int | None,
                                    extra_patterns: tuple[str, ...] = ()) -> int:
     """Drop every cached authenticated ESI response for this character, and
     any entry matching `extra_patterns`, without holding the write lock
@@ -531,9 +558,10 @@ async def _clear_esi_cache_batched(db: AsyncSession, cid: int,
     transaction. The only way esi_cache is cleared per character: by the
     removal purge, and after a narrowing (clear_esi_cache_in_background).
     """
-    match = ESICache.key.like(_esi_cache_marker(cid))
-    if extra_patterns:
-        match = or_(match, *(ESICache.key.like(p) for p in extra_patterns))
+    patterns = ((_esi_cache_marker(cid),) if cid is not None else ()) + tuple(extra_patterns)
+    if not patterns:
+        return 0
+    match = or_(*(ESICache.key.like(p) for p in patterns))
     keys = list((await db.execute(select(ESICache.key).where(match))).scalars())
     deleted = 0
     for i in range(0, len(keys), ESI_CACHE_BATCH_KEYS):

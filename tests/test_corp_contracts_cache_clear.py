@@ -156,3 +156,93 @@ def test_the_corp_contracts_page_caches_under_the_shared_principal():
     from app.routes import corporations
     src = inspect.getsource(corporations.check_corp_contracts)
     assert "user_principal(user_id)" in src
+
+
+# ── The same entries when a character leaves an account ─────────────────────
+# Taking a character off an account withdraws everything it granted, so the
+# user's corp-contract entries for its corporation go too, after the request
+# (the request never scans esi_cache). The character's own entries stay for
+# the background purge, as before.
+
+OTHER_USER_KEYS = {
+    _key(f"/corporations/{CORP}/contracts/", OTHER_ID),                    # also in STAYS
+    _key(f"/corporations/{OTHER_CORP}/contracts/9001/items/", OTHER_ID),
+}
+LOOKALIKE_OTHER = _key(f"/corporations/{CORP}/contracts/", int(f"{OTHER_ID}0"))
+
+
+def _make_admin(env, monkeypatch):
+    """USER_ID as an admin, with token revocation stubbed (no network)."""
+    import app.auth.tokens as tokens
+    from app.db.models import User
+
+    async def no_revoke(token):
+        return True
+    monkeypatch.setattr(tokens, "revoke_refresh_token", no_revoke)
+
+    async def go(db):
+        u = (await db.execute(select(User).where(User.id == USER_ID))).scalar_one()
+        u.role, u.is_admin = "admin", True
+        await db.commit()
+    env.q(go)
+
+
+def _add_keys(env, keys):
+    async def go(db):
+        for key in keys:
+            db.add(ESICache(key=key, data="[]", expires_at=datetime(2030, 1, 1)))
+        await db.commit()
+    env.q(go)
+
+
+def test_self_removal_clears_the_users_cached_contracts_for_that_corp(env):
+    from tests.test_permissions_flow import CSRF
+    _seed(env, cat.scopes_for(["wallet", "corp_contracts"]))
+
+    r = env.user().post(f"/auth/remove/{ALT_ID}", data={"csrf_token": CSRF})
+
+    assert r.status_code == 303 and env.char(ALT_ID) is None
+    assert _keys(env) == STAYS | {ALT_OWN}
+
+
+def test_removing_a_pilot_that_never_shared_corp_contracts_leaves_them(env):
+    from tests.test_permissions_flow import CSRF
+    _seed(env, cat.scopes_for(["wallet"]))
+
+    env.user().post(f"/auth/remove/{ALT_ID}", data={"csrf_token": CSRF})
+
+    assert env.char(ALT_ID) is None
+    assert _keys(env) == GOES | STAYS | {ALT_OWN}
+
+
+def test_admin_remove_character_clears_them_too(env, monkeypatch):
+    _seed(env, cat.scopes_for(["wallet", "corp_contracts"]))
+    _make_admin(env, monkeypatch)
+
+    r = env.user().post(f"/admin/action/remove-character/{ALT_ID}")
+
+    assert r.status_code == 200 and env.char(ALT_ID) is None
+    assert _keys(env) == STAYS | {ALT_OWN}
+
+
+def test_admin_remove_user_clears_all_of_that_users_entries(env, monkeypatch):
+    _seed(env, cat.scopes_for(["wallet", "corp_contracts"]))
+    _add_keys(env, (OTHER_USER_KEYS - STAYS) | {LOOKALIKE_OTHER})
+    _make_admin(env, monkeypatch)
+
+    r = env.user().post(f"/admin/action/remove-user/{OTHER_ID}")
+
+    assert r.status_code == 200
+    assert _keys(env) == (GOES | STAYS | {ALT_OWN, LOOKALIKE_OTHER}) - OTHER_USER_KEYS
+
+
+def test_a_transfer_clears_the_old_owners_cached_contracts(env, monkeypatch):
+    from tests.test_character_owner_change import _login, _set_owner, _sso
+    _seed(env, cat.scopes_for(["wallet", "corp_contracts"]))
+    _set_owner(env, ALT_ID, "owner-A")
+    _sso(monkeypatch, ALT_ID, "Alt Pilot", owner="owner-B")
+
+    r = _login(env)
+
+    assert r.status_code == 303 and env.char(ALT_ID).user_id != USER_ID
+    assert _keys(env) == STAYS | {ALT_OWN}
