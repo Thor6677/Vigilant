@@ -85,6 +85,10 @@ COPY_ALL = (
     'everef_import_days',
     'hosted_images',
     'industry_job_history',
+    # ISS-070: whose kept history each removed character's is. Copied with the
+    # history it describes: without it, dev would treat that history as
+    # unowned and delete it on any re-add.
+    'kept_character_histories',
     'kill_alert_events',
     # Both aggregate tables are small AND are what the activity/history pages
     # read for day-and-longer windows. Dropping them would break exactly the

@@ -55,9 +55,11 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   late rows are purged too. The sync itself also re-checks before its final
   commit (sync_must_not_write).
 * If the character is linked again before its history is gone, the purge
-  stops and keeps what is left, so the re-added pilot's new rows survive.
-  Live-state sweeps are guarded the same way; esi_cache entries are always
-  cleared, since a dropped cache entry is only a refetch.
+  stops, so the re-added pilot's new rows survive. Whatever history was due
+  for deletion has already gone by then: the re-link deletes it first (see
+  "Linking a character again" below). Live-state sweeps are guarded the same
+  way; esi_cache entries are always cleared, since a dropped cache entry is
+  only a refetch.
 * The transfer path is the exception: its caller links the character to the
   new owner in the same request, so a background purge would always find it
   "re-added" and the new owner would inherit the old owner's history. Its
@@ -65,12 +67,28 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   goes (only its esi_cache clean-up is left to the background). If the
   process dies half way, the row is still there under the old owner, so the
   new owner's next sign-in detects the transfer again and finishes it.
+
+Linking a character again (ISS-070)
+-----------------------------------
+History kept by a self-removal is keyed by character_id alone, so whoever
+links the character next would see it, including a later EVE owner. So kept
+history is bound to its owner: the removal records who that was
+(kept_character_histories), and every path that creates a new characters row
+first calls settle_history_for_relink, which keeps the history only when the
+re-add proves the same owner (kept_history_verdict has the rules) and
+otherwise deletes it in batches before the link. History with no record at
+all (kept before this existed) is deleted on any re-add, and so is history a
+pending purge was due to delete. The record goes in the same commit as the
+link (finish_relink), so a crash half way leaves the character unlinked with
+its record, and the retry makes the same decision.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
@@ -81,7 +99,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.cache import ESICache
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
-    CharacterDashboardCache, CharacterPurge, NetWorthSnapshot,
+    CharacterDashboardCache, CharacterPurge, KeptCharacterHistory, NetWorthSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -326,6 +344,8 @@ KEPT_TABLES: dict[str, str] = {
 REMOVAL_TABLES: dict[str, str] = {
     "characters": "the character row itself, deleted by the removal request",
     "character_purges": "the pending-purge queue; the background purge deletes its own row",
+    "kept_character_histories": ("whose kept history it is (ISS-070); written by a "
+                                 "self-removal that keeps history, deleted on re-link"),
 }
 
 REASON_SELF = "self"
@@ -445,6 +465,173 @@ async def _record_purge(db: AsyncSession, cid: int, *, reason: str, delete_histo
     await db.execute(stmt)
 
 
+# ── ISS-070: kept history goes back only to its owner ───────────────────────
+
+def owner_from_token(access_token: str | None) -> str | None:
+    """The EVE account that owns a character, from an access token's `owner`
+    claim (EVE's CharacterOwnerHash); None when the token can't say.
+
+    Not signature-verified and expiry doesn't matter: the claim is what EVE
+    put in a token Vigilant got from SSO itself. Used at sign-in (with
+    /oauth/verify as the fallback) and at removal, for a row whose owner_hash
+    was never filled in.
+    """
+    try:
+        payload_b64 = (access_token or "").split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        owner = json.loads(base64.urlsafe_b64decode(payload_b64)).get("owner")
+    except Exception:
+        return None
+    return owner if isinstance(owner, str) and owner else None
+
+
+async def _remember_kept_history(db: AsyncSession, cid: int, *, owner_hash: str | None,
+                                 user_id: int | None) -> None:
+    stmt = sqlite_insert(KeptCharacterHistory).values(
+        character_id=cid, owner_hash=owner_hash, user_id=user_id, removed_at=_utcnow())
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["character_id"],
+        set_={"owner_hash": stmt.excluded.owner_hash, "user_id": stmt.excluded.user_id,
+              "removed_at": stmt.excluded.removed_at},
+    )
+    await db.execute(stmt)
+
+
+async def _forget_kept_history(db: AsyncSession, cid: int) -> None:
+    await db.execute(delete(KeptCharacterHistory)
+                     .where(KeptCharacterHistory.character_id == cid)
+                     .execution_options(synchronize_session=False))
+
+
+KEEP_SAME_OWNER = "same_owner"
+KEEP_SAME_ACCOUNT = "same_account"
+DROP_OTHER_OWNER = "other_owner"
+DROP_UNKNOWN_OWNER = "unknown_owner"
+DROP_LEGACY = "legacy"
+DROP_PENDING_PURGE = "pending_purge"
+
+# For the audit row. Never the owner hashes themselves.
+_RELINK_REASONS = {
+    KEEP_SAME_OWNER: "the same EVE account added it back",
+    KEEP_SAME_ACCOUNT: "its EVE owner is unknown, and the same Vigilant account added it back",
+    DROP_OTHER_OWNER: "another EVE account added it",
+    DROP_UNKNOWN_OWNER: "its EVE owner is unknown, and another Vigilant account added it",
+    DROP_LEGACY: "it was kept before Vigilant recorded whose history it is",
+    DROP_PENDING_PURGE: "a pending removal had already asked for it to be deleted",
+}
+
+
+def kept_history_verdict(record, *, pending_delete: bool, owner_hash: str | None,
+                         user_id: int | None) -> tuple[bool, str]:
+    """Whether a character's kept history survives it being linked again:
+    (keep, one of the KEEP_/DROP_ reasons).
+
+    `record` is its KeptCharacterHistory row (or anything with `owner_hash`
+    and `user_id`), None when there is none; `pending_delete` says a
+    character_purges row is still due to delete its history; `owner_hash` is
+    the new sign-in's EVE owner and `user_id` the Vigilant account linking it
+    (None for an account being created by this sign-in). Kept only when it is
+    provably the same owner:
+
+    1. both owner hashes are known and equal; or
+    2. either is unknown, and the same Vigilant account is adding it back.
+
+    Anything else deletes it, including history with no record at all (kept
+    before records existed) and history a pending purge was due to delete.
+    """
+    if pending_delete:
+        return False, DROP_PENDING_PURGE
+    if record is None:
+        return False, DROP_LEGACY
+    if record.owner_hash and owner_hash:
+        return (True, KEEP_SAME_OWNER) if record.owner_hash == owner_hash else (False, DROP_OTHER_OWNER)
+    if record.user_id is not None and record.user_id == user_id:
+        return True, KEEP_SAME_ACCOUNT
+    return False, DROP_UNKNOWN_OWNER
+
+
+@dataclass
+class RelinkHistory:
+    """What settle_history_for_relink decided, for finish_relink."""
+    character_id: int
+    had_record: bool
+    keep: bool
+    reason: str
+    deleted: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def noop(self) -> bool:
+        """Nothing was kept or deleted: a character with no history at all."""
+        return not self.had_record and not self.deleted
+
+
+async def _has_rows(db: AsyncSession, table: str, cid: int) -> bool:
+    """One indexed lookup (every HISTORY_TABLES table indexes character_id)."""
+    return (await db.execute(text(f"SELECT 1 FROM {table} WHERE character_id = :cid LIMIT 1"),
+                             {"cid": cid})).first() is not None
+
+
+async def settle_history_for_relink(db: AsyncSession, character_id: int, *,
+                                    owner_hash: str | None,
+                                    user_id: int | None) -> RelinkHistory:
+    """Decide, before a NEW characters row is created for `character_id`,
+    whether the history left under that id goes with it (kept_history_verdict),
+    and if not, delete it now.
+
+    The deletes run PURGE_BATCH_ROWS at a time, each batch its own commit on
+    `db`, so nothing else may be pending in the session: call this before the
+    new user or character is added. For a character with no history it is a
+    few indexed reads and writes nothing. The kept-history record stays until
+    finish_relink drops it in the same commit as the link, so a crash part way
+    leaves the character unlinked with its record, and the retry decides the
+    same way and finishes the deletes.
+    """
+    if db.new or db.dirty or db.deleted:
+        raise RuntimeError("settle_history_for_relink commits; call it with nothing pending")
+    cid = int(character_id)
+    record = (await db.execute(select(KeptCharacterHistory).where(
+        KeptCharacterHistory.character_id == cid))).scalar_one_or_none()
+    pending_delete = bool((await db.execute(select(CharacterPurge.delete_history).where(
+        CharacterPurge.character_id == cid))).scalar())
+    keep, reason = kept_history_verdict(record, pending_delete=pending_delete,
+                                        owner_hash=owner_hash, user_id=user_id)
+    outcome = RelinkHistory(character_id=cid, had_record=record is not None,
+                            keep=keep, reason=reason)
+    if not keep:
+        for table in HISTORY_TABLES:
+            if await _has_rows(db, table, cid):
+                outcome.deleted[table], _ = await _delete_in_batches(
+                    db, table, cid, only_if_gone=False)
+    if not outcome.noop:
+        logger.info("character %s linked again: history %s (%s): %s", cid,
+                    "kept" if keep else "deleted", reason, outcome.deleted)
+    return outcome
+
+
+async def finish_relink(db: AsyncSession, outcome: RelinkHistory, *, user_id: int | None,
+                        ip: str | None = None) -> None:
+    """In the transaction that creates the new characters row: drop the
+    kept-history record and audit what settle_history_for_relink did.
+    Doesn't commit; the caller's link commit carries it."""
+    cid = outcome.character_id
+    if outcome.had_record:
+        await _forget_kept_history(db, cid)
+    if outcome.noop:
+        return
+    why = _RELINK_REASONS[outcome.reason]
+    if outcome.keep:
+        detail = f"Added again; its kept history stays because {why}"
+    else:
+        rows = ", ".join(f"{t}={n}" for t, n in sorted(outcome.deleted.items()) if n)
+        detail = (f"Added again; its kept history was deleted before linking because {why}. "
+                  f"Rows deleted: {rows or 'none left'}")
+    db.add(AdminAuditLog(
+        user_id=user_id, character_id=cid,
+        event_type="kept_history_restored" if outcome.keep else "kept_history_deleted",
+        detail=detail, ip_address=ip,
+    ))
+
+
 async def remove_character_from_account(db: AsyncSession, char: Character, *,
                                         reason: str, delete_history: bool) -> dict[str, int]:
     """Take a character off its account: the one helper every removal path calls.
@@ -459,12 +646,19 @@ async def remove_character_from_account(db: AsyncSession, char: Character, *,
     `delete_history`, the history is deleted here instead, in batches that
     each commit on `db`, before the row goes (see the module docstring for
     why); rows a running sync wrote between batches go in the caller's commit.
+
+    ISS-070: history that is kept gets a kept_character_histories record of
+    who it belongs to (the EVE owner and this account), so that only that
+    owner gets it back when the character is linked again. A removal that
+    deletes the history drops any such record.
     """
     if reason not in REMOVAL_REASONS:
         raise ValueError(f"unknown removal reason {reason!r}")
     cid = int(char.character_id)
     history_now = reason == REASON_TRANSFER and delete_history
     counts: dict[str, int] = {}
+    owner_hash = char.owner_hash or owner_from_token(char.access_token)
+    removed_by = char.user_id
 
     if history_now:
         for table in HISTORY_TABLES:
@@ -478,6 +672,10 @@ async def remove_character_from_account(db: AsyncSession, char: Character, *,
     await db.delete(char)
     await _record_purge(db, cid, reason=reason,
                         delete_history=delete_history and not history_now)
+    if delete_history:
+        await _forget_kept_history(db, cid)
+    else:
+        await _remember_kept_history(db, cid, owner_hash=owner_hash, user_id=removed_by)
     logger.info("removing character %s (%s, history %s): %s", cid, reason,
                 "deleted now" if history_now else ("queued for deletion" if delete_history else "kept"),
                 counts)

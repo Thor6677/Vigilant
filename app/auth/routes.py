@@ -30,7 +30,6 @@ call outside what a token carries (app/esi/scope_guard.py).
 """
 import asyncio
 import base64
-import json
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -45,8 +44,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
 from app.auth.purge import (
-    REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, purge_history,
-    remove_character_from_account,
+    REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, finish_relink,
+    owner_from_token, purge_history, remove_character_from_account, settle_history_for_relink,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -280,14 +279,7 @@ def _owner_hash(access_token: str, verify_data: dict) -> str | None:
     Not signature-verified, like scope_guard.granted_scopes: the token came
     straight from the SSO token endpoint over TLS a moment ago.
     """
-    try:
-        payload_b64 = access_token.split(".")[1]
-        payload_b64 += "=" * (-len(payload_b64) % 4)
-        owner = json.loads(base64.urlsafe_b64decode(payload_b64)).get("owner")
-    except Exception:
-        owner = None
-    if not isinstance(owner, str) or not owner:
-        owner = verify_data.get("CharacterOwnerHash")
+    owner = owner_from_token(access_token) or verify_data.get("CharacterOwnerHash")
     return owner if isinstance(owner, str) and owner else None
 
 
@@ -462,9 +454,14 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
             existing.user_id = user.id
             existing.is_main = True
         else:
-            # A character Vigilant has never seen. The login token carries no
+            # A character Vigilant has no row for. The login token carries no
             # permissions; keep it so the row is valid, and send the user
             # straight to the picker to choose what to share.
+            # ISS-070: first, any history left under this id goes unless it is
+            # provably back with its owner. This account is new, so only the
+            # same EVE owner keeps it. Before User(): the deletes commit.
+            relink = await settle_history_for_relink(db, character_id, owner_hash=owner_hash,
+                                                     user_id=None)
             user = User()
             db.add(user)
             await db.flush()
@@ -475,6 +472,8 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
                 scopes=granted, declined_scopes="",
             )
             db.add(existing)
+            await finish_relink(db, relink, user_id=user.id,
+                                ip=request.client.host if request.client else None)
             new_account = True
         # Deliberately NOT touching access_token / refresh_token / scopes on an
         # existing character: logging in must never change what it shares.
@@ -515,6 +514,15 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
     if intent == ADD and existing and existing.user_id and existing.user_id != current_user_id:
         # Character is already owned by a different account — reject.
         return RedirectResponse("/dashboard?error=character_claimed", status_code=303)
+
+    # ISS-070: a new characters row is about to be created below. Any history
+    # left under this id goes first unless it is provably back with its owner.
+    # Here, before a signup's User() is added: the deletes commit as they go.
+    relink = None
+    if existing is None:
+        relink = await settle_history_for_relink(
+            db, character_id, owner_hash=owner_hash,
+            user_id=current_user_id if intent == ADD else None)
 
     # What the character carried before this callback. Read before the probe
     # below, which may rewrite the row: the audit row and the live-state
@@ -617,6 +625,8 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
             token_expiry=token_expiry, scopes=granted, declined_scopes="",
         )
         db.add(existing)
+        await finish_relink(db, relink, user_id=user.id,
+                            ip=request.client.host if request.client else None)
     existing.user_id = user.id
     existing.character_name = character_name
     existing.access_token = access_token
