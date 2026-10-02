@@ -59,6 +59,10 @@ class User(Base):
 
 class Character(Base):
     __tablename__ = "characters"
+    # A removed character's id is never handed to the next one added: token
+    # writes are keyed by this id (ISS-074). Existing installs are rebuilt
+    # once at startup (app/db/character_ids.py).
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True)
     character_id = Column(Integer, unique=True, nullable=False, index=True)
