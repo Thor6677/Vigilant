@@ -37,7 +37,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -45,7 +45,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms
 from app.auth.purge import (
-    REASON_SELF, REASON_TRANSFER, clear_live_state, purge_history, remove_character_from_account,
+    REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, purge_history,
+    remove_character_from_account,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -402,7 +403,8 @@ async def _probe_stored_token(db: AsyncSession, character_id: int
 
 
 @router.get("/callback")
-async def callback(request: Request, code: str, state: str, db: AsyncSession = Depends(get_db)):
+async def callback(request: Request, code: str, state: str, background_tasks: BackgroundTasks,
+                   db: AsyncSession = Depends(get_db)):
     saved_state = request.session.get("oauth_state")
     if not saved_state or saved_state != state:
         raise HTTPException(status_code=400, detail="Invalid OAuth state.")
@@ -662,6 +664,7 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
         # Always: nothing withdrawn keeps feeding features as if it were live.
         await clear_live_state(db, character_id, gone)
         if pending.get("purge"):
+            # In batches that each commit, so the write lock is never held long.
             counts = await purge_history(db, character_id, gone)
             db.add(AdminAuditLog(
                 user_id=user.id, character_id=character_id, event_type="permissions_purged",
@@ -669,6 +672,12 @@ async def callback(request: Request, code: str, state: str, db: AsyncSession = D
             ))
             purged_note = " History collected under the withdrawn permissions was deleted."
         await db.commit()
+        # ISS-072: the ESI response cache goes after the response, in its own
+        # session: finding its rows scans a large table. Never through
+        # character_purges, which would make the resync queued below drop its
+        # results. Lost on a restart, that is safe: the scope guard refuses a
+        # withdrawn scope before any cache is read (app/auth/purge.py).
+        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id)
 
     if request.session.get("flash") is None:
         if not_granted:

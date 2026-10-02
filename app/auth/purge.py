@@ -16,6 +16,16 @@ Two tiers, because they answer different questions:
   row's component. Deleted only when the user ticks "also delete data already
   collected" (T-064: ask every time).
 
+On a narrowing (ISS-072) the small live state is cleared in the request
+(clear_live_state). The ESI response cache is not: finding a character's
+entries is a scan of a large table, so it is cleared after the response
+(clear_esi_cache_in_background) by the same batched helper the removal purge
+uses. If the process stops before that runs, the entries simply expire: every
+authenticated read checks the token's current scopes before it looks at the
+cache (app/esi/scope_guard.py), so a withdrawn scope's entries can't be served
+in the meantime. History, when asked for, is deleted in the request, in
+batches, since it can be a year of wallet snapshots.
+
 Scope is the character's OWN data. Corporation-level data (corp wallet
 history, corp inventory) is shared by the whole corporation and may have been
 fetched with another member's token, so it is left alone; the picker says so.
@@ -71,8 +81,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.cache import ESICache
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
-    CharacterDashboardCache, CharacterPurge, IndustryJobHistory, MiningLedgerEntry,
-    NetWorthSnapshot, WalletSnapshot, WalletTransaction,
+    CharacterDashboardCache, CharacterPurge, NetWorthSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,22 +134,13 @@ def _esi_cache_marker(character_id: int) -> str:
     return f"%:@CHARACTER:EVE:{int(character_id)}|%"
 
 
-async def clear_esi_cache(db: AsyncSession, character_id: int) -> int:
-    """Drop every cached authenticated ESI response for this character.
-
-    One DELETE with a leading-wildcard LIKE: a full scan of esi_cache under
-    the write lock. Fine for the permission-narrowing path it serves; the
-    removal paths use the batched background version instead
-    (_clear_esi_cache_batched).
-    """
-    res = await db.execute(delete(ESICache).where(ESICache.key.like(_esi_cache_marker(character_id))))
-    return res.rowcount or 0
-
-
 async def clear_live_state(db: AsyncSession, character_id: int,
                            keys: Iterable[str]) -> dict[str, int]:
     """Drop the current-value caches fed by the given permissions. Runs on
-    every narrowing. Caller commits. Returns counts for the audit log."""
+    every narrowing. Caller commits. Returns counts for the audit log.
+
+    Not the ESI response cache: the caller schedules
+    clear_esi_cache_in_background for after the response (ISS-072)."""
     keys = set(keys)
     counts: dict[str, int] = {}
     cid = int(character_id)
@@ -168,10 +168,32 @@ async def clear_live_state(db: AsyncSession, character_id: int,
         counts["asset_cache"] = await _delete(db, CharacterAssetCache, cid)
     if "corp_roles" in keys:
         counts["corp_roles"] = await _delete(db, CharacterCorpRoles, cid)
-    counts["esi_cache"] = await clear_esi_cache(db, cid)
     logger.info("cleared live state for withdrawn permissions %s, character %s: %s",
                 sorted(keys), cid, counts)
     return counts
+
+
+async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
+    """Clear a character's ESI response cache after a narrowing (ISS-072).
+
+    Scheduled by the SSO callback to run after its response, in its own
+    session on `bind` (the request's engine). It is the removal purge's
+    batched clear: a read-only key scan, then deletes by key in short
+    transactions. It never writes to character_purges, which would tell the
+    resync the callback queued to drop its results (sync_must_not_write).
+    Failures are logged, never raised: the response has already gone.
+    Returns the number of entries deleted, or None if it failed.
+    """
+    cid = int(character_id)
+    try:
+        async with AsyncSession(bind, expire_on_commit=False) as db:
+            deleted = await _clear_esi_cache_batched(db, cid)
+    except Exception as e:
+        logger.warning("ESI cache clear after narrowing failed for character %s: %s: %s",
+                       cid, type(e).__name__, e)
+        return None
+    logger.info("cleared %s ESI cache entries after narrowing, character %s", deleted, cid)
+    return deleted
 
 
 async def _delete(db: AsyncSession, model, cid: int) -> int:
@@ -179,21 +201,37 @@ async def _delete(db: AsyncSession, model, cid: int) -> int:
     return res.rowcount or 0
 
 
+# permission key -> history tables purge_history deletes a character's rows from.
+_HISTORY_ROWS: dict[str, tuple[str, ...]] = {
+    "wallet": ("wallet_snapshots", "wallet_transactions"),
+    "industry": ("industry_job_history",),
+    "mining": ("mining_ledger_entries",),
+}
+
+
 async def purge_history(db: AsyncSession, character_id: int,
                         keys: Iterable[str]) -> dict[str, int]:
     """Delete what Vigilant accumulated under the given permissions. Only when
-    the user asked. Caller commits. Returns counts for the audit log."""
+    the user asked. Returns counts for the audit log.
+
+    The rows go PURGE_BATCH_ROWS at a time, each batch its own short
+    transaction committed on `db` (a year of wallet snapshots is ~260k rows,
+    too many for one DELETE under SQLite's one write lock; ISS-072). Whatever
+    the caller had pending goes in the first of those commits. The net-worth
+    adjustment at the end is not committed: the caller commits it.
+
+    The net-worth UPDATEs stay single statements: net_worth_snapshots holds
+    one row per character per day (primary key character_id, date), so they
+    touch at most one row for each day the character has been valued.
+    """
     keys = set(keys)
     counts: dict[str, int] = {}
     cid = int(character_id)
 
-    if "wallet" in keys:
-        counts["wallet_snapshots"] = await _delete(db, WalletSnapshot, cid)
-        counts["wallet_transactions"] = await _delete(db, WalletTransaction, cid)
-    if "industry" in keys:
-        counts["industry_job_history"] = await _delete(db, IndustryJobHistory, cid)
-    if "mining" in keys:
-        counts["mining_ledger_entries"] = await _delete(db, MiningLedgerEntry, cid)
+    for key, tables in _HISTORY_ROWS.items():
+        if key in keys:
+            for table in tables:
+                counts[table], _ = await _delete_in_batches(db, table, cid, only_if_gone=False)
 
     components = [c for k in keys for c in _NETWORTH_COMPONENTS.get(k, ())]
     if components:
@@ -250,7 +288,8 @@ async def purge_character_user_rows(db: AsyncSession, character_id: int) -> int:
 # that was already running wrote one back. The character's ESI response
 # cache belongs here too, but it is keyed by token principal rather than a
 # character_id column and finding its rows is a scan of a large table, so
-# only the background purge clears it.
+# only background work clears it: the purge after a removal, and
+# clear_esi_cache_in_background after a narrowing.
 LIVE_STATE_TABLES: tuple[str, ...] = (
     "character_dashboard_cache",
     "character_asset_cache",
@@ -363,11 +402,13 @@ async def _delete_in_batches(db: AsyncSession, table: str, cid: int, *,
 
 
 async def _clear_esi_cache_batched(db: AsyncSession, cid: int) -> int:
-    """clear_esi_cache without holding the write lock through a table scan.
+    """Drop every cached authenticated ESI response for this character,
+    without holding the write lock through a table scan.
 
     The LIKE is a read-only SELECT of keys (a WAL reader never blocks the
     writer), then the rows go by primary key, ESI_CACHE_BATCH_KEYS per
-    transaction.
+    transaction. The only way esi_cache is cleared per character: by the
+    removal purge, and after a narrowing (clear_esi_cache_in_background).
     """
     keys = list((await db.execute(
         select(ESICache.key).where(ESICache.key.like(_esi_cache_marker(cid))))).scalars())
