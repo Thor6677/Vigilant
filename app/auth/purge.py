@@ -24,7 +24,10 @@ uses. If the process stops before that runs, the entries simply expire: every
 authenticated read checks the token's current scopes before it looks at the
 cache (app/esi/scope_guard.py), so a withdrawn scope's entries can't be served
 in the meantime. History, when asked for, is deleted in the request, in
-batches, since it can be a year of wallet snapshots.
+batches, since it can be a year of wallet snapshots. Work already running
+with the old, wider token (a sync, a page that stores what it read) checks
+scopes_withdrawn inside its own write transaction and drops what it fetched
+(ISS-079), so none of it lands after the clean-up.
 
 Scope is the character's OWN data. Corporation-level data (corp wallet
 history, corp inventory) is shared by the whole corporation and may have been
@@ -78,6 +81,7 @@ from sqlalchemy import delete, exists, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.scopes import parse_scopes
 from app.db.cache import ESICache
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
@@ -503,6 +507,36 @@ async def sync_must_not_write(db: AsyncSession, character_id: int, sync_started:
     removed = exists().where(CharacterPurge.character_id == cid, CharacterPurge.removed_at >= since)
     with db.no_autoflush:
         return bool((await db.execute(select(or_(gone, removed)))).scalar())
+
+
+async def scopes_withdrawn(db: AsyncSession, character_id: int, scopes) -> bool:
+    """True when any of `scopes` is missing from the character's stored scopes
+    now (ISS-079).
+
+    The narrowing counterpart of sync_must_not_write, for work that fetched
+    with an access token it read earlier: a sync, a fetcher that commits as it
+    goes, a page that stores what it read. After a narrowing the old, wider
+    token stays usable at ESI for up to 20 minutes, so what such work fetched
+    may come from a permission the user has just withdrawn, after the
+    narrowing cleared live state and maybe purged history. `scopes` are the
+    ones the write depends on (for a whole sync, every scope it started with).
+    Widening, or no change, never makes this true. Nor does a character that
+    is gone: removal has its own guard (sync_must_not_write) and its own
+    clean-up (the background purge), which this leaves exactly as they were.
+
+    Ask it inside the write's own transaction, after its first write
+    statement: SQLite's write lock is then held from this check to the commit,
+    so a narrowing can't commit in between (its scope change waits for ours).
+    Runs with autoflush off, like sync_must_not_write. The lookup is the
+    unique index on characters.character_id.
+    """
+    wanted = parse_scopes(scopes)
+    with db.no_autoflush:
+        row = (await db.execute(select(Character.scopes).where(
+            Character.character_id == int(character_id)))).first()
+    if row is None:
+        return False
+    return bool(wanted - parse_scopes(row[0]))
 
 
 async def run_due_purges(now: datetime | None = None, *, session_factory=None) -> list[dict]:
