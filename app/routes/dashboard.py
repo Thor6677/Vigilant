@@ -1342,8 +1342,9 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
     """Fetch + persist wallet transactions (buy/sell fills) per character.
 
     Unlike the other fetchers this one WRITES its results directly (into
-    `wallet_transactions`) using the per-fetcher `db` session handed to it by
-    `_sync_fields._run_fetcher`, then returns a lightweight marker
+    `wallet_transactions`), each pilot in a session of its own on the engine
+    of the `db` handed to it by `_sync_fields._run_fetcher` (ISS-079), then
+    returns a lightweight marker
     ``{character_id: (rows_inserted, warning)}`` through the normal return path.
     Mirrors `fetch_assets_data`'s shape but persists instead of handing JSON
     back for the caller to store — transactions are append-only immutable rows,
@@ -1363,12 +1364,16 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
         # cache so we get live fills each cycle and don't pollute esi_cache with
         # one-shot backfill pages.
         client.cache_enabled = False
+        # ISS-079: this pilot's reads and writes get a session of their own,
+        # so dropping its page (a rollback) can't roll back or expire anything
+        # another pilot in the same call holds.
+        tdb = AsyncSession(db.bind, expire_on_commit=False)
         try:
-            before = (await db.execute(
+            before = (await tdb.execute(
                 select(func.count()).select_from(WalletTransaction)
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar() or 0
-            existing_max = (await db.execute(
+            existing_max = (await tdb.execute(
                 select(func.max(WalletTransaction.transaction_id))
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar()
@@ -1391,17 +1396,17 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                 } for t in batch]
                 stmt = sqlite_insert(WalletTransaction).values(rows)
                 stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
-                await db.execute(stmt)
+                await tdb.execute(stmt)
                 # ISS-079: this page may have come from the old token of a
                 # narrowing that withdrew the wallet. Asked after the INSERT,
                 # which holds the write lock until we commit or roll back.
                 from app.auth.purge import scopes_withdrawn
-                cid = char.character_id   # the rollback below expires char
-                if await scopes_withdrawn(db, cid, (perms.WALLET,)):
-                    await db.rollback()
+                cid = char.character_id
+                if await scopes_withdrawn(tdb, cid, (perms.WALLET,)):
+                    await tdb.rollback()
                     logger.info("Wallet transactions for char %s dropped: permission withdrawn", cid)
                     return cid, 0, None
-                await db.commit()
+                await tdb.commit()
 
                 min_id = min(t["transaction_id"] for t in batch)
                 # Reached data we already have — stop paging further back.
@@ -1409,7 +1414,7 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                     break
                 from_id = min_id
 
-            after = (await db.execute(
+            after = (await tdb.execute(
                 select(func.count()).select_from(WalletTransaction)
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar() or 0
@@ -1417,6 +1422,8 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
         except Exception as e:
             logger.warning("Wallet transactions fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, 0, f"esi_error: {type(e).__name__}"
+        finally:
+            await tdb.close()
 
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
@@ -1597,9 +1604,13 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 "job_id": j.get("job_id"),
                 "end_date": j.get("end_date"),
             } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
-            cid = char.character_id   # a dropped persist rolls back, which expires char
+            cid = char.character_id
             try:
-                await _persist_completed_jobs(db, cid, jobs or [])
+                # ISS-079: a session of its own, so a dropped persist (a
+                # rollback) can't roll back or expire anything another pilot
+                # in the same call holds.
+                async with AsyncSession(db.bind, expire_on_commit=False) as jdb:
+                    await _persist_completed_jobs(jdb, cid, jobs or [])
             except Exception as e:
                 logger.warning("Completed jobs persist failed for char %s: %s", cid, e)
             return cid, trimmed, None

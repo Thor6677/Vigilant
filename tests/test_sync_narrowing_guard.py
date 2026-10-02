@@ -15,6 +15,7 @@ commit while the writer is between its read and its write.
 """
 import asyncio
 import json
+import logging
 import tempfile
 from datetime import date, datetime, timedelta
 
@@ -52,23 +53,23 @@ async def _engine():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _add_pilot(SessionLocal, scopes):
+async def _add_pilot(SessionLocal, scopes, cid=CID):
     async with SessionLocal() as db:
-        db.add(Character(character_id=CID, character_name="Test Alt", user_id=USER,
+        db.add(Character(character_id=cid, character_name="Test Alt", user_id=USER,
                          access_token="x", refresh_token="y", token_expiry=datetime(2099, 1, 1),
                          scopes=cat.join_scopes(scopes)))
         await db.commit()
 
 
-async def _change_scopes(SessionLocal, scopes, *, clear=()):
+async def _change_scopes(SessionLocal, scopes, *, clear=(), cid=CID):
     """What a narrowing (or widening) commits: the new stored scopes, then
     the live-state clear, in two commits as the SSO callback does."""
     async with SessionLocal() as db:
-        c = (await db.execute(select(Character).where(Character.character_id == CID))).scalar_one()
+        c = (await db.execute(select(Character).where(Character.character_id == cid))).scalar_one()
         c.scopes = cat.join_scopes(scopes)
         await db.commit()
         if clear:
-            await purge.clear_live_state(db, CID, clear)
+            await purge.clear_live_state(db, cid, clear)
             await db.commit()
 
 
@@ -310,6 +311,143 @@ def test_completed_jobs_fetched_before_a_narrowing_are_not_stored(monkeypatch, c
     active, warning = result[CID]
     assert [j["job_id"] for j in active] == [777002] and warning is None
     assert stored == (0 if change == NARROWED else 1)
+
+
+# ── One call, several pilots: a drop for one leaves the others alone ───────
+
+OTHER_CID = 525252
+
+
+def _no_warnings(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.name == "app.routes.dashboard" and r.levelno >= logging.WARNING]
+
+
+def _hold_until_dropped(monkeypatch):
+    """An event set once the narrowed pilot's write has been refused, so the
+    other pilot's fetch can be made to finish only after that drop."""
+    dropped = asyncio.Event()
+    real = purge.scopes_withdrawn
+
+    async def watching(db, character_id, scopes):
+        answer = await real(db, character_id, scopes)
+        if answer:
+            dropped.set()
+        return answer
+    monkeypatch.setattr(purge, "scopes_withdrawn", watching)
+
+    async def wait():
+        await dropped.wait()
+        for _ in range(20):          # and let its rollback finish
+            await asyncio.sleep(0.01)
+    return wait
+
+
+def test_a_transactions_drop_for_one_pilot_leaves_the_others_written(monkeypatch, caplog):
+    """Both pilots share the call and its session. Dropping the narrowed
+    pilot's page must not roll back, or expire, anything of the other's."""
+    import app.routes.dashboard as dash
+    caplog.set_level(logging.INFO)
+
+    async def go():
+        engine, SessionLocal = await _engine()
+        try:
+            await _add_pilot(SessionLocal, [cat.WALLET])
+            await _add_pilot(SessionLocal, [cat.WALLET], cid=OTHER_CID)
+
+            async def client_for(char):
+                return _Client(), None
+
+            pages: dict[int, int] = {}
+            after_the_drop = _hold_until_dropped(monkeypatch)
+
+            async def page(client, character_id, from_id):
+                pages[character_id] = pages.get(character_id, 0) + 1
+                if pages[character_id] > 1:
+                    return []
+                if character_id == CID:
+                    await _change_scopes(SessionLocal, [])
+                else:
+                    await after_the_drop()
+                return [{"transaction_id": character_id * 10 + i, "date": "2026-09-01T12:00:00Z",
+                         "type_id": 34, "quantity": 1, "unit_price": 5.0, "is_buy": True}
+                        for i in range(2)]
+            monkeypatch.setattr(dash, "_client_for", client_for)
+            monkeypatch.setattr(dash.esi_char, "get_wallet_transactions", page)
+
+            async with SessionLocal() as db:
+                chars = list((await db.execute(select(Character).order_by(
+                    Character.character_id))).scalars())
+                result = await dash.fetch_wallet_transactions_data(chars, db)
+            async with SessionLocal() as db:
+                stored = dict((await db.execute(text(
+                    "SELECT character_id, count(*) FROM wallet_transactions GROUP BY character_id"
+                ))).all())
+            return result, stored
+        finally:
+            await engine.dispose()
+
+    result, stored = _run(go())
+    assert stored == {OTHER_CID: 2}
+    assert result == {CID: (0, None), OTHER_CID: (2, None)}
+    assert _no_warnings(caplog) == []
+
+
+def test_a_completed_jobs_drop_for_one_pilot_leaves_the_others_written(monkeypatch, caplog):
+    import app.esi.industry as esi_industry
+    import app.market.lp as market_lp
+    import app.routes.dashboard as dash
+    caplog.set_level(logging.INFO)
+
+    def jobs_for(cid):
+        return [{"job_id": cid * 10, "status": "delivered", "activity_id": 1,
+                 "blueprint_type_id": 1001, "product_type_id": 1002, "runs": 1, "cost": 1.0,
+                 "start_date": "2026-09-01T00:00:00Z", "completed_date": "2026-09-02T00:00:00Z"},
+                {"job_id": cid * 10 + 1, "status": "active", "activity_id": 1,
+                 "blueprint_type_id": 1001, "product_type_id": 1002, "runs": 1,
+                 "end_date": "2026-09-09T00:00:00Z"}]
+
+    async def go():
+        engine, SessionLocal = await _engine()
+        try:
+            await _add_pilot(SessionLocal, [cat.JOBS])
+            await _add_pilot(SessionLocal, [cat.JOBS], cid=OTHER_CID)
+
+            async def client_for(char):
+                return _Client(), None
+
+            after_the_drop = _hold_until_dropped(monkeypatch)
+
+            async def fetch(client, character_id, include_completed=False):
+                if character_id == CID:
+                    await _change_scopes(SessionLocal, [])
+                else:
+                    await after_the_drop()
+                return jobs_for(character_id)
+
+            async def prices(db):
+                return {}
+            monkeypatch.setattr(dash, "_client_for", client_for)
+            monkeypatch.setattr(esi_industry, "get_character_jobs", fetch)
+            monkeypatch.setattr(market_lp, "get_price_map", prices)
+
+            async with SessionLocal() as db:
+                chars = list((await db.execute(select(Character).order_by(
+                    Character.character_id))).scalars())
+                result = await dash.fetch_industry_jobs_data(chars, db)
+            async with SessionLocal() as db:
+                stored = dict((await db.execute(text(
+                    "SELECT character_id, count(*) FROM industry_job_history GROUP BY character_id"
+                ))).all())
+            return result, stored
+        finally:
+            await engine.dispose()
+
+    result, stored = _run(go())
+    assert stored == {OTHER_CID: 1}
+    assert {cid: ([j["job_id"] for j in active], warn) for cid, (active, warn) in result.items()} \
+        == {CID: ([CID * 10 + 1], None), OTHER_CID: ([OTHER_CID * 10 + 1], None)}
+    assert _no_warnings(caplog) == []
 
 
 # ── The mining ledger: stored by the page that reads it ─────────────────────

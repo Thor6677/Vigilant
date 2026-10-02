@@ -165,7 +165,9 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
 
 async def _do_refresh(character: Character, db: AsyncSession, *,
                       clear_on_narrowing: bool = True) -> str:
-    """Refresh at SSO, store the rotated token and its scopes, commit once.
+    """Refresh at SSO, then store the rotated token and its scopes in one
+    commit on `db`. A narrowing is cleaned up after that commit, in its own
+    session (clear_after_refresh_narrowing).
 
     `clear_on_narrowing=False` is for the ISS-068 probe in the SSO callback,
     which inspects the refreshed scopes itself and, if EVE narrowed them,
@@ -236,20 +238,17 @@ async def _do_refresh(character: Character, db: AsyncSession, *,
                 character.character_id, len((character.scopes or "").split()), len(in_token))
             lost = parse_scopes(character.scopes) - set(in_token)
             character.scopes = refreshed
-    # ISS-078: EVE narrowed the authorization on its own. Clear what the
-    # withdrawn permissions fed, as a user's narrowing does, in this same
-    # commit; never history. The ESI cache goes after the commit, in the
-    # background. Widening only updates the scopes, as above.
-    narrowed = bool(lost) and clear_on_narrowing
-    if narrowed:
-        from app.auth.purge import clear_after_refresh_narrowing, narrowing_cache_patterns
-        gone = await clear_after_refresh_narrowing(db, character, lost)
-        extra = narrowing_cache_patterns(character.user_id, character.corporation_id, gone)
     bind, cid = db.bind, character.character_id
     await db.commit()
-    if narrowed:
-        from app.auth.purge import schedule_esi_cache_clear
-        schedule_esi_cache_clear(bind, cid, extra)
+    # ISS-078: EVE narrowed the authorization on its own. Clear what the
+    # withdrawn permissions fed, as a user's narrowing does; never history.
+    # Only after the commit above, and in a session of its own: SSO has
+    # already rotated the refresh token, so a clean-up that failed before
+    # that commit would lose it. It logs its own failures and never raises.
+    # Widening only updates the scopes, as above.
+    if lost and clear_on_narrowing:
+        from app.auth.purge import clear_after_refresh_narrowing
+        await clear_after_refresh_narrowing(bind, cid, lost)
     return character.access_token
 
 
