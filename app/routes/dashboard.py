@@ -1765,6 +1765,46 @@ async def _drop_if_narrowed(db: AsyncSession, character_id: int, started_scopes:
     return True
 
 
+async def _fetch_public_affiliation(character_id: int, corporation_id, alliance_id):
+    """ISS-083: the network half of the sync's corp/alliance refresh.
+
+    _sync_fields calls this before its results loop changes any row on its
+    session. After such a change the next query autoflushes, which opens the
+    write transaction and holds SQLite's single write lock until the final
+    commit. These calls, and a 502 backoff or a 429's retry-after with them,
+    used to run inside it and stall every other writer.
+
+    Makes no writes. `corporation_id` and `alliance_id` are the character's
+    current ones. Returns (corp, alliance) for the caller to apply, each an
+    (id, name) pair, or None when it is unchanged. Returns None outright when
+    the public lookup itself failed, which changes nothing.
+    """
+    try:
+        pub_client = ESIClient("")
+        pub_info = await esi_char.get_public_info(pub_client, character_id)
+        new_corp_id = pub_info.get("corporation_id")
+        new_alliance_id = pub_info.get("alliance_id")
+        corp = alliance = None
+        if new_corp_id and new_corp_id != corporation_id:
+            try:
+                corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
+                corp = (new_corp_id, corp_info.get("name"))
+            except Exception:
+                corp = (new_corp_id, None)
+        if new_alliance_id != alliance_id:
+            alliance = (new_alliance_id, None)
+            if new_alliance_id:
+                try:
+                    ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
+                    alliance = (new_alliance_id, ally_info.get("name"))
+                except Exception:
+                    pass
+        return corp, alliance
+    except Exception as pub_err:
+        logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+        return None
+
+
 async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     """Core field-fetch logic, extracted so _sync_task_inner can wrap it
     with asyncio.wait_for for a hard timeout."""
@@ -1800,6 +1840,7 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
 
+    affiliation = None  # ISS-083: fetched after the gather, applied after the loop
     if stale_fields:
         # Each gathered fetcher gets its own AsyncSessionLocal() session and
         # its own Character row. The location and assets fetchers write/commit
@@ -1820,6 +1861,12 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
             *[_run_fetcher(field) for field in stale_fields],
             return_exceptions=True,
         )
+        # ISS-083: the public corp/alliance lookups are network calls, so they
+        # run here, before the loop below changes rows on `db` and the write
+        # lock is taken. Their results are applied after the loop, as before.
+        if "location" in stale_fields:
+            affiliation = await _fetch_public_affiliation(
+                character_id, char.corporation_id, char.alliance_id)
         for field, result in zip(stale_fields, results):
             if isinstance(result, ScopeNotGranted):
                 # The guard refused a call this token may not make. Not a sync
@@ -1895,34 +1942,15 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                 warnings[field] = warn
             field_synced[field] = now.isoformat()
 
-    # Refresh corp/alliance info from public endpoint (no scope needed)
-    if "location" in stale_fields:
-        try:
-            pub_client = ESIClient("")
-            pub_info = await esi_char.get_public_info(pub_client, character_id)
-            new_corp_id = pub_info.get("corporation_id")
-            new_alliance_id = pub_info.get("alliance_id")
-            if new_corp_id and new_corp_id != char.corporation_id:
-                try:
-                    corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
-                    char.corporation_id = new_corp_id
-                    char.corporation_name = corp_info.get("name")
-                except Exception:
-                    char.corporation_id = new_corp_id
-                    char.corporation_name = None
-                logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, new_corp_id)
-            if new_alliance_id != char.alliance_id:
-                char.alliance_id = new_alliance_id
-                if new_alliance_id:
-                    try:
-                        ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
-                        char.alliance_name = ally_info.get("name")
-                    except Exception:
-                        char.alliance_name = None
-                else:
-                    char.alliance_name = None
-        except Exception as pub_err:
-            logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+    # Refresh corp/alliance info from public endpoint (no scope needed).
+    # ISS-083: fetched before the loop (_fetch_public_affiliation); applied here.
+    if affiliation is not None:
+        corp, alliance = affiliation
+        if corp is not None:
+            char.corporation_id, char.corporation_name = corp
+            logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, char.corporation_id)
+        if alliance is not None:
+            char.alliance_id, char.alliance_name = alliance
 
     cache.field_synced_json = json.dumps(field_synced)
     cache.sync_warnings_json = json.dumps(warnings) if warnings else None
