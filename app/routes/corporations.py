@@ -1110,11 +1110,13 @@ async def check_corp_contracts(user_id: int, corp_id: int, db: AsyncSession, emi
         return
 
     # Fetch all outstanding corp contracts (with DB cache)
-    from app.db.cache import cache_get, cache_set
+    from app.db.cache import cache_get, cache_set, user_principal
     contracts_cache_path = f"/corporations/{corp_id}/contracts/"
     # Role-gated corp data: namespace the cache per user so a role-holder's
     # fetched contracts are never served to another user's alert check. See F1.
-    cache_principal = f"user:{user_id}"
+    # A narrowing that withdraws a pilot's corp contracts clears these for its
+    # corporation (app/auth/purge.py, narrowing_cache_patterns; ISS-077).
+    cache_principal = user_principal(user_id)
     contracts = await cache_get(db, contracts_cache_path, principal=cache_principal)
     if contracts is None:
         contracts, _ = await _try_api_call_with_fallback(

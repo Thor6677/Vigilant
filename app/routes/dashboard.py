@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import user_agent
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction, CorpWalletSnapshot
@@ -1391,6 +1392,15 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                 stmt = sqlite_insert(WalletTransaction).values(rows)
                 stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
                 await db.execute(stmt)
+                # ISS-079: this page may have come from the old token of a
+                # narrowing that withdrew the wallet. Asked after the INSERT,
+                # which holds the write lock until we commit or roll back.
+                from app.auth.purge import scopes_withdrawn
+                cid = char.character_id   # the rollback below expires char
+                if await scopes_withdrawn(db, cid, (perms.WALLET,)):
+                    await db.rollback()
+                    logger.info("Wallet transactions for char %s dropped: permission withdrawn", cid)
+                    return cid, 0, None
                 await db.commit()
 
                 min_id = min(t["transaction_id"] for t in batch)
@@ -1542,6 +1552,15 @@ async def _persist_completed_jobs(db: AsyncSession, character_id: int,
         if cost is not None:
             row.build_cost, row.cost_basis = cost, basis
 
+    # ISS-079: the jobs may have come from the old token of a narrowing that
+    # withdrew industry. Asked after the flush, which holds the write lock
+    # until we commit or roll back.
+    from app.auth.purge import scopes_withdrawn
+    await db.flush()
+    if await scopes_withdrawn(db, character_id, (perms.JOBS,)):
+        await db.rollback()
+        logger.info("Completed jobs for char %s dropped: permission withdrawn", character_id)
+        return 0
     await db.commit()
     return inserted
 
@@ -1578,11 +1597,12 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 "job_id": j.get("job_id"),
                 "end_date": j.get("end_date"),
             } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
+            cid = char.character_id   # a dropped persist rolls back, which expires char
             try:
-                await _persist_completed_jobs(db, char.character_id, jobs or [])
+                await _persist_completed_jobs(db, cid, jobs or [])
             except Exception as e:
-                logger.warning("Completed jobs persist failed for char %s: %s", char.character_id, e)
-            return char.character_id, trimmed, None
+                logger.warning("Completed jobs persist failed for char %s: %s", cid, e)
+            return cid, trimmed, None
         except Exception as e:
             logger.warning("Industry jobs fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, None, f"esi_error: {type(e).__name__}"
@@ -1721,6 +1741,17 @@ async def _sync_task_inner(character_id: int):
                     await db.commit()
             except Exception:
                 pass
+
+
+async def _drop_if_narrowed(db: AsyncSession, character_id: int, started_scopes: str) -> bool:
+    """ISS-079: roll the sync back and say so when a scope it started with
+    is no longer stored (app.auth.purge.scopes_withdrawn)."""
+    from app.auth.purge import scopes_withdrawn
+    if not await scopes_withdrawn(db, character_id, started_scopes):
+        return False
+    await db.rollback()
+    logger.info("Sync for char %s dropped: permissions narrowed while it ran", character_id)
+    return True
 
 
 async def _sync_fields(character_id: int, char, cache, asset_cache, db):
@@ -1893,6 +1924,22 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     if await sync_must_not_write(db, character_id, now):
         await db.rollback()
         logger.info("Sync for char %s dropped: character removed while it ran", character_id)
+        return
+    # ISS-079: nor if its permissions were narrowed while it ran, since it may
+    # have fetched with the old, wider token. All of it goes; the next sync
+    # uses the new token. Asked before the flush (withdrawing assets or corp
+    # roles deletes rows this sync would update) and again after it, when
+    # this session holds SQLite's write lock and no narrowing can commit
+    # before ours.
+    if await _drop_if_narrowed(db, character_id, scopes):
+        return
+    try:
+        await db.flush()
+    except StaleDataError:
+        await db.rollback()
+        logger.info("Sync for char %s dropped: a row it updates was deleted while it ran", character_id)
+        return
+    if await _drop_if_narrowed(db, character_id, scopes):
         return
     await db.commit()
 

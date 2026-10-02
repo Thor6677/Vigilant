@@ -67,8 +67,6 @@ async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: Async
 
             if new_entries:
                 db.add_all(new_entries)
-                await db.commit()
-                logger.info("Stored %d new mining entries for char %s", len(new_entries), character_id)
 
             # Update quantities for today's entries (they can change during the day)
             from sqlalchemy import update, and_
@@ -83,7 +81,19 @@ async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: Async
                         )
                     ).values(quantity=e["quantity"])
                 )
-            await db.commit()
+            # ISS-079: the ledger may have come from the old token of a
+            # narrowing that withdrew mining. New rows and updates go in one
+            # transaction; this is asked after its first write, which holds
+            # the write lock until we commit or roll back.
+            from app.auth.purge import scopes_withdrawn
+            from app.auth.scopes import MINING
+            if await scopes_withdrawn(db, character_id, (MINING,)):
+                await db.rollback()
+                logger.info("Mining entries for char %s dropped: permission withdrawn", character_id)
+            else:
+                await db.commit()
+                if new_entries:
+                    logger.info("Stored %d new mining entries for char %s", len(new_entries), character_id)
         except Exception:
             await db.rollback()
             raise

@@ -71,6 +71,27 @@ def _cache_key(path: str, params: dict = None, principal: str = None) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:32] + ":" + raw[:100]
 
 
+def user_principal(user_id: int) -> str:
+    """Principal for data cached per USER rather than per token: corp
+    contracts (app/routes/corporations.py), served while any of the user's
+    pilots in the corporation still holds the scope."""
+    return f"user:{int(user_id)}"
+
+
+def principal_key_pattern(principal: str, path_prefix: str) -> str:
+    """LIKE pattern matching every key _cache_key builds for `principal` and
+    a path starting with `path_prefix`, with or without params (ISS-077).
+
+    A key is "<hash>:<raw[:100]>" with raw "@<principal>|<path>[?params]",
+    so the pattern matches its readable tail. Both parts must be free of
+    LIKE wildcards and fit well inside those 100 characters.
+    """
+    raw = f"@{principal}|{path_prefix}"
+    if len(raw) > 90 or "%" in raw or "_" in raw:
+        raise ValueError(f"can't match cache keys by {raw!r}")
+    return f"%:{raw}%"
+
+
 def _ttl_for_path(path: str) -> int:
     if "/universe/types/" in path:       return TTL["universe_type"]
     if "/universe/systems/" in path:     return TTL["universe_system"]

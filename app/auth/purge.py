@@ -24,7 +24,10 @@ uses. If the process stops before that runs, the entries simply expire: every
 authenticated read checks the token's current scopes before it looks at the
 cache (app/esi/scope_guard.py), so a withdrawn scope's entries can't be served
 in the meantime. History, when asked for, is deleted in the request, in
-batches, since it can be a year of wallet snapshots.
+batches, since it can be a year of wallet snapshots. Work already running
+with the old, wider token (a sync, a page that stores what it read) checks
+scopes_withdrawn inside its own write transaction and drops what it fetched
+(ISS-079), so none of it lands after the clean-up.
 
 Scope is the character's OWN data. Corporation-level data (corp wallet
 history, corp inventory) is shared by the whole corporation and may have been
@@ -96,7 +99,8 @@ from sqlalchemy import delete, exists, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.cache import ESICache
+from app.auth.scopes import PERMISSIONS, parse_scopes
+from app.db.cache import ESICache, principal_key_pattern, user_principal
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
     CharacterDashboardCache, CharacterPurge, KeptCharacterHistory, NetWorthSnapshot,
@@ -152,6 +156,26 @@ def _esi_cache_marker(character_id: int) -> str:
     return f"%:@CHARACTER:EVE:{int(character_id)}|%"
 
 
+def narrowing_cache_patterns(user_id: int | None, corporation_id: int | None,
+                             keys: Iterable[str]) -> tuple[str, ...]:
+    """esi_cache entries a narrowing must clear beyond the character's own
+    (ISS-077): LIKE patterns for clear_esi_cache_in_background.
+
+    Corp contracts and their items are cached under the USER's principal
+    (check_corp_contracts in app/routes/corporations.py), and served while
+    any of the user's pilots in that corporation still holds the scope, so
+    the per-character clear never reaches them. When the narrowed pilot
+    loses corp contracts, that user's entries for its corporation go too; a
+    pilot that still has the scope just fetches them again. The pattern
+    follows app/db/cache.py's key format and matches only that user's
+    entries for that corporation.
+    """
+    if "corp_contracts" not in set(keys) or not user_id or not corporation_id:
+        return ()
+    return (principal_key_pattern(user_principal(user_id),
+                                  f"/corporations/{int(corporation_id)}/contracts/"),)
+
+
 async def clear_live_state(db: AsyncSession, character_id: int,
                            keys: Iterable[str]) -> dict[str, int]:
     """Drop the current-value caches fed by the given permissions. Runs on
@@ -191,27 +215,80 @@ async def clear_live_state(db: AsyncSession, character_id: int,
     return counts
 
 
-async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
-    """Clear a character's ESI response cache after a narrowing (ISS-072).
+async def clear_esi_cache_in_background(bind, character_id: int,
+                                        extra_patterns: Iterable[str] = ()) -> int | None:
+    """Clear a character's ESI response cache after a narrowing (ISS-072),
+    plus any entries matching `extra_patterns` (narrowing_cache_patterns).
 
-    Scheduled by the SSO callback to run after its response, in its own
-    session on `bind` (the request's engine). It is the removal purge's
-    batched clear: a read-only key scan, then deletes by key in short
-    transactions. It never writes to character_purges, which would tell the
-    resync the callback queued to drop its results (sync_must_not_write).
-    Failures are logged, never raised: the response has already gone.
+    Scheduled by the SSO callback to run after its response, and by
+    schedule_esi_cache_clear after a narrowing noticed at token refresh
+    (ISS-078), in its own session on `bind` (the caller's engine). It is the
+    removal purge's batched clear: a read-only key scan, then deletes by key
+    in short transactions. It never writes to character_purges, which would
+    tell the resync the callback queued to drop its results
+    (sync_must_not_write). Failures are logged, never raised: nobody is
+    waiting on it.
     Returns the number of entries deleted, or None if it failed.
     """
     cid = int(character_id)
     try:
         async with AsyncSession(bind, expire_on_commit=False) as db:
-            deleted = await _clear_esi_cache_batched(db, cid)
+            deleted = await _clear_esi_cache_batched(db, cid, tuple(extra_patterns))
     except Exception as e:
         logger.warning("ESI cache clear after narrowing failed for character %s: %s: %s",
                        cid, type(e).__name__, e)
         return None
     logger.info("cleared %s ESI cache entries after narrowing, character %s", deleted, cid)
     return deleted
+
+
+def withdrawn_keys(removed_scopes: Iterable[str]) -> list[str]:
+    """The permissions a narrowing withdraws: each one that lost ANY of its
+    scopes. Shared by the SSO callback and the refresh path (ISS-078)."""
+    removed = set(removed_scopes)
+    return [p.key for p in PERMISSIONS if set(p.scopes) & removed]
+
+
+async def clear_after_refresh_narrowing(db: AsyncSession, character: Character,
+                                        lost: Iterable[str]) -> list[str]:
+    """EVE narrowed a character's authorization on its own and a token
+    refresh just noticed (ISS-078): the stored scopes already lost `lost`.
+
+    Clears the withdrawn permissions' live state exactly as a user's
+    narrowing does (clear_live_state) and writes the audit row. Never
+    history: only the user can ask for that. Doesn't commit; the refresh
+    commits it with the new token and scopes, so nothing ever sees the
+    narrower scopes beside the withdrawn values. The caller schedules the
+    ESI cache clear once that commit is in (schedule_esi_cache_clear).
+    Returns the withdrawn permission keys.
+    """
+    lost = set(lost)
+    gone = withdrawn_keys(lost)
+    await clear_live_state(db, character.character_id, gone)
+    db.add(AdminAuditLog(
+        user_id=character.user_id, character_id=character.character_id,
+        event_type="permissions_changed",
+        detail=(f"refresh: EVE narrowed the stored authorization: -{len(lost)} scopes; "
+                f"withdrawn: {', '.join(gone) or 'none'}; history kept"),
+    ))
+    return gone
+
+
+# Post-refresh ESI cache clears in flight. The event loop holds tasks only
+# weakly, so one nobody references can vanish before it runs.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def schedule_esi_cache_clear(bind, character_id: int,
+                             extra_patterns: Iterable[str] = ()) -> asyncio.Task:
+    """Run clear_esi_cache_in_background as a task of its own, for a caller
+    with no response to hang it on (the refresh path, ISS-078). Returns the
+    task; it is held here until it finishes."""
+    task = asyncio.get_running_loop().create_task(
+        clear_esi_cache_in_background(bind, character_id, extra_patterns))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 async def _delete(db: AsyncSession, model, cid: int) -> int:
@@ -421,17 +498,21 @@ async def _delete_in_batches(db: AsyncSession, table: str, cid: int, *,
         await _between_batches()
 
 
-async def _clear_esi_cache_batched(db: AsyncSession, cid: int) -> int:
-    """Drop every cached authenticated ESI response for this character,
-    without holding the write lock through a table scan.
+async def _clear_esi_cache_batched(db: AsyncSession, cid: int,
+                                   extra_patterns: tuple[str, ...] = ()) -> int:
+    """Drop every cached authenticated ESI response for this character, and
+    any entry matching `extra_patterns`, without holding the write lock
+    through a table scan.
 
     The LIKE is a read-only SELECT of keys (a WAL reader never blocks the
     writer), then the rows go by primary key, ESI_CACHE_BATCH_KEYS per
     transaction. The only way esi_cache is cleared per character: by the
     removal purge, and after a narrowing (clear_esi_cache_in_background).
     """
-    keys = list((await db.execute(
-        select(ESICache.key).where(ESICache.key.like(_esi_cache_marker(cid))))).scalars())
+    match = ESICache.key.like(_esi_cache_marker(cid))
+    if extra_patterns:
+        match = or_(match, *(ESICache.key.like(p) for p in extra_patterns))
+    keys = list((await db.execute(select(ESICache.key).where(match))).scalars())
     deleted = 0
     for i in range(0, len(keys), ESI_CACHE_BATCH_KEYS):
         res = await db.execute(
@@ -701,6 +782,36 @@ async def sync_must_not_write(db: AsyncSession, character_id: int, sync_started:
     removed = exists().where(CharacterPurge.character_id == cid, CharacterPurge.removed_at >= since)
     with db.no_autoflush:
         return bool((await db.execute(select(or_(gone, removed)))).scalar())
+
+
+async def scopes_withdrawn(db: AsyncSession, character_id: int, scopes) -> bool:
+    """True when any of `scopes` is missing from the character's stored scopes
+    now (ISS-079).
+
+    The narrowing counterpart of sync_must_not_write, for work that fetched
+    with an access token it read earlier: a sync, a fetcher that commits as it
+    goes, a page that stores what it read. After a narrowing the old, wider
+    token stays usable at ESI for up to 20 minutes, so what such work fetched
+    may come from a permission the user has just withdrawn, after the
+    narrowing cleared live state and maybe purged history. `scopes` are the
+    ones the write depends on (for a whole sync, every scope it started with).
+    Widening, or no change, never makes this true. Nor does a character that
+    is gone: removal has its own guard (sync_must_not_write) and its own
+    clean-up (the background purge), which this leaves exactly as they were.
+
+    Ask it inside the write's own transaction, after its first write
+    statement: SQLite's write lock is then held from this check to the commit,
+    so a narrowing can't commit in between (its scope change waits for ours).
+    Runs with autoflush off, like sync_must_not_write. The lookup is the
+    unique index on characters.character_id.
+    """
+    wanted = parse_scopes(scopes)
+    with db.no_autoflush:
+        row = (await db.execute(select(Character.scopes).where(
+            Character.character_id == int(character_id)))).first()
+    if row is None:
+        return False
+    return bool(wanted - parse_scopes(row[0]))
 
 
 async def run_due_purges(now: datetime | None = None, *, session_factory=None) -> list[dict]:

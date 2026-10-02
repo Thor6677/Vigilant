@@ -45,7 +45,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import scopes as perms
 from app.auth.purge import (
     REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, finish_relink,
-    owner_from_token, purge_history, remove_character_from_account, settle_history_for_relink,
+    narrowing_cache_patterns, owner_from_token, purge_history, remove_character_from_account,
+    settle_history_for_relink, withdrawn_keys,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -382,8 +383,10 @@ async def _probe_stored_token(db: AsyncSession, character_id: int
             if char is None:
                 return PROBE_UNKNOWN, None, "character row missing"
             try:
-                # Writes the rotated token and its scp claim to the row, and commits.
-                await esi_client._do_refresh(char, probe_db)
+                # Writes the rotated token and its scp claim to the row, and
+                # commits. If EVE narrowed it, the callback's own narrowing
+                # path clears what the pilot had, so the refresh doesn't too.
+                await esi_client._do_refresh(char, probe_db, clear_on_narrowing=False)
             except esi_client.TokenRevoked as exc:
                 logger.info("character %s: stored token no longer refreshes (%s)", character_id, exc)
                 return PROBE_REVOKED, None, None
@@ -670,7 +673,7 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
     purged_note = ""
     if removed:
         # A permission is withdrawn when ANY of its scopes went away.
-        gone = [p.key for p in perms.PERMISSIONS if set(p.scopes) & removed]
+        gone = withdrawn_keys(removed)
         # Always: nothing withdrawn keeps feeding features as if it were live.
         await clear_live_state(db, character_id, gone)
         if pending.get("purge"):
@@ -687,7 +690,10 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
         # character_purges, which would make the resync queued below drop its
         # results. Lost on a restart, that is safe: the scope guard refuses a
         # withdrawn scope before any cache is read (app/auth/purge.py).
-        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id)
+        # ISS-077: and the user's cached corp contracts for this pilot's
+        # corporation, when it lost that permission.
+        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id,
+                                  narrowing_cache_patterns(user.id, existing.corporation_id, gone))
 
     if request.session.get("flash") is None:
         if not_granted:
