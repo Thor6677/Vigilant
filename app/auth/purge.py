@@ -864,6 +864,30 @@ async def scopes_withdrawn(db: AsyncSession, character_id: int, scopes) -> bool:
     return bool(wanted - parse_scopes(row[0]))
 
 
+async def fetch_must_not_write(db: AsyncSession, character_id: int, row_id: int,
+                               scopes) -> bool:
+    """True when rows fetched for a character while it was linked as
+    characters row `row_id` must not be written now (ISS-082, ISS-079).
+
+    That is when the character has since been taken off its account (no
+    row), or linked again (a different row: an EVE owner change, whose new
+    owner's sign-in creates a new row, or a re-add; characters.id is never
+    reused), or narrowed (any of `scopes` is no longer stored). A fetch holds
+    the token it read at the start, so in the first two cases what it fetched
+    belongs to the old link, and the new owner's scopes usually still cover
+    it. For writers that commit as they go, outside _sync_fields' final check
+    (sync_must_not_write covers that one). Like scopes_withdrawn, ask it
+    inside the write's own transaction after its first write statement; it
+    runs with autoflush off.
+    """
+    with db.no_autoflush:
+        row = (await db.execute(select(Character.id, Character.scopes).where(
+            Character.character_id == int(character_id)))).first()
+    if row is None or row[0] != row_id:
+        return True
+    return bool(parse_scopes(scopes) - parse_scopes(row[1]))
+
+
 async def run_due_purges(now: datetime | None = None, *, session_factory=None) -> list[dict]:
     """Run every pending purge whose PURGE_DELAY has passed, oldest first.
 

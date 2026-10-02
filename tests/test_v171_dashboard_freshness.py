@@ -274,14 +274,14 @@ def test_fetch_industry_jobs_data_keeps_job_id_and_end_date(monkeypatch):
     async def fake_client(char):
         return object(), None
 
-    async def fake_persist(db, cid, jobs):
+    async def fake_persist(db, cid, jobs, **kwargs):
         return 0
 
     import app.esi.industry as esi_industry
     monkeypatch.setattr(esi_industry, "get_character_jobs", fake_jobs)
     monkeypatch.setattr(dash_mod, "_client_for", fake_client)
     monkeypatch.setattr(dash_mod, "_persist_completed_jobs", fake_persist)
-    char = SimpleNamespace(character_id=42, scopes="esi-industry.read_character_jobs.v1")
+    char = SimpleNamespace(id=1, character_id=42, scopes="esi-industry.read_character_jobs.v1")
     out = asyncio.run(dash_mod.fetch_industry_jobs_data([char], None))
     trimmed, warn = out[42]
     assert warn is None

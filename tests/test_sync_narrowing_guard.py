@@ -327,17 +327,17 @@ def _hold_until_dropped(monkeypatch):
     """An event set once the narrowed pilot's write has been refused, so the
     other pilot's fetch can be made to finish only after that drop."""
     dropped = asyncio.Event()
-    real = purge.scopes_withdrawn
+    real = purge.fetch_must_not_write
 
-    async def watching(db, character_id, scopes):
-        answer = await real(db, character_id, scopes)
+    async def watching(db, character_id, row_id, scopes):
+        answer = await real(db, character_id, row_id, scopes)
         if answer:
             dropped.set()
         return answer
-    monkeypatch.setattr(purge, "scopes_withdrawn", watching)
+    monkeypatch.setattr(purge, "fetch_must_not_write", watching)
 
     async def wait():
-        await dropped.wait()
+        await asyncio.wait_for(dropped.wait(), timeout=10)
         for _ in range(20):          # and let its rollback finish
             await asyncio.sleep(0.01)
     return wait

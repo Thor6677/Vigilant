@@ -36,8 +36,12 @@ async def _fetch_all_mining(client: ESIClient, character_id: int) -> list:
     return all_entries
 
 
-async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: AsyncSession) -> list:
-    """Fetch from ESI, store new entries, return ALL historical entries from DB."""
+async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: AsyncSession, *,
+                                 row_id: int | None = None) -> list:
+    """Fetch from ESI, store new entries, return ALL historical entries from DB.
+
+    `row_id` is the characters row the caller read the token from: the new
+    rows are dropped if that link has ended since (ISS-082)."""
     # 1. Fetch fresh data from ESI (last 30 days)
     esi_entries = await _fetch_all_mining(client, character_id)
 
@@ -81,15 +85,18 @@ async def _sync_and_fetch_mining(client: ESIClient, character_id: int, db: Async
                         )
                     ).values(quantity=e["quantity"])
                 )
-            # ISS-079: the ledger may have come from the old token of a
-            # narrowing that withdrew mining. New rows and updates go in one
-            # transaction; this is asked after its first write, which holds
-            # the write lock until we commit or roll back.
-            from app.auth.purge import scopes_withdrawn
+            # ISS-079/082: the ledger may have come from the old token of a
+            # narrowing that withdrew mining, or of a link that has since
+            # ended (removed, or now another EVE owner's). New rows and
+            # updates go in one transaction; this is asked after its first
+            # write, which holds the write lock until we commit or roll back.
+            from app.auth.purge import fetch_must_not_write, scopes_withdrawn
             from app.auth.scopes import MINING
-            if await scopes_withdrawn(db, character_id, (MINING,)):
+            if (await fetch_must_not_write(db, character_id, row_id, (MINING,))
+                    if row_id is not None else await scopes_withdrawn(db, character_id, (MINING,))):
                 await db.rollback()
-                logger.info("Mining entries for char %s dropped: permission withdrawn", character_id)
+                logger.info("Mining entries for char %s dropped: permission withdrawn "
+                            "or character unlinked while fetched", character_id)
             else:
                 await db.commit()
                 if new_entries:
@@ -229,10 +236,11 @@ async def character_mining(
             "error": None, "missing_perm": "mining",
             "is_corp": False, "corp_id": None, "characters": []})
 
+    row_id = char.id   # ISS-082: the link the token below is read from
     try:
         token = await refresh_token(char, db)
         client = ESIClient(token, db=db)
-        raw = await _sync_and_fetch_mining(client, character_id, db)
+        raw = await _sync_and_fetch_mining(client, character_id, db, row_id=row_id)
 
         # Resolve names
         type_ids = list({e["type_id"] for e in raw})
@@ -301,7 +309,7 @@ async def corp_mining(
                     raise ValueError(f"Character {c.character_id} not found")
                 token = await refresh_token(fresh, char_db)
                 client = ESIClient(token, db=char_db)
-                entries = await _sync_and_fetch_mining(client, c.character_id, char_db)
+                entries = await _sync_and_fetch_mining(client, c.character_id, char_db, row_id=c.id)
                 return c.character_name, entries
 
         results = await asyncio.gather(*[_fetch_for_char(c) for c in corp_chars], return_exceptions=True)
