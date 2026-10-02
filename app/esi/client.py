@@ -242,13 +242,14 @@ async def _do_refresh(character: Character, db: AsyncSession, *,
     # background. Widening only updates the scopes, as above.
     narrowed = bool(lost) and clear_on_narrowing
     if narrowed:
-        from app.auth.purge import clear_after_refresh_narrowing
-        await clear_after_refresh_narrowing(db, character, lost)
+        from app.auth.purge import clear_after_refresh_narrowing, narrowing_cache_patterns
+        gone = await clear_after_refresh_narrowing(db, character, lost)
+        extra = narrowing_cache_patterns(character.user_id, character.corporation_id, gone)
     bind, cid = db.bind, character.character_id
     await db.commit()
     if narrowed:
         from app.auth.purge import schedule_esi_cache_clear
-        schedule_esi_cache_clear(bind, cid)
+        schedule_esi_cache_clear(bind, cid, extra)
     return character.access_token
 
 

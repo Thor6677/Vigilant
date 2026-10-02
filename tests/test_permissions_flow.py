@@ -412,7 +412,7 @@ def test_narrowing_leaves_the_esi_cache_clear_out_of_the_request(env, monkeypatc
     _seed_alt_data(env)
     handed_off = []
 
-    async def record_only(bind, character_id):
+    async def record_only(bind, character_id, *extra_patterns):
         handed_off.append((bind, character_id))
     monkeypatch.setattr(auth_routes, "clear_esi_cache_in_background", record_only, raising=False)
     sql = _sql_log(env)
@@ -461,7 +461,7 @@ def test_a_failed_background_clear_is_logged_and_the_change_stands(env, monkeypa
     import app.auth.purge as purge
     _seed_alt_data(env)
 
-    async def locked(db, cid):
+    async def locked(db, cid, *extra_patterns):
         raise RuntimeError("database is locked")
     monkeypatch.setattr(purge, "_clear_esi_cache_batched", locked)
     caplog.set_level(logging.INFO, logger="app.auth.purge")

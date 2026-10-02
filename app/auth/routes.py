@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import scopes as perms
 from app.auth.purge import (
     REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, purge_history,
-    remove_character_from_account, withdrawn_keys,
+    narrowing_cache_patterns, remove_character_from_account, withdrawn_keys,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -679,7 +679,10 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
         # character_purges, which would make the resync queued below drop its
         # results. Lost on a restart, that is safe: the scope guard refuses a
         # withdrawn scope before any cache is read (app/auth/purge.py).
-        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id)
+        # ISS-077: and the user's cached corp contracts for this pilot's
+        # corporation, when it lost that permission.
+        background_tasks.add_task(clear_esi_cache_in_background, db.bind, character_id,
+                                  narrowing_cache_patterns(user.id, existing.corporation_id, gone))
 
     if request.session.get("flash") is None:
         if not_granted:

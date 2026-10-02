@@ -82,7 +82,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.scopes import PERMISSIONS, parse_scopes
-from app.db.cache import ESICache
+from app.db.cache import ESICache, principal_key_pattern, user_principal
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
     CharacterDashboardCache, CharacterPurge, NetWorthSnapshot,
@@ -138,6 +138,26 @@ def _esi_cache_marker(character_id: int) -> str:
     return f"%:@CHARACTER:EVE:{int(character_id)}|%"
 
 
+def narrowing_cache_patterns(user_id: int | None, corporation_id: int | None,
+                             keys: Iterable[str]) -> tuple[str, ...]:
+    """esi_cache entries a narrowing must clear beyond the character's own
+    (ISS-077): LIKE patterns for clear_esi_cache_in_background.
+
+    Corp contracts and their items are cached under the USER's principal
+    (check_corp_contracts in app/routes/corporations.py), and served while
+    any of the user's pilots in that corporation still holds the scope, so
+    the per-character clear never reaches them. When the narrowed pilot
+    loses corp contracts, that user's entries for its corporation go too; a
+    pilot that still has the scope just fetches them again. The pattern
+    follows app/db/cache.py's key format and matches only that user's
+    entries for that corporation.
+    """
+    if "corp_contracts" not in set(keys) or not user_id or not corporation_id:
+        return ()
+    return (principal_key_pattern(user_principal(user_id),
+                                  f"/corporations/{int(corporation_id)}/contracts/"),)
+
+
 async def clear_live_state(db: AsyncSession, character_id: int,
                            keys: Iterable[str]) -> dict[str, int]:
     """Drop the current-value caches fed by the given permissions. Runs on
@@ -177,8 +197,10 @@ async def clear_live_state(db: AsyncSession, character_id: int,
     return counts
 
 
-async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
-    """Clear a character's ESI response cache after a narrowing (ISS-072).
+async def clear_esi_cache_in_background(bind, character_id: int,
+                                        extra_patterns: Iterable[str] = ()) -> int | None:
+    """Clear a character's ESI response cache after a narrowing (ISS-072),
+    plus any entries matching `extra_patterns` (narrowing_cache_patterns).
 
     Scheduled by the SSO callback to run after its response, and by
     schedule_esi_cache_clear after a narrowing noticed at token refresh
@@ -193,7 +215,7 @@ async def clear_esi_cache_in_background(bind, character_id: int) -> int | None:
     cid = int(character_id)
     try:
         async with AsyncSession(bind, expire_on_commit=False) as db:
-            deleted = await _clear_esi_cache_batched(db, cid)
+            deleted = await _clear_esi_cache_batched(db, cid, tuple(extra_patterns))
     except Exception as e:
         logger.warning("ESI cache clear after narrowing failed for character %s: %s: %s",
                        cid, type(e).__name__, e)
@@ -239,12 +261,13 @@ async def clear_after_refresh_narrowing(db: AsyncSession, character: Character,
 _background_tasks: set[asyncio.Task] = set()
 
 
-def schedule_esi_cache_clear(bind, character_id: int) -> asyncio.Task:
+def schedule_esi_cache_clear(bind, character_id: int,
+                             extra_patterns: Iterable[str] = ()) -> asyncio.Task:
     """Run clear_esi_cache_in_background as a task of its own, for a caller
     with no response to hang it on (the refresh path, ISS-078). Returns the
     task; it is held here until it finishes."""
     task = asyncio.get_running_loop().create_task(
-        clear_esi_cache_in_background(bind, character_id))
+        clear_esi_cache_in_background(bind, character_id, extra_patterns))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return task
@@ -455,17 +478,21 @@ async def _delete_in_batches(db: AsyncSession, table: str, cid: int, *,
         await _between_batches()
 
 
-async def _clear_esi_cache_batched(db: AsyncSession, cid: int) -> int:
-    """Drop every cached authenticated ESI response for this character,
-    without holding the write lock through a table scan.
+async def _clear_esi_cache_batched(db: AsyncSession, cid: int,
+                                   extra_patterns: tuple[str, ...] = ()) -> int:
+    """Drop every cached authenticated ESI response for this character, and
+    any entry matching `extra_patterns`, without holding the write lock
+    through a table scan.
 
     The LIKE is a read-only SELECT of keys (a WAL reader never blocks the
     writer), then the rows go by primary key, ESI_CACHE_BATCH_KEYS per
     transaction. The only way esi_cache is cleared per character: by the
     removal purge, and after a narrowing (clear_esi_cache_in_background).
     """
-    keys = list((await db.execute(
-        select(ESICache.key).where(ESICache.key.like(_esi_cache_marker(cid))))).scalars())
+    match = ESICache.key.like(_esi_cache_marker(cid))
+    if extra_patterns:
+        match = or_(match, *(ESICache.key.like(p) for p in extra_patterns))
+    keys = list((await db.execute(select(ESICache.key).where(match))).scalars())
     deleted = 0
     for i in range(0, len(keys), ESI_CACHE_BATCH_KEYS):
         res = await db.execute(
