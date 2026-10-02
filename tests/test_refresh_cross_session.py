@@ -108,7 +108,7 @@ def test_mining_ledger_refreshes_a_due_token_loaded_in_another_session(monkeypat
             await _add_due_pilot(SessionLocal)
             _mock_sso(monkeypatch)
 
-            async def sync_and_fetch(client, character_id, db):
+            async def sync_and_fetch(client, character_id, db, *, row_id=None):
                 return [{"type_id": 1, "solar_system_id": 2, "quantity": 5, "date": "2026-09-01"}]
 
             async def names(db, ids):
