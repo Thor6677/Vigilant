@@ -28,7 +28,9 @@ from app.auth import purge
 from app.auth import scopes as cat
 from app.db.models import AdminAuditLog, Character, User
 from tests.test_character_owner_change import _jwt, _set_owner, _sso
-from tests.test_character_removal import _counts, _only, _seed, no_pause  # noqa: F401 — fixture
+from tests.test_character_removal import (  # noqa: F401 — no_pause is a fixture
+    _audit, _counts, _job, _only, _run_due, _seed, no_pause,
+)
 from tests.test_permissions_flow import (  # noqa: F401 — `env` is a fixture
     ALT_ID, CSRF, MAIN_ID, OTHER_ID, STRANGER_ID, USER_ID, _pending, _scalar, env,
 )
@@ -286,6 +288,28 @@ def test_a_readd_inside_the_purge_delay_does_not_keep_history_due_for_deletion(
     [(event_type, _, detail)] = _kept_audit(env)
     assert event_type == "kept_history_deleted"
     assert "pending" in detail
+
+
+def test_the_leftover_purge_after_such_a_readd_reports_the_history_deleted(seeded, monkeypatch):
+    """The re-add deleted the history the pending purge was due to delete, so
+    when that purge runs and finds the character linked again, it finished
+    the job rather than abandoning it."""
+    env = seeded
+    _set_owner(env, ALT_ID, "owner-A")
+    _self_remove(env, tick=True)
+    assert _readd(env, monkeypatch, "add", owner="owner-A", as_user=USER_ID).status_code == 303
+    assert _history(env) == _none()
+    assert env.q(lambda db: _job(db, ALT_ID)) is not None      # the leftover purge
+
+    [result] = _run_due(env)
+
+    assert result["outcome"] == "done"
+    [(event_type, detail)] = env.q(lambda db: _audit(db, ALT_ID))
+    assert event_type == "character_purge_done"
+    assert "history deleted (finished when the character was linked again)" in detail
+    assert "history kept" not in detail
+    assert env.q(lambda db: _job(db, ALT_ID)) is None
+    assert _linked_to(env) == USER_ID
 
 
 # ── A brand-new character costs nothing ──────────────────────────────────────

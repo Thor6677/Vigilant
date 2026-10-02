@@ -736,6 +736,7 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
                      reason: str) -> dict:
     counts: dict[str, int] = {}
     outcome = "done"
+    finished_by_relink = False
     async with factory() as db:
         counts["esi_cache"] = await _clear_esi_cache_batched(db, cid)
         for table in LIVE_STATE_TABLES:
@@ -747,7 +748,14 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
             for table in HISTORY_TABLES:
                 counts[table], _ = await _delete_in_batches(db, table, cid, only_if_gone=True)
                 if await _is_linked(db, cid):
-                    outcome = "abandoned"
+                    # ISS-070: a re-add while this purge was pending deletes the
+                    # history itself before linking (settle_history_for_relink),
+                    # so finding none left means the job is done, not abandoned.
+                    remaining = [t for t in HISTORY_TABLES if await _has_rows(db, t, cid)]
+                    if remaining:
+                        outcome = "abandoned"
+                    else:
+                        finished_by_relink = True
                     break
 
         # Only this job's row: a removal recorded while it ran moved
@@ -755,6 +763,8 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
         await db.execute(delete(CharacterPurge).where(
             CharacterPurge.character_id == cid, CharacterPurge.removed_at == removed_at))
         history = "deleted" if delete_history else "kept"
+        if finished_by_relink:
+            history = "deleted (finished when the character was linked again)"
         if outcome == "abandoned":
             history = "kept (the character was linked again before it was all deleted)"
         detail = (f"Background clean-up after removal ({reason}); history {history}. "
