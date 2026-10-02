@@ -415,6 +415,15 @@ async def startup():
             await ensure_users_sequence_floor(db)
         except Exception as e:
             logging.warning("users sqlite_sequence floor check failed: %s", e)
+        # ISS-074: characters.id gets AUTOINCREMENT too (token writes are keyed
+        # by it). Runs before any background task; logs its own timing. No
+        # sequence floor: nothing keeps a characters.id (see the module).
+        from app.db.character_ids import ensure_characters_autoincrement
+        try:
+            await ensure_characters_autoincrement(db)
+        except Exception as e:
+            logging.warning("characters AUTOINCREMENT rebuild failed, table unchanged: %s: %s",
+                            type(e).__name__, e)
 
     # ── Add killmail_attackers columns introduced for /intel/kills ─────
     # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via PRAGMA check.
