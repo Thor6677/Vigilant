@@ -4,6 +4,8 @@ picker, sort, and account divider rows).
 """
 from datetime import datetime, timezone
 
+import pytest
+
 from app.dashboard import prefs as prefs_mod
 from app.dashboard.table import _FAR_FUTURE_TS, build_table_row, sort_table_rows
 from tests._dashboard_fixture import CHARACTERS, render_full
@@ -186,3 +188,35 @@ def test_table_mode_empty_state():
         table_rows=[],
     )
     assert "No pilots to show" in html
+
+
+# ── ISS-087 / mobile design §5.8: training-state fixes ─────────────────────
+
+@pytest.mark.parametrize("warning", ["ok", "warning", "critical"])
+def test_queue_end_text_is_the_whole_queue_while_training(warning):
+    """Queue End is when the WHOLE queue runs out (queue_left_str "1d"), not
+    when the current skill finishes (finish_str "3h")."""
+    s = dict(SUMMARY, training=dict(SUMMARY["training"], warning=warning))
+    dt = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    row = build_table_row(s, None, None, None, dt)
+    assert row["cells"]["queue_end"]["text"] == "1d"
+    assert row["cells"]["queue_end"]["sort"] == dt.timestamp()
+
+
+@pytest.mark.parametrize("warning", ["paused", "empty", "no_scope", "error"])
+def test_queue_end_is_a_dash_and_sorts_last_unless_training(warning):
+    # queue_left_str is deliberately still "1d" here: the gate, not missing
+    # data, is what has to produce the dash.
+    s = dict(SUMMARY, training=dict(SUMMARY["training"], warning=warning))
+    row = build_table_row(s, None, None, None, datetime(2026, 10, 1, tzinfo=timezone.utc))
+    assert row["cells"]["queue_end"]["text"] == "—"
+    assert row["cells"]["queue_end"]["sort"] == _FAR_FUTURE_TS
+
+
+def test_training_column_reads_paused_even_with_a_next_skill():
+    """A paused queue still has a first skill (the skill-queue processor sets
+    current_skill from it), which used to win over the paused branch."""
+    s = dict(SUMMARY, training=dict(SUMMARY["training"], warning="paused",
+                                    finish_str=None, queue_left_str=None))
+    row = build_table_row(s, None, None, None, None)
+    assert row["cells"]["training"]["text"] == "Paused"

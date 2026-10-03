@@ -5,7 +5,7 @@ refactor proof (tests/_dashboard_fixture.py) — no database, no real
 """
 import re
 
-from tests._dashboard_fixture import CHARACTERS, render_full
+from tests._dashboard_fixture import CHAR_PAUSED, CHARACTERS, build_context, extract_card, render_full
 
 _GAME_WIDE_LOAD_HX_GETS = (
     'hx-get="/dashboard/recent-battles"',
@@ -147,3 +147,15 @@ def test_attention_strip_mount_point_present_in_every_mode():
         assert 'id="dash-attention"' in html
         assert 'hx-get="/dashboard/attention"' in html
         assert 'data-htmx-no-error="1"' in html
+
+
+def test_paused_card_says_paused_even_when_the_queue_has_a_next_skill():
+    """ISS-087: real paused queues carry current_skill (their first entry).
+    The shared fixture's paused pilot doesn't, so patch it here rather than
+    in the fixture, which would move the golden cards."""
+    cid = CHAR_PAUSED.character_id
+    skill_map = dict(build_context("custom")["skill_map"])
+    skill_map[cid] = dict(skill_map[cid], current_skill="Gunnery", current_level=5)
+    card = extract_card(render_full("custom", skill_map=skill_map), cid)
+    assert "Paused (3 queued)" in card
+    assert "Gunnery" not in card

@@ -44,6 +44,11 @@ def _lower(s: str | None) -> str:
 # page's client-side sort — a finite sentinel avoids that entirely.
 _FAR_FUTURE_TS = 32_503_680_000.0
 
+# ISS-087: the only training.warning values where a queue is actually running
+# (app.routes.characters.skill_warning). A paused queue still carries its
+# first skill as `skill`, but nothing is training and there is no queue end.
+_TRAINING_STATES = ("ok", "warning", "critical")
+
 
 def _delta_text(delta: dict | None) -> str:
     if not delta:
@@ -76,7 +81,9 @@ def build_table_row(
     `tags_row` is a load_character_tags() entry or None. `queue_end` is the
     raw datetime app.routes.characters.group_skill_data's skill_map already
     carries per character (`skill_map[cid]["queue_end"]`) — used only for a
-    correct chronological sort, since `training.finish_str` is text.
+    correct chronological sort, since `training.queue_left_str` is text.
+    Both the Queue End text and its sort are gated on the pilot actually
+    training (`_TRAINING_STATES`); anything else reads "—" and sorts last.
     `last_synced` is the raw datetime off CharacterDashboardCache.last_synced
     (the same value `app.routes.dashboard._age_str` formats into
     `sync.last_str`) — same reason: sorting "Last Sync" by its display text
@@ -94,14 +101,18 @@ def build_table_row(
     net_worth = detail.get("net_worth")
     wallet = summary.get("wallet")
 
+    warning = training.get("warning")
+    is_training = warning in _TRAINING_STATES
+
     training_text = "—"
-    if training.get("skill"):
-        training_text = f"{training['skill']} {training['level']}"
-    elif training.get("warning") == "paused":
+    if warning == "paused":
+        # Checked before `skill`: a paused queue still names its first skill.
         training_text = "Paused"
-    elif training.get("warning") == "empty":
+    elif training.get("skill"):
+        training_text = f"{training['skill']} {training['level']}"
+    elif warning == "empty":
         training_text = "Empty queue"
-    elif training.get("warning") == "no_scope":
+    elif warning == "no_scope":
         training_text = "—"
 
     tags_list = tags_row.get("tags") or []
@@ -116,8 +127,10 @@ def build_table_row(
         "wallet_7d": {"text": _delta_text(wallet_delta), "sort": _delta_sort(wallet_delta)},
         "net_worth": {"text": _isk(net_worth) if net_worth is not None else "—", "sort": net_worth if net_worth is not None else -1.0},
         "queue_end": {
-            "text": training.get("finish_str") or "—",
-            "sort": queue_end.timestamp() if queue_end else _FAR_FUTURE_TS,
+            # The WHOLE queue's remaining time, not the current skill's
+            # (finish_str) — ISS-087.
+            "text": (training.get("queue_left_str") or "—") if is_training else "—",
+            "sort": queue_end.timestamp() if (is_training and queue_end) else _FAR_FUTURE_TS,
         },
         "training": {"text": training_text, "sort": _lower(training.get("skill"))},
         "pi": {"text": pi["expiry_str"] if pi else "—", "sort": pi["colonies"] if pi else 0},
