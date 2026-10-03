@@ -749,6 +749,14 @@ function dashSortSelect() {
     var url = this.value || '';
     if (url.indexOf('/dashboard?sort=') === 0) window.location.href = url;
 }
+// Back / bfcache restores the select's last-picked value, not the page's
+// real sort/mode; snap both phone selects back to the server-rendered
+// selection so a re-pick always fires `change`.
+window.addEventListener('pageshow', function () {
+  document.querySelectorAll('.dash-phone-toolbar select').forEach(function (s) {
+    for (var i = 0; i < s.options.length; i++) { if (s.options[i].defaultSelected) { s.selectedIndex = i; break; } }
+  });
+});
 
 // ── T-076: tag filter — server round-trip like setDashMode, so tag TEXT
 // never has to be matched or rendered by JS at all (no innerHTML over it). ──

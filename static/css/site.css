@@ -754,4 +754,5 @@
 @media (max-width: 640px) {
     .dash-toolbar { flex-wrap: wrap !important; white-space: normal !important; overflow: visible !important; row-gap: 0.4rem; }
     .dash-toolbar > * { margin-left: 0 !important; }
+    .dash-toolbar > .b-link { min-height: 44px; display: inline-flex; align-items: center; }
 }

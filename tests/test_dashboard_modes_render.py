@@ -217,3 +217,15 @@ def test_secondary_toolbar_controls_stay_on_phones_only_when_they_apply():
 def test_toolbar_wraps_on_phones():
     phone = _media_bodies(_css(), "max-width: 640px")
     assert re.search(r"\.dash-toolbar\s*\{[^}]*flex-wrap:\s*wrap\s*!important", phone)
+
+
+def test_tag_filter_hides_edit_and_the_toolbar_row_on_phones():
+    html = render_full("custom", active_tag_filter=["x"])
+    assert 'class="dash-toolbar m-hide"' in html
+    assert 'id="edit-mode-btn"' not in html
+
+
+def test_phone_selects_reset_to_rendered_selection_on_pageshow():
+    html = render_full("custom")
+    assert "pageshow" in html
+    assert ".dash-phone-toolbar select" in html
