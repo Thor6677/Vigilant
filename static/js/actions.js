@@ -928,4 +928,77 @@
        and returns immediately when there are none. */
     if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
     window._timerBannerInterval = setInterval(window.styleTimerBanners, 1000);
+
+    /* ── Mobile expand-on-tap rows (mobile design §4.3) ──────────────────
+     *
+     * A row tagged class="m-row" data-click="toggleMRow" collapses to its
+     * data-m="key" cells on phones (CSS in site.css); a tap toggles
+     * `is-open`, which reveals its data-m-label cells. Rows that already
+     * expand via toggleExpanded keep that handler, and the CSS treats their
+     * `is-expanded` the same way, so one tap opens both.
+     *
+     * The dispatcher calls fn.call(row, e). A child with its own data-click
+     * (a button) is matched first by closest('[data-click]'), so this never
+     * runs for it. Plain links and form fields are filtered out here so they
+     * keep their own behaviour. */
+    var M_PHONE = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    var M_INTERACTIVE = 'a, button, input, select, textarea, label, summary';
+
+    function mIsPhone() { return !!(M_PHONE && M_PHONE.matches); }
+
+    window.toggleMRow = window.toggleMRow || function (e) {
+        if (!mIsPhone()) return;
+        var t = e && e.target;
+        var hit = t && typeof t.closest === 'function' ? t.closest(M_INTERACTIVE) : null;
+        if (hit && hit !== this && this.contains(hit)) return;
+        var open = !this.classList.contains('is-open');
+        this.classList.toggle('is-open', open);
+        this.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    // Phones: make expandable rows focusable and announce their state.
+    // Desktop: remove anything we added. Runs on load, after every htmx
+    // swap, and when the viewport crosses the breakpoint.
+    window.mRowInit = window.mRowInit || function (root) {
+        var scope = root && root.querySelectorAll ? root : document;
+        var rows = scope.querySelectorAll('.m-row:not(.m-row--link)');
+        var phone = mIsPhone();
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            if (phone) {
+                if (!r.hasAttribute('tabindex')) {
+                    r.setAttribute('tabindex', '0');
+                    r.setAttribute('data-m-tabindex', '');
+                }
+                var parent = r.parentElement;
+                var open = r.classList.contains('is-open') || r.classList.contains('is-expanded') ||
+                    !!(parent && parent.classList.contains('is-expanded'));
+                r.setAttribute('aria-expanded', open ? 'true' : 'false');
+            } else {
+                if (r.hasAttribute('data-m-tabindex')) {
+                    r.removeAttribute('tabindex');
+                    r.removeAttribute('data-m-tabindex');
+                }
+                r.removeAttribute('aria-expanded');
+            }
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', function () { window.mRowInit(document); });
+    document.addEventListener('htmx:afterSwap', function (e) { window.mRowInit(e.target); });
+    if (M_PHONE) {
+        var mOnChange = function () { window.mRowInit(document); };
+        if (M_PHONE.addEventListener) M_PHONE.addEventListener('change', mOnChange);
+        else if (M_PHONE.addListener) M_PHONE.addListener(mOnChange);
+    }
+
+    // Enter / Space on a focused row behave like a tap. Clicking (not calling
+    // toggleMRow directly) lets rows that use toggleExpanded work too.
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var r = e.target;
+        if (!r || !r.classList || !r.classList.contains('m-row') || !mIsPhone()) return;
+        e.preventDefault();
+        r.click();
+    });
 })();
