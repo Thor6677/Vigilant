@@ -190,3 +190,13 @@ def test_menu_still_links_every_item():
             continue
         for item in g["items"]:
             assert f'href="{item["url"]}"' in menu, item["url"]
+
+
+# ── search palette ───────────────────────────────────────────────────
+
+def test_palette_is_centred_closable_and_hides_key_hints_on_touch():
+    html = _render_base("/dashboard")
+    assert re.search(r"#cmdk\s*\{[^}]*margin:\s*auto", html)
+    assert 'class="cmdk-close" data-click="closePalette"' in html
+    assert "window.closePalette" in html
+    assert re.search(r"@media \(hover: none\), \(max-width: 640px\)\s*\{\s*#cmdk \.cmdk-hint\s*\{\s*display:\s*none", html)
