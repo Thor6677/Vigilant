@@ -208,3 +208,14 @@ def test_palette_enter_only_acts_from_the_input():
     assert ".cmdk-close:focus-visible" in html
     assert re.search(r"@media \(max-width: 640px\) \{ #cmdk \{ margin: 0\.75rem auto auto; \} \}", html)
     assert html.index("margin:auto") < html.index("margin: 0.75rem auto auto")
+
+
+# ── audit script ─────────────────────────────────────────────────────
+
+def test_mobile_audit_script_exists_and_restores_width():
+    path = os.path.join(_ROOT, "scripts", "mobile-audit.js")
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    assert "360" in src and "scrollWidth" in src
+    assert "h.style.width = prevWidth" in src
+    assert "'OK'" in src
