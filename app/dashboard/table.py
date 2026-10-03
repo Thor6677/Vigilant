@@ -165,6 +165,13 @@ def build_table_row(
         "can_fly": {"text": "…", "sort": 0},
     }
 
+    # Mobile design §5.2 / §5.8: wording only the phone row shows. Desktop
+    # keeps each cell's plain `text` (Queue End "—", Training "Paused").
+    if warning == "empty":
+        cells["queue_end"]["phone_text"] = "empty"
+    if warning == "paused" and training.get("queue_length"):
+        cells["training"]["queued"] = training["queue_length"]
+
     if no_perms:
         # ISS-069: no sync age for a pilot that shares nothing; link to where
         # permissions are granted instead.
@@ -179,6 +186,7 @@ def build_table_row(
         "tags": tags_list,
         "flags": summary.get("flags", []),
         "needs_reauth": summary.get("needs_reauth", False),
+        "is_online": bool(summary.get("is_online")),  # phone row's lead dot
         "cells": cells,
     }
 

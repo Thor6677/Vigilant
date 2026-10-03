@@ -15,6 +15,24 @@
    file is `{% include %}`'d straight into that page (never htmx-swapped on
    its own), but carries no script element of its own regardless, per the
    v1.7.0 CSP rule for everything under partials/.
+
+   Mobile R1 (mobile design §5.2). On phones (≤640px) each pilot row is an
+   m-row (contract in static/css/site.css):
+     * lead  = the online dot
+     * key 1 = pilot name + PAUSED/EMPTY/RENEW badges (other flags are m-hide)
+     * key 2 = Queue End
+   Both key cells ALWAYS render. When the Columns picker has the pilot or
+   Queue End column off, an m-only stand-in renders instead (the name one
+   BEFORE the column cells, the Queue End one AFTER, because the phone CSS
+   orders keys by DOM position). When a column is on, its own cell is the
+   key cell and is never repeated as a detail line. Every other picked
+   column is a data-m-label detail cell, then the Details → / Permissions
+   links. m-only cells are display:none above 640px, so desktop shows
+   exactly the columns it did. Column cells carry data-col-cell so
+   dashboard.html's client sort finds them by name: the phone-only cells
+   mean a cell's position no longer matches its header. (Not `data-col`:
+   that's the header's attribute, and tests/test_dashboard_table.py checks
+   its absence per column.)
 #}
 {% set column_labels = {
     'pilot': 'Pilot', 'account': 'Account', 'corporation': 'Corporation',
@@ -38,13 +56,16 @@
 </div>
 
 {% set _numeric_columns = ('wallet', 'wallet_7d', 'net_worth', 'queue_end', 'pi', 'jobs', 'orders', 'escrow', 'clones', 'last_sync', 'can_fly') %}
-<div class="b-section" style="overflow:auto;max-height:70vh;">
+{# m-unclamp: on phones the box drops its own max-height/scroll so the page
+   scrolls instead (§5.2). thead is hidden there, so sticky headers aren't
+   needed. #}
+<div class="b-section m-unclamp" style="overflow:auto;max-height:70vh;">
     {# `position:sticky` goes on each <th>, not the <tr> — sticky on a row
        element is unreliable across browsers, and this container (not the
        page) is the sticky/scroll context, since it's the nearest ancestor
        with its own scrollbar (max-height + overflow:auto above). #}
-    <table id="dash-table" class="b-table" style="width:100%;border-collapse:collapse;font-size:11px;">
-        <thead>
+    <table id="dash-table" class="b-table m-table" style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead class="m-head">
             <tr>
                 {% for key in active_columns %}
                 <th data-click="sortDashTable" data-col="{{ key }}"
@@ -62,25 +83,38 @@
         <tr class="dash-table-divider"><td colspan="{{ active_columns | length }}" style="padding:0.3rem 0.6rem;background:var(--border);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">{{ row.account }}</td></tr>
         {% set ns.prev_account = row.account %}
         {% endif %}
-        <tr data-char-id="{{ row.character_id }}" data-account="{{ row.account }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
+        <tr class="m-row" data-click="toggleMRow" data-char-id="{{ row.character_id }}" data-account="{{ row.account }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
+            <td class="m-only" data-m="lead"><span class="b-dot" style="width:7px;height:7px;{% if row.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span></td>
+            {% if 'pilot' not in active_columns %}
+            <td class="m-only" data-m="key"><a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>{% for f in row.flags if f.label in ('PAUSED', 'EMPTY', 'RENEW') %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-left:0.3rem;">{{ f.label }}</span>{% endfor %}</td>
+            {% endif %}
             {% for key in active_columns %}
             {% if key == 'tags' %}
-            <td data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
+            <td data-col-cell="tags" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
                 {% for t in row.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-right:2px;">{{ t }}</span>{% endfor %}
             </td>
             {% elif key == 'can_fly' %}
-            <td data-sort-value="{{ row.cells.can_fly.sort }}" data-canfly-slot="{{ row.character_id }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);"><span data-canfly-text>{{ row.cells.can_fly.text }}</span></td>
+            <td data-col-cell="can_fly" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.can_fly.sort }}" data-canfly-slot="{{ row.character_id }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);"><span data-canfly-text>{{ row.cells.can_fly.text }}</span></td>
             {% elif key == 'pilot' %}
-            <td data-sort-value="{{ row.cells.pilot.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">
+            <td data-col-cell="pilot" data-m="key" data-sort-value="{{ row.cells.pilot.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">
                 <a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>
-                {% if row.flags %}<span style="margin-left:0.3rem;">{% for f in row.flags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);">{{ f.label }}</span>{% endfor %}</span>{% endif %}
+                {% if row.flags %}<span style="margin-left:0.3rem;">{% for f in row.flags %}<span class="b-badge{% if f.label not in ('PAUSED', 'EMPTY', 'RENEW') %} m-hide{% endif %}" style="font-size:8px;border:1px solid var(--border);color:var(--muted);">{{ f.label }}</span>{% endfor %}</span>{% endif %}
             </td>
+            {% elif key == 'queue_end' %}
+            <td data-col-cell="queue_end" data-m="key" data-sort-value="{{ row.cells.queue_end.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{% if row.cells.queue_end.get('phone_text') %}<span class="m-hide">{{ row.cells.queue_end.text }}</span><span class="m-only">{{ row.cells.queue_end.get('phone_text') }}</span>{% else %}{{ row.cells.queue_end.text }}{% endif %}</td>
+            {% elif key == 'training' %}
+            <td data-col-cell="training" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.training.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{{ row.cells.training.text }}{% if row.cells.training.get('queued') %}<span class="m-only"> ({{ row.cells.training.get('queued') }} queued)</span>{% endif %}</td>
             {% elif key in ('wallet', 'wallet_7d', 'net_worth', 'escrow') %}
-            <td data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">{{ row.cells[key].text }}</td>
+            <td data-col-cell="{{ key }}" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">{{ row.cells[key].text }}</td>
             {% else %}
-            <td data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{% if row.cells[key].href %}<a href="{{ row.cells[key].href }}" style="color:var(--muted);">{{ row.cells[key].text }}</a>{% else %}{{ row.cells[key].text }}{% endif %}</td>
+            <td data-col-cell="{{ key }}" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{% if row.cells[key].href %}<a href="{{ row.cells[key].href }}" style="color:var(--muted);">{{ row.cells[key].text }}</a>{% else %}{{ row.cells[key].text }}{% endif %}</td>
             {% endif %}
             {% endfor %}
+            {% if 'queue_end' not in active_columns %}
+            <td class="m-only" data-m="key">{{ row.cells.queue_end.get('phone_text') or row.cells.queue_end.text }}</td>
+            {% endif %}
+            {# Links inside an m-row never toggle it (toggleMRow ignores taps on a). #}
+            <td class="m-only" data-m-label="Open"><span style="display:flex;gap:0.4rem;justify-content:flex-end;"><a href="/character/{{ row.character_id }}" class="b-btn" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Details →</a><a href="/account/permissions/{{ row.character_id }}" class="b-btn" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Permissions</a></span></td>
         </tr>
         {% endfor %}
         </tbody>

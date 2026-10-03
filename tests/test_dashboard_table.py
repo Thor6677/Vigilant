@@ -286,3 +286,115 @@ def test_page_level_training_sort_uses_training_rank():
     branch = src.split('elif sort == "training":', 1)[1].split("elif sort ==", 1)[0]
     assert "training_rank(" in branch
     assert "current_skill" not in branch
+
+
+# ── Mobile R1: Table view rows on phones (mobile design §5.2) ──────────────
+
+import re
+
+from tests._dashboard_fixture import build_context
+from tests._mobile import assert_mrow, mrows
+from tests.test_mobile_css import _css, _media_bodies
+
+ONLINE = dict(SUMMARY, is_online=True)
+PAUSED = dict(SUMMARY, character_id=1004, name="Pilot Four",
+              training={"skill": "Gunnery", "level": 5, "finish_str": None, "queue_left_str": None,
+                        "progress_pct": 0, "warning": "paused", "queue_length": 3},
+              flags=[{"label": "PAUSED", "sev": "grey"}])
+EMPTY = dict(SUMMARY, character_id=1005, name="Pilot Five",
+             training={"skill": None, "level": None, "finish_str": None, "queue_left_str": None,
+                       "progress_pct": 0, "warning": "empty"},
+             flags=[{"label": "EMPTY", "sev": "red"}, {"label": "RENEW", "sev": "red"}, {"label": "SYNC STALE", "sev": "amber"}])
+
+
+def _table(summaries, columns=None, **prefs):
+    rows = [build_table_row(s, None, None, None, None) for s in summaries]
+    if columns is not None:
+        prefs["table_columns"] = columns
+    return render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=rows, prefs_patch=prefs or None)
+
+
+def _row_html(html, cid):
+    m = re.search(r'<tr class="m-row"[^>]*data-char-id="%d".*?</tr>' % cid, html, re.S)
+    assert m, f"no m-row for character {cid}"
+    return m.group(0)
+
+
+def test_summaries_carry_the_queue_length():
+    assert build_context("custom")["pilot_summaries"][1004]["training"]["queue_length"] == 3
+
+
+def test_table_rows_are_mrows_with_a_lead_dot_and_two_keys():
+    html = _table([ONLINE])
+    rows = assert_mrow(html)
+    assert len(rows) == 1 and rows[0]["tag"] == "tr"
+    kids = rows[0]["children"]
+    assert len([k for k in kids if k.get("data-m") == "lead"]) == 1
+    keys = [k for k in kids if k.get("data-m") == "key"]
+    assert [k.get("data-col-cell") for k in keys] == ["pilot", "queue_end"]
+    row = _row_html(html, 1001)
+    assert re.search(r'<td data-col-cell="queue_end" data-m="key"[^>]*>1d</td>', row)
+    lead = row.split('data-m="lead"')[1].split("</td>")[0]
+    assert "background:var(--success)" in lead
+
+
+def test_key_columns_are_never_repeated_as_detail_lines():
+    html = _table([SUMMARY])  # default columns
+    labels = [k["data-m-label"] for k in mrows(html)[0]["children"] if "data-m-label" in k]
+    assert labels == ["Account", "System", "Ship", "Wallet", "7d", "PI", "Last Sync", "Open"]
+
+
+def test_key_cells_render_when_their_columns_are_off():
+    html = _table([SUMMARY], columns=["account", "wallet"])
+    keys = [k for k in assert_mrow(html)[0]["children"] if k.get("data-m") == "key"]
+    assert len(keys) == 2 and all(k.get("class") == "m-only" for k in keys)
+    row = _row_html(html, 1001)
+    assert re.search(r'<td class="m-only" data-m="key"><a href="/character/1001"[^>]*>Pilot One</a>', row)
+    assert '<td class="m-only" data-m="key">1d</td>' in row
+    assert row.index(">Pilot One<") < row.index(">1d<")  # name is key 1 (left)
+
+
+def test_stand_in_name_cell_precedes_an_enabled_queue_end_column():
+    html = _table([SUMMARY], columns=["queue_end", "account"])
+    keys = [k for k in assert_mrow(html)[0]["children"] if k.get("data-m") == "key"]
+    assert keys[0].get("class") == "m-only"
+    assert keys[1].get("data-col-cell") == "queue_end"
+
+
+def test_paused_and_empty_wording_on_phones():
+    html = _table([PAUSED, EMPTY], columns=["pilot", "queue_end", "training"])
+    paused = _row_html(html, 1004)
+    assert re.search(r'<td data-col-cell="queue_end" data-m="key"[^>]*>—</td>', paused)
+    assert re.search(r'data-m-label="Training"[^>]*>Paused<span class="m-only"> \(3 queued\)</span></td>', paused)
+    empty = _row_html(html, 1005)
+    assert '<span class="m-hide">—</span><span class="m-only">empty</span>' in empty
+    # Key 1 keeps only PAUSED/EMPTY/RENEW on phones; other flags are desktop-only.
+    assert re.search(r'<span class="b-badge"[^>]*>EMPTY</span>', empty)
+    assert re.search(r'<span class="b-badge m-hide"[^>]*>SYNC STALE</span>', empty)
+    # RENEW (needs re-auth) is actionable, so it stays visible on phones too.
+    assert re.search(r'<span class="b-badge"[^>]*>RENEW</span>', empty)
+
+
+def test_account_dividers_are_not_mrows():
+    a = dict(SUMMARY, character_id=1, account="Alpha Corp")
+    b = dict(SUMMARY, character_id=2, account="Bravo Corp")
+    html = _table([a, b], table_sort={"key": "account", "dir": "asc"})
+    assert len(assert_mrow(html)) == 2
+    assert '<tr class="dash-table-divider">' in html
+
+
+def test_table_box_unclamps_on_phones_and_sorts_by_cell_name():
+    html = _table([SUMMARY])
+    assert '<div class="b-section m-unclamp" style="overflow:auto;max-height:70vh;">' in html
+    assert '<table id="dash-table" class="b-table m-table"' in html
+    assert '<thead class="m-head">' in html
+    assert "td[data-col-cell=" in html          # dashboard.html's client sort
+    assert "children[colIndex]" not in html
+
+
+def test_table_rows_phone_css():
+    phone = _media_bodies(_css(), "max-width: 640px")
+    assert re.search(r"#dash-table tr\.m-row > td\s*\{[^}]*padding:\s*0\s*!important", phone)
+    assert re.search(r"#dash-table tr\.m-row > td\[data-m-label\]\s*\{[^}]*white-space:\s*normal\s*!important", phone)
+    assert re.search(r"#dash-table tr\.dash-table-divider", phone)

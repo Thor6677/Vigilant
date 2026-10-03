@@ -805,9 +805,15 @@ function _applyDashTableSort() {
 
     Array.prototype.slice.call(tbody.querySelectorAll('tr.dash-table-divider')).forEach(function (d) { d.remove(); });
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-char-id]'));
+    // Mobile R1: rows also hold phone-only cells (status dot, stand-in key
+    // cells, links), so a column's cell is found by name, never by position.
+    var cellValue = function (row) {
+        var td = row.querySelector('td[data-col-cell="' + dashTableSort.key + '"]');
+        return td ? (td.dataset.sortValue || '') : '';
+    };
     rows.sort(function (a, b) {
-        var av = a.children[colIndex].dataset.sortValue;
-        var bv = b.children[colIndex].dataset.sortValue;
+        var av = cellValue(a);
+        var bv = cellValue(b);
         var cmp;
         if (sortType === 'num') {
             cmp = parseFloat(av) - parseFloat(bv);

@@ -756,3 +756,15 @@
     .dash-toolbar > * { margin-left: 0 !important; }
     .dash-toolbar > .b-link { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* Dashboard Table view rows (mobile design §5.2). Each cell carries inline
+   desktop padding, a bottom border and nowrap. As m-row grid items those
+   would draw a rule under every cell, so the row draws one line instead.
+   Detail (labelled) cells may wrap; key cells keep nowrap for the ellipsis.
+   Divider rows sit in a tbody that is now display:block. */
+@media (max-width: 640px) {
+    #dash-table tr.m-row { border-bottom: 1px solid var(--border); }
+    #dash-table tr.m-row > td { padding: 0 !important; border-bottom: none !important; }
+    #dash-table tr.m-row > td[data-m-label] { white-space: normal !important; }
+    #dash-table tr.dash-table-divider, #dash-table tr.dash-table-divider > td { display: block; }
+}
