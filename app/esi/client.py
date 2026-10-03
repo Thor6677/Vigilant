@@ -163,7 +163,16 @@ async def refresh_token(character: Character, db: AsyncSession) -> str:
         return await _do_refresh(character, db)
 
 
-async def _do_refresh(character: Character, db: AsyncSession) -> str:
+async def _do_refresh(character: Character, db: AsyncSession, *,
+                      clear_on_narrowing: bool = True) -> str:
+    """Refresh at SSO, then store the rotated token and its scopes in one
+    commit on `db`. A narrowing is cleaned up after that commit, in its own
+    session (clear_after_refresh_narrowing).
+
+    `clear_on_narrowing=False` is for the ISS-068 probe in the SSO callback,
+    which inspects the refreshed scopes itself and, if EVE narrowed them,
+    narrows through its own path, measured from what the pilot had before.
+    """
     if is_fernet_shaped(character.refresh_token):
         # EncryptedText.process_result_value returns undecryptable ciphertext
         # as-is rather than raising, so a token wrapped under a SECRET_KEY we
@@ -218,16 +227,28 @@ async def _do_refresh(character: Character, db: AsyncSession) -> str:
     # authorization underneath us, the Account page and the sync layer see it
     # at the next refresh instead of data quietly going stale.
     in_token = scope_guard.scopes_in_token(character.access_token)
+    lost: set[str] = set()
     if in_token is not None:
-        from app.auth.scopes import join_scopes
+        from app.auth.scopes import join_scopes, parse_scopes
         refreshed = join_scopes(in_token)
         if refreshed != (character.scopes or ""):
             import logging
             logging.getLogger(__name__).info(
                 "character %s scopes changed at refresh: %d -> %d",
                 character.character_id, len((character.scopes or "").split()), len(in_token))
+            lost = parse_scopes(character.scopes) - set(in_token)
             character.scopes = refreshed
+    bind, cid = db.bind, character.character_id
     await db.commit()
+    # ISS-078: EVE narrowed the authorization on its own. Clear what the
+    # withdrawn permissions fed, as a user's narrowing does; never history.
+    # Only after the commit above, and in a session of its own: SSO has
+    # already rotated the refresh token, so a clean-up that failed before
+    # that commit would lose it. It logs its own failures and never raises.
+    # Widening only updates the scopes, as above.
+    if lost and clear_on_narrowing:
+        from app.auth.purge import clear_after_refresh_narrowing
+        await clear_after_refresh_narrowing(bind, cid, lost)
     return character.access_token
 
 

@@ -21,7 +21,10 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 def _sqlite_pragmas(dbapi_connection, connection_record):
     if "sqlite" in str(engine.url):
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # ISS-075: busy_timeout FIRST, so every later statement waits up to 10 s
+        # for a lock instead of the driver's 5 s default. journal_mode=WAL is
+        # persistent in the database file and is set once by ensure_wal() at
+        # startup, not on every new connection.
         cursor.execute("PRAGMA busy_timeout=10000")
         cursor.execute("PRAGMA synchronous=NORMAL")
         # 256MB memory-mapped read region. Pages stay in OS page cache
@@ -31,6 +34,28 @@ def _sqlite_pragmas(dbapi_connection, connection_record):
         cursor.execute("PRAGMA mmap_size=268435456")
         cursor.execute("PRAGMA cache_size=-20000")  # 20MB page cache per connection
         cursor.close()
+
+
+def ensure_wal(db_url: str | None = None) -> str:
+    """Put the SQLite database file in WAL mode and return the resulting mode.
+
+    WAL is stored in the file header, so it only needs setting once rather than
+    on every pooled connection (ISS-075). Uses its own short-lived synchronous
+    connection with a 10 s busy timeout. Returns "" for a non-SQLite URL.
+    """
+    import sqlite3
+    from sqlalchemy.engine import make_url
+
+    url = make_url(db_url or settings.database_url)
+    if not url.drivername.startswith("sqlite") or not url.database or url.database == ":memory:":
+        return ""
+    conn = sqlite3.connect(url.database, timeout=10)
+    try:
+        conn.execute("PRAGMA busy_timeout=10000")
+        row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        return (row[0] if row else "").lower()
+    finally:
+        conn.close()
 
 
 class Base(DeclarativeBase):
@@ -59,6 +84,10 @@ class User(Base):
 
 class Character(Base):
     __tablename__ = "characters"
+    # A removed character's id is never handed to the next one added: token
+    # writes are keyed by this id (ISS-074). Existing installs are rebuilt
+    # once at startup (app/db/character_ids.py).
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True)
     character_id = Column(Integer, unique=True, nullable=False, index=True)
@@ -1614,3 +1643,31 @@ class CharacterPurge(Base):
 # _DEFERRED_INDEX_DDL.
 Index("ix_dscan_results_expires_at", DScanResult.expires_at)
 Index("ix_dscan_results_user_created", DScanResult.user_id, DScanResult.created_at)
+
+
+# ── ISS-070: kept history owners ─────────────────────────────────────────────
+
+class KeptCharacterHistory(Base):
+    """Whose kept history this is, for a character removed with its history kept.
+
+    Self-removal with the history box unticked leaves the character's history
+    (app/auth/purge.py HISTORY_TABLES) keyed by character_id alone. This row
+    remembers who it belongs to. When the character is linked again, the
+    history stays only if the re-add proves it is back with the same owner:
+    the same EVE account (owner_hash), or, when either side's owner is
+    unknown, the same Vigilant account (user_id). Otherwise it is deleted
+    before the link (purge.settle_history_for_relink).
+
+    Deleted in the request that links the character again, and by any removal
+    that deletes the history. `user_id` is nulled when that account is
+    removed (NULLABLE_FKS in app/routes/admin.py), so the row then binds by
+    owner alone.
+    """
+    __tablename__ = "kept_character_histories"
+
+    character_id = Column(Integer, primary_key=True, autoincrement=False)
+    # EVE's CharacterOwnerHash when it was removed; null when unknown.
+    owner_hash = Column(String, nullable=True)
+    # The Vigilant account that removed it.
+    user_id = Column(Integer, nullable=True)
+    removed_at = Column(DateTime, nullable=False)       # naive UTC

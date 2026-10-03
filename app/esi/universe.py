@@ -56,23 +56,25 @@ async def get_structure(client: ESIClient, structure_id: int, db=None) -> dict:
 
 
 async def cache_structure_name(db, structure_id: int, name: str, solar_system_id: int = None):
-    """Persist a structure name to the DB cache."""
-    from sqlalchemy import select
+    """Persist a structure name to the DB cache.
+
+    ISS-085: one upsert rather than a read and then an insert. Two lookups of
+    the same structure can run at once, each on its own session (the location
+    fetcher and the asset resolver in one sync). Both found the row missing,
+    and the second insert failed on the primary key.
+    """
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     from app.db.models import StructureNameCache
-    existing = await db.execute(
-        select(StructureNameCache).where(StructureNameCache.structure_id == structure_id)
+    stmt = sqlite_insert(StructureNameCache).values(
+        structure_id=structure_id, name=name,
+        solar_system_id=solar_system_id,
+        updated_at=datetime.now(timezone.utc),
     )
-    entry = existing.scalar_one_or_none()
-    if entry:
-        entry.name = name
-        if solar_system_id:
-            entry.solar_system_id = solar_system_id
-        entry.updated_at = datetime.now(timezone.utc)
-    else:
-        db.add(StructureNameCache(
-            structure_id=structure_id, name=name,
-            solar_system_id=solar_system_id,
-        ))
+    # As before, a stored system is replaced only by a known one.
+    update = {"name": stmt.excluded.name, "updated_at": stmt.excluded.updated_at}
+    if solar_system_id:
+        update["solar_system_id"] = stmt.excluded.solar_system_id
+    await db.execute(stmt.on_conflict_do_update(index_elements=["structure_id"], set_=update))
     await db.commit()
 
 

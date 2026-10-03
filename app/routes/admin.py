@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Form
+from fastapi import APIRouter, BackgroundTasks, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,8 @@ from app.db.models import (
     UpdateSchedule, UpdateRunReport,
 )
 from app.auth.purge import (
-    REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, remove_character_from_account,
+    REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, clear_esi_cache_in_background,
+    remove_character_from_account, removal_cache_patterns, user_cache_patterns,
 )
 from app.auth.session_guard import rotate_session_epoch
 from app.db.cache import cache_stats, ESICache
@@ -96,6 +97,9 @@ NULLABLE_FKS = (
     ("update_policy", "updated_by"),
     ("update_run_report", "acknowledged_by"),
     ("update_notify_settings", "updated_by"),
+    # ISS-070: the account that removed a character with its history kept. The
+    # record outlives the account and then binds the history by EVE owner alone.
+    ("kept_character_histories", "user_id"),
 )
 
 # (table, column) pairs that hold a users.id but aren't touched by the two
@@ -118,7 +122,8 @@ AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("allowlist", "Allowlist", ("admin_allowlist",)),
     ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
                                  "character_transferred", "user_logout_everywhere",
-                                 "character_purge")),  # ISS-060: background clean-up after a removal
+                                 "character_purge",    # ISS-060: background clean-up after a removal
+                                 "kept_history")),     # ISS-070: kept history on a re-add
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),
@@ -816,18 +821,27 @@ async def admin_player_count_status(
 @router.post("/action/cache-purge", response_class=HTMLResponse)
 async def admin_cache_purge(request: Request, db: AsyncSession = Depends(get_db),
                             admin: User = Depends(require_admin)):
-    result = await db.execute(
-        text("DELETE FROM esi_cache WHERE expires_at < :now"),
-        {"now": datetime.now(timezone.utc).isoformat()},
-    )
-    await db.commit()
-    deleted = result.rowcount
+    # ISS-071/073: the same batched GC as the hourly job, capped so the request
+    # stays short (stored times are naive UTC; the GC binds them as DateTime).
+    from app.db.cache import cache_gc_run
+    gc = await cache_gc_run(max_seconds=20)
+    deleted = gc.removed
 
-    await _log_audit(db, "admin_cache_purge", admin.id,
-                     detail=f"Purged {deleted} expired cache entries",
-                     ip=request.client.host if request.client else None)
+    # Nothing happened when another clean-up held the GC, so no audit row.
+    if not gc.skipped:
+        detail = f"Purged {deleted} expired cache entries"
+        if not gc.complete:
+            detail += " (stopped early; more remain)"
+        await _log_audit(db, "admin_cache_purge", admin.id, detail=detail,
+                         ip=request.client.host if request.client else None)
 
-    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">Purged {deleted} expired cache entries.</div>')
+    if gc.skipped:
+        note = "A cache clean-up is already running; try again shortly."
+    elif not gc.complete:
+        note = f"Purged {deleted} expired cache entries; more remain, and the hourly clean-up will continue."
+    else:
+        note = f"Purged {deleted} expired cache entries."
+    return HTMLResponse(f'<div class="b-empty" style="color:var(--success);">{note}</div>')
 
 
 # ── User management actions ──────────────────────────────────────────────────
@@ -867,7 +881,7 @@ async def admin_set_role(user_id: int, new_role: str, request: Request,
 
 
 @router.post("/action/remove-user/{user_id}", response_class=HTMLResponse)
-async def admin_remove_user(user_id: int, request: Request,
+async def admin_remove_user(user_id: int, request: Request, background_tasks: BackgroundTasks,
                             db: AsyncSession = Depends(get_db),
                             admin: User = Depends(require_admin)):
     if user_id == admin.id:
@@ -915,6 +929,10 @@ async def admin_remove_user(user_id: int, request: Request,
 
     await db.delete(user)
     await db.commit()
+    # ISS-077: everything cached under the user's own principal (their corp
+    # contracts), after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None,
+                              user_cache_patterns(user_id))
     for token in to_revoke:
         await revoke_refresh_token(token)
 
@@ -927,6 +945,7 @@ async def admin_remove_user(user_id: int, request: Request,
 
 @router.post("/action/remove-character/{character_id}", response_class=HTMLResponse)
 async def admin_remove_character(character_id: int, request: Request,
+                                 background_tasks: BackgroundTasks,
                                  db: AsyncSession = Depends(get_db),
                                  admin: User = Depends(require_admin)):
     result = await db.execute(select(Character).where(Character.character_id == character_id))
@@ -938,8 +957,11 @@ async def admin_remove_character(character_id: int, request: Request,
     from app.auth.tokens import issued_to_us, revoke_refresh_token
     old_refresh = char.refresh_token if issued_to_us(char.access_token) else None
     # ISS-060: live state now; ESI cache and history in the background.
+    cache_patterns = removal_cache_patterns(char)
     await remove_character_from_account(db, char, reason=REASON_ADMIN_CHARACTER, delete_history=True)
     await db.commit()
+    # ISS-077: the user's cached corp contracts, after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
     await revoke_refresh_token(old_refresh)   # None (not ours) is a no-op
 
     await _log_audit(db, "admin_remove_character", admin.id, character_id,

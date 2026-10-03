@@ -95,9 +95,16 @@ async def _fetch_chars_mining(chars: list[Character], db: AsyncSession):
     async def _fetch_one(c):
         # Each character needs its own session to avoid concurrent transaction conflicts
         async with AsyncSessionLocal() as char_db:
-            token = await refresh_token(c, char_db)
+            # ISS-081: the caller's Character belongs to another session; refresh
+            # the pilot's own row as loaded by THIS one.
+            fresh = (await char_db.execute(
+                select(Character).where(Character.character_id == c.character_id)
+            )).scalar_one_or_none()
+            if fresh is None:
+                raise ValueError(f"Character {c.character_id} not found")
+            token = await refresh_token(fresh, char_db)
             client = ESIClient(token, db=char_db)
-            entries = await _sync_and_fetch_mining(client, c.character_id, char_db)
+            entries = await _sync_and_fetch_mining(client, c.character_id, char_db, row_id=c.id)
             return c.character_id, c.character_name, entries
 
     results = await asyncio.gather(*[_fetch_one(c) for c in chars], return_exceptions=True)

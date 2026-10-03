@@ -55,9 +55,11 @@ def _pilot(cid=1, name="Pilot One", **kw):
     return base
 
 
-def _sq_entry(finish_in_days: float, start_in_days: float = -1):
-    finish = NOW + timedelta(days=finish_in_days)
-    start = NOW + timedelta(days=start_in_days)
+def _sq_entry(finish_in_days: float, start_in_days: float = -1, base: datetime = NOW):
+    # `base` defaults to the pinned NOW; route tests, whose server reads the
+    # real clock, pass the real current time instead.
+    finish = base + timedelta(days=finish_in_days)
+    start = base + timedelta(days=start_in_days)
     return {
         "skill_id": 1,
         "finished_level": 5,
@@ -170,7 +172,7 @@ def test_skill_queue_critical_pins_against_the_real_skill_warning():
         queue_end = NOW + timedelta(days=finish_in_days)
         queue = [{"finish_date": queue_end.isoformat()}]
         assert skill_queue_state(queue, NOW)[0] == expected
-        assert skill_warning(queue, queue_end) == expected
+        assert skill_warning(queue, queue_end, NOW) == expected
 
 
 # ── account grouping (the queue-idle signal is per-account, not per-pilot) ──
@@ -681,7 +683,7 @@ def test_dismiss_requires_a_session(attn_client):
 def test_get_is_empty_when_nothing_needs_attention(attn_client):
     _seed_user(attn_client, 1)
     _seed_character(attn_client, cid=100, user_id=1, scopes=SQ_SCOPE,
-                    cache=_fresh(SQ_SCOPE, skillqueue_json=json.dumps([_sq_entry(30)]),
+                    cache=_fresh(SQ_SCOPE, skillqueue_json=json.dumps([_sq_entry(30, base=datetime.now(timezone.utc))]),
                                  sync_status="idle"))
     attn_client.login(1)
     r = attn_client.get("/dashboard/attention")

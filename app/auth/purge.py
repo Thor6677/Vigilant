@@ -16,6 +16,19 @@ Two tiers, because they answer different questions:
   row's component. Deleted only when the user ticks "also delete data already
   collected" (T-064: ask every time).
 
+On a narrowing (ISS-072) the small live state is cleared in the request
+(clear_live_state). The ESI response cache is not: finding a character's
+entries is a scan of a large table, so it is cleared after the response
+(clear_esi_cache_in_background) by the same batched helper the removal purge
+uses. If the process stops before that runs, the entries simply expire: every
+authenticated read checks the token's current scopes before it looks at the
+cache (app/esi/scope_guard.py), so a withdrawn scope's entries can't be served
+in the meantime. History, when asked for, is deleted in the request, in
+batches, since it can be a year of wallet snapshots. Work already running
+with the old, wider token (a sync, a page that stores what it read) checks
+scopes_withdrawn inside its own write transaction and drops what it fetched
+(ISS-079), so none of it lands after the clean-up.
+
 Scope is the character's OWN data. Corporation-level data (corp wallet
 history, corp inventory) is shared by the whole corporation and may have been
 fetched with another member's token, so it is left alone; the picker says so.
@@ -33,6 +46,11 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   character, and the character row itself are deleted, and a pending purge is
   recorded in `character_purges`. Token revocation stays with each caller
   (a transfer never revokes; see app/auth/routes.py's module docstring).
+* Right after the response, each caller clears the corp contracts its user
+  has cached for the character's corporation (removal_cache_patterns; for
+  admin remove-user, everything under that user's principal). Those are
+  keyed by user, not character, so the background purge can't find them
+  once the row is gone (ISS-077).
 * In the background (run_due_purges, from the scheduler): the character's
   ESI response cache and, when asked, its history. Both can be large — a
   year of wallet snapshots is ~260k rows, and finding a character's
@@ -45,9 +63,11 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   late rows are purged too. The sync itself also re-checks before its final
   commit (sync_must_not_write).
 * If the character is linked again before its history is gone, the purge
-  stops and keeps what is left, so the re-added pilot's new rows survive.
-  Live-state sweeps are guarded the same way; esi_cache entries are always
-  cleared, since a dropped cache entry is only a refetch.
+  stops, so the re-added pilot's new rows survive. Whatever history was due
+  for deletion has already gone by then: the re-link deletes it first (see
+  "Linking a character again" below). Live-state sweeps are guarded the same
+  way; esi_cache entries are always cleared, since a dropped cache entry is
+  only a refetch.
 * The transfer path is the exception: its caller links the character to the
   new owner in the same request, so a background purge would always find it
   "re-added" and the new owner would inherit the old owner's history. Its
@@ -55,12 +75,28 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   goes (only its esi_cache clean-up is left to the background). If the
   process dies half way, the row is still there under the old owner, so the
   new owner's next sign-in detects the transfer again and finishes it.
+
+Linking a character again (ISS-070)
+-----------------------------------
+History kept by a self-removal is keyed by character_id alone, so whoever
+links the character next would see it, including a later EVE owner. So kept
+history is bound to its owner: the removal records who that was
+(kept_character_histories), and every path that creates a new characters row
+first calls settle_history_for_relink, which keeps the history only when the
+re-add proves the same owner (kept_history_verdict has the rules) and
+otherwise deletes it in batches before the link. History with no record at
+all (kept before this existed) is deleted on any re-add, and so is history a
+pending purge was due to delete. The record goes in the same commit as the
+link (finish_relink), so a crash half way leaves the character unlinked with
+its record, and the retry makes the same decision.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
@@ -68,11 +104,11 @@ from sqlalchemy import delete, exists, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.cache import ESICache
+from app.auth.scopes import PERMISSIONS, parse_scopes
+from app.db.cache import ESICache, principal_key_pattern, user_principal
 from app.db.models import (
     AdminAuditLog, AsyncSessionLocal, Character, CharacterAssetCache, CharacterCorpRoles,
-    CharacterDashboardCache, CharacterPurge, IndustryJobHistory, MiningLedgerEntry,
-    NetWorthSnapshot, WalletSnapshot, WalletTransaction,
+    CharacterDashboardCache, CharacterPurge, KeptCharacterHistory, NetWorthSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,22 +161,33 @@ def _esi_cache_marker(character_id: int) -> str:
     return f"%:@CHARACTER:EVE:{int(character_id)}|%"
 
 
-async def clear_esi_cache(db: AsyncSession, character_id: int) -> int:
-    """Drop every cached authenticated ESI response for this character.
+def narrowing_cache_patterns(user_id: int | None, corporation_id: int | None,
+                             keys: Iterable[str]) -> tuple[str, ...]:
+    """esi_cache entries a narrowing must clear beyond the character's own
+    (ISS-077): LIKE patterns for clear_esi_cache_in_background.
 
-    One DELETE with a leading-wildcard LIKE: a full scan of esi_cache under
-    the write lock. Fine for the permission-narrowing path it serves; the
-    removal paths use the batched background version instead
-    (_clear_esi_cache_batched).
+    Corp contracts and their items are cached under the USER's principal
+    (check_corp_contracts in app/routes/corporations.py), and served while
+    any of the user's pilots in that corporation still holds the scope, so
+    the per-character clear never reaches them. When the narrowed pilot
+    loses corp contracts, that user's entries for its corporation go too; a
+    pilot that still has the scope just fetches them again. The pattern
+    follows app/db/cache.py's key format and matches only that user's
+    entries for that corporation.
     """
-    res = await db.execute(delete(ESICache).where(ESICache.key.like(_esi_cache_marker(character_id))))
-    return res.rowcount or 0
+    if "corp_contracts" not in set(keys) or not user_id or not corporation_id:
+        return ()
+    return (principal_key_pattern(user_principal(user_id),
+                                  f"/corporations/{int(corporation_id)}/contracts/"),)
 
 
 async def clear_live_state(db: AsyncSession, character_id: int,
                            keys: Iterable[str]) -> dict[str, int]:
     """Drop the current-value caches fed by the given permissions. Runs on
-    every narrowing. Caller commits. Returns counts for the audit log."""
+    every narrowing. Caller commits. Returns counts for the audit log.
+
+    Not the ESI response cache: the caller schedules
+    clear_esi_cache_in_background for after the response (ISS-072)."""
     keys = set(keys)
     counts: dict[str, int] = {}
     cid = int(character_id)
@@ -168,10 +215,129 @@ async def clear_live_state(db: AsyncSession, character_id: int,
         counts["asset_cache"] = await _delete(db, CharacterAssetCache, cid)
     if "corp_roles" in keys:
         counts["corp_roles"] = await _delete(db, CharacterCorpRoles, cid)
-    counts["esi_cache"] = await clear_esi_cache(db, cid)
     logger.info("cleared live state for withdrawn permissions %s, character %s: %s",
                 sorted(keys), cid, counts)
     return counts
+
+
+async def clear_esi_cache_in_background(bind, character_id: int | None,
+                                        extra_patterns: Iterable[str] = ()) -> int | None:
+    """Clear a character's ESI response cache after a narrowing (ISS-072),
+    plus any entries matching `extra_patterns` (narrowing_cache_patterns).
+    With `character_id` None, only the patterns: a removal, whose own
+    entries the background purge clears (removal_cache_patterns).
+
+    Scheduled by the SSO callback to run after its response, and by
+    schedule_esi_cache_clear after a narrowing noticed at token refresh
+    (ISS-078), in its own session on `bind` (the caller's engine). It is the
+    removal purge's batched clear: a read-only key scan, then deletes by key
+    in short transactions. It never writes to character_purges, which would
+    tell the resync the callback queued to drop its results
+    (sync_must_not_write). Failures are logged, never raised: nobody is
+    waiting on it.
+    Returns the number of entries deleted, or None if it failed.
+    """
+    cid = None if character_id is None else int(character_id)
+    extra_patterns = tuple(extra_patterns)
+    if cid is None and not extra_patterns:
+        return 0
+    try:
+        async with AsyncSession(bind, expire_on_commit=False) as db:
+            deleted = await _clear_esi_cache_batched(db, cid, extra_patterns)
+    except Exception as e:
+        logger.warning("ESI cache clear failed for character %s %s: %s: %s",
+                       cid, extra_patterns, type(e).__name__, e)
+        return None
+    logger.info("cleared %s ESI cache entries, character %s %s", deleted, cid, extra_patterns)
+    return deleted
+
+
+def removal_cache_patterns(char: Character) -> tuple[str, ...]:
+    """ISS-077 on the removal path: the user's corp-contract entries for the
+    character's corporation, when it shared corp contracts. Taking a
+    character off an account withdraws everything it granted. Read it before
+    the removal (the row goes); the caller clears it after its commit with
+    clear_esi_cache_in_background(bind, None, patterns), never inside the
+    request's write transaction."""
+    return narrowing_cache_patterns(char.user_id, char.corporation_id,
+                                    withdrawn_keys(parse_scopes(char.scopes)))
+
+
+def user_cache_patterns(user_id: int) -> tuple[str, ...]:
+    """Every entry cached under a user's own principal, for removing the
+    whole user (admin remove-user)."""
+    return (principal_key_pattern(user_principal(user_id), ""),)
+
+
+def withdrawn_keys(removed_scopes: Iterable[str]) -> list[str]:
+    """The permissions a narrowing withdraws: each one that lost ANY of its
+    scopes. Shared by the SSO callback and the refresh path (ISS-078)."""
+    removed = set(removed_scopes)
+    return [p.key for p in PERMISSIONS if set(p.scopes) & removed]
+
+
+async def clear_after_refresh_narrowing(bind, character_id: int,
+                                        lost: Iterable[str]) -> list[str] | None:
+    """EVE narrowed a character's authorization on its own and a token
+    refresh just noticed (ISS-078): the stored scopes lost `lost`.
+
+    Runs after the refresh has committed the rotated token and the narrower
+    scopes, in its own session on `bind`, never the refresh caller's. EVE
+    rotates refresh tokens, so the old one is already dead: nothing here may
+    stand between the new one and the database. Clears the withdrawn
+    permissions' live state exactly as a user's narrowing does
+    (clear_live_state) and writes the audit row, in one commit. Never
+    history: only the user can ask for that. A failure is logged, never
+    raised, and leaves the caller's session alone. The moment in which the
+    narrower scopes sit beside values not yet cleared is covered by the
+    writers' own check (scopes_withdrawn).
+
+    Then schedules the ESI cache clear, with the user's corp-contract entries
+    when those were withdrawn (ISS-077). It runs either way: it doesn't
+    depend on the live-state clear. Returns the withdrawn permission keys,
+    or None if the clean-up failed.
+    """
+    cid = int(character_id)
+    lost = set(lost)
+    gone = withdrawn_keys(lost)
+    patterns: tuple[str, ...] = ()
+    done = True
+    try:
+        async with AsyncSession(bind, expire_on_commit=False) as db:
+            owner = (await db.execute(select(Character.user_id, Character.corporation_id)
+                                      .where(Character.character_id == cid))).first()
+            user_id, corporation_id = owner if owner else (None, None)
+            patterns = narrowing_cache_patterns(user_id, corporation_id, gone)
+            await clear_live_state(db, cid, gone)
+            db.add(AdminAuditLog(
+                user_id=user_id, character_id=cid, event_type="permissions_changed",
+                detail=(f"refresh: EVE narrowed the stored authorization: -{len(lost)} scopes; "
+                        f"withdrawn: {', '.join(gone) or 'none'}; history kept"),
+            ))
+            await db.commit()
+    except Exception as e:
+        done = False
+        logger.warning("clean-up after EVE narrowed character %s at refresh failed: %s: %s",
+                       cid, type(e).__name__, e)
+    schedule_esi_cache_clear(bind, cid, patterns)
+    return gone if done else None
+
+
+# Post-refresh ESI cache clears in flight. The event loop holds tasks only
+# weakly, so one nobody references can vanish before it runs.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def schedule_esi_cache_clear(bind, character_id: int,
+                             extra_patterns: Iterable[str] = ()) -> asyncio.Task:
+    """Run clear_esi_cache_in_background as a task of its own, for a caller
+    with no response to hang it on (the refresh path, ISS-078). Returns the
+    task; it is held here until it finishes."""
+    task = asyncio.get_running_loop().create_task(
+        clear_esi_cache_in_background(bind, character_id, extra_patterns))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 async def _delete(db: AsyncSession, model, cid: int) -> int:
@@ -179,21 +345,37 @@ async def _delete(db: AsyncSession, model, cid: int) -> int:
     return res.rowcount or 0
 
 
+# permission key -> history tables purge_history deletes a character's rows from.
+_HISTORY_ROWS: dict[str, tuple[str, ...]] = {
+    "wallet": ("wallet_snapshots", "wallet_transactions"),
+    "industry": ("industry_job_history",),
+    "mining": ("mining_ledger_entries",),
+}
+
+
 async def purge_history(db: AsyncSession, character_id: int,
                         keys: Iterable[str]) -> dict[str, int]:
     """Delete what Vigilant accumulated under the given permissions. Only when
-    the user asked. Caller commits. Returns counts for the audit log."""
+    the user asked. Returns counts for the audit log.
+
+    The rows go PURGE_BATCH_ROWS at a time, each batch its own short
+    transaction committed on `db` (a year of wallet snapshots is ~260k rows,
+    too many for one DELETE under SQLite's one write lock; ISS-072). Whatever
+    the caller had pending goes in the first of those commits. The net-worth
+    adjustment at the end is not committed: the caller commits it.
+
+    The net-worth UPDATEs stay single statements: net_worth_snapshots holds
+    one row per character per day (primary key character_id, date), so they
+    touch at most one row for each day the character has been valued.
+    """
     keys = set(keys)
     counts: dict[str, int] = {}
     cid = int(character_id)
 
-    if "wallet" in keys:
-        counts["wallet_snapshots"] = await _delete(db, WalletSnapshot, cid)
-        counts["wallet_transactions"] = await _delete(db, WalletTransaction, cid)
-    if "industry" in keys:
-        counts["industry_job_history"] = await _delete(db, IndustryJobHistory, cid)
-    if "mining" in keys:
-        counts["mining_ledger_entries"] = await _delete(db, MiningLedgerEntry, cid)
+    for key, tables in _HISTORY_ROWS.items():
+        if key in keys:
+            for table in tables:
+                counts[table], _ = await _delete_in_batches(db, table, cid, only_if_gone=False)
 
     components = [c for k in keys for c in _NETWORTH_COMPONENTS.get(k, ())]
     if components:
@@ -250,7 +432,8 @@ async def purge_character_user_rows(db: AsyncSession, character_id: int) -> int:
 # that was already running wrote one back. The character's ESI response
 # cache belongs here too, but it is keyed by token principal rather than a
 # character_id column and finding its rows is a scan of a large table, so
-# only the background purge clears it.
+# only background work clears it: the purge after a removal, and
+# clear_esi_cache_in_background after a narrowing.
 LIVE_STATE_TABLES: tuple[str, ...] = (
     "character_dashboard_cache",
     "character_asset_cache",
@@ -287,6 +470,8 @@ KEPT_TABLES: dict[str, str] = {
 REMOVAL_TABLES: dict[str, str] = {
     "characters": "the character row itself, deleted by the removal request",
     "character_purges": "the pending-purge queue; the background purge deletes its own row",
+    "kept_character_histories": ("whose kept history it is (ISS-070); written by a "
+                                 "self-removal that keeps history, deleted on re-link"),
 }
 
 REASON_SELF = "self"
@@ -362,15 +547,22 @@ async def _delete_in_batches(db: AsyncSession, table: str, cid: int, *,
         await _between_batches()
 
 
-async def _clear_esi_cache_batched(db: AsyncSession, cid: int) -> int:
-    """clear_esi_cache without holding the write lock through a table scan.
+async def _clear_esi_cache_batched(db: AsyncSession, cid: int | None,
+                                   extra_patterns: tuple[str, ...] = ()) -> int:
+    """Drop every cached authenticated ESI response for this character, and
+    any entry matching `extra_patterns`, without holding the write lock
+    through a table scan.
 
     The LIKE is a read-only SELECT of keys (a WAL reader never blocks the
     writer), then the rows go by primary key, ESI_CACHE_BATCH_KEYS per
-    transaction.
+    transaction. The only way esi_cache is cleared per character: by the
+    removal purge, and after a narrowing (clear_esi_cache_in_background).
     """
-    keys = list((await db.execute(
-        select(ESICache.key).where(ESICache.key.like(_esi_cache_marker(cid))))).scalars())
+    patterns = ((_esi_cache_marker(cid),) if cid is not None else ()) + tuple(extra_patterns)
+    if not patterns:
+        return 0
+    match = or_(*(ESICache.key.like(p) for p in patterns))
+    keys = list((await db.execute(select(ESICache.key).where(match))).scalars())
     deleted = 0
     for i in range(0, len(keys), ESI_CACHE_BATCH_KEYS):
         res = await db.execute(
@@ -404,6 +596,173 @@ async def _record_purge(db: AsyncSession, cid: int, *, reason: str, delete_histo
     await db.execute(stmt)
 
 
+# ── ISS-070: kept history goes back only to its owner ───────────────────────
+
+def owner_from_token(access_token: str | None) -> str | None:
+    """The EVE account that owns a character, from an access token's `owner`
+    claim (EVE's CharacterOwnerHash); None when the token can't say.
+
+    Not signature-verified and expiry doesn't matter: the claim is what EVE
+    put in a token Vigilant got from SSO itself. Used at sign-in (with
+    /oauth/verify as the fallback) and at removal, for a row whose owner_hash
+    was never filled in.
+    """
+    try:
+        payload_b64 = (access_token or "").split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        owner = json.loads(base64.urlsafe_b64decode(payload_b64)).get("owner")
+    except Exception:
+        return None
+    return owner if isinstance(owner, str) and owner else None
+
+
+async def _remember_kept_history(db: AsyncSession, cid: int, *, owner_hash: str | None,
+                                 user_id: int | None) -> None:
+    stmt = sqlite_insert(KeptCharacterHistory).values(
+        character_id=cid, owner_hash=owner_hash, user_id=user_id, removed_at=_utcnow())
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["character_id"],
+        set_={"owner_hash": stmt.excluded.owner_hash, "user_id": stmt.excluded.user_id,
+              "removed_at": stmt.excluded.removed_at},
+    )
+    await db.execute(stmt)
+
+
+async def _forget_kept_history(db: AsyncSession, cid: int) -> None:
+    await db.execute(delete(KeptCharacterHistory)
+                     .where(KeptCharacterHistory.character_id == cid)
+                     .execution_options(synchronize_session=False))
+
+
+KEEP_SAME_OWNER = "same_owner"
+KEEP_SAME_ACCOUNT = "same_account"
+DROP_OTHER_OWNER = "other_owner"
+DROP_UNKNOWN_OWNER = "unknown_owner"
+DROP_LEGACY = "legacy"
+DROP_PENDING_PURGE = "pending_purge"
+
+# For the audit row. Never the owner hashes themselves.
+_RELINK_REASONS = {
+    KEEP_SAME_OWNER: "the same EVE account added it back",
+    KEEP_SAME_ACCOUNT: "its EVE owner is unknown, and the same Vigilant account added it back",
+    DROP_OTHER_OWNER: "another EVE account added it",
+    DROP_UNKNOWN_OWNER: "its EVE owner is unknown, and another Vigilant account added it",
+    DROP_LEGACY: "it was kept before Vigilant recorded whose history it is",
+    DROP_PENDING_PURGE: "a pending removal had already asked for it to be deleted",
+}
+
+
+def kept_history_verdict(record, *, pending_delete: bool, owner_hash: str | None,
+                         user_id: int | None) -> tuple[bool, str]:
+    """Whether a character's kept history survives it being linked again:
+    (keep, one of the KEEP_/DROP_ reasons).
+
+    `record` is its KeptCharacterHistory row (or anything with `owner_hash`
+    and `user_id`), None when there is none; `pending_delete` says a
+    character_purges row is still due to delete its history; `owner_hash` is
+    the new sign-in's EVE owner and `user_id` the Vigilant account linking it
+    (None for an account being created by this sign-in). Kept only when it is
+    provably the same owner:
+
+    1. both owner hashes are known and equal; or
+    2. either is unknown, and the same Vigilant account is adding it back.
+
+    Anything else deletes it, including history with no record at all (kept
+    before records existed) and history a pending purge was due to delete.
+    """
+    if pending_delete:
+        return False, DROP_PENDING_PURGE
+    if record is None:
+        return False, DROP_LEGACY
+    if record.owner_hash and owner_hash:
+        return (True, KEEP_SAME_OWNER) if record.owner_hash == owner_hash else (False, DROP_OTHER_OWNER)
+    if record.user_id is not None and record.user_id == user_id:
+        return True, KEEP_SAME_ACCOUNT
+    return False, DROP_UNKNOWN_OWNER
+
+
+@dataclass
+class RelinkHistory:
+    """What settle_history_for_relink decided, for finish_relink."""
+    character_id: int
+    had_record: bool
+    keep: bool
+    reason: str
+    deleted: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def noop(self) -> bool:
+        """Nothing was kept or deleted: a character with no history at all."""
+        return not self.had_record and not self.deleted
+
+
+async def _has_rows(db: AsyncSession, table: str, cid: int) -> bool:
+    """One indexed lookup (every HISTORY_TABLES table indexes character_id)."""
+    return (await db.execute(text(f"SELECT 1 FROM {table} WHERE character_id = :cid LIMIT 1"),
+                             {"cid": cid})).first() is not None
+
+
+async def settle_history_for_relink(db: AsyncSession, character_id: int, *,
+                                    owner_hash: str | None,
+                                    user_id: int | None) -> RelinkHistory:
+    """Decide, before a NEW characters row is created for `character_id`,
+    whether the history left under that id goes with it (kept_history_verdict),
+    and if not, delete it now.
+
+    The deletes run PURGE_BATCH_ROWS at a time, each batch its own commit on
+    `db`, so nothing else may be pending in the session: call this before the
+    new user or character is added. For a character with no history it is a
+    few indexed reads and writes nothing. The kept-history record stays until
+    finish_relink drops it in the same commit as the link, so a crash part way
+    leaves the character unlinked with its record, and the retry decides the
+    same way and finishes the deletes.
+    """
+    if db.new or db.dirty or db.deleted:
+        raise RuntimeError("settle_history_for_relink commits; call it with nothing pending")
+    cid = int(character_id)
+    record = (await db.execute(select(KeptCharacterHistory).where(
+        KeptCharacterHistory.character_id == cid))).scalar_one_or_none()
+    pending_delete = bool((await db.execute(select(CharacterPurge.delete_history).where(
+        CharacterPurge.character_id == cid))).scalar())
+    keep, reason = kept_history_verdict(record, pending_delete=pending_delete,
+                                        owner_hash=owner_hash, user_id=user_id)
+    outcome = RelinkHistory(character_id=cid, had_record=record is not None,
+                            keep=keep, reason=reason)
+    if not keep:
+        for table in HISTORY_TABLES:
+            if await _has_rows(db, table, cid):
+                outcome.deleted[table], _ = await _delete_in_batches(
+                    db, table, cid, only_if_gone=False)
+    if not outcome.noop:
+        logger.info("character %s linked again: history %s (%s): %s", cid,
+                    "kept" if keep else "deleted", reason, outcome.deleted)
+    return outcome
+
+
+async def finish_relink(db: AsyncSession, outcome: RelinkHistory, *, user_id: int | None,
+                        ip: str | None = None) -> None:
+    """In the transaction that creates the new characters row: drop the
+    kept-history record and audit what settle_history_for_relink did.
+    Doesn't commit; the caller's link commit carries it."""
+    cid = outcome.character_id
+    if outcome.had_record:
+        await _forget_kept_history(db, cid)
+    if outcome.noop:
+        return
+    why = _RELINK_REASONS[outcome.reason]
+    if outcome.keep:
+        detail = f"Added again; its kept history stays because {why}"
+    else:
+        rows = ", ".join(f"{t}={n}" for t, n in sorted(outcome.deleted.items()) if n)
+        detail = (f"Added again; its kept history was deleted before linking because {why}. "
+                  f"Rows deleted: {rows or 'none left'}")
+    db.add(AdminAuditLog(
+        user_id=user_id, character_id=cid,
+        event_type="kept_history_restored" if outcome.keep else "kept_history_deleted",
+        detail=detail, ip_address=ip,
+    ))
+
+
 async def remove_character_from_account(db: AsyncSession, char: Character, *,
                                         reason: str, delete_history: bool) -> dict[str, int]:
     """Take a character off its account: the one helper every removal path calls.
@@ -418,12 +777,19 @@ async def remove_character_from_account(db: AsyncSession, char: Character, *,
     `delete_history`, the history is deleted here instead, in batches that
     each commit on `db`, before the row goes (see the module docstring for
     why); rows a running sync wrote between batches go in the caller's commit.
+
+    ISS-070: history that is kept gets a kept_character_histories record of
+    who it belongs to (the EVE owner and this account), so that only that
+    owner gets it back when the character is linked again. A removal that
+    deletes the history drops any such record.
     """
     if reason not in REMOVAL_REASONS:
         raise ValueError(f"unknown removal reason {reason!r}")
     cid = int(char.character_id)
     history_now = reason == REASON_TRANSFER and delete_history
     counts: dict[str, int] = {}
+    owner_hash = char.owner_hash or owner_from_token(char.access_token)
+    removed_by = char.user_id
 
     if history_now:
         for table in HISTORY_TABLES:
@@ -437,6 +803,10 @@ async def remove_character_from_account(db: AsyncSession, char: Character, *,
     await db.delete(char)
     await _record_purge(db, cid, reason=reason,
                         delete_history=delete_history and not history_now)
+    if delete_history:
+        await _forget_kept_history(db, cid)
+    else:
+        await _remember_kept_history(db, cid, owner_hash=owner_hash, user_id=removed_by)
     logger.info("removing character %s (%s, history %s): %s", cid, reason,
                 "deleted now" if history_now else ("queued for deletion" if delete_history else "kept"),
                 counts)
@@ -462,6 +832,60 @@ async def sync_must_not_write(db: AsyncSession, character_id: int, sync_started:
     removed = exists().where(CharacterPurge.character_id == cid, CharacterPurge.removed_at >= since)
     with db.no_autoflush:
         return bool((await db.execute(select(or_(gone, removed)))).scalar())
+
+
+async def scopes_withdrawn(db: AsyncSession, character_id: int, scopes) -> bool:
+    """True when any of `scopes` is missing from the character's stored scopes
+    now (ISS-079).
+
+    The narrowing counterpart of sync_must_not_write, for work that fetched
+    with an access token it read earlier: a sync, a fetcher that commits as it
+    goes, a page that stores what it read. After a narrowing the old, wider
+    token stays usable at ESI for up to 20 minutes, so what such work fetched
+    may come from a permission the user has just withdrawn, after the
+    narrowing cleared live state and maybe purged history. `scopes` are the
+    ones the write depends on (for a whole sync, every scope it started with).
+    Widening, or no change, never makes this true. Nor does a character that
+    is gone: removal has its own guard (sync_must_not_write) and its own
+    clean-up (the background purge), which this leaves exactly as they were.
+
+    Ask it inside the write's own transaction, after its first write
+    statement: SQLite's write lock is then held from this check to the commit,
+    so a narrowing can't commit in between (its scope change waits for ours).
+    Runs with autoflush off, like sync_must_not_write. The lookup is the
+    unique index on characters.character_id.
+    """
+    wanted = parse_scopes(scopes)
+    with db.no_autoflush:
+        row = (await db.execute(select(Character.scopes).where(
+            Character.character_id == int(character_id)))).first()
+    if row is None:
+        return False
+    return bool(wanted - parse_scopes(row[0]))
+
+
+async def fetch_must_not_write(db: AsyncSession, character_id: int, row_id: int,
+                               scopes) -> bool:
+    """True when rows fetched for a character while it was linked as
+    characters row `row_id` must not be written now (ISS-082, ISS-079).
+
+    That is when the character has since been taken off its account (no
+    row), or linked again (a different row: an EVE owner change, whose new
+    owner's sign-in creates a new row, or a re-add; characters.id is never
+    reused), or narrowed (any of `scopes` is no longer stored). A fetch holds
+    the token it read at the start, so in the first two cases what it fetched
+    belongs to the old link, and the new owner's scopes usually still cover
+    it. For writers that commit as they go, outside _sync_fields' final check
+    (sync_must_not_write covers that one). Like scopes_withdrawn, ask it
+    inside the write's own transaction after its first write statement; it
+    runs with autoflush off.
+    """
+    with db.no_autoflush:
+        row = (await db.execute(select(Character.id, Character.scopes).where(
+            Character.character_id == int(character_id)))).first()
+    if row is None or row[0] != row_id:
+        return True
+    return bool(parse_scopes(scopes) - parse_scopes(row[1]))
 
 
 async def run_due_purges(now: datetime | None = None, *, session_factory=None) -> list[dict]:
@@ -497,6 +921,7 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
                      reason: str) -> dict:
     counts: dict[str, int] = {}
     outcome = "done"
+    finished_by_relink = False
     async with factory() as db:
         counts["esi_cache"] = await _clear_esi_cache_batched(db, cid)
         for table in LIVE_STATE_TABLES:
@@ -508,7 +933,14 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
             for table in HISTORY_TABLES:
                 counts[table], _ = await _delete_in_batches(db, table, cid, only_if_gone=True)
                 if await _is_linked(db, cid):
-                    outcome = "abandoned"
+                    # ISS-070: a re-add while this purge was pending deletes the
+                    # history itself before linking (settle_history_for_relink),
+                    # so finding none left means the job is done, not abandoned.
+                    remaining = [t for t in HISTORY_TABLES if await _has_rows(db, t, cid)]
+                    if remaining:
+                        outcome = "abandoned"
+                    else:
+                        finished_by_relink = True
                     break
 
         # Only this job's row: a removal recorded while it ran moved
@@ -516,6 +948,8 @@ async def _run_purge(factory, cid: int, removed_at: datetime, delete_history: bo
         await db.execute(delete(CharacterPurge).where(
             CharacterPurge.character_id == cid, CharacterPurge.removed_at == removed_at))
         history = "deleted" if delete_history else "kept"
+        if finished_by_relink:
+            history = "deleted (finished when the character was linked again)"
         if outcome == "abandoned":
             history = "kept (the character was linked again before it was all deleted)"
         detail = (f"Background clean-up after removal ({reason}); history {history}. "

@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import user_agent
 from app.db.models import get_db, Character, CharacterDashboardCache, WalletSnapshot, CharacterAssetCache, CharacterCorpRoles, AsyncSessionLocal, PlayerCountSnapshot, WalletTransaction, CorpWalletSnapshot
@@ -1341,8 +1342,9 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
     """Fetch + persist wallet transactions (buy/sell fills) per character.
 
     Unlike the other fetchers this one WRITES its results directly (into
-    `wallet_transactions`) using the per-fetcher `db` session handed to it by
-    `_sync_fields._run_fetcher`, then returns a lightweight marker
+    `wallet_transactions`), each pilot in a session of its own on the engine
+    of the `db` handed to it by `_sync_fields._run_fetcher` (ISS-079), then
+    returns a lightweight marker
     ``{character_id: (rows_inserted, warning)}`` through the normal return path.
     Mirrors `fetch_assets_data`'s shape but persists instead of handing JSON
     back for the caller to store — transactions are append-only immutable rows,
@@ -1355,6 +1357,7 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
     async def _get(char):
         if not _has_scope(char, "esi-wallet.read_character_wallet.v1"):
             return char.character_id, 0, "missing_scope"
+        row_id = char.id   # the link this fetch is for (ISS-082), read before its token
         client, err = await _client_for(char)
         if not client:
             return char.character_id, 0, err
@@ -1362,12 +1365,16 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
         # cache so we get live fills each cycle and don't pollute esi_cache with
         # one-shot backfill pages.
         client.cache_enabled = False
+        # ISS-079: this pilot's reads and writes get a session of their own,
+        # so dropping its page (a rollback) can't roll back or expire anything
+        # another pilot in the same call holds.
+        tdb = AsyncSession(db.bind, expire_on_commit=False)
         try:
-            before = (await db.execute(
+            before = (await tdb.execute(
                 select(func.count()).select_from(WalletTransaction)
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar() or 0
-            existing_max = (await db.execute(
+            existing_max = (await tdb.execute(
                 select(func.max(WalletTransaction.transaction_id))
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar()
@@ -1390,8 +1397,20 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                 } for t in batch]
                 stmt = sqlite_insert(WalletTransaction).values(rows)
                 stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
-                await db.execute(stmt)
-                await db.commit()
+                await tdb.execute(stmt)
+                # ISS-079/082: this page may have come from the old token of
+                # a narrowing that withdrew the wallet, or of a link that has
+                # since ended (removed, or now another EVE owner's). Asked
+                # after the INSERT, which holds the write lock until we
+                # commit or roll back.
+                from app.auth.purge import fetch_must_not_write
+                cid = char.character_id
+                if await fetch_must_not_write(tdb, cid, row_id, (perms.WALLET,)):
+                    await tdb.rollback()
+                    logger.info("Wallet transactions for char %s dropped: permission withdrawn "
+                                "or character unlinked while fetched", cid)
+                    return cid, 0, None
+                await tdb.commit()
 
                 min_id = min(t["transaction_id"] for t in batch)
                 # Reached data we already have — stop paging further back.
@@ -1399,7 +1418,7 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
                     break
                 from_id = min_id
 
-            after = (await db.execute(
+            after = (await tdb.execute(
                 select(func.count()).select_from(WalletTransaction)
                 .where(WalletTransaction.character_id == char.character_id)
             )).scalar() or 0
@@ -1407,6 +1426,8 @@ async def fetch_wallet_transactions_data(characters: list[Character], db: AsyncS
         except Exception as e:
             logger.warning("Wallet transactions fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, 0, f"esi_error: {type(e).__name__}"
+        finally:
+            await tdb.close()
 
     return {cid: (val, warn) for cid, val, warn in await asyncio.gather(*[_get(c) for c in characters])}
 
@@ -1440,7 +1461,7 @@ async def fetch_orders_data(characters: list[Character], db: AsyncSession) -> di
 
 
 async def _persist_completed_jobs(db: AsyncSession, character_id: int,
-                                   jobs: list[dict]) -> int:
+                                   jobs: list[dict], *, row_id: int | None = None) -> int:
     """Persist delivered manufacturing/reaction jobs with build cost valued
     at completion date (Industry P&L, T-041 item 2). Idempotent via
     insert-or-ignore on job_id; NULL build_costs retry valuation here on
@@ -1542,6 +1563,19 @@ async def _persist_completed_jobs(db: AsyncSession, character_id: int,
         if cost is not None:
             row.build_cost, row.cost_basis = cost, basis
 
+    # ISS-079/082: the jobs may have come from the old token of a narrowing
+    # that withdrew industry, or, given the characters row `row_id` the fetch
+    # started from, of a link that has since ended (removed, or now another
+    # EVE owner's). Asked after the flush, which holds the write lock until
+    # we commit or roll back.
+    from app.auth.purge import fetch_must_not_write, scopes_withdrawn
+    await db.flush()
+    if (await fetch_must_not_write(db, character_id, row_id, (perms.JOBS,)) if row_id is not None
+            else await scopes_withdrawn(db, character_id, (perms.JOBS,))):
+        await db.rollback()
+        logger.info("Completed jobs for char %s dropped: permission withdrawn "
+                    "or character unlinked while fetched", character_id)
+        return 0
     await db.commit()
     return inserted
 
@@ -1560,6 +1594,7 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
     async def _get(char):
         if not _has_scope(char, "esi-industry.read_character_jobs.v1"):
             return char.character_id, None, "missing_scope"
+        row_id = char.id   # the link this fetch is for (ISS-082), read before its token
         client, err = await _client_for(char)
         if not client:
             return char.character_id, None, err
@@ -1578,11 +1613,16 @@ async def fetch_industry_jobs_data(characters: list[Character], db: AsyncSession
                 "job_id": j.get("job_id"),
                 "end_date": j.get("end_date"),
             } for j in jobs or [] if j.get("status") in ("active", "paused", "ready")]
+            cid = char.character_id
             try:
-                await _persist_completed_jobs(db, char.character_id, jobs or [])
+                # ISS-079: a session of its own, so a dropped persist (a
+                # rollback) can't roll back or expire anything another pilot
+                # in the same call holds.
+                async with AsyncSession(db.bind, expire_on_commit=False) as jdb:
+                    await _persist_completed_jobs(jdb, cid, jobs or [], row_id=row_id)
             except Exception as e:
-                logger.warning("Completed jobs persist failed for char %s: %s", char.character_id, e)
-            return char.character_id, trimmed, None
+                logger.warning("Completed jobs persist failed for char %s: %s", cid, e)
+            return cid, trimmed, None
         except Exception as e:
             logger.warning("Industry jobs fetch failed for char %s: %s", char.character_id, e)
             return char.character_id, None, f"esi_error: {type(e).__name__}"
@@ -1631,6 +1671,26 @@ async def _sync_task(character_id: int):
             await _sync_task_inner(character_id)
 
 
+async def _record_sync_failure(db: AsyncSession, character_id: int, message: str) -> None:
+    """ISS-084: mark a sync that stopped before its own commit as failed,
+    and commit nothing else.
+
+    The session may still hold the sync's results, pending or already
+    flushed into its open write transaction. Committing them here would skip
+    the removal (ISS-060) and narrowing (ISS-079) checks that guard the
+    sync's own commit, so they are rolled back first, and the cache row is
+    read afresh to carry the status alone.
+    """
+    await db.rollback()
+    cache = (await db.execute(
+        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
+    )).scalar_one_or_none()
+    if cache:
+        cache.sync_status = "error"
+        cache.sync_error = message
+        await db.commit()
+
+
 async def _sync_task_inner(character_id: int):
     """Inner sync body — always resets DB sync_status on exit."""
     async with AsyncSessionLocal() as db:
@@ -1674,9 +1734,7 @@ async def _sync_task_inner(character_id: int):
             logger.warning("Sync for char %s timed out after %ds", character_id, _SYNC_TIMEOUT)
             try:
                 if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = f"timeout after {_SYNC_TIMEOUT}s"
-                    await db.commit()
+                    await _record_sync_failure(db, character_id, f"timeout after {_SYNC_TIMEOUT}s")
             except Exception:
                 pass
         except (asyncio.CancelledError, BaseException) as e:
@@ -1686,23 +1744,14 @@ async def _sync_task_inner(character_id: int):
             logger.warning("Sync for char %s cancelled/crashed: %s", character_id, type(e).__name__)
             try:
                 if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = f"{type(e).__name__}: {str(e)[:300]}"
-                    await db.commit()
+                    await _record_sync_failure(db, character_id, f"{type(e).__name__}: {str(e)[:300]}")
             except Exception:
                 pass
             if isinstance(e, asyncio.CancelledError):
                 raise  # re-raise so asyncio cancellation propagates
         except Exception as e:
             try:
-                cache_result = await db.execute(
-                    select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)
-                )
-                cache = cache_result.scalar_one_or_none()
-                if cache:
-                    cache.sync_status = "error"
-                    cache.sync_error = str(e)[:500]
-                    await db.commit()
+                await _record_sync_failure(db, character_id, str(e)[:500])
             except Exception:
                 pass
         finally:
@@ -1721,6 +1770,57 @@ async def _sync_task_inner(character_id: int):
                     await db.commit()
             except Exception:
                 pass
+
+
+async def _drop_if_narrowed(db: AsyncSession, character_id: int, started_scopes: str) -> bool:
+    """ISS-079: roll the sync back and say so when a scope it started with
+    is no longer stored (app.auth.purge.scopes_withdrawn)."""
+    from app.auth.purge import scopes_withdrawn
+    if not await scopes_withdrawn(db, character_id, started_scopes):
+        return False
+    await db.rollback()
+    logger.info("Sync for char %s dropped: permissions narrowed while it ran", character_id)
+    return True
+
+
+async def _fetch_public_affiliation(character_id: int, corporation_id, alliance_id):
+    """ISS-083: the network half of the sync's corp/alliance refresh.
+
+    _sync_fields calls this before its results loop changes any row on its
+    session. After such a change the next query autoflushes, which opens the
+    write transaction and holds SQLite's single write lock until the final
+    commit. These calls, and a 502 backoff or a 429's retry-after with them,
+    used to run inside it and stall every other writer.
+
+    Makes no writes. `corporation_id` and `alliance_id` are the character's
+    current ones. Returns (corp, alliance) for the caller to apply, each an
+    (id, name) pair, or None when it is unchanged. Returns None outright when
+    the public lookup itself failed, which changes nothing.
+    """
+    try:
+        pub_client = ESIClient("")
+        pub_info = await esi_char.get_public_info(pub_client, character_id)
+        new_corp_id = pub_info.get("corporation_id")
+        new_alliance_id = pub_info.get("alliance_id")
+        corp = alliance = None
+        if new_corp_id and new_corp_id != corporation_id:
+            try:
+                corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
+                corp = (new_corp_id, corp_info.get("name"))
+            except Exception:
+                corp = (new_corp_id, None)
+        if new_alliance_id != alliance_id:
+            alliance = (new_alliance_id, None)
+            if new_alliance_id:
+                try:
+                    ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
+                    alliance = (new_alliance_id, ally_info.get("name"))
+                except Exception:
+                    pass
+        return corp, alliance
+    except Exception as pub_err:
+        logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+        return None
 
 
 async def _sync_fields(character_id: int, char, cache, asset_cache, db):
@@ -1758,6 +1858,7 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning("Corrupt %s cache for char %s: %s", sf, character_id, e)
 
+    affiliation = None  # ISS-083: fetched after the gather, applied after the loop
     if stale_fields:
         # Each gathered fetcher gets its own AsyncSessionLocal() session and
         # its own Character row. The location and assets fetchers write/commit
@@ -1778,6 +1879,12 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
             *[_run_fetcher(field) for field in stale_fields],
             return_exceptions=True,
         )
+        # ISS-083: the public corp/alliance lookups are network calls, so they
+        # run here, before the loop below changes rows on `db` and the write
+        # lock is taken. Their results are applied after the loop, as before.
+        if "location" in stale_fields:
+            affiliation = await _fetch_public_affiliation(
+                character_id, char.corporation_id, char.alliance_id)
         for field, result in zip(stale_fields, results):
             if isinstance(result, ScopeNotGranted):
                 # The guard refused a call this token may not make. Not a sync
@@ -1853,34 +1960,15 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                 warnings[field] = warn
             field_synced[field] = now.isoformat()
 
-    # Refresh corp/alliance info from public endpoint (no scope needed)
-    if "location" in stale_fields:
-        try:
-            pub_client = ESIClient("")
-            pub_info = await esi_char.get_public_info(pub_client, character_id)
-            new_corp_id = pub_info.get("corporation_id")
-            new_alliance_id = pub_info.get("alliance_id")
-            if new_corp_id and new_corp_id != char.corporation_id:
-                try:
-                    corp_info = await esi_corp.get_corporation_info(pub_client, new_corp_id)
-                    char.corporation_id = new_corp_id
-                    char.corporation_name = corp_info.get("name")
-                except Exception:
-                    char.corporation_id = new_corp_id
-                    char.corporation_name = None
-                logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, new_corp_id)
-            if new_alliance_id != char.alliance_id:
-                char.alliance_id = new_alliance_id
-                if new_alliance_id:
-                    try:
-                        ally_info = await esi_corp.get_alliance_info(pub_client, new_alliance_id)
-                        char.alliance_name = ally_info.get("name")
-                    except Exception:
-                        char.alliance_name = None
-                else:
-                    char.alliance_name = None
-        except Exception as pub_err:
-            logger.debug("Public info refresh failed for char %s: %s", character_id, pub_err)
+    # Refresh corp/alliance info from public endpoint (no scope needed).
+    # ISS-083: fetched before the loop (_fetch_public_affiliation); applied here.
+    if affiliation is not None:
+        corp, alliance = affiliation
+        if corp is not None:
+            char.corporation_id, char.corporation_name = corp
+            logger.info("Corp change for char %s: now %s (%s)", character_id, char.corporation_name, char.corporation_id)
+        if alliance is not None:
+            char.alliance_id, char.alliance_name = alliance
 
     cache.field_synced_json = json.dumps(field_synced)
     cache.sync_warnings_json = json.dumps(warnings) if warnings else None
@@ -1893,6 +1981,22 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
     if await sync_must_not_write(db, character_id, now):
         await db.rollback()
         logger.info("Sync for char %s dropped: character removed while it ran", character_id)
+        return
+    # ISS-079: nor if its permissions were narrowed while it ran, since it may
+    # have fetched with the old, wider token. All of it goes; the next sync
+    # uses the new token. Asked before the flush (withdrawing assets or corp
+    # roles deletes rows this sync would update) and again after it, when
+    # this session holds SQLite's write lock and no narrowing can commit
+    # before ours.
+    if await _drop_if_narrowed(db, character_id, scopes):
+        return
+    try:
+        await db.flush()
+    except StaleDataError:
+        await db.rollback()
+        logger.info("Sync for char %s dropped: a row it updates was deleted while it ran", character_id)
+        return
+    if await _drop_if_narrowed(db, character_id, scopes):
         return
     await db.commit()
 
@@ -2112,6 +2216,17 @@ async def _clean_stuck_characters():
     return stuck_cids
 
 
+async def _run_cache_gc() -> None:
+    """Hourly batched ESI cache GC, run as its own task (ISS-073). Never raises."""
+    try:
+        from app.db.cache import cache_gc
+        removed = await cache_gc()
+        if removed:
+            logger.info("ESI cache GC removed %d expired rows", removed)
+    except Exception as e:
+        logger.warning("Cache GC error: %s", e)
+
+
 async def _background_scheduler():
     """Runs forever. Every 60s, find all characters with stale fields and sync them.
 
@@ -2171,16 +2286,14 @@ async def _background_scheduler():
                     logger.warning("Corp wallet snapshot error: %s", e)
 
             # ESI cache GC (every hour) — drops rows whose expires_at has passed.
+            # ISS-073: its own task (like the character purge below), so a big
+            # backlog never holds up this loop; app.db.cache allows one GC at a time.
             if not hasattr(_background_scheduler, '_last_cache_gc') or \
                (now - _background_scheduler._last_cache_gc).total_seconds() >= 3600:
-                try:
-                    from app.db.cache import cache_gc
-                    removed = await cache_gc()
-                    if removed:
-                        logger.info("ESI cache GC removed %d expired rows", removed)
+                _gc_task = getattr(_background_scheduler, '_cache_gc_task', None)
+                if _gc_task is None or _gc_task.done():
                     _background_scheduler._last_cache_gc = now
-                except Exception as e:
-                    logger.warning("Cache GC error: %s", e)
+                    _background_scheduler._cache_gc_task = asyncio.create_task(_run_cache_gc())
 
             # Daily PRAGMA optimize (T-038) — incremental planner-stat upkeep.
             # analysis_limit bounds the work so this is a sub-second write txn

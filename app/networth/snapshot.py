@@ -41,10 +41,11 @@ from datetime import date as date_cls, datetime, timezone
 import json
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import scopes as perms
 from app.db.models import (
     AsyncSessionLocal,
     Character,
@@ -212,6 +213,9 @@ async def take_snapshots(
         return {"date": on_date.isoformat(), "written": 0, "skipped": 0}
 
     cids = [c.character_id for c in characters]
+    # Which link (characters row, ISS-082) and what it granted (ISS-079),
+    # read before the live state is.
+    before = {c.character_id: (c.id, c.scopes) for c in characters}
     dash_rows = (await db.execute(
         select(CharacterDashboardCache).where(
             CharacterDashboardCache.character_id.in_(cids)
@@ -244,6 +248,7 @@ async def take_snapshots(
 
     written = 0
     skipped = 0
+    written_before: dict[int, tuple[int, str]] = {}
     for char in characters:
         values = build_snapshot_values(
             char,
@@ -272,9 +277,70 @@ async def take_snapshots(
         )
         await db.execute(stmt)
         written += 1
+        written_before[char.character_id] = before[char.character_id]
 
+    await _drop_withdrawn_components(db, written_before, on_date)
     await db.commit()
     return {"date": on_date.isoformat(), "written": written, "skipped": skipped}
+
+
+# ISS-079: the one scope that feeds each component, through the sync field
+# that fills its live state (FIELD_SCOPES in app/dashboard/staleness.py):
+# wallet balance, open orders, assets, and industry jobs (JOBS only; a pilot
+# that never granted blueprints still has its jobs valued).
+_COMPONENT_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (perms.WALLET, ("wallet",)),
+    (perms.ORDERS, ("escrow",)),
+    (perms.ASSETS, ("assets_value", "unpriced_count")),
+    (perms.JOBS, ("industry_value",)),
+)
+
+
+async def _drop_withdrawn_components(
+    db: AsyncSession, before: dict[int, tuple[int, str]], on_date: date_cls
+) -> None:
+    """Settle the rows just written for `on_date` against what changed while
+    this run read its inputs; `before` maps each character to the characters
+    row and scopes it had then.
+
+    * Narrowed (ISS-079): every component whose scope the character held then
+      and has lost since is zeroed. A narrowing that lands between this run
+      reading the live state and writing the rows would otherwise leave the
+      withdrawn values in today's row, after the narrowing's own clean-up
+      (and its purge, if asked) had already run. The row stays, without
+      them: a missing day would show as a dip in the summed chart.
+      Characters that never granted a scope are left as they are.
+    * Taken off its account, or linked again as a new row (an EVE owner
+      change, ISS-082): the row goes. It valued the old link's live state,
+      and under the character id it would count for whoever has the
+      character now.
+
+    Runs after the upserts, so this session holds SQLite's write lock and
+    neither can commit between this read and the commit.
+    """
+    if not before:
+        return
+    now = {cid: (row_id, scopes) for cid, row_id, scopes in (await db.execute(
+        select(Character.character_id, Character.id, Character.scopes)
+        .where(Character.character_id.in_(list(before)))
+    )).all()}
+    for cid, (row_id, scopes) in before.items():
+        where = (NetWorthSnapshot.character_id == cid, NetWorthSnapshot.date == on_date)
+        if cid not in now or now[cid][0] != row_id:
+            await db.execute(delete(NetWorthSnapshot).where(*where))
+            logger.info("net-worth snapshot for character %s: not kept, the character "
+                        "was unlinked while it ran", cid)
+            continue
+        lost = perms.parse_scopes(scopes) - perms.parse_scopes(now[cid][1])
+        zero = {c: 0 for scope, comps in _COMPONENT_SCOPES if scope in lost for c in comps}
+        if not zero:
+            continue
+        await db.execute(update(NetWorthSnapshot).where(*where).values(**zero))
+        await db.execute(update(NetWorthSnapshot).where(*where).values(
+            total=NetWorthSnapshot.wallet + NetWorthSnapshot.assets_value
+            + NetWorthSnapshot.escrow + NetWorthSnapshot.industry_value))
+        logger.info("net-worth snapshot for character %s: dropped %s, permissions narrowed "
+                    "while it ran", cid, sorted(zero))
 
 
 async def snapshot_for_characters(
