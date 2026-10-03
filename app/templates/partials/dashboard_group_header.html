@@ -27,7 +27,9 @@
     {% set w = wallets.get(cid) %}
     {% if w %}{% set ns.wallet_total = ns.wallet_total + w %}{% endif %}
     {% set sk = skill_map.get(cid, {}) %}
-    {% if sk.get('current_skill') %}{% set ns.training_ok = ns.training_ok + 1 %}{% endif %}
+    {# By training STATE, not current_skill: a paused queue still has a current
+       skill (ISS-087). Same rule as dashboard.html's accounts-training summary. #}
+    {% if sk.get('warning') in ('ok', 'warning', 'critical') %}{% set ns.training_ok = ns.training_ok + 1 %}{% endif %}
     {% set s = pilot_summaries.get(cid, {}) %}
     {% if s.get('flags') %}{% set ns.flagged = ns.flagged + 1 %}{% endif %}
     {% set qend = sk.get('queue_end') %}

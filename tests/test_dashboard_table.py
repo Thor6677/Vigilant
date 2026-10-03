@@ -220,3 +220,69 @@ def test_training_column_reads_paused_even_with_a_next_skill():
                                     finish_str=None, queue_left_str=None))
     row = build_table_row(s, None, None, None, None)
     assert row["cells"]["training"]["text"] == "Paused"
+
+
+# ── Task 7b: paused pilots are not "training" (ISS-087) ─────────────────────
+
+import types
+
+from app.routes import dashboard as dash_mod
+from tests._dashboard_fixture import build_context
+
+
+def _env():
+    return dash_mod.templates.env
+
+
+def test_group_header_does_not_count_paused_pilots_as_training():
+    chars = [types.SimpleNamespace(character_id=1), types.SimpleNamespace(character_id=2)]
+    skill_map = {
+        1: {"current_skill": "Gunnery", "warning": "ok", "queue_end": None},
+        # Real paused data: the queue has entries, so current_skill is set.
+        2: {"current_skill": "Navigation", "warning": "paused", "queue_end": None},
+    }
+    tmpl = _env().from_string(
+        '{% from "partials/dashboard_group_header.html" import group_header %}'
+        '{{ group_header("Main", chars, {}, skill_map, {}, True, False) }}')
+    html = tmpl.render(chars=chars, skill_map=skill_map)
+    assert "training 1/2" in html
+
+
+def test_compact_row_shows_paused_even_with_a_next_skill():
+    s = dict(build_context("custom")["pilot_summaries"][1004])
+    s["training"] = {**s["training"], "skill": "Navigation", "level": 3, "warning": "paused"}
+    tmpl = _env().from_string(
+        '{% from "partials/dashboard_compact_row.html" import pilot_row %}{{ pilot_row(s) }}')
+    html = tmpl.render(s=s)
+    # The training cell is followed by the flags cell (both before and after
+    # Task 10, which only adds an inline flags copy inside the name cell).
+    training = html.split('class="dash-compact-training"', 1)[1].split('class="dash-compact-flags"', 1)[0]
+    assert "Paused" in training
+    assert "Navigation" not in training
+
+
+def test_training_sort_ranks_active_then_paused_then_empty():
+    def row(warning, skill):
+        summary = {**SUMMARY, "training": {**SUMMARY["training"], "warning": warning, "skill": skill}}
+        return build_table_row(summary, None, None, None, None)["cells"]["training"]["sort"]
+    active_a = row("ok", "Armor")
+    active_z = row("critical", "Zebra")
+    paused = row("paused", "Aaa First Alphabetically")
+    empty = row("empty", None)
+    assert sorted([empty, paused, active_z, active_a]) == [active_a, active_z, paused, empty]
+
+
+def test_training_rank_orders_states():
+    from app.dashboard.table import training_rank
+    assert [training_rank(w) for w in ("ok", "warning", "critical", "paused", "empty", "no_scope", "error", None)] == [0, 0, 0, 1, 2, 3, 3, 3]
+
+
+def test_page_level_training_sort_uses_training_rank():
+    # /dashboard?sort=training (Cards/Compact/Detailed ordering) must use the
+    # same state rule as the Table column, not "has a current_skill".
+    import inspect
+    from app.routes import dashboard as dash_routes
+    src = inspect.getsource(dash_routes)
+    branch = src.split('elif sort == "training":', 1)[1].split("elif sort ==", 1)[0]
+    assert "training_rank(" in branch
+    assert "current_skill" not in branch

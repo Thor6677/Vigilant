@@ -50,6 +50,16 @@ _FAR_FUTURE_TS = 32_503_680_000.0
 _TRAINING_STATES = ("ok", "warning", "critical")
 
 
+def training_rank(warning: str | None) -> int:
+    """ISS-087: order pilots by training STATE, never by whether a next skill
+    exists (a paused queue still has one). 0 = actively training,
+    1 = paused, 2 = empty queue, 3 = anything else (no_scope, error, None).
+    Shared by the Table view's Training column and /dashboard?sort=training."""
+    if warning in _TRAINING_STATES:
+        return 0
+    return {"paused": 1, "empty": 2}.get(warning, 3)
+
+
 def _delta_text(delta: dict | None) -> str:
     if not delta:
         return ""
@@ -132,7 +142,13 @@ def build_table_row(
             "text": (training.get("queue_left_str") or "—") if is_training else "—",
             "sort": queue_end.timestamp() if (is_training and queue_end) else _FAR_FUTURE_TS,
         },
-        "training": {"text": training_text, "sort": _lower(training.get("skill"))},
+        "training": {
+            "text": training_text,
+            # Rank first so paused/empty never interleave with training pilots
+            # by their next skill's name; the value stays a plain string.
+            "sort": str(training_rank(warning))
+            + (_lower(training.get("skill")) if is_training else ""),
+        },
         "pi": {"text": pi["expiry_str"] if pi else "—", "sort": pi["colonies"] if pi else 0},
         "jobs": {"text": f"{industry['active']} active" if industry else "—", "sort": industry["active"] if industry else 0},
         "orders": {"text": f"{market['open_orders']} open" if market else "—", "sort": market["open_orders"] if market else 0},

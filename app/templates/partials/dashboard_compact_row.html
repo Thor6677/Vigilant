@@ -60,11 +60,12 @@
         {% if wallet_delta %}<span style="font-size:9px;margin-left:0.25rem;">{{ wallet_arrow(wallet_delta) }}</span>{% endif %}
     </span>
     <span class="dash-compact-training" style="display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;">
-        {% if s.training.skill %}
+        {% if warn == 'paused' %}
+        {# Paused before skill: a paused queue still has a next skill (ISS-087). #}
+        <span style="font-size:10px;color:var(--muted);">Paused</span>
+        {% elif s.training.skill %}
         <span style="font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.training.skill }} {{ s.training.level }}{% if s.training.queue_left_str %} &middot; {{ s.training.queue_left_str }}{% endif %}</span>
         <div class="b-progress" style="height:3px;"><div class="b-progress-fill {% if warn == 'critical' %}is-crit{% elif warn == 'warning' %}is-warn{% else %}is-active{% endif %}" style="width:{{ s.training.progress_pct }}%"></div></div>
-        {% elif warn == 'paused' %}
-        <span style="font-size:10px;color:var(--muted);">Paused</span>
         {% elif warn == 'empty' %}
         <span style="font-size:10px;color:var(--danger);">Empty queue</span>
         {% elif warn == 'no_scope' %}
