@@ -137,17 +137,23 @@ def _stub_esi(monkeypatch):
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _assert_single_nav_row(html: str, cid: int):
-    assert html.count('class="b-tab-strip"') == 1
-    assert html.count(f'href="/intel/entity/character/{cid}"') == 1
-    zkb_hrefs = re.findall(r'href="(https://zkillboard\.com/character/%d/)"' % cid, html)
-    assert len(zkb_hrefs) == 1
+    # One desktop tab strip plus (mobile R1) one phone dropdown with the same
+    # links. Count inside the strip so a duplicate row is still caught.
+    assert html.count('class="b-tab-strip m-tabs-desktop"') == 1
+    assert html.count('<details class="m-tabs">') == 1
+    strip = html.split('class="b-tab-strip m-tabs-desktop"', 1)[1].split('<details class="m-tabs">', 1)[0]
+    assert strip.count(f'href="/intel/entity/character/{cid}"') == 1
+    assert len(re.findall(r'href="(https://zkillboard\.com/character/%d/)"' % cid, strip)) == 1
+    # Across the page: exactly the strip copy and the dropdown copy.
+    assert html.count(f'href="/intel/entity/character/{cid}"') == 2
+    assert len(re.findall(r'href="(https://zkillboard\.com/character/%d/)"' % cid, html)) == 2
     # No leftover chip row from the old per-page entity_links() call.
     assert "el-chips" not in html
-    # zKillboard opens in a new tab, safely.
-    zkb_idx = html.index("zkillboard.com/character")
-    tag_start = html.rfind("<a ", 0, zkb_idx)
-    tag_end = html.index(">", zkb_idx)
-    tag = html[tag_start:tag_end]
+    # zKillboard opens in a new tab, safely (checked on the strip's link).
+    zkb_idx = strip.index("zkillboard.com/character")
+    tag_start = strip.rfind("<a ", 0, zkb_idx)
+    tag_end = strip.index(">", zkb_idx)
+    tag = strip[tag_start:tag_end]
     assert 'target="_blank"' in tag
     assert 'rel="noopener"' in tag
 

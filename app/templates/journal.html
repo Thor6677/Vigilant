@@ -8,6 +8,7 @@
 {% endif %}
 {% endblock %}
 {% block content %}
+{% from "partials/_character_tabs.html" import character_tabs %}
 
 {% from "partials/_isk_format.html" import format_isk, format_isk_signed %}
 
@@ -29,18 +30,7 @@
 
 {% if char and not is_corp %}
 {% set _cid = char.character_id %}
-<div class="b-tab-strip">
-    <a href="/character/{{ _cid }}">Overview</a>
-    <a href="/character/{{ _cid }}/skills">Skills</a>
-    <a href="/character/{{ _cid }}/fittings">Fittings</a>
-    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
-    <a href="/character/{{ _cid }}/journal" class="is-active">Journal</a>
-    <a href="/character/{{ _cid }}/mining">Mining</a>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;padding:0 0.85rem;">
-        <a href="/intel/entity/character/{{ _cid }}" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">Stats</a>
-        <a href="https://zkillboard.com/character/{{ _cid }}/" target="_blank" rel="noopener" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">zKillboard ↗</a>
-    </span>
-</div>
+{{ character_tabs(_cid, 'journal') }}
 {% endif %}
 
 {# ── Corp division selector ───────────────────────────────────────────────── #}
