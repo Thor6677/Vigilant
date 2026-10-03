@@ -200,3 +200,11 @@ def test_palette_is_centred_closable_and_hides_key_hints_on_touch():
     assert 'class="cmdk-close" data-click="closePalette"' in html
     assert "window.closePalette" in html
     assert re.search(r"@media \(hover: none\), \(max-width: 640px\)\s*\{\s*#cmdk \.cmdk-hint\s*\{\s*display:\s*none", html)
+
+
+def test_palette_enter_only_acts_from_the_input():
+    html = _render_base("/dashboard")
+    assert "if (e.target !== $('cmdk-input')) return;" in html
+    assert ".cmdk-close:focus-visible" in html
+    assert re.search(r"@media \(max-width: 640px\) \{ #cmdk \{ margin: 0\.75rem auto auto; \} \}", html)
+    assert html.index("margin:auto") < html.index("margin: 0.75rem auto auto")

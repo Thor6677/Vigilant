@@ -317,6 +317,8 @@
 #cmdk .cmdk-star.is-pinned { color:var(--accent); }
 #cmdk .cmdk-empty { padding:0.9rem; text-align:center; font-size:11px; color:var(--muted); }
 #cmdk .cmdk-hint { display:flex; gap:0.9rem; padding:0.4rem 0.9rem; border-top:1px solid var(--border); font-size:9px; color:var(--muted); }
+#cmdk .cmdk-close:focus-visible { outline-offset:-2px; }
+@media (max-width: 640px) { #cmdk { margin: 0.75rem auto auto; } }
 @media (hover: none), (max-width: 640px) { #cmdk .cmdk-hint { display:none; } }
 </style>
 <dialog id="cmdk" aria-label="Command palette">
@@ -885,6 +887,7 @@
             if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
             else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
             else if (e.key === 'Enter') {
+                if (e.target !== $('cmdk-input')) return;
                 var sel = selected();
                 if (sel) {
                     e.preventDefault();
