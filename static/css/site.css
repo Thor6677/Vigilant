@@ -203,8 +203,6 @@
     .b-grid-2 { grid-template-columns: 1fr; }
     .b-nav { padding: 0 1rem; }
     .b-main { padding: 1.5rem 1rem; }
-    .b-stats { flex-wrap: wrap; }
-    .b-stat { flex: 1 1 45%; }
     /* Full touch compliance on phones (44px Apple HIG) */
     input, select, textarea, .b-btn, button {
         min-height: 44px;
@@ -654,7 +652,6 @@
     .b-panel.is-brackets { overflow: visible; }
 
     /* ── utilities ─────────────────────────────────────────────── */
-    .m-hide, .m-tabs-desktop { display: none !important; }
     .m-tap, .dash-sec-toggle, .dash-sec-hide {
         min-width: 40px !important; min-height: 40px !important; font-size: 12px !important;
         display: inline-flex !important; align-items: center; justify-content: center;
@@ -669,7 +666,7 @@
     /* ── stats: 2 per row (§4.6). box-shadow draws the grid lines so an odd
        tile count leaves an empty cell, not a filled block. `.b-stats .b-stat`
        (descendant) also reaches tiles inside display:contents wrappers. ── */
-    .b-stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; }
+    .b-stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; }
     .b-stats .b-stat { border-right: none !important; box-shadow: 0 0 0 1px var(--border); }
 
     /* ── section heads wrap; a subtitle drops below its title ──── */
@@ -680,6 +677,7 @@
     .m-head { display: none !important; }
     table.m-table, table.m-table > tbody { display: block; width: 100%; }
     table.m-table > thead { display: none !important; }
+    table.m-table > tbody > tr:not(.m-row), table.m-table > tbody > tr:not(.m-row) > td { display: block; }
     .m-row {
         display: grid !important;
         grid-template-columns: auto minmax(0, 1fr) auto 14px !important;
@@ -688,7 +686,7 @@
         padding: 0.6rem 0.75rem !important;
         cursor: pointer;
     }
-    .m-row.m-row--link { cursor: auto; }
+    .m-row.m-row--link { cursor: pointer; }
     .m-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
     /* Untagged cells are hidden; inline flex/width/min-width are neutralised. */
     .m-row > * { display: none !important; flex: none !important; width: auto !important; min-width: 0 !important; max-width: none !important; }
@@ -707,18 +705,18 @@
         content: "▸"; grid-row: 1; grid-column: 4;
         margin-left: 0.4rem; text-align: right; color: var(--muted); font-size: 11px;
     }
-    .m-row.is-open::after, .m-row.is-expanded::after, .is-expanded > .m-row::after { content: "▾"; }
+    .m-row.is-open:not(.m-row--link)::after, .m-row.is-expanded:not(.m-row--link)::after, .is-expanded > .m-row:not(.m-row--link)::after { content: "▾"; }
     .m-row > [data-m-label] { grid-column: 1 / -1; }
     /* font-size is !important because detail cells carry desktop inline
        sizes (9–11px) that would otherwise stay tiny on a phone. */
-    .m-row.is-open > [data-m-label],
-    .m-row.is-expanded > [data-m-label],
-    .is-expanded > .m-row > [data-m-label] {
-        display: flex !important; justify-content: space-between; gap: 1rem;
+    .m-row.is-open:not(.m-row--link) > [data-m-label],
+    .m-row.is-expanded:not(.m-row--link) > [data-m-label],
+    .is-expanded > .m-row:not(.m-row--link) > [data-m-label] {
+        display: flex !important; justify-content: flex-end; flex-wrap: wrap; gap: 0.25rem 0.4rem;
         font-size: 12px !important; text-align: right; white-space: normal; word-break: break-word;
     }
     .m-row > [data-m-label]::before {
-        content: attr(data-m-label); flex: none; text-align: left;
+        content: attr(data-m-label); flex: none; text-align: left; margin-right: auto; padding-right: 0.6rem;
         color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
     }
 
@@ -744,4 +742,7 @@
     details.m-tabs .m-tabs-list a:last-child { border-bottom: none; }
     details.m-tabs .m-tabs-list a.is-active { color: var(--accent); }
     details.m-tabs .m-tabs-sep { border-top: 1px solid var(--border); }
+
+    /* Last on purpose: beats .m-tap / .m-pair / .m-stack (same specificity, !important). */
+    .m-hide, .m-tabs-desktop { display: none !important; }
 }

@@ -65,10 +65,32 @@ def test_mrow_places_every_item_explicitly():
 
 def test_mrow_open_states_cover_both_expanders():
     phone = _phone()
-    for sel in (r"\.m-row\.is-open > \[data-m-label\]",
-                r"\.m-row\.is-expanded > \[data-m-label\]",
-                r"\.is-expanded > \.m-row > \[data-m-label\]"):
+    for sel in (r"\.m-row\.is-open:not\(\.m-row--link\) > \[data-m-label\]",
+                r"\.m-row\.is-expanded:not\(\.m-row--link\) > \[data-m-label\]",
+                r"\.is-expanded > \.m-row:not\(\.m-row--link\) > \[data-m-label\]"):
         assert re.search(sel, phone), sel
+
+
+def test_open_cells_group_value_pieces_right():
+    phone = _phone()
+    assert re.search(r"\.is-expanded > \.m-row:not\(\.m-row--link\) > \[data-m-label\]\s*\{[^}]*justify-content:\s*flex-end[^}]*flex-wrap:\s*wrap", phone)
+    assert re.search(r"\.m-row > \[data-m-label\]::before\s*\{[^}]*margin-right:\s*auto", phone)
+
+
+def test_open_states_exclude_link_rows():
+    phone = _phone()
+    for m in re.finditer(r"([^{}]*\.(?:is-open|is-expanded)[^{}]*)\{", phone):
+        for sel in m.group(1).split(","):
+            if ".m-row" in sel and ("is-open" in sel or "is-expanded" in sel) and ".m-row" in sel.split("is-")[-1] + ".m-row" and "m-tabs" not in sel and "m-clamp" not in sel:
+                assert ":not(.m-row--link)" in sel, sel.strip()
+    assert ".m-row.is-open:not(.m-row--link)" in phone
+    assert ".is-expanded > .m-row:not(.m-row--link) > [data-m-label]" in phone
+
+
+def test_m_hide_is_last_phone_utility():
+    phone = _phone()
+    i = phone.rindex(".m-hide")
+    assert i > phone.index(".m-tap") and i > phone.index(".m-pair")
 
 
 def test_utilities_exist():
