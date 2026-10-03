@@ -2,6 +2,12 @@
  *
  * Usage: open a page on the dev instance in Chrome DevTools device mode
  * (phone preset), paste this whole file into the console, press Enter.
+ * Use a phone preset <=400px wide; two partials have 400px breakpoints.
+ * Closed <details> content is measured in current Chrome, so a flag there
+ * means it will overflow when opened.
+ * Viewport-relative widths (calc(100vw - ...)) or elements anchored to the
+ * page can show false alarms in the forced pass; confirm those at a real
+ * 360px preset.
  *
  * It checks the page twice: at the current viewport width, and with <html>
  * forced to 360px (a narrow Android). Both widths use the same ≤640px CSS
@@ -51,12 +57,12 @@
         if (!(pr.right > vw + 1)) overflow.push(path(e) + ' right=' + Math.round(r.right));
       }
       if (e.clientWidth >= 60 && e.scrollWidth > e.clientWidth + 8) {
-        const singleLineEllipsis = cs.textOverflow === 'ellipsis' || (cs.whiteSpace === 'nowrap' && e.children.length === 0);
+        const singleLineEllipsis = (cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap') || (cs.whiteSpace === 'nowrap' && e.children.length === 0);
         if (/(hidden|clip)/.test(cs.overflowX) && !singleLineEllipsis) clipped.push(path(e) + ' ' + e.clientWidth + '/' + e.scrollWidth);
         if (/(auto|scroll)/.test(cs.overflowX)) scrollers.push(path(e) + ' ' + e.clientWidth + '/' + e.scrollWidth);
       }
     }
-    const pageWide = h.scrollWidth > vw + 1;
+    const pageWide = (forced ? document.body.scrollWidth : h.scrollWidth) > vw + 1;
     h.style.width = prevWidth;
     return { width: vw, pageWide, overflow: uniq(overflow), clipped: uniq(clipped), scrollers: uniq(scrollers) };
   };
@@ -64,6 +70,7 @@
   const current = await pass(0);
   const narrow = await pass(360);
   const bad = p => p.pageWide || p.overflow.length || p.clipped.length;
-  console.log('[mobile-audit]', location.pathname, { current, narrow });
-  return bad(current) || bad(narrow) ? { current, narrow } : 'OK';
+  const verdict = bad(current) || bad(narrow) ? 'ISSUES' : 'OK';
+  console.log('[mobile-audit]', location.pathname, verdict, { current, narrow });
+  return verdict === 'OK' ? 'OK' : { current, narrow };
 })();

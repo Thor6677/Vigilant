@@ -219,3 +219,5 @@ def test_mobile_audit_script_exists_and_restores_width():
     assert "360" in src and "scrollWidth" in src
     assert "h.style.width = prevWidth" in src
     assert "'OK'" in src
+    assert "forced ? document.body.scrollWidth : h.scrollWidth" in src
+    assert "verdict" in src
