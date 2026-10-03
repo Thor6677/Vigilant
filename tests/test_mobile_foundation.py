@@ -40,6 +40,7 @@ def test_helper_ignores_grandchildren():
     ('<div class="m-row" data-click="toggleMRow"><i data-m="key"></i><i data-m-label=" "></i></div>', "empty data-m-label"),
     ('<div class="m-row"><i data-m="key"></i></div>', "need data-click"),
     ('<a class="m-row m-row--link" data-click="toggleMRow"><i data-m="key"></i></a>', "link rows must not toggle"),
+    ('<div class="m-row" data-click="toggleMRow"><i data-m="key" data-m-label="X"></i></div>', "can't be both"),
 ])
 def test_helper_rejects_contract_violations(bad, msg):
     with pytest.raises(AssertionError, match=msg):
@@ -71,3 +72,16 @@ def test_actions_js_defines_mrow_handlers():
 def test_toggle_mrow_ignores_taps_on_controls():
     js = _js()
     assert "a, button, input, select, textarea, label, summary" in js
+
+
+def test_keydown_never_handles_link_rows_or_modified_keys():
+    js = _js()
+    region = js[js.index("addEventListener('keydown'"):]
+    assert "classList.contains('m-row--link')" in region
+    assert "e.metaKey" in region and "e.repeat" in region
+
+
+def test_aria_is_resynced_after_any_row_click():
+    js = _js()
+    assert "function mSyncAria" in js
+    assert "htmx:afterSettle" in js

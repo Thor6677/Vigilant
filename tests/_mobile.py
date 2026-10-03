@@ -56,6 +56,8 @@ def assert_mrow(html: str, min_rows: int = 1) -> list[dict]:
         assert 1 <= len(keys) <= 2, f"{where}: needs 1–2 data-m=key children, has {len(keys)}"
         assert len(leads) <= 1, f"{where}: at most 1 data-m=lead child, has {len(leads)}"
         for k in kids:
+            assert not ("data-m" in k and "data-m-label" in k), (
+                f"{where}: a cell can't be both data-m and data-m-label")
             if "data-m-label" in k:
                 assert k["data-m-label"].strip(), f"{where}: empty data-m-label"
         is_link = "m-row--link" in r["attrs"].get("class", "").split()
