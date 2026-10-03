@@ -159,3 +159,61 @@ def test_paused_card_says_paused_even_when_the_queue_has_a_next_skill():
     card = extract_card(render_full("custom", skill_map=skill_map), cid)
     assert "Paused (3 queued)" in card
     assert "Gunnery" not in card
+
+
+# ── Mobile R1: phone toolbar (mobile design §5.1) ──────────────────────────
+
+from tests.test_mobile_css import _css, _media_bodies
+
+_SORTS = [("Grouped", "custom"), ("Name", "name"), ("Corp", "corp"),
+          ("Training", "training"), ("Queue End", "queue")]
+_VIEWS = [("Compact", "compact"), ("Cards", "cards"), ("Detailed", "detailed"), ("Table", "table")]
+
+
+def _options(html, handler):
+    m = re.search(r'<select data-change="' + handler + r'"[^>]*>(.*?)</select>', html, re.S)
+    assert m, f"no <select> bound to {handler}"
+    return re.findall(r'<option value="([^"]*)"( selected)?>([^<]*)</option>', m.group(1))
+
+
+def test_phone_sort_select_lists_every_sort_url():
+    opts = _options(render_full("name"), "dashSortSelect")
+    assert [(label, value) for value, _sel, label in opts] == [
+        (label, f"/dashboard?sort={value}") for label, value in _SORTS]
+    assert [value for value, sel, _label in opts if sel] == ["/dashboard?sort=name"]
+
+
+def test_phone_view_select_lists_every_mode():
+    opts = _options(render_full("custom", dash_mode="table"), "dashViewSelect")
+    assert [(label, value) for value, _sel, label in opts] == _VIEWS
+    assert [value for value, sel, _label in opts if sel] == ["table"]
+
+
+def test_phone_select_handlers_share_set_dash_mode():
+    html = render_full("custom")
+    assert "function setDashMode() { dashSetMode(this.dataset.mode); }" in html
+    assert "function dashViewSelect() { dashSetMode(this.value); }" in html
+    assert "function dashSortSelect() {" in html
+    assert "url.indexOf('/dashboard?sort=') === 0" in html
+    assert html.count('class="m-only dash-phone-toolbar"') == 1
+
+
+def test_desktop_sort_and_view_controls_hide_on_phones():
+    html = render_full("custom")
+    assert re.findall(r'<a href="/dashboard\?sort=(\w+)" class="b-btn m-hide"', html) == [v for _l, v in _SORTS]
+    assert len(re.findall(r'<button type="button" class="b-btn m-hide" data-click="setDashMode"', html)) == 4
+
+
+def test_secondary_toolbar_controls_stay_on_phones_only_when_they_apply():
+    cards = render_full("custom")
+    assert 'class="dash-toolbar"' in cards
+    assert cards.count('id="edit-mode-btn"') == 1  # never duplicated: JS finds it by id
+    assert 'class="dash-toolbar m-hide"' in render_full("custom", dash_mode="compact")
+    farm = render_full("name", farm_info={"ready_now": 2})
+    assert 'class="dash-toolbar"' in farm
+    assert farm.count('href="/tools/skill-farm"') == 1
+
+
+def test_toolbar_wraps_on_phones():
+    phone = _media_bodies(_css(), "max-width: 640px")
+    assert re.search(r"\.dash-toolbar\s*\{[^}]*flex-wrap:\s*wrap\s*!important", phone)

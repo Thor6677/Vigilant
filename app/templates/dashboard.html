@@ -300,12 +300,39 @@
 {% endif %}
 
 {# ── Sort Controls ──────────────────────────────────────────────────────── #}
-<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
-    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
-    {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
-    <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
+{% set dash_sort_options = [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
+{% set dash_view_options = [('Compact', 'compact'), ('Cards', 'cards'), ('Detailed', 'detailed'), ('Table', 'table')] %}
+{% set dash_show_edit = sort == 'custom' and dash_mode == 'cards' and not active_tag_filter %}
+{# Mobile design §5.1: phones get two native selects instead of the button
+   row below. The row itself stays, because Edit / + Add Account / Saved are
+   found by id (toggleEditMode, the add-group binding) and must not be
+   duplicated. Its sort and view controls are m-hide, so on a phone it shows
+   only those secondary controls, under the selects. When none of them
+   applies, the whole row is m-hide. #}
+<div class="m-only dash-phone-toolbar" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+    <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+        Sort
+        <select data-change="dashSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+            {% for label, value in dash_sort_options %}
+            <option value="/dashboard?sort={{ value }}"{% if sort == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+        View
+        <select data-change="dashViewSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+            {% for label, value in dash_view_options %}
+            <option value="{{ value }}"{% if dash_mode == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+</div>
+<div class="dash-toolbar{% if not (dash_show_edit or farm_info) %} m-hide{% endif %}" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
+    <span class="m-hide" style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
+    {% for label, value in dash_sort_options %}
+    <a href="/dashboard?sort={{ value }}" class="b-btn m-hide" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}
-    {% if sort == 'custom' and dash_mode == 'cards' and not active_tag_filter %}
+    {% if dash_show_edit %}
     <button id="edit-mode-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;" data-click="toggleEditMode">Edit</button>
     <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);display:none;">+ Add Account</button>
     <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
@@ -313,10 +340,10 @@
     {% if farm_info %}
     <a href="/tools/skill-farm" class="b-link" style="font-size:10px;margin-left:0.5rem;">Skill farm &middot; {{ farm_info.ready_now }} injector{{ 's' if farm_info.ready_now != 1 else '' }} ready</a>
     {% endif %}
-    <span style="flex:1;"></span>
-    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
-    {% for label, value in [('Compact', 'compact'), ('Cards', 'cards'), ('Detailed', 'detailed'), ('Table', 'table')] %}
-    <button type="button" class="b-btn" data-click="setDashMode" data-mode="{{ value }}"
+    <span class="m-hide" style="flex:1;"></span>
+    <span class="m-hide" style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
+    {% for label, value in dash_view_options %}
+    <button type="button" class="b-btn m-hide" data-click="setDashMode" data-mode="{{ value }}"
             style="padding:2px 8px;font-size:10px;border:1px solid {% if dash_mode == value %}var(--accent){% else %}var(--border){% endif %};{% if dash_mode == value %}color:var(--accent);{% endif %}">{{ label }}</button>
     {% endfor %}
 </div>
@@ -708,9 +735,19 @@ function postDashPrefs(patch) {
     return dashPrefsQueue;
 }
 
-function setDashMode() {
-    var mode = this.dataset.mode;
+// One save-and-reload path for every way of choosing a mode: the desktop
+// buttons (data-click="setDashMode", reading data-mode) and, on phones, the
+// View select (mobile design §5.1). Top-level declarations, so the
+// data-click / data-change dispatcher finds them on window.
+function dashSetMode(mode) {
     postDashPrefs({ mode: mode }).then(function () { window.location.reload(); });
+}
+function setDashMode() { dashSetMode(this.dataset.mode); }
+function dashViewSelect() { dashSetMode(this.value); }
+// The phone Sort select's option values are the desktop sort links' own URLs.
+function dashSortSelect() {
+    var url = this.value || '';
+    if (url.indexOf('/dashboard?sort=') === 0) window.location.href = url;
 }
 
 // ── T-076: tag filter — server round-trip like setDashMode, so tag TEXT

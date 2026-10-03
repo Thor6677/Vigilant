@@ -746,3 +746,12 @@
     /* Last on purpose: beats .m-tap / .m-pair / .m-stack (same specificity, !important). */
     .m-hide, .m-tabs-desktop { display: none !important; }
 }
+
+/* Dashboard toolbar (mobile design §5.1). On phones only its Edit /
+   + Add Account / Saved / Skill farm controls remain (the sort and view
+   controls are m-hide; two selects replace them), so let them wrap instead
+   of scrolling sideways in their own strip. */
+@media (max-width: 640px) {
+    .dash-toolbar { flex-wrap: wrap !important; white-space: normal !important; overflow: visible !important; row-gap: 0.4rem; }
+    .dash-toolbar > * { margin-left: 0 !important; }
+}
