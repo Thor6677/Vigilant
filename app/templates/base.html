@@ -222,27 +222,29 @@
        link that stands in for the Overview item (so that item is skipped in the
        loop). Non-landing groups whose url equals their first item's url
        (Dashboard/Map/Admin) suppress the parent to avoid a duplicate link.
-       Mobile is a flat list: no in-group dividers (divider_before is desktop-only). #}
+       Mobile groups are <details> (mobile design §4.5): the group for the current page opens, the rest collapse to one row each. No JS. divider_before is desktop-only. #}
     {% for group in nav_groups %}
         {% if not group['admin'] or request.session.get('is_admin') %}
             {% if not group['items'] %}
     <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
             {% else %}
-    <div class="b-mobile-sep"></div>
+    <details class="b-mobile-group"{% if nav_group_active(group, _path) %} open{% endif %}>
+        <summary>{{ group['label'] }}</summary>
                 {% if group['landing'] %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
                 {% elif group['url'] != group['items'][0]['url'] %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
                 {% endif %}
                 {% for item in group['items'] %}
                     {% if not (group['landing'] and item['url'] == group['url']) %}
                         {% if item['external'] %}
-    <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
+        <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
                         {% else %}
-    <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+        <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
                         {% endif %}
                     {% endif %}
                 {% endfor %}
+    </details>
             {% endif %}
         {% endif %}
     {% endfor %}

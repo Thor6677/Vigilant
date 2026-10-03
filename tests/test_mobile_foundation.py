@@ -146,3 +146,47 @@ def test_character_pages_use_the_shared_macro(page):
     assert "character_tabs(" in src, page
     assert 'class="b-tab-strip"' not in src, page
     assert f"character_tabs(_cid, '{_CHAR_TAB_PAGES[page]}')" in src, page
+
+
+# ── hamburger menu groups ────────────────────────────────────────────
+
+import types
+
+from app.nav import NAV_GROUPS, item_active, group_active
+
+
+def _render_base(path="/industry/planetary", is_admin=True):
+    env = _env()
+    env.globals.update(nav_groups=NAV_GROUPS, nav_item_active=item_active,
+                       nav_group_active=group_active)
+    request = types.SimpleNamespace(
+        url=types.SimpleNamespace(path=path),
+        state=types.SimpleNamespace(csp_nonce="test-nonce"),
+        session={"user_id": 1, "is_admin": is_admin,
+                 "active_character_id": 90000001, "csrf_token": "t"},
+    )
+    return env.get_template("base.html").render(request=request, css_v="1", js_v="1")
+
+
+def _mobile_menu(html):
+    return html.split('id="mobile-menu"')[1].split('<div id="esi-banner"')[0]
+
+
+def test_menu_groups_are_details_with_only_the_active_one_open():
+    menu = _mobile_menu(_render_base("/industry/planetary"))
+    groups = re.findall(r'<details class="b-mobile-group"( open)?>\s*<summary>([^<]+)</summary>', menu)
+    with_items = [g["label"] for g in NAV_GROUPS if g["items"] and (not g["admin"])]
+    labels = [label.strip() for _, label in groups]
+    for label in with_items:
+        assert label in labels, (label, labels)
+    open_labels = [label.strip() for is_open, label in groups if is_open]
+    assert open_labels == ["Industry"], open_labels
+
+
+def test_menu_still_links_every_item():
+    menu = _mobile_menu(_render_base("/dashboard"))
+    for g in NAV_GROUPS:
+        if g["admin"]:
+            continue
+        for item in g["items"]:
+            assert f'href="{item["url"]}"' in menu, item["url"]
