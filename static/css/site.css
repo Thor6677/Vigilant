@@ -208,8 +208,12 @@
     /* Full touch compliance on phones (44px Apple HIG) */
     input, select, textarea, .b-btn, button {
         min-height: 44px;
-        font-size: max(12px, inherit);
     }
+    /* iOS zooms into any focused field under 16px and never zooms back out,
+       leaving the page scrolling sideways (mobile design §4.1, ISS-092).
+       !important beats ~134 inline font sizes and the #cmdk ID rule. Never
+       "fix" this with maximum-scale=1: that also blocks pinch-zoom. */
+    input, select, textarea { font-size: 16px !important; }
     /* Collapse inline 2-column grids to single column */
     [style*="grid-template-columns:1fr 1fr"],
     [style*="grid-template-columns: 1fr 1fr"] {
@@ -224,7 +228,8 @@
     [style*="min-width:180px"], [style*="min-width:200px"] {
         min-width: 0 !important;
     }
-    /* Phone base bumped to 16px to prevent iOS input auto-zoom and meet web a11y floor */
+    /* Phone base text size (web a11y floor). Form controls don't inherit it;
+       their 16px rule is above. */
     body { font-size: 16px; }
     .b-page-title { font-size: 18px; }
     /* Alert banners wrap text */
@@ -245,7 +250,6 @@
 @media (max-width: 480px) {
     .b-main { padding: 1rem 0.75rem; }
     .b-nav { padding: 0 0.75rem; }
-    .b-stat { flex: 1 1 100%; }
 }
 
 /* T-031 round 3: CSS hover utilities to replace inline mouseover/out
@@ -612,4 +616,132 @@
     .upd-form { grid-template-columns: minmax(0, 1fr); }
     .upd-form > label, .upd-form > input, .upd-form > select { grid-column: 1; }
     .upd-form > label:not(.upd-check) { margin-bottom: -0.25rem; }
+}
+
+/* ═══ Mobile R1 — phone layer (mobile design §4) ═════════════════════════
+   Phone = ≤640px. Templates opt in with m-* classes and data-m attributes;
+   the contract is documented in the mobile R1 plan and pinned by
+   tests/test_mobile_css.py. Desktop is untouched apart from the two
+   "phone-only element" guards directly below. */
+@media (min-width: 641px) {
+    .m-only, details.m-tabs { display: none !important; }
+}
+
+/* Tab strip trailing links (Stats / zKillboard), rendered by the tab_nav
+   macro. These replace inline styles that were copied into six templates. */
+.b-tab-strip .b-tab-extra { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; padding: 0 0.85rem; }
+.b-tab-strip .b-tab-extra a { font-size: 9px; letter-spacing: 0.08em; padding: 0; border-bottom: none; }
+
+/* Hamburger menu groups (base.html #mobile-menu). The menu itself only shows
+   below 1000px, so these aren't media-scoped. */
+.b-mobile-menu .b-mobile-group { border-bottom: 1px solid var(--border); }
+.b-mobile-menu .b-mobile-group > summary {
+    list-style: none; display: flex; justify-content: space-between; align-items: center;
+    min-height: 44px; padding: 0.75rem 1.5rem; cursor: pointer;
+    font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text);
+}
+.b-mobile-menu .b-mobile-group > summary::-webkit-details-marker { display: none; }
+.b-mobile-menu .b-mobile-group > summary::after { content: "▸"; color: var(--muted); }
+.b-mobile-menu .b-mobile-group[open] > summary { color: var(--accent); }
+.b-mobile-menu .b-mobile-group[open] > summary::after { content: "▾"; }
+.b-mobile-menu .b-mobile-group > a { padding-left: 2.25rem; }
+
+@media (max-width: 640px) {
+    /* §4.2 safety net: anything wider than its panel scrolls instead of
+       vanishing. A panel is already a scroll container (overflow:hidden), so
+       nothing changes visually when content fits. Vertical clipping stays. */
+    .b-panel { overflow-x: auto; }
+    .b-panel.is-brackets { overflow: visible; }
+
+    /* ── utilities ─────────────────────────────────────────────── */
+    .m-hide, .m-tabs-desktop { display: none !important; }
+    .m-tap, .dash-sec-toggle, .dash-sec-hide {
+        min-width: 40px !important; min-height: 40px !important; font-size: 12px !important;
+        display: inline-flex !important; align-items: center; justify-content: center;
+    }
+    .m-unclamp { max-height: none !important; overflow: visible !important; }
+    .m-clamp-wrap:not(.is-expanded) .m-clamp > :nth-child(n+11) { display: none !important; }
+    .m-clamp-wrap.is-expanded .m-showall { display: none !important; }
+    .m-stack { display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 0.5rem !important; }
+    .m-stack > * { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+    .m-pair { display: flex !important; flex-direction: column; align-items: stretch; gap: 0.25rem; width: 100%; }
+
+    /* ── stats: 2 per row (§4.6). box-shadow draws the grid lines so an odd
+       tile count leaves an empty cell, not a filled block. `.b-stats .b-stat`
+       (descendant) also reaches tiles inside display:contents wrappers. ── */
+    .b-stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; }
+    .b-stats .b-stat { border-right: none !important; box-shadow: 0 0 0 1px var(--border); }
+
+    /* ── section heads wrap; a subtitle drops below its title ──── */
+    .b-section-head, .b-panel-head { flex-wrap: wrap; row-gap: 0.25rem; }
+    .b-subtitle { flex-basis: 100%; }
+
+    /* ── m-row: expand-on-tap rows (§4.3) ─────────────────────── */
+    .m-head { display: none !important; }
+    table.m-table, table.m-table > tbody { display: block; width: 100%; }
+    table.m-table > thead { display: none !important; }
+    .m-row {
+        display: grid !important;
+        grid-template-columns: auto minmax(0, 1fr) auto 14px !important;
+        column-gap: 0 !important; row-gap: 0.3rem !important;
+        align-items: center !important;
+        padding: 0.6rem 0.75rem !important;
+        cursor: pointer;
+    }
+    .m-row.m-row--link { cursor: auto; }
+    .m-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+    /* Untagged cells are hidden; inline flex/width/min-width are neutralised. */
+    .m-row > * { display: none !important; flex: none !important; width: auto !important; min-width: 0 !important; max-width: none !important; }
+    /* Explicit placement: key cells are often not adjacent in the markup
+       (Planetary's Expiry, the journal's amount), so auto-placement would
+       push key 2 off line 1 when a row opens. */
+    .m-row > [data-m="lead"] { display: flex !important; align-items: center; grid-row: 1; grid-column: 1; margin-right: 0.6rem; }
+    .m-row > [data-m="key"] {
+        display: block !important; grid-row: 1; grid-column: 2;
+        overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    }
+    .m-row > [data-m="key"] ~ [data-m="key"] {
+        grid-column: 3; margin-left: 0.6rem; text-align: right; overflow: visible;
+    }
+    .m-row:not(.m-row--link)::after {
+        content: "▸"; grid-row: 1; grid-column: 4;
+        margin-left: 0.4rem; text-align: right; color: var(--muted); font-size: 11px;
+    }
+    .m-row.is-open::after, .m-row.is-expanded::after, .is-expanded > .m-row::after { content: "▾"; }
+    .m-row > [data-m-label] { grid-column: 1 / -1; }
+    /* font-size is !important because detail cells carry desktop inline
+       sizes (9–11px) that would otherwise stay tiny on a phone. */
+    .m-row.is-open > [data-m-label],
+    .m-row.is-expanded > [data-m-label],
+    .is-expanded > .m-row > [data-m-label] {
+        display: flex !important; justify-content: space-between; gap: 1rem;
+        font-size: 12px !important; text-align: right; white-space: normal; word-break: break-word;
+    }
+    .m-row > [data-m-label]::before {
+        content: attr(data-m-label); flex: none; text-align: left;
+        color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+
+    /* ── tab dropdown (§4.4) ──────────────────────────────────── */
+    /* align-self/width: the dropdown may sit inside a flex page header
+       (Planetary), whose inline align-items:center would otherwise shrink it. */
+    details.m-tabs { margin-bottom: 1rem; border: 1px solid var(--border); align-self: stretch; width: 100%; }
+    details.m-tabs > summary {
+        list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+        min-height: 44px; padding: 0.7rem 0.85rem; cursor: pointer;
+        font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    details.m-tabs > summary::-webkit-details-marker { display: none; }
+    details.m-tabs > summary .m-tabs-label { color: var(--muted); }
+    details.m-tabs > summary .m-tabs-current { margin-left: auto; color: var(--accent); }
+    details.m-tabs > summary::after { content: "▾"; color: var(--muted); }
+    details.m-tabs[open] > summary::after { content: "▴"; }
+    details.m-tabs .m-tabs-list { border-top: 1px solid var(--border); }
+    details.m-tabs .m-tabs-list a {
+        display: block; min-height: 44px; padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border);
+        font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); text-decoration: none;
+    }
+    details.m-tabs .m-tabs-list a:last-child { border-bottom: none; }
+    details.m-tabs .m-tabs-list a.is-active { color: var(--accent); }
+    details.m-tabs .m-tabs-sep { border-top: 1px solid var(--border); }
 }
