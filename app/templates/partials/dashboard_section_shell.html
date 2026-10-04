@@ -17,9 +17,13 @@
 {# Mobile R1 (§5.7): size comes from classes, not inline styles. The desktop
    2px 6px / 9px is `.b-btn.dash-sec-toggle, .b-btn.dash-sec-hide` in
    site.css; the phone 40px tap target is the shared m-tap rule. The border
-   stays inline: `.b-btn:last-child` would strip a class-level right border
-   from ✕. The toggle's title and aria-expanded follow its state; after
-   load, dashboard.html's dashSetSectionToggle keeps them in step. #}
+   stays inline as the robust choice: `.b-btn:last-child` strips ✕'s right
+   border, and whether a class-level border survives that depends on
+   specificity and load order (a one-class rule loses; a two-class rule
+   ties and wins only because site.css loads later). No `.b-btn` rule can
+   outrank an inline style. The toggle's title and aria-expanded follow
+   its state; after load, dashboard.html's dashSetSectionToggle keeps them
+   in step. #}
 {% macro section_toolbar(key, label, is_collapsed, is_hidden) %}
 <button type="button" class="dash-sec-toggle b-btn m-tap" data-click="toggleDashSection" data-section="{{ key }}"
         title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}" aria-expanded="{{ 'false' if is_collapsed else 'true' }}"

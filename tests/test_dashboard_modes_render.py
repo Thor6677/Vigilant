@@ -436,9 +436,52 @@ def test_section_buttons_use_the_tap_class_not_inline_sizing():
         assert "border:1px solid var(--border)" in style, (cls, style)
 
 
+def _without_media(css):
+    """`css` with comments and every @media block (prelude and body) removed."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out, i = [], 0
+    for m in re.finditer(r"@media[^{]*\{", css):
+        if m.start() < i:
+            continue                       # nested inside a block already skipped
+        out.append(css[i:m.start()])
+        depth, j = 1, m.end()
+        while depth and j < len(css):
+            depth += {"{": 1, "}": -1}.get(css[j], 0)
+            j += 1
+        i = j
+    out.append(css[i:])
+    return "".join(out)
+
+
 def test_section_button_desktop_size_lives_in_site_css():
     css = _css()
-    assert re.search(r"\.b-btn\.dash-sec-toggle,\s*\.b-btn\.dash-sec-hide\s*\{\s*padding:\s*2px 6px;\s*font-size:\s*9px;\s*\}", css)
+    desktop_rule = r"\.b-btn\.dash-sec-toggle,\s*\.b-btn\.dash-sec-hide\s*\{\s*padding:\s*2px 6px;\s*font-size:\s*9px;\s*\}"
+    # Outside every media query, not merely outside the 640px one.
+    assert re.search(desktop_rule, _without_media(css))
+    assert "@media" not in _without_media(css)
     phone = _media_bodies(css, "max-width: 640px")
     assert not re.search(r"\.b-btn\.dash-sec-toggle", phone)  # desktop rule, not phone-only
     assert re.search(r"\.dash-sec-toggle \+ \.dash-sec-hide\s*\{[^}]*margin-left:\s*4px", phone)
+
+
+def test_group_toggle_is_a_phone_tap_target_and_keeps_its_desktop_size():
+    """The account-group ▾ was 21x44 with a 9px glyph on phones. m-tap gives
+    it the shared 40x40 / 12px rule, whose declarations are !important and
+    so beat the inline 9px there; m-tap has no rule above 640px, so desktop
+    keeps the inline 2px 6px / 9px."""
+    for mode in ("cards", "compact"):
+        for collapsed in ([], ["Sample Corp"]):
+            html = render_full("custom", dash_mode=mode, prefs_patch={"collapsed_groups": collapsed})
+            btns = re.findall(r'<button type="button" class="([^"]*)" data-click="toggleDashGroup"[^>]*style="([^"]*)"', html)
+            assert btns, (mode, collapsed)
+            for cls, style in btns:
+                assert cls == "dash-group-toggle b-btn m-tap", (mode, cls)
+                assert "padding:2px 6px;font-size:9px;" in style, (mode, style)
+    # A group added in the page (+ Add Account) is built by script: same class.
+    assert "toggleBtn.className = 'dash-group-toggle b-btn m-tap';" in render_full("custom", dash_mode="cards")
+    css = _css()
+    tap = re.search(r"\.m-tap, \.dash-sec-toggle, \.dash-sec-hide\s*\{([^}]*)\}", _media_bodies(css, "max-width: 640px"))
+    assert tap, "shared m-tap phone rule missing"
+    for decl in ("min-width: 40px !important", "min-height: 40px !important", "font-size: 12px !important"):
+        assert decl in tap.group(1), decl
+    assert ".m-tap" not in _without_media(css)

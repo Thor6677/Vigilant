@@ -45,7 +45,10 @@
         <button type="button" class="group-move-down b-btn" style="flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">▼</button>
     </div>
     {% endif %}
-    <button type="button" class="dash-group-toggle b-btn" data-click="toggleDashGroup" data-group="{{ group_name }}"
+    {#- m-tap: the shared 40x40 phone tap target with a 12px glyph. Its size
+       and font-size are !important there, so they win over the inline 9px
+       on phones; desktop keeps the inline size (m-tap has no desktop rule). #}
+    <button type="button" class="dash-group-toggle b-btn m-tap" data-click="toggleDashGroup" data-group="{{ group_name }}"
             title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ group_name }}"
             style="flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
     <span class="group-label b-label" data-group="{{ group_name }}">{{ group_name }}</span>
