@@ -480,6 +480,15 @@ def test_t1_css_landing_grid_is_one_column():
     assert _decl(rule_bodies(css, ".tl-card-title"), "flex-wrap", "wrap")
 
 
+def test_t1_css_landing_description_is_one_line():
+    """D1 A: title and a one-line description. The full text stays on each
+    tool's own page, so the card ends the line with an ellipsis."""
+    desc = rule_bodies(_phone(), ".tl-card-desc")
+    for prop, value in (("white-space", "nowrap"), ("overflow", "hidden"),
+                        ("text-overflow", "ellipsis"), ("min-width", "0")):
+        assert _decl(desc, prop, value), (prop, value)
+
+
 def test_t1_css_controls_go_full_width():
     css = _phone()
     assert _decl(rule_bodies(css, ".mfg-fill"), "width", "100% !important")

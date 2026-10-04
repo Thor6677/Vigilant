@@ -1179,15 +1179,20 @@
 /* ── R3 T1 · landing/manufacturing ── */
 @media (max-width: 640px) {
     /* Tool landings, /industry /intel /tools (D1 A): compact cards in one
-       column; the desktop 320px minimum is wider than a 320px phone. The
-       features list is m-hide in the markup, so the description's bottom
-       margin goes too. The URL label, subtitle and external arrow go from
-       9–10px to 11px. !important: the page's own <style> loads after this
-       file, and the subtitle's size is inline. */
+       column; the desktop 320px minimum is wider than a 320px phone. Each
+       card is its title and a one-line description ending in an ellipsis
+       (the full text is on the tool's own page). The features list is
+       m-hide in the markup, so the description's bottom margin goes too.
+       The URL label, subtitle and external arrow go from 9–10px to 11px.
+       !important: the page's own <style> loads after this file, and the
+       subtitle's size is inline. */
     .tl-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 0.5rem !important; }
     .tl-card { padding: 0.75rem !important; }
     .tl-card-title { flex-wrap: wrap; }
-    .tl-card-desc { margin-bottom: 0 !important; }
+    .tl-card-desc {
+        margin-bottom: 0 !important;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
     .tl-card-url, .tl-subtitle { font-size: 11px !important; }
     .tl-card-external::after { font-size: 11px !important; }
 
