@@ -321,10 +321,12 @@ def test_polish_b_show_all_is_inset_inside_asset_lists():
     assert re.search(r"margin:\s*0\.4rem 0\.75rem 0\.6rem", body)
 
 
-def test_polish_b_journal_type_badge_is_centred_and_uncapped_on_phones():
+def test_polish_b_journal_type_badge_is_uncapped_on_phones():
+    """R2 P makes the badge a block on phones (that lines it up with the
+    amount), so a vertical-align here would be dead."""
     body = _pb_rule_bodies(_phone(), '.m-row > [data-m="key"] > .journal-type')
-    assert re.search(r"vertical-align:\s*middle", body)
     assert re.search(r"max-width:\s*100%\s*!important", body)
+    assert "vertical-align" not in body
 
 
 def test_polish_b_classes_have_no_desktop_rules():
@@ -380,7 +382,10 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
         body = css_section(task, raw)
         preludes = re.findall(r"@media([^{]*)\{", body)
         assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
-        phone_block(body)       # opens with its phone block, and that block closes
+        try:
+            phone_block(body)   # opens with its phone block, and that block closes
+        except AssertionError as e:
+            raise AssertionError(f"{head}: {e}") from e
         depth = 0
         for ch in body:
             depth += (ch == "{") - (ch == "}")

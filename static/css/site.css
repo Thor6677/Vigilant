@@ -870,11 +870,10 @@
        double against the card's own sides and bottom. */
     .asset-list .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 
-    /* Wallet journal type badge (key 1): centred on the amount (as an
-       overflow:hidden inline-block its baseline is its bottom edge, so it
-       sat high), and as wide as the key cell rather than the desktop 120px;
-       a long type still ellipsises inside the badge. */
-    .m-row > [data-m="key"] > .journal-type { vertical-align: middle; max-width: 100% !important; }
+    /* Wallet journal type badge (key 1): as wide as the key cell rather than
+       the desktop 120px; a long type still ellipsises inside the badge. Its
+       line-up with the amount is R2 P's (the badge is a block there). */
+    .m-row > [data-m="key"] > .journal-type { max-width: 100% !important; }
 }
 
 /* ── R2 T1 · character overview ── */

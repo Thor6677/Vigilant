@@ -281,11 +281,12 @@
     // hides the right series), and tooltips read the dataset's full label.
     // Chart.js's own generator is looked up when the legend is built.
     var _LEGEND_MAX_CHARS = 20;
+    // Only for chart types whose legend uses the default generator (line, bar), not doughnut/pie (Chart.overrides).
     function _shortLegendLabels(chart) {
         var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
         items.forEach(function (item) {
             if (item.text && item.text.length > _LEGEND_MAX_CHARS) {
-                item.text = item.text.slice(0, _LEGEND_MAX_CHARS - 1) + '\u2026';
+                item.text = item.text.slice(0, _LEGEND_MAX_CHARS - 1).trimEnd() + '\u2026';
             }
         });
         return items;

@@ -253,6 +253,7 @@ const src = fs.readFileSync(process.argv[process.argv.length - 1], 'utf8');
 const LONG = 'Sample Navy Issue Hull Mark 07';          // 30 characters
 const EXACT = 'Twenty Character Nam';                   // 20 characters
 const SHORT = 'Sample Frigate';
+const SPACED = 'Charlie Navy Issue Hookbill';            // a space at character 19
 
 const state = { phone: false };
 const mqls = [];
@@ -274,7 +275,8 @@ Chart.defaults = { plugins: { legend: { labels: { generateLabels: chart =>
 const canvases = [
   { dataset: { chartKind: 'autopsy', chart: JSON.stringify({ solo: 1, small_gang: 0, fleet: 0, smartbomb: 0, npc: 0 }) } },
   { dataset: { chartKind: 'stream', chart: JSON.stringify({
-      datasets: [{ label: LONG, data: [1] }, { label: EXACT, data: [1] }, { label: SHORT, data: [1] }], weeks: 1 }) } },
+      datasets: [{ label: LONG, data: [1] }, { label: EXACT, data: [1] }, { label: SHORT, data: [1] },
+                 { label: SPACED, data: [1] }], weeks: 1 }) } },
 ];
 const document = {
   querySelectorAll: sel => (sel === 'canvas[data-chart-kind]' ? canvases : []),
@@ -311,8 +313,10 @@ process.stdout.write(JSON.stringify(out));
 """
 
 _LONG, _EXACT, _SHORT = "Sample Navy Issue Hull Mark 07", "Twenty Character Nam", "Sample Frigate"
+_SPACED = "Charlie Navy Issue Hookbill"
+_LABELS = [_LONG, _EXACT, _SHORT, _SPACED]
 _DESKTOP_STREAM = {"position": "right", "labels": {"color": "#bfbfbf", "font": {"size": 9}, "boxWidth": 8},
-                   "keys": ["color", "font", "boxWidth"], "gen": None, "datasetLabels": [_LONG, _EXACT, _SHORT]}
+                   "keys": ["color", "font", "boxWidth"], "gen": None, "datasetLabels": _LABELS}
 
 
 @pytest.fixture(scope="module")
@@ -338,13 +342,15 @@ def test_stream_legend_shortens_long_names_on_phones(legend_run):
     legend at half the chart's height, so only 7 of 10 showed at 360px. At
     20 characters two fit per row. The datasets keep their full labels, and
     tooltips read those. Legend items keep their datasetIndex, so a tap still
-    hides the right series."""
+    hides the right series. A cut that ends on a space drops it, so the
+    ellipsis sits against the last word."""
+    assert _SPACED[18] == " "
     stream = legend_run["phone"]["stream"]
     assert stream["position"] == "bottom"
     assert stream["labels"] == _DESKTOP_STREAM["labels"]          # colour, font and box as before
-    assert stream["gen"] == [[_LONG[:19] + "…", 0], [_EXACT, 1], [_SHORT, 2]]
+    assert stream["gen"] == [[_LONG[:19] + "…", 0], [_EXACT, 1], [_SHORT, 2], ["Charlie Navy Issue…", 3]]
     assert len(stream["gen"][0][0]) == 20
-    assert stream["datasetLabels"] == [_LONG, _EXACT, _SHORT]
+    assert stream["datasetLabels"] == _LABELS
 
 
 def test_only_the_stream_legend_is_shortened(legend_run):
@@ -406,8 +412,8 @@ def test_group_toggle_state_is_set_in_one_place_by_every_path():
 
 def test_only_the_two_toggle_helpers_write_a_chevron():
     html = render_full("custom", dash_mode="cards")
-    writes = re.findall(r"\.textContent = [^;\n]*[▸▾][^;\n]*;", html)
-    assert writes == [".textContent = expanded ? '▾' : '▸';"] * 2, writes
+    writes = re.findall(r"\.(?:textContent|innerText|innerHTML)\s*=\s*[^;\n]*[▸▾]", html)
+    assert writes == [".textContent = expanded ? '▾' : '▸"] * 2, writes
     assert html.index("function dashSetSectionToggle(") < html.index("function dashSetGroupToggle(")
 
 
