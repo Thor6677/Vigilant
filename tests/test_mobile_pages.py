@@ -984,3 +984,100 @@ def test_polish_b_planet_detail_scrolls_inside_itself_on_phones():
     phone = re.search(r"@media \(max-width: 640px\) \{(.*?)\n    \}", style, re.S)
     assert phone, "planetary.html needs a phone block in its own <style>"
     assert re.search(r"\.pi-row-detail\s*\{\s*overflow-x:\s*auto;?\s*\}", phone.group(1))
+
+
+class _Pieces(HTMLParser):
+    """For each .m-row's labelled cell `label`: (classes, own text) of every
+    element inside it, in document order."""
+
+    def __init__(self, label):
+        super().__init__(convert_charrefs=True)
+        self.label, self.stack, self.rows = label, [], []
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v or "") for k, v in attrs}
+        if "m-row" in a.get("class", "").split():
+            self.rows.append([])
+        inside = any(e[1] for e in self.stack) or bool(
+            self.stack and self.stack[-1][2] and a.get("data-m-label") == self.label)
+        piece = None
+        if inside and a.get("data-m-label") != self.label:
+            piece = [set(a.get("class", "").split()), ""]
+            self.rows[-1].append(piece)
+        if tag not in _VOID:
+            self.stack.append((tag, inside, "m-row" in a.get("class", "").split(), piece))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        for e in reversed(self.stack):
+            if e[3] is not None:
+                e[3][1] += data
+                return
+
+
+def _pieces(html, label):
+    p = _Pieces(label)
+    p.feed(html)
+    p.close()
+    return [[(cls, _norm(t)) for cls, t in row] for row in p.rows]
+
+
+_LONG_DESC = ("Contract reward for hauling a very large container of assorted goods "
+              "from the sample hub to the far region")                        # 108 chars
+_LONG_REASON = "Fuel and supplies for the sample structure out in the far region"  # 64 chars
+
+
+def _render_journal_long():
+    def entry(i, description="", reason="", fp="", sp=""):
+        return {"id": i, "date": f"2026-10-01T1{i}:00:00Z", "ref_type": "player_donation",
+                "ref_type_label": "Player Donation", "category": "other", "amount": 1000.0,
+                "balance": 5000.0, "description": description, "reason": reason,
+                "first_party": fp, "second_party": sp, "tax": None}
+    entries = [entry(0, _LONG_DESC, _LONG_REASON, fp="Sample Agency"),
+               entry(1, "A short description", "A short reason")]
+    return _render(journal_mod, "journal.html", "/character/90000001/journal",
+                   char=_PILOT, entries=entries, error=None, page=1, has_more=False,
+                   category="all", categories=journal_mod.CATEGORY_LABELS,
+                   is_corp=False, corp_id=None, division=None)
+
+
+def test_polish_b_journal_cut_text_has_a_full_phone_copy():
+    """Desktop keeps the cut copy (m-hide on phones); an open phone row shows
+    the full text (m-only, never shown on desktop)."""
+    assert len(_LONG_DESC) > 80 and len(_LONG_REASON) > 60
+    long_row = _pieces(_render_journal_long(), "Description")[0]
+    assert ({"m-hide"}, _LONG_DESC[:80] + "…") in long_row
+    assert ({"m-only"}, _LONG_DESC) in long_row
+    assert ({"m-hide"}, _LONG_REASON[:60]) in long_row
+    assert ({"m-only"}, _LONG_REASON) in long_row
+    # Both copies sit in the one value wrapper: the cell still has one child.
+    _assert_single_value_child(_rows(_render_journal_long())[0])
+
+
+def test_polish_b_journal_uncut_text_renders_once():
+    short_row = _pieces(_render_journal_long(), "Description")[1]
+    assert not any(cls & {"m-hide", "m-only"} for cls, _ in short_row)
+    texts = [t for _, t in short_row]
+    assert "A short description" in texts and "A short reason" in texts
+
+
+def test_polish_b_overview_cut_description_has_a_full_phone_copy():
+    journal = [
+        {"amount": 1.0, "balance": 2.0, "ref_type": "player_donation",
+         "description": _LONG_DESC, "date": "2026-10-01T12:00:00Z"},
+        {"amount": 1.0, "balance": 2.0, "ref_type": "player_donation",
+         "description": "A short description", "date": "2026-10-01T13:00:00Z"},
+    ]
+    html = _render_overview(journal=journal)
+    long_row, short_row = _pieces(html, "Description")[:2]
+    assert ({"m-hide"}, _LONG_DESC[:60] + "…") in long_row
+    assert ({"m-only"}, _LONG_DESC) in long_row
+    assert [cls for cls, _ in short_row] == [{"ref-type", "m-hide"}, set()]
+    assert short_row[1][1] == "A short description"
+    for r in _rows(html)[:2]:
+        _assert_single_value_child(r)

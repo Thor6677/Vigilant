@@ -113,7 +113,11 @@
     {# Phones (mobile design §6.4): key 1 = type, key 2 = amount. Details is
        labelled only when there is something to show, so an empty entry
        doesn't open onto a blank "Description" line. Its parts sit in one
-       wrapper: an open row lays a labelled cell out as label · value. #}
+       wrapper: an open row lays a labelled cell out as label · value.
+       A description or reason cut short for the desktop column also carries
+       its full text: the cut copy is m-hide, the full copy m-only, so an
+       open phone row (the only place a phone shows it) reads it all. Uncut
+       text renders once, as before. #}
     {% set has_details = e.first_party or e.second_party or e.description or e.reason or (e.tax and e.tax > 0) %}
     <div class="b-table-row m-row" data-click="toggleMRow">
         <span data-m-label="Date" style="flex:0 0 120px;font-size:9px;color:var(--muted);letter-spacing:0.04em;white-space:nowrap;">
@@ -137,11 +141,11 @@
             {% endif %}
             {% if e.description %}
             <div style="font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">
-                {{ e.description[:80] }}{% if e.description|length > 80 %}…{% endif %}
+                {% if e.description|length > 80 %}<span class="m-hide">{{ e.description[:80] }}…</span><span class="m-only">{{ e.description }}</span>{% else %}{{ e.description }}{% endif %}
             </div>
             {% endif %}
             {% if e.reason %}
-            <div style="font-size:9px;color:var(--accent);font-style:italic;">{{ e.reason[:60] }}</div>
+            <div style="font-size:9px;color:var(--accent);font-style:italic;">{% if e.reason|length > 60 %}<span class="m-hide">{{ e.reason[:60] }}</span><span class="m-only">{{ e.reason }}</span>{% else %}{{ e.reason }}{% endif %}</div>
             {% endif %}
             {% if e.tax and e.tax > 0 %}
             <div style="font-size:9px;color:var(--muted);">Tax: {{ format_isk(e.tax) }} ISK</div>
