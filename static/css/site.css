@@ -739,6 +739,7 @@
         display: flex !important; justify-content: flex-end; flex-wrap: wrap; gap: 0.25rem 0.4rem;
         font-size: 12px !important; text-align: right; white-space: normal; word-break: break-word;
     }
+    /* flex: 0 1 auto + min-width: 0: a label wider than its cell wraps instead of overflowing left under justify-content:flex-end; a short label never shrinks. */
     .m-row > [data-m-label]::before {
         content: attr(data-m-label); flex: 0 1 auto; min-width: 0; text-align: left; margin-right: auto; padding-right: 0.6rem;
         color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;

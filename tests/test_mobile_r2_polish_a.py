@@ -380,15 +380,35 @@ def test_r1_label_rule_keeps_its_other_declarations():
         assert decl in body, decl
 
 
-def test_no_section_keeps_a_local_label_shrink():
-    """The missing-skill cards' local copy is gone: the global rule covers
-    them, and no R2 section re-sizes the labels."""
-    css = _css()
-    assert not re.search(r"\.cf-miss\b", css)
-    for task in ("T1", "T2", "T3", "T4", "T5", "T6"):
-        for m in re.finditer(r"([^{}]+)\{", css_section(task)):
-            for sel in selectors(m.group(1)):
-                assert not ("data-m-label" in sel and "::before" in sel), (task, sel)
+_SIZING = re.compile(r"(?<![-\w])(?:flex(?:-grow|-shrink|-basis)?|min-width)\s*:")
+
+
+def _label_resizers(css):
+    """Every (selector, body) where a `[data-m-label]…::before` selector
+    other than R1's own rule declares flex sizing or min-width."""
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        for sel in selectors(m.group(1)):
+            if ("[data-m-label" in sel and "::before" in sel and sel != _R1_LABEL
+                    and _SIZING.search(m.group(2))):
+                out.append((sel, m.group(2).strip()))
+    return out
+
+
+def test_label_resizer_check_is_not_blind():
+    sample = (".m-row > [data-m-label]::before { flex: 0 1 auto; min-width: 0; }\n"
+              ".cf-miss.m-row > [data-m-label]::before { flex: 0 1 auto; min-width: 0; }\n"
+              ".x > [data-m-label]::before { flex-shrink: 0; }\n"
+              ".y > [data-m-label]::before { color: red; flex-wrap: wrap; }\n")
+    assert [s for s, _ in _label_resizers(sample)] == [
+        ".cf-miss.m-row > [data-m-label]::before", ".x > [data-m-label]::before"]
+
+
+def test_no_local_label_shrink_remains():
+    """Only R1's rule sizes the label: the missing-skill cards' local copy
+    is gone, and no other `[data-m-label]::before` rule re-declares flex
+    sizing or min-width (other declarations, such as a colour, are fine)."""
+    assert _label_resizers(_css()) == []
 
 
 # ── 3. Shared plan: the rank is readable on phones ────────────────────

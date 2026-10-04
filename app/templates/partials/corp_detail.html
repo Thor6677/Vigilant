@@ -169,24 +169,25 @@
         <div class="m-clamp-wrap">
         <div class="m-clamp corp-jobs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--border);border:1px solid var(--border)">
         {% for job in corp_jobs %}
+        {%- set product = job.product_name or '—' %}
         <div class="m-row" data-click="toggleMRow" style="background:var(--surface);padding:0.5rem 0.75rem">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
                 <span class="b-label" style="color:var(--accent)">{{ job.activity_name }}</span>
                 <span class="b-label">{{ job.runs }}x</span>
             </div>
             <div style="font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                {{ job.product_name or '—' }}
+                {{ product }}
             </div>
             {% if job.time_remaining %}
             <div class="b-label" style="margin-top:2px;{{ 'color:var(--success)' if job.time_remaining == 'Ready' else '' }}">
                 {{ job.time_remaining }}
             </div>
             {% endif %}
-            <span class="m-only corp-job-product" data-m="key">{{ job.product_name or '—' }}</span>
+            <span class="m-only corp-job-product" data-m="key">{{ product }}</span>
             {% if job.time_remaining %}
             <span class="m-only b-label" data-m="key"{% if job.time_remaining == 'Ready' %} style="color:var(--success)"{% endif %}>{{ job.time_remaining }}</span>
             {% endif %}
-            <span class="m-only" data-m-label="Name">{{ job.product_name or '—' }}</span>
+            <span class="m-only" data-m-label="Name">{{ product }}</span>
             <span class="m-only" data-m-label="Activity">{{ job.activity_name }}</span>
             <span class="m-only" data-m-label="Runs">{{ job.runs }}</span>
         </div>

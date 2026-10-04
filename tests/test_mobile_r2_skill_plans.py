@@ -271,11 +271,11 @@ def test_gap_rows_lead_with_status_and_key_on_time():
     assert_mrow(html, min_rows=3)
     rows = cells_rows(html)
     assert len(rows) == 3
-    expected = [("✓ Sample Gunnery Basics V", "done", "5 → 5"),
-                ("● Sample Hull Upgrades IV", "1d 4h", "2 → 4"),
-                ("● Sample Drone Operation III", "9h 12m", "0 → 3")]
-    for row, (k1_text, k2_text, level) in zip(rows, expected):
-        name = k1_text[2:]          # the full "skill level" Name line, without the status icon
+    # (key 1, key 2, the full Name line, Level)
+    expected = [("✓ Sample Gunnery Basics V", "done", "Sample Gunnery Basics V", "5 → 5"),
+                ("● Sample Hull Upgrades IV", "1d 4h", "Sample Hull Upgrades IV", "2 → 4"),
+                ("● Sample Drone Operation III", "9h 12m", "Sample Drone Operation III", "0 → 3")]
+    for row, (k1_text, k2_text, name, level) in zip(rows, expected):
         assert row["attrs"]["data-click"] == "toggleMRow"
         assert "skp-gap-row" in _classes(row["attrs"])
         k1, k2 = row_keys(row)

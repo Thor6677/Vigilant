@@ -179,12 +179,13 @@
         <div class="m-clamp-wrap skills-queue">
             <div class="m-clamp">
                 {% for q in queue_items %}
+                {%- set roman = ['', 'I', 'II', 'III', 'IV', 'V'][q.level] %}
                 <div class="b-table-row m-row" data-click="toggleMRow">
                     <span data-m="key" class="skills-key" style="flex:3;display:flex;align-items:center;gap:0.4rem;">
                         <span style="font-size:11px;color:var(--text);">{{ q.name }}</span>
-                        <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][q.level] }}</span>
+                        <span style="font-size:10px;color:var(--accent);">{{ roman }}</span>
                     </span>
-                    <span class="m-only" data-m-label="Name">{{ q.name }} {{ ['', 'I', 'II', 'III', 'IV', 'V'][q.level] }}</span>
+                    <span class="m-only" data-m-label="Name">{{ q.name }} {{ roman }}</span>
                     <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">
                         <span>{{ q.primary_name[:3] }}/{{ q.secondary_name[:3] }}
                         <span class="skills-rank" style="color:var(--border);">×{{ q.rank }}</span></span>
