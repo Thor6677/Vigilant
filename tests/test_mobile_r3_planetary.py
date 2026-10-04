@@ -24,7 +24,7 @@ import re
 from app.routes import pi as pi_mod
 from tests._mobile import (Styled, assert_mrow, assert_single_value_child, cells_rows,
                            css_section, phone_block, render_page, row_keys, row_labelled,
-                           row_lead, rule_bodies, source)
+                           row_lead, rule_bodies)
 
 _section = functools.partial(css_section, release="R3")
 
