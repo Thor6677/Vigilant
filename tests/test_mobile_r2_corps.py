@@ -58,6 +58,23 @@ def test_fuel_under_a_day_is_a_warning_end_to_end():
     assert corps_mod._fuel_level(remaining) == "warn"
 
 
+@pytest.mark.parametrize("ahead, level", [
+    (timedelta(minutes=30), "warn"),             # "0h"
+    (timedelta(hours=23, minutes=30), "warn"),   # "23h"
+    (timedelta(hours=24, minutes=30), "warn"),   # "1d 0h"
+    (timedelta(hours=47, minutes=30), "warn"),   # "1d 23h"
+    (timedelta(hours=48, minutes=30), ""),       # "2d 0h"
+    (timedelta(minutes=-1), "danger"),           # "EXPIRED"
+])
+def test_fuel_level_round_trips_fuel_remaining(ahead, level):
+    """_fuel_level reads _fuel_remaining's display string, so pin the pair
+    together: a change to that string's format must not silently drop the
+    warning. Each case sits 30 minutes inside its band, so the moment
+    _fuel_remaining reads the clock can't move it."""
+    expires = (datetime.now(timezone.utc) + ahead).isoformat()
+    assert corps_mod._fuel_level(corps_mod._fuel_remaining(expires)) == level
+
+
 def test_fuel_level_is_a_template_filter():
     assert corps_mod.templates.env.filters["fuel_level"] is corps_mod._fuel_level
 
@@ -210,6 +227,18 @@ def test_wallet_chart_legend_moves_below_on_phones_only():
     assert re.search(r"spanGaps:\s*false", script)
 
 
+def test_wallet_chart_x_ticks_thin_out_on_phones_only():
+    """Phones get at most 4 x-axis labels ("MM-DD HH:MM" each), so they
+    don't overlap in ~310px; desktop keeps its 8."""
+    html = _render_list()
+    script = html[html.index("Corp wallet history chart"):html.index("Drag-and-drop reorder")]
+    assert re.search(r"if \(phone\) xTicks\.maxTicksLimit = 4;", script)
+    assert re.search(r"var xTicks = \{[^;]*maxTicksLimit: 8,", script)
+    assert re.search(r"x: \{ ticks: xTicks,", script)
+    assert re.search(r"var phone = window\.matchMedia && window\.matchMedia\('\(max-width: 640px\)'\)\.matches;", script)
+    assert re.search(r"if \(phone\) legend\.position = 'bottom';", script)
+
+
 # ── Corp detail (D10 A, D11 A, D12 A) ─────────────────────────────────
 
 _SCOPES = " ".join(list(corps_mod.CORP_SCOPES.values()) + [perms.CORP_ROLES])
@@ -351,11 +380,10 @@ def test_desktop_fuel_span_uses_the_same_level():
 def test_structure_without_fuel_keeps_one_key():
     lowpower = _struct("Sample Station Echo", "shield_vulnerable", None)
     html = _render_detail(structures=[lowpower])
-    rows = assert_mrow(html, min_rows=1)
+    assert_mrow(html, min_rows=1)
     srow = [r for r in cells_rows(html) if "Sample Station Echo" in row_keys(r)[0]["text"]]
     assert len(srow) == 1 and len(row_keys(srow[0])) == 1
     assert "Fuel:" not in html
-    assert rows
 
 
 def test_structure_labelled_cells():
@@ -381,6 +409,18 @@ def test_structure_labelled_cells():
             assert lab["Timer"]["text"] == s["state_timer_end"]
         if "Services" in want:
             assert all(svc["name"] in lab["Services"]["text"] for svc in s["services"])
+
+
+def test_structure_system_without_region_and_reinforce_at_midnight():
+    """A reinforce hour of 0 is still shown, and a system with no region
+    reads as the system alone, as on desktop."""
+    odd = dict(_struct("Sample Station Golf", "shield_vulnerable", "4d 0h", reinforce=0), region=None)
+    html = _render_detail(structures=[odd])
+    row = [r for r in cells_rows(html) if "Sample Station Golf" in row_keys(r)[0]["text"]][0]
+    lab = row_labelled(row)
+    assert lab["System"]["text"] == "Sample System"
+    assert lab["Reinforce"]["text"] == "00:00 EVE"
+    assert "Reinforce: 00:00 EVE" in html          # desktop line
 
 
 def test_structure_services_badges_sit_in_one_wrapper():
@@ -530,11 +570,23 @@ def _t5():
     return css_section("T5")
 
 
+def _split_media(section):
+    """(before, inside, after) the section's phone @media block, found by
+    matching braces from its opening `{`, so a rule after the block (a
+    desktop rule) lands in `after` rather than inside the block."""
+    at = section.index("@media")
+    start = section.index("{", at) + 1
+    depth = 1
+    for i in range(start, len(section)):
+        depth += (section[i] == "{") - (section[i] == "}")
+        if depth == 0:
+            return section[:at], section[start:i], section[i + 1:]
+    raise AssertionError("R2 T5's @media block never closes")
+
+
 def _phone_block():
-    body = _t5()
-    m = re.search(r"@media \(max-width: 640px\) \{(.*)\}\s*$", body, flags=re.S)
-    assert m, "R2 T5 section must hold one phone @media block"
-    return m.group(1)
+    before, inside, after = _split_media(_t5())
+    return inside
 
 
 def _decl(body, prop):
@@ -619,9 +671,21 @@ def test_css_jobs_are_one_column_and_structure_key_one_truncates_the_name():
 
 
 def test_css_has_no_desktop_rules():
-    """D21: desktop renders as before, so nothing follows the phone block."""
+    """D21: desktop renders as before, so the section is one phone @media
+    block with only whitespace before it and after its closing brace, up to
+    the end marker."""
     body = _t5()
-    assert body.strip().endswith("}")
-    assert len(re.findall(r"@media", body)) == 1
-    tail = body[body.rindex("}") + 1:]
-    assert not tail.strip()
+    before, inside, after = _split_media(body)
+    assert body[len(before):].startswith("@media (max-width: 640px) {")
+    assert not before.strip(), before
+    assert not after.strip(), f"rules after the phone block apply on desktop: {after.strip()!r}"
+    assert "@media" not in inside
+
+
+def test_split_media_catches_a_rule_after_the_block():
+    """The guard above, against the mutation that slipped past a greedy
+    match: a desktop rule after the phone block, inside the section."""
+    sample = "\n@media (max-width: 640px) {\n    .a { color: red; }\n}\n.b { outline: 3px solid red; }\n"
+    before, inside, after = _split_media(sample)
+    assert ".b" not in inside and ".a" in inside
+    assert after.strip() == ".b { outline: 3px solid red; }"

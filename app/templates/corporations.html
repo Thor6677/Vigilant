@@ -223,9 +223,14 @@
             });
         });
         var legend = { labels: { color: '#8a8a8a', font: { size: 9 }, boxWidth: 8 } };
-        /* Phones: the legend goes under the plot, so a wrapped legend
-           doesn't eat the top of its 160px. Read once, at build time. */
-        if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) legend.position = 'bottom';
+        var xTicks = { color: '#7a7a7a', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
+                       callback: function(v, i) { var l = this.getLabelForValue(v); return l ? l.slice(5, 16).replace('T', ' ') : ''; } };
+        /* Phones, read once at build time: the legend goes under the plot,
+           so a wrapped legend doesn't eat the top of its 160px, and at most
+           4 "MM-DD HH:MM" x labels fit ~310px without overlapping. */
+        var phone = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+        if (phone) legend.position = 'bottom';
+        if (phone) xTicks.maxTicksLimit = 4;
         charts[key] = new Chart(canvas, {
             type: 'line',
             data: { labels: data.labels, datasets: datasets },
@@ -239,8 +244,7 @@
                     } } },
                 },
                 scales: {
-                    x: { ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
-                                  callback: function(v, i) { var l = this.getLabelForValue(v); return l ? l.slice(5, 16).replace('T', ' ') : ''; } },
+                    x: { ticks: xTicks,
                          grid: { display: false } },
                     y: { ticks: { color: '#7a7a7a', font: { size: 9 }, callback: fmtISK },
                          grid: { color: 'rgba(255,255,255,0.05)' } },

@@ -241,6 +241,10 @@
            the fuel left, coloured by the same fuel_level as desktop. #}
         {% for struct in corp_structures %}
         {% set fuel_lvl = struct.fuel_remaining | fuel_level %}
+        {# Text the phone cells share; the desktop lines keep their own. #}
+        {% set state_txt = struct.state | replace('_', ' ') | upper %}
+        {% set sys_txt = struct.system_name ~ (' — ' ~ struct.region if struct.region else '') %}
+        {% set reinforce_txt = '%02d:00 EVE' % struct.reinforce_hour if struct.reinforce_hour is not none else '' %}
         <div class="m-row" data-click="toggleMRow" style="padding:0.65rem 0.75rem;border-bottom:1px solid var(--border)">
             <!-- Name + state badge -->
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:4px">
@@ -280,15 +284,15 @@
                 {% endfor %}
             </div>
             {% endif %}
-            <span class="m-only corp-struct-key" data-m="key"><span class="corp-struct-name">{{ struct.name }}</span>{% if struct.state_class %}<span class="b-badge {{ struct.state_class }}">{{ struct.state | replace('_', ' ') | upper }}</span>{% endif %}</span>
+            <span class="m-only corp-struct-key" data-m="key"><span class="corp-struct-name">{{ struct.name }}</span>{% if struct.state_class %}<span class="b-badge {{ struct.state_class }}">{{ state_txt }}</span>{% endif %}</span>
             {% if struct.fuel_remaining %}
             <span class="m-only b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}" data-m="key">{{ struct.fuel_remaining }}</span>
             {% endif %}
-            <span class="m-only" data-m-label="State"><span class="b-badge {{ struct.state_class }}">{{ struct.state | replace('_', ' ') | upper }}</span></span>
+            <span class="m-only" data-m-label="State"><span class="b-badge {{ struct.state_class }}">{{ state_txt }}</span></span>
             <span class="m-only" data-m-label="Type">{{ struct.type_name }}</span>
-            <span class="m-only" data-m-label="System">{{ struct.system_name }}{% if struct.region %} — {{ struct.region }}{% endif %}</span>
-            {% if struct.reinforce_hour is not none %}
-            <span class="m-only" data-m-label="Reinforce">{{ '%02d:00' % struct.reinforce_hour }} EVE</span>
+            <span class="m-only" data-m-label="System">{{ sys_txt }}</span>
+            {% if reinforce_txt %}
+            <span class="m-only" data-m-label="Reinforce">{{ reinforce_txt }}</span>
             {% endif %}
             {% if struct.state_timer_end %}
             <span class="m-only" data-m-label="Timer"><span class="is-danger">{{ struct.state_timer_end }}</span></span>
