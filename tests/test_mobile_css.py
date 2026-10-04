@@ -2,10 +2,14 @@
 
 These read the stylesheet as text. They pin the rules every phone layout in
 the app depends on, so a later edit can't silently drop one."""
-import os
 import re
 
-_SITE_CSS = os.path.join(os.path.dirname(__file__), "..", "static", "css", "site.css")
+import pytest
+
+from tests._mobile import SITE_CSS as _SITE_CSS
+from tests._mobile import css_section
+from tests._mobile import rule_bodies as _pb_rule_bodies
+from tests._mobile import selectors as _pb_selectors
 PHONE = "max-width: 640px"
 
 
@@ -97,8 +101,8 @@ _DISPLAY_IMPORTANT = re.compile(r"(?<![-\w])display\s*:[^;]*!important")
 
 def _phone_rules() -> list[tuple[list[str], str]]:
     """(selectors, body) for every rule in the phone @media blocks, in file
-    order. Selector lists are split by _pb_selectors (Polish B, below), which
-    keeps the commas inside :not(a, b) together."""
+    order. Selector lists are split by _pb_selectors (tests._mobile's
+    selectors()), which keeps the commas inside :not(a, b) together."""
     return [(_pb_selectors(m.group(1)), m.group(2))
             for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _phone())]
 
@@ -256,28 +260,6 @@ _PB_OPEN_STATES = (".m-row.is-open:not(.m-row--link)",
 _PB_NOT_CONTROLS = ":not(input, select, textarea)"
 
 
-def _pb_selectors(prelude: str) -> list[str]:
-    """Split a selector list on its top-level commas (not those in :not())."""
-    out, depth, cur = [], 0, ""
-    for ch in prelude:
-        depth += (ch == "(") - (ch == ")")
-        if ch == "," and depth == 0:
-            out.append(cur.strip())
-            cur = ""
-        else:
-            cur += ch
-    return out + [cur.strip()]
-
-
-def _pb_rule_bodies(css: str, selector: str) -> str:
-    """Joined bodies of every rule whose selector list contains `selector`."""
-    out = []
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-        if selector in _pb_selectors(m.group(1)):
-            out.append(m.group(2))
-    return "\n".join(out)
-
-
 def test_polish_b_open_row_labelled_values_wrap_in_full():
     """User decision 2026-10-03: an open row shows each labelled value in
     full. The cell and everything in it wrap (long unbroken strings break)
@@ -374,7 +356,12 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
     Between them sits exactly one phone @media block, first; a desktop rule,
     if a task truly needs one, goes after that block's `}` and before the
     end marker. Braces balance inside each section, and every section comes
-    before the final m-hide block."""
+    before the final m-hide block.
+
+    Nothing may follow the final m-hide block: only whitespace and comments.
+    A rule after it, phone-scoped or not (a bare rule, `(max-width:640px)`
+    without the space, `(max-width: 480px)`, `! important`), could undo
+    the tie-break that test_m_hide_is_last_phone_utility can't see."""
     raw = _raw_css()
     marks = []
     for task, page in _R2_SECTIONS:
@@ -387,8 +374,8 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
     assert raw.count(_M_HIDE_FINAL) == 1
     assert flat[-1] < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
 
-    for start, stop, head, end in marks:
-        body = re.sub(r"/\*.*?\*/", "", raw[start + len(head):stop], flags=re.S)
+    for (task, _), (_, _, head, _) in zip(_R2_SECTIONS, marks):
+        body = css_section(task, raw)
         preludes = re.findall(r"@media([^{]*)\{", body)
         assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
         assert body.lstrip().startswith(f"@media ({PHONE}) {{"), head
@@ -399,5 +386,21 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
         assert depth == 0, f"{head}: unbalanced braces"
 
     final = re.sub(r"/\*.*?\*/", "", raw[raw.index(_M_HIDE_FINAL):], flags=re.S)
-    assert re.match(rf"\s*@media \({PHONE}\) \{{\s*\.m-hide, \.m-tabs-desktop \{{ display: none !important; \}}\s*\}}",
-                    final), "the final m-hide block must follow the R2 sections"
+    assert re.fullmatch(rf"\s*@media \({PHONE}\) \{{\s*\.m-hide, \.m-tabs-desktop \{{ display: none !important; \}}\s*\}}\s*",
+                        final), "the final m-hide block must follow the R2 sections and end the file"
+
+
+def test_css_section_returns_a_tasks_section_without_comments():
+    for task, _ in _R2_SECTIONS:
+        body = css_section(task)
+        assert body.lstrip().startswith(f"@media ({PHONE}) {{"), task
+        assert "/*" not in body, task
+    sample = ("/* ── R2 T9 · sample ── */\n@media (max-width: 640px) {\n"
+              "    /* why */\n    .a { color: red; }\n}\n/* ── end R2 T9 ── */\n")
+    assert css_section("T9", sample) == "\n@media (max-width: 640px) {\n    \n    .a { color: red; }\n}\n"
+
+
+@pytest.mark.parametrize("task", ["T7", "T0", "T", "t1"])
+def test_css_section_rejects_an_unknown_task(task):
+    with pytest.raises(AssertionError, match=f"R2 {task} section header"):
+        css_section(task)

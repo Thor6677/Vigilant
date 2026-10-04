@@ -16,6 +16,10 @@ Helpers, one line each:
   SITE_CSS                       path to static/css/site.css
   clamps(html)                   .m-clamp lists, .m-showall buttons, .m-unclamp and .m-clamp-wrap counts
   Styled                         HTMLParser collecting every start tag's name, classes and inline style
+  VOID                           the void HTML elements (no end tag), for a test's own HTMLParser
+  css_section(task, css=None)    an R2 task's site.css section ("T1"…"T6"), comments stripped
+  selectors(prelude)             split a CSS selector list on its top-level commas (not inside :not())
+  rule_bodies(css, selector)     joined bodies of every rule whose selector list contains `selector`
 
 `assert_mrow(html)` parses rendered HTML and checks every element with class
 `m-row`:
@@ -34,7 +38,7 @@ import re
 import types
 from html.parser import HTMLParser
 
-_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
          "meta", "source", "track", "wbr"}
 
 
@@ -54,7 +58,7 @@ class _Collector(HTMLParser):
         if "m-row" in a.get("class", "").split():
             self.rows.append({"tag": tag, "attrs": a, "children": [], "child_tags": []})
             idx = len(self.rows) - 1
-        if tag not in _VOID:
+        if tag not in VOID:
             self.stack.append((tag, idx))
 
     def handle_endtag(self, tag):
@@ -126,22 +130,27 @@ _DEFAULT = object()
 
 
 def request(path="/", session=_DEFAULT):
-    """A stand-in for the Starlette request a template reads: url.path,
-    state.csp_nonce and session. Leave `session` out for the logged-in
+    """A stand-in for the Starlette request a template reads: url (path,
+    scheme, netloc, query), query_params, headers, cookies, state.csp_nonce
+    and session. Leave `session` out for the logged-in
     session above (a fresh copy each call); pass None or {} for an
     anonymous visitor (empty session, no user_id); or pass your own dict."""
     if session is _DEFAULT:
         session = dict(_LOGGED_IN)
     elif not session:
         session = {}
-    return _NS(url=_NS(path=path), state=_NS(csp_nonce="test-nonce"), session=session)
+    return _NS(url=_NS(path=path, scheme="https", netloc="example.test", query=""),
+               query_params={}, headers={}, cookies={},
+               state=_NS(csp_nonce="test-nonce"), session=session)
 
 
 def render_page(module, template, path="/", *, session=_DEFAULT, **ctx):
-    """Full page (base.html included) through the route module's own
-    `templates.env`. app.main is imported first so every env carries the
-    globals and filters the real routes register. `session` is passed to
-    request(); the rest is the template context."""
+    """Render `template` through the route module's own `templates.env`: a
+    page that extends base.html renders in full; a partial (no extends)
+    renders on its own, so use this for partials too. app.main is imported
+    first so every env carries the globals and filters the real routes
+    register. `session` is passed to request(); the rest is the template
+    context."""
     import app.main  # noqa: F401 — populates every router's templates.env.globals
     return module.templates.env.get_template(template).render(
         request=request(path, session), **ctx)
@@ -192,7 +201,7 @@ class _Cells(HTMLParser):
         if "m-row" in a.get("class", "").split():
             self.rows.append({"tag": tag, "attrs": a, "cells": []})
             entry = [tag, "row", len(self.rows) - 1]
-        if tag not in _VOID:
+        if tag not in VOID:
             self.stack.append(entry)
 
     def handle_endtag(self, tag):
@@ -282,7 +291,7 @@ class _Clamps(HTMLParser):
         if "m-showall" in cls:
             self._btn = {"in_wrap": in_wrap, "attrs": a, "text": ""}
             self.showall.append(self._btn)
-        if tag not in _VOID:
+        if tag not in VOID:
             self.stack.append([tag, cls, ref])
 
     def handle_endtag(self, tag):
@@ -319,3 +328,46 @@ class Styled(HTMLParser):
     def handle_starttag(self, tag, attrs):
         a = {k: (v if v is not None else "") for k, v in attrs}
         self.tags.append((tag, a.get("class", "").split(), a.get("style", "")))
+
+
+# ── site.css sections and rules ───────────────────────────────────────
+
+def css_section(task, css=None):
+    """The text of R2 task `task`'s section of site.css ("T1"…"T6"): what
+    lies between `/* ── R2 <task> · … ── */` and `/* ── end R2 <task> ── */`,
+    with comments stripped. Reads SITE_CSS unless `css` is given. Fails
+    (AssertionError) unless the header and end marker each appear exactly
+    once, header first."""
+    if css is None:
+        with open(SITE_CSS, encoding="utf-8") as fh:
+            css = fh.read()
+    heads = list(re.finditer(rf"/\* ── R2 {re.escape(task)} · [^*]*? ── \*/", css))
+    end = f"/* ── end R2 {task} ── */"
+    assert len(heads) == 1, f"expected one R2 {task} section header in site.css, found {len(heads)}"
+    assert css.count(end) == 1, f"expected one {end!r} in site.css, found {css.count(end)}"
+    start, stop = heads[0].end(), css.index(end)
+    assert start <= stop, f"R2 {task}'s end marker comes before its header"
+    return re.sub(r"/\*.*?\*/", "", css[start:stop], flags=re.S)
+
+
+def selectors(prelude):
+    """Split a selector list on its top-level commas (not those in :not())."""
+    out, depth, cur = [], 0, ""
+    for ch in prelude:
+        depth += (ch == "(") - (ch == ")")
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur.strip()]
+
+
+def rule_bodies(css, selector):
+    """Joined bodies of every innermost rule in `css` whose selector list
+    contains `selector` exactly (as split by selectors())."""
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        if selector in selectors(m.group(1)):
+            out.append(m.group(2))
+    return "\n".join(out)

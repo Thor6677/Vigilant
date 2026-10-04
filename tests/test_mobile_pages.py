@@ -13,7 +13,8 @@ import types
 from html.parser import HTMLParser
 
 import app.main  # noqa: F401 — populates every router's templates.env.globals
-from tests._mobile import _VOID, assert_mrow
+from tests._mobile import VOID as _VOID
+from tests._mobile import assert_mrow
 from tests._mobile import SITE_CSS as _SITE_CSS
 from tests._mobile import Styled as _Styled
 from tests._mobile import assert_single_value_child as _assert_single_value_child
