@@ -223,13 +223,13 @@ def test_hamburger_focus_ring_stays_on_screen():
 
 # ── Polish B ──────────────────────────────────────────────────────────
 
-_OPEN_STATES = (".m-row.is-open:not(.m-row--link)",
+_PB_OPEN_STATES = (".m-row.is-open:not(.m-row--link)",
                 ".m-row.is-expanded:not(.m-row--link)",
                 ".is-expanded > .m-row:not(.m-row--link)")
-_NOT_CONTROLS = ":not(input, select, textarea)"
+_PB_NOT_CONTROLS = ":not(input, select, textarea)"
 
 
-def _selectors(prelude: str) -> list[str]:
+def _pb_selectors(prelude: str) -> list[str]:
     """Split a selector list on its top-level commas (not those in :not())."""
     out, depth, cur = [], 0, ""
     for ch in prelude:
@@ -242,77 +242,77 @@ def _selectors(prelude: str) -> list[str]:
     return out + [cur.strip()]
 
 
-def _rules(css: str, selector: str) -> str:
+def _pb_rule_bodies(css: str, selector: str) -> str:
     """Joined bodies of every rule whose selector list contains `selector`."""
     out = []
     for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-        if selector in _selectors(m.group(1)):
+        if selector in _pb_selectors(m.group(1)):
             out.append(m.group(2))
     return "\n".join(out)
 
 
-def test_open_row_labelled_values_wrap_in_full():
+def test_polish_b_open_row_labelled_values_wrap_in_full():
     """User decision 2026-10-03: an open row shows each labelled value in
     full. The cell and everything in it wrap (long unbroken strings break)
     instead of keeping their desktop inline nowrap/ellipsis."""
     phone = _phone()
-    for state in _OPEN_STATES:
-        cell = _rules(phone, f"{state} > [data-m-label]")
+    for state in _PB_OPEN_STATES:
+        cell = _pb_rule_bodies(phone, f"{state} > [data-m-label]")
         assert re.search(r"white-space:\s*normal\s*!important", cell), state
         assert re.search(r"text-overflow:\s*clip\s*!important", cell), state
         assert re.search(r"overflow-wrap:\s*anywhere", cell), state
         assert re.search(r"align-items:\s*baseline", cell), state
-        inner = _rules(phone, f"{state} > [data-m-label] {_NOT_CONTROLS}")
+        inner = _pb_rule_bodies(phone, f"{state} > [data-m-label] {_PB_NOT_CONTROLS}")
         assert re.search(r"white-space:\s*normal\s*!important", inner), state
         assert re.search(r"overflow:\s*visible\s*!important", inner), state
         assert re.search(r"text-overflow:\s*clip\s*!important", inner), state
 
 
-def test_open_row_labelled_values_use_the_cell_size():
+def test_polish_b_open_row_labelled_values_use_the_cell_size():
     """Descendants inherit the open cell's 12px instead of their own inline
     8–11px. Form controls are excluded so they keep the 16px iOS-zoom rule."""
     phone = _phone()
-    for state in _OPEN_STATES:
-        assert re.search(r"font-size:\s*12px\s*!important", _rules(phone, f"{state} > [data-m-label]")), state
-        inner = _rules(phone, f"{state} > [data-m-label] {_NOT_CONTROLS}")
+    for state in _PB_OPEN_STATES:
+        assert re.search(r"font-size:\s*12px\s*!important", _pb_rule_bodies(phone, f"{state} > [data-m-label]")), state
+        inner = _pb_rule_bodies(phone, f"{state} > [data-m-label] {_PB_NOT_CONTROLS}")
         assert re.search(r"font-size:\s*inherit\s*!important", inner), state
 
 
-def test_open_row_full_value_rules_are_phone_only():
+def test_polish_b_open_row_full_value_rules_are_phone_only():
     css = _css()
-    sel = f"> [data-m-label] {_NOT_CONTROLS}"
+    sel = f"> [data-m-label] {_PB_NOT_CONTROLS}"
     assert css.count(sel) == _phone().count(sel) == 3
     assert "[data-m-label] *" not in css
 
 
-def test_link_rows_have_no_chevron_track():
+def test_polish_b_link_rows_have_no_chevron_track():
     """No chevron, no 14px track: key 2 reaches the row's right padding."""
-    body = _rules(_phone(), ".m-row.m-row--link")
+    body = _pb_rule_bodies(_phone(), ".m-row.m-row--link")
     m = re.search(r"grid-template-columns:\s*([^;!]+?)\s*!important", body)
     assert m and m.group(1) == "auto minmax(0, 1fr) auto"
 
 
-def test_dashboard_phone_reverse_sort_looks_disabled():
-    body = _rules(_phone(), ".dash-phone-toolbar .b-btn:disabled")
+def test_polish_b_dashboard_phone_reverse_sort_looks_disabled():
+    body = _pb_rule_bodies(_phone(), ".dash-phone-toolbar .b-btn:disabled")
     assert re.search(r"opacity:\s*0?\.4\b", body)
     assert re.search(r"cursor:\s*default", body)
 
 
-def test_tab_dropdown_in_a_page_header_drops_its_margin():
+def test_polish_b_tab_dropdown_in_a_page_header_drops_its_margin():
     phone = _phone()
-    assert re.search(r"margin-bottom:\s*0\s*;", _rules(phone, ".b-page-header > details.m-tabs"))
+    assert re.search(r"margin-bottom:\s*0\s*;", _pb_rule_bodies(phone, ".b-page-header > details.m-tabs"))
     # Character pages' dropdown (not in a page header) keeps its spacing.
-    assert re.search(r"margin-bottom:\s*1rem", _rules(phone, "details.m-tabs"))
+    assert re.search(r"margin-bottom:\s*1rem", _pb_rule_bodies(phone, "details.m-tabs"))
 
 
-def test_show_all_is_inset_inside_asset_lists():
-    body = _rules(_phone(), ".asset-list .m-showall")
+def test_polish_b_show_all_is_inset_inside_asset_lists():
+    body = _pb_rule_bodies(_phone(), ".asset-list .m-showall")
     assert re.search(r"width:\s*calc\(100% - 1\.5rem\)", body)
     assert re.search(r"margin:\s*0\.4rem 0\.75rem 0\.6rem", body)
 
 
-def test_journal_type_badge_is_centred_and_uncapped_on_phones():
-    body = _rules(_phone(), '.m-row > [data-m="key"] > .journal-type')
+def test_polish_b_journal_type_badge_is_centred_and_uncapped_on_phones():
+    body = _pb_rule_bodies(_phone(), '.m-row > [data-m="key"] > .journal-type')
     assert re.search(r"vertical-align:\s*middle", body)
     assert re.search(r"max-width:\s*100%\s*!important", body)
 

@@ -878,7 +878,7 @@ def test_unclamp_show_all_button_is_styled_in_site_css():
 import pytest  # noqa: E402
 
 
-def _row_html(lead):
+def _pb_row_html(lead):
     return f'<div class="m-row" data-click="toggleMRow">{lead}<span data-m="key">Name</span></div>'
 
 
@@ -894,7 +894,7 @@ def test_polish_b_helper_rejects_image_leads_without_a_size(lead, msg):
     """Phone CSS forces width:auto !important on row children, so an image
     lead without width/height collapses to ~2px until (or unless) it loads."""
     with pytest.raises(AssertionError, match=msg):
-        assert_mrow(_row_html(lead))
+        assert_mrow(_pb_row_html(lead))
 
 
 @pytest.mark.parametrize("lead", [
@@ -906,7 +906,7 @@ def test_polish_b_helper_rejects_image_leads_without_a_size(lead, msg):
 def test_polish_b_helper_accepts_sized_image_leads_and_other_leads(lead):
     """A dot or a wrapper isn't an image lead (the dashboard's online dot),
     and min-/max-width aren't the img's own inline size."""
-    assert_mrow(_row_html(lead))
+    assert_mrow(_pb_row_html(lead))
 
 
 def test_polish_b_every_r1_image_lead_carries_its_size():
@@ -916,7 +916,7 @@ def test_polish_b_every_r1_image_lead_carries_its_size():
         assert any(t == "img" for r in rows for t in r["child_tags"])
 
 
-def _render_blueprints_pb():
+def _pb_render_blueprints():
     raw = [
         {"type_id": 691, "item_id": 1, "quantity": -1, "material_efficiency": 10,
          "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
@@ -939,7 +939,7 @@ def _render_blueprints_pb():
 def test_polish_b_blueprint_calc_link_is_a_tap_target():
     """In an open phone row the Calc link is a 40px m-tap target; the class
     has no desktop rule, so desktop keeps the small inline link."""
-    for row in _render_blueprints_pb().values():
+    for row in _pb_render_blueprints().values():
         (link,) = _labelled(row)["Calc"]["kids"]
         assert link["class"] == "m-tap"
         assert "font-size:9px" in link["style"]
@@ -948,7 +948,7 @@ def test_polish_b_blueprint_calc_link_is_a_tap_target():
 def test_polish_b_blueprint_me_te_key_is_labelled():
     """The ME and TE headers are hidden on phones, so the combined key
     names itself."""
-    rows = _render_blueprints_pb()
+    rows = _pb_render_blueprints()
     for name, want in (("Sample Alpha Blueprint", "ME 10 / TE 20"),
                        ("Sample Bravo Blueprint", "ME 0 / TE 0"),
                        ("Sample Charlie Blueprint", "ME 0 / TE 4")):
@@ -960,7 +960,7 @@ def test_polish_b_blueprint_me_te_key_is_labelled():
 def test_polish_b_blueprint_unresearched_me_te_is_muted():
     """0/0 is muted like the desktop ME and TE cells' zeros; any research
     shows in text colour; fully researched stays green."""
-    rows = _render_blueprints_pb()
+    rows = _pb_render_blueprints()
     styles = {n: _keys(r)[1]["attrs"]["style"] for n, r in rows.items()}
     assert "color:var(--success)" in styles["Sample Alpha Blueprint"]
     assert "color:var(--muted)" in styles["Sample Bravo Blueprint"]
@@ -986,7 +986,7 @@ def test_polish_b_planet_detail_scrolls_inside_itself_on_phones():
     assert re.search(r"\.pi-row-detail\s*\{\s*overflow-x:\s*auto;?\s*\}", phone.group(1))
 
 
-class _Pieces(HTMLParser):
+class _PBPieces(HTMLParser):
     """For each .m-row's labelled cell `label`: (classes, own text) of every
     element inside it, in document order."""
 
@@ -1020,25 +1020,25 @@ class _Pieces(HTMLParser):
                 return
 
 
-def _pieces(html, label):
-    p = _Pieces(label)
+def _pb_pieces(html, label):
+    p = _PBPieces(label)
     p.feed(html)
     p.close()
     return [[(cls, _norm(t)) for cls, t in row] for row in p.rows]
 
 
-_LONG_DESC = ("Contract reward for hauling a very large container of assorted goods "
-              "from the sample hub to the far region")                        # 108 chars
-_LONG_REASON = "Fuel and supplies for the sample structure out in the far region"  # 64 chars
+_PB_LONG_DESC = ("Contract reward for hauling a very large container of assorted goods "
+                 "from the sample hub to the far region")                     # 108 chars
+_PB_LONG_REASON = "Fuel and supplies for the sample structure out in the far region"  # 64 chars
 
 
-def _render_journal_long():
+def _pb_render_journal_long():
     def entry(i, description="", reason="", fp="", sp=""):
         return {"id": i, "date": f"2026-10-01T1{i}:00:00Z", "ref_type": "player_donation",
                 "ref_type_label": "Player Donation", "category": "other", "amount": 1000.0,
                 "balance": 5000.0, "description": description, "reason": reason,
                 "first_party": fp, "second_party": sp, "tax": None}
-    entries = [entry(0, _LONG_DESC, _LONG_REASON, fp="Sample Agency"),
+    entries = [entry(0, _PB_LONG_DESC, _PB_LONG_REASON, fp="Sample Agency"),
                entry(1, "A short description", "A short reason")]
     return _render(journal_mod, "journal.html", "/character/90000001/journal",
                    char=_PILOT, entries=entries, error=None, page=1, has_more=False,
@@ -1049,18 +1049,18 @@ def _render_journal_long():
 def test_polish_b_journal_cut_text_has_a_full_phone_copy():
     """Desktop keeps the cut copy (m-hide on phones); an open phone row shows
     the full text (m-only, never shown on desktop)."""
-    assert len(_LONG_DESC) > 80 and len(_LONG_REASON) > 60
-    long_row = _pieces(_render_journal_long(), "Description")[0]
-    assert ({"m-hide"}, _LONG_DESC[:80] + "…") in long_row
-    assert ({"m-only"}, _LONG_DESC) in long_row
-    assert ({"m-hide"}, _LONG_REASON[:60]) in long_row
-    assert ({"m-only"}, _LONG_REASON) in long_row
+    assert len(_PB_LONG_DESC) > 80 and len(_PB_LONG_REASON) > 60
+    long_row = _pb_pieces(_pb_render_journal_long(), "Description")[0]
+    assert ({"m-hide"}, _PB_LONG_DESC[:80] + "…") in long_row
+    assert ({"m-only"}, _PB_LONG_DESC) in long_row
+    assert ({"m-hide"}, _PB_LONG_REASON[:60]) in long_row
+    assert ({"m-only"}, _PB_LONG_REASON) in long_row
     # Both copies sit in the one value wrapper: the cell still has one child.
-    _assert_single_value_child(_rows(_render_journal_long())[0])
+    _assert_single_value_child(_rows(_pb_render_journal_long())[0])
 
 
 def test_polish_b_journal_uncut_text_renders_once():
-    short_row = _pieces(_render_journal_long(), "Description")[1]
+    short_row = _pb_pieces(_pb_render_journal_long(), "Description")[1]
     assert not any(cls & {"m-hide", "m-only"} for cls, _ in short_row)
     texts = [t for _, t in short_row]
     assert "A short description" in texts and "A short reason" in texts
@@ -1069,14 +1069,14 @@ def test_polish_b_journal_uncut_text_renders_once():
 def test_polish_b_overview_cut_description_has_a_full_phone_copy():
     journal = [
         {"amount": 1.0, "balance": 2.0, "ref_type": "player_donation",
-         "description": _LONG_DESC, "date": "2026-10-01T12:00:00Z"},
+         "description": _PB_LONG_DESC, "date": "2026-10-01T12:00:00Z"},
         {"amount": 1.0, "balance": 2.0, "ref_type": "player_donation",
          "description": "A short description", "date": "2026-10-01T13:00:00Z"},
     ]
     html = _render_overview(journal=journal)
-    long_row, short_row = _pieces(html, "Description")[:2]
-    assert ({"m-hide"}, _LONG_DESC[:60] + "…") in long_row
-    assert ({"m-only"}, _LONG_DESC) in long_row
+    long_row, short_row = _pb_pieces(html, "Description")[:2]
+    assert ({"m-hide"}, _PB_LONG_DESC[:60] + "…") in long_row
+    assert ({"m-only"}, _PB_LONG_DESC) in long_row
     assert [cls for cls, _ in short_row] == [{"ref-type", "m-hide"}, set()]
     assert short_row[1][1] == "A short description"
     for r in _rows(html)[:2]:
