@@ -7,9 +7,10 @@ import re
 import pytest
 
 from tests._mobile import SITE_CSS as _SITE_CSS
-from tests._mobile import css_section
+from tests._mobile import css_section, phone_block
 from tests._mobile import rule_bodies as _pb_rule_bodies
 from tests._mobile import selectors as _pb_selectors
+
 PHONE = "max-width: 640px"
 
 
@@ -338,11 +339,11 @@ def test_polish_b_classes_have_no_desktop_rules():
 # ── R2 foundation ─────────────────────────────────────────────────────
 # Six R2 page tasks run in parallel worktrees and are cherry-picked back.
 # Each edits only its own seeded section of site.css, which is what keeps
-# those cherry-picks conflict-free.
+# those cherry-picks conflict-free. The polish pass's section, P, follows T6.
 
 _R2_SECTIONS = (("T1", "character overview"), ("T2", "skills"),
                 ("T3", "fittings/stats/filters"), ("T4", "mining"),
-                ("T5", "corporations"), ("T6", "skill plans"))
+                ("T5", "corporations"), ("T6", "skill plans"), ("P", "polish B"))
 _M_HIDE_FINAL = "/* ── m-hide wins ties: keep this the last phone rule in the file ── */"
 
 
@@ -352,7 +353,7 @@ def _raw_css() -> str:
 
 
 def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
-    """Each section's header and end marker appear once, in T1…T6 order.
+    """Each section's header and end marker appear once, in T1…T6, P order.
     Between them sits exactly one phone @media block, first; a desktop rule,
     if a task truly needs one, goes after that block's `}` and before the
     end marker. Braces balance inside each section, and every section comes
@@ -374,11 +375,12 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
     assert raw.count(_M_HIDE_FINAL) == 1
     assert flat[-1] < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
 
-    for (task, _), (_, _, head, _) in zip(_R2_SECTIONS, marks):
+    for (task, _), mark in zip(_R2_SECTIONS, marks):
+        head = mark[2]
         body = css_section(task, raw)
         preludes = re.findall(r"@media([^{]*)\{", body)
         assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
-        assert body.lstrip().startswith(f"@media ({PHONE}) {{"), head
+        phone_block(body)       # opens with its phone block, and that block closes
         depth = 0
         for ch in body:
             depth += (ch == "{") - (ch == "}")

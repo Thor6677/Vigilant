@@ -17,7 +17,8 @@ Helpers, one line each:
   clamps(html)                   .m-clamp lists, .m-showall buttons, .m-unclamp and .m-clamp-wrap counts
   Styled                         HTMLParser collecting every start tag's name, classes and inline style
   VOID                           the void HTML elements (no end tag), for a test's own HTMLParser
-  css_section(task, css=None)    an R2 task's site.css section ("T1"…"T6"), comments stripped
+  css_section(task, css=None)    an R2 task's site.css section ("T1"…"T6", "P"), comments stripped
+  phone_block(section)           a css_section's phone @media body (brace-matched) and what follows it
   selectors(prelude)             split a CSS selector list on its top-level commas (not inside :not())
   rule_bodies(css, selector)     joined bodies of every rule whose selector list contains `selector`
 
@@ -39,7 +40,7 @@ import types
 from html.parser import HTMLParser
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-         "meta", "source", "track", "wbr"}
+        "meta", "source", "track", "wbr"}
 
 
 class _Collector(HTMLParser):
@@ -333,11 +334,11 @@ class Styled(HTMLParser):
 # ── site.css sections and rules ───────────────────────────────────────
 
 def css_section(task, css=None):
-    """The text of R2 task `task`'s section of site.css ("T1"…"T6"): what
-    lies between `/* ── R2 <task> · … ── */` and `/* ── end R2 <task> ── */`,
-    with comments stripped. Reads SITE_CSS unless `css` is given. Fails
-    (AssertionError) unless the header and end marker each appear exactly
-    once, header first."""
+    """The text of R2 task `task`'s section of site.css ("T1"…"T6", or "P"
+    for the polish pass): what lies between `/* ── R2 <task> · … ── */` and
+    `/* ── end R2 <task> ── */`, with comments stripped. Reads SITE_CSS
+    unless `css` is given. Fails (AssertionError) unless the header and end
+    marker each appear exactly once, header first."""
     if css is None:
         with open(SITE_CSS, encoding="utf-8") as fh:
             css = fh.read()
@@ -348,6 +349,22 @@ def css_section(task, css=None):
     start, stop = heads[0].end(), css.index(end)
     assert start <= stop, f"R2 {task}'s end marker comes before its header"
     return re.sub(r"/\*.*?\*/", "", css[start:stop], flags=re.S)
+
+
+def phone_block(section):
+    """Split an R2 section (css_section's text) into the body of its phone
+    @media block, found by matching braces, and whatever follows that block
+    up to the end marker: a desktop rule, if the task needed one. Fails
+    (AssertionError) unless the section opens with
+    `@media (max-width: 640px) {` and that block is closed."""
+    m = re.match(r"\s*@media \(max-width: 640px\) \{", section)
+    assert m, "the section must open with its phone @media block"
+    depth, i = 1, m.end()
+    while depth:
+        assert i < len(section), "the phone @media block is never closed"
+        depth += (section[i] == "{") - (section[i] == "}")
+        i += 1
+    return section[m.end():i - 1], section[i:]
 
 
 def selectors(prelude):
@@ -365,7 +382,9 @@ def selectors(prelude):
 
 def rule_bodies(css, selector):
     """Joined bodies of every innermost rule in `css` whose selector list
-    contains `selector` exactly (as split by selectors())."""
+    contains `selector` exactly (as split by selectors()). A css_section
+    holds its phone block and any desktop rule after it, so for phone-only
+    bodies, slice up to the @media block's closing brace (phone_block)."""
     out = []
     for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
         if selector in selectors(m.group(1)):
