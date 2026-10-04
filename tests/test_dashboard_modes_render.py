@@ -288,3 +288,11 @@ def test_phone_table_sort_runs_the_header_click_path():
     assert "_dashSyncPhoneTableSort();" in sort_body
     pageshow = html.split("window.addEventListener('pageshow'", 1)[1].split("\n});", 1)[0]
     assert "_dashSyncPhoneTableSort();" in pageshow
+
+
+def test_remove_is_hidden_on_phones_in_cards_and_detailed():
+    for mode in ("cards", "detailed"):
+        html = render_full("custom", dash_mode=mode)
+        forms = re.findall(r'<form method="POST" action="/auth/remove/\d+"([^>]*)>', html)
+        assert len(forms) == len(CHARACTERS), mode
+        assert all(f.startswith(' class="m-hide" data-confirm=') for f in forms), mode

@@ -61,6 +61,9 @@
     justify-content: flex-end;
     min-width: 0;
 }
+/* Mobile design §5.3: a second copy of the flags, inside the name cell,
+ * shown only in the <=760px tier below. */
+.dash-compact-flags-inline { display: none; }
 /* T-078: two responsive tiers below the 8-track desktop grid. Before this,
  * the only override was a <=480px phone-only rule — from 481px up to ~760px
  * the fixed 150+120+110px (loc/ship/wallet) tracks alone summed past 380px
@@ -78,25 +81,30 @@
  *   761-1000px : drop ship only — loc, wallet and training still fit — down
  *                to 7 tracks: dot, portrait, name, loc, wallet, training,
  *                flags.
- *   <=760px    : drop loc, ship and training too (this also covers the old
- *                phone breakpoint) — 5 tracks: dot, portrait, name, wallet,
- *                flags. Name is `minmax(0, 1fr)` with ellipsis; wallet is
- *                `auto` sized to its own content (still right-aligned)
- *                instead of a fixed 110px, since there's no ship/training
- *                column left to share space with — safe here specifically
- *                because flags (the only track after it) is now a FIXED
- *                90px, so wallet's right edge is still a constant distance
- *                from the row's right edge on every row; flags wraps onto a
- *                2nd line inside that fixed width instead of overflowing.
+ *   <=760px    : drop loc, ship and training too (this also covers the
+ *                phone layout) — 4 tracks: dot, portrait, name, wallet.
+ *                Flags move inside the name cell, inline after the name
+ *                (mobile design §5.3): `.dash-compact-flags-inline`, a copy
+ *                the row partial renders and only this tier shows, wraps
+ *                freely instead of being clipped to a 90px track. Wallet is
+ *                `auto` and now the LAST track, so its right edge is the
+ *                row's own content edge on every row (still right-aligned).
  */
 @media (max-width: 1000px) {
     .dash-compact-ship { display: none; }
     .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1.2fr) 150px 110px minmax(0, 1fr) 130px; }
 }
 @media (max-width: 760px) {
-    .dash-compact-loc, .dash-compact-ship, .dash-compact-training { display: none; }
-    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1fr) auto 90px; }
-    .dash-compact-flags { flex-wrap: wrap; }
+    .dash-compact-loc, .dash-compact-ship, .dash-compact-flags { display: none; }
+    /* !important: the training cell sets display:flex inline, which beats a
+       plain class rule. Without it the cell stayed visible here, the row had
+       six cells for five tracks, and the flags cell wrapped onto a second
+       grid line inside the 11px dot track (ISS-096). */
+    .dash-compact-training { display: none !important; }
+    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1fr) auto; }
+    /* The name cell wraps rather than clipping, so no badge is cut off. */
+    .dash-compact-name { white-space: normal !important; overflow: visible !important; }
+    .dash-compact-flags-inline { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: 4px; vertical-align: middle; }
 }
 </style>
 {% endif %}

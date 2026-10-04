@@ -157,7 +157,7 @@
     <div class="b-actions">
         <a href="/character/{{ char.character_id }}" class="b-btn">Details →</a>
         <a href="/account/permissions/{{ char.character_id }}" class="b-btn" style="font-size:9px;">Permissions</a>
-        <form method="POST" action="/auth/remove/{{ char.character_id }}" data-confirm="Remove {{ char.character_name }} from Vigilant? Its authorization is revoked at EVE, and its current data, tags and notes are deleted. Its history is kept; to delete that too, remove it from the Account page instead." style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
+        <form method="POST" action="/auth/remove/{{ char.character_id }}" class="m-hide" data-confirm="Remove {{ char.character_name }} from Vigilant? Its authorization is revoked at EVE, and its current data, tags and notes are deleted. Its history is kept; to delete that too, remove it from the Account page instead." style="display:flex;"><button type="submit" class="b-btn is-danger" style="font-size:9px;">Remove</button></form>
     </div>
 </div>
 {% endmacro %}

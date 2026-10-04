@@ -3,10 +3,9 @@
 One shared CSS grid template per breakpoint — no row carries its own inline
 `grid-template-columns`, and the class-level rules define the tracks (dot,
 portrait, name, location, ship, wallet, training, flags) once each. Flags
-render on one line at the base and <=1000px tiers (`flex-wrap: nowrap`), but
-wrap onto a second line at the <=760px tier, where location/ship/training
-are gone and there's a fixed-width flags column to wrap inside instead of
-overflowing it. The wallet cell is right-aligned with tabular figures at
+render on one line in their own track at the base and <=1000px tiers
+(`flex-wrap: nowrap`); at the <=760px tier that track is gone and a copy
+inside the name cell wraps instead (mobile design §5.3). The wallet cell is right-aligned with tabular figures at
 every tier.
 
 T-078 also fixed a row-to-row column-drift bug: each `.dash-compact-row` is
@@ -162,7 +161,9 @@ def test_grid_tracks_by_breakpoint(client):
     for cls in (".dash-compact-loc", ".dash-compact-ship", ".dash-compact-training"):
         assert cls in small_block, f"{cls} must be hidden under <=760px"
     small_tracks = _row_tracks(small_block)
-    assert len(small_tracks) == 5, f"expected 5 tracks (dot/portrait/name/wallet/flags) under <=760px, got {small_tracks}"
+    assert len(small_tracks) == 4, (
+        f"expected 4 tracks (dot/portrait/name/wallet) under <=760px — flags sit "
+        f"inside the name cell there (mobile design §5.3), got {small_tracks}")
 
     # No content-dependent track in the base or 7-track tier.
     for tier_name, tracks in (("base", base_tracks), ("<=1000px", mid_tracks)):
@@ -171,13 +172,10 @@ def test_grid_tracks_by_breakpoint(client):
                 f"{tier_name} tier track {t!r} is content-dependent (bare auto/fr) "
                 "and will drift row to row"
             )
-    # The 5-track tier keeps `auto` deliberately for wallet (brief: "wallet
-    # auto, right-aligned"), which is safe there ONLY because the track
-    # after it (flags) is a fixed px width — assert that explicitly.
-    assert small_tracks[3] == "auto", f"expected wallet (4th track) to stay auto, got {small_tracks}"
-    assert re.fullmatch(r"\d+px", small_tracks[4]), (
-        f"flags (last track) must be a fixed px width for wallet's right edge to stay constant, got {small_tracks[4]!r}"
-    )
+    # The 4-track tier keeps `auto` deliberately for wallet (brief: "wallet
+    # auto, right-aligned"). Wallet is the LAST track there, so its right
+    # edge is the row's own content edge on every row — assert it stays last.
+    assert small_tracks[-1] == "auto", f"expected wallet (last track) to stay auto, got {small_tracks}"
 
 
 def test_responsive_breakpoints_are_1000_and_760px():
@@ -242,3 +240,38 @@ def test_compact_grid_css_absent_outside_compact_mode(client):
         client.post("/dashboard/prefs", json={"mode": mode})
         html = client.get("/dashboard").text
         assert ".dash-compact-row {" not in html, f"compact grid CSS leaked into {mode} mode"
+
+
+# ── Mobile R1: flags inline after the name at <=760px (mobile design §5.3) ──
+
+def _dashboard_source():
+    with open(os.path.join(os.path.dirname(__file__), "..", "app", "templates", "dashboard.html"),
+              encoding="utf-8") as f:
+        return f.read()
+
+
+def _compact_row(html, cid):
+    m = re.search(r'<a href="/character/%d" class="dash-compact-row".*?</a>' % cid, html, re.S)
+    assert m, f"no compact row for {cid}"
+    return m.group(0)
+
+
+def test_compact_flags_also_render_inside_the_name_cell():
+    html = render_full("name", dash_mode="compact")
+    paused = _compact_row(html, 1004)  # fixture: PAUSED, nothing else
+    name_cell = paused.split('class="dash-compact-name"')[1].split('class="dash-compact-loc"')[0]
+    assert 'class="dash-compact-flags-inline"' in name_cell
+    assert ">PAUSED</span>" in name_cell
+    assert ">PAUSED</span>" in paused.split('class="dash-compact-flags"')[1]  # desktop track copy
+    assert "dash-compact-flags-inline" not in _compact_row(html, 1001)  # no flags, no copy
+
+
+def test_760px_tier_hides_training_for_real_and_shows_inline_flags():
+    src = _dashboard_source()
+    base = src.split("@media (max-width: 1000px)")[0]
+    assert re.search(r"\.dash-compact-flags-inline\s*\{\s*display:\s*none;", base)
+    small = _media_block(src, 760)
+    assert re.search(r"\.dash-compact-training\s*\{\s*display:\s*none\s*!important;", small)
+    assert re.search(r"\.dash-compact-loc, \.dash-compact-ship, \.dash-compact-flags\s*\{\s*display:\s*none;", small)
+    assert re.search(r"\.dash-compact-flags-inline\s*\{[^}]*display:\s*inline-flex;[^}]*flex-wrap:\s*wrap;", small)
+    assert re.search(r"\.dash-compact-name\s*\{[^}]*overflow:\s*visible\s*!important", small)

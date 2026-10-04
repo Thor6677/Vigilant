@@ -43,11 +43,14 @@
     <span class="b-dot" style="width:7px;height:7px;{% if s.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span>
     <img src="https://images.evetech.net/characters/{{ s.character_id }}/portrait?size=64" alt=""
          style="width:24px;height:24px;border-radius:2px;">
-    <span style="font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+    <span class="dash-compact-name" style="font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ s.name }}
         {% if tags and tags.tags %}
         {% for t in tags.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-left:3px;">{{ t }}</span>{% endfor %}
         {% endif %}
+        {# Mobile design §5.3: the same flags, shown only at <=760px (CSS in
+           dashboard.html's head), inline after the name. #}
+        {% if s.flags %}<span class="dash-compact-flags-inline">{% for f in s.flags %}<span class="b-badge" style="font-size:8px;border:1px solid {{ _flag_color(f.sev) }};color:{{ _flag_color(f.sev) }};white-space:nowrap;">{{ f.label }}</span>{% endfor %}</span>{% endif %}
     </span>
     <span class="dash-compact-loc" style="font-size:10px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {% if s.security is not none %}[{{ "%.1f"|format(s.security) }}] {% endif %}{{ s.system_name or "Unknown" }}
