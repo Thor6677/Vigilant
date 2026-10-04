@@ -219,3 +219,67 @@ def test_hamburger_focus_ring_stays_on_screen():
     """Closing the menu puts focus on the Menu button, which fills the bar's
     height; an outside ring would lose its top edge off-screen."""
     assert _has_decl(_rule(_css(), ".b-hamburger:focus-visible"), "outline-offset: -2px")
+
+
+# ── Polish B ──────────────────────────────────────────────────────────
+
+_OPEN_STATES = (".m-row.is-open:not(.m-row--link)",
+                ".m-row.is-expanded:not(.m-row--link)",
+                ".is-expanded > .m-row:not(.m-row--link)")
+_NOT_CONTROLS = ":not(input, select, textarea)"
+
+
+def _selectors(prelude: str) -> list[str]:
+    """Split a selector list on its top-level commas (not those in :not())."""
+    out, depth, cur = [], 0, ""
+    for ch in prelude:
+        depth += (ch == "(") - (ch == ")")
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur.strip()]
+
+
+def _rules(css: str, selector: str) -> str:
+    """Joined bodies of every rule whose selector list contains `selector`."""
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        if selector in _selectors(m.group(1)):
+            out.append(m.group(2))
+    return "\n".join(out)
+
+
+def test_open_row_labelled_values_wrap_in_full():
+    """User decision 2026-10-03: an open row shows each labelled value in
+    full. The cell and everything in it wrap (long unbroken strings break)
+    instead of keeping their desktop inline nowrap/ellipsis."""
+    phone = _phone()
+    for state in _OPEN_STATES:
+        cell = _rules(phone, f"{state} > [data-m-label]")
+        assert re.search(r"white-space:\s*normal\s*!important", cell), state
+        assert re.search(r"text-overflow:\s*clip\s*!important", cell), state
+        assert re.search(r"overflow-wrap:\s*anywhere", cell), state
+        assert re.search(r"align-items:\s*baseline", cell), state
+        inner = _rules(phone, f"{state} > [data-m-label] {_NOT_CONTROLS}")
+        assert re.search(r"white-space:\s*normal\s*!important", inner), state
+        assert re.search(r"overflow:\s*visible\s*!important", inner), state
+        assert re.search(r"text-overflow:\s*clip\s*!important", inner), state
+
+
+def test_open_row_labelled_values_use_the_cell_size():
+    """Descendants inherit the open cell's 12px instead of their own inline
+    8–11px. Form controls are excluded so they keep the 16px iOS-zoom rule."""
+    phone = _phone()
+    for state in _OPEN_STATES:
+        assert re.search(r"font-size:\s*12px\s*!important", _rules(phone, f"{state} > [data-m-label]")), state
+        inner = _rules(phone, f"{state} > [data-m-label] {_NOT_CONTROLS}")
+        assert re.search(r"font-size:\s*inherit\s*!important", inner), state
+
+
+def test_open_row_full_value_rules_are_phone_only():
+    css = _css()
+    sel = f"> [data-m-label] {_NOT_CONTROLS}"
+    assert css.count(sel) == _phone().count(sel) == 3
+    assert "[data-m-label] *" not in css

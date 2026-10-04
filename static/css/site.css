@@ -828,3 +828,27 @@
         cursor: pointer;
     }
 }
+
+/* ═══ Polish B — open rows, link rows and phone details (mobile R1) ══════ */
+@media (max-width: 640px) {
+    /* Open rows show labelled values in full: the open row is the only place
+       a phone can read them. The cell and every element in it wrap instead
+       of ellipsising (long unbroken strings break), and descendants take the
+       cell's 12px instead of their desktop inline 8–11px. !important beats
+       those inline sizes and nowrap/ellipsis. Form controls keep their own
+       16px (iOS zoom rule). baseline: a label lines up with its value's
+       first line, including a 40px m-tap link or button. Collapsed rows and
+       link rows are untouched. */
+    .m-row.is-open:not(.m-row--link) > [data-m-label],
+    .m-row.is-expanded:not(.m-row--link) > [data-m-label],
+    .is-expanded > .m-row:not(.m-row--link) > [data-m-label] {
+        align-items: baseline;
+        white-space: normal !important; text-overflow: clip !important; overflow-wrap: anywhere;
+    }
+    .m-row.is-open:not(.m-row--link) > [data-m-label] :not(input, select, textarea),
+    .m-row.is-expanded:not(.m-row--link) > [data-m-label] :not(input, select, textarea),
+    .is-expanded > .m-row:not(.m-row--link) > [data-m-label] :not(input, select, textarea) {
+        font-size: inherit !important;
+        white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+    }
+}

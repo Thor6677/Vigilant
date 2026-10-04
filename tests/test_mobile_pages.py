@@ -914,3 +914,32 @@ def test_polish_b_every_r1_image_lead_carries_its_size():
     for html in pages:
         rows = assert_mrow(html, min_rows=2)
         assert any(t == "img" for r in rows for t in r["child_tags"])
+
+
+def _render_blueprints_pb():
+    raw = [
+        {"type_id": 691, "item_id": 1, "quantity": -1, "material_efficiency": 10,
+         "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+        {"type_id": 692, "item_id": 2, "quantity": -1, "material_efficiency": 0,
+         "time_efficiency": 0, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+        {"type_id": 693, "item_id": 3, "quantity": -1, "material_efficiency": 0,
+         "time_efficiency": 4, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+    ]
+    names = {691: "Sample Alpha Blueprint", 692: "Sample Bravo Blueprint", 693: "Sample Charlie Blueprint"}
+    bps = blueprints_mod._process_blueprints(raw, names)
+    char = {"character_id": 90000001, "character_name": "Pilot Alpha",
+            "corporation_id": None, "corporation_name": None}
+    html = _render(blueprints_mod, "blueprints.html", "/character/90000001/blueprints",
+                   char=char, blueprints=bps, groups=blueprints_mod._group_blueprints(bps, "type"),
+                   stats=blueprints_mod._compute_stats(bps), error=None, is_corp=False,
+                   corp_id=None, filter="all", group_by="type")
+    return {_keys(r)[0]["text"]: r for r in _rows(html)}
+
+
+def test_polish_b_blueprint_calc_link_is_a_tap_target():
+    """In an open phone row the Calc link is a 40px m-tap target; the class
+    has no desktop rule, so desktop keeps the small inline link."""
+    for row in _render_blueprints_pb().values():
+        (link,) = _labelled(row)["Calc"]["kids"]
+        assert link["class"] == "m-tap"
+        assert "font-size:9px" in link["style"]
