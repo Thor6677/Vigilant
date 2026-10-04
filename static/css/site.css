@@ -964,6 +964,16 @@
 
 /* ── R2 T4 · mining ── */
 @media (max-width: 640px) {
+    /* Ore name (key 1 on By Ore Type and Full Detail) with its icon inline.
+       A key cell is display:block, which would sit the icon on the text
+       baseline and drop the desktop gap; keep the cell a flex line so the
+       icon keeps its size and only the name ellipsises. */
+    .m-row > [data-m="key"].mining-ore { display: flex !important; align-items: center; }
+    .m-row > .mining-ore > img { flex: none; }
+    .m-row > .mining-ore > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* "Show all" inside a panel: inset, so its border doesn't double
+       against the panel's own sides and bottom. */
+    .mining-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 }
 /* ── end R2 T4 ── */
 
