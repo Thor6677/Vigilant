@@ -417,6 +417,17 @@
         });
     };
 
+    // The legend side is read when a chart is built, so crossing the phone
+    // breakpoint (a rotation, a resized window) redraws every combat chart
+    // on the page; renderCombatCharts destroys the old instances first. One
+    // listener per page, however many times this file runs.
+    if (window.matchMedia && !window._combatLegendMq) {
+        window._combatLegendMq = window.matchMedia('(max-width: 640px)');
+        var _relayCombatLegends = function () { window.renderCombatCharts(document); };
+        if (window._combatLegendMq.addEventListener) window._combatLegendMq.addEventListener('change', _relayCombatLegends);
+        else if (window._combatLegendMq.addListener) window._combatLegendMq.addListener(_relayCombatLegends);
+    }
+
     // ── Activity history panel (#history-panel) ─────────────────────────
     //
     // partials/activity_history.html carried this as an inline script: fetch

@@ -889,6 +889,17 @@
     .cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"] {
         max-width: 40vw !important; overflow: hidden; text-overflow: ellipsis;
     }
+    /* Missing skills: a card's labels are skill names, the first labels that
+       come from data. R1's `[data-m-label]::before { flex: none }` would hold
+       a long one at full width, and justify-content:flex-end would push its
+       start out of the card's left edge. Here the label may shrink, so it
+       wraps; the value stays right-aligned. (0,3,1) beats R1's (0,2,1). */
+    .cf-miss.m-row > [data-m-label]::before { flex: 0 1 auto; min-width: 0; }
+
+    /* Corporation History: when the phone logo fails too, data-on-error hides
+       it; the lead keeps its 18px slot so key 1 stays in line with its
+       neighbours. min-width beats `.m-row > * { min-width: 0 !important }`. */
+    .ov-corp.m-row > [data-m="lead"] { min-width: 18px !important; min-height: 18px; }
 
     /* 40px tap targets: the Can Fly, Recently Completed and Corporation
        History toggles. line-height centres the text and keeps the summary a
@@ -910,6 +921,10 @@
     }
     .ks-isk > .ks-isk-tile:last-child { border-bottom: none; }
     .ks-isk > .ks-isk-tile > * { margin-top: 0 !important; }
+    /* Ship Usage Stream: its legend moves below the plot on phones and would
+       take half of the desktop 200px box, so the box grows. !important beats
+       the inline height. */
+    .ks-stream { height: 280px !important; }
 }
 /* ── end R2 T1 ── */
 

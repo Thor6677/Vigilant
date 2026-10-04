@@ -303,7 +303,9 @@
             <span class="b-label">Ship Usage Stream · 180d</span>
             <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships</span>
         </div>
-        <div style="position:relative;height:200px;">
+        {# Phones: the legend sits below the plot, so the box is taller
+           there (.ks-stream in site.css R2 T1). #}
+        <div class="ks-stream" style="position:relative;height:200px;">
             <canvas id="stream-{{ character_id }}" data-chart-kind="stream"
                     data-chart="{{ {'datasets': ts_datasets, 'weeks': ts_weeks}|tojson|forceescape }}"></canvas>
         </div>

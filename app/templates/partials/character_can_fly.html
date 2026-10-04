@@ -24,9 +24,13 @@
     site.css R2 T1).
   - Missing skills: each card is an m-row whose cells are phone-only
     (m-only) copies; the desktop head row and skill lines stay untagged, so
-    phones hide them and desktop renders exactly as before. Key 2 is the
-    fit's total training time. Key 1's link is inline, so a tap beside the
-    name opens the row.
+    phones hide them and desktop renders exactly as before. Both copies
+    render from the same loop variables (fit_href, fit_label, folder). Key 2
+    is the fit's total training time. Key 1 holds the fit link: a tap on
+    the name opens the fit, and with a typical name the link fills key 1,
+    so the row opens from a tap on the training time, the chevron or the
+    card's padding. Skill-name labels can be long, so they may wrap
+    (.cf-miss in site.css R2 T1).
 #}
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Can Fly</span></div>
@@ -75,12 +79,17 @@
         <div class="m-clamp">
         {% for f in missing_fits %}
         {% set total_str = f.get('missing_training_str') %}
-        <div class="b-card m-row" data-click="toggleMRow" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
+        {#- One source for the desktop head row and the phone copies; `-`
+            keeps these lines out of the output. #}
+        {%- set fit_href = '/tools/fitting?load=' ~ f.id %}
+        {%- set fit_label %}{{ f.ship_name }} &mdash; {{ f.name }}{% endset %}
+        {%- set folder = f.folder if f.folder else "—" %}
+        <div class="b-card m-row cf-miss" data-click="toggleMRow" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;">
-                <a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    {{ f.ship_name }} &mdash; {{ f.name }}
+                <a href="{{ fit_href }}" style="color:var(--accent);text-decoration:none;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {{ fit_label }}
                 </a>
-                <span style="font-size:9px;color:var(--muted);white-space:nowrap;">{{ f.folder if f.folder else "—" }}</span>
+                <span style="font-size:9px;color:var(--muted);white-space:nowrap;">{{ folder }}</span>
             </div>
             <div style="margin-top:0.4rem;display:flex;flex-direction:column;gap:0.25rem;">
                 {% for m in f.missing %}
@@ -91,14 +100,14 @@
                 </div>
                 {% endfor %}
             </div>
-            <span class="m-only" data-m="key" style="font-size:11px;"><a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;">{{ f.ship_name }} &mdash; {{ f.name }}</a></span>
+            <span class="m-only" data-m="key" style="font-size:11px;"><a href="{{ fit_href }}" style="color:var(--accent);text-decoration:none;">{{ fit_label }}</a></span>
             {% if total_str %}
             <span class="m-only" data-m="key" style="font-size:11px;color:var(--accent);">{{ total_str }}</span>
             {% endif %}
             {% for m in f.missing %}
             <div class="m-only" data-m-label="{{ m.skill_name }}"><span>{{ m.have }} &rarr; {{ m.need }} &middot; {{ m.time_str }} approx.</span></div>
             {% endfor %}
-            <div class="m-only" data-m-label="Folder"><span>{{ f.folder if f.folder else "—" }}</span></div>
+            <div class="m-only" data-m-label="Folder"><span>{{ folder }}</span></div>
         </div>
         {% endfor %}
         </div>

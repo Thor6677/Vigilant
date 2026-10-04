@@ -16,8 +16,11 @@ Desktop must render identically (D21): every phone cell is m-only and every
 new class has rules only in this task's site.css section. Names and ids are
 invented."""
 import asyncio
+import json
 import os
 import re
+import shutil
+import subprocess
 from datetime import datetime
 from html import unescape
 from html.parser import HTMLParser
@@ -32,7 +35,7 @@ from app.db.models import Base
 from app.routes import character_detail as cd
 from tests._mobile import (SITE_CSS, VOID, assert_mrow, assert_single_value_child, cells_rows,
                            clamps, css_section, norm, render_page, row_keys, row_labelled, row_lead,
-                           rule_bodies, source)
+                           rule_bodies, selectors, source)
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _ACTIONS_JS = os.path.join(_ROOT, "static", "js", "actions.js")
@@ -40,6 +43,61 @@ _ACTIONS_JS = os.path.join(_ROOT, "static", "js", "actions.js")
 
 def _classes(attrs):
     return attrs.get("class", "").split()
+
+
+class _Elements(HTMLParser):
+    """Every element matching `pick(tag, attrs)`: its tag, attrs, text, and
+    its direct children's tag, attrs and text. Attribute order and
+    whitespace don't matter. Matches don't nest in the markup read here."""
+
+    def __init__(self, pick):
+        super().__init__(convert_charrefs=True)
+        self.pick, self.stack, self.found = pick, [], []
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v or "") for k, v in attrs}
+        parent = self.stack[-1][1] if self.stack else None
+        el = None
+        if self.pick(tag, a):
+            el = {"tag": tag, "attrs": a, "text": "", "kids": []}
+            self.found.append(el)
+        elif parent is not None and parent.get("_depth") == len(self.stack):
+            parent["kids"].append({"tag": tag, "attrs": a, "text": ""})
+        if tag in VOID:
+            return
+        owner = el or parent
+        if el is not None:
+            el["_depth"] = len(self.stack) + 1
+        self.stack.append((tag, owner))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        if not self.stack or self.stack[-1][1] is None:
+            return
+        el = self.stack[-1][1]
+        el["text"] += data
+        if len(self.stack) > el["_depth"] and el["kids"]:
+            el["kids"][-1]["text"] += data
+
+
+def _elements(html, pick):
+    p = _Elements(pick)
+    p.feed(html)
+    p.close()
+    for el in p.found:
+        el["text"] = norm(el["text"])
+        for k in el["kids"]:
+            k["text"] = norm(k["text"])
+    return p.found
+
+
+def _with_class(cls):
+    return lambda tag, a: cls in _classes(a)
 
 
 # ── Can Fly partial ───────────────────────────────────────────────────
@@ -94,7 +152,8 @@ def test_can_fly_rows_are_link_rows_keyed_by_fit_and_folder():
     rows = _fly_rows(_render_can_fly(3, 0))
     assert len(rows) == 3
     for i, r in enumerate(rows):
-        assert {"b-row", "m-row", "m-row--link"} <= set(_classes(r["attrs"]))
+        assert {"b-row", "m-row", "m-row--link", "cf-fly"} <= set(_classes(r["attrs"]))
+        assert "cf-miss" not in _classes(r["attrs"])
         k1, k2 = row_keys(r)
         assert k1["tag"] == "a"
         assert k1["attrs"]["href"] == f"/tools/fitting?load={i + 1}"
@@ -149,7 +208,8 @@ def test_both_can_fly_lists_clamp_separately():
     assert [b["text"] for b in c.showall] == ["Show all 11", "Show all 11"]
     assert c.wraps == 2 and c.nested_wraps == 0
     # Each <details> is its own wrap: Show all toggles only its own list.
-    assert html.count('<details class="m-clamp-wrap"') == 2
+    details = _elements(html, lambda tag, a: tag == "details")
+    assert [_classes(d["attrs"]) for d in details] == [["m-clamp-wrap"], ["m-clamp-wrap"]]
 
 
 class _Parents(HTMLParser):
@@ -189,7 +249,7 @@ def test_missing_cards_are_mrows_keyed_by_fit_and_training_time():
     rows = _miss_rows(_render_can_fly(0, missing_fits=fits))
     assert len(rows) == 3
     for f, r in zip(fits, rows):
-        assert {"b-card", "m-row"} <= set(_classes(r["attrs"]))
+        assert {"b-card", "m-row", "cf-miss"} <= set(_classes(r["attrs"]))
         assert "m-row--link" not in _classes(r["attrs"])
         assert r["attrs"]["data-click"] == "toggleMRow"
         k1, k2 = row_keys(r)
@@ -228,6 +288,21 @@ def test_missing_cards_keep_the_desktop_markup_untagged():
             assert "data-m" not in c["attrs"] and "data-m-label" not in c["attrs"]
         assert all("data-m" in c["attrs"] or "data-m-label" in c["attrs"] for c in phone)
         assert len(phone) == 2 + 2 + 1      # two keys, two skills, Folder
+
+
+def test_missing_card_phone_copies_match_the_desktop_card():
+    """Key 1 and Folder render from the same values as the desktop head
+    row, so the two copies can't drift apart (escaping included)."""
+    fits = _missing(2) + [dict(_missing(1)[0], id=7, name="R&D <Fit>", folder="A & B")]
+    html = _render_can_fly(0, missing_fits=fits)
+    rows = _miss_rows(html)
+    assert len(rows) == 3
+    for r in rows:
+        head = r["cells"][0]                     # desktop head row: fit link + folder
+        key1, folder = row_keys(r)[0], row_labelled(r)["Folder"]
+        assert head["kids"][0]["href"] == key1["kids"][0]["href"]
+        assert head["text"] == f"{key1['text']} {folder['text']}"
+    assert html.count("R&amp;D &lt;Fit&gt;") == 2 and html.count("A &amp; B") == 2
 
 
 def test_missing_card_without_a_training_str_still_renders():
@@ -359,7 +434,7 @@ def test_corp_history_rows_follow_the_mrow_contract():
     rows = _corp_rows(html)
     assert len(rows) == 4
     for r in rows:
-        assert "m-row" in _classes(r["attrs"])
+        assert {"m-row", "ov-corp"} <= set(_classes(r["attrs"]))
         assert r["attrs"]["data-click"] == "toggleMRow"
 
 
@@ -422,11 +497,14 @@ def test_location_headers_share_one_class_hook():
     """The jump-clone header (here) and the asset-location header (in
     partials/assets_partial.html) both carry .asset-location-header, the
     hook the 40px phone rule targets."""
-    html = _render_overview()
-    heads = re.findall(r'<div class="([^"]*)" data-click="toggleAssetLocation"', html)
-    assert heads == ["asset-location-header"]
-    assert 'class="asset-location-header" data-click="toggleAssetLocation"' in source(
-        "partials/assets_partial.html")
+    toggles = lambda tag, a: a.get("data-click") == "toggleAssetLocation"
+    clones = _elements(_render_overview(), toggles)
+    assets = _elements(render_page(cd, "partials/assets_partial.html", "/character/90000001/assets-partial",
+                                   locations=[{"location": "Sample Station", "items": []}], docked_at=None),
+                       toggles)
+    assert len(clones) == 1 and len(assets) == 1
+    for head in clones + assets:
+        assert _classes(head["attrs"]) == ["asset-location-header"]
 
 
 # ── Combat Profile partial ────────────────────────────────────────────
@@ -448,16 +526,20 @@ def _render_kill_stats():
 
 
 def test_isk_row_and_tiles_carry_class_hooks():
-    html = _render_kill_stats()
-    m = re.search(r'<div class="ks-isk" style="([^"]*)">(.*?)\n    </div>\n', html, flags=re.S)
-    assert m, "ISK summary row not found"
+    (row,) = _elements(_render_kill_stats(), _with_class("ks-isk"))
     # The desktop inline layout is unchanged.
-    assert m.group(1) == ("display:flex;flex-wrap:wrap;text-align:center;"
-                          "border:1px solid var(--border);margin-bottom:0.75rem;")
-    tiles = re.findall(r'<div class="ks-isk-tile" style="[^"]*">', m.group(2))
-    assert len(tiles) == 3
-    for label in ("ISK Destroyed", "ISK Lost", "Efficiency"):
-        assert label in m.group(2)
+    assert row["attrs"]["style"] == ("display:flex;flex-wrap:wrap;text-align:center;"
+                                     "border:1px solid var(--border);margin-bottom:0.75rem;")
+    assert [_classes(k["attrs"]) for k in row["kids"]] == [["ks-isk-tile"]] * 3
+    assert [k["text"] for k in row["kids"]] == ["2.50B ISK Destroyed", "400.0M ISK Lost", "86% Efficiency"]
+
+
+def test_stream_chart_box_carries_a_class_hook():
+    """Phones give the stream chart a taller box: its legend sits below the
+    plot there. Desktop keeps the inline 200px."""
+    (box,) = _elements(_render_kill_stats(), _with_class("ks-stream"))
+    assert box["attrs"]["style"] == "position:relative;height:200px;"
+    assert [(k["tag"], k["attrs"].get("data-chart-kind")) for k in box["kids"]] == [("canvas", "stream")]
 
 
 def test_charts_grid_never_overflows_a_narrow_phone():
@@ -524,26 +606,89 @@ def test_css_isk_row_becomes_label_value_lines():
     assert "color" not in tile + kids
 
 
+def _phone_block(sec):
+    """The body of the section's phone @media block, found by matching its
+    braces, and whatever follows the block up to the end marker."""
+    m = re.match(r"\s*@media \(max-width: 640px\) \{", sec)
+    assert m, "the section must open with its phone @media block"
+    depth, i = 1, m.end()
+    while depth:
+        assert i < len(sec), "the phone @media block is never closed"
+        depth += (sec[i] == "{") - (sec[i] == "}")
+        i += 1
+    return sec[m.end():i - 1], sec[i:]
+
+
+_HOOKS = (".cf-fly", ".cf-miss", ".ov-toggle", ".ov-corp", ".ks-isk", ".ks-stream")
+
+
 def test_css_new_class_hooks_have_no_desktop_rules():
     with open(SITE_CSS, encoding="utf-8") as fh:
         css = fh.read()
-    sec = _sec()
-    phone = sec[:sec.rindex("}") + 1]
-    for cls in (".cf-fly", ".ov-toggle", ".ks-isk"):
-        assert cls in phone, cls
-        assert css.count(cls) == sec.count(cls), f"{cls} is styled outside the R2 T1 section"
-    assert re.fullmatch(r"\s*@media \(max-width: 640px\) \{.*\}\s*", sec, flags=re.S)
+    phone, after = _phone_block(_sec())
+    assert after.strip() == "", f"rules after the phone block: {after.strip()[:80]!r}"
+    for cls in _HOOKS:
+        assert re.search(re.escape(cls) + r"\b", phone), cls
+        assert len(re.findall(re.escape(cls) + r"\b", css)) == len(re.findall(re.escape(cls) + r"\b", phone)), (
+            f"{cls} is styled outside the R2 T1 phone block")
+
+
+def test_css_long_skill_labels_wrap_instead_of_clipping():
+    """A missing card's labels are skill names, the first data-driven
+    labels: R1's `.m-row > [data-m-label]::before { flex: none }` would hold
+    a long one at full width and push its start out of the card. Letting the
+    label shrink (it wraps) keeps it inside; the value stays right-aligned.
+    (0,3,1) beats R1's (0,2,1)."""
+    body = _flat(rule_bodies(_sec(), ".cf-miss.m-row > [data-m-label]::before"))
+    assert "flex: 0 1 auto" in body
+    assert "min-width: 0" in body
+
+
+def test_css_label_shrink_targets_the_missing_cards_only():
+    """Every ::before rule in this section is scoped to .cf-miss, and only
+    the missing-skills card carries that class, so no other R1/R2 list's
+    labels change."""
+    labels = [sel for m in re.finditer(r"([^{}]+)\{[^{}]*\}", _phone_block(_sec())[0])
+              for sel in selectors(m.group(1)) if "::before" in sel]
+    assert labels == [".cf-miss.m-row > [data-m-label]::before"]
+    users = []
+    for dirpath, _, files in os.walk(os.path.join(_ROOT, "app")):
+        for name in files:
+            with open(os.path.join(dirpath, name), encoding="utf-8", errors="ignore") as fh:
+                if re.search(r"\bcf-miss\b", fh.read()):
+                    users.append(os.path.relpath(os.path.join(dirpath, name), _ROOT))
+    assert users == [os.path.join("app", "templates", "partials", "character_can_fly.html")]
+    markup = re.sub(r"\{#.*?#\}", "", source("partials/character_can_fly.html"), flags=re.S)
+    assert len(re.findall(r"\bcf-miss\b", markup)) == 1
+    fits = _missing(3)
+    hooked = _elements(_render_can_fly(4, missing_fits=fits), _with_class("cf-miss"))
+    assert len(hooked) == len(fits)
+    assert all({"b-card", "m-row"} <= set(_classes(el["attrs"])) for el in hooked)
+
+
+def test_css_stream_chart_box_is_taller_on_phones():
+    body = _flat(rule_bodies(_sec(), ".ks-stream"))
+    assert re.search(r"height: (\d+)px !important", body)
+    assert int(re.search(r"height: (\d+)px", body).group(1)) >= 260
+
+
+def test_css_corp_logo_slot_holds_its_size_when_the_logo_fails():
+    """data-on-error="hide" sets display:none on the phone logo; the lead
+    cell keeps an 18px slot so key 1 stays aligned with its neighbours.
+    min-width needs !important to beat `.m-row > * { min-width: 0 !important }`."""
+    body = _flat(rule_bodies(_sec(), '.ov-corp.m-row > [data-m="lead"]'))
+    assert "min-width: 18px !important" in body
+    assert "min-height: 18px" in body
 
 
 # ── actions.js: chart legends ─────────────────────────────────────────
 
 def _combat_js():
+    """The combat-chart code: from _combatChart to the next section."""
     with open(_ACTIONS_JS, encoding="utf-8") as fh:
         js = fh.read()
     start = js.index("function _combatChart(")
-    end = js.index("window.renderCombatCharts", start)
-    end = js.index("};", end)
-    return js[start:end]
+    return js[start:js.index("// ── Activity history panel", start)]
 
 
 def test_combat_chart_legends_drop_below_the_chart_on_phones():
@@ -554,3 +699,89 @@ def test_combat_chart_legends_drop_below_the_chart_on_phones():
     side = m.group(1)
     assert len(re.findall(rf"position: {side}\b", block)) == 2      # doughnut + stream
     assert not re.search(r"position:\s*'right'", block)
+
+
+def test_combat_charts_redraw_when_the_breakpoint_is_crossed():
+    """Text check: one guarded 640px change listener that redraws every
+    combat chart on the page."""
+    block = _combat_js()
+    assert "if (window.matchMedia && !window._combatLegendMq)" in block
+    assert "window._combatLegendMq = window.matchMedia('(max-width: 640px)');" in block
+    assert "window.renderCombatCharts(document);" in block
+    assert re.search(r"_combatLegendMq\.addEventListener\('change', \w+\)", block)
+
+
+_LEGEND_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[process.argv.length - 1], 'utf8');
+
+const state = { phone: false };
+const mqls = [];
+function matchMedia(q) {
+  const m = { media: q, ls: [],
+    get matches() { return state.phone && q === '(max-width: 640px)'; },
+    addEventListener(t, fn) { if (t === 'change') this.ls.push(fn); },
+    addListener(fn) { this.ls.push(fn); } };
+  mqls.push(m);
+  return m;
+}
+let made = [];
+function Chart(canvas, cfg) { this.canvas = canvas; this.cfg = cfg; canvas._chart = this; made.push(this); }
+Chart.getChart = c => c._chart || null;
+Chart.prototype.destroy = function () { this.destroyed = true; this.canvas._chart = null; };
+const canvases = [
+  { dataset: { chartKind: 'autopsy', chart: JSON.stringify({ solo: 1, small_gang: 0, fleet: 0, smartbomb: 0, npc: 0 }) } },
+  { dataset: { chartKind: 'stream', chart: JSON.stringify({ datasets: [{ label: 'x', data: [1] }], weeks: 1 }) } },
+];
+const document = {
+  querySelectorAll: sel => (sel === 'canvas[data-chart-kind]' ? canvases : []),
+  querySelector: () => null, getElementById: () => null,
+  body: { addEventListener() {} }, addEventListener() {},
+};
+const sandbox = { window: { matchMedia }, document, console, Date, Chart,
+  localStorage: { getItem: () => null, setItem() {} },
+  setInterval: () => 0, clearInterval() {}, setTimeout: () => 0 };
+sandbox.window.document = document;
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox);
+vm.runInContext(src, sandbox);      // a second run must not add a second listener
+
+const out = { atLoad: made.length };
+sandbox.window.renderCombatCharts(document);      // the page's first draw (desktop)
+out.first = made.map(c => [c.cfg.type, c.cfg.options.plugins.legend.position]);
+const fire = phone => {
+  const before = made.slice();
+  state.phone = phone;
+  made = [];
+  mqls.forEach(m => m.ls.slice().forEach(fn => fn({ matches: m.matches, media: m.media })));
+  return { charts: made.map(c => [c.cfg.type, c.cfg.options.plugins.legend.position]),
+           oldDestroyed: before.every(c => c.destroyed) };
+};
+out.toPhone = fire(true);
+out.toDesktop = fire(false);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.fixture(scope="module")
+def legend_run(tmp_path_factory):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    harness = tmp_path_factory.mktemp("legend") / "harness.js"
+    harness.write_text(_LEGEND_HARNESS)
+    run = subprocess.run(["node", str(harness), _ACTIONS_JS], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_combat_chart_legends_follow_the_breakpoint(legend_run):
+    """Behaviour, with actions.js run twice against a stub DOM: nothing is
+    drawn at load; the first draw on a desktop puts legends on the right;
+    crossing to phone redraws each chart once (one listener, not two) with
+    legends below, destroying the old instances; crossing back restores
+    the right-hand legends."""
+    assert legend_run["atLoad"] == 0
+    assert legend_run["first"] == [["doughnut", "right"], ["line", "right"]]
+    assert legend_run["toPhone"] == {"charts": [["doughnut", "bottom"], ["line", "bottom"]], "oldDestroyed": True}
+    assert legend_run["toDesktop"] == {"charts": [["doughnut", "right"], ["line", "right"]], "oldDestroyed": True}
