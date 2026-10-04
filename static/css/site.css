@@ -883,6 +883,33 @@
 
 /* ── R2 T2 · skills ── */
 @media (max-width: 640px) {
+    /* Queue Summary and Remap Summary (D6 A): the 3-tile row becomes one
+       label · value line per tile. Tiles carry an inline flex:1 and right
+       border. Lines are separated by a bottom border, with none under the
+       last: it would double against the "saves …" line's top border or the
+       remap box's own border. The label leads whatever its DOM position (the
+       queue's tiles put the value first). The value keeps its inline colour
+       and weight, and wraps inside itself rather than past the edge. */
+    .skills-tiles { flex-direction: column; }
+    .skills-tiles > .skills-tile {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+        flex: none !important; border-right: none !important; border-bottom: 1px solid var(--border);
+    }
+    .skills-tiles > .skills-tile:last-child { border-bottom: none; }
+    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; }
+    .skills-tile > .skills-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* Key 1 of the queue and remap rows (D4 B, D5 A): the skill name
+       ellipsises and its level stays whole, so a long "… Specialization"
+       still shows which level it is. Beats R1's display:block !important on
+       key cells. */
+    .m-row > [data-m="key"].skills-key { display: flex !important; align-items: center; gap: 0.4rem; }
+    .m-row > [data-m="key"].skills-key > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-row > [data-m="key"].skills-key > :last-child { flex: none; }
+
+    /* "Show all N" inside the Skill Queue panel: inset, so its border doesn't
+       double against the panel's sides and bottom (as .asset-list's does). */
+    .skills-queue .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 }
 /* ── end R2 T2 ── */
 
