@@ -1467,6 +1467,10 @@
        40px tap targets. */
     .pi-tier-item { display: flex !important; align-items: center; min-height: 40px; }
     .sys-dd-item, .calc-dd-item { min-height: 40px; align-items: center; }
+
+    /* Planet detail (Colonies): an opened pin row's Contents <details>
+       opens from a 40px summary (toggleMRow ignores taps on a summary). */
+    .pi-pin-row > [data-m-label] > details > summary { min-height: 40px; line-height: 40px; }
 }
 /* ── end R3 T6 ── */
 

@@ -552,3 +552,89 @@ def test_css_lookup_tier_chips_and_dropdown_rows_are_40px():
     for sel in (".sys-dd-item", ".calc-dd-item"):
         body = rule_bodies(css, sel)
         assert "min-height: 40px" in body and "align-items: center" in body, sel
+
+
+# ── Planet detail pins (D16 A) ───────────────────────────────────────
+
+from app.pi import constants as pi_const  # noqa: E402
+
+_TYPE_NAMES = {91001: "Sample Gas", 95001: "Sample Oxidizer"}
+# The shapes pi.py's planet-detail route leaves on each pin: two extractors
+# (one about to expire), a factory and a launchpad.
+_PINS = [
+    {"type_id": 80001, "_kind": "extractor", "_type_name": "Sample Extractor Unit",
+     "_product_name": "Sample Gas", "extractor_qty_per_cycle": 1200,
+     "_expiry_str": "3h 10m", "_expiry_warning": "critical"},
+    {"type_id": 80001, "_kind": "extractor", "_type_name": "Sample Extractor Unit",
+     "_product_name": "Sample Ions", "extractor_qty_per_cycle": 900,
+     "_expiry_str": "2d 4h", "_expiry_warning": "ok"},
+    {"type_id": 80002, "_kind": "factory", "_type_name": "Sample Industry Facility",
+     "schematic_id": 121, "_schematic_name": "Sample Oxidizer Schematic",
+     "_schematic_output": "Sample Oxidizer", "_schematic_output_qty": 20,
+     "contents": [{"type_id": 91001, "amount": 3000}]},
+    {"type_id": 80003, "_kind": "launchpad", "_type_name": "Sample Launchpad",
+     "contents": [{"type_id": 91001, "amount": 12000}, {"type_id": 95001, "amount": 0},
+                  {"type_id": 99999, "amount": 5}]},
+]
+
+
+def _planet_detail():
+    return render_page(
+        pi_mod, "partials/planetary_planet_detail.html", "/industry/planetary/planet/1/2",
+        planet={"upgrade_level": 4, "last_update": "2026-10-01T12:34:56Z"},
+        pins=[dict(p) for p in _PINS], type_names=_TYPE_NAMES,
+        pin_group_names=pi_const.PIN_GROUP_NAMES)
+
+
+def test_planet_detail_pins_key_structure_and_expiry():
+    html = _planet_detail()
+    rows = assert_mrow(html, min_rows=len(_PINS))
+    assert len(rows) == len(_PINS)
+    cells = _hooked(html, "pi-pin-row")
+    assert len(cells) == len(_PINS)
+    expiry = ["3h 10m", "2d 4h", "—", "—"]
+    colour = ["var(--danger)", "var(--muted)", "var(--muted)", "var(--muted)"]
+    for r, pin, when, col in zip(cells, _PINS, expiry, colour):
+        assert r["attrs"]["data-click"] == "toggleMRow"
+        structure, exp = row_keys(r)
+        assert structure["text"] == pin["_type_name"]
+        assert exp["text"] == when
+        assert f"color:{col};" in exp["attrs"]["style"]           # coloured as on desktop
+        assert _labels(r) == ["Name", "Kind", "Product", "Contents"]
+        labelled = row_labelled(r)
+        assert "m-only" in _classes(labelled["Name"])
+        assert labelled["Name"]["text"] == pin["_type_name"]
+        assert labelled["Kind"]["text"] == pi_const.PIN_GROUP_NAMES[pin["_kind"]]
+        assert_single_value_child(r)
+    product = [row_labelled(r)["Product"]["text"] for r in cells]
+    assert product[0] == "→ Sample Gas · 1200/cycle"
+    assert product[2] == "Sample Oxidizer Schematic → Sample Oxidizer ×20"
+    assert product[3] == "—"
+
+
+def test_planet_detail_contents_still_open_from_a_details():
+    html = _planet_detail()
+    cells = _hooked(html, "pi-pin-row")
+    contents = [row_labelled(r)["Contents"] for r in cells]
+    assert [c["text"] for c in contents[:2]] == ["—", "—"]
+    for c in contents[2:]:
+        assert [k.get("style") for k in c["kids"]] == ["cursor:pointer;"]   # the <details>
+    boxes = re.findall(r'<details style="cursor:pointer;">\s*<summary class="b-text">'
+                       r'(\d+) items?</summary>\s*<div class="m-unclamp" '
+                       r'style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;'
+                       r'overflow-y:auto;">', html)
+    # An open row forces overflow:visible on every value descendant (Polish
+    # B), so the 180px box would spill over the next row: it unclamps.
+    assert boxes == ["1", "3"]
+    assert "Type 99999" in html
+
+
+def test_planet_detail_column_header_hides_on_phones():
+    (head,) = _with_class(_planet_detail(), "m-head")
+    assert head[2].startswith("display:grid;grid-template-columns:110px minmax(160px,1.5fr) "
+                              "minmax(140px,1.2fr) minmax(100px,1fr) 90px;")
+
+
+def test_css_planet_detail_contents_summary_is_a_40px_target():
+    body = rule_bodies(_phone(), ".pi-pin-row > [data-m-label] > details > summary")
+    assert "min-height: 40px" in body and "line-height: 40px" in body
