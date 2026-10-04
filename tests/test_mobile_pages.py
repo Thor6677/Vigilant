@@ -332,3 +332,79 @@ def test_planetary_expanded_row_shows_the_planet_detail():
     shown = re.search(r"\.pi-row\.is-expanded \.pi-row-detail\s*\{\s*display:\s*block;?\s*\}", style)
     assert base and shown
     assert base.start() < shown.start()
+
+
+# ── Task 15: Blueprints (§6.3) ───────────────────────────────────────
+
+from app.routes import blueprints as blueprints_mod  # noqa: E402
+
+_LONG_BP = "Sample Capital Construction Component With A Very Long Name Blueprint"
+
+
+def _render_blueprints():
+    raw = [
+        {"type_id": 691, "item_id": 1, "quantity": -1, "material_efficiency": 10,
+         "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+        {"type_id": 692, "item_id": 2, "quantity": -2, "material_efficiency": 2,
+         "time_efficiency": 4, "runs": 5, "location_flag": "Hangar", "location_id": 60000001},
+    ]
+    bps = blueprints_mod._process_blueprints(raw, {691: "Sample Frigate Blueprint", 692: _LONG_BP})
+    char = {"character_id": 90000001, "character_name": "Pilot Alpha",
+            "corporation_id": None, "corporation_name": None}
+    return _render(blueprints_mod, "blueprints.html", "/character/90000001/blueprints",
+                   char=char, blueprints=bps, groups=blueprints_mod._group_blueprints(bps, "type"),
+                   stats=blueprints_mod._compute_stats(bps), error=None, is_corp=False,
+                   corp_id=None, filter="all", group_by="type")
+
+
+def test_blueprints_rows_follow_the_mrow_contract():
+    rows = assert_mrow(_render_blueprints(), min_rows=2)
+    assert all(r["attrs"]["data-click"] == "toggleMRow" for r in rows)
+
+
+def test_blueprints_rows_key_on_name_and_me_te():
+    bpo, bpc = _rows(_render_blueprints())[:2]
+    lead = _lead(bpo)
+    assert [c["tag"] for c in lead] == ["img"]
+    assert "m-only" in lead[0]["attrs"]["class"].split()        # phone-only copy of the icon
+    name, mete = _keys(bpo)
+    assert name["text"] == "Sample Frigate Blueprint"
+    assert mete["text"] == "10/20"
+    assert "m-only" in mete["attrs"]["class"].split()           # desktop keeps ME and TE columns
+    assert "color:var(--success)" in mete["attrs"]["style"]     # fully researched
+    assert _keys(bpc)[0]["text"] == _LONG_BP
+    assert _keys(bpc)[1]["text"] == "2/4"
+    for r in (bpo, bpc):
+        assert list(_labelled(r)) == ["Type", "Runs", "Location", "Calc"]
+        _assert_single_value_child(r)
+    assert _labelled(bpo)["Type"]["text"] == "BPO"
+    assert _labelled(bpo)["Runs"]["text"] == "∞"
+    assert _labelled(bpc)["Runs"]["text"] == "5"
+    assert _labelled(bpo)["Location"]["text"] == "Personal Hangar"
+    assert _labelled(bpo)["Calc"]["kids"][0]["href"] == "/industry?type_id=691"
+    # The separate ME and TE cells stay untagged: hidden on phones, where
+    # the combined key replaces them.
+    plain = [c["text"] for c in bpo["cells"] if "data-m" not in c["attrs"] and "data-m-label" not in c["attrs"]]
+    assert plain == ["10", "20"]
+
+
+def test_blueprints_header_hides_on_phones():
+    html = _render_blueprints()
+    assert html.count('<div class="b-table-row m-head"') == 2      # one per group
+
+
+def test_blueprints_long_names_truncate_on_desktop():
+    """§6.3 desktop fix: the name column may shrink below its text, so a
+    long name ellipsizes instead of pushing the row (and page) wider."""
+    html = _render_blueprints()
+    bpc = _rows(html)[1]
+    name = _keys(bpc)[0]
+    assert "min-width:0" in name["attrs"]["style"]
+    icon, text = name["kids"]
+    assert icon["class"] == "m-hide"                               # lead replaces it on phones
+    for prop in ("min-width:0", "overflow:hidden", "text-overflow:ellipsis", "white-space:nowrap"):
+        assert prop in text["style"], prop
+    head = re.search(r'<div class="b-table-row m-head"[^>]*>\s*<span style="([^"]*)">Blueprint</span>', html)
+    assert head, "Blueprint header cell not found"
+    for prop in ("min-width:0", "overflow:hidden", "text-overflow:ellipsis"):
+        assert prop in head.group(1), prop
