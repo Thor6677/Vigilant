@@ -411,3 +411,118 @@ def test_blueprints_long_names_truncate_on_desktop():
     assert head, "Blueprint header cell not found"
     for prop in ("min-width:0", "overflow:hidden", "text-overflow:ellipsis"):
         assert prop in head.group(1), prop
+
+
+# ── Task 16: Wallet journal (§6.4) ───────────────────────────────────
+
+from datetime import datetime  # noqa: E402
+
+from app.routes import character_detail as overview_mod  # noqa: E402
+from app.routes import journal as journal_mod  # noqa: E402
+
+_PILOT = _NS(character_id=90000001, character_name="Pilot Alpha",
+             corporation_name="Sample Corp", alliance_name=None,
+             security_status=1.5, birthday=None)
+
+
+def _render_journal():
+    entries = [
+        {"id": 1, "date": "2026-10-01T12:00:00Z", "ref_type": "bounty_prizes",
+         "ref_type_label": "Bounty Prizes", "category": "pve", "amount": 1500000.0,
+         "balance": 9000000000.0, "description": "Bounty prize for clearing a sample site",
+         "reason": "", "first_party": "Sample Agency", "second_party": "Pilot Alpha", "tax": 0},
+        {"id": 2, "date": "2026-10-01T13:00:00Z", "ref_type": "market_escrow",
+         "ref_type_label": "Market Escrow", "category": "market", "amount": -2500000.0,
+         "balance": None, "description": "", "reason": "", "first_party": "",
+         "second_party": "", "tax": None},
+    ]
+    return _render(journal_mod, "journal.html", "/character/90000001/journal",
+                   char=_PILOT, entries=entries, error=None, page=1, has_more=False,
+                   category="all", categories=journal_mod.CATEGORY_LABELS,
+                   is_corp=False, corp_id=None, division=None)
+
+
+def _overview_ctx(**over):
+    ctx = dict(
+        char=_PILOT, killmails_enabled=False, current_wallet=1.0e9,
+        journal=[
+            {"amount": 1500000.0, "balance": 9000000000.0, "ref_type": "bounty_prizes",
+             "description": "Bounty prize for clearing a sample site", "date": "2026-10-01T12:00:00Z"},
+            {"amount": -2500000.0, "balance": None, "ref_type": "market_escrow",
+             "description": "", "date": "2026-10-01T13:00:00Z"},
+        ],
+        journal_error=None, chart_data_json='{"labels": [], "values": []}',
+        active_range="1m", ranges=["1d", "1w", "1m"],
+        active_skill=None, skillqueue=[], completed_skills=[], corp_history=[],
+        total_sp_in_queue=0, total_trained_sp=5000000, unallocated_sp=0,
+        has_implants_scope=False, last_synced_str="5m ago", queue_remaining=0,
+        zkill=[], kills=0, losses=0, has_assets_scope=True, docked_at=None,
+        current_system=None, implants=[], jump_clones=[], now=datetime(2026, 10, 3),
+    )
+    ctx.update(over)
+    return ctx
+
+
+def _render_overview(**over):
+    return _render(overview_mod, "character_detail.html", "/character/90000001", **_overview_ctx(**over))
+
+
+def test_journal_page_rows_key_on_type_and_amount():
+    html = _render_journal()
+    rows = assert_mrow(html, min_rows=2)
+    assert all(r["attrs"]["data-click"] == "toggleMRow" for r in rows)
+    gain, loss = _rows(html)[:2]
+    kind, amount = _keys(gain)
+    assert kind["text"] == "Bounty Prizes"
+    assert amount["text"] == "+1.50M ISK"
+    assert "color:var(--success)" in amount["attrs"]["style"]
+    assert _keys(loss)[1]["text"] == "-2.50M ISK"
+    assert "color:var(--danger)" in _keys(loss)[1]["attrs"]["style"]
+    assert list(_labelled(gain)) == ["Date", "Description", "Balance after"]
+    assert _labelled(gain)["Date"]["text"] == "2026-10-01 12:00"
+    assert "Sample Agency → Pilot Alpha" in _labelled(gain)["Description"]["text"]
+    assert "Bounty prize for clearing a sample site" in _labelled(gain)["Description"]["text"]
+    assert _labelled(gain)["Balance after"]["text"] == "9.00B"
+    # Nothing to describe: the cell stays untagged (hidden on phones)
+    # rather than opening onto an empty "Description" line.
+    assert list(_labelled(loss)) == ["Date", "Balance after"]
+    assert _labelled(loss)["Balance after"]["text"] == "—"
+    for r in (gain, loss):
+        _assert_single_value_child(r)
+
+
+def test_journal_page_header_hides_on_phones():
+    html = _render_journal()
+    assert '<div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">' in html
+
+
+def test_journal_overview_panel_rows_key_on_type_and_amount():
+    html = _render_overview()
+    rows = assert_mrow(html, min_rows=2)
+    assert all(r["attrs"]["data-click"] == "toggleMRow" for r in rows)
+    gain, loss = _rows(html)[:2]
+    kind, amount = _keys(gain)
+    assert "m-only" in kind["attrs"]["class"].split()          # desktop shows type in the combined cell
+    assert kind["text"] == "bounty prizes"
+    assert kind["kids"][0]["class"] == "ref-type"
+    assert amount["text"] == "+1.50M"
+    assert "tx-amount-pos" in amount["attrs"]["class"]
+    assert "tx-amount-neg" in _keys(loss)[1]["attrs"]["class"]
+    assert list(_labelled(gain)) == ["Date", "Description", "Balance after"]
+    assert _labelled(gain)["Description"]["text"] == "bounty prizes Bounty prize for clearing a sample site"
+    assert list(_labelled(loss)) == ["Date", "Balance after"]
+    for r in (gain, loss):
+        _assert_single_value_child(r)
+    assert '<div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">' in html
+
+
+def test_journal_overview_description_is_a_block_so_it_ellipsizes():
+    """§6.4, also desktop: an inline span ignores overflow and text-overflow,
+    so long descriptions were clipped mid-word. As a block it ellipsizes."""
+    gain = _rows(_render_overview())[0]
+    combined = _labelled(gain)["Description"]
+    ref, desc = combined["kids"]
+    assert ref["class"] == "ref-type m-hide"                   # key 1 shows the type on phones
+    assert "display:block" in desc["style"]
+    assert "text-overflow:ellipsis" in desc["style"]
+    assert "margin-left" not in desc["style"]

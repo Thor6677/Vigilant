@@ -99,7 +99,7 @@
 
 <div class="b-panel">
     {# Header #}
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
         <span style="flex:0 0 120px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
         <span style="flex:0 0 130px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
         <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Details</span>
@@ -110,16 +110,22 @@
     {# Entries #}
     <div id="journal-entries">
     {% for e in entries %}
-    <div class="b-table-row">
-        <span style="flex:0 0 120px;font-size:9px;color:var(--muted);letter-spacing:0.04em;white-space:nowrap;">
+    {# Phones (mobile design §6.4): key 1 = type, key 2 = amount. Details is
+       labelled only when there is something to show, so an empty entry
+       doesn't open onto a blank "Description" line. Its parts sit in one
+       wrapper: an open row lays a labelled cell out as label · value. #}
+    {% set has_details = e.first_party or e.second_party or e.description or e.reason or (e.tax and e.tax > 0) %}
+    <div class="b-table-row m-row" data-click="toggleMRow">
+        <span data-m-label="Date" style="flex:0 0 120px;font-size:9px;color:var(--muted);letter-spacing:0.04em;white-space:nowrap;">
             {{ e.date[:16].replace("T", " ") if e.date else "—" }}
         </span>
-        <span style="flex:0 0 130px;">
+        <span data-m="key" style="flex:0 0 130px;">
             <span style="font-size:9px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);padding:1px 4px;display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 {{ e.ref_type_label }}
             </span>
         </span>
-        <span style="flex:1;min-width:0;overflow:hidden;">
+        <span{% if has_details %} data-m-label="Description"{% endif %} style="flex:1;min-width:0;overflow:hidden;">
+            <span style="display:block;min-width:0;">
             {% if e.first_party and e.second_party %}
             <span style="font-size:10px;color:var(--text);">{{ e.first_party }}</span>
             <span style="font-size:9px;color:var(--muted);"> → </span>
@@ -140,11 +146,12 @@
             {% if e.tax and e.tax > 0 %}
             <div style="font-size:9px;color:var(--muted);">Tax: {{ format_isk(e.tax) }} ISK</div>
             {% endif %}
+            </span>
         </span>
-        <span style="flex:0 0 110px;text-align:right;font-size:11px;font-weight:500;{% if e.amount >= 0 %}color:var(--success);{% else %}color:var(--danger);{% endif %}">
+        <span data-m="key" style="flex:0 0 110px;text-align:right;font-size:11px;font-weight:500;{% if e.amount >= 0 %}color:var(--success);{% else %}color:var(--danger);{% endif %}">
             {{ format_isk_signed(e.amount) }} ISK
         </span>
-        <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+        <span data-m-label="Balance after" style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
             {% if e.balance is not none %}{{ format_isk(e.balance) }}{% else %}—{% endif %}
         </span>
     </div>

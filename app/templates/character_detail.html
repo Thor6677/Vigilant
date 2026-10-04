@@ -632,7 +632,7 @@
     <div class="b-panel" style="border-top:none;">
 
         {# Header row #}
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
             <span class="b-row-label" style="flex:0 0 110px;">Date</span>
             <span class="b-row-label" style="flex:1;">Type / Description</span>
             <span class="b-row-label" style="flex:0 0 90px;text-align:right;">Amount</span>
@@ -645,23 +645,28 @@
         {% set ref_type = entry.get("ref_type", "") %}
         {% set desc = entry.get("description", "") %}
         {% set date_raw = entry.get("date", "") %}
-        <div class="b-table-row">
-            <span style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
+        {# Phones (mobile design §6.4): key 1 = type, key 2 = amount. Type and
+           description share one desktop cell, so phones get the type as its
+           own m-only key cell and the shared cell, labelled Description only
+           when there is one, hides its copy of the type (m-hide). #}
+        <div class="b-table-row m-row" data-click="toggleMRow">
+            <span data-m-label="Date" style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
                 {{ date_raw[:16].replace("T", " ") if date_raw else "—" }}
             </span>
-            <span style="flex:1;min-width:0;overflow:hidden;">
-                <span class="ref-type">{{ ref_type.replace("_", " ") }}</span>
+            <span data-m="key" class="m-only"><span class="ref-type">{{ ref_type.replace("_", " ") }}</span></span>
+            <span{% if desc %} data-m-label="Description"{% endif %} style="flex:1;min-width:0;overflow:hidden;">
+                <span class="ref-type m-hide">{{ ref_type.replace("_", " ") }}</span>
                 {% if desc %}
-                <span style="font-size:10px;color:var(--muted);margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                <span style="display:block;margin-top:2px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                     {{ desc[:60] }}{% if desc|length > 60 %}…{% endif %}
                 </span>
                 {% endif %}
             </span>
-            <span style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
+            <span data-m="key" style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
                   class="{% if amount >= 0 %}tx-amount-pos{% else %}tx-amount-neg{% endif %}">
                 {{ format_isk_signed(amount) }}
             </span>
-            <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+            <span data-m-label="Balance after" style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
                 {{ format_isk(balance) if balance is not none else "—" }}
             </span>
         </div>
