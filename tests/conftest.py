@@ -1,9 +1,37 @@
+import glob
 import os
+import shutil
 import tempfile
+import time
 
 os.environ.setdefault("EVE_CLIENT_ID", "test")
 os.environ.setdefault("EVE_CLIENT_SECRET", "test")
 os.environ.setdefault("SECRET_KEY", "test-secret")
+
+# Every temp file the suite creates lands in one directory per run, removed in
+# pytest_unconfigure. Most fixtures build their database with
+# NamedTemporaryFile(delete=False) and never delete it; each is a full-schema
+# SQLite file of about 1 MB, so routine runs left tens of GB in the system temp
+# dir. Redirecting tempfile here covers every one of those call sites, their
+# -wal/-shm files, and any new test written the same way. pytest's own tmp_path
+# root resolves through tempfile too, so it is removed with the run as well.
+#
+# Only Python's tempfile is redirected. TMPDIR is left alone: the updater
+# resolves `${TMPDIR:-/tmp}` itself and its tests steer that directly.
+#
+# A run that is killed outright (SIGKILL, closed terminal) never reaches
+# pytest_unconfigure, so sweep run dirs left behind by earlier runs. The
+# day-old cutoff leaves a run going on at the same time in another checkout
+# alone.
+_RUN_PREFIX = "vigilant-pytest-"
+for _stale in glob.glob(os.path.join(tempfile.gettempdir(), _RUN_PREFIX + "*")):
+    try:
+        if time.time() - os.path.getmtime(_stale) > 24 * 3600:
+            shutil.rmtree(_stale, ignore_errors=True)
+    except OSError:
+        pass
+_RUN_TMP = tempfile.mkdtemp(prefix=_RUN_PREFIX)
+tempfile.tempdir = _RUN_TMP
 
 # The route smoke tests drive a TestClient against the real `app.main`, whose
 # engine is built from DATABASE_URL at import time (app/db/models.py:10). Left
@@ -42,6 +70,11 @@ def pytest_configure(config):
     # ISS-075: the engine hook no longer sets WAL, so do it here like startup.
     ensure_wal()
     asyncio.run(_create_schema())
+
+
+def pytest_unconfigure(config):
+    """Remove this run's temp dir. Runs on Ctrl-C as well as a normal finish."""
+    shutil.rmtree(_RUN_TMP, ignore_errors=True)
 
 
 def ensure_user(user_id: int, db_url: str | None = None) -> int:
