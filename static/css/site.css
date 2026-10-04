@@ -910,6 +910,12 @@
     /* "Show all N" inside the Skill Queue panel: inset, so its border doesn't
        double against the panel's sides and bottom (as .asset-list's does). */
     .skills-queue .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* The skill's rank in an open queue row's Attributes value. Desktop draws
+       it in var(--border), which is near-invisible (about 1.1:1); the open
+       row is the only place a phone shows it, so it takes the muted colour.
+       !important beats the inline desktop colour. */
+    .skills-queue .skills-rank { color: var(--muted) !important; }
 }
 /* ── end R2 T2 ── */
 

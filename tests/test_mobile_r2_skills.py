@@ -97,6 +97,7 @@ class _Node:
     def __init__(self, tag, attrs, parent):
         self.tag, self.attrs, self.parent = tag, attrs, parent
         self.children, self.text = [], ""
+        self.start, self.src = None, ""   # src: the element's source, start tag to end tag
 
     @property
     def classes(self):
@@ -115,13 +116,25 @@ class _Node:
 
 
 class _Tree(HTMLParser):
-    def __init__(self):
+    """Element tree with each element's source text (`src`), so string-based
+    helpers can be run on one subtree. No implied end tags: fine for the
+    hand-written templates here."""
+
+    def __init__(self, html):
         super().__init__(convert_charrefs=True)
+        self.html = html
+        # getpos() counts lines by "\n"; offsets of each line's first character.
+        self.lines = [0] + [m.end() for m in re.finditer("\n", html)]
         self.root = _Node("#root", {}, None)
         self.cur = self.root
 
+    def _offset(self):
+        line, col = self.getpos()
+        return self.lines[line - 1] + col
+
     def handle_starttag(self, tag, attrs):
         node = _Node(tag, {k: (v if v is not None else "") for k, v in attrs}, self.cur)
+        node.start = self._offset()
         self.cur.children.append(node)
         if tag not in VOID:
             self.cur = node
@@ -131,6 +144,7 @@ class _Tree(HTMLParser):
         while n is not self.root and n.tag != tag:
             n = n.parent
         if n is not self.root:
+            n.src = self.html[n.start:self.html.index(">", self._offset()) + 1]
             self.cur = n.parent
 
     def handle_data(self, data):
@@ -138,10 +152,23 @@ class _Tree(HTMLParser):
 
 
 def _tree(html):
-    t = _Tree()
+    t = _Tree(html)
     t.feed(html)
     t.close()
     return t.root
+
+
+def _queue_panel(html):
+    """The Skill Queue panel: the one .b-panel whose head label reads
+    "Skill Queue". Page-wide checks are scoped to it, so an m-row, m-head or
+    clamp added later to base.html or the character tabs can't break them."""
+    panels = [p for p in _tree(html).find("b-panel")
+              if any(h.full_text() == "Skill Queue"
+                     for c in p.children if "b-panel-head" in c.classes
+                     for h in c.find("b-label"))]
+    assert len(panels) == 1, f"expected one Skill Queue panel, found {len(panels)}"
+    assert panels[0].src.startswith("<div") and panels[0].src.endswith("</div>")
+    return panels[0]
 
 
 # ── D4 B: Skill Queue rows ────────────────────────────────────────────
@@ -149,9 +176,10 @@ def _tree(html):
 @pytest.mark.parametrize("n", [3, 12])
 def test_queue_rows_follow_the_contract(n):
     html, queue = _render_skills(n)
-    assert len(mrows(html)) == n, "every m-row on the page is a queue row"
-    assert_mrow(html, min_rows=n)
-    rows = cells_rows(html)
+    panel = _queue_panel(html).src
+    assert len(mrows(panel)) == n, "every m-row in the queue panel is a queue row"
+    assert_mrow(panel, min_rows=n)
+    rows = cells_rows(panel)
     for q, row in zip(queue, rows):
         assert row["attrs"].get("data-click") == "toggleMRow"
         k1, k2 = row_keys(row)
@@ -170,7 +198,7 @@ def test_queue_key_one_keeps_name_and_level_as_separate_children():
     the level of a long skill name stays visible. That needs the name and
     the level as the key cell's two element children, and the hook class."""
     html, queue = _render_skills(3)
-    rows = cells_rows(html)
+    rows = cells_rows(_queue_panel(html).src)
     assert len(rows) == 3
     for row in rows:
         k1 = row_keys(row)[0]
@@ -181,7 +209,7 @@ def test_queue_key_one_keeps_name_and_level_as_separate_children():
 @pytest.mark.parametrize("n, button", [(3, False), (10, False), (11, True), (12, True)])
 def test_queue_shows_all_past_ten(n, button):
     html, _ = _render_skills(n)
-    c = clamps(html)
+    c = clamps(_queue_panel(html).src)
     assert c.wraps == 1 and c.nested_wraps == 0
     assert len(c.clamps) == 1
     assert c.clamps[0]["children"] == n, "the clamp holds the queue rows and nothing else"
@@ -198,13 +226,23 @@ def test_queue_shows_all_past_ten(n, button):
         assert c.showall == []
 
 
+def test_queue_rank_has_a_phone_colour_hook():
+    """The rank keeps its inline desktop colour; the hook lets the phone
+    CSS give it a readable one in the open row."""
+    html, queue = _render_skills(3)
+    ranks = _queue_panel(html).find("skills-rank")
+    assert [r.full_text() for r in ranks] == [f"×{q['rank']}" for q in queue]
+    for r in ranks:
+        assert "color:var(--border)" in r.attrs.get("style", "").replace(" ", "")
+        assert r.parent.parent.attrs.get("data-m-label") == "Attributes"
+
+
 def test_queue_rows_sit_directly_in_the_clamp_not_the_wrap():
     """Show all expands the wrap. R1 opens a row whose direct parent is
     is-expanded, so the rows' parent must be the clamp list, not the wrap.
     The button follows the list inside the wrap, so the last row stays its
     list's last child (desktop drops that row's bottom border)."""
-    root = _tree(_render_skills(12)[0])
-    wrap, = root.find("m-clamp-wrap")
+    wrap, = _queue_panel(_render_skills(12)[0]).find("m-clamp-wrap")
     assert "skills-queue" in wrap.classes
     clamp, button = wrap.children
     assert "m-clamp" in clamp.classes and "m-showall" in button.classes
@@ -212,15 +250,14 @@ def test_queue_rows_sit_directly_in_the_clamp_not_the_wrap():
 
 
 def test_empty_queue_renders_no_clamp():
-    html, _ = _render_skills(0)
-    assert "No active skills in queue" in html
-    assert clamps(html).wraps == 0
-    assert mrows(html) == []
+    panel = _queue_panel(_render_skills(0)[0])
+    assert "No active skills in queue" in panel.full_text()
+    assert clamps(panel.src).wraps == 0
+    assert mrows(panel.src) == []
 
 
 def test_queue_header_is_m_head():
-    root = _tree(_render_skills(3)[0])
-    heads = root.find("m-head")
+    heads = _queue_panel(_render_skills(3)[0]).find("m-head")
     assert len(heads) == 1
     head = heads[0]
     assert "b-table-row" in head.classes
@@ -371,6 +408,13 @@ def test_t2_css_keeps_the_level_visible_in_key_one():
         assert _decl(name, prop, value), (prop, value)
     assert _decl(rule_bodies(css, '.m-row > [data-m="key"].skills-key > :last-child'),
                  "flex", "none")
+
+
+def test_t2_css_makes_the_rank_readable_on_phones():
+    """Desktop's var(--border) is about 1.1:1 against the panel; the open
+    row is the only place a phone shows the rank."""
+    css = css_section("T2")
+    assert _decl(rule_bodies(css, ".skills-queue .skills-rank"), "color", "var(--muted) !important")
 
 
 def test_t2_css_insets_show_all_inside_the_queue_panel():
