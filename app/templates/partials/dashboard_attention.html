@@ -40,9 +40,22 @@
     letter-spacing: 0.08em; text-transform: uppercase;
   }
   #dash-attention .da-more-summary:hover { color: var(--text); }
-  @media (max-width: 400px) {
+  /* Mobile design §5.7: on phones the actions drop under the text and the
+     three snooze buttons become one full-width segmented control: three
+     equal buttons, 44px tall, 12px text. (Replaces a 400px rule that only
+     moved the actions.) These ID rules outrank site.css's phone
+     `button { min-height: 44px }`, so they restate 44px rather than shrink
+     the buttons below it. The primary action (Renew, Jobs, Skills, Planets
+     links and the Sync button) gets the same height and text size, centred,
+     so the link and button variants match. */
+  @media (max-width: 640px) {
     #dash-attention .da-row { grid-template-columns: 3px minmax(0, 1fr); }
-    #dash-attention .da-actions { grid-column: 1 / -1; justify-content: flex-start; }
+    #dash-attention .da-actions { grid-column: 1 / -1; justify-content: flex-start; padding-top: 0; }
+    #dash-attention .da-action-btn { min-height: 44px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; padding: 0 0.75rem; }
+    #dash-attention .da-dismiss { flex: 1 1 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+    #dash-attention .da-dismiss form { display: flex; min-width: 0; }
+    #dash-attention .da-dismiss button { flex: 1 1 auto; min-height: 44px; font-size: 12px; padding: 0 0.5rem; }
+    #dash-attention .da-dismiss form + form button { border-left: none; }
   }
 </style>
 

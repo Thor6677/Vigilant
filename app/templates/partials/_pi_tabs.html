@@ -1,0 +1,20 @@
+{# Planetary Industry's four views, shared by planetary.html,
+   planetary_lookup.html, planetary_calculator.html and planetary_chain.html
+   (mobile design §6.2). Desktop: the original pill buttons, unchanged
+   (spec §9), hidden on phones via m-tabs-desktop. Phones: "View: <active> ▾"
+   from tab_dropdown(). `active` is one of: colonies, lookup, calculator, chain. #}
+{% from "partials/_tab_nav.html" import tab_dropdown %}
+{% macro pi_tabs(active) -%}
+{%- set views = [
+    {'key': 'colonies',   'label': 'Colonies',       'url': '/industry/planetary'},
+    {'key': 'lookup',     'label': 'System Lookup',  'url': '/industry/planetary/lookup'},
+    {'key': 'calculator', 'label': 'Calculator',     'url': '/industry/planetary/calculator'},
+    {'key': 'chain',      'label': 'Chain Explorer', 'url': '/industry/planetary/chain'},
+] -%}
+<nav class="m-tabs-desktop" style="display:flex;gap:0.5rem;font-size:11px;">
+    {%- for v in views %}
+    <a href="{{ v['url'] }}" class="b-btn{% if v['key'] == active %} is-active{% endif %}" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">{{ v['label'] }}</a>
+    {%- endfor %}
+</nav>
+{{ tab_dropdown(views, active, label='View') }}
+{%- endmacro %}

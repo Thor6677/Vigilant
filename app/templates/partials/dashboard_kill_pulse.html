@@ -18,7 +18,6 @@
 
 {% if total_kl == 0 and not wingmen and not hunters %}
 <div class="b-section">
-    <div class="b-section-head"><span class="b-label">Pilot Pulse · {{ days }}d</span></div>
     <div style="padding:0.75rem;text-align:center;color:var(--muted);font-size:11px;">
         Backfilling killmail history… multi-character analytics will appear over the next few minutes.
     </div>
@@ -27,10 +26,9 @@
 
 {# ── Pilot Pulse 5-tile header ───────────────────────────────────────────── #}
 <div class="b-panel" style="margin-bottom:0.75rem;">
-    <div class="b-panel-head" style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.75rem;">
-        <span class="b-label">Pilot Pulse · {{ days }}d</span>
-        <span class="b-label" style="color:var(--muted);font-size:9px;">all your characters · stored killmails</span>
-    </div>
+    {# Mobile design §5.6: the section name, its 30d window and its scope
+       note are the collapse bar in dashboard.html (which always asks for the
+       default days=30). #}
     <div style="display:flex;flex-wrap:wrap;text-align:center;">
         <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
             <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(pulse_30['isk_destroyed']) }}</div>

@@ -44,6 +44,32 @@ def _lower(s: str | None) -> str:
 # page's client-side sort — a finite sentinel avoids that entirely.
 _FAR_FUTURE_TS = 32_503_680_000.0
 
+# ISS-087: the only training.warning values where a queue is actually running
+# (app.routes.characters.skill_warning). A paused queue still carries its
+# first skill as `skill`, but nothing is training and there is no queue end.
+_TRAINING_STATES = ("ok", "warning", "critical")
+
+
+def training_rank(warning: str | None) -> int:
+    """ISS-087: order pilots by training STATE, never by whether a next skill
+    exists (a paused queue still has one). 0 = actively training,
+    1 = paused, 2 = empty queue, 3 = anything else (no_scope, error, None).
+    Ranks must stay single-digit: `training_sort_value` prefixes them to a
+    string that the Table's client-side sort compares as text."""
+    if warning in _TRAINING_STATES:
+        return 0
+    return {"paused": 1, "empty": 2}.get(warning, 3)
+
+
+def training_sort_value(warning: str | None, skill: str | None) -> str:
+    """The one Training sort key, shared by the Table view's Training column
+    (its `sort` value, compared as a string in the page's client-side sort)
+    and /dashboard?sort=training (Cards/Compact/Detailed). State rank first,
+    then, among pilots actually training, the current skill's name. Paused
+    and empty queues get no tiebreak: a paused queue's first skill must never
+    order it among the others."""
+    return str(training_rank(warning)) + (_lower(skill) if warning in _TRAINING_STATES else "")
+
 
 def _delta_text(delta: dict | None) -> str:
     if not delta:
@@ -76,7 +102,10 @@ def build_table_row(
     `tags_row` is a load_character_tags() entry or None. `queue_end` is the
     raw datetime app.routes.characters.group_skill_data's skill_map already
     carries per character (`skill_map[cid]["queue_end"]`) — used only for a
-    correct chronological sort, since `training.finish_str` is text.
+    correct chronological sort, since `training.queue_left_str` is text.
+    Both the Queue End text and its sort are gated on the pilot actually
+    training (`_TRAINING_STATES`); anything else reads "—" and sorts after
+    every real queue end.
     `last_synced` is the raw datetime off CharacterDashboardCache.last_synced
     (the same value `app.routes.dashboard._age_str` formats into
     `sync.last_str`) — same reason: sorting "Last Sync" by its display text
@@ -94,14 +123,18 @@ def build_table_row(
     net_worth = detail.get("net_worth")
     wallet = summary.get("wallet")
 
+    warning = training.get("warning")
+    is_training = warning in _TRAINING_STATES
+
     training_text = "—"
-    if training.get("skill"):
-        training_text = f"{training['skill']} {training['level']}"
-    elif training.get("warning") == "paused":
+    if warning == "paused":
+        # Checked before `skill`: a paused queue still names its first skill.
         training_text = "Paused"
-    elif training.get("warning") == "empty":
+    elif training.get("skill"):
+        training_text = f"{training['skill']} {training['level']}"
+    elif warning == "empty":
         training_text = "Empty queue"
-    elif training.get("warning") == "no_scope":
+    elif warning == "no_scope":
         training_text = "—"
 
     tags_list = tags_row.get("tags") or []
@@ -116,10 +149,17 @@ def build_table_row(
         "wallet_7d": {"text": _delta_text(wallet_delta), "sort": _delta_sort(wallet_delta)},
         "net_worth": {"text": _isk(net_worth) if net_worth is not None else "—", "sort": net_worth if net_worth is not None else -1.0},
         "queue_end": {
-            "text": training.get("finish_str") or "—",
-            "sort": queue_end.timestamp() if queue_end else _FAR_FUTURE_TS,
+            # The WHOLE queue's remaining time, not the current skill's
+            # (finish_str) — ISS-087.
+            "text": (training.get("queue_left_str") or "—") if is_training else "—",
+            "sort": queue_end.timestamp() if (is_training and queue_end) else _FAR_FUTURE_TS,
         },
-        "training": {"text": training_text, "sort": _lower(training.get("skill"))},
+        "training": {
+            "text": training_text,
+            # Rank first so paused/empty never interleave with training pilots
+            # by their next skill's name; the value stays a plain string.
+            "sort": training_sort_value(warning, training.get("skill")),
+        },
         "pi": {"text": pi["expiry_str"] if pi else "—", "sort": pi["colonies"] if pi else 0},
         "jobs": {"text": f"{industry['active']} active" if industry else "—", "sort": industry["active"] if industry else 0},
         "orders": {"text": f"{market['open_orders']} open" if market else "—", "sort": market["open_orders"] if market else 0},
@@ -136,6 +176,13 @@ def build_table_row(
         "can_fly": {"text": "…", "sort": 0},
     }
 
+    # Mobile design §5.2 / §5.8: wording only the phone row shows. Desktop
+    # keeps each cell's plain `text` (Queue End "—", Training "Paused").
+    if warning == "empty":
+        cells["queue_end"]["phone_text"] = "empty"
+    if warning == "paused" and training.get("queue_length"):
+        cells["training"]["queued"] = training["queue_length"]
+
     if no_perms:
         # ISS-069: no sync age for a pilot that shares nothing; link to where
         # permissions are granted instead.
@@ -150,6 +197,7 @@ def build_table_row(
         "tags": tags_list,
         "flags": summary.get("flags", []),
         "needs_reauth": summary.get("needs_reauth", False),
+        "is_online": bool(summary.get("is_online")),  # phone row's lead dot
         "cells": cells,
     }
 

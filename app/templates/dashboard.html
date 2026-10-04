@@ -61,6 +61,9 @@
     justify-content: flex-end;
     min-width: 0;
 }
+/* Mobile design §5.3: a second copy of the flags, inside the name cell,
+ * shown only in the <=760px tier below. */
+.dash-compact-flags-inline { display: none; }
 /* T-078: two responsive tiers below the 8-track desktop grid. Before this,
  * the only override was a <=480px phone-only rule — from 481px up to ~760px
  * the fixed 150+120+110px (loc/ship/wallet) tracks alone summed past 380px
@@ -78,25 +81,30 @@
  *   761-1000px : drop ship only — loc, wallet and training still fit — down
  *                to 7 tracks: dot, portrait, name, loc, wallet, training,
  *                flags.
- *   <=760px    : drop loc, ship and training too (this also covers the old
- *                phone breakpoint) — 5 tracks: dot, portrait, name, wallet,
- *                flags. Name is `minmax(0, 1fr)` with ellipsis; wallet is
- *                `auto` sized to its own content (still right-aligned)
- *                instead of a fixed 110px, since there's no ship/training
- *                column left to share space with — safe here specifically
- *                because flags (the only track after it) is now a FIXED
- *                90px, so wallet's right edge is still a constant distance
- *                from the row's right edge on every row; flags wraps onto a
- *                2nd line inside that fixed width instead of overflowing.
+ *   <=760px    : drop loc, ship and training too (this also covers the
+ *                phone layout) — 4 tracks: dot, portrait, name, wallet.
+ *                Flags move inside the name cell, inline after the name
+ *                (mobile design §5.3): `.dash-compact-flags-inline`, a copy
+ *                the row partial renders and only this tier shows, wraps
+ *                freely instead of being clipped to a 90px track. Wallet is
+ *                `auto` and now the LAST track, so its right edge is the
+ *                row's own content edge on every row (still right-aligned).
  */
 @media (max-width: 1000px) {
     .dash-compact-ship { display: none; }
     .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1.2fr) 150px 110px minmax(0, 1fr) 130px; }
 }
 @media (max-width: 760px) {
-    .dash-compact-loc, .dash-compact-ship, .dash-compact-training { display: none; }
-    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1fr) auto 90px; }
-    .dash-compact-flags { flex-wrap: wrap; }
+    .dash-compact-loc, .dash-compact-ship, .dash-compact-flags { display: none; }
+    /* !important: the training cell sets display:flex inline, which beats a
+       plain class rule. Without it the cell stayed visible here, the row had
+       six cells for five tracks, and the flags cell wrapped onto a second
+       grid line inside the 11px dot track (ISS-096). */
+    .dash-compact-training { display: none !important; }
+    .dash-compact-row { grid-template-columns: 11px 24px minmax(0, 1fr) auto; }
+    /* The name cell wraps rather than clipping, so no badge is cut off. */
+    .dash-compact-name { white-space: normal !important; overflow: visible !important; overflow-wrap: anywhere; }
+    .dash-compact-flags-inline { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: 4px; vertical-align: middle; }
 }
 </style>
 {% endif %}
@@ -108,6 +116,7 @@
 {% from "partials/dashboard_group_header.html" import group_header %}
 {% from "partials/dashboard_compact_row.html" import pilot_row %}
 {% from "partials/dashboard_section_shell.html" import section_toolbar %}
+{% from "partials/_dash_table_columns.html" import column_labels %}
 
 {# T-070: saved view state. `dash_prefs`/`dash_mode`/`pilot_summaries` come
    from dashboard()'s one load_prefs() call + build_pilot_summaries() — see
@@ -300,12 +309,64 @@
 {% endif %}
 
 {# ── Sort Controls ──────────────────────────────────────────────────────── #}
-<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
-    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
-    {% for label, value in [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
-    <a href="/dashboard?sort={{ value }}" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
+{% set dash_sort_options = [('Grouped', 'custom'), ('Name', 'name'), ('Corp', 'corp'), ('Training', 'training'), ('Queue End', 'queue')] %}
+{% set dash_view_options = [('Compact', 'compact'), ('Cards', 'cards'), ('Detailed', 'detailed'), ('Table', 'table')] %}
+{% set dash_show_edit = sort == 'custom' and dash_mode == 'cards' and not active_tag_filter %}
+{# Mobile design §5.1: phones get two native selects instead of the button
+   row below. The row itself stays, because Edit / + Add Account / Saved are
+   found by id (toggleEditMode, the add-group binding) and must not be
+   duplicated. Its sort and view controls are m-hide, so on a phone it shows
+   only those secondary controls, under the selects. When none of them
+   applies, the whole row is m-hide. #}
+<div class="m-only dash-phone-toolbar" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+    {% if dash_mode == 'table' %}
+    {# Table view (mobile design §5.2): thead is hidden on phones, so this
+       select (the table's visible columns) and the reverse button stand in
+       for header clicks, through the same sortDashTable(). `?sort=` only
+       breaks ties under table_sort here, so it isn't offered. When the
+       saved sort column is hidden, a disabled placeholder names it (the rows
+       are still sorted by it) and reverse is off, as no header exists. #}
+    {% set dash_tsort = dash_prefs.table_sort %}
+    {% set dash_tsort_shown = dash_tsort.key in dash_prefs.table_columns %}
+    <div style="flex:1 1 0;min-width:0;display:flex;align-items:flex-end;gap:0.3rem;">
+        <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+            Sort
+            <select data-change="dashTableSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+                {% if not dash_tsort_shown %}
+                <option value="" disabled selected>{{ column_labels.get(dash_tsort.key, dash_tsort.key) }}</option>
+                {% endif %}
+                {% for key in dash_prefs.table_columns %}
+                <option value="{{ key }}"{% if dash_tsort.key == key %} selected{% endif %}>{{ column_labels.get(key, key) }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="button" class="b-btn m-tap" data-click="dashTableSortReverse" aria-label="Reverse sort"{% if not dash_tsort_shown %} disabled{% endif %} style="flex:none;height:44px;border:1px solid var(--border);">{{ '▲' if dash_tsort.dir == 'asc' else '▼' }}</button>
+    </div>
+    {% else %}
+    <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+        Sort
+        <select data-change="dashSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+            {% for label, value in dash_sort_options %}
+            <option value="/dashboard?sort={{ value }}"{% if sort == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    {% endif %}
+    <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+        View
+        <select data-change="dashViewSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+            {% for label, value in dash_view_options %}
+            <option value="{{ value }}"{% if dash_mode == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+</div>
+<div class="dash-toolbar{% if not (dash_show_edit or farm_info) %} m-hide{% endif %}" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
+    <span class="m-hide" style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Sort:</span>
+    {% for label, value in dash_sort_options %}
+    <a href="/dashboard?sort={{ value }}" class="b-btn m-hide" style="padding:2px 8px;font-size:10px;border:1px solid {% if sort == value %}var(--accent){% else %}var(--border){% endif %};{% if sort == value %}color:var(--accent);{% endif %};">{{ label }}</a>
     {% endfor %}
-    {% if sort == 'custom' and dash_mode == 'cards' and not active_tag_filter %}
+    {% if dash_show_edit %}
     <button id="edit-mode-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);margin-left:0.5rem;" data-click="toggleEditMode">Edit</button>
     <button id="add-group-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);display:none;">+ Add Account</button>
     <span id="save-status" style="font-size:10px;color:var(--success);display:none;margin-left:0.25rem;">Saved</span>
@@ -313,10 +374,10 @@
     {% if farm_info %}
     <a href="/tools/skill-farm" class="b-link" style="font-size:10px;margin-left:0.5rem;">Skill farm &middot; {{ farm_info.ready_now }} injector{{ 's' if farm_info.ready_now != 1 else '' }} ready</a>
     {% endif %}
-    <span style="flex:1;"></span>
-    <span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
-    {% for label, value in [('Compact', 'compact'), ('Cards', 'cards'), ('Detailed', 'detailed'), ('Table', 'table')] %}
-    <button type="button" class="b-btn" data-click="setDashMode" data-mode="{{ value }}"
+    <span class="m-hide" style="flex:1;"></span>
+    <span class="m-hide" style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">View:</span>
+    {% for label, value in dash_view_options %}
+    <button type="button" class="b-btn m-hide" data-click="setDashMode" data-mode="{{ value }}"
             style="padding:2px 8px;font-size:10px;border:1px solid {% if dash_mode == value %}var(--accent){% else %}var(--border){% endif %};{% if dash_mode == value %}color:var(--accent);{% endif %}">{{ label }}</button>
     {% endfor %}
 </div>
@@ -505,15 +566,22 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Major Fleet Battles</span>
+        {# §5.6: the section's only title. Its meta text lives here too. #}
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Major Fleet Battles</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">New Eden &middot; last 7 days</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    {# §5.5: always deferred. data-dash-autoload marks what loads straight
+       away on desktop (exactly the old not-sec_defer case); the init at
+       the end of this page's script fires it, or on phones may hold it
+       collapsed. #}
     <div id="dashboard-recent-battles"
-         {% if not sec_defer %}hx-get="/dashboard/recent-battles" hx-trigger="load"{% else %}data-dash-src="/dashboard/recent-battles" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/recent-battles" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Major Fleet Battles in New Eden · 7d</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -529,15 +597,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Activity</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Activity</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">New Eden</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-activity"
-         {% if not sec_defer %}hx-get="/dashboard/activity?window=24h" hx-trigger="load"{% else %}data-dash-src="/dashboard/activity?window=24h" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/activity?window=24h" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="outerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Activity</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -553,15 +623,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Pilot Pulse</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Pilot Pulse</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">30d &middot; all your characters &middot; stored killmails</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-kill-pulse"
-         {% if not sec_defer %}hx-get="/dashboard/kill-pulse" hx-trigger="load"{% else %}data-dash-src="/dashboard/kill-pulse" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/kill-pulse" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -580,15 +652,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Combat Profile</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Combat Profile</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">your pilots &middot; 90d</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-combat-profile"
-         {% if not sec_defer %}hx-get="/dashboard/combat-profile" hx-trigger="load"{% else %}data-dash-src="/dashboard/combat-profile" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/combat-profile" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Your Pilots Combat Profile</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -708,10 +782,32 @@ function postDashPrefs(patch) {
     return dashPrefsQueue;
 }
 
-function setDashMode() {
-    var mode = this.dataset.mode;
+// One save-and-reload path for every way of choosing a mode: the desktop
+// buttons (data-click="setDashMode", reading data-mode) and, on phones, the
+// View select (mobile design §5.1). Top-level declarations, so the
+// data-click / data-change dispatcher finds them on window.
+function dashSetMode(mode) {
     postDashPrefs({ mode: mode }).then(function () { window.location.reload(); });
 }
+function setDashMode() { dashSetMode(this.dataset.mode); }
+function dashViewSelect() { dashSetMode(this.value); }
+// The phone Sort select's option values are the desktop sort links' own URLs.
+function dashSortSelect() {
+    var url = this.value || '';
+    if (url.indexOf('/dashboard?sort=') === 0) window.location.href = url;
+}
+// Back / bfcache restores the select's last-picked value, not the page's
+// real sort/mode; snap both phone selects back to the server-rendered
+// selection so a re-pick always fires `change`.
+// The Table view's column select is the exception: it sorts in place
+// without navigating, so its truth is dashTableSort (which bfcache keeps
+// along with the reordered rows), not the server-rendered selection.
+window.addEventListener('pageshow', function () {
+  document.querySelectorAll('.dash-phone-toolbar select').forEach(function (s) {
+    for (var i = 0; i < s.options.length; i++) { if (s.options[i].defaultSelected) { s.selectedIndex = i; break; } }
+  });
+  _dashSyncPhoneTableSort();
+});
 
 // ── T-076: tag filter — server round-trip like setDashMode, so tag TEXT
 // never has to be matched or rendered by JS at all (no innerHTML over it). ──
@@ -739,7 +835,43 @@ function sortDashTable() {
     var dir = (dashTableSort.key === col && dashTableSort.dir === 'asc') ? 'desc' : 'asc';
     dashTableSort = { key: col, dir: dir };
     _applyDashTableSort();
+    _dashSyncPhoneTableSort();
     postDashPrefs({ table_sort: dashTableSort });
+}
+
+// Mobile design §5.2: thead is hidden on phones, so the phone toolbar's
+// column select and reverse button stand in for header clicks. Each finds
+// the column's own header and runs sortDashTable() on it: the exact path a
+// desktop click takes (client-side reorder, then the table_sort prefs save).
+function _dashTableHeader(key) {
+    var ths = document.querySelectorAll('#dash-table thead th[data-col]');
+    for (var i = 0; i < ths.length; i++) { if (ths[i].dataset.col === key) return ths[i]; }
+    return null;
+}
+// A newly picked column sorts ascending, as a click on its header would.
+function dashTableSortSelect() {
+    var th = _dashTableHeader(this.value);
+    if (th) sortDashTable.call(th);
+}
+// Clicking the sorted column's header again flips its direction.
+function dashTableSortReverse() {
+    var th = _dashTableHeader(dashTableSort.key);
+    if (th) sortDashTable.call(th);
+}
+// Point the phone select and reverse button at dashTableSort. Runs after
+// every sort (header click or phone control) and on pageshow, where the
+// browser may have restored a stale select value.
+function _dashSyncPhoneTableSort() {
+    var sel = document.querySelector('.dash-phone-toolbar select[data-change="dashTableSortSelect"]');
+    var btn = document.querySelector('.dash-phone-toolbar button[data-click="dashTableSortReverse"]');
+    if (!sel || !btn) return;
+    var shown = !!_dashTableHeader(dashTableSort.key);
+    var want = shown ? dashTableSort.key : '';  // '' = the hidden-column placeholder
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === want) { sel.selectedIndex = i; break; }
+    }
+    btn.textContent = dashTableSort.dir === 'asc' ? '▲' : '▼';
+    btn.disabled = !shown;
 }
 
 function _applyDashTableSort() {
@@ -760,9 +892,15 @@ function _applyDashTableSort() {
 
     Array.prototype.slice.call(tbody.querySelectorAll('tr.dash-table-divider')).forEach(function (d) { d.remove(); });
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-char-id]'));
+    // Mobile R1: rows also hold phone-only cells (status dot, stand-in key
+    // cells, links), so a column's cell is found by name, never by position.
+    var cellValue = function (row) {
+        var td = row.querySelector('td[data-col-cell="' + dashTableSort.key + '"]');
+        return td ? (td.dataset.sortValue || '') : '';
+    };
     rows.sort(function (a, b) {
-        var av = a.children[colIndex].dataset.sortValue;
-        var bv = b.children[colIndex].dataset.sortValue;
+        var av = cellValue(a);
+        var bv = cellValue(b);
         var cmp;
         if (sortType === 'num') {
             cmp = parseFloat(av) - parseFloat(bv);
@@ -855,9 +993,37 @@ function activateLazy(body) {
     var trigger = el.getAttribute('data-dash-trigger') || 'load';
     el.removeAttribute('data-dash-src');
     el.removeAttribute('data-dash-trigger');
+    el.removeAttribute('data-dash-autoload');
     el.setAttribute('hx-get', src);
     el.setAttribute('hx-trigger', trigger);
     if (window.htmx) window.htmx.process(el);
+}
+
+// ── Mobile design §5.5: heavy sections on phones ───────────────────────────
+// Phones start these collapsed (body hidden, data not fetched) unless this
+// device opened them before. The set lives in localStorage, never in
+// server prefs, and every access is guarded: with storage unavailable
+// (private mode) they simply start collapsed on every visit.
+var DASH_PHONE_OPEN_KEY = 'vigilant.dash.phoneOpen';
+var DASH_PHONE_COLLAPSED = ['wealth', 'battles', 'activity', 'kill_pulse', 'combat_profile'];
+
+function dashIsPhone() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+}
+
+function dashPhoneOpenRead() {
+    try {
+        var v = JSON.parse(window.localStorage.getItem(DASH_PHONE_OPEN_KEY) || '[]');
+        return Array.isArray(v) ? v.filter(function (k) { return typeof k === 'string'; }) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function dashPhoneOpenWrite(keys) {
+    try {
+        window.localStorage.setItem(DASH_PHONE_OPEN_KEY, JSON.stringify(keys));
+    } catch (e) { /* storage unavailable: next visit starts collapsed */ }
 }
 
 function _arrAdd(arr, key) { if (arr.indexOf(key) === -1) arr.push(key); }
@@ -901,6 +1067,17 @@ function refreshHiddenFooter() {
     });
 }
 
+// A section toggle's glyph, title and aria-expanded follow its body. Both
+// paths that change a body (the toggle itself and the phone init) set all
+// three through here, so the title never says "Collapse" on a closed section.
+function dashSetSectionToggle(btn, expanded) {
+    var key = btn.dataset.section;
+    var label = DASH_SECTION_LABELS[key] || key;
+    btn.textContent = expanded ? '▾' : '▸';
+    btn.title = (expanded ? 'Collapse ' : 'Expand ') + label;
+    btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function toggleDashSection() {
     var wrap = this.closest('[data-dash-section]');
     if (!wrap) return;
@@ -909,9 +1086,19 @@ function toggleDashSection() {
     if (!body) return;
     var willExpand = body.style.display === 'none';
     body.style.display = willExpand ? '' : 'none';
-    this.textContent = willExpand ? '▾' : '▸';
+    dashSetSectionToggle(this, willExpand);
+    if (willExpand) activateLazy(body);
+    if (dashIsPhone() && DASH_PHONE_COLLAPSED.indexOf(key) !== -1) {
+        // Phones (§5.5), heavy sections only: per-device state. Every other
+        // section (Contracts, Recent Kills, ...) falls through to the server
+        // prefs path below. dashCollapsedSections, which a later ✕ posts,
+        // never holds these phone-only keys, so nothing leaks to server prefs.
+        var open = dashPhoneOpenRead();
+        if (willExpand) _arrAdd(open, key); else _arrRemove(open, key);
+        dashPhoneOpenWrite(open);
+        return;
+    }
     if (willExpand) {
-        activateLazy(body);
         _arrRemove(dashCollapsedSections, key);
     } else {
         _arrAdd(dashCollapsedSections, key);
@@ -982,6 +1169,39 @@ function toggleDashGroup() {
     if (summary) summary.style.display = willCollapse ? '' : 'none';
     this.textContent = willCollapse ? '▸' : '▾';
     persistGroupState();
+}
+
+// §5.5 init. Phones: collapse the heavy sections this device hasn't opened.
+// The init never expands anything; server-collapsed sections are left as
+// rendered. A server-hidden heavy section is collapsed inside its hidden
+// wrapper, so un-hiding it on a phone shows a collapsed bar. Then, at every
+// width, load each section the server marked data-dash-autoload whose body
+// is still visible: on desktop that is exactly the set that used to load via
+// hx-trigger="load".
+function dashSectionsInit() {
+    if (dashIsPhone()) {
+        var open = dashPhoneOpenRead();
+        DASH_PHONE_COLLAPSED.forEach(function (key) {
+            if (open.indexOf(key) !== -1) return;
+            var wrap = document.querySelector('[data-dash-section="' + key + '"]');
+            if (!wrap) return;
+            var body = wrap.querySelector('[data-dash-body="' + key + '"]');
+            if (!body || body.style.display === 'none') return;
+            body.style.display = 'none';
+            var btn = wrap.querySelector('.dash-sec-toggle');
+            if (btn) dashSetSectionToggle(btn, false);
+        });
+    }
+    document.querySelectorAll('[data-dash-autoload]').forEach(function (el) {
+        var body = el.closest('[data-dash-body]');
+        if (body && body.style.display === 'none') return;
+        activateLazy(el);
+    });
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', dashSectionsInit);
+} else {
+    dashSectionsInit();
 }
 </script>
 
@@ -1341,7 +1561,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
-        toggleBtn.className = 'dash-group-toggle b-btn';
+        toggleBtn.className = 'dash-group-toggle b-btn m-tap';  // as the partial: phone tap target
         toggleBtn.dataset.click = 'toggleDashGroup';
         toggleBtn.dataset.group = name;
         toggleBtn.title = 'Collapse ' + name;

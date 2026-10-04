@@ -1,0 +1,10 @@
+{# Header text for each Table-view column (keys: app.dashboard.prefs.TABLE_COLUMNS).
+   One map, imported by partials/dashboard_table.html (headers, picker, phone
+   detail labels) and dashboard.html (the phone toolbar's column Sort select),
+   so the two can never disagree. #}
+{% set column_labels = {
+    'pilot': 'Pilot', 'account': 'Account', 'corporation': 'Corporation',
+    'system': 'System', 'ship': 'Ship', 'wallet': 'Wallet', 'wallet_7d': '7d',
+    'net_worth': 'Net Worth', 'queue_end': 'Queue End', 'training': 'Training',
+    'pi': 'PI', 'jobs': 'Jobs', 'orders': 'Orders', 'escrow': 'Escrow',
+    'clones': 'Clones', 'last_sync': 'Last Sync', 'tags': 'Tags', 'can_fly': 'Can Fly'} %}

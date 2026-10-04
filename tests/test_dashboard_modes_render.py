@@ -5,7 +5,7 @@ refactor proof (tests/_dashboard_fixture.py) — no database, no real
 """
 import re
 
-from tests._dashboard_fixture import CHARACTERS, render_full
+from tests._dashboard_fixture import CHAR_PAUSED, CHARACTERS, build_context, extract_card, render_full
 
 _GAME_WIDE_LOAD_HX_GETS = (
     'hx-get="/dashboard/recent-battles"',
@@ -21,15 +21,34 @@ def test_default_mode_is_cards():
     assert 'class="b-card"' in html
 
 
-def test_cards_default_loads_every_game_wide_section():
-    """Positive control for the "no hx-get" assertions below: with the
-    feature flags on and nothing collapsed/hidden, Cards fires all four
-    lazy loads on `load` — proves the *absence* of hx-get elsewhere is
-    deliberate deferral, not just the flags being off."""
+_LAZY = {
+    "dashboard-recent-battles": "/dashboard/recent-battles",
+    "dashboard-activity": "/dashboard/activity?window=24h",
+    "dashboard-kill-pulse": "/dashboard/kill-pulse",
+    "dashboard-combat-profile": "/dashboard/combat-profile",
+}
+
+
+def _open_tag(html, needle):
+    """The full opening tag containing `needle` (attributes may span lines)."""
+    at = html.index(needle)
+    return html[html.rfind("<", 0, at):html.index(">", at) + 1]
+
+
+def test_cards_default_autoloads_every_lazy_section():
+    """Positive control for the deferral assertions below (mobile design
+    §5.5). The four lazy sections always render deferred (data-dash-src),
+    never with hx-trigger="load". In Cards with nothing collapsed or hidden,
+    each one carries the data-dash-autoload marker that the page's init
+    activates on DOMContentLoaded (desktop). That proves the marker's
+    absence elsewhere is deliberate deferral, not the flags being off."""
     html = render_full("custom", killmails_enabled=True, battles_enabled=True)
-    for needle in _GAME_WIDE_LOAD_HX_GETS:
-        assert needle in html, f"expected {needle} in default Cards render"
-    assert _COMBAT_PROFILE_HX_GET in html
+    for el_id, src in _LAZY.items():
+        tag = _open_tag(html, f'id="{el_id}"')
+        assert f'data-dash-src="{src}"' in tag, el_id
+        assert 'data-dash-autoload="1"' in tag, el_id
+    for needle in _GAME_WIDE_LOAD_HX_GETS + (_COMBAT_PROFILE_HX_GET,):
+        assert needle not in html, needle
 
 
 def test_compact_renders_one_row_per_pilot():
@@ -61,7 +80,8 @@ def test_compact_starts_with_pilot_sections_collapsed():
 
 def test_cards_mode_never_forces_pilot_sections_collapsed():
     html = render_full("custom", dash_mode="cards", killmails_enabled=True)
-    assert _COMBAT_PROFILE_HX_GET in html
+    assert 'data-dash-autoload="1"' in _open_tag(html, 'id="dashboard-combat-profile"')
+    assert "display:none" not in _open_tag(html, 'data-dash-body="combat_profile"')
 
 
 def test_a_collapsed_section_has_no_load_trigger_hx_get():
@@ -147,3 +167,321 @@ def test_attention_strip_mount_point_present_in_every_mode():
         assert 'id="dash-attention"' in html
         assert 'hx-get="/dashboard/attention"' in html
         assert 'data-htmx-no-error="1"' in html
+
+
+def test_paused_card_says_paused_even_when_the_queue_has_a_next_skill():
+    """ISS-087: real paused queues carry current_skill (their first entry),
+    and so does the shared fixture's paused pilot. The golden cards hold
+    because the card checks paused before current_skill."""
+    cid = CHAR_PAUSED.character_id
+    assert build_context("custom")["skill_map"][cid]["current_skill"] == "Navigation"
+    card = extract_card(render_full("custom"), cid)
+    assert "Paused (3 queued)" in card
+    assert "Navigation" not in card
+
+
+# ── Mobile R1: phone toolbar (mobile design §5.1) ──────────────────────────
+
+from tests.test_mobile_css import _css, _media_bodies
+
+_SORTS = [("Grouped", "custom"), ("Name", "name"), ("Corp", "corp"),
+          ("Training", "training"), ("Queue End", "queue")]
+_VIEWS = [("Compact", "compact"), ("Cards", "cards"), ("Detailed", "detailed"), ("Table", "table")]
+
+
+def _options(html, handler):
+    m = re.search(r'<select data-change="' + handler + r'"[^>]*>(.*?)</select>', html, re.S)
+    assert m, f"no <select> bound to {handler}"
+    return re.findall(r'<option value="([^"]*)"( selected)?>([^<]*)</option>', m.group(1))
+
+
+def test_phone_sort_select_lists_every_sort_url():
+    opts = _options(render_full("name"), "dashSortSelect")
+    assert [(label, value) for value, _sel, label in opts] == [
+        (label, f"/dashboard?sort={value}") for label, value in _SORTS]
+    assert [value for value, sel, _label in opts if sel] == ["/dashboard?sort=name"]
+
+
+def test_phone_view_select_lists_every_mode():
+    opts = _options(render_full("custom", dash_mode="table"), "dashViewSelect")
+    assert [(label, value) for value, _sel, label in opts] == _VIEWS
+    assert [value for value, sel, _label in opts if sel] == ["table"]
+
+
+def test_phone_select_handlers_share_set_dash_mode():
+    html = render_full("custom")
+    assert "function setDashMode() { dashSetMode(this.dataset.mode); }" in html
+    assert "function dashViewSelect() { dashSetMode(this.value); }" in html
+    assert "function dashSortSelect() {" in html
+    assert "url.indexOf('/dashboard?sort=') === 0" in html
+    assert html.count('class="m-only dash-phone-toolbar"') == 1
+
+
+def test_desktop_sort_and_view_controls_hide_on_phones():
+    html = render_full("custom")
+    assert re.findall(r'<a href="/dashboard\?sort=(\w+)" class="b-btn m-hide"', html) == [v for _l, v in _SORTS]
+    assert len(re.findall(r'<button type="button" class="b-btn m-hide" data-click="setDashMode"', html)) == 4
+
+
+def test_secondary_toolbar_controls_stay_on_phones_only_when_they_apply():
+    cards = render_full("custom")
+    assert 'class="dash-toolbar"' in cards
+    assert cards.count('id="edit-mode-btn"') == 1  # never duplicated: JS finds it by id
+    assert 'class="dash-toolbar m-hide"' in render_full("custom", dash_mode="compact")
+    farm = render_full("name", farm_info={"ready_now": 2})
+    assert 'class="dash-toolbar"' in farm
+    assert farm.count('href="/tools/skill-farm"') == 1
+
+
+def test_toolbar_wraps_on_phones():
+    phone = _media_bodies(_css(), "max-width: 640px")
+    assert re.search(r"\.dash-toolbar\s*\{[^}]*flex-wrap:\s*wrap\s*!important", phone)
+
+
+def test_tag_filter_hides_edit_and_the_toolbar_row_on_phones():
+    html = render_full("custom", active_tag_filter=["x"])
+    assert 'class="dash-toolbar m-hide"' in html
+    assert 'id="edit-mode-btn"' not in html
+
+
+def test_phone_selects_reset_to_rendered_selection_on_pageshow():
+    html = render_full("custom")
+    assert "pageshow" in html
+    assert ".dash-phone-toolbar select" in html
+
+
+# ── Task 9 review: Table view sorts by its own columns on phones ───────────
+
+from app.dashboard import prefs as prefs_mod
+
+
+def _table_mode(**prefs):
+    return render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=[], prefs_patch=prefs or None)
+
+
+def _reverse_button(html):
+    m = re.search(r'<button [^>]*data-click="dashTableSortReverse"[^>]*>([^<]*)</button>', html)
+    assert m, "no reverse-sort button"
+    return m
+
+
+def test_table_mode_phone_sort_lists_the_visible_columns():
+    html = _table_mode(table_columns=["pilot", "account", "wallet"],
+                       table_sort={"key": "wallet", "dir": "desc"})
+    opts = _options(html, "dashTableSortSelect")
+    assert [(v, label) for v, _sel, label in opts] == [("pilot", "Pilot"), ("account", "Account"), ("wallet", "Wallet")]
+    assert [v for v, sel, _label in opts if sel] == ["wallet"]
+    # Option values are exactly the header keys a desktop click sorts by.
+    assert re.findall(r'<th data-click="sortDashTable" data-col="([^"]+)"', html) == [v for v, _s, _l in opts]
+    btn = _reverse_button(html)
+    assert 'aria-label="Reverse sort"' in btn.group(0) and "m-tap" in btn.group(0)
+    assert "disabled" not in btn.group(0)
+    assert btn.group(1) == "▼"
+    assert '<select data-change="dashSortSelect"' not in html  # `?sort=` only breaks ties here
+    assert html.count('class="m-only dash-phone-toolbar"') == 1
+
+
+def test_table_mode_phone_sort_names_a_hidden_sort_column():
+    html = _table_mode(table_columns=["account", "wallet"], table_sort={"key": "pilot", "dir": "asc"})
+    assert '<option value="" disabled selected>Pilot</option>' in html
+    assert [v for v, sel, _label in _options(html, "dashTableSortSelect") if sel] == []
+    btn = _reverse_button(html)
+    assert " disabled" in btn.group(0) and btn.group(1) == "▲"
+
+
+def test_other_modes_keep_the_url_sort_select():
+    for mode in ("cards", "compact", "detailed"):
+        html = render_full("name", dash_mode=mode)
+        assert [v for v, sel, _label in _options(html, "dashSortSelect") if sel] == ["/dashboard?sort=name"], mode
+        assert '<select data-change="dashTableSortSelect"' not in html, mode
+        assert not re.search(r'<button [^>]*data-click="dashTableSortReverse"', html), mode
+
+
+def test_phone_table_sort_runs_the_header_click_path():
+    html = _table_mode()
+    for fn in ("function dashTableSortSelect() {", "function dashTableSortReverse() {"):
+        body = html.split(fn, 1)[1].split("\n}", 1)[0]
+        assert "sortDashTable.call(th)" in body, fn
+    sort_body = html.split("function sortDashTable() {", 1)[1].split("\n}", 1)[0]
+    assert "_dashSyncPhoneTableSort();" in sort_body
+    pageshow = html.split("window.addEventListener('pageshow'", 1)[1].split("\n});", 1)[0]
+    assert "_dashSyncPhoneTableSort();" in pageshow
+
+
+def test_remove_is_hidden_on_phones_in_cards_and_detailed():
+    for mode in ("cards", "detailed"):
+        html = render_full("custom", dash_mode=mode)
+        forms = re.findall(r'<form method="POST" action="/auth/remove/\d+"([^>]*)>', html)
+        assert len(forms) == len(CHARACTERS), mode
+        assert all(f.startswith(' class="m-hide" data-confirm=') for f in forms), mode
+
+
+# ── Mobile R1: heavy sections and titles (mobile design §5.5 / §5.6) ──────
+
+import os
+
+_PARTIALS = os.path.join(os.path.dirname(__file__), "..", "app", "templates", "partials")
+
+
+def _partial_source(name):
+    with open(os.path.join(_PARTIALS, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_compact_and_collapsed_sections_get_no_autoload_marker():
+    html = render_full("custom", dash_mode="compact", killmails_enabled=True, battles_enabled=True)
+    for el_id in _LAZY:
+        assert "data-dash-autoload" not in _open_tag(html, f'id="{el_id}"'), el_id
+    html = render_full("custom", killmails_enabled=True,
+                       prefs_patch={"collapsed_sections": ["activity"]})
+    assert "data-dash-autoload" not in _open_tag(html, 'id="dashboard-activity"')
+    assert 'data-dash-autoload="1"' in _open_tag(html, 'id="dashboard-kill-pulse"')
+
+
+def test_phone_init_uses_a_per_device_open_set():
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    assert "var DASH_PHONE_OPEN_KEY = 'vigilant.dash.phoneOpen';" in html
+    assert ("var DASH_PHONE_COLLAPSED = ['wealth', 'battles', 'activity', "
+            "'kill_pulse', 'combat_profile'];") in html
+    assert "document.querySelectorAll('[data-dash-autoload]')" in html
+    read = html.split("function dashPhoneOpenRead()")[1].split("function dashPhoneOpenWrite(")[0]
+    write = html.split("function dashPhoneOpenWrite(")[1].split("\nfunction ")[0]
+    assert "try {" in read and "catch (e)" in read
+    assert "try {" in write and "catch (e)" in write
+    toggle = html.split("function toggleDashSection()")[1].split("function hideDashSection()")[0]
+    guard = "if (dashIsPhone() && DASH_PHONE_COLLAPSED.indexOf(key) !== -1)"
+    assert guard in toggle
+    phone = toggle.index(guard)
+    assert toggle.index("dashPhoneOpenWrite(", phone) < toggle.index("return;", phone) \
+        < toggle.index("persistSectionState()")
+
+
+def _section_toggles(html):
+    return re.findall(r'<button type="button" class="dash-sec-toggle b-btn m-tap"[^>]*'
+                      r'data-section="([a-z_]+)"\s+title="([^"]*)" aria-expanded="(true|false)"[^>]*>([^<]*)</button>', html)
+
+
+def test_section_toggles_render_title_and_aria_expanded_for_their_state():
+    """Compact force-collapses combat_profile; a saved collapse closes
+    wealth. Every toggle's glyph, title and aria-expanded agree."""
+    html = render_full("custom", dash_mode="compact", killmails_enabled=True, battles_enabled=True,
+                       prefs_patch={"collapsed_sections": ["wealth"]})
+    toggles = {key: (title, aria, glyph) for key, title, aria, glyph in _section_toggles(html)}
+    assert {"wealth", "battles", "activity", "kill_pulse", "combat_profile"} <= set(toggles)
+    for key, (title, aria, glyph) in toggles.items():
+        if key in ("wealth", "combat_profile"):
+            assert (title.split(" ", 1)[0], aria, glyph) == ("Expand", "false", "▸"), key
+        else:
+            assert (title.split(" ", 1)[0], aria, glyph) == ("Collapse", "true", "▾"), key
+    assert toggles["wealth"][0] == "Expand Wealth by Character"
+
+
+def test_section_toggle_state_is_set_in_one_place_by_both_paths():
+    """The phone init collapses heavy sections after load, and every toggle
+    flips one: both must update the title and aria-expanded, not only the
+    glyph."""
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    helper = html.split("function dashSetSectionToggle(btn, expanded) {", 1)[1].split("\n}", 1)[0]
+    assert "DASH_SECTION_LABELS[key]" in helper
+    assert "btn.textContent = expanded ? '▾' : '▸';" in helper
+    assert "btn.title = (expanded ? 'Collapse ' : 'Expand ') + label;" in helper
+    assert "btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');" in helper
+    toggle = html.split("function toggleDashSection()")[1].split("function hideDashSection()")[0]
+    # Before the phone branch, which returns early.
+    assert toggle.index("dashSetSectionToggle(this, willExpand);") \
+        < toggle.index("if (dashIsPhone() && DASH_PHONE_COLLAPSED")
+    init = html.split("function dashSectionsInit() {")[1].split("\n}", 1)[0]
+    assert "if (btn) dashSetSectionToggle(btn, false);" in init
+    for body in (toggle, init):
+        assert ".textContent = " not in body
+
+
+def test_each_lazy_section_title_appears_once():
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    for title in ("Major Fleet Battles", "Activity", "Pilot Pulse", "Combat Profile"):
+        assert html.count(f">{title}<") == 1, (title, html.count(f">{title}<"))
+    assert "Major Fleet Battles in New Eden" not in html
+    assert "Your Pilots Combat Profile" not in html
+    for meta in ("New Eden &middot; last 7 days",
+                 "30d &middot; all your characters &middot; stored killmails",
+                 "your pilots &middot; 90d"):
+        assert meta in html, meta
+
+
+def test_lazy_partials_drop_their_title_lines_but_keep_data_meta():
+    assert "Major Fleet Battles" not in _partial_source("dashboard_recent_battles.html")
+    activity = _partial_source("dashboard_activity.html")
+    assert "Activity · New Eden" not in activity
+    assert "peak {{ fmt_pcu(peak_pcu) }} online" in activity
+    assert "{% for w, label in [('1h','1H')" in activity  # window buttons stay
+    pulse = _partial_source("dashboard_kill_pulse.html")
+    assert "Pilot Pulse · {{ days }}d" not in pulse
+    assert "all your characters · stored killmails" not in pulse
+    profile = _partial_source("dashboard_combat_profile.html")
+    assert "Your Pilots Combat Profile" not in profile
+    assert ">Combat Profile<" not in profile
+    assert ">Combat Radar<" in profile
+    assert "{{ char_count }} char" in profile
+
+
+# ── Mobile R1: tap targets (mobile design §5.7) ────────────────────────────
+
+def test_section_buttons_use_the_tap_class_not_inline_sizing():
+    html = render_full("custom")
+    btns = re.findall(r'<button type="button" class="(dash-sec-(?:toggle|hide) b-btn m-tap)"[^>]*style="([^"]*)"', html)
+    assert len(btns) >= 2
+    for cls, style in btns:
+        assert "padding" not in style and "font-size" not in style, (cls, style)
+        assert "border:1px solid var(--border)" in style, (cls, style)
+
+
+def _without_media(css):
+    """`css` with comments and every @media block (prelude and body) removed."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out, i = [], 0
+    for m in re.finditer(r"@media[^{]*\{", css):
+        if m.start() < i:
+            continue                       # nested inside a block already skipped
+        out.append(css[i:m.start()])
+        depth, j = 1, m.end()
+        while depth and j < len(css):
+            depth += {"{": 1, "}": -1}.get(css[j], 0)
+            j += 1
+        i = j
+    out.append(css[i:])
+    return "".join(out)
+
+
+def test_section_button_desktop_size_lives_in_site_css():
+    css = _css()
+    desktop_rule = r"\.b-btn\.dash-sec-toggle,\s*\.b-btn\.dash-sec-hide\s*\{\s*padding:\s*2px 6px;\s*font-size:\s*9px;\s*\}"
+    # Outside every media query, not merely outside the 640px one.
+    assert re.search(desktop_rule, _without_media(css))
+    assert "@media" not in _without_media(css)
+    phone = _media_bodies(css, "max-width: 640px")
+    assert not re.search(r"\.b-btn\.dash-sec-toggle", phone)  # desktop rule, not phone-only
+    assert re.search(r"\.dash-sec-toggle \+ \.dash-sec-hide\s*\{[^}]*margin-left:\s*4px", phone)
+
+
+def test_group_toggle_is_a_phone_tap_target_and_keeps_its_desktop_size():
+    """The account-group ▾ was 21x44 with a 9px glyph on phones. m-tap gives
+    it the shared 40x40 / 12px rule, whose declarations are !important and
+    so beat the inline 9px there; m-tap has no rule above 640px, so desktop
+    keeps the inline 2px 6px / 9px."""
+    for mode in ("cards", "compact"):
+        for collapsed in ([], ["Sample Corp"]):
+            html = render_full("custom", dash_mode=mode, prefs_patch={"collapsed_groups": collapsed})
+            btns = re.findall(r'<button type="button" class="([^"]*)" data-click="toggleDashGroup"[^>]*style="([^"]*)"', html)
+            assert btns, (mode, collapsed)
+            for cls, style in btns:
+                assert cls == "dash-group-toggle b-btn m-tap", (mode, cls)
+                assert "padding:2px 6px;font-size:9px;" in style, (mode, style)
+    # A group added in the page (+ Add Account) is built by script: same class.
+    assert "toggleBtn.className = 'dash-group-toggle b-btn m-tap';" in render_full("custom", dash_mode="cards")
+    css = _css()
+    tap = re.search(r"\.m-tap, \.dash-sec-toggle, \.dash-sec-hide\s*\{([^}]*)\}", _media_bodies(css, "max-width: 640px"))
+    assert tap, "shared m-tap phone rule missing"
+    for decl in ("min-width: 40px !important", "min-height: 40px !important", "font-size: 12px !important"):
+        assert decl in tap.group(1), decl
+    assert ".m-tap" not in _without_media(css)

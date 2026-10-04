@@ -8,6 +8,7 @@
 {% endif %}
 {% endblock %}
 {% block content %}
+{% from "partials/_character_tabs.html" import character_tabs %}
 
 <div class="b-page-header">
     <div>
@@ -35,18 +36,7 @@
 
 {% if char and char.character_id and not is_corp %}
 {% set _cid = char.character_id %}
-<div class="b-tab-strip">
-    <a href="/character/{{ _cid }}">Overview</a>
-    <a href="/character/{{ _cid }}/skills">Skills</a>
-    <a href="/character/{{ _cid }}/fittings">Fittings</a>
-    <a href="/character/{{ _cid }}/blueprints" class="is-active">Blueprints</a>
-    <a href="/character/{{ _cid }}/journal">Journal</a>
-    <a href="/character/{{ _cid }}/mining">Mining</a>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;padding:0 0.85rem;">
-        <a href="/intel/entity/character/{{ _cid }}" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">Stats</a>
-        <a href="https://zkillboard.com/character/{{ _cid }}/" target="_blank" rel="noopener" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">zKillboard ↗</a>
-    </span>
-</div>
+{{ character_tabs(_cid, 'blueprints') }}
 {% endif %}
 
 {% from "partials/_permission_notice.html" import permission_notice %}
@@ -113,8 +103,8 @@
     </div>
 
     {# Header #}
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
-        <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Blueprint</span>
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
+        <span style="flex:3;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Blueprint</span>
         <span style="flex:0 0 45px;text-align:center;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
         <span style="flex:0 0 40px;text-align:center;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">ME</span>
         <span style="flex:0 0 40px;text-align:center;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">TE</span>
@@ -124,16 +114,27 @@
     </div>
 
     {% for bp in items %}
-    <div class="b-table-row">
-        <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
-            <img src="https://images.evetech.net/types/{{ bp.type_id }}/{% if bp.is_bpo %}bp{% else %}bpc{% endif %}?size=32"
+    {%- set icon_src = "https://images.evetech.net/types/" ~ bp.type_id ~ "/" ~ ("bp" if bp.is_bpo else "bpc") ~ "?size=32" %}
+    {%- set icon_fallback = "https://images.evetech.net/types/" ~ bp.type_id ~ "/icon?size=32" %}
+    {# Phones (mobile design §6.3): lead = icon, key 1 = name, key 2 = ME/TE.
+       The icon sits inside the name cell on desktop, so phones get their own
+       copy as a direct child (m-only) and the in-cell one is m-hide. ME and
+       TE stay separate untagged cells (hidden on phones); one m-only cell
+       carries "ME/TE" as key 2. #}
+    <div class="b-table-row m-row" data-click="toggleMRow">
+        <img data-m="lead" class="m-only" loading="lazy" alt="" width="24" height="24"
+             src="{{ icon_src }}"
+             style="width:24px;height:24px;border:1px solid var(--border);"
+             data-on-error="imgFallback" data-fallback-src="{{ icon_fallback }}">
+        <span data-m="key" style="flex:3;min-width:0;display:flex;align-items:center;gap:0.4rem;">
+            <img class="m-hide" src="{{ icon_src }}"
                  style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
-                 data-on-error="imgFallback" data-fallback-src="https://images.evetech.net/types/{{ bp.type_id }}/icon?size=32">
-            <span style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                 data-on-error="imgFallback" data-fallback-src="{{ icon_fallback }}">
+            <span style="min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 {{ bp.name }}
             </span>
         </span>
-        <span style="flex:0 0 45px;text-align:center;">
+        <span data-m-label="Type" style="flex:0 0 45px;text-align:center;">
             <span style="font-size:9px;letter-spacing:0.06em;padding:1px 5px;border:1px solid {% if bp.is_bpo %}var(--success){% else %}var(--accent){% endif %};color:{% if bp.is_bpo %}var(--success){% else %}var(--accent){% endif %};">
                 {{ bp.label }}
             </span>
@@ -144,14 +145,15 @@
         <span style="flex:0 0 40px;text-align:center;font-size:11px;{% if bp.te_maxed %}color:var(--success);font-weight:600;{% elif bp.te > 0 %}color:var(--text);{% else %}color:var(--muted);{% endif %}">
             {{ bp.te }}
         </span>
-        <span style="flex:0 0 60px;text-align:center;font-size:11px;{% if bp.runs %}color:var(--text);{% else %}color:var(--muted);{% endif %}">
+        <span data-m="key" class="m-only" title="ME {{ bp.me }} / TE {{ bp.te }}" aria-label="ME {{ bp.me }} / TE {{ bp.te }}" style="font-size:11px;{% if bp.me_maxed and bp.te_maxed %}color:var(--success);font-weight:600;{% elif bp.me > 0 or bp.te > 0 %}color:var(--text);{% else %}color:var(--muted);{% endif %}">{{ bp.me }}/{{ bp.te }}</span>
+        <span data-m-label="Runs" style="flex:0 0 60px;text-align:center;font-size:11px;{% if bp.runs %}color:var(--text);{% else %}color:var(--muted);{% endif %}">
             {% if bp.runs %}{{ "{:,}".format(bp.runs) }}{% elif bp.is_bpo %}∞{% else %}—{% endif %}
         </span>
-        <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span data-m-label="Location" style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {{ bp.location_label }}
         </span>
-        <span style="flex:0 0 50px;text-align:right;">
-            <a href="/industry?type_id={{ bp.type_id }}"
+        <span data-m-label="Calc" style="flex:0 0 50px;text-align:right;">
+            <a href="/industry?type_id={{ bp.type_id }}" class="m-tap"
                style="font-size:9px;color:var(--accent);text-decoration:none;">Calc →</a>
         </span>
     </div>

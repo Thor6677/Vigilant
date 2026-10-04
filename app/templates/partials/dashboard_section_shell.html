@@ -14,11 +14,21 @@
    any htmx-swapped partial — a script element in a fragment like this one
    carries a mismatched nonce and never runs under this app's CSP.
 #}
+{# Mobile R1 (§5.7): size comes from classes, not inline styles. The desktop
+   2px 6px / 9px is `.b-btn.dash-sec-toggle, .b-btn.dash-sec-hide` in
+   site.css; the phone 40px tap target is the shared m-tap rule. The border
+   stays inline as the robust choice: `.b-btn:last-child` strips ✕'s right
+   border, and whether a class-level border survives that depends on
+   specificity and load order (a one-class rule loses; a two-class rule
+   ties and wins only because site.css loads later). No `.b-btn` rule can
+   outrank an inline style. The toggle's title and aria-expanded follow
+   its state; after load, dashboard.html's dashSetSectionToggle keeps them
+   in step. #}
 {% macro section_toolbar(key, label, is_collapsed, is_hidden) %}
-<button type="button" class="dash-sec-toggle b-btn" data-click="toggleDashSection" data-section="{{ key }}"
-        title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}"
-        style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
-<button type="button" class="dash-sec-hide b-btn" data-click="hideDashSection" data-section="{{ key }}"
+<button type="button" class="dash-sec-toggle b-btn m-tap" data-click="toggleDashSection" data-section="{{ key }}"
+        title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}" aria-expanded="{{ 'false' if is_collapsed else 'true' }}"
+        style="border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
+<button type="button" class="dash-sec-hide b-btn m-tap" data-click="hideDashSection" data-section="{{ key }}"
         title="Hide {{ label }}"
-        style="padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;">✕</button>
+        style="border:1px solid var(--border);line-height:1;">✕</button>
 {% endmacro %}

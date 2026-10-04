@@ -30,6 +30,8 @@ below without updating every consumer:
         finish_str       str | None   — current_finish_str
         queue_left_str   str | None   — time_remaining_str
         progress_pct     int          — 0 when there is nothing training
+        queue_length     int          — skills in the queue (0 when unknown);
+                         used for "Paused (N queued)"
         warning          str          — exactly the value the card uses today:
                          one of ok | warning | critical | empty | paused |
                          no_scope | error (skill-queue fetch failed but the
@@ -171,6 +173,7 @@ def build_pilot_summaries(
                 "finish_str": sk.get("current_finish_str"),
                 "queue_left_str": sk.get("time_remaining_str"),
                 "progress_pct": sk.get("progress_pct", 0) or 0,
+                "queue_length": sk.get("queue_length", 0) or 0,
                 "warning": training_warning,
             },
             "clones": {

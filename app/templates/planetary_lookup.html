@@ -2,14 +2,10 @@
 {% block title %}PI LOOKUP — VIGILANT{% endblock %}
 
 {% block content %}
+{% from "partials/_pi_tabs.html" import pi_tabs %}
 <div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
     <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
-    <nav style="display:flex;gap:0.5rem;font-size:11px;">
-        <a href="/industry/planetary" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
-        <a href="/industry/planetary/lookup" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
-        <a href="/industry/planetary/calculator" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Calculator</a>
-        <a href="/industry/planetary/chain" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
-    </nav>
+    {{ pi_tabs('lookup') }}
 </div>
 
 <div class="b-panel b-section" style="overflow:visible;">

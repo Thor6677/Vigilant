@@ -1,0 +1,17 @@
+{# The character page's tab strip (Overview … Mining + Stats / zKillboard).
+   Previously copied by hand into six templates; now one source. `active` is
+   one of: overview, skills, fittings, blueprints, journal, mining. #}
+{% from "partials/_tab_nav.html" import tab_nav %}
+{% macro character_tabs(cid, active) -%}
+{{ tab_nav([
+    {'key': 'overview',   'label': 'Overview',   'url': '/character/' ~ cid},
+    {'key': 'skills',     'label': 'Skills',     'url': '/character/' ~ cid ~ '/skills'},
+    {'key': 'fittings',   'label': 'Fittings',   'url': '/character/' ~ cid ~ '/fittings'},
+    {'key': 'blueprints', 'label': 'Blueprints', 'url': '/character/' ~ cid ~ '/blueprints'},
+    {'key': 'journal',    'label': 'Journal',    'url': '/character/' ~ cid ~ '/journal'},
+    {'key': 'mining',     'label': 'Mining',     'url': '/character/' ~ cid ~ '/mining'},
+], active, label='Section', extra=[
+    {'label': 'Stats',        'url': '/intel/entity/character/' ~ cid},
+    {'label': 'zKillboard ↗', 'url': 'https://zkillboard.com/character/' ~ cid ~ '/', 'external': True},
+]) }}
+{%- endmacro %}

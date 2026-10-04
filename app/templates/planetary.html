@@ -2,14 +2,10 @@
 {% block title %}PLANETARY INDUSTRY — VIGILANT{% endblock %}
 
 {% block content %}
+{% from "partials/_pi_tabs.html" import pi_tabs %}
 <div class="b-page-header" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
     <h1 class="b-page-title" style="margin:0;">Planetary Industry</h1>
-    <nav style="display:flex;gap:0.5rem;font-size:11px;">
-        <a href="/industry/planetary" class="b-btn is-active" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Colonies</a>
-        <a href="/industry/planetary/lookup" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">System Lookup</a>
-        <a href="/industry/planetary/calculator" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Calculator</a>
-        <a href="/industry/planetary/chain" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);">Chain Explorer</a>
-    </nav>
+    {{ pi_tabs('colonies') }}
 </div>
 
 <div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
@@ -37,7 +33,8 @@
 {{ permission_notice(missing_scope_chars, 'planets', what="their colonies are not listed") }}
 
 <div class="b-section" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-    <form method="get" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">
+    <form method="get" class="pi-filter" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;flex:1;">
+        <span class="m-pair">
         <label class="b-muted-sm">Sort</label>
         <select name="sort" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="expiry" {% if sort == 'expiry' %}selected{% endif %}>Expiry (soonest)</option>
@@ -45,6 +42,8 @@
             <option value="system" {% if sort == 'system' %}selected{% endif %}>System</option>
             <option value="type" {% if sort == 'type' %}selected{% endif %}>Planet type</option>
         </select>
+        </span>
+        <span class="m-pair">
         <label class="b-muted-sm">Type</label>
         <select name="filter_type" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
@@ -52,17 +51,20 @@
             <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ t | capitalize }}</option>
             {% endfor %}
         </select>
+        </span>
+        <span class="m-pair">
         <label class="b-muted-sm">Expiry</label>
         <select name="filter_warn" data-change="submitForm" style="padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;">
             <option value="">All</option>
             <option value="expiring" {% if filter_warn == 'expiring' %}selected{% endif %}>Expiring / &lt; 24h</option>
             <option value="expired" {% if filter_warn == 'expired' %}selected{% endif %}>Expired only</option>
         </select>
+        </span>
     </form>
 </div>
 
 <div class="b-panel b-section">
-    <div class="b-panel-head" style="display:grid;grid-template-columns:32px minmax(140px,1.5fr) minmax(90px,1fr) minmax(120px,1fr) 70px 90px 20px;gap:0.5rem;padding:0.4rem 0.75rem;">
+    <div class="b-panel-head m-head" style="display:grid;grid-template-columns:32px minmax(140px,1.5fr) minmax(90px,1fr) minmax(120px,1fr) 70px 90px 20px;gap:0.5rem;padding:0.4rem 0.75rem;">
         <span></span>
         <span class="b-label">Character</span>
         <span class="b-label">Planet type</span>
@@ -77,25 +79,29 @@
     {% set char = row.char %}
     {% set planet = row.planet %}
     <div class="pi-row" data-planet-id="{{ planet.planet_id }}" data-char-id="{{ char.character_id }}">
-        <div class="pi-row-top"
+        {# Phones (mobile design §4.3, §6.2): an m-row that keeps its own
+           toggleExpanded + hx-get "click once", so one tap shows the labelled
+           cells and loads the planet detail beneath them. The m-row chevron
+           replaces .pi-arrow, which stays untagged (hidden on phones). #}
+        <div class="pi-row-top m-row"
              style="display:grid;grid-template-columns:32px minmax(140px,1.5fr) minmax(90px,1fr) minmax(120px,1fr) 70px 90px 20px;gap:0.5rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);cursor:pointer;align-items:center;"
              hx-get="/industry/planetary/planet/{{ char.character_id }}/{{ planet.planet_id }}"
              hx-trigger="click once"
              hx-target="#pi-detail-{{ char.character_id }}-{{ planet.planet_id }}"
              hx-swap="innerHTML"
              data-click="toggleExpanded" data-toggle-target=".pi-row">
-            <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
-                 class="b-portrait-sm" alt="" style="width:28px;height:28px;border-radius:2px;">
-            <span style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.character_name }}</span>
-            <span style="font-size:11px;color:var(--text);text-transform:capitalize;">{{ planet.planet_type }}</span>
-            <span style="font-size:11px;color:var(--muted);">{{ planet.system_name or '—' }}</span>
-            <span style="font-size:11px;color:var(--muted);text-align:center;">{{ planet.num_pins }}</span>
-            <span style="font-size:11px;text-align:right;{% if planet.expiry_warning == 'expired' %}color:var(--danger);{% elif planet.expiry_warning == 'critical' %}color:var(--danger);{% elif planet.expiry_warning == 'warning' %}color:var(--warn);{% else %}color:var(--muted);{% endif %}">
+            <img data-m="lead" src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
+                 class="b-portrait-sm" alt="" width="28" height="28" style="width:28px;height:28px;border-radius:2px;">
+            <span data-m="key" style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ char.character_name }}</span>
+            <span data-m-label="Planet" style="font-size:11px;color:var(--text);text-transform:capitalize;">{{ planet.planet_type }}</span>
+            <span data-m-label="System" style="font-size:11px;color:var(--muted);">{{ planet.system_name or '—' }}</span>
+            <span data-m-label="Pins" style="font-size:11px;color:var(--muted);text-align:center;">{{ planet.num_pins }}</span>
+            <span data-m="key" style="font-size:11px;text-align:right;{% if planet.expiry_warning == 'expired' %}color:var(--danger);{% elif planet.expiry_warning == 'critical' %}color:var(--danger);{% elif planet.expiry_warning == 'warning' %}color:var(--warn);{% else %}color:var(--muted);{% endif %}">
                 {% if planet.expiry_time_str %}{{ planet.expiry_time_str }}{% else %}no extractor{% endif %}
             </span>
             <span class="pi-arrow b-muted-sm">▸</span>
         </div>
-        <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail" style="display:none;"></div>
+        <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail"></div>
     </div>
     {% endfor %}
     {% else %}
@@ -122,8 +128,22 @@
 <style nonce="{{ request.state.csp_nonce }}">
     .pi-row.is-expanded .pi-row-top { background:var(--panel-hover, rgba(255,255,255,0.02)); }
     .pi-row.is-expanded .pi-arrow { transform:rotate(90deg); display:inline-block; }
+    /* Hidden here, not inline: an inline display:none would beat the
+       is-expanded rule below, and the loaded detail would never show. */
+    .pi-row-detail { display:none; }
     .pi-row.is-expanded .pi-row-detail { display:block; }
     .pi-row-top:hover { background:var(--panel-hover, rgba(255,255,255,0.02)); }
+    /* Filter pairs: label beside its select on desktop, exactly as before
+       the m-pair wrappers. site.css stacks them, label above, on phones. */
+    @media (min-width: 641px) {
+        .pi-filter .m-pair { display: inline-flex; align-items: center; gap: 0.5rem; }
+    }
+    /* Phones: the planet detail's 5-column pin grid is wider than a phone.
+       It scrolls inside the detail, so the colony rows above stay put
+       (otherwise site.css's panel safety net scrolls the whole panel). */
+    @media (max-width: 640px) {
+        .pi-row-detail { overflow-x: auto; }
+    }
 </style>
 
 <div class="b-section" style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);">

@@ -221,35 +221,39 @@
        Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
        link that stands in for the Overview item (so that item is skipped in the
        loop). Non-landing groups whose url equals their first item's url
-       (Dashboard/Map/Admin) suppress the parent to avoid a duplicate link.
-       Mobile is a flat list: no in-group dividers (divider_before is desktop-only). #}
+       (Dashboard/Market) suppress the parent to avoid a duplicate link.
+       Mobile groups are <details> (mobile design §4.5): the group for the current page opens, the rest collapse to one row each. No JS. divider_before is desktop-only.
+       A group whose only item is its own url (Account, Admin) would open onto
+       that one link, so it renders as a plain link instead: one tap. #}
     {% for group in nav_groups %}
         {% if not group['admin'] or request.session.get('is_admin') %}
-            {% if not group['items'] %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+            {% set _one_tap = group['items']|length == 1 and group['items'][0]['url'] == group['url'] and not group['items'][0]['external'] %}
+            {% if not group['items'] or _one_tap %}
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}"{% if nav_group_active(group, _path) %} aria-current="page"{% endif %}>{{ group['label'] }}</a>
             {% else %}
-    <div class="b-mobile-sep"></div>
+    <details class="b-mobile-group"{% if nav_group_active(group, _path) %} open{% endif %}>
+        <summary>{{ group['label'] }}</summary>
                 {% if group['landing'] %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}"{% if nav_item_active(group['items'][0], _path) %} aria-current="page"{% endif %}>{{ group['label'] }} Overview</a>
                 {% elif group['url'] != group['items'][0]['url'] %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}"{% if nav_group_active(group, _path) %} aria-current="page"{% endif %}>{{ group['label'] }}</a>
                 {% endif %}
                 {% for item in group['items'] %}
                     {% if not (group['landing'] and item['url'] == group['url']) %}
                         {% if item['external'] %}
-    <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
+        <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
                         {% else %}
-    <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+        <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}"{% if nav_item_active(item, _path) %} aria-current="page"{% endif %}>{{ item['label'] }}</a>
                         {% endif %}
                     {% endif %}
                 {% endfor %}
+    </details>
             {% endif %}
         {% endif %}
     {% endfor %}
-    <div class="b-mobile-sep"></div>
     <a href="/auth/connect" style="color:var(--accent);">+ Add Character</a>
     <form method="post" action="/auth/logout" style="margin:0;">
-        <button type="submit" style="background:none;border:none;cursor:pointer;font:inherit;color:var(--danger);padding:0;text-align:left;width:100%;">Logout</button>
+        <button type="submit" class="b-mobile-logout is-danger">Logout</button>
     </form>
 </div>
 <div id="esi-banner"
@@ -299,9 +303,11 @@
    Pinned/Recent are localStorage-only, injected client-side into #cmdk-client
    when the query is empty. #}
 <style nonce="{{ request.state.csp_nonce }}">
-#cmdk { padding:0; border:1px solid var(--border); background:var(--surface); color:var(--text); width:min(560px, calc(100vw - 2rem)); max-width:560px; box-shadow:0 12px 48px rgba(0,0,0,0.55); }
+#cmdk { padding:0; margin:12vh auto auto; border:1px solid var(--border); background:var(--surface); color:var(--text); width:min(560px, calc(100vw - 2rem)); max-width:560px; box-shadow:0 12px 48px rgba(0,0,0,0.55); }
 #cmdk::backdrop { background:rgba(0,0,0,0.55); }
-#cmdk .cmdk-inp { width:100%; box-sizing:border-box; padding:0.7rem 0.9rem; background:var(--bg); border:none; border-bottom:1px solid var(--border); color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+#cmdk .cmdk-inrow { display:flex; align-items:stretch; border-bottom:1px solid var(--border); }
+#cmdk .cmdk-inp { flex:1 1 auto; min-width:0; box-sizing:border-box; padding:0.7rem 0.9rem; background:var(--bg); border:none; color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+#cmdk .cmdk-close { flex:none; min-width:44px; background:var(--bg); border:none; border-left:1px solid var(--border); color:var(--muted); font-size:14px; cursor:pointer; }
 #cmdk .cmdk-scroll { max-height:min(60vh, 440px); overflow-y:auto; }
 #cmdk .cmdk-section-head { font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); padding:0.4rem 0.9rem 0.2rem; }
 #cmdk .cmdk-rowwrap { display:flex; align-items:center; }
@@ -314,12 +320,18 @@
 #cmdk .cmdk-star.is-pinned { color:var(--accent); }
 #cmdk .cmdk-empty { padding:0.9rem; text-align:center; font-size:11px; color:var(--muted); }
 #cmdk .cmdk-hint { display:flex; gap:0.9rem; padding:0.4rem 0.9rem; border-top:1px solid var(--border); font-size:9px; color:var(--muted); }
+#cmdk .cmdk-close:focus-visible { outline-offset:-2px; }
+@media (max-width: 640px) { #cmdk { margin: 0.75rem auto auto; } }
+@media (hover: none), (max-width: 640px) { #cmdk .cmdk-hint { display:none; } }
 </style>
 <dialog id="cmdk" aria-label="Command palette">
-    <input id="cmdk-input" class="cmdk-inp" type="text" name="q" autocomplete="off" spellcheck="false"
-           placeholder="Search pages, characters, systems, items…"
-           hx-get="/nav/palette" hx-trigger="input changed delay:150ms"
-           hx-target="#cmdk-results" hx-swap="innerHTML">
+    <div class="cmdk-inrow">
+        <input id="cmdk-input" class="cmdk-inp" type="text" name="q" autocomplete="off" spellcheck="false"
+               placeholder="Search pages, characters, systems, items…"
+               hx-get="/nav/palette" hx-trigger="input changed delay:150ms"
+               hx-target="#cmdk-results" hx-swap="innerHTML">
+        <button type="button" class="cmdk-close" data-click="closePalette" aria-label="Close search">✕</button>
+    </div>
     <div class="cmdk-scroll">
         <div id="cmdk-client"></div>
         <div id="cmdk-results"></div>
@@ -668,10 +680,14 @@
         var menu = getMenu();
         var btn = getBtn();
         if (!menu) return;
+        /* Closing hides the menu, which would drop focus inside it to <body>
+           (Escape from a menu link, say). Read this before the class flips. */
+        var hadFocus = !open && menu.contains(document.activeElement);
         menu.classList.toggle('is-open', open);
         menu.setAttribute('aria-hidden', open ? 'false' : 'true');
         if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         document.body.style.overflow = open ? 'hidden' : '';
+        if (hadFocus && btn) btn.focus();
     }
     window.toggleMobileMenu = function() {
         var menu = getMenu();
@@ -853,6 +869,8 @@
         openPalette();
     }
     window.openPalette = openPaletteFromChrome;
+    // The palette's ✕ button (data-click="closePalette") needs a global.
+    window.closePalette = closePalette;
 
     /* Mac reports Cmd, everyone else Ctrl — the markup ships the Ctrl label so
        the button is correct with JS disabled, and this corrects it on Mac. */
@@ -876,6 +894,7 @@
             if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
             else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
             else if (e.key === 'Enter') {
+                if (e.target !== $('cmdk-input')) return;
                 var sel = selected();
                 if (sel) {
                     e.preventDefault();

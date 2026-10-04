@@ -61,6 +61,19 @@
         color: var(--muted);
         white-space: nowrap;
     }
+
+    /* Phones (mobile design §6.5): the search box, then "Nearest to" above a
+       full-width character select. Side by side, the bar was wider than a
+       400px screen. */
+    @media (max-width: 640px) {
+        .asset-search-bar { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+        .asset-input { max-width: none; }
+        .asset-controls-right { flex-direction: column; align-items: stretch; gap: 0.25rem; }
+        .asset-select { width: 100%; max-width: 100%; }
+        /* The open row is the only place a phone shows the full location, so
+           let it wrap and drop the desktop indent that misaligns its label. */
+        .m-row > [data-m-label="Location"] { white-space: normal !important; padding-left: 0 !important; }
+    }
 </style>
 {% endblock %}
 

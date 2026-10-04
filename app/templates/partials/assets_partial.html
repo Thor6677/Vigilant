@@ -8,13 +8,21 @@
             <span class="expand-icon{% if is_current %} open{% endif %}">▼</span>
         </div>
     </div>
-    <div class="asset-list{% if is_current %} open{% endif %}">
+    {# Phones (mobile design §4.6): no inner scroll box (m-unclamp); the
+       first 10 items, then "Show all N". The inner .m-clamp div keeps the
+       button out of the clamped children. #}
+    <div class="asset-list m-unclamp m-clamp-wrap{% if is_current %} open{% endif %}">
+        <div class="m-clamp">
         {% for item in loc['items'] %}
         <div class="asset-item">
             <span class="asset-item-name">{{ item.name }}</span>
             <span class="asset-item-qty">{{ "{:,}".format(item.quantity) }}</span>
         </div>
         {% endfor %}
+        </div>
+        {% if loc['items']|length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ loc['items']|length }}</button>
+        {% endif %}
     </div>
 </div>
 {% else %}

@@ -124,7 +124,9 @@ SKILL_MAP = {
               current_finish_str="12h 0m", time_remaining_str="13d 1h", progress_pct=80),
     1003: _sk("critical", current_skill="Engineering", current_level=3,
               current_finish_str="1h 0m", time_remaining_str="6d 23h", progress_pct=95),
-    1004: _sk("paused", queue_length=3),
+    # A paused queue keeps its first entry as current_skill (the skill-queue
+    # processor falls back to pending[0]); only the dates are missing.
+    1004: _sk("paused", current_skill="Navigation", current_level=3, queue_length=3),
     1005: _sk("empty"),
     1006: _sk("no_scope"),
     1007: _sk("ok", current_skill="Drones", current_level=2, current_finish_str="2h 0m",

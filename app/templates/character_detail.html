@@ -191,6 +191,7 @@
 {% endmacro %}
 
 {% block content %}
+{% from "partials/_character_tabs.html" import character_tabs %}
 
 {# ── Header ──────────────────────────────────────────────────────────── #}
 <div class="b-page-header">
@@ -246,18 +247,7 @@
 
 {# ── Tab Strip ───────────────────────────────────────────────────────────── #}
 {% set _cid = char.character_id %}
-<div class="b-tab-strip">
-    <a href="/character/{{ _cid }}" class="is-active">Overview</a>
-    <a href="/character/{{ _cid }}/skills">Skills</a>
-    <a href="/character/{{ _cid }}/fittings">Fittings</a>
-    <a href="/character/{{ _cid }}/blueprints">Blueprints</a>
-    <a href="/character/{{ _cid }}/journal">Journal</a>
-    <a href="/character/{{ _cid }}/mining">Mining</a>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;padding:0 0.85rem;">
-        <a href="/intel/entity/character/{{ _cid }}" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">Stats</a>
-        <a href="https://zkillboard.com/character/{{ _cid }}/" target="_blank" rel="noopener" style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:none;padding:0;">zKillboard ↗</a>
-    </span>
-</div>
+{{ character_tabs(_cid, 'overview') }}
 
 {# ── Can Fly (T-072; lazy-loaded) ─────────────────────────────────────────── #}
 <div id="can-fly-panel"
@@ -334,13 +324,18 @@
                 {% endif %}
             </div>
 
-            {# Full skill queue list #}
+            {# Full skill queue list. Phones (mobile design §4.6, ISS-104): the
+               box loses its own scroll (m-unclamp) so it can't trap touch
+               scrolling, and shows its first 10 rows (m-clamp) plus a
+               "Show all N" button. Same for Recently Completed and Corporation
+               History below. A clamp wrap must never contain another: the
+               clamp rules use descendant selectors. #}
             {% if skillqueue|length > 1 %}
-            <div style="margin-top: 0.75rem;">
+            <div class="m-clamp-wrap" style="margin-top: 0.75rem;">
                 <div style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem;">
                     Queue ({{ skillqueue|length }} skills)
                 </div>
-                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
+                <div class="m-unclamp m-clamp" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
                     {% for entry in skillqueue %}
                     <div style="display: flex; justify-content: space-between; align-items: center;
                                 padding: 0.35rem 0.6rem; font-size: 10px;
@@ -360,16 +355,19 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if skillqueue|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ skillqueue|length }}</button>
+                {% endif %}
             </div>
             {% endif %}
 
             {# Recently completed skills #}
             {% if completed_skills %}
-            <details style="margin-top: 0.75rem;">
+            <details class="m-clamp-wrap" style="margin-top: 0.75rem;">
                 <summary style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     &#10003; Recently Completed ({{ completed_skills|length }})
                 </summary>
-                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                <div class="m-unclamp m-clamp" style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
                     {% for entry in completed_skills %}
                     <div style="display: flex; justify-content: space-between; align-items: center;
                                 padding: 0.35rem 0.6rem; font-size: 10px; opacity: 0.6;
@@ -389,6 +387,9 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if completed_skills|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ completed_skills|length }}</button>
+                {% endif %}
             </details>
             {% endif %}
         </div>
@@ -397,11 +398,11 @@
         {# Corporation History #}
         {% if corp_history %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
-            <details>
+            <details class="m-clamp-wrap">
                 <summary style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     Corporation History ({{ corp_history|length }})
                 </summary>
-                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                <div class="m-unclamp m-clamp" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
                     {% for h in corp_history %}
                     <div style="display: flex; align-items: center; gap: 0.5rem;
                                 padding: 0.35rem 0.6rem; font-size: 10px;
@@ -423,6 +424,9 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if corp_history|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ corp_history|length }}</button>
+                {% endif %}
             </details>
         </div>
         {% endif %}
@@ -497,8 +501,11 @@
                 </span>
             </div>
 
-            {# Assets Section — auto-loaded on page load #}
-            <div class="assets-container" id="assets-container">
+            {# Assets Section — auto-loaded on page load. m-unclamp: no inner
+               scroll box on phones. Each location's item list clamps itself
+               (partials/assets_partial.html); this container must not become
+               a clamp wrap, or it would clamp those lists from outside. #}
+            <div class="assets-container m-unclamp" id="assets-container">
                 <span class="card-title" style="margin: 0.75rem 0 0.5rem 0;">Assets by Location</span>
                 <div id="assets-inner"
                      hx-get="/character/{{ char.character_id }}/assets-partial"
@@ -546,7 +553,7 @@
                     <span class="expand-icon">▼</span>
                 </div>
             </div>
-            <div class="asset-list">
+            <div class="asset-list m-unclamp">
                 {% if clone.implants %}
                     {% set attr_imps  = clone.implants | selectattr("is_attr") | list %}
                     {% set hard_imps  = clone.implants | rejectattr("is_attr") | list %}
@@ -642,7 +649,7 @@
     <div class="b-panel" style="border-top:none;">
 
         {# Header row #}
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.3rem 0.75rem;">
             <span class="b-row-label" style="flex:0 0 110px;">Date</span>
             <span class="b-row-label" style="flex:1;">Type / Description</span>
             <span class="b-row-label" style="flex:0 0 90px;text-align:right;">Amount</span>
@@ -655,23 +662,30 @@
         {% set ref_type = entry.get("ref_type", "") %}
         {% set desc = entry.get("description", "") %}
         {% set date_raw = entry.get("date", "") %}
-        <div class="b-table-row">
-            <span style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
+        {# Phones (mobile design §6.4): key 1 = type, key 2 = amount. Type and
+           description share one desktop cell, so phones get the type as its
+           own m-only key cell and the shared cell, labelled Description only
+           when there is one, hides its copy of the type (m-hide). A
+           description cut short for desktop also carries its full text
+           (cut copy m-hide, full copy m-only) for the open phone row. #}
+        <div class="b-table-row m-row" data-click="toggleMRow">
+            <span data-m-label="Date" style="flex:0 0 110px;font-size:9px;color:var(--muted);letter-spacing:0.05em;white-space:nowrap;">
                 {{ date_raw[:16].replace("T", " ") if date_raw else "—" }}
             </span>
-            <span style="flex:1;min-width:0;overflow:hidden;">
-                <span class="ref-type">{{ ref_type.replace("_", " ") }}</span>
+            <span data-m="key" class="m-only"><span class="ref-type">{{ ref_type.replace("_", " ") }}</span></span>
+            <span{% if desc %} data-m-label="Description"{% endif %} style="flex:1;min-width:0;overflow:hidden;">
+                <span class="ref-type m-hide">{{ ref_type.replace("_", " ") }}</span>
                 {% if desc %}
-                <span style="font-size:10px;color:var(--muted);margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    {{ desc[:60] }}{% if desc|length > 60 %}…{% endif %}
+                <span style="display:block;margin-top:2px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {% if desc|length > 60 %}<span class="m-hide">{{ desc[:60] }}…</span><span class="m-only">{{ desc }}</span>{% else %}{{ desc }}{% endif %}
                 </span>
                 {% endif %}
             </span>
-            <span style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
+            <span data-m="key" style="flex:0 0 90px;text-align:right;font-size:11px;font-weight:500;"
                   class="{% if amount >= 0 %}tx-amount-pos{% else %}tx-amount-neg{% endif %}">
                 {{ format_isk_signed(amount) }}
             </span>
-            <span style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
+            <span data-m-label="Balance after" style="flex:0 0 110px;text-align:right;font-size:10px;color:var(--muted);">
                 {{ format_isk(balance) if balance is not none else "—" }}
             </span>
         </div>

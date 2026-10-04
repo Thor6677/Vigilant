@@ -7,6 +7,7 @@ context keys (dash_prefs/dash_mode/pilot_summaries) wired in. This does.
 import asyncio
 import base64
 import json
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -182,3 +183,85 @@ def test_table_sort_is_persisted_and_reflected_in_the_next_render(two_pilot_clie
     high_idx2 = r2.text.index(f'data-char-id="{CHAR_HIGH}"')
     low_idx2 = r2.text.index(f'data-char-id="{CHAR_LOW}"')
     assert low_idx2 < high_idx2, "wallet-asc sort should place the poorer pilot first"
+
+
+# ── Task 7b polish: ?sort=training matches the Table's Training sort ──────
+
+ZETA, PAUSED, ALPHA = 90002001, 90002002, 90002003
+
+
+@pytest.fixture
+def training_client():
+    """Three pilots inserted (so read back) in id order: one training
+    "Sample Zeta Skill", one paused on "Sample Aaa Skill", one training
+    "Sample Alpha Skill"."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp.name}")
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(timezone.utc)
+
+    def _iso(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def training(sid):
+        return [{"skill_id": sid, "finished_level": 3, "queue_position": 0,
+                 "start_date": _iso(now - timedelta(hours=1)),
+                 "finish_date": _iso(now + timedelta(days=20))}]
+    queues = {
+        ZETA: ("Pilot Zeta", training(70001)),
+        # No dates: the queue is paused, but its first skill is still named.
+        PAUSED: ("Pilot Paused", [{"skill_id": 70003, "finished_level": 2, "queue_position": 0}]),
+        ALPHA: ("Pilot Alpha", training(70002)),
+    }
+
+    async def seed():
+        from app.db.sde_models import SDEType
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            db.add(User(id=USER_ID, role="user"))
+            for type_id, name in ((70001, "Sample Zeta Skill"), (70002, "Sample Alpha Skill"),
+                                  (70003, "Sample Aaa Skill")):
+                db.add(SDEType(type_id=type_id, type_name=name))
+            for order, (cid, (name, queue)) in enumerate(queues.items()):
+                db.add(Character(
+                    character_id=cid, character_name=name, user_id=USER_ID,
+                    is_main=order == 0, account_group="Sample Corp", sort_order=order,
+                    scopes=" ".join(perms.ALL_SCOPES), declined_scopes="",
+                    access_token="x", refresh_token="x",
+                    token_expiry=now + timedelta(days=1),
+                ))
+                db.add(CharacterDashboardCache(character_id=cid, sync_status="idle",
+                                               skillqueue_json=json.dumps(queue)))
+            await db.commit()
+    asyncio.run(seed())
+
+    async def _override():
+        async with SessionLocal() as s:
+            yield s
+    main.app.dependency_overrides[get_db] = _override
+    c = TestClient(main.app, base_url="https://testserver")
+    c.cookies.set("vigilant_session", _cookie(main.settings.secret_key, USER_ID))
+    c.headers.update({"X-CSRF-Token": CSRF})
+    yield c
+    main.app.dependency_overrides.pop(get_db, None)
+
+
+def _card_order(html):
+    return [int(cid) for cid in re.findall(r'<div class="b-card" data-char-id="(\d+)"', html)]
+
+
+def test_training_sort_tiebreaks_by_skill_name_like_the_table(training_client):
+    """Rank alone would keep Zeta before Alpha (input order); the Table's
+    Training column also orders training pilots by skill name. The paused
+    pilot's alphabetically-first skill must not pull it ahead."""
+    r = training_client.get("/dashboard?sort=training")
+    assert r.status_code == 200
+    assert _card_order(r.text) == [ALPHA, ZETA, PAUSED]
+    assert _card_order(training_client.get("/dashboard?sort=name").text) == [ALPHA, PAUSED, ZETA]
+
+    training_client.post("/dashboard/prefs", json={"mode": "table", "table_sort": {"key": "training", "dir": "asc"}})
+    table = training_client.get("/dashboard").text
+    rows = [int(cid) for cid in re.findall(r'<tr class="m-row" data-click="toggleMRow" data-char-id="(\d+)"', table)]
+    assert rows == [ALPHA, ZETA, PAUSED]

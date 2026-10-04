@@ -389,6 +389,7 @@ from app.dashboard.staleness import (  # noqa: E402
     has_permissions as _has_permissions,
     staleness as _staleness_for,
 )
+from app.dashboard.table import training_sort_value  # noqa: E402  (ISS-087)
 
 # DB column for each field (None = special handling — wallet Float or assets separate table)
 _FIELD_DB_COLUMN: dict[str, str | None] = {
@@ -2760,7 +2761,13 @@ async def dashboard(request: Request, sort: str = "custom", db: AsyncSession = D
     elif sort == "corp":
         characters = sorted(characters, key=lambda c: (c.corporation_name or "").lower())
     elif sort == "training":
-        characters = sorted(characters, key=lambda c: 0 if skill_map.get(c.character_id, {}).get("current_skill") else 1)
+        # ISS-087: by training state (training -> paused -> empty -> other),
+        # then by current skill name among training pilots. The same key the
+        # Table view's Training column sorts by (training_sort_value).
+        def _training_key(c):
+            sk = skill_map.get(c.character_id, {})
+            return training_sort_value(sk.get("warning"), sk.get("current_skill"))
+        characters = sorted(characters, key=_training_key)
     elif sort == "queue":
         from datetime import datetime as _dt
         characters = sorted(characters, key=lambda c: skill_map.get(c.character_id, {}).get("queue_end") or _dt.max.replace(tzinfo=timezone.utc))
