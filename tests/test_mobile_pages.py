@@ -941,7 +941,7 @@ def test_polish_b_blueprint_calc_link_is_a_tap_target():
     has no desktop rule, so desktop keeps the small inline link."""
     for row in _pb_render_blueprints().values():
         (link,) = _labelled(row)["Calc"]["kids"]
-        assert link["class"] == "m-tap"
+        assert "m-tap" in link["class"].split()
         assert "font-size:9px" in link["style"]
 
 
@@ -973,17 +973,20 @@ def test_polish_b_journal_type_badge_is_classed_for_phones():
     class; the inline desktop styles stay as they were."""
     gain = _rows(_render_journal())[0]
     (badge,) = _keys(gain)[0]["kids"]
-    assert badge["class"] == "journal-type"
+    assert "journal-type" in badge["class"].split()
     assert "max-width:120px" in badge["style"]
     assert "display:inline-block" in badge["style"]
+
+
+from tests.test_mobile_css import _media_bodies as _pb_media_bodies  # noqa: E402
 
 
 def test_polish_b_planet_detail_scrolls_inside_itself_on_phones():
     html = _render_planetary()
     (style,) = [b for b in re.findall(r"<style[^>]*>(.*?)</style>", html, re.S) if ".pi-row-detail" in b]
-    phone = re.search(r"@media \(max-width: 640px\) \{(.*?)\n    \}", style, re.S)
+    phone = _pb_media_bodies(re.sub(r"/\*.*?\*/", "", style, flags=re.S), "max-width: 640px")
     assert phone, "planetary.html needs a phone block in its own <style>"
-    assert re.search(r"\.pi-row-detail\s*\{\s*overflow-x:\s*auto;?\s*\}", phone.group(1))
+    assert re.search(r"\.pi-row-detail\s*\{\s*overflow-x:\s*auto;?\s*\}", phone)
 
 
 class _PBPieces(HTMLParser):
