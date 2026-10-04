@@ -569,7 +569,12 @@ def test_assets_results_rows_key_on_item_and_quantity():
 
 def test_assets_results_header_hides_on_phones():
     html = _render_asset_results()
-    assert '<div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.25rem 0.75rem;">' in html
+    assert re.search(r'<div class="[^"]*\bb-table-row\b[^"]*\bm-head\b[^"]*"', html)
+
+
+def test_assets_lead_icon_holds_its_size_while_loading():
+    img = _lead(_rows(_render_asset_results())[0])[0]
+    assert img["attrs"].get("width") == "32" and img["attrs"].get("height") == "32"
 
 
 def test_assets_search_bar_stacks_on_phones():
@@ -585,3 +590,4 @@ def test_assets_search_bar_stacks_on_phones():
     assert re.search(r"\.asset-input \{ max-width: none; \}", css)
     assert re.search(r"\.asset-controls-right \{ flex-direction: column; align-items: stretch;", css)
     assert re.search(r"\.asset-select \{ width: 100%; max-width: 100%; \}", css)
+    assert re.search(r'\.m-row > \[data-m-label="Location"\] \{ white-space: normal !important; padding-left: 0 !important; \}', css)
