@@ -13,127 +13,26 @@ import types
 from html.parser import HTMLParser
 
 import app.main  # noqa: F401 — populates every router's templates.env.globals
-from tests._mobile import assert_mrow
+from tests._mobile import _VOID, assert_mrow
+from tests._mobile import SITE_CSS as _SITE_CSS
+from tests._mobile import Styled as _Styled
+from tests._mobile import assert_single_value_child as _assert_single_value_child
+from tests._mobile import cells_rows as _rows
+from tests._mobile import clamps as _clamps
+from tests._mobile import norm as _norm
+from tests._mobile import render_page as _render
+from tests._mobile import row_keys as _keys
+from tests._mobile import row_labelled as _labelled
+from tests._mobile import row_lead as _lead
+from tests._mobile import source as _source
 
-_ROOT = os.path.join(os.path.dirname(__file__), "..")
-_TEMPLATES = os.path.join(_ROOT, "app", "templates")
+_TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
 _NS = types.SimpleNamespace
-_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-         "meta", "source", "track", "wbr"}
-
-
-def _request(path="/"):
-    return _NS(
-        url=_NS(path=path),
-        state=_NS(csp_nonce="test-nonce"),
-        session={"user_id": 1, "is_admin": False,
-                 "active_character_id": 90000001, "csrf_token": "t"},
-    )
-
-
-def _render(module, name, path="/", **ctx):
-    """Full page through the route module's own Jinja env."""
-    return module.templates.env.get_template(name).render(request=_request(path), **ctx)
-
-
-def _source(name):
-    with open(os.path.join(_TEMPLATES, name), encoding="utf-8") as fh:
-        return fh.read()
-
-
-def _norm(s):
-    return re.sub(r"\s+", " ", s).strip()
-
-
-class _Cells(HTMLParser):
-    """For every .m-row: its attrs, and each direct child's attrs, text and
-    element children (attrs of the child's own direct children).
-
-    Limits, all acceptable for the hand-written templates it reads:
-    - No implied end tags. An unclosed <td>, <li> or <p> stays open, so the
-      next sibling is read as its child rather than as another cell.
-    - An end tag closes the nearest open element with that name, so a stray
-      end tag can close a row early. Cells after it are dropped, which could
-      hide a third key from assert_mrow.
-    - `_labelled` keys cells by label, so two cells with the same label merge
-      into the last one."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.stack = []   # [tag, kind, ref]; kind: "row" | "cell" | "in" | None
-        self.rows = []
-
-    def handle_starttag(self, tag, attrs):
-        a = {k: (v if v is not None else "") for k, v in attrs}
-        parent = self.stack[-1] if self.stack else None
-        entry = [tag, None, None]
-        if parent and parent[1] == "row":
-            cell = {"tag": tag, "attrs": a, "text": "", "kids": []}
-            self.rows[parent[2]]["cells"].append(cell)
-            entry = [tag, "cell", cell]
-        elif parent and parent[1] in ("cell", "in"):
-            if parent[1] == "cell":
-                parent[2]["kids"].append(a)
-            entry = [tag, "in", parent[2]]
-        if "m-row" in a.get("class", "").split():
-            self.rows.append({"tag": tag, "attrs": a, "cells": []})
-            entry = [tag, "row", len(self.rows) - 1]
-        if tag not in _VOID:
-            self.stack.append(entry)
-
-    def handle_endtag(self, tag):
-        for i in range(len(self.stack) - 1, -1, -1):
-            if self.stack[i][0] == tag:
-                del self.stack[i:]
-                return
-
-    def handle_data(self, data):
-        for e in reversed(self.stack):
-            if e[1] in ("cell", "in"):
-                e[2]["text"] += data
-                return
-            if e[1] == "row":
-                return
-
-
-def _rows(html):
-    p = _Cells()
-    p.feed(html)
-    p.close()
-    for r in p.rows:
-        for c in r["cells"]:
-            c["text"] = _norm(c["text"])
-    return p.rows
-
-
-def _keys(row):
-    return [c for c in row["cells"] if c["attrs"].get("data-m") == "key"]
-
-
-def _lead(row):
-    return [c for c in row["cells"] if c["attrs"].get("data-m") == "lead"]
-
-
-def _labelled(row):
-    return {c["attrs"]["data-m-label"]: c for c in row["cells"] if "data-m-label" in c["attrs"]}
-
-
-def _assert_single_value_child(row):
-    """An open row lays a labelled cell out as label · value, with the value
-    pieces grouped on the right (justify-content:flex-end; flex-wrap:wrap),
-    so several element children would still render. This helper is stricter
-    than the CSS on purpose: one wrapper per value keeps each value laid out
-    as a unit, the way its desktop cell is. m-hide children don't count."""
-    for label, c in _labelled(row).items():
-        shown = [k for k in c["kids"] if "m-hide" not in k.get("class", "").split()]
-        assert len(shown) <= 1, f"labelled cell {label!r} has {len(shown)} element children"
 
 
 # ── Task 13: Skill Plans (§6.1) ──────────────────────────────────────
 
 from app.routes import skill_plans as skill_plans_mod  # noqa: E402
-
-_SITE_CSS = os.path.join(_ROOT, "static", "css", "site.css")
 
 
 def _plan(pid, name, visibility="personal", n_entries=3, corp=None, description=""):
@@ -678,65 +577,6 @@ def test_assets_search_bar_stacks_on_phones():
 
 # ── Task 18: Character overview scroll boxes (§4.6, ISS-104) ─────────
 
-class _Clamps(HTMLParser):
-    """Collects every .m-clamp (with its direct-child count), every
-    .m-showall button (with whether a .m-clamp-wrap encloses it), every
-    .m-unclamp element's classes, and counts .m-clamp-wraps, including any
-    nested in another."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.stack = []        # [tag, classes, clamp_ref]
-        self.clamps = []
-        self.showall = []
-        self.unclamped = []
-        self.wraps = 0
-        self.nested_wraps = 0
-        self._btn = None
-
-    def handle_starttag(self, tag, attrs):
-        a = {k: (v if v is not None else "") for k, v in attrs}
-        cls = a.get("class", "").split()
-        if self.stack and self.stack[-1][2] is not None:
-            self.stack[-1][2]["children"] += 1
-        in_wrap = any("m-clamp-wrap" in e[1] for e in self.stack)
-        if "m-clamp-wrap" in cls:
-            self.wraps += 1
-            self.nested_wraps += in_wrap
-        ref = None
-        if "m-clamp" in cls:
-            ref = {"children": 0, "classes": cls}
-            self.clamps.append(ref)
-        if "m-unclamp" in cls:
-            self.unclamped.append(cls)
-        if "m-showall" in cls:
-            self._btn = {"in_wrap": in_wrap, "attrs": a, "text": ""}
-            self.showall.append(self._btn)
-        if tag not in _VOID:
-            self.stack.append([tag, cls, ref])
-
-    def handle_endtag(self, tag):
-        if tag == "button":
-            self._btn = None
-        for i in range(len(self.stack) - 1, -1, -1):
-            if self.stack[i][0] == tag:
-                del self.stack[i:]
-                return
-
-    def handle_data(self, data):
-        if self._btn is not None:
-            self._btn["text"] += data
-
-
-def _clamps(html):
-    p = _Clamps()
-    p.feed(html)
-    p.close()
-    for b in p.showall:
-        b["text"] = _norm(b["text"])
-    return p
-
-
 def _queue(n):
     return [{"skill_name": f"Sample Skill {i}", "finished_level": 3, "remaining_seconds": 3600 * (i + 1)}
             for i in range(n)]
@@ -835,18 +675,6 @@ def test_unclamp_current_location_list_starts_open():
     assert [b["text"] for b in c.showall] == ["Show all 12"] and c.showall[0]["in_wrap"]
 
 
-class _Styled(HTMLParser):
-    """Every start tag's name, classes and inline style."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.tags = []
-
-    def handle_starttag(self, tag, attrs):
-        a = {k: (v if v is not None else "") for k, v in attrs}
-        self.tags.append((tag, a.get("class", "").split(), a.get("style", "")))
-
-
 def test_unclamp_every_inline_scroll_box_in_the_overview():
     """Any element of the overview whose inline style makes it a scroll box
     (max-height plus overflow-y:auto) traps touch scrolling on phones unless
@@ -915,24 +743,25 @@ def test_polish_b_every_r1_image_lead_carries_its_size():
         assert any(t == "img" for r in rows for t in r["child_tags"])
 
 
+_PB_BLUEPRINTS = (
+    ({"type_id": 694, "item_id": 4, "quantity": -1, "material_efficiency": 10,
+      "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+     "Sample Alpha Blueprint"),
+    ({"type_id": 695, "item_id": 5, "quantity": -1, "material_efficiency": 0,
+      "time_efficiency": 0, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+     "Sample Bravo Blueprint"),
+    ({"type_id": 696, "item_id": 6, "quantity": -1, "material_efficiency": 0,
+      "time_efficiency": 4, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
+     "Sample Charlie Blueprint"),
+)
+
+
 def _pb_render_blueprints():
-    raw = [
-        {"type_id": 691, "item_id": 1, "quantity": -1, "material_efficiency": 10,
-         "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
-        {"type_id": 692, "item_id": 2, "quantity": -1, "material_efficiency": 0,
-         "time_efficiency": 0, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
-        {"type_id": 693, "item_id": 3, "quantity": -1, "material_efficiency": 0,
-         "time_efficiency": 4, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
-    ]
-    names = {691: "Sample Alpha Blueprint", 692: "Sample Bravo Blueprint", 693: "Sample Charlie Blueprint"}
-    bps = blueprints_mod._process_blueprints(raw, names)
-    char = {"character_id": 90000001, "character_name": "Pilot Alpha",
-            "corporation_id": None, "corporation_name": None}
-    html = _render(blueprints_mod, "blueprints.html", "/character/90000001/blueprints",
-                   char=char, blueprints=bps, groups=blueprints_mod._group_blueprints(bps, "type"),
-                   stats=blueprints_mod._compute_stats(bps), error=None, is_corp=False,
-                   corp_id=None, filter="all", group_by="type")
-    return {_keys(r)[0]["text"]: r for r in _rows(html)}
+    """Three BPOs (10/20, 0/0, 0/4) rendered through _render_blueprints,
+    by name. The two default rows that render alongside them are left out."""
+    names = {name for _, name in _PB_BLUEPRINTS}
+    rows = _rows(_render_blueprints(_PB_BLUEPRINTS))
+    return {_keys(r)[0]["text"]: r for r in rows if _keys(r)[0]["text"] in names}
 
 
 def test_polish_b_blueprint_calc_link_is_a_tap_target():
@@ -1040,12 +869,8 @@ def _pb_render_journal_long():
                 "ref_type_label": "Player Donation", "category": "other", "amount": 1000.0,
                 "balance": 5000.0, "description": description, "reason": reason,
                 "first_party": fp, "second_party": sp, "tax": None}
-    entries = [entry(0, _PB_LONG_DESC, _PB_LONG_REASON, fp="Sample Agency"),
-               entry(1, "A short description", "A short reason")]
-    return _render(journal_mod, "journal.html", "/character/90000001/journal",
-                   char=_PILOT, entries=entries, error=None, page=1, has_more=False,
-                   category="all", categories=journal_mod.CATEGORY_LABELS,
-                   is_corp=False, corp_id=None, division=None)
+    return _render_journal([entry(0, _PB_LONG_DESC, _PB_LONG_REASON, fp="Sample Agency"),
+                            entry(1, "A short description", "A short reason")])
 
 
 def test_polish_b_journal_cut_text_has_a_full_phone_copy():
