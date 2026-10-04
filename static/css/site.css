@@ -1183,6 +1183,38 @@
 
 /* ── R3 T2 · build finder ── */
 @media (max-width: 640px) {
+    /* Results (D5 A): both keys at 12px. Key 2 is the desktop Margin % cell
+       with its inline 11px, and key 1 would take the 16px phone body size
+       as its line height, so the two keys would sit at different heights. */
+    .bf-row > [data-m="key"] { font-size: 12px !important; }
+    /* "Show all" inside the results panel: inset, so its border doesn't
+       double against the panel's own sides and bottom. */
+    .bf-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* The form's two control blocks stack in one column. The fields' inline
+       min-width (220px, 240px) and flex shorthands need !important. The
+       page's <style> loads after this file, so the select's 150px and the
+       ME box's 60px are beaten with a second class instead. */
+    #bf-form > .bf-controls { flex-direction: column; align-items: stretch; }
+    #bf-form > .bf-controls > .bf-field { flex: none !important; min-width: 0 !important; }
+    .bf-field > .bf-select { min-width: 0; }
+    .bf-field > .bf-me { width: 100%; }
+
+    /* Decryptor chips: 40px tap targets. They are labels, so the global
+       44px rule for buttons and fields doesn't reach them. */
+    .bf-chip-row > .bf-chip {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-height: 40px; min-width: 40px; font-size: 12px;
+    }
+
+    /* Market-group tree: rows at least 40px tall whose two buttons fill the
+       row's height, a 40px-wide expand arrow with a 12px glyph, and a leaf
+       spacer as wide, so leaf names line up with branch names. Classes
+       only: the rows are htmx-loaded and the page JS keys on them. */
+    .bft-node > .bft-row { min-height: 40px; align-items: stretch; }
+    .bft-row > .bft-arrow { width: 40px; font-size: 12px; }
+    .bft-row > .bft-arrow-empty { width: 40px; }
+    .bft-row > .bft-select { font-size: 12px; }
 }
 /* ── end R3 T2 ── */
 
