@@ -334,6 +334,17 @@ def test_planetary_expanded_row_shows_the_planet_detail():
     assert base.start() < shown.start()
 
 
+def test_planetary_portrait_holds_its_size_while_loading():
+    """On phones `.m-row > *` forces width:auto !important over the inline
+    28px, so an unloaded (or failed) portrait would collapse to ~2px and the
+    name would jump when it arrives. The width/height attributes give the
+    img an intrinsic size that holds whether it's loaded, pending or broken."""
+    for row in _rows(_render_planetary()):
+        (lead,) = _lead(row)
+        assert lead["attrs"].get("width") == "28"
+        assert lead["attrs"].get("height") == "28"
+
+
 # ── Task 15: Blueprints (§6.3) ───────────────────────────────────────
 
 from app.routes import blueprints as blueprints_mod  # noqa: E402
