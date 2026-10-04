@@ -177,6 +177,8 @@ def test_fittings_css_save_all_status_takes_its_own_line():
     assert status["flex-basis"] == "100%" and fails["flex-basis"] == "100%"
     assert int(status["order"]) >= 1                        # below the button
     assert int(fails["order"]) >= int(status["order"])      # and the failure list below the status
+    # A fit name with no spaces in the list must wrap, not widen the page.
+    assert fails["min-width"] == "0" and fails["overflow-wrap"] == "anywhere"
     assert "margin-top" in _decls(".fit-saveall > .fit-saveall-status:not(:empty)")
 
 
@@ -190,6 +192,10 @@ def test_fittings_css_fit_head_is_a_44px_target_with_a_12px_arrow():
     title = _decls(".fit-head > .fit-title")
     assert title["min-width"] == "0"
     assert title["flex-wrap"] == "wrap"
+    # The name span's min-content is its longest word, so a long name with
+    # no spaces would run past the arrow; it may shrink and break anywhere.
+    name = _decls(".fit-head > .fit-title > :first-child")
+    assert name["min-width"] == "0" and name["overflow-wrap"] == "anywhere"
     arrow = _decls(".fit-head .fit-arrow")
     assert arrow["font-size"] == "12px"
     assert arrow["flex"] == "none"
@@ -265,11 +271,12 @@ def test_blueprint_filter_row_is_hooked(is_corp, filter, group_by):
     sep = kids[4]
     assert sep["tag"] == "span" and "bp-filter-sep" in sep["cls"]
     assert sep["attrs"]["style"] == "color:var(--border);margin:0 4px;"
+    assert sep["attrs"].get("aria-hidden") == "true"         # a decorative glyph, not read aloud
     base = "/corporations/98000001/blueprints" if is_corp else "/character/90000001/blueprints"
     buttons = kids[:4] + kids[5:]
     keys = ["all", "bpo", "bpc", "unresearched", "type", "location"]
     for key, btn in zip(keys, buttons):
-        assert btn["tag"] == "a" and btn["cls"] == ["b-btn"]
+        assert btn["tag"] == "a" and "b-btn" in btn["cls"]
         assert btn["attrs"]["href"].startswith(base + "?")
         active = key in (filter, group_by)
         # The active accent stays inline, so the phone grid keeps it.

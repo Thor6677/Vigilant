@@ -932,14 +932,17 @@
     .fit-saveall > .b-btn { flex: none; }
     .fit-saveall > .fit-saveall-status { order: 1; flex-basis: 100%; }
     .fit-saveall > .fit-saveall-status:not(:empty) { margin-top: 0.35rem; }
-    .fit-saveall > ul { order: 2; flex-basis: 100%; }
+    .fit-saveall > ul { order: 2; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
 
     /* Fit head (tap to open): a 44px target with a 12px arrow. R1 wraps
        every .b-panel-head on phones, which would push the arrow onto its own
-       line under a long fit name; this head stays on one line and its title
-       side shrinks, dropping the module count below the name instead. */
+       line under a long fit name. This head stays on one line and the arrow
+       keeps its place on the right. The title side shrinks: the module count
+       drops below the name, and the name wraps, breaking anywhere if it has
+       no spaces (its min-content would otherwise run past the arrow). */
     .b-panel-head.fit-head { min-height: 44px; flex-wrap: nowrap; gap: 0.5rem; }
     .fit-head > .fit-title { min-width: 0; flex-wrap: wrap; }
+    .fit-head > .fit-title > :first-child { min-width: 0; overflow-wrap: anywhere; }
     .fit-head .fit-arrow { flex: none; font-size: 12px; }
 
     /* Stats: the zKillboard chip is an m-tap target. As an inline-flex box

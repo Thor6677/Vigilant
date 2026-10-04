@@ -82,7 +82,7 @@
         {{ label }}
     </a>
     {% endfor %}
-    <span class="bp-filter-sep" style="color:var(--border);margin:0 4px;">|</span>
+    <span class="bp-filter-sep" aria-hidden="true" style="color:var(--border);margin:0 4px;">|</span>
     {% for key, label in [("type", "By Type"), ("location", "By Location")] %}
     <a href="{{ base }}?filter={{ filter }}&group_by={{ key }}"
        class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if group_by == key %}var(--accent){% else %}var(--border){% endif %};{% if group_by == key %}color:var(--accent);{% endif %}">
