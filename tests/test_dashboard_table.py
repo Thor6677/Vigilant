@@ -419,7 +419,7 @@ def test_table_rows_are_mrows_with_a_lead_dot_and_two_keys():
 def test_key_columns_are_never_repeated_as_detail_lines():
     html = _table([SUMMARY])  # default columns
     labels = [k["data-m-label"] for k in mrows(html)[0]["children"] if "data-m-label" in k]
-    assert labels == ["Account", "System", "Ship", "Wallet", "7d", "PI", "Last Sync", "Open"]
+    assert labels == ["Account", "System", "Ship", "Wallet", "PI", "Last Sync", "Open"]  # no 7d delta: no 7d label
 
 
 def test_key_cells_render_when_their_columns_are_off():
@@ -511,6 +511,17 @@ def test_tags_cell_is_a_detail_line_only_when_there_are_tags():
     labels = {r["attrs"]["data-char-id"]: [k.get("data-m-label") for k in r["children"] if k.get("data-col-cell") == "tags"]
               for r in mrows(html)}
     assert labels == {"1001": ["Tags"], "1002": [None]}  # the bare cell still renders, unlabelled
+
+
+def test_7d_cell_is_labelled_only_when_there_is_a_delta():
+    delta = {"direction": "up", "amount": 5_000_000.0}
+    with_delta = build_table_row(SUMMARY, None, None, delta, None)
+    bare = build_table_row(dict(SUMMARY, character_id=1002, name="Pilot Two"), None, None, None, None)
+    html = render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=[with_delta, bare], prefs_patch={"table_columns": ["pilot", "wallet_7d"]})
+    labels = {r["attrs"]["data-char-id"]: [k.get("data-m-label") for k in r["children"] if k.get("data-col-cell") == "wallet_7d"]
+              for r in mrows(html)}
+    assert labels == {"1001": ["7d"], "1002": [None]}  # the bare cell still renders, unlabelled
 
 
 def test_every_row_has_its_column_cells_in_header_order():

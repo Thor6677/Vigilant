@@ -875,7 +875,6 @@ def test_unclamp_show_all_button_is_styled_in_site_css():
 
 # ── Polish B ──────────────────────────────────────────────────────────
 
-import pytest  # noqa: E402
 
 
 def _pb_row_html(lead):

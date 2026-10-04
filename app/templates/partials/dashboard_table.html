@@ -107,7 +107,7 @@
             {% elif key == 'training' %}
             <td data-col-cell="training" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.training.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{{ row.cells.training.text }}{% if row.cells.training.get('queued') %}<span class="m-only"> ({{ row.cells.training.get('queued') }} queued)</span>{% endif %}</td>
             {% elif key in ('wallet', 'wallet_7d', 'net_worth', 'escrow') %}
-            <td data-col-cell="{{ key }}" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">{{ row.cells[key].text }}</td>
+            <td data-col-cell="{{ key }}"{% if row.cells[key].text %} data-m-label="{{ column_labels.get(key, key) }}"{% endif %} data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">{{ row.cells[key].text }}</td>
             {% else %}
             <td data-col-cell="{{ key }}" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells[key].sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">{% if row.cells[key].href %}<a href="{{ row.cells[key].href }}" style="color:var(--muted);">{{ row.cells[key].text }}</a>{% else %}{{ row.cells[key].text }}{% endif %}</td>
             {% endif %}

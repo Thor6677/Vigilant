@@ -639,8 +639,9 @@
 /* ═══ Mobile R1 — phone layer (mobile design §4) ═════════════════════════
    Phone = ≤640px. Templates opt in with m-* classes and data-m attributes;
    the contract is documented in the mobile R1 plan and pinned by
-   tests/test_mobile_css.py. Desktop is untouched apart from the two
-   "phone-only element" guards directly below. */
+   tests/test_mobile_css.py. Desktop rendering is unchanged by the media
+   queries; the few non-media rules below (tab-strip extra links, mobile-menu
+   groups, section toggle button) and these two guards are the exceptions. */
 @media (min-width: 641px) {
     .m-only, details.m-tabs { display: none !important; }
 }

@@ -2,7 +2,7 @@
  *
  * Usage: open a page on the dev instance in Chrome DevTools device mode
  * (phone preset), paste this whole file into the console, press Enter.
- * Use a phone preset <=400px wide; two partials have 400px breakpoints.
+ * Use a phone preset <=400px wide; the character tags partial still has a 400px breakpoint.
  * Closed <details> content is measured in current Chrome, so a flag there
  * means it will overflow when opened.
  * Viewport-relative widths (calc(100vw - ...)) or elements anchored to the
