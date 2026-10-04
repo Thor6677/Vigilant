@@ -51,8 +51,15 @@ def _render_char(days=14):
 
 
 def _render_corp(days=14):
-    """The corp route: two contributing characters, their ledgers merged."""
-    data = _data(days)
+    """The corp route: two contributing characters, each with its own
+    ledger, extended into one list before aggregation (as corp_mining
+    does). The two split one run of days between them, so the lists come
+    out the same size as the character variant's."""
+    rows = _raw(days)
+    all_raw = []
+    for ledger in (rows[0::2], rows[1::2]):
+        all_raw.extend(ledger)
+    data = mining_mod._aggregate_ledger(all_raw, _ORES, _SYSTEMS, _PRICES)
     char = {k: _CHAR[k] for k in ("character_id", "character_name", "corporation_name")}
     html = render_page(mining_mod, "mining.html", "/corporations/98000001/mining",
                        char=char, data=data, error=None, is_corp=True,
@@ -121,6 +128,7 @@ def test_by_ore_type_rows(variant):
         imgs = [k for k in k1["kids"] if f"/types/{ore['type_id']}/icon" in k.get("src", "")]
         assert len(imgs) == 1, "the ore icon stays inline in key 1"
         assert "width:20px;height:20px" in imgs[0]["style"]
+        assert "flex-shrink:0" in imgs[0]["style"], "keeps its size in the phone flex line"
         assert "mining-ore" in k1["attrs"]["class"].split()
         assert k2["text"] == _isk(ore["value"])
         labelled = row_labelled(row)
@@ -173,6 +181,7 @@ def test_full_detail_rows(variant):
         imgs = [k for k in k1["kids"] if f"/types/{e['type_id']}/icon" in k.get("src", "")]
         assert len(imgs) == 1, "the ore icon stays inline in key 1"
         assert "width:16px;height:16px" in imgs[0]["style"]
+        assert "flex-shrink:0" in imgs[0]["style"], "keeps its size in the phone flex line"
         assert "mining-ore" in k1["attrs"]["class"].split()
         assert k2["text"] == _isk(e["value"])
         labelled = row_labelled(row)
@@ -289,7 +298,9 @@ def test_rows_and_tagged_cells_are_never_hidden_inline(variant):
     """The phone rules use display:… !important, which would override an
     inline display:none on a row or tagged cell; only wrappers hide."""
     html, _ = _VARIANTS[variant]()
-    for r in cells_rows(html):
+    rows = cells_rows(html)
+    assert len(rows) == 6 + 3 + 14 + 14
+    for r in rows:
         for a in [r["attrs"]] + [c["attrs"] for c in r["cells"] if c["attrs"].keys()
                                  & {"data-m", "data-m-label"}]:
             assert "display:none" not in a.get("style", "").replace(" ", "")
@@ -309,11 +320,11 @@ def test_corp_variant_keeps_its_chips_and_has_no_character_tabs():
 def test_ore_key_keeps_its_icon_beside_an_ellipsised_name():
     """Key 1 is display:block on phones, which would drop the icon to the
     text baseline and lose the gap. The ore cell stays a flex line: the
-    icon keeps its size and only the name ellipsises."""
+    icon keeps its size (its inline flex-shrink:0, checked in the row
+    tests) and only the name ellipsises."""
     css = css_section("T4")
     cell = rule_bodies(css, '.m-row > [data-m="key"].mining-ore')
     assert "display: flex !important" in cell and "align-items: center" in cell
-    assert "flex: none" in rule_bodies(css, ".m-row > .mining-ore > img")
     name = rule_bodies(css, ".m-row > .mining-ore > span")
     for decl in ("min-width: 0", "overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"):
         assert decl in name, decl
@@ -325,12 +336,32 @@ def test_show_all_is_inset_inside_its_panel():
     assert "margin: 0.4rem 0.75rem 0.6rem" in body
 
 
+def _split_section(section):
+    """A section's phone @media block body, and whatever follows the
+    block's closing brace (its desktop slot), found by brace matching."""
+    start = section.index("{", section.index("@media")) + 1
+    depth, i = 1, start
+    while depth:
+        depth += (section[i] == "{") - (section[i] == "}")
+        i += 1
+    return section[start:i - 1], section[i:]
+
+
+def test_split_section_sees_a_rule_in_the_desktop_slot():
+    sample = ("/* ── R2 T4 · mining ── */\n@media (max-width: 640px) {\n"
+              "    .a > .b { color: red; }\n}\n.mining-ore { color: blue; }\n"
+              "/* ── end R2 T4 ── */\n")
+    phone, desktop = _split_section(css_section("T4", sample))
+    assert ".a > .b" in phone and ".mining-ore" not in phone
+    assert ".mining-ore" in desktop
+
+
 def test_mining_classes_have_no_desktop_rules():
     """mining-ore and mining-clamp only act on phones, so desktop renders
-    exactly as before (D21)."""
+    exactly as before (D21). T4 has no desktop rules at all."""
     with open(SITE_CSS, encoding="utf-8") as fh:
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
-    section = css_section("T4")
-    phone_block = section[section.index("{") + 1:section.rindex("}")]
+    phone_block, desktop_slot = _split_section(css_section("T4"))
+    assert not desktop_slot.strip(), "T4's desktop slot holds no rules"
     for cls in (".mining-ore", ".mining-clamp"):
         assert css.count(cls) == phone_block.count(cls) > 0, cls
