@@ -58,10 +58,14 @@
 {# ── Planets list — compact rows ────────────────────────────────────────── #}
 <div style="border-bottom:1px solid var(--border);">
     {% for p in planets %}
-    <div style="padding:0.35rem 0.75rem;display:grid;grid-template-columns:minmax(120px,160px) minmax(70px,90px) 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
-        <span class="b-text">{{ p.planet_name }}</span>
-        <span style="color:var(--muted);text-transform:capitalize;">{{ p.planet_type }}</span>
-        <span style="color:var(--muted);font-size:10px;">{{ p.p0_materials | join(' · ') }}</span>
+    {# Phones (R3 T6): planet and type are the keys; the P0 list opens below.
+       This fragment arrives by fetch() + innerHTML, so the page calls
+       mRowInit on it after injecting. #}
+    <div class="m-row" data-click="toggleMRow" style="padding:0.35rem 0.75rem;display:grid;grid-template-columns:minmax(120px,160px) minmax(70px,90px) 1fr;gap:0.5rem;align-items:center;border-top:1px solid var(--border);font-size:11px;">
+        <span class="m-only" data-m-label="Name">{{ p.planet_name }}</span>
+        <span class="b-text" data-m="key">{{ p.planet_name }}</span>
+        <span data-m="key" style="color:var(--muted);text-transform:capitalize;">{{ p.planet_type }}</span>
+        <span data-m-label="P0" style="color:var(--muted);font-size:10px;">{{ p.p0_materials | join(' · ') }}</span>
     </div>
     {% endfor %}
 </div>
@@ -72,8 +76,8 @@
         <span class="b-label">Producible commodities</span>
         <span class="b-muted-sm">
             <span class="b-text">●</span> producible &nbsp;
-            <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; · &nbsp;
-            hover to trace recipe
+            <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; <span class="m-hide">· &nbsp;
+            hover to trace recipe</span>
         </span>
     </div>
 
@@ -125,7 +129,7 @@
     </div>
 
     <div style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
-        Hover a commodity to see its recipe chain — green = ingredients (inputs), cyan = downstream uses.
+        <span class="m-hide">Hover a commodity to see its recipe chain — green = ingredients (inputs), cyan = downstream uses.</span>
         Click to open the Chain Explorer for full details.
     </div>
 </div>

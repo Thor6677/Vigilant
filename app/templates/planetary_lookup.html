@@ -223,7 +223,9 @@
         el.innerHTML = '<div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>';
         fetch('/industry/planetary/lookup/system?name=' + encodeURIComponent(name))
             .then(function(r){ return r.text(); })
-            .then(function(html){ el.innerHTML = html; piInitTierGraph(el); })
+            /* mRowInit: the planet rows are m-rows, and markup written with
+               innerHTML never reaches actions.js's htmx:afterSwap init. */
+            .then(function(html){ el.innerHTML = html; if (window.mRowInit) window.mRowInit(el); piInitTierGraph(el); })
             .catch(function(){ el.innerHTML = '<div class="b-empty b-pad-md">Lookup failed.</div>'; });
     };
     document.addEventListener('click', function(e) {

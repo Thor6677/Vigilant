@@ -465,3 +465,90 @@ def test_css_chain_node_recipe_links_underline_their_text_not_the_tap_box():
                       r'<a [^>]*class="pi-node-input m-tap"', _chain_node())
     assert len(rows) == len(_INPUTS)
     assert all(s.startswith("display:flex;justify-content:space-between;") for s in rows)
+
+
+# ── System Lookup ────────────────────────────────────────────────────
+
+_PLANETS = [
+    {"planet_id": 40000001, "planet_name": "Sample System I", "planet_type": "barren",
+     "planet_index": 1, "p0_materials": ["Sample Microbes", "Sample Gas"]},
+    {"planet_id": 40000002, "planet_name": "Sample System II", "planet_type": "gas",
+     "planet_index": 2, "p0_materials": ["Sample Gas"]},
+    {"planet_id": 40000003, "planet_name": "Sample System III", "planet_type": "plasma",
+     "planet_index": 3, "p0_materials": ["Sample Ions", "Sample Metals", "Sample Suspended"]},
+]
+
+
+def _tier_item(tid, name, producible):
+    return {"type_id": tid, "name": name, "producible": producible, "direct_input_ids": [],
+            "ancestor_ids": [], "descendant_ids": [], "inputs": [], "cycle_time": 1800,
+            "planet_sources": ["gas"], "missing": [] if producible else ["Sample Ions"]}
+
+
+def _lookup_system():
+    tiers = {0: [_tier_item(91001, "Sample Gas", True), _tier_item(91002, "Sample Ions", False)],
+             1: [_tier_item(95001, "Sample Oxidizer", True)], 2: [], 3: [], 4: []}
+    counts = {t: {"total": len(v), "producible": sum(i["producible"] for i in v)}
+              for t, v in tiers.items()}
+    return render_page(
+        pi_mod, "partials/planetary_lookup_system.html", "/industry/planetary/lookup/system",
+        system={"system_name": "Sample System", "security": 0.4,
+                "constellation": "Sample Constellation", "region": "Sample Region"},
+        planets=_PLANETS, no_sde=False, all_tiers=tiers, tier_counts=counts,
+        system_p0_names=["Sample Gas"], space_type="lowsec")
+
+
+def _lookup_page():
+    return render_page(pi_mod, "planetary_lookup.html", "/industry/planetary/lookup",
+                       planet_types=["Barren"], p0_materials=["Sample Gas"],
+                       p0_by_type={"Barren": ["Sample Gas"]})
+
+
+def test_lookup_planets_are_tap_to_open_rows():
+    html = _lookup_system()
+    rows = assert_mrow(html, min_rows=len(_PLANETS))
+    assert len(rows) == len(_PLANETS)
+    for r, p in zip(cells_rows(html), _PLANETS):
+        assert r["attrs"]["data-click"] == "toggleMRow"
+        name, ptype = row_keys(r)
+        assert name["text"] == p["planet_name"]
+        assert ptype["text"] == p["planet_type"]
+        assert _labels(r) == ["Name", "P0"]
+        labelled = row_labelled(r)
+        assert "m-only" in _classes(labelled["Name"])
+        assert labelled["Name"]["text"] == p["planet_name"]
+        assert labelled["P0"]["text"] == " · ".join(p["p0_materials"])
+        assert_single_value_child(r)
+        # Desktop columns unchanged.
+        assert r["attrs"]["style"].startswith(
+            "padding:0.35rem 0.75rem;display:grid;grid-template-columns:minmax(120px,160px) "
+            "minmax(70px,90px) 1fr;")
+
+
+def test_lookup_hover_hints_hide_on_phones():
+    html = _lookup_system()
+    assert re.search(r'off-system inputs &nbsp; <span class="m-hide">· &nbsp;\s*'
+                     r'hover to trace recipe</span>', html)
+    foot = re.search(r'<span class="m-hide">(Hover a commodity[^<]*)</span>\s*'
+                     r'Click to open the Chain Explorer', html)
+    assert foot and "cyan = downstream uses." in foot.group(1)
+
+
+def test_lookup_page_inits_rows_after_injecting_the_fragment():
+    """The fragment arrives by fetch() + innerHTML, not htmx, so actions.js's
+    afterSwap init never sees it."""
+    script = _page_script(_lookup_page(), "piSysSubmit")
+    assert re.search(r"\.then\(function\(html\)\{ el\.innerHTML = html; "
+                     r"if \(window\.mRowInit\) window\.mRowInit\(el\); piInitTierGraph\(el\); \}\)",
+                     script)
+
+
+def test_css_lookup_tier_chips_and_dropdown_rows_are_40px():
+    css = _phone()
+    chip = rule_bodies(css, ".pi-tier-item")
+    # The chips carry an inline display:block.
+    assert "display: flex !important" in chip and "align-items: center" in chip
+    assert "min-height: 40px" in chip
+    for sel in (".sys-dd-item", ".calc-dd-item"):
+        body = rule_bodies(css, sel)
+        assert "min-height: 40px" in body and "align-items: center" in body, sel
