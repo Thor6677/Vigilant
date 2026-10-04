@@ -210,8 +210,9 @@
 {% endif %}
 
 {% if plan.share_token %}
+{# Phones: the link gets its own full-width line (skp-share in site.css). #}
 <div class="b-section">
-    <div style="padding:0.4rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <div class="skp-share" style="padding:0.4rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
         <span style="font-size:9px;color:var(--muted);">Share link:</span>
         <input type="text" id="share-url" readonly
                value="{{ request.url.scheme }}://{{ request.url.netloc }}/skill-plans/shared/{{ plan.share_token }}"
@@ -233,22 +234,24 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.25rem;">
             <span class="b-label">Skills</span>
-            <div style="display:flex;gap:0.5rem;font-size:9px;">
-                <button type="button" data-click="exportPlan" class="b-link-btn" style="color:var(--accent);">Export</button>
+            {# Phones: with the drag handle hidden these are the only list
+               controls, so each is a 40px tap target (m-tap). #}
+            <div class="skp-sortbar" style="display:flex;gap:0.5rem;font-size:9px;">
+                <button type="button" data-click="exportPlan" class="b-link-btn m-tap" style="color:var(--accent);">Export</button>
                 {% if can_edit and entries | length > 1 %}
                 <span style="color:var(--border);">|</span>
                 <span class="b-muted">Sort:</span>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="name">
-                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
+                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
                 </form>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="optimal">
-                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
+                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
                 </form>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="level">
-                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
+                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
                 </form>
                 {% endif %}
             </div>

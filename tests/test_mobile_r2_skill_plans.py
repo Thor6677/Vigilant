@@ -24,9 +24,9 @@ import types
 from html.parser import HTMLParser
 
 from app.routes import skill_plans as sp_mod
-from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
-                           css_section, mrows, render_page, row_keys, row_labelled,
-                           row_lead, rule_bodies)
+from tests._mobile import (assert_mrow, assert_single_value_child, cells_rows, css_section,
+                           mrows, render_page, row_keys, row_labelled, row_lead, rule_bodies,
+                           selectors)
 
 _NS = types.SimpleNamespace
 _ROMAN = ["", "I", "II", "III", "IV", "V"]
@@ -395,9 +395,59 @@ def test_css_gap_picker_puts_the_select_on_its_own_line():
     assert "width: 100%" in sel
 
 
-def test_css_share_link_ends_in_an_ellipsis():
-    d = _decls("#share-url")
+def test_share_row_carries_its_hook():
+    html = render_page(
+        sp_mod, "skill_plan_detail.html", "/skill-plans/42",
+        plan=_plan(share_token="sample-share-token"), entries=_entries(3), characters=_CHARS,
+        corp_names={}, alliance_names={}, can_edit=True, can_admin=True, is_owner=True,
+        eligible_corps=[], eligible_alliances=[], acl_entries=[], acl_err=None)
+    m = re.search(r'<div class="skp-share"[^>]*>(.*?)</div>', html, re.S)
+    assert m, "the share-link row needs the skp-share hook"
+    assert 'id="share-url"' in m.group(1) and 'data-click="copyShareUrl"' in m.group(1)
+
+
+def test_css_share_link_gets_a_full_width_line_with_an_ellipsis():
+    d = _decls(".skp-share > #share-url")
+    assert "flex: 1 1 100% !important" in d and "min-width: 0" in d
     assert "white-space: nowrap" in d and "text-overflow: ellipsis" in d
+
+
+def test_css_share_link_rule_is_scoped_to_this_page():
+    """#share-url is reused by the intel, D-scan and image-share pages; a
+    bare #share-url rule here would restyle their inputs too."""
+    preludes = re.findall(r"([^{}]+)\{", css_section("T6"))
+    for prelude in preludes:
+        for sel in selectors(prelude):
+            if "#share-url" in sel:
+                assert sel.startswith(".skp-share "), f"unscoped selector {sel!r}"
+
+
+def test_sort_toolbar_buttons_are_tap_targets():
+    """With the drag handle hidden on phones, Export and the three Sort
+    buttons are the only list controls: each is an m-tap (40px, 12px)."""
+    tags = _tags(_render_detail(can_edit=True))
+    i = next(n for n, (t, a) in enumerate(tags) if "skp-sortbar" in _classes(a))
+    buttons = []
+    for t, a in tags[i + 1:]:
+        if t == "button":
+            buttons.append(a)
+        if len(buttons) == 4:
+            break
+    assert buttons[0].get("data-click") == "exportPlan"
+    for b in buttons:
+        assert "m-tap" in _classes(b), b
+
+
+def test_read_only_sort_toolbar_keeps_export_tappable():
+    tags = _tags(_render_detail(can_edit=False))
+    (export,) = [a for t, a in tags if a.get("data-click") == "exportPlan"]
+    assert "m-tap" in _classes(export)
+
+
+def test_css_sort_toolbar_wraps_centred_at_12px():
+    d = _decls(".skp-sortbar")
+    assert "flex-wrap: wrap" in d and "align-items: center" in d
+    assert "font-size: 12px !important" in d
 
 
 def test_css_typeahead_rows_are_40px_12px_left_aligned():
@@ -437,14 +487,29 @@ def test_css_gap_row_keys_share_one_size():
         assert "font-size: 12px !important" in _decls(sel), sel
 
 
+def _after_phone_block(section):
+    """What follows the section's phone @media block, found by matching its
+    braces from the block's own `{` (not by the last `}` in the section,
+    which a trailing desktop rule would also end with)."""
+    m = re.match(r"\s*@media \(max-width: 640px\) \{", section)
+    assert m, "the section must open with its phone @media block"
+    depth = 1
+    for i in range(m.end(), len(section)):
+        depth += (section[i] == "{") - (section[i] == "}")
+        if depth == 0:
+            return section[i + 1:]
+    raise AssertionError("the phone @media block never closes")
+
+
+def test_after_phone_block_sees_a_trailing_desktop_rule():
+    """The guard below isn't blind: a rule after the block is reported."""
+    sample = "\n@media (max-width: 640px) {\n    .a { color: red; }\n}\n.b { color: blue; }\n"
+    assert _after_phone_block(sample).strip() == ".b { color: blue; }"
+    assert _after_phone_block("@media (max-width: 640px) {\n    .a { b: c; }\n}\n").strip() == ""
+
+
 def test_css_section_is_phone_only():
-    body = css_section("T6").strip()
-    assert body.startswith("@media (max-width: 640px) {")
-    # One phone block holds everything: nothing after its closing brace.
-    depth, end = 0, None
-    for i, ch in enumerate(body):
-        depth += (ch == "{") - (ch == "}")
-        if depth == 0 and ch == "}":
-            end = i
-            break
-    assert end == len(body) - 1, "the R2 T6 section has a rule outside its phone block"
+    """Desktop renders as before (D21): every T6 rule sits inside the one
+    phone block, and only whitespace follows it up to the end marker."""
+    rest = _after_phone_block(css_section("T6"))
+    assert rest.strip() == "", f"the R2 T6 section has a rule outside its phone block: {rest.strip()[:80]!r}"

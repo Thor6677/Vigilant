@@ -1064,9 +1064,19 @@
     .skp-gap-pick { flex-wrap: wrap; }
     .skp-gap-pick > select { flex: 1 1 100% !important; min-width: 0; width: 100%; }
 
-    /* The share link is far longer than a phone is wide: end it with an
-       ellipsis rather than cutting it off (Copy still copies all of it). */
-    #share-url { white-space: nowrap; text-overflow: ellipsis; }
+    /* Share link: its own full-width line (the inline flex:1 left it 117px
+       wide beside the label and Copy), ending in an ellipsis since it is
+       still longer than a phone is wide; Copy copies all of it. Scoped:
+       other pages reuse the #share-url id. */
+    .skp-share > #share-url {
+        flex: 1 1 100% !important; min-width: 0;
+        white-space: nowrap; text-overflow: ellipsis;
+    }
+
+    /* Skills toolbar (Export, Sort: Name / Optimal / Level): its buttons are
+       m-tap; the toolbar wraps and centres "Sort:" on them, at 12px rather
+       than the inline 9px. */
+    .skp-sortbar { flex-wrap: wrap; align-items: center; font-size: 12px !important; }
 
     /* Add Skill / Add from Ship typeahead: 40px rows at 12px. The dropdown
        is absolutely positioned inside a panel that clips (overflow:hidden,
