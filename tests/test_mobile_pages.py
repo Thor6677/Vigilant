@@ -313,3 +313,22 @@ def test_planetary_sibling_pages_share_the_view_tabs():
         assert '{% from "partials/_pi_tabs.html" import pi_tabs %}' in src, page
         assert f"{{{{ pi_tabs('{key}') }}}}" in src, page
         assert "<nav " not in src, page
+
+
+def test_planetary_expanded_row_shows_the_planet_detail():
+    """The planet detail used to carry an inline display:none, which the
+    page's `.pi-row.is-expanded .pi-row-detail` rule can't beat, so the
+    htmx-loaded detail never showed. Hiding it from the page <style> lets
+    the expanded rule win (same specificity order: base rule first)."""
+    html = _render_planetary()
+    details = re.findall(r'<div id="pi-detail-[^"]*" class="pi-row-detail"([^>]*)>', html)
+    assert len(details) == 2
+    for attrs in details:
+        assert "display:none" not in attrs.replace(" ", "")
+    blocks = [b for b in re.findall(r"<style[^>]*>(.*?)</style>", html, re.S) if ".pi-row-detail" in b]
+    assert len(blocks) == 1
+    style = blocks[0]
+    base = re.search(r"(?m)^\s*\.pi-row-detail\s*\{\s*display:\s*none;?\s*\}", style)
+    shown = re.search(r"\.pi-row\.is-expanded \.pi-row-detail\s*\{\s*display:\s*block;?\s*\}", style)
+    assert base and shown
+    assert base.start() < shown.start()

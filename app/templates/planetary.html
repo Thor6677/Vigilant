@@ -101,7 +101,7 @@
             </span>
             <span class="pi-arrow b-muted-sm">▸</span>
         </div>
-        <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail" style="display:none;"></div>
+        <div id="pi-detail-{{ char.character_id }}-{{ planet.planet_id }}" class="pi-row-detail"></div>
     </div>
     {% endfor %}
     {% else %}
@@ -128,6 +128,9 @@
 <style nonce="{{ request.state.csp_nonce }}">
     .pi-row.is-expanded .pi-row-top { background:var(--panel-hover, rgba(255,255,255,0.02)); }
     .pi-row.is-expanded .pi-arrow { transform:rotate(90deg); display:inline-block; }
+    /* Hidden here, not inline: an inline display:none would beat the
+       is-expanded rule below, and the loaded detail would never show. */
+    .pi-row-detail { display:none; }
     .pi-row.is-expanded .pi-row-detail { display:block; }
     .pi-row-top:hover { background:var(--panel-hover, rgba(255,255,255,0.02)); }
     /* Filter pairs: label beside its select on desktop, exactly as before
