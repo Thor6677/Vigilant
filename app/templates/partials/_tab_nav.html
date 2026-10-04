@@ -6,22 +6,28 @@
    details.m-tabs).
 
    tabs   — list of dicts {'key', 'label', 'url', 'external' (optional)}
-   active — the active tab's key
+   active — the active tab's key. A key that matches no tab marks nothing
+            active and leaves the phone summary's current label empty.
    label  — summary prefix on phones ("Section", "View", …)
    extra  — optional trailing links, same dict shape; small and right-aligned
             on desktop (.b-tab-extra), after a divider on phones.
 
+   Empty `tabs` renders nothing at all.
+
    tab_dropdown() is the phone half on its own, for pages that keep their
    own desktop nav (Planetary's pill buttons). tab_nav() = strip + dropdown.
+   The dropdown's list is a plain <div>, like the desktop strip: the page
+   already has its nav landmarks, and an unlabelled one adds noise.
 
    Links only. A strip of in-page <button>s (admin.html) needs a button
    variant before it can use this. #}
 {% macro tab_dropdown(tabs, active, label="Section", extra=None) -%}
-{%- set ns = namespace(current=tabs[0]['label'] if tabs else '') -%}
+{%- if tabs -%}
+{%- set ns = namespace(current='') -%}
 {%- for t in tabs %}{% if t['key'] == active %}{% set ns.current = t['label'] %}{% endif %}{% endfor -%}
 <details class="m-tabs">
     <summary><span class="m-tabs-label">{{ label }}</span><span class="m-tabs-current">{{ ns.current }}</span></summary>
-    <nav class="m-tabs-list">
+    <div class="m-tabs-list">
         {%- for t in tabs %}
         <a href="{{ t['url'] }}"{% if t['key'] == active %} class="is-active" aria-current="page"{% endif %}{% if t.get('external') %} target="_blank" rel="noopener"{% endif %}>{{ t['label'] }}</a>
         {%- endfor %}
@@ -31,11 +37,13 @@
         <a href="{{ x['url'] }}"{% if x.get('external') %} target="_blank" rel="noopener"{% endif %}>{{ x['label'] }}</a>
         {%- endfor %}
         {%- endif %}
-    </nav>
+    </div>
 </details>
+{%- endif -%}
 {%- endmacro %}
 
 {% macro tab_nav(tabs, active, label="Section", extra=None) -%}
+{%- if tabs -%}
 <div class="b-tab-strip m-tabs-desktop">
     {%- for t in tabs %}
     <a href="{{ t['url'] }}"{% if t['key'] == active %} class="is-active" aria-current="page"{% endif %}{% if t.get('external') %} target="_blank" rel="noopener"{% endif %}>{{ t['label'] }}</a>
@@ -49,4 +57,5 @@
     {%- endif %}
 </div>
 {{ tab_dropdown(tabs, active, label, extra) }}
+{%- endif -%}
 {%- endmacro %}

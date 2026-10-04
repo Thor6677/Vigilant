@@ -253,7 +253,7 @@
     {% endfor %}
     <a href="/auth/connect" style="color:var(--accent);">+ Add Character</a>
     <form method="post" action="/auth/logout" style="margin:0;">
-        <button type="submit" style="background:none;border:none;cursor:pointer;font:inherit;color:var(--danger);padding:0;text-align:left;width:100%;">Logout</button>
+        <button type="submit" class="b-mobile-logout is-danger">Logout</button>
     </form>
 </div>
 <div id="esi-banner"
@@ -680,10 +680,14 @@
         var menu = getMenu();
         var btn = getBtn();
         if (!menu) return;
+        /* Closing hides the menu, which would drop focus inside it to <body>
+           (Escape from a menu link, say). Read this before the class flips. */
+        var hadFocus = !open && menu.contains(document.activeElement);
         menu.classList.toggle('is-open', open);
         menu.setAttribute('aria-hidden', open ? 'false' : 'true');
         if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         document.body.style.overflow = open ? 'hidden' : '';
+        if (hadFocus && btn) btn.focus();
     }
     window.toggleMobileMenu = function() {
         var menu = getMenu();

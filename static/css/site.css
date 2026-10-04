@@ -89,7 +89,8 @@
 .b-tab-strip button:focus-visible,
 .b-footer-link:focus-visible,
 .b-breadcrumbs a:focus-visible,
-.b-mobile-menu a:focus-visible {
+.b-mobile-menu a:focus-visible,
+.b-mobile-menu .b-mobile-logout:focus-visible {
     outline: none;
     color: var(--accent);
     text-decoration: underline;
@@ -143,10 +144,26 @@
 }
 .b-mobile-menu a:hover { color: var(--text); background: rgba(200,169,81,0.05); }
 .b-mobile-menu a.is-active { color: var(--accent); font-weight: 500; }
-.b-mobile-menu .b-mobile-sep {
-    border-top: 1px solid var(--border);
-    margin: 0.25rem 1.5rem;
+/* Logout is a <button> (it POSTs), so the UA's button styles are reset here
+   to line it up with the menu links above. Its colour comes from the global
+   !important .is-danger utility, as on the desktop account menu. */
+.b-mobile-menu .b-mobile-logout {
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-align: left;
+    transition: color 0.1s, background 0.1s;
 }
+.b-mobile-menu .b-mobile-logout:hover { background: rgba(214,69,69,0.05); }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1000px) {
@@ -639,10 +656,13 @@
     font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text);
 }
 .b-mobile-menu .b-mobile-group > summary::-webkit-details-marker { display: none; }
-.b-mobile-menu .b-mobile-group > summary::after { content: "▸"; color: var(--muted); }
+.b-mobile-menu .b-mobile-group > summary::after { content: "▸"; content: "▸" / ""; color: var(--muted); }
 .b-mobile-menu .b-mobile-group[open] > summary { color: var(--accent); }
-.b-mobile-menu .b-mobile-group[open] > summary::after { content: "▾"; }
+.b-mobile-menu .b-mobile-group[open] > summary::after { content: "▾"; content: "▾" / ""; }
 .b-mobile-menu .b-mobile-group > a { padding-left: 2.25rem; }
+/* A full-width row, so the global ring is drawn inside it: the menu is an
+   overflow container and would clip a ring drawn outside. */
+.b-mobile-menu .b-mobile-group > summary:focus-visible { outline-offset: -2px; }
 
 @media (max-width: 640px) {
     /* §4.2 safety net: anything wider than its panel scrolls instead of
@@ -702,10 +722,10 @@
         grid-column: 3; margin-left: 0.6rem; text-align: right; overflow: visible;
     }
     .m-row:not(.m-row--link)::after {
-        content: "▸"; grid-row: 1; grid-column: 4;
+        content: "▸"; content: "▸" / ""; grid-row: 1; grid-column: 4;
         margin-left: 0.4rem; text-align: right; color: var(--muted); font-size: 11px;
     }
-    .m-row.is-open:not(.m-row--link)::after, .m-row.is-expanded:not(.m-row--link)::after, .is-expanded > .m-row:not(.m-row--link)::after { content: "▾"; }
+    .m-row.is-open:not(.m-row--link)::after, .m-row.is-expanded:not(.m-row--link)::after, .is-expanded > .m-row:not(.m-row--link)::after { content: "▾"; content: "▾" / ""; }
     .m-row > [data-m-label] { grid-column: 1 / -1; }
     /* font-size is !important because detail cells carry desktop inline
        sizes (9–11px) that would otherwise stay tiny on a phone. */
@@ -732,8 +752,8 @@
     details.m-tabs > summary::-webkit-details-marker { display: none; }
     details.m-tabs > summary .m-tabs-label { color: var(--muted); }
     details.m-tabs > summary .m-tabs-current { margin-left: auto; color: var(--accent); }
-    details.m-tabs > summary::after { content: "▾"; color: var(--muted); }
-    details.m-tabs[open] > summary::after { content: "▴"; }
+    details.m-tabs > summary::after { content: "▾"; content: "▾" / ""; color: var(--muted); }
+    details.m-tabs[open] > summary::after { content: "▴"; content: "▴" / ""; }
     details.m-tabs .m-tabs-list { border-top: 1px solid var(--border); }
     details.m-tabs .m-tabs-list a {
         display: block; min-height: 44px; padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border);
@@ -741,7 +761,10 @@
     }
     details.m-tabs .m-tabs-list a:last-child { border-bottom: none; }
     details.m-tabs .m-tabs-list a.is-active { color: var(--accent); }
-    details.m-tabs .m-tabs-sep { border-top: 1px solid var(--border); }
+    /* Extra links (Stats / zKillboard) sit below a 6px band: the last tab's
+       own bottom border, the gap, then this rule. A top border here would
+       merge with that bottom border into one 2px line. */
+    details.m-tabs .m-tabs-sep { height: 6px; border-bottom: 1px solid var(--border); }
 
     /* Last on purpose: beats .m-tap / .m-pair / .m-stack (same specificity, !important). */
     .m-hide, .m-tabs-desktop { display: none !important; }

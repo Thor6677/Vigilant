@@ -304,3 +304,102 @@ def test_admin_menu_link_only_for_admins():
     assert 'href="/admin"' in _mobile_menu(_render_base("/dashboard", is_admin=True))
     assert 'href="/admin"' not in _mobile_menu(_render_base("/dashboard", is_admin=False))
 
+
+def test_menu_has_no_separators():
+    with open(_BASE_HTML, encoding="utf-8") as fh:
+        assert "b-mobile-sep" not in fh.read()
+    assert "b-mobile-sep" not in _mobile_menu(_render_base("/dashboard"))
+
+
+def test_menu_logout_is_class_styled_and_desktop_logout_unchanged():
+    html = _render_base("/dashboard")
+    menu = _mobile_menu(html)
+    assert '<button type="submit" class="b-mobile-logout is-danger">Logout</button>' in menu
+    button = menu.split('class="b-mobile-logout')[0].rsplit("<button", 1)[1]
+    assert "style=" not in button
+    assert '<button type="submit" class="b-nav-dropdown-item is-danger">Logout</button>' in html
+
+
+def _mobile_menu_script():
+    with open(_BASE_HTML, encoding="utf-8") as fh:
+        src = fh.read()
+    return src.split("ISS-006: mobile menu lifecycle")[1].split("</script>")[0]
+
+
+def test_closing_the_menu_returns_focus_to_the_hamburger():
+    js = _mobile_menu_script()
+    set_open = js.split("function setOpen(open) {")[1].split("window.toggleMobileMenu")[0]
+    # Read focus before the menu hides (display:none drops it to <body>),
+    # then hand it to the trigger.
+    probe = set_open.index("menu.contains(document.activeElement)")
+    hide = set_open.index("menu.classList.toggle('is-open', open)")
+    give = set_open.index("if (hadFocus && btn) btn.focus();")
+    assert probe < hide < give
+    assert "var hadFocus = !open && menu.contains(document.activeElement);" in set_open
+    getter = js.split("function getBtn()")[1].split("}")[0]
+    assert "document.querySelector('.b-hamburger')" in getter
+    # Escape closes through setOpen(false), so it takes this path.
+    escape = js.split("if (e.key !== 'Escape') return;")[1]
+    assert "setOpen(false)" in escape.split("});")[0]
+
+
+def _tag_hrefs(part):
+    return re.findall(r'<a href="([^"]+)"', part)
+
+
+def test_character_tabs_keep_link_order_in_both_forms():
+    html = _render_character_tabs("journal")
+    strip, details = html.split('<details class="m-tabs">')
+    expected = [
+        "/character/90000001", "/character/90000001/skills",
+        "/character/90000001/fittings", "/character/90000001/blueprints",
+        "/character/90000001/journal", "/character/90000001/mining",
+        "/intel/entity/character/90000001", "https://zkillboard.com/character/90000001/",
+    ]
+    assert _tag_hrefs(strip) == expected
+    assert _tag_hrefs(details) == expected
+
+
+def test_only_the_zkillboard_link_opens_a_new_tab():
+    html = _render_character_tabs("overview")
+    tags = re.findall(r"<a [^>]*>", html)
+    assert len(tags) == 16
+    for tag in tags:
+        if "zkillboard.com" in tag:
+            assert 'target="_blank" rel="noopener"' in tag, tag
+        else:
+            assert "target=" not in tag, tag
+
+
+def _render_tab_macros(src, **ctx):
+    return _env().from_string(
+        '{% from "partials/_tab_nav.html" import tab_nav, tab_dropdown %}' + src).render(**ctx)
+
+
+_TABS = [{"key": "a", "label": "Alpha", "url": "/a"}, {"key": "b", "label": "Beta", "url": "/b"}]
+_EXTRA = [{"label": "More", "url": "/more"}]
+
+
+def test_tab_dropdown_unknown_key_leaves_the_current_label_empty():
+    html = _render_tab_macros("{{ tab_nav(tabs, 'zzz', extra=extra) }}", tabs=_TABS, extra=_EXTRA)
+    assert '<span class="m-tabs-current"></span>' in html
+    assert "is-active" not in html and "aria-current" not in html
+    assert _tag_hrefs(html) == ["/a", "/b", "/more"] * 2
+
+
+@pytest.mark.parametrize("call", [
+    "{{ tab_nav([], 'a') }}", "{{ tab_dropdown([], 'a') }}",
+    "{{ tab_nav([], 'a', extra=extra) }}", "{{ tab_dropdown([], 'a', extra=extra) }}",
+    "{{ tab_nav(None, 'a') }}",
+])
+def test_empty_tabs_render_nothing(call):
+    assert _render_tab_macros(call, extra=_EXTRA).strip() == ""
+
+
+def test_tab_dropdown_list_is_not_a_landmark():
+    for html in (_render_character_tabs("skills"),
+                 _render_tab_macros("{{ tab_dropdown(tabs, 'a', extra=extra) }}", tabs=_TABS, extra=_EXTRA)):
+        details = html.split('<details class="m-tabs">')[1].split("</details>")[0]
+        assert "<nav" not in details
+        assert '<div class="m-tabs-list">' in details
+        assert '<div class="m-tabs-sep"></div>' in details
