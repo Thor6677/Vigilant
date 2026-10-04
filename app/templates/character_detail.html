@@ -364,7 +364,7 @@
             {# Recently completed skills #}
             {% if completed_skills %}
             <details class="m-clamp-wrap" style="margin-top: 0.75rem;">
-                <summary style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                <summary class="ov-toggle" style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     &#10003; Recently Completed ({{ completed_skills|length }})
                 </summary>
                 <div class="m-unclamp m-clamp" style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
@@ -399,28 +399,36 @@
         {% if corp_history %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
             <details class="m-clamp-wrap">
-                <summary style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
+                <summary class="ov-toggle" style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     Corporation History ({{ corp_history|length }})
                 </summary>
+                {# Phones (mobile R2, D3): key 1 corporation, key 2 tenure
+                   (absent when unknown), Joined when open. The desktop logo
+                   stays untagged, so phones hide it: its data-on-error="hide"
+                   sets an inline display:none that a tagged cell's display
+                   !important would override. The phone-only lead wraps its
+                   own sized copy instead. #}
                 <div class="m-unclamp m-clamp" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
                     {% for h in corp_history %}
-                    <div style="display: flex; align-items: center; gap: 0.5rem;
+                    <div class="m-row" data-click="toggleMRow" style="display: flex; align-items: center; gap: 0.5rem;
                                 padding: 0.35rem 0.6rem; font-size: 10px;
                                 border-bottom: 1px solid rgba(200,169,81,0.08);
                                 {% if h.is_current %}background: rgba(200,169,81,0.07);{% endif %}">
+                        <span class="m-only" data-m="lead"><img src="https://images.evetech.net/corporations/{{ h.corporation_id }}/logo?size=32"
+                             alt="" width="18" height="18" style="border-radius:2px;" data-on-error="hide"></span>
                         <img src="https://images.evetech.net/corporations/{{ h.corporation_id }}/logo?size=32"
                              style="width:18px;height:18px;border-radius:2px;flex-shrink:0;" data-on-error="hide">
-                        <span style="flex: 1; color: {% if h.is_current %}var(--accent){% else %}var(--text){% endif %};">
+                        <span data-m="key" style="flex: 1; color: {% if h.is_current %}var(--accent){% else %}var(--text){% endif %};">
                             {{ h.corporation_name }}
                         </span>
                         {% if h.days_in is not none %}
-                        <span style="color: var(--muted); white-space: nowrap; min-width: 4rem; text-align: right;">
+                        <span data-m="key" style="color: var(--muted); white-space: nowrap; min-width: 4rem; text-align: right;">
                             {% if h.days_in >= 365 %}{{ (h.days_in / 365)|round(1) }}y
                             {% elif h.days_in > 0 %}{{ h.days_in }}d
                             {% else %}&lt;1d{% endif %}
                         </span>
                         {% endif %}
-                        <span style="color: var(--muted); white-space: nowrap; min-width: 5.5rem; text-align: right;">{{ h.start_date }}</span>
+                        <span data-m-label="Joined" style="color: var(--muted); white-space: nowrap; min-width: 5.5rem; text-align: right;">{{ h.start_date }}</span>
                     </div>
                     {% endfor %}
                 </div>

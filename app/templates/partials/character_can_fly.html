@@ -13,6 +13,20 @@
   the rest of the character page far down the viewport) — no JS required.
   `missing_fits` arrives pre-sorted by the route, fewest/shortest missing
   training first (character_detail.py's character_can_fly()).
+
+  Phones (mobile R2, D1/D2). Each <details> is its list's clamp wrap: the
+  first 10 entries, then "Show all N". The Show all button sits after the
+  list's own container, never among the rows: .b-row:last-child drops the
+  last row's border on desktop, and a sibling button (even display:none)
+  would take :last-child from it.
+  - Can fly now: link rows (m-row--link), keyed fit and folder. No
+    data-click: on phones the fit link stretches over the whole row (CSS,
+    site.css R2 T1).
+  - Missing skills: each card is an m-row whose cells are phone-only
+    (m-only) copies; the desktop head row and skill lines stay untagged, so
+    phones hide them and desktop renders exactly as before. Key 2 is the
+    fit's total training time. Key 1's link is inline, so a tap beside the
+    name opens the row.
 #}
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Can Fly</span></div>
@@ -27,33 +41,41 @@
     <div style="padding:0.6rem 0.75rem;font-size:11px;color:var(--muted);">Flies {{ can_fly }} of {{ total }} saved fits{% if missing_fits %} &middot; {{ missing_fits|length }} need{{ 's' if missing_fits|length == 1 else '' }} skills{% endif %}</div>
 
     {% if can_fly_fits %}
-    <details style="margin:0 0.75rem 0.6rem;">
-        <summary style="cursor:pointer;font-size:10px;color:var(--success);letter-spacing:0.1em;text-transform:uppercase;">
+    <details class="m-clamp-wrap" style="margin:0 0.75rem 0.6rem;">
+        <summary class="ov-toggle" style="cursor:pointer;font-size:10px;color:var(--success);letter-spacing:0.1em;text-transform:uppercase;">
             Can fly now ({{ can_fly_fits|length }})
         </summary>
-        <div style="margin-top:0.4rem;">
+        <div class="m-clamp" style="margin-top:0.4rem;">
             {% for f in can_fly_fits %}
-            <div class="b-row">
-                <a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;">
+            <div class="b-row m-row m-row--link cf-fly">
+                <a data-m="key" href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;">
                     {{ f.ship_name }} &mdash; {{ f.name }}
                 </a>
-                <span class="b-row-val is-muted">{{ f.folder if f.folder else "—" }}</span>
+                <span data-m="key" class="b-row-val is-muted">{{ f.folder if f.folder else "—" }}</span>
             </div>
             {% endfor %}
         </div>
+        {% if can_fly_fits|length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ can_fly_fits|length }}</button>
+        {% endif %}
     </details>
     {% endif %}
 
     {% if missing_fits %}
-    <details style="margin:0 0.75rem 0.6rem;">
-        <summary style="cursor:pointer;font-size:10px;color:var(--danger);letter-spacing:0.1em;text-transform:uppercase;">
+    <details class="m-clamp-wrap" style="margin:0 0.75rem 0.6rem;">
+        <summary class="ov-toggle" style="cursor:pointer;font-size:10px;color:var(--danger);letter-spacing:0.1em;text-transform:uppercase;">
             Missing skills ({{ missing_fits|length }})
         </summary>
         <div style="margin:0.4rem 0 0.5rem;font-size:9px;color:var(--muted);">
             Sorted by fastest to train first. Training times are approx. (default attributes).
         </div>
+        {# The clamp holds the cards only, so the note above isn't counted
+           among the first 10. A plain block: the cards' margins collapse
+           through it exactly as they did without it. #}
+        <div class="m-clamp">
         {% for f in missing_fits %}
-        <div class="b-card" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
+        {% set total_str = f.get('missing_training_str') %}
+        <div class="b-card m-row" data-click="toggleMRow" style="padding:0.6rem 0.75rem;margin-bottom:0.5rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;">
                 <a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                     {{ f.ship_name }} &mdash; {{ f.name }}
@@ -69,8 +91,20 @@
                 </div>
                 {% endfor %}
             </div>
+            <span class="m-only" data-m="key" style="font-size:11px;"><a href="/tools/fitting?load={{ f.id }}" style="color:var(--accent);text-decoration:none;">{{ f.ship_name }} &mdash; {{ f.name }}</a></span>
+            {% if total_str %}
+            <span class="m-only" data-m="key" style="font-size:11px;color:var(--accent);">{{ total_str }}</span>
+            {% endif %}
+            {% for m in f.missing %}
+            <div class="m-only" data-m-label="{{ m.skill_name }}"><span>{{ m.have }} &rarr; {{ m.need }} &middot; {{ m.time_str }} approx.</span></div>
+            {% endfor %}
+            <div class="m-only" data-m-label="Folder"><span>{{ f.folder if f.folder else "—" }}</span></div>
         </div>
         {% endfor %}
+        </div>
+        {% if missing_fits|length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ missing_fits|length }}</button>
+        {% endif %}
     </details>
     {% endif %}
     {% endif %}

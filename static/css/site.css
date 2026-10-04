@@ -878,6 +878,38 @@
 
 /* ── R2 T1 · character overview ── */
 @media (max-width: 640px) {
+    /* Can Fly → Can fly now (D1): link rows with no data-click. The fit link
+       (key 1) stretches over the whole row, so a tap anywhere opens the fit.
+       The link's overflow:hidden doesn't clip it: its containing block is
+       the row, an ancestor of the link. */
+    .cf-fly.m-row--link { position: relative; }
+    .cf-fly.m-row--link > a[data-m="key"]::after { content: ""; position: absolute; inset: 0; }
+    /* A long folder name (key 2) can't squeeze the fit name to nothing. vw,
+       because a % max-width on the auto key-2 track resolves cyclically. */
+    .cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"] {
+        max-width: 40vw !important; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* 40px tap targets: the Can Fly, Recently Completed and Corporation
+       History toggles. line-height centres the text and keeps the summary a
+       list item, so its native disclosure marker stays. */
+    summary.ov-toggle { min-height: 40px; line-height: 40px; }
+    /* Asset-location and jump-clone headers (already flex, align-items
+       centre); the class is only used on the character overview. */
+    .asset-location-header { min-height: 40px; }
+
+    /* Combat Profile ISK row (D6): one column of label/value lines. The
+       tile's value comes first in the markup, so row-reverse puts the label
+       on the left; the value keeps its own colour and size. !important only
+       where an inline style has to lose. */
+    .ks-isk { flex-direction: column; text-align: left !important; }
+    .ks-isk > .ks-isk-tile {
+        display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+        flex: none !important; min-width: 0 !important; padding: 0.5rem 0.75rem !important;
+        border-right: none !important; border-bottom: 1px solid var(--border);
+    }
+    .ks-isk > .ks-isk-tile:last-child { border-bottom: none; }
+    .ks-isk > .ks-isk-tile > * { margin-top: 0 !important; }
 }
 /* ── end R2 T1 ── */
 

@@ -276,6 +276,10 @@
     function _combatChart(canvas, kind, d) {
         var palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7',
                        '#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
+        // Phones (≤640px, mobile R2): the doughnut's and the stream chart's
+        // legends go below the chart; beside it they squeeze the plot to a
+        // sliver. Read at render, like the rest of the options.
+        var legendSide = (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) ? 'bottom' : 'right';
         if (kind === 'radar') {
             return new Chart(canvas, {
                 type: 'radar',
@@ -326,7 +330,7 @@
                 options: {
                     responsive: true, maintainAspectRatio: false, cutout: '50%',
                     plugins: {
-                        legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        legend: { position: legendSide, labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
                         tooltip: { callbacks: { label: function (ctx) {
                             var total = data.reduce(function (a, b) { return a + b; }, 0);
                             var pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
@@ -389,7 +393,7 @@
                         x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
                         y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     },
-                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' } }
+                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: legendSide } }
                 }
             });
         }
