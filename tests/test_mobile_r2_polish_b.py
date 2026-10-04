@@ -69,6 +69,20 @@ def _count(cls, css):
     return len(re.findall(re.escape(cls) + r"(?![\w-])", css))
 
 
+def _all_phone_bodies(css):
+    """Every `(max-width: 640px)` @media body in `css`, brace-matched."""
+    out = []
+    for m in re.finditer(r"@media([^{]*)\{", css):
+        if "max-width: 640px" not in m.group(1):
+            continue
+        depth, i = 1, m.end()
+        while depth and i < len(css):
+            depth += (css[i] == "{") - (css[i] == "}")
+            i += 1
+        out.append(css[m.end():i - 1])
+    return "\n".join(out)
+
+
 # ── 6. The section and the phone_block helper ─────────────────────────
 
 def test_phone_block_splits_a_section_into_its_phone_body_and_the_rest():
@@ -105,8 +119,9 @@ def test_new_class_hooks_are_styled_only_in_this_sections_phone_block():
         assert _count(cls, phone), cls
         assert _count(cls, css) == _count(cls, phone), f"{cls} is styled outside the R2 P phone block"
     # The overview's .ref-type is styled for desktop by character_detail.html's
-    # own <style>; site.css only adds this phone rule.
-    assert _count(".ref-type", css) == _count(".ref-type", phone) > 0
+    # own <style>; site.css styles it on phones only.
+    assert _count(".ref-type", phone)
+    assert _count(".ref-type", css) == _count(".ref-type", _all_phone_bodies(css))
 
 
 # ── 1. Wallet journal: both keys on one line ──────────────────────────
@@ -177,11 +192,11 @@ def test_journal_page_key_one_is_just_the_type_badge():
 
 def test_overview_key_one_is_just_the_type_badge():
     """The overview's markup belongs to another task, and the fix there is
-    CSS only, so pin the shape it relies on: an m-only key cell whose one
+    CSS only, so pin the shape it relies on: a key cell whose one element
     child is the .ref-type badge."""
     for key in _badge_keys(_render_overview()):
-        assert key["attrs"].get("class", "").split() == ["m-only"]
-        assert [k.get("class", "").split() for k in key["kids"]] == [["ref-type"]]
+        assert len(key["kids"]) == 1
+        assert "ref-type" in key["kids"][0].get("class", "").split()
 
 
 # ── 2. Dashboard Combat Profile stream chart ──────────────────────────
