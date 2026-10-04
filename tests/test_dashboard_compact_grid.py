@@ -5,8 +5,8 @@ One shared CSS grid template per breakpoint — no row carries its own inline
 portrait, name, location, ship, wallet, training, flags) once each. Flags
 render on one line in their own track at the base and <=1000px tiers
 (`flex-wrap: nowrap`); at the <=760px tier that track is gone and a copy
-inside the name cell wraps instead (mobile design §5.3). The wallet cell is right-aligned with tabular figures at
-every tier.
+inside the name cell wraps instead (mobile design §5.3). The wallet cell
+is right-aligned with tabular figures at every tier.
 
 T-078 also fixed a row-to-row column-drift bug: each `.dash-compact-row` is
 its own independent grid container, so a bare `auto` or bare `Nfr` track
@@ -274,4 +274,4 @@ def test_760px_tier_hides_training_for_real_and_shows_inline_flags():
     assert re.search(r"\.dash-compact-training\s*\{\s*display:\s*none\s*!important;", small)
     assert re.search(r"\.dash-compact-loc, \.dash-compact-ship, \.dash-compact-flags\s*\{\s*display:\s*none;", small)
     assert re.search(r"\.dash-compact-flags-inline\s*\{[^}]*display:\s*inline-flex;[^}]*flex-wrap:\s*wrap;", small)
-    assert re.search(r"\.dash-compact-name\s*\{[^}]*overflow:\s*visible\s*!important", small)
+    assert re.search(r"\.dash-compact-name\s*\{[^}]*overflow:\s*visible\s*!important;[^}]*overflow-wrap:\s*anywhere", small)
