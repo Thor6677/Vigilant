@@ -17,6 +17,9 @@ jobs:
   test:
     name: pytest
     runs-on: ubuntu-latest
+    # Same caps as tests.yml: a hang here once held a release for five hours
+    # (ISS-112).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +39,7 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
 
   build:
     name: build and push

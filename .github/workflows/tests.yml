@@ -20,6 +20,9 @@ jobs:
   pytest:
     name: pytest
     runs-on: ubuntu-latest
+    # The suite takes a few minutes. Without a cap, a hang runs to GitHub's
+    # six-hour default (the v1.8.0 release run did, ISS-112).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -40,5 +43,9 @@ jobs:
 
       # No secrets or .env needed: tests/conftest.py supplies dummy SSO
       # credentials and points DATABASE_URL at a throwaway SQLite file.
+      # --timeout fails a single stuck test instead of the whole job, and the
+      # thread method dumps every thread's stack so the log names the hang. It
+      # is set here rather than in pytest config so local runs don't need the
+      # plugin.
       - name: Run tests
-        run: pytest tests -q
+        run: pytest tests -q --timeout=120 --timeout-method=thread

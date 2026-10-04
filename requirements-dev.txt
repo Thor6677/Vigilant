@@ -1,4 +1,5 @@
 pytest>=8
+pytest-timeout>=2.3
 aiosqlite
 greenlet
 PyYAML
