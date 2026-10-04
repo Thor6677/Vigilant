@@ -203,3 +203,113 @@ def test_skill_plans_badge_line_ellipsises_on_phones():
     rule = re.search(r'\.m-row > \[data-m="key"\] > \.m-trunc > \*\s*\{([^}]*)\}', _phone())
     assert rule, "m-trunc rule missing from the phone CSS"
     assert "text-overflow: ellipsis" in rule.group(1) and "min-width: 0" in rule.group(1)
+
+
+# ── Task 14: Planetary (§6.2) ────────────────────────────────────────
+
+from jinja2 import Environment, FileSystemLoader  # noqa: E402
+
+from app.routes import pi as pi_mod  # noqa: E402
+
+_PI_PAGES = {
+    "planetary.html": "colonies",
+    "planetary_lookup.html": "lookup",
+    "planetary_calculator.html": "calculator",
+    "planetary_chain.html": "chain",
+}
+_PI_URLS = ("/industry/planetary", "/industry/planetary/lookup",
+            "/industry/planetary/calculator", "/industry/planetary/chain")
+
+
+def _render_planetary():
+    pilot = _NS(character_id=90000001, character_name="Pilot Alpha")
+    rows = [
+        {"char": pilot, "planet": {"planet_id": 40000001, "planet_type": "gas",
+                                   "system_name": "Sample System", "num_pins": 12,
+                                   "expiry_warning": "critical", "expiry_time_str": "3h 10m"}},
+        {"char": pilot, "planet": {"planet_id": 40000002, "planet_type": "barren",
+                                   "system_name": None, "num_pins": 4,
+                                   "expiry_warning": None, "expiry_time_str": None}},
+    ]
+    return _render(pi_mod, "planetary.html", "/industry/planetary",
+                   rows=rows, missing_scope_chars=[], sort="expiry", filter_type="",
+                   filter_warn="", all_types=["barren", "gas"], total_planets=2,
+                   expiring_soon=1, warning_cnt=0, pin_group_names={})
+
+
+def test_planetary_colony_rows_keep_their_expander():
+    rows = assert_mrow(_render_planetary(), min_rows=2)
+    for r in rows:
+        a = r["attrs"]
+        assert a["class"].split() == ["pi-row-top", "m-row"]
+        assert a["data-click"] == "toggleExpanded"           # not toggleMRow (§4.3)
+        assert a["data-toggle-target"] == ".pi-row"
+        assert a["hx-trigger"] == "click once"
+        assert a["hx-get"].startswith("/industry/planetary/planet/90000001/")
+
+
+def test_planetary_colony_rows_tag_portrait_character_and_expiry():
+    first, second = _rows(_render_planetary())[:2]
+    assert [c["tag"] for c in _lead(first)] == ["img"]
+    name, expiry = _keys(first)
+    assert name["text"] == "Pilot Alpha"
+    assert expiry["text"] == "3h 10m"
+    assert "color:var(--danger)" in expiry["attrs"]["style"]   # urgency colour kept
+    labelled = _labelled(first)
+    assert list(labelled) == ["Planet", "System", "Pins"]
+    assert labelled["Planet"]["text"] == "gas"
+    assert labelled["System"]["text"] == "Sample System"
+    assert labelled["Pins"]["text"] == "12"
+    arrow = [c for c in first["cells"] if "pi-arrow" in c["attrs"].get("class", "")]
+    assert len(arrow) == 1
+    assert "data-m" not in arrow[0]["attrs"] and "data-m-label" not in arrow[0]["attrs"]
+    assert _keys(second)[1]["text"] == "no extractor"
+    assert _labelled(second)["System"]["text"] == "—"
+    for r in (first, second):
+        _assert_single_value_child(r)
+
+
+def test_planetary_column_header_hides_on_phones():
+    assert re.search(r'<div class="b-panel-head m-head"', _render_planetary())
+
+
+def test_planetary_subnav_keeps_desktop_pills_and_adds_a_view_dropdown():
+    html = _render_planetary()
+    pills = re.search(r'<nav class="m-tabs-desktop" style="display:flex;gap:0.5rem;font-size:11px;">(.*?)</nav>', html, re.S).group(1)
+    details = re.search(r'<details class="m-tabs">(.*?)</details>', html, re.S).group(1)
+    assert '<span class="m-tabs-label">View</span><span class="m-tabs-current">Colonies</span>' in details
+    for part in (pills, details):
+        for url in _PI_URLS:
+            assert f'href="{url}"' in part, url
+    assert 'href="/industry/planetary" class="b-btn is-active"' in pills
+    assert pills.count("is-active") == 1
+    assert 'href="/industry/planetary" class="is-active" aria-current="page"' in details
+    assert 'class="b-tab-strip' not in html          # no desktop tab strip on PI pages
+
+
+def test_planetary_filter_wraps_each_label_and_select():
+    html = _render_planetary()
+    assert 'class="pi-filter"' in html
+    pairs = re.findall(r'<span class="m-pair">\s*<label class="b-muted-sm">(\w+)</label>\s*<select name="(\w+)"', html)
+    assert pairs == [("Sort", "sort"), ("Type", "filter_type"), ("Expiry", "filter_warn")]
+    # Desktop keeps the label beside its select, as before the wrappers.
+    assert re.search(r"@media \(min-width: 641px\)\s*\{\s*\.pi-filter \.m-pair\s*\{\s*display:\s*inline-flex", html)
+
+
+def test_planetary_tabs_macro_marks_each_view_active():
+    env = Environment(loader=FileSystemLoader(_TEMPLATES))
+    tmpl = env.from_string('{% from "partials/_pi_tabs.html" import pi_tabs %}{{ pi_tabs(active) }}')
+    for key, label in (("colonies", "Colonies"), ("lookup", "System Lookup"),
+                       ("calculator", "Calculator"), ("chain", "Chain Explorer")):
+        html = tmpl.render(active=key)
+        assert f'<span class="m-tabs-current">{label}</span>' in html
+        assert html.count('aria-current="page"') == 1          # dropdown only
+        assert html.count('b-btn is-active') == 1              # desktop pill
+
+
+def test_planetary_sibling_pages_share_the_view_tabs():
+    for page, key in _PI_PAGES.items():
+        src = _source(page)
+        assert '{% from "partials/_pi_tabs.html" import pi_tabs %}' in src, page
+        assert f"{{{{ pi_tabs('{key}') }}}}" in src, page
+        assert "<nav " not in src, page
