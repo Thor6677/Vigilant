@@ -1077,10 +1077,11 @@ function toggleDashSection() {
     body.style.display = willExpand ? '' : 'none';
     this.textContent = willExpand ? '▾' : '▸';
     if (willExpand) activateLazy(body);
-    if (dashIsPhone()) {
-        // Phones (§5.5): per-device state only. dashCollapsedSections, which
-        // a later ✕ posts, is never touched, so nothing here reaches server
-        // prefs.
+    if (dashIsPhone() && DASH_PHONE_COLLAPSED.indexOf(key) !== -1) {
+        // Phones (§5.5), heavy sections only: per-device state. Every other
+        // section (Contracts, Recent Kills, ...) falls through to the server
+        // prefs path below. dashCollapsedSections, which a later ✕ posts,
+        // never holds these phone-only keys, so nothing leaks to server prefs.
         var open = dashPhoneOpenRead();
         if (willExpand) _arrAdd(open, key); else _arrRemove(open, key);
         dashPhoneOpenWrite(open);
@@ -1160,8 +1161,9 @@ function toggleDashGroup() {
 }
 
 // §5.5 init. Phones: collapse the heavy sections this device hasn't opened.
-// Server-collapsed or server-hidden ones are left exactly as rendered (this
-// only ever collapses). Then, at every width, load each section the server
+// The init never expands anything; server-collapsed sections are left as
+// rendered. A server-hidden heavy section is collapsed inside its hidden
+// wrapper, so un-hiding it on a phone shows a collapsed bar. Then, at every width, load each section the server
 // marked data-dash-autoload whose body is still visible: on desktop that is
 // exactly the set that used to load via hx-trigger="load".
 function dashSectionsInit() {

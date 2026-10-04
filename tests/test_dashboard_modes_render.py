@@ -347,11 +347,13 @@ def test_phone_init_uses_a_per_device_open_set():
             "'kill_pulse', 'combat_profile'];") in html
     assert "document.querySelectorAll('[data-dash-autoload]')" in html
     read = html.split("function dashPhoneOpenRead()")[1].split("function dashPhoneOpenWrite(")[0]
-    write = html.split("function dashPhoneOpenWrite(")[1].split("function dashSectionsInit()")[0]
+    write = html.split("function dashPhoneOpenWrite(")[1].split("\nfunction ")[0]
     assert "try {" in read and "catch (e)" in read
     assert "try {" in write and "catch (e)" in write
     toggle = html.split("function toggleDashSection()")[1].split("function hideDashSection()")[0]
-    phone = toggle.index("if (dashIsPhone())")
+    guard = "if (dashIsPhone() && DASH_PHONE_COLLAPSED.indexOf(key) !== -1)"
+    assert guard in toggle
+    phone = toggle.index(guard)
     assert toggle.index("dashPhoneOpenWrite(", phone) < toggle.index("return;", phone) \
         < toggle.index("persistSectionState()")
 
@@ -379,4 +381,6 @@ def test_lazy_partials_drop_their_title_lines_but_keep_data_meta():
     assert "all your characters · stored killmails" not in pulse
     profile = _partial_source("dashboard_combat_profile.html")
     assert "Your Pilots Combat Profile" not in profile
+    assert ">Combat Profile<" not in profile
+    assert ">Combat Radar<" in profile
     assert "{{ char_count }} char" in profile
