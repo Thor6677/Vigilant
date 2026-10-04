@@ -775,3 +775,12 @@
     /* Details → / Permissions: centre the text in the 44px touch height. */
     #dash-table tr.m-row a.dash-tlink { display: inline-flex; align-items: center; justify-content: center; }
 }
+
+/* Dashboard section toolbar buttons (▾ / ✕). Their desktop size used to be
+   inline; it lives here now so the phone tap-target rule (m-tap) doesn't
+   have to fight it. Two classes, to outrank .b-btn's own padding and size. */
+.b-btn.dash-sec-toggle, .b-btn.dash-sec-hide { padding: 2px 6px; font-size: 9px; }
+@media (max-width: 640px) {
+    /* ≥8px between the two 40px buttons (each wrapper's gap is 0.35rem). */
+    .dash-sec-toggle + .dash-sec-hide { margin-left: 4px; }
+}

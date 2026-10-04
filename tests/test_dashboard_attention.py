@@ -973,3 +973,29 @@ def test_route_structure_banners_drop_old_alerts(attn_client):
     assert labels["TowerAlertMsg"] not in r.text
     assert r.text.count(labels["StructureFuelAlert"]) == 1
     dash_mod._structure_banner_cache.clear()
+
+
+# ── Mobile R1: snooze buttons on phones (mobile design §5.7) ──────────────
+
+def test_snooze_buttons_become_a_full_width_segmented_control_on_phones():
+    import re
+    import types
+
+    from app.dashboard.attention import AttentionItem
+    from app.routes import dashboard_attention as attn_routes
+    from tests.test_mobile_css import _media_bodies
+
+    item = AttentionItem(
+        key="jobs_ready:1001", fingerprint="fp", severity="gold", character_id=1001,
+        character_name="Pilot One", text="2 jobs ready", action_label="Jobs",
+        action_url="/industry/jobs", action_method="get", since=None)
+    request = types.SimpleNamespace(state=types.SimpleNamespace(csp_nonce="test-nonce"))
+    # attention_age is a global on THIS router's env, not dashboard.py's.
+    html = attn_routes.templates.env.get_template("partials/dashboard_attention.html").render(
+        request=request, items=[item], overflow_items=[], expanded=False)
+    assert html.count('<button type="submit" title="Dismiss') == 3
+    phone = _media_bodies(html, "max-width: 640px")
+    assert re.search(r"\.da-actions\s*\{[^}]*grid-column:\s*1 / -1", phone)
+    assert re.search(r"\.da-dismiss\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)", phone)
+    assert re.search(r"\.da-dismiss button\s*\{[^}]*min-height:\s*40px;[^}]*font-size:\s*12px", phone)
+    assert "max-width: 400px" not in html

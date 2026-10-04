@@ -384,3 +384,22 @@ def test_lazy_partials_drop_their_title_lines_but_keep_data_meta():
     assert ">Combat Profile<" not in profile
     assert ">Combat Radar<" in profile
     assert "{{ char_count }} char" in profile
+
+
+# ── Mobile R1: tap targets (mobile design §5.7) ────────────────────────────
+
+def test_section_buttons_use_the_tap_class_not_inline_sizing():
+    html = render_full("custom")
+    btns = re.findall(r'<button type="button" class="(dash-sec-(?:toggle|hide) b-btn m-tap)"[^>]*style="([^"]*)"', html)
+    assert len(btns) >= 2
+    for cls, style in btns:
+        assert "padding" not in style and "font-size" not in style, (cls, style)
+        assert "border:1px solid var(--border)" in style, (cls, style)
+
+
+def test_section_button_desktop_size_lives_in_site_css():
+    css = _css()
+    assert re.search(r"\.b-btn\.dash-sec-toggle,\s*\.b-btn\.dash-sec-hide\s*\{\s*padding:\s*2px 6px;\s*font-size:\s*9px;\s*\}", css)
+    phone = _media_bodies(css, "max-width: 640px")
+    assert not re.search(r"\.b-btn\.dash-sec-toggle", phone)  # desktop rule, not phone-only
+    assert re.search(r"\.dash-sec-toggle \+ \.dash-sec-hide\s*\{[^}]*margin-left:\s*4px", phone)
