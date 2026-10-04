@@ -61,6 +61,16 @@
         color: var(--muted);
         white-space: nowrap;
     }
+
+    /* Phones (mobile design §6.5): the search box, then "Nearest to" above a
+       full-width character select. Side by side, the bar was wider than a
+       400px screen. */
+    @media (max-width: 640px) {
+        .asset-search-bar { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+        .asset-input { max-width: none; }
+        .asset-controls-right { flex-direction: column; align-items: stretch; gap: 0.25rem; }
+        .asset-select { width: 100%; max-width: 100%; }
+    }
 </style>
 {% endblock %}
 

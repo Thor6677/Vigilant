@@ -60,7 +60,7 @@
     </div>
 
     {# ── Header row ──────────────────────────────────────────────────────────── #}
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);padding:0.25rem 0.75rem;">
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.25rem 0.75rem;">
         <span style="width:32px;flex-shrink:0;"></span>
         <span class="b-row-label" style="flex:2;min-width:120px;">Item</span>
         <span class="b-row-label" style="flex:0 0 60px;text-align:right;">Qty</span>
@@ -71,25 +71,31 @@
     </div>
 
     {% for asset in assets %}
-    <div class="b-table-row">
+    {# Phones (mobile design §6.5): lead = icon, key 1 = item, key 2 = qty;
+       the rest open as labelled lines. The pilot is the panel heading, so
+       there's no per-row Character cell. #}
+    <div class="b-table-row m-row" data-click="toggleMRow">
         {# Type icon #}
-        <img src="https://images.evetech.net/types/{{ asset.type_id }}/icon?size=32"
+        <img data-m="lead" src="https://images.evetech.net/types/{{ asset.type_id }}/icon?size=32"
              alt=""
              style="width:32px;height:32px;object-fit:contain;border:1px solid var(--border);flex-shrink:0;filter:grayscale(10%);"
              loading="lazy">
 
         {# Item name #}
-        <span style="flex:2;min-width:120px;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span data-m="key" style="flex:2;min-width:120px;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {{ asset.type_name or ("Type " ~ asset.type_id) }}
         </span>
 
         {# Quantity #}
-        <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--muted);">
+        <span data-m="key" style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--muted);">
             {% if asset.is_singleton %}—{% else %}×{{ "{:,}".format(asset.quantity) }}{% endif %}
         </span>
 
-        {# Location name + region #}
-        <span style="flex:3;min-width:160px;padding-left:0.6rem;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {# Location name + region. One wrapper: an open phone row lays a
+           labelled cell out as label · value. Inline on desktop, so the
+           cell's own ellipsis still applies there. #}
+        <span data-m-label="Location" style="flex:3;min-width:160px;padding-left:0.6rem;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">
             {% if asset.location_name %}
                 <span class="b-text">{{ asset.location_name }}</span>
                 {% if asset.region %}
@@ -98,20 +104,21 @@
             {% else %}
                 <span class="b-muted">Unknown</span>
             {% endif %}
+            </span>
         </span>
 
         {# Security #}
-        <span style="flex:0 0 34px;text-align:center;">
+        <span data-m-label="Sec" style="flex:0 0 34px;text-align:center;">
             {{ sec_badge(asset.security) }}
         </span>
 
         {# Location flag #}
-        <span style="flex:0 0 90px;text-align:center;font-size:9px;color:var(--muted);letter-spacing:0.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span data-m-label="Flag" style="flex:0 0 90px;text-align:center;font-size:9px;color:var(--muted);letter-spacing:0.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {{ asset.location_flag | camel_to_space }}
         </span>
 
         {# Jump distance #}
-        <span style="flex:0 0 52px;text-align:center;">
+        <span data-m-label="Jumps" style="flex:0 0 52px;text-align:center;">
             {{ jump_badge(asset.jump_dist, asset.has_origin) }}
         </span>
     </div>

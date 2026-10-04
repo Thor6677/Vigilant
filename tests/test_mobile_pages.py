@@ -526,3 +526,62 @@ def test_journal_overview_description_is_a_block_so_it_ellipsizes():
     assert "display:block" in desc["style"]
     assert "text-overflow:ellipsis" in desc["style"]
     assert "margin-left" not in desc["style"]
+
+
+# ── Task 17: Asset Search (§6.5) ─────────────────────────────────────
+
+from app.routes import assets as assets_mod  # noqa: E402
+
+
+def _render_asset_results():
+    pilot = _NS(character_id=90000001, character_name="Pilot Alpha", sort_order=0)
+    stack = {"type_id": 34, "type_name": "Tritanium", "quantity": 125000, "is_singleton": False,
+             "location_name": "Sample Station", "region": "Sample Region", "security": 0.9,
+             "location_flag": "Hangar", "jump_dist": 3, "has_origin": True}
+    ship = {"type_id": 587, "type_name": "Sample Frigate", "quantity": 1, "is_singleton": True,
+            "location_name": None, "region": None, "security": None,
+            "location_flag": "ShipHangar", "jump_dist": None, "has_origin": False}
+    groups = {"Main": {90000001: {"char": pilot, "assets": [stack, ship]}}}
+    tmpl = assets_mod.templates.env.get_template("partials/assets_results.html")
+    return tmpl.render(groups=groups, sorted_group_names=["Main"])
+
+
+def test_assets_results_rows_key_on_item_and_quantity():
+    html = _render_asset_results()
+    rows = assert_mrow(html, min_rows=2)
+    assert all(r["attrs"]["data-click"] == "toggleMRow" for r in rows)
+    stack, ship = _rows(html)[:2]
+    assert [c["tag"] for c in _lead(stack)] == ["img"]
+    item, qty = _keys(stack)
+    assert item["text"] == "Tritanium"
+    assert qty["text"] == "×125,000"
+    assert _keys(ship)[1]["text"] == "—"                         # singleton
+    assert list(_labelled(stack)) == ["Location", "Sec", "Flag", "Jumps"]
+    assert _labelled(stack)["Location"]["text"] == "Sample Station · Sample Region"
+    assert _labelled(stack)["Sec"]["text"] == "0.9"
+    assert _labelled(stack)["Flag"]["text"] == "Hangar"
+    assert _labelled(stack)["Jumps"]["text"] == "3j"
+    assert _labelled(ship)["Location"]["text"] == "Unknown"
+    assert _labelled(ship)["Flag"]["text"] == "Ship Hangar"
+    for r in (stack, ship):
+        _assert_single_value_child(r)
+
+
+def test_assets_results_header_hides_on_phones():
+    html = _render_asset_results()
+    assert '<div class="b-table-row m-head" style="border-bottom:2px solid var(--border);padding:0.25rem 0.75rem;">' in html
+
+
+def test_assets_search_bar_stacks_on_phones():
+    html = _render(assets_mod, "assets.html", "/assets",
+                   characters=[{"character_id": 90000001, "character_name": "Pilot Alpha",
+                                "system_name": "Sample System"}],
+                   active_char_id=90000001)
+    styles = re.findall(r"<style[^>]*>(.*?)</style>", html, re.S)
+    page_css = _norm(next(s for s in styles if ".asset-search-bar {" in s))
+    assert "@media (max-width: 640px) {" in page_css, "assets.html needs a phone block in its own <style>"
+    css = page_css.split("@media (max-width: 640px) {", 1)[1]
+    assert re.search(r"\.asset-search-bar \{ flex-direction: column; align-items: stretch;", css)
+    assert re.search(r"\.asset-input \{ max-width: none; \}", css)
+    assert re.search(r"\.asset-controls-right \{ flex-direction: column; align-items: stretch;", css)
+    assert re.search(r"\.asset-select \{ width: 100%; max-width: 100%; \}", css)
