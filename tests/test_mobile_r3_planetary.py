@@ -337,3 +337,131 @@ def test_calculator_without_a_flow_chart_still_renders_its_rows():
         no_sde=False, tier_names={})
     assert "pi-flow-container" not in html
     assert_mrow(html, min_rows=len(_P0) + 4 + len(_PIPELINE))
+
+
+# ── Chain Explorer (D15 A) ───────────────────────────────────────────
+
+def _chain_item(tid, name, price, margin):
+    return {"type_id": tid, "name": name, "price": price, "margin_pct": margin}
+
+
+_CHAIN = {
+    0: [_chain_item(91001, "Sample Gas", 12.5, None)],
+    1: [_chain_item(95001, "Sample Oxidizer", 410.0, 12.0)],
+    2: [_chain_item(92001, "Sample Coolant", 9000.0, -4.0)],
+    3: [_chain_item(93001, "Sample Unit", 60000.0, 20.0)],
+    4: [_chain_item(_TARGET, "Sample Node", 0, None)],
+}
+_INPUTS = [{"type_id": 92001, "name": "Sample Coolant", "quantity": 10},
+           {"type_id": 92002, "name": "Sample Mainframe", "quantity": 10}]
+_USES = [{"type_id": _TARGET, "name": "Sample Node"}, {"type_id": 94002, "name": "Sample Relay"}]
+
+
+def _chain():
+    return render_page(pi_mod, "planetary_chain.html", "/industry/planetary/chain",
+                       chain=_CHAIN, p0_by_planet_type={})
+
+
+def _chain_node():
+    return render_page(
+        pi_mod, "partials/planetary_chain_node.html", "/industry/planetary/chain/node/93001",
+        type_id=93001, name="Sample Unit", tier=3, planet_types=None, inputs=_INPUTS,
+        uses=_USES, cycle_time=3600, output_qty=3, price=60000.0, input_cost=100000.0,
+        revenue_per_cycle=180000.0, margin_per_cycle=80000.0)
+
+
+class _Links(Styled):
+    """Every <a>'s attributes."""
+
+    def __init__(self):
+        super().__init__()
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self.links.append({k: (v or "") for k, v in attrs})
+
+
+def _links(html):
+    p = _Links()
+    p.feed(html)
+    p.close()
+    return p.links
+
+
+def _page_script(html, needle):
+    """The page's own script block that contains `needle`."""
+    (script,) = [s for s in re.findall(r"<script nonce=[^>]*>(.*?)</script>", html, re.S)
+                 if needle in s]
+    return script
+
+
+def test_chain_grid_stacks_and_the_detail_panel_stops_sticking_via_hooks():
+    html = _chain()
+    (grid,) = _with_class(html, "pi-chain-grid")
+    assert "b-grid-2" in grid[1]
+    assert grid[2].startswith("grid-template-columns:minmax(0,2fr) minmax(0,1fr);")
+    (panel,) = _with_class(html, "pi-chain-detail-panel")
+    assert "b-panel" in panel[1]
+    assert panel[2] == "position:sticky;top:1rem;"          # desktop keeps it sticky
+    assert re.search(r'class="b-panel pi-chain-detail-panel"[^>]*>\s*'
+                     r'<div class="b-panel-head">.*?<div id="chain-detail">', html, re.S)
+
+
+def test_css_chain_stacks_unsticks_and_clears_the_sticky_nav():
+    css = _phone()
+    # The inline grid template beats .b-grid-2's phone rule, hence the hook.
+    assert "grid-template-columns: minmax(0, 1fr) !important" in rule_bodies(css, ".pi-chain-grid")
+    assert "position: static !important" in rule_bodies(css, ".pi-chain-detail-panel")
+    # scrollIntoView lands the detail below the 46px sticky nav.
+    margin = re.search(r"scroll-margin-top:\s*(\d+)px", rule_bodies(css, "#chain-detail"))
+    assert margin and int(margin.group(1)) >= 46
+
+
+def test_chain_script_scrolls_a_loaded_detail_into_view_on_phones_only():
+    script = _page_script(_chain(), "piLoadNode")
+    helper = re.search(r"function piShowChainDetail\(\) \{(.*?)\n\}", script, re.S)
+    assert helper, "the page script needs a piShowChainDetail helper"
+    body = helper.group(1)
+    gate = body.index("window.matchMedia('(max-width: 640px)').matches")
+    assert "return" in body[gate:body.index("scrollIntoView")], "desktop returns before scrolling"
+    assert gate < body.index("document.getElementById('chain-detail')") < body.index("scrollIntoView")
+    # Every way a detail loads: a tile (htmx), a link inside the detail, a deep link.
+    hook = re.search(r"addEventListener\('htmx:afterSwap', function\(evt\) \{(.*?)\}\);", script, re.S)
+    assert hook and "evt.detail.target.id === 'chain-detail'" in hook.group(1)
+    assert "piShowChainDetail()" in hook.group(1)
+    load_node = script[script.index("window.piLoadNode"):script.index("function selectChainItem")]
+    assert re.search(r"el\.innerHTML = html; piShowChainDetail\(\);", load_node)
+    from_hash = script[script.index("function loadFromHash"):]
+    assert re.search(r"if \(el\) \{ el\.innerHTML = html; piShowChainDetail\(\); \}", from_hash)
+    # Only the detail scroll is gated: the deep link still centres its tile.
+    assert "tile.scrollIntoView({ behavior: 'smooth', block: 'center' });" in from_hash
+
+
+def test_chain_node_links_and_chips_are_tap_targets():
+    links = _links(_chain_node())
+    recipe = [a for a in links if "pi-node-input" in a.get("class", "").split()]
+    assert [a["data-type-id"] for a in recipe] == [str(i["type_id"]) for i in _INPUTS]
+    chips = [a for a in links if a not in recipe]
+    assert [a["data-type-id"] for a in chips] == [str(u["type_id"]) for u in _USES]
+    for a in links:
+        assert "m-tap" in a.get("class", "").split()
+        assert a["data-click"] == "piLoadNode" and a["href"] == "#"
+    # Desktop styles unchanged.
+    assert all(a["style"].startswith("color:inherit;text-decoration:none;"
+                                     "border-bottom:1px dotted var(--muted);") for a in recipe)
+    assert all(a["style"].startswith("font-size:11px;padding:0.2rem 0.5rem;") for a in chips)
+
+
+def test_css_chain_node_recipe_links_underline_their_text_not_the_tap_box():
+    """m-tap makes a recipe link a 40px box; its dotted border would sit at
+    the box's foot, well below the name, so phones underline the text."""
+    body = rule_bodies(_phone(), ".pi-node-input")
+    assert "border-bottom: none !important" in body
+    assert "text-decoration: underline dotted var(--muted) !important" in body
+    # The 40px link and its "× qty" share a line: centre them, not top-align.
+    assert "align-items: center" in rule_bodies(_phone(), ".pi-node-recipe")
+    rows = re.findall(r'<div class="pi-node-recipe" style="([^"]*)">\s*<span class="b-text">\s*'
+                      r'<a [^>]*class="pi-node-input m-tap"', _chain_node())
+    assert len(rows) == len(_INPUTS)
+    assert all(s.startswith("display:flex;justify-content:space-between;") for s in rows)

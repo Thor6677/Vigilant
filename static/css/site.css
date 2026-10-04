@@ -1444,6 +1444,23 @@
     .pi-calc-row2 input, .pi-calc-row2 select { min-width: 0; }
     .pi-calc-row2 > .pi-calc-note { grid-column: 1 / -1; }
     .pi-calc-actions > .b-btn { flex: 1 1 0; }
+
+    /* Chain Explorer (D15 A): the inline 2fr/1fr grid beats .b-grid-2's
+       phone rule, so the hook stacks it; the detail panel sits below the
+       list and stops being sticky. The page script scrolls #chain-detail
+       into view after a load; the margin clears the 46px sticky nav and
+       the panel's Detail head. */
+    .pi-chain-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .pi-chain-detail-panel { position: static !important; }
+    #chain-detail { scroll-margin-top: 88px; }
+    /* Recipe links are 40px m-tap boxes here: underline the name rather
+       than draw the dotted border at the foot of the box, and centre the
+       "× qty" beside it instead of top-aligning it. */
+    .pi-node-input {
+        border-bottom: none !important;
+        text-decoration: underline dotted var(--muted) !important; text-underline-offset: 3px;
+    }
+    .pi-node-recipe { align-items: center; }
 }
 /* ── end R3 T6 ── */
 

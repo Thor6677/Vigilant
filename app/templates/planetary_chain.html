@@ -13,7 +13,10 @@
     Prices are ESI global averages (15 min cache).
 </div>
 
-<div class="b-grid-2 b-section" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:1rem;">
+{# pi-chain-grid / pi-chain-detail-panel: phone hooks (site.css R3 T6). The
+   inline template beats .b-grid-2's phone rule, so the grid stacks via the
+   hook, and the detail panel below the list stops being sticky. #}
+<div class="b-grid-2 b-section pi-chain-grid" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:1rem;">
     <div>
         {% for tier in [0,1,2,3,4] %}
         {% set items = chain.get(tier, []) %}
@@ -74,7 +77,7 @@
     </div>
 
     <div>
-        <div class="b-panel" style="position:sticky;top:1rem;">
+        <div class="b-panel pi-chain-detail-panel" style="position:sticky;top:1rem;">
             <div class="b-panel-head"><span class="b-label">Detail</span></div>
             <div id="chain-detail">
                 <div class="b-empty" style="padding:1rem;">Click a commodity on the left to see its details.</div>
@@ -89,6 +92,20 @@
 </style>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Phones (mobile R3, D15 A): the detail panel stacks below every tier list,
+ * so a detail loaded from a tile far up the page would land off-screen.
+ * Bring it into view. Desktop keeps it beside the list and never scrolls.
+ * Called from every load path: a tile (htmx), piLoadNode and the deep link. */
+function piShowChainDetail() {
+    if (!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) return;
+    var el = document.getElementById('chain-detail');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+/* A tile loads its detail through htmx (hx-target="#chain-detail"). */
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target && evt.detail.target.id === 'chain-detail') piShowChainDetail();
+});
+
 /* Intra-panel navigation between commodity nodes.
  *
  * This lived inside partials/planetary_chain_node.html, which htmx swaps
@@ -110,7 +127,7 @@ window.piLoadNode = function(e) {
     if (target) target.classList.add('is-active');
     fetch('/industry/planetary/chain/node/' + typeId)
         .then(function(r){ return r.text(); })
-        .then(function(html){ el.innerHTML = html; });
+        .then(function(html){ el.innerHTML = html; piShowChainDetail(); });
 };
 
 /* Clicking a chain tile makes it the active one. */
@@ -136,7 +153,7 @@ function selectChainItem() {
             .then(function(r){ return r.text(); })
             .then(function(html){
                 var el = document.getElementById('chain-detail');
-                if (el) el.innerHTML = html;
+                if (el) { el.innerHTML = html; piShowChainDetail(); }
             });
     }
     if (document.readyState === 'loading') {
