@@ -41,6 +41,8 @@
     </div>
 </div>
 
+{# Phones (R4 T1 in site.css): the stat cards become label · value lines
+   (D3 A) and the range buttons centred tap targets. #}
 <div class="mk-stats">
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-avg">—</div><div class="mk-stat-label">Latest avg</div></div>
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-high">—</div><div class="mk-stat-label">Latest high</div></div>
@@ -78,8 +80,13 @@
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
     var TYPE_ID = {{ type_id }};
-    var range = '1y', chart = null;
+    var range = '1y', chart = null, lastData = null;
     var errEl = document.getElementById('mk-error');
+    /* Phones (≤640px, D4 A): price only. The volume bars and their
+       right-hand axis would take ~50px of a 360px screen, so they go, and
+       at most 3 date labels fit. Read when the chart is built; crossing the
+       breakpoint rebuilds it (below). Desktop options are untouched. */
+    var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
     function fmtIsk(v) {
         if (v == null) return '—';
@@ -101,6 +108,7 @@
     }
 
     function build(data) {
+        lastData = data;
         errEl.style.display = 'none';
         document.getElementById('mk-latest-avg').textContent = fmtIsk(last(data.average));
         document.getElementById('mk-latest-high').textContent = fmtIsk(last(data.highest));
@@ -145,6 +153,11 @@
                 }
             }
         };
+        if (phoneMq && phoneMq.matches) {
+            cfg.data.datasets = cfg.data.datasets.filter(function (d) { return d.yAxisID !== 'y1'; });
+            delete cfg.options.scales.y1;
+            cfg.options.scales.x.ticks.maxTicksLimit = 3;
+        }
         if (chart) { chart.destroy(); }
         chart = new Chart(document.getElementById('mk-chart'), cfg);
     }
@@ -179,6 +192,12 @@
         });
         load();
     });
+
+    if (phoneMq) {
+        var onBreakpoint = function () { if (chart && lastData) build(lastData); };
+        if (phoneMq.addEventListener) phoneMq.addEventListener('change', onBreakpoint);
+        else if (phoneMq.addListener) phoneMq.addListener(onBreakpoint);
+    }
 
     load();
 })();

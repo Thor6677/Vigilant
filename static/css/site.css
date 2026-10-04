@@ -1508,6 +1508,37 @@
 
 /* ── R4 T1 · market ── */
 @media (max-width: 640px) {
+    /* Search results (D1 A): link rows whose key 1 is two lines, the name
+       and its group below it, each ellipsising on its own. R1's key cell
+       is one nowrap line; in this list its children are block lines, so
+       the global key rule stays as it is. Sizes and the group's muted
+       colour come from the page's .mk-row-name / .mk-row-group. */
+    .mk-results > .m-row > .mk-row-key > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mk-results > .m-row > .mk-row-go { color: var(--muted); font-size: 12px; }
+
+    /* Order book (D2 A): Sell above Buy. The global [style*="1fr 1fr"]
+       rule already stacks this grid; this names it, and minmax(0, …) keeps
+       any row content from widening the column past the screen. Keys at
+       12px, as other phone rows; !important beats their inline 11px. */
+    .mk-book { grid-template-columns: minmax(0, 1fr) !important; }
+    .mk-book .m-row > [data-m="key"] { font-size: 12px !important; }
+
+    /* Stat cards (D3 A; both the Latest strip and the order book's): one
+       label · value line per card, as R2 T2's Queue Summary. Each card
+       keeps its own border and the cards close up into one box. The label
+       leads although each card puts its value first; the value keeps its
+       colour and size and wraps inside itself. !important: the page's
+       <style> loads after this file. */
+    .mk-stats { grid-template-columns: minmax(0, 1fr) !important; gap: 0 !important; }
+    .mk-stats > .mk-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+    .mk-stats > .mk-stat + .mk-stat { border-top: none; }
+    .mk-stat > .mk-stat-label { order: -1; flex: none; margin: 0; text-align: left; }
+    .mk-stat > .mk-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* Price-history range buttons: the global phone rule makes them 44px
+       tall, but their 10px label sat at the top of that block box. Centre
+       a 12px label in a box at least 40px wide; the 44px height stays. */
+    #mk-ranges > .b-btn { display: flex; align-items: center; justify-content: center; min-width: 40px; font-size: 12px; }
 }
 /* ── end R4 T1 ── */
 

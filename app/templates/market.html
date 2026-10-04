@@ -61,4 +61,20 @@
         </div>
     </div>
 </div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Phones (R4 T1): no autofocus, so the keyboard doesn't open over the page
+   on load. Desktop keeps the attribute. The browser queues an autofocus
+   when it parses the input, so removing the attribute may come too late:
+   blur the box if it has the focus now or after the next frame. */
+(function () {
+    if (!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) return;
+    var q = document.querySelector('.mk-input[autofocus]');
+    if (!q) return;
+    q.removeAttribute('autofocus');
+    function drop() { if (document.activeElement === q) q.blur(); }
+    drop();
+    if (window.requestAnimationFrame) window.requestAnimationFrame(drop);
+})();
+</script>
 {% endblock %}
