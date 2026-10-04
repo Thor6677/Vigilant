@@ -199,8 +199,7 @@ def test_skill_plans_phone_line_carries_skills_and_sp():
 def test_skill_plans_badge_line_ellipsises_on_phones():
     html = _render_skill_plans()
     assert re.search(r'<span class="m-trunc"[^>]*>\s*<span[^>]*>Alpha Doctrine', html)
-    with open(_SITE_CSS, encoding="utf-8") as fh:
-        css = fh.read()
-    phone = css[css.rindex("@media (max-width: 640px)"):]
-    assert '.m-row > [data-m="key"] > .m-trunc > *' in phone
-    assert "text-overflow: ellipsis" in phone and "min-width: 0" in phone
+    from tests.test_mobile_css import _phone
+    rule = re.search(r'\.m-row > \[data-m="key"\] > \.m-trunc > \*\s*\{([^}]*)\}', _phone())
+    assert rule, "m-trunc rule missing from the phone CSS"
+    assert "text-overflow: ellipsis" in rule.group(1) and "min-width: 0" in rule.group(1)
