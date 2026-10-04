@@ -471,6 +471,9 @@ def test_appraisal_rows_lead_icon_key_name_and_total():
         assert lead["tag"] == "img" and "m-only" in _classes(lead["attrs"])
         assert f"/types/{item['type_id']}/icon" in lead["attrs"]["src"]
         assert (lead["attrs"]["width"], lead["attrs"]["height"]) == ("16", "16")
+        # Never hide a tagged cell inline: the phone rules' !important beats
+        # it anyway, so a broken icon just leaves its empty 16x16 slot.
+        assert "data-on-error" not in lead["attrs"]
         k1, k2 = row_keys(row)
         assert k1["text"] == item["name"]
         icons = [k for k in k1["kids"] if "/icon" in k.get("src", "")]
