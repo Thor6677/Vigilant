@@ -348,9 +348,9 @@ def test_key_columns_are_never_repeated_as_detail_lines():
 def test_key_cells_render_when_their_columns_are_off():
     html = _table([SUMMARY], columns=["account", "wallet"])
     keys = [k for k in assert_mrow(html)[0]["children"] if k.get("data-m") == "key"]
-    assert len(keys) == 2 and all(k.get("class") == "m-only" for k in keys)
+    assert len(keys) == 2 and all("m-only" in k.get("class", "").split() for k in keys)
     row = _row_html(html, 1001)
-    assert re.search(r'<td class="m-only" data-m="key"><a href="/character/1001"[^>]*>Pilot One</a>', row)
+    assert re.search(r'<td class="m-only dash-tname" data-m="key"><a href="/character/1001"[^>]*>Pilot One</a>', row)
     assert '<td class="m-only" data-m="key">1d</td>' in row
     assert row.index(">Pilot One<") < row.index(">1d<")  # name is key 1 (left)
 
@@ -358,7 +358,7 @@ def test_key_cells_render_when_their_columns_are_off():
 def test_stand_in_name_cell_precedes_an_enabled_queue_end_column():
     html = _table([SUMMARY], columns=["queue_end", "account"])
     keys = [k for k in assert_mrow(html)[0]["children"] if k.get("data-m") == "key"]
-    assert keys[0].get("class") == "m-only"
+    assert keys[0].get("class") == "m-only dash-tname"
     assert keys[1].get("data-col-cell") == "queue_end"
 
 
@@ -397,4 +397,52 @@ def test_table_rows_phone_css():
     phone = _media_bodies(_css(), "max-width: 640px")
     assert re.search(r"#dash-table tr\.m-row > td\s*\{[^}]*padding:\s*0\s*!important", phone)
     assert re.search(r"#dash-table tr\.m-row > td\[data-m-label\]\s*\{[^}]*white-space:\s*normal\s*!important", phone)
-    assert re.search(r"#dash-table tr\.dash-table-divider", phone)
+    # Divider rows are plain rows: Task 1's m-table rule already blocks them,
+    # so there is no table-specific copy of it.
+    assert re.search(r"table\.m-table > tbody > tr:not\(\.m-row\) > td\s*\{[^}]*display:\s*block", phone)
+    assert not re.search(r"#dash-table tr\.dash-table-divider", phone)
+
+
+def test_both_name_cells_keep_their_badges_visible_on_phones():
+    """Key 1 clips at its end, so a long name used to push PAUSED/EMPTY/RENEW
+    out of view. Both name cells are `dash-tname`: a flex row where only the
+    name link shrinks and every badge (or badge wrapper) keeps its width."""
+    for columns in (["pilot", "account"], ["account"]):
+        html = _table([EMPTY], columns=columns)
+        key1 = [k for k in assert_mrow(html)[0]["children"] if k.get("data-m") == "key"][0]
+        assert "dash-tname" in key1.get("class", "").split(), columns
+    stand_in = _row_html(_table([EMPTY], columns=["account"]), 1005)
+    assert re.search(r'<td class="m-only dash-tname" data-m="key"><a [^>]*>Pilot Five</a><span class="b-badge"[^>]*>EMPTY</span>', stand_in)
+    phone = _media_bodies(_css(), "max-width: 640px")
+    assert re.search(r"#dash-table tr\.m-row > td\.dash-tname\s*\{[^}]*display:\s*flex\s*!important", phone)
+    assert re.search(r"#dash-table tr\.m-row > td\.dash-tname > a\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis", phone)
+    assert re.search(r"#dash-table tr\.m-row > td\.dash-tname > :not\(a\)\s*\{[^}]*flex:\s*none", phone)
+
+
+def test_open_row_links_centre_their_text_on_phones():
+    row = _row_html(_table([SUMMARY]), 1001)
+    assert row.count('class="b-btn dash-tlink"') == 2
+    phone = _media_bodies(_css(), "max-width: 640px")
+    assert re.search(r"#dash-table tr\.m-row a\.dash-tlink\s*\{[^}]*display:\s*inline-flex[^}]*align-items:\s*center", phone)
+
+
+def test_tags_cell_is_a_detail_line_only_when_there_are_tags():
+    tagged = build_table_row(SUMMARY, None, {"tags": ["Cyno"], "note": None}, None, None)
+    bare = build_table_row(dict(SUMMARY, character_id=1002, name="Pilot Two"), None, None, None, None)
+    html = render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=[tagged, bare], prefs_patch={"table_columns": ["pilot", "tags"]})
+    labels = {r["attrs"]["data-char-id"]: [k.get("data-m-label") for k in r["children"] if k.get("data-col-cell") == "tags"]
+              for r in mrows(html)}
+    assert labels == {"1001": ["Tags"], "1002": [None]}  # the bare cell still renders, unlabelled
+
+
+def test_every_row_has_its_column_cells_in_header_order():
+    rows = [build_table_row(dict(SUMMARY, character_id=cid), None, None, None, None) for cid in (1001, 1002)]
+    html = render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=rows, prefs_patch={"table_columns": list(prefs_mod.TABLE_COLUMNS)})
+    headers = re.findall(r'<th data-click="sortDashTable" data-col="([^"]+)"', html)
+    assert headers == list(prefs_mod.TABLE_COLUMNS)
+    parsed = mrows(html)
+    assert len(parsed) == 2
+    for r in parsed:
+        assert [k["data-col-cell"] for k in r["children"] if "data-col-cell" in k] == headers

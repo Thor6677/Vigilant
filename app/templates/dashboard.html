@@ -108,6 +108,7 @@
 {% from "partials/dashboard_group_header.html" import group_header %}
 {% from "partials/dashboard_compact_row.html" import pilot_row %}
 {% from "partials/dashboard_section_shell.html" import section_toolbar %}
+{% from "partials/_dash_table_columns.html" import column_labels %}
 
 {# T-070: saved view state. `dash_prefs`/`dash_mode`/`pilot_summaries` come
    from dashboard()'s one load_prefs() call + build_pilot_summaries() — see
@@ -310,6 +311,30 @@
    only those secondary controls, under the selects. When none of them
    applies, the whole row is m-hide. #}
 <div class="m-only dash-phone-toolbar" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+    {% if dash_mode == 'table' %}
+    {# Table view (mobile design §5.2): thead is hidden on phones, so this
+       select (the table's visible columns) and the reverse button stand in
+       for header clicks, through the same sortDashTable(). `?sort=` only
+       breaks ties under table_sort here, so it isn't offered. When the
+       saved sort column is hidden, a disabled placeholder names it (the rows
+       are still sorted by it) and reverse is off, as no header exists. #}
+    {% set dash_tsort = dash_prefs.table_sort %}
+    {% set dash_tsort_shown = dash_tsort.key in dash_prefs.table_columns %}
+    <div style="flex:1 1 0;min-width:0;display:flex;align-items:flex-end;gap:0.3rem;">
+        <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
+            Sort
+            <select data-change="dashTableSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
+                {% if not dash_tsort_shown %}
+                <option value="" disabled selected>{{ column_labels.get(dash_tsort.key, dash_tsort.key) }}</option>
+                {% endif %}
+                {% for key in dash_prefs.table_columns %}
+                <option value="{{ key }}"{% if dash_tsort.key == key %} selected{% endif %}>{{ column_labels.get(key, key) }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="button" class="b-btn m-tap" data-click="dashTableSortReverse" aria-label="Reverse sort"{% if not dash_tsort_shown %} disabled{% endif %} style="flex:none;height:44px;border:1px solid var(--border);">{{ '▲' if dash_tsort.dir == 'asc' else '▼' }}</button>
+    </div>
+    {% else %}
     <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
         Sort
         <select data-change="dashSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
@@ -318,6 +343,7 @@
             {% endfor %}
         </select>
     </label>
+    {% endif %}
     <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
         View
         <select data-change="dashViewSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
@@ -752,10 +778,14 @@ function dashSortSelect() {
 // Back / bfcache restores the select's last-picked value, not the page's
 // real sort/mode; snap both phone selects back to the server-rendered
 // selection so a re-pick always fires `change`.
+// The Table view's column select is the exception: it sorts in place
+// without navigating, so its truth is dashTableSort (which bfcache keeps
+// along with the reordered rows), not the server-rendered selection.
 window.addEventListener('pageshow', function () {
   document.querySelectorAll('.dash-phone-toolbar select').forEach(function (s) {
     for (var i = 0; i < s.options.length; i++) { if (s.options[i].defaultSelected) { s.selectedIndex = i; break; } }
   });
+  _dashSyncPhoneTableSort();
 });
 
 // ── T-076: tag filter — server round-trip like setDashMode, so tag TEXT
@@ -784,7 +814,43 @@ function sortDashTable() {
     var dir = (dashTableSort.key === col && dashTableSort.dir === 'asc') ? 'desc' : 'asc';
     dashTableSort = { key: col, dir: dir };
     _applyDashTableSort();
+    _dashSyncPhoneTableSort();
     postDashPrefs({ table_sort: dashTableSort });
+}
+
+// Mobile design §5.2: thead is hidden on phones, so the phone toolbar's
+// column select and reverse button stand in for header clicks. Each finds
+// the column's own header and runs sortDashTable() on it: the exact path a
+// desktop click takes (client-side reorder, then the table_sort prefs save).
+function _dashTableHeader(key) {
+    var ths = document.querySelectorAll('#dash-table thead th[data-col]');
+    for (var i = 0; i < ths.length; i++) { if (ths[i].dataset.col === key) return ths[i]; }
+    return null;
+}
+// A newly picked column sorts ascending, as a click on its header would.
+function dashTableSortSelect() {
+    var th = _dashTableHeader(this.value);
+    if (th) sortDashTable.call(th);
+}
+// Clicking the sorted column's header again flips its direction.
+function dashTableSortReverse() {
+    var th = _dashTableHeader(dashTableSort.key);
+    if (th) sortDashTable.call(th);
+}
+// Point the phone select and reverse button at dashTableSort. Runs after
+// every sort (header click or phone control) and on pageshow, where the
+// browser may have restored a stale select value.
+function _dashSyncPhoneTableSort() {
+    var sel = document.querySelector('.dash-phone-toolbar select[data-change="dashTableSortSelect"]');
+    var btn = document.querySelector('.dash-phone-toolbar button[data-click="dashTableSortReverse"]');
+    if (!sel || !btn) return;
+    var shown = !!_dashTableHeader(dashTableSort.key);
+    var want = shown ? dashTableSort.key : '';  // '' = the hidden-column placeholder
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === want) { sel.selectedIndex = i; break; }
+    }
+    btn.textContent = dashTableSort.dir === 'asc' ? '▲' : '▼';
+    btn.disabled = !shown;
 }
 
 function _applyDashTableSort() {

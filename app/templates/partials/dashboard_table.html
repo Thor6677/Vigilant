@@ -19,7 +19,10 @@
    Mobile R1 (mobile design §5.2). On phones (≤640px) each pilot row is an
    m-row (contract in static/css/site.css):
      * lead  = the online dot
-     * key 1 = pilot name + PAUSED/EMPTY/RENEW badges (other flags are m-hide)
+     * key 1 = pilot name + PAUSED/EMPTY/RENEW badges (other flags are m-hide).
+               Both name cells carry `dash-tname`: on phones the cell is a
+               flex row where only the name truncates, so a long name can
+               never push the status badges out of view.
      * key 2 = Queue End
    Both key cells ALWAYS render. When the Columns picker has the pilot or
    Queue End column off, an m-only stand-in renders instead (the name one
@@ -32,14 +35,11 @@
    dashboard.html's client sort finds them by name: the phone-only cells
    mean a cell's position no longer matches its header. (Not `data-col`:
    that's the header's attribute, and tests/test_dashboard_table.py checks
-   its absence per column.)
+   its absence per column.) thead is hidden on phones, so dashboard.html's
+   phone toolbar carries a column Sort select + reverse button instead; both
+   go through the same sortDashTable() a header click runs.
 #}
-{% set column_labels = {
-    'pilot': 'Pilot', 'account': 'Account', 'corporation': 'Corporation',
-    'system': 'System', 'ship': 'Ship', 'wallet': 'Wallet', 'wallet_7d': '7d',
-    'net_worth': 'Net Worth', 'queue_end': 'Queue End', 'training': 'Training',
-    'pi': 'PI', 'jobs': 'Jobs', 'orders': 'Orders', 'escrow': 'Escrow',
-    'clones': 'Clones', 'last_sync': 'Last Sync', 'tags': 'Tags', 'can_fly': 'Can Fly'} %}
+{% from "partials/_dash_table_columns.html" import column_labels %}
 {% set active_columns = dash_prefs.table_columns %}
 {% set current_sort = dash_prefs.table_sort %}
 
@@ -86,17 +86,19 @@
         <tr class="m-row" data-click="toggleMRow" data-char-id="{{ row.character_id }}" data-account="{{ row.account }}" style="{% if row.needs_reauth %}border-left:3px solid var(--danger);{% endif %}">
             <td class="m-only" data-m="lead"><span class="b-dot" style="width:7px;height:7px;{% if row.is_online %}background:var(--success);box-shadow:0 0 4px var(--success);{% else %}background:var(--muted);{% endif %}"></span></td>
             {% if 'pilot' not in active_columns %}
-            <td class="m-only" data-m="key"><a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>{% for f in row.flags if f.label in ('PAUSED', 'EMPTY', 'RENEW') %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-left:0.3rem;">{{ f.label }}</span>{% endfor %}</td>
+            <td class="m-only dash-tname" data-m="key"><a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>{% for f in row.flags if f.label in ('PAUSED', 'EMPTY', 'RENEW') %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);">{{ f.label }}</span>{% endfor %}</td>
             {% endif %}
             {% for key in active_columns %}
             {% if key == 'tags' %}
-            <td data-col-cell="tags" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
+            {# No tags: no label, so the phone row hides the cell (untagged
+               m-row children are hidden) instead of showing an empty line. #}
+            <td data-col-cell="tags"{% if row.tags %} data-m-label="{{ column_labels.get(key, key) }}"{% endif %} data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
                 {% for t in row.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-right:2px;">{{ t }}</span>{% endfor %}
             </td>
             {% elif key == 'can_fly' %}
             <td data-col-cell="can_fly" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.can_fly.sort }}" data-canfly-slot="{{ row.character_id }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);"><span data-canfly-text>{{ row.cells.can_fly.text }}</span></td>
             {% elif key == 'pilot' %}
-            <td data-col-cell="pilot" data-m="key" data-sort-value="{{ row.cells.pilot.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">
+            <td class="dash-tname" data-col-cell="pilot" data-m="key" data-sort-value="{{ row.cells.pilot.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);white-space:nowrap;">
                 <a href="/character/{{ row.character_id }}" style="color:var(--text);text-decoration:none;">{{ row.cells.pilot.text }}</a>
                 {% if row.flags %}<span style="margin-left:0.3rem;">{% for f in row.flags %}<span class="b-badge{% if f.label not in ('PAUSED', 'EMPTY', 'RENEW') %} m-hide{% endif %}" style="font-size:8px;border:1px solid var(--border);color:var(--muted);">{{ f.label }}</span>{% endfor %}</span>{% endif %}
             </td>
@@ -114,7 +116,7 @@
             <td class="m-only" data-m="key">{{ row.cells.queue_end.get('phone_text') or row.cells.queue_end.text }}</td>
             {% endif %}
             {# Links inside an m-row never toggle it (toggleMRow ignores taps on a). #}
-            <td class="m-only" data-m-label="Open"><span style="display:flex;gap:0.4rem;justify-content:flex-end;"><a href="/character/{{ row.character_id }}" class="b-btn" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Details →</a><a href="/account/permissions/{{ row.character_id }}" class="b-btn" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Permissions</a></span></td>
+            <td class="m-only" data-m-label="Open"><span style="display:flex;gap:0.4rem;justify-content:flex-end;"><a href="/character/{{ row.character_id }}" class="b-btn dash-tlink" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Details →</a><a href="/account/permissions/{{ row.character_id }}" class="b-btn dash-tlink" style="flex:none;padding:2px 8px;font-size:10px;border:1px solid var(--border);">Permissions</a></span></td>
         </tr>
         {% endfor %}
         </tbody>

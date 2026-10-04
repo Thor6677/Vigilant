@@ -761,10 +761,17 @@
    desktop padding, a bottom border and nowrap. As m-row grid items those
    would draw a rule under every cell, so the row draws one line instead.
    Detail (labelled) cells may wrap; key cells keep nowrap for the ellipsis.
-   Divider rows sit in a tbody that is now display:block. */
+   Account divider rows need nothing here: they are plain rows, which the
+   m-table rules above already turn into full-width blocks. */
 @media (max-width: 640px) {
     #dash-table tr.m-row { border-bottom: 1px solid var(--border); }
     #dash-table tr.m-row > td { padding: 0 !important; border-bottom: none !important; }
     #dash-table tr.m-row > td[data-m-label] { white-space: normal !important; }
-    #dash-table tr.dash-table-divider, #dash-table tr.dash-table-divider > td { display: block; }
+    /* Name cell (key 1): only the name truncates. A plain key cell clips at
+       its end, which would cut the PAUSED/EMPTY/RENEW badges off first. */
+    #dash-table tr.m-row > td.dash-tname { display: flex !important; align-items: center; gap: 0.3rem; }
+    #dash-table tr.m-row > td.dash-tname > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #dash-table tr.m-row > td.dash-tname > :not(a) { flex: none; }
+    /* Details → / Permissions: centre the text in the 44px touch height. */
+    #dash-table tr.m-row a.dash-tlink { display: inline-flex; align-items: center; justify-content: center; }
 }

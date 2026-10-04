@@ -229,3 +229,62 @@ def test_phone_selects_reset_to_rendered_selection_on_pageshow():
     html = render_full("custom")
     assert "pageshow" in html
     assert ".dash-phone-toolbar select" in html
+
+
+# ── Task 9 review: Table view sorts by its own columns on phones ───────────
+
+from app.dashboard import prefs as prefs_mod
+
+
+def _table_mode(**prefs):
+    return render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=[], prefs_patch=prefs or None)
+
+
+def _reverse_button(html):
+    m = re.search(r'<button [^>]*data-click="dashTableSortReverse"[^>]*>([^<]*)</button>', html)
+    assert m, "no reverse-sort button"
+    return m
+
+
+def test_table_mode_phone_sort_lists_the_visible_columns():
+    html = _table_mode(table_columns=["pilot", "account", "wallet"],
+                       table_sort={"key": "wallet", "dir": "desc"})
+    opts = _options(html, "dashTableSortSelect")
+    assert [(v, label) for v, _sel, label in opts] == [("pilot", "Pilot"), ("account", "Account"), ("wallet", "Wallet")]
+    assert [v for v, sel, _label in opts if sel] == ["wallet"]
+    # Option values are exactly the header keys a desktop click sorts by.
+    assert re.findall(r'<th data-click="sortDashTable" data-col="([^"]+)"', html) == [v for v, _s, _l in opts]
+    btn = _reverse_button(html)
+    assert 'aria-label="Reverse sort"' in btn.group(0) and "m-tap" in btn.group(0)
+    assert "disabled" not in btn.group(0)
+    assert btn.group(1) == "▼"
+    assert '<select data-change="dashSortSelect"' not in html  # `?sort=` only breaks ties here
+    assert html.count('class="m-only dash-phone-toolbar"') == 1
+
+
+def test_table_mode_phone_sort_names_a_hidden_sort_column():
+    html = _table_mode(table_columns=["account", "wallet"], table_sort={"key": "pilot", "dir": "asc"})
+    assert '<option value="" disabled selected>Pilot</option>' in html
+    assert [v for v, sel, _label in _options(html, "dashTableSortSelect") if sel] == []
+    btn = _reverse_button(html)
+    assert " disabled" in btn.group(0) and btn.group(1) == "▲"
+
+
+def test_other_modes_keep_the_url_sort_select():
+    for mode in ("cards", "compact", "detailed"):
+        html = render_full("name", dash_mode=mode)
+        assert [v for v, sel, _label in _options(html, "dashSortSelect") if sel] == ["/dashboard?sort=name"], mode
+        assert '<select data-change="dashTableSortSelect"' not in html, mode
+        assert not re.search(r'<button [^>]*data-click="dashTableSortReverse"', html), mode
+
+
+def test_phone_table_sort_runs_the_header_click_path():
+    html = _table_mode()
+    for fn in ("function dashTableSortSelect() {", "function dashTableSortReverse() {"):
+        body = html.split(fn, 1)[1].split("\n}", 1)[0]
+        assert "sortDashTable.call(th)" in body, fn
+    sort_body = html.split("function sortDashTable() {", 1)[1].split("\n}", 1)[0]
+    assert "_dashSyncPhoneTableSort();" in sort_body
+    pageshow = html.split("window.addEventListener('pageshow'", 1)[1].split("\n});", 1)[0]
+    assert "_dashSyncPhoneTableSort();" in pageshow
