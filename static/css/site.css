@@ -1329,6 +1329,62 @@
 
 /* ── R3 T7 · stockpiles/farm/appraisal ── */
 @media (max-width: 640px) {
+    /* Stockpiles and Skill Farm rows (D17 A, D18 A) are table rows in an
+       m-table. Each cell carries the page's desktop padding and bottom
+       rule; as grid items those would draw a line under every cell, so
+       the row draws one instead. Two classes and two types outrank the
+       page's `.sp-table td` / `.sf-table td`, whose <style> loads later. */
+    .sp-table tr.m-row,
+    .sf-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .sp-table tr.m-row > td,
+    .sf-table tr.m-row > td { padding: 0; border-bottom: none; }
+
+    /* Stockpiles: the under-stocked tint moves from the cells to the row,
+       so the gaps between an open row's lines are tinted too (beats the
+       page's `.sp-table tr.is-under td`). A covered target's "—" in key 2
+       is muted; a short one keeps the page's red. */
+    .sp-table tr.m-row.is-under { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+    .sp-table tr.m-row.is-under > td { background: none; }
+    .sp-table tr.m-row:not(.is-under) > .sp-deficit { color: var(--muted); }
+
+    /* Remove (both tables): .b-btn's flex:1 would stretch the 40px ×
+       across the whole open row. */
+    .sp-table tr.m-row > td > .sp-del,
+    .sf-table tr.m-row > td > .sf-del { flex: none; }
+
+    /* Skill Farm, Base SP in an open row: the desktop 100px box holds 7
+       digits at 12px. Phones force inputs to 16px, so it widens to hold
+       the 10-digit maximum. */
+    .sf-table tr.m-row > [data-m-label] .sf-input { width: 10em; }
+
+    /* Skill Farm, Monthly profit (open rows and the Total line) in the
+       page's own green/red. The page's `.sf-table td` colour outranks its
+       `.sf-profit` / `.sf-loss`, so desktop draws it in the text colour;
+       desktop is left as it is. */
+    .sf-table td.sf-profit { color: #93c47d; }
+    .sf-table td.sf-loss { color: #e06666; }
+
+    /* Skill Farm Total: not an m-row, so it becomes a "Total" line and two
+       label/value lines. In a block table (m-table) the footer would
+       otherwise be wrapped in anonymous table boxes. The 2px rule moves
+       from every cell to the row and the empty cells hide. A value cell's
+       label comes from data-sf-label, floated left of its right-aligned
+       value; Ready now's ISK keeps its own second line. Three types
+       outrank the page's `.sf-table tfoot td` and `td:first-child`. */
+    .sf-table > tfoot,
+    .sf-table > tfoot > tr { display: block; }
+    .sf-table > tfoot > tr { border-top: 2px solid var(--border); padding: 0.3rem 0; }
+    .sf-table > tfoot > tr > td { display: none; }
+    .sf-table > tfoot > tr > td:first-child,
+    .sf-table > tfoot > tr > td[data-sf-label] { display: block; border-top: none; padding: 0.3rem 0.75rem; }
+    .sf-table > tfoot > tr > td[data-sf-label]::before {
+        content: attr(data-sf-label); float: left; padding-right: 0.6rem;
+        color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+
+    /* Appraisal: "Show all" inside the panel, inset so its border doesn't
+       double against the panel's own sides and bottom. */
+    .apr-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 }
 /* ── end R3 T7 ── */
 

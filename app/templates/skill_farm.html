@@ -63,4 +63,33 @@
 <div id="skill-farm-content">
     {% include "partials/skill_farm_content.html" %}
 </div>
+
+{# Phones: every form in the section (a Base SP change, Remove, Save, Add)
+   swaps the whole section, which would close the pilot row being edited.
+   Re-open the rows that were open, by pilot id. actions.js's afterSettle
+   pass then syncs their aria-expanded. Desktop never opens a row, so this
+   does nothing there. On the page, not in the partial: a script inside a
+   swapped fragment never runs (no nonce). #}
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var open = [];
+    function isFarm(e) {
+        return !!(e.detail && e.detail.target && e.detail.target.id === 'skill-farm-content');
+    }
+    document.addEventListener('htmx:beforeSwap', function (e) {
+        if (!isFarm(e)) return;
+        open = Array.prototype.map.call(
+            e.detail.target.querySelectorAll('tr.m-row.is-open[data-pilot-id]'),
+            function (r) { return r.getAttribute('data-pilot-id'); });
+    });
+    document.addEventListener('htmx:afterSwap', function (e) {
+        if (!isFarm(e)) return;
+        open.forEach(function (id) {
+            var r = e.detail.target.querySelector('tr.m-row[data-pilot-id="' + id + '"]');
+            if (r) r.classList.add('is-open');
+        });
+        open = [];
+    });
+})();
+</script>
 {% endblock %}

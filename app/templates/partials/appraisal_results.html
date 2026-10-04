@@ -51,7 +51,14 @@
         </div>
 
         {# ── Item Table ───────────────────────────────────────────────────────── #}
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+        {# Phones (D19 A): each item is an expand-on-tap row. Lead is the icon
+           (a phone copy; the in-cell one is m-hide), key 1 the item, key 2
+           the line total ("—" with no orders). Name, Qty, Unit price and
+           Volume open below. Past 10 rows a "Show all N" button shows the
+           rest. #appraisal-items stays the list itself (the clamp), so Send
+           to Hauling still reads every row's data-haul-*. The Total row is
+           not an m-row. m-only cells are display:none above 640px. #}
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
             <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Item</span>
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Qty</span>
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Unit Price</span>
@@ -59,26 +66,35 @@
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Volume</span>
         </div>
 
-        <div id="appraisal-items">
+        <div class="m-clamp-wrap apr-clamp">
+        <div id="appraisal-items" class="m-clamp">
         {% for item in items %}
-        <div class="b-table-row"
+        <div class="b-table-row m-row" data-click="toggleMRow"
              data-haul-name="{{ item.name }}" data-haul-qty="{{ item.qty }}"
              data-haul-volume="{{ item.unit_volume }}">
-            <span style="flex:3;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;overflow:hidden;">
-                <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;flex-shrink:0;" data-on-error="hide">
+            <img data-m="lead" class="m-only" loading="lazy" alt="" width="16" height="16"
+                 src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
+                 style="width:16px;height:16px;" data-on-error="hide">
+            <span data-m="key" style="flex:3;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;overflow:hidden;">
+                <img class="m-hide" src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;flex-shrink:0;" data-on-error="hide">
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.name }}</span>
             </span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,}".format(item.qty) }}</span>
+            <span class="m-only" data-m-label="Name">{{ item.name }}</span>
+            <span data-m-label="Qty" style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,}".format(item.qty) }}</span>
             {% if item.unit_price is not none %}
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.2f}".format(item.unit_price) }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">{{ fmt_isk(item.total_price) }}</span>
+            <span data-m-label="Unit price" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.2f}".format(item.unit_price) }}</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">{{ fmt_isk(item.total_price) }}</span>
             {% else %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">No orders</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            <span data-m-label="Unit price" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">No orders</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
             {% endif %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(item.total_volume) }} m³</span>
+            <span data-m-label="Volume" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(item.total_volume) }} m³</span>
         </div>
         {% endfor %}
+        </div>
+        {% if items|length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ items|length }}</button>
+        {% endif %}
         </div>
 
         {# ── Total Row ────────────────────────────────────────────────────────── #}
