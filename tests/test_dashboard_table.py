@@ -234,31 +234,64 @@ def _env():
     return dash_mod.templates.env
 
 
-def test_group_header_does_not_count_paused_pilots_as_training():
-    chars = [types.SimpleNamespace(character_id=1), types.SimpleNamespace(character_id=2)]
-    skill_map = {
-        1: {"current_skill": "Gunnery", "warning": "ok", "queue_end": None},
-        # Real paused data: the queue has entries, so current_skill is set.
-        2: {"current_skill": "Navigation", "warning": "paused", "queue_end": None},
-    }
+def _group_header(skill_map):
+    chars = [types.SimpleNamespace(character_id=cid) for cid in skill_map]
     tmpl = _env().from_string(
         '{% from "partials/dashboard_group_header.html" import group_header %}'
         '{{ group_header("Main", chars, {}, skill_map, {}, True, False) }}')
-    html = tmpl.render(chars=chars, skill_map=skill_map)
+    return tmpl.render(chars=chars, skill_map=skill_map)
+
+
+def test_group_header_does_not_count_paused_pilots_as_training():
+    html = _group_header({
+        1: {"current_skill": "Gunnery", "warning": "ok", "queue_end": None},
+        # Real paused data: the queue has entries, so current_skill is set.
+        2: {"current_skill": "Navigation", "warning": "paused", "queue_end": None},
+    })
     assert "training 1/2" in html
 
 
-def test_compact_row_shows_paused_even_with_a_next_skill():
-    s = dict(build_context("custom")["pilot_summaries"][1004])
-    s["training"] = {**s["training"], "skill": "Navigation", "level": 3, "warning": "paused"}
+def test_group_header_counts_every_training_state_and_nothing_else():
+    """warning and critical queues are running (just ending soon), so they
+    count; empty, no_scope and error never do, even when the dict carries a
+    stale current_skill."""
+    states = ["ok", "warning", "critical", "paused", "empty", "no_scope", "error"]
+    html = _group_header({i: {"current_skill": "Gunnery", "warning": w, "queue_end": None}
+                          for i, w in enumerate(states, 1)})
+    assert "training 3/7" in html
+    for counted in ("warning", "critical"):
+        assert "training 1/1" in _group_header({1: {"current_skill": "Gunnery", "warning": counted}}), counted
+    for skipped in ("empty", "no_scope", "error"):
+        assert "training 0/1" in _group_header({1: {"current_skill": "Gunnery", "warning": skipped}}), skipped
+
+
+def _compact_training_cell(cid):
+    s = build_context("custom")["pilot_summaries"][cid]
     tmpl = _env().from_string(
         '{% from "partials/dashboard_compact_row.html" import pilot_row %}{{ pilot_row(s) }}')
     html = tmpl.render(s=s)
     # The training cell is followed by the flags cell (both before and after
     # Task 10, which only adds an inline flags copy inside the name cell).
-    training = html.split('class="dash-compact-training"', 1)[1].split('class="dash-compact-flags"', 1)[0]
+    return s, html.split('class="dash-compact-training"', 1)[1].split('class="dash-compact-flags"', 1)[0]
+
+
+def test_compact_row_shows_paused_even_with_a_next_skill():
+    s, training = _compact_training_cell(1004)
+    # The shared fixture's paused pilot keeps its first skill, as real paused
+    # queues do; without it this test could not fail.
+    assert s["training"]["warning"] == "paused" and s["training"]["skill"] == "Navigation"
     assert "Paused" in training
     assert "Navigation" not in training
+
+
+@pytest.mark.parametrize("cid, warning", [(1006, "no_scope"), (1011, "error")])
+def test_compact_row_training_cell_is_a_dash_when_unknown(cid, warning):
+    """Like the Table's Training column: a skill queue that couldn't be read
+    shows a dash, not a blank cell."""
+    s, training = _compact_training_cell(cid)
+    assert s["training"]["warning"] == warning
+    assert re.search(r'<span style="font-size:10px;color:var\(--muted\);">&mdash;</span>', training)
+    assert build_table_row(s, None, None, None, None)["cells"]["training"]["text"] == "—"
 
 
 def test_training_sort_ranks_active_then_paused_then_empty():
@@ -277,15 +310,59 @@ def test_training_rank_orders_states():
     assert [training_rank(w) for w in ("ok", "warning", "critical", "paused", "empty", "no_scope", "error", None)] == [0, 0, 0, 1, 2, 3, 3, 3]
 
 
-def test_page_level_training_sort_uses_training_rank():
-    # /dashboard?sort=training (Cards/Compact/Detailed ordering) must use the
-    # same state rule as the Table column, not "has a current_skill".
+def test_page_level_training_sort_uses_the_table_sort_key():
+    # /dashboard?sort=training (Cards/Compact/Detailed ordering) must sort by
+    # the Table column's own key: state rank, then skill name among pilots
+    # actually training. Never by "has a current_skill" alone.
     import inspect
     from app.routes import dashboard as dash_routes
     src = inspect.getsource(dash_routes)
     branch = src.split('elif sort == "training":', 1)[1].split("elif sort ==", 1)[0]
-    assert "training_rank(" in branch
-    assert "current_skill" not in branch
+    assert 'training_sort_value(sk.get("warning"), sk.get("current_skill"))' in branch
+
+
+_ALL_WARNINGS = ("ok", "warning", "critical", "paused", "empty", "no_scope", "error", None)
+
+
+@pytest.mark.parametrize("warning", _ALL_WARNINGS)
+def test_page_training_key_is_the_table_training_sort(warning):
+    from app.dashboard.table import training_sort_value
+    summary = {**SUMMARY, "training": {**SUMMARY["training"], "warning": warning, "skill": "Gunnery"}}
+    cell = build_table_row(summary, None, None, None, None)["cells"]["training"]
+    assert training_sort_value(warning, "Gunnery") == cell["sort"]
+
+
+def test_training_sort_key_tiebreaks_by_skill_name_only_while_training():
+    from app.dashboard.table import training_sort_value
+    keys = {
+        "zeta": training_sort_value("ok", "Zeta Skill"),
+        "alpha": training_sort_value("critical", "alpha skill"),
+        "paused": training_sort_value("paused", "Aaa First Alphabetically"),
+        "paused_b": training_sort_value("paused", "Zzz"),
+        "empty": training_sort_value("empty", None),
+        "error": training_sort_value("error", None),
+    }
+    assert sorted(keys, key=keys.get) == ["alpha", "zeta", "paused", "paused_b", "empty", "error"]
+    # Paused queues keep the input order (stable sort): no skill-name tiebreak.
+    assert keys["paused"] == keys["paused_b"]
+
+
+def test_training_header_sorts_as_a_string():
+    """The Training cell's sort value is "<rank><skill>", which the page's
+    client-side sort compares as text — right only while every rank is a
+    single digit (training_rank returns 0-3)."""
+    from app.dashboard.table import training_rank
+    assert max(training_rank(w) for w in _ALL_WARNINGS) <= 9
+    html = _table_with_columns(["pilot", "training"])
+    th = re.search(r'<th data-click="sortDashTable" data-col="training"\s+data-sort-type="([a-z]+)"', html)
+    assert th, "Training header not found"
+    assert th.group(1) == "str"
+
+
+def _table_with_columns(columns):
+    rows = [build_table_row(SUMMARY, None, None, None, None)]
+    return render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=rows, prefs_patch={"table_columns": columns})
 
 
 # ── Mobile R1: Table view rows on phones (mobile design §5.2) ──────────────

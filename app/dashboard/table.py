@@ -54,10 +54,21 @@ def training_rank(warning: str | None) -> int:
     """ISS-087: order pilots by training STATE, never by whether a next skill
     exists (a paused queue still has one). 0 = actively training,
     1 = paused, 2 = empty queue, 3 = anything else (no_scope, error, None).
-    Shared by the Table view's Training column and /dashboard?sort=training."""
+    Ranks must stay single-digit: `training_sort_value` prefixes them to a
+    string that the Table's client-side sort compares as text."""
     if warning in _TRAINING_STATES:
         return 0
     return {"paused": 1, "empty": 2}.get(warning, 3)
+
+
+def training_sort_value(warning: str | None, skill: str | None) -> str:
+    """The one Training sort key, shared by the Table view's Training column
+    (its `sort` value, compared as a string in the page's client-side sort)
+    and /dashboard?sort=training (Cards/Compact/Detailed). State rank first,
+    then, among pilots actually training, the current skill's name. Paused
+    and empty queues get no tiebreak: a paused queue's first skill must never
+    order it among the others."""
+    return str(training_rank(warning)) + (_lower(skill) if warning in _TRAINING_STATES else "")
 
 
 def _delta_text(delta: dict | None) -> str:
@@ -93,7 +104,8 @@ def build_table_row(
     carries per character (`skill_map[cid]["queue_end"]`) — used only for a
     correct chronological sort, since `training.queue_left_str` is text.
     Both the Queue End text and its sort are gated on the pilot actually
-    training (`_TRAINING_STATES`); anything else reads "—" and sorts last.
+    training (`_TRAINING_STATES`); anything else reads "—" and sorts after
+    every real queue end.
     `last_synced` is the raw datetime off CharacterDashboardCache.last_synced
     (the same value `app.routes.dashboard._age_str` formats into
     `sync.last_str`) — same reason: sorting "Last Sync" by its display text
@@ -146,8 +158,7 @@ def build_table_row(
             "text": training_text,
             # Rank first so paused/empty never interleave with training pilots
             # by their next skill's name; the value stays a plain string.
-            "sort": str(training_rank(warning))
-            + (_lower(training.get("skill")) if is_training else ""),
+            "sort": training_sort_value(warning, training.get("skill")),
         },
         "pi": {"text": pi["expiry_str"] if pi else "—", "sort": pi["colonies"] if pi else 0},
         "jobs": {"text": f"{industry['active']} active" if industry else "—", "sort": industry["active"] if industry else 0},

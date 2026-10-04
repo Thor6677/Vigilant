@@ -1067,6 +1067,17 @@ function refreshHiddenFooter() {
     });
 }
 
+// A section toggle's glyph, title and aria-expanded follow its body. Both
+// paths that change a body (the toggle itself and the phone init) set all
+// three through here, so the title never says "Collapse" on a closed section.
+function dashSetSectionToggle(btn, expanded) {
+    var key = btn.dataset.section;
+    var label = DASH_SECTION_LABELS[key] || key;
+    btn.textContent = expanded ? '▾' : '▸';
+    btn.title = (expanded ? 'Collapse ' : 'Expand ') + label;
+    btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function toggleDashSection() {
     var wrap = this.closest('[data-dash-section]');
     if (!wrap) return;
@@ -1075,7 +1086,7 @@ function toggleDashSection() {
     if (!body) return;
     var willExpand = body.style.display === 'none';
     body.style.display = willExpand ? '' : 'none';
-    this.textContent = willExpand ? '▾' : '▸';
+    dashSetSectionToggle(this, willExpand);
     if (willExpand) activateLazy(body);
     if (dashIsPhone() && DASH_PHONE_COLLAPSED.indexOf(key) !== -1) {
         // Phones (§5.5), heavy sections only: per-device state. Every other
@@ -1163,9 +1174,10 @@ function toggleDashGroup() {
 // §5.5 init. Phones: collapse the heavy sections this device hasn't opened.
 // The init never expands anything; server-collapsed sections are left as
 // rendered. A server-hidden heavy section is collapsed inside its hidden
-// wrapper, so un-hiding it on a phone shows a collapsed bar. Then, at every width, load each section the server
-// marked data-dash-autoload whose body is still visible: on desktop that is
-// exactly the set that used to load via hx-trigger="load".
+// wrapper, so un-hiding it on a phone shows a collapsed bar. Then, at every
+// width, load each section the server marked data-dash-autoload whose body
+// is still visible: on desktop that is exactly the set that used to load via
+// hx-trigger="load".
 function dashSectionsInit() {
     if (dashIsPhone()) {
         var open = dashPhoneOpenRead();
@@ -1177,7 +1189,7 @@ function dashSectionsInit() {
             if (!body || body.style.display === 'none') return;
             body.style.display = 'none';
             var btn = wrap.querySelector('.dash-sec-toggle');
-            if (btn) btn.textContent = '▸';
+            if (btn) dashSetSectionToggle(btn, false);
         });
     }
     document.querySelectorAll('[data-dash-autoload]').forEach(function (el) {

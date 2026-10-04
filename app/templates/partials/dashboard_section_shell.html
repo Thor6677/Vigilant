@@ -18,10 +18,11 @@
    2px 6px / 9px is `.b-btn.dash-sec-toggle, .b-btn.dash-sec-hide` in
    site.css; the phone 40px tap target is the shared m-tap rule. The border
    stays inline: `.b-btn:last-child` would strip a class-level right border
-   from ✕. #}
+   from ✕. The toggle's title and aria-expanded follow its state; after
+   load, dashboard.html's dashSetSectionToggle keeps them in step. #}
 {% macro section_toolbar(key, label, is_collapsed, is_hidden) %}
 <button type="button" class="dash-sec-toggle b-btn m-tap" data-click="toggleDashSection" data-section="{{ key }}"
-        title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}"
+        title="{{ 'Expand' if is_collapsed else 'Collapse' }} {{ label }}" aria-expanded="{{ 'false' if is_collapsed else 'true' }}"
         style="border:1px solid var(--border);line-height:1;">{{ '▸' if is_collapsed else '▾' }}</button>
 <button type="button" class="dash-sec-hide b-btn m-tap" data-click="hideDashSection" data-section="{{ key }}"
         title="Hide {{ label }}"

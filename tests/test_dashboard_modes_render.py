@@ -170,15 +170,14 @@ def test_attention_strip_mount_point_present_in_every_mode():
 
 
 def test_paused_card_says_paused_even_when_the_queue_has_a_next_skill():
-    """ISS-087: real paused queues carry current_skill (their first entry).
-    The shared fixture's paused pilot doesn't, so patch it here rather than
-    in the fixture, which would move the golden cards."""
+    """ISS-087: real paused queues carry current_skill (their first entry),
+    and so does the shared fixture's paused pilot. The golden cards hold
+    because the card checks paused before current_skill."""
     cid = CHAR_PAUSED.character_id
-    skill_map = dict(build_context("custom")["skill_map"])
-    skill_map[cid] = dict(skill_map[cid], current_skill="Gunnery", current_level=5)
-    card = extract_card(render_full("custom", skill_map=skill_map), cid)
+    assert build_context("custom")["skill_map"][cid]["current_skill"] == "Navigation"
+    card = extract_card(render_full("custom"), cid)
     assert "Paused (3 queued)" in card
-    assert "Gunnery" not in card
+    assert "Navigation" not in card
 
 
 # ── Mobile R1: phone toolbar (mobile design §5.1) ──────────────────────────
@@ -356,6 +355,46 @@ def test_phone_init_uses_a_per_device_open_set():
     phone = toggle.index(guard)
     assert toggle.index("dashPhoneOpenWrite(", phone) < toggle.index("return;", phone) \
         < toggle.index("persistSectionState()")
+
+
+def _section_toggles(html):
+    return re.findall(r'<button type="button" class="dash-sec-toggle b-btn m-tap"[^>]*'
+                      r'data-section="([a-z_]+)"\s+title="([^"]*)" aria-expanded="(true|false)"[^>]*>([^<]*)</button>', html)
+
+
+def test_section_toggles_render_title_and_aria_expanded_for_their_state():
+    """Compact force-collapses combat_profile; a saved collapse closes
+    wealth. Every toggle's glyph, title and aria-expanded agree."""
+    html = render_full("custom", dash_mode="compact", killmails_enabled=True, battles_enabled=True,
+                       prefs_patch={"collapsed_sections": ["wealth"]})
+    toggles = {key: (title, aria, glyph) for key, title, aria, glyph in _section_toggles(html)}
+    assert {"wealth", "battles", "activity", "kill_pulse", "combat_profile"} <= set(toggles)
+    for key, (title, aria, glyph) in toggles.items():
+        if key in ("wealth", "combat_profile"):
+            assert (title.split(" ", 1)[0], aria, glyph) == ("Expand", "false", "▸"), key
+        else:
+            assert (title.split(" ", 1)[0], aria, glyph) == ("Collapse", "true", "▾"), key
+    assert toggles["wealth"][0] == "Expand Wealth by Character"
+
+
+def test_section_toggle_state_is_set_in_one_place_by_both_paths():
+    """The phone init collapses heavy sections after load, and every toggle
+    flips one: both must update the title and aria-expanded, not only the
+    glyph."""
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    helper = html.split("function dashSetSectionToggle(btn, expanded) {", 1)[1].split("\n}", 1)[0]
+    assert "DASH_SECTION_LABELS[key]" in helper
+    assert "btn.textContent = expanded ? '▾' : '▸';" in helper
+    assert "btn.title = (expanded ? 'Collapse ' : 'Expand ') + label;" in helper
+    assert "btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');" in helper
+    toggle = html.split("function toggleDashSection()")[1].split("function hideDashSection()")[0]
+    # Before the phone branch, which returns early.
+    assert toggle.index("dashSetSectionToggle(this, willExpand);") \
+        < toggle.index("if (dashIsPhone() && DASH_PHONE_COLLAPSED")
+    init = html.split("function dashSectionsInit() {")[1].split("\n}", 1)[0]
+    assert "if (btn) dashSetSectionToggle(btn, false);" in init
+    for body in (toggle, init):
+        assert ".textContent = " not in body
 
 
 def test_each_lazy_section_title_appears_once():
