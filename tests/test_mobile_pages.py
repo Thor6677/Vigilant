@@ -367,6 +367,9 @@ def test_blueprints_rows_key_on_name_and_me_te():
     lead = _lead(bpo)
     assert [c["tag"] for c in lead] == ["img"]
     assert "m-only" in lead[0]["attrs"]["class"].split()        # phone-only copy of the icon
+    # Phone CSS forces width:auto on row children, so without intrinsic size the
+    # lead collapses to ~2px until (or unless) the image loads.
+    assert lead[0]["attrs"]["width"] == "24" and lead[0]["attrs"]["height"] == "24"
     name, mete = _keys(bpo)
     assert name["text"] == "Sample Frigate Blueprint"
     assert mete["text"] == "10/20"
