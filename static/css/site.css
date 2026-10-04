@@ -875,3 +875,38 @@
        a long type still ellipsises inside the badge. */
     .m-row > [data-m="key"] > .journal-type { vertical-align: middle; max-width: 100% !important; }
 }
+
+/* ── R2 T1 · character overview ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T1 ── */
+
+/* ── R2 T2 · skills ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T2 ── */
+
+/* ── R2 T3 · fittings/stats/filters ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T3 ── */
+
+/* ── R2 T4 · mining ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T4 ── */
+
+/* ── R2 T5 · corporations ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T5 ── */
+
+/* ── R2 T6 · skill plans ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 T6 ── */
+
+/* ── m-hide wins ties: keep this the last phone rule in the file ── */
+@media (max-width: 640px) {
+    .m-hide, .m-tabs-desktop { display: none !important; }
+}

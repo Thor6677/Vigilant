@@ -91,10 +91,37 @@ def test_open_states_exclude_link_rows():
     assert ".is-expanded > .m-row:not(.m-row--link) > [data-m-label]" in phone
 
 
+_M_HIDE = [".m-hide", ".m-tabs-desktop"]
+_DISPLAY_IMPORTANT = re.compile(r"(?<![-\w])display\s*:[^;]*!important")
+
+
+def _phone_rules() -> list[tuple[list[str], str]]:
+    """(selectors, body) for every rule in the phone @media blocks, in file
+    order. Selector lists are split by _pb_selectors (Polish B, below), which
+    keeps the commas inside :not(a, b) together."""
+    return [(_pb_selectors(m.group(1)), m.group(2))
+            for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _phone())]
+
+
 def test_m_hide_is_last_phone_utility():
-    phone = _phone()
-    i = phone.rindex(".m-hide")
-    assert i > phone.index(".m-tap") and i > phone.index(".m-pair")
+    """m-hide wins every tie: no phone rule after the final `.m-hide,
+    .m-tabs-desktop` block sets `display: … !important`, so on the same
+    element it beats .m-tap, .m-pair, .m-stack and anything an R2 page
+    section adds. The final block re-declares the original rule at the end
+    of the file for exactly that.
+
+    Specificity still matters: this settles ties only. m-hide on a tagged
+    m-row cell loses to `.m-row > [data-m="key"]` / `[data-m="lead"]`
+    (two selectors against one), per the contract: never hide a tagged cell,
+    hide a wrapper instead."""
+    rules = _phone_rules()
+    hides = [i for i, (sels, _) in enumerate(rules) if sels == _M_HIDE]
+    assert len(hides) >= 2, "expected the original m-hide rule and its final re-declaration"
+    for i in hides:
+        assert re.search(r"display:\s*none\s*!important", rules[i][1])
+    setters = [i for i, (_, body) in enumerate(rules) if _DISPLAY_IMPORTANT.search(body)]
+    assert setters[-1] == hides[-1], (
+        f"{', '.join(rules[setters[-1]][0])} sets display !important after the final m-hide block")
 
 
 def test_utilities_exist():
@@ -324,3 +351,53 @@ def test_polish_b_classes_have_no_desktop_rules():
     phone = _phone()
     for cls in (".m-tap", ".journal-type"):
         assert css.count(cls) == phone.count(cls), cls
+
+
+# ── R2 foundation ─────────────────────────────────────────────────────
+# Six R2 page tasks run in parallel worktrees and are cherry-picked back.
+# Each edits only its own seeded section of site.css, which is what keeps
+# those cherry-picks conflict-free.
+
+_R2_SECTIONS = (("T1", "character overview"), ("T2", "skills"),
+                ("T3", "fittings/stats/filters"), ("T4", "mining"),
+                ("T5", "corporations"), ("T6", "skill plans"))
+_M_HIDE_FINAL = "/* ── m-hide wins ties: keep this the last phone rule in the file ── */"
+
+
+def _raw_css() -> str:
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
+    """Each section's header and end marker appear once, in T1…T6 order.
+    Between them sits exactly one phone @media block, first; a desktop rule,
+    if a task truly needs one, goes after that block's `}` and before the
+    end marker. Braces balance inside each section, and every section comes
+    before the final m-hide block."""
+    raw = _raw_css()
+    marks = []
+    for task, page in _R2_SECTIONS:
+        head, end = f"/* ── R2 {task} · {page} ── */", f"/* ── end R2 {task} ── */"
+        assert raw.count(head) == 1, head
+        assert raw.count(end) == 1, end
+        marks.append((raw.index(head), raw.index(end), head, end))
+    flat = [p for start, stop, _, _ in marks for p in (start, stop)]
+    assert flat == sorted(flat), "R2 sections are out of order or overlap"
+    assert raw.count(_M_HIDE_FINAL) == 1
+    assert flat[-1] < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
+
+    for start, stop, head, end in marks:
+        body = re.sub(r"/\*.*?\*/", "", raw[start + len(head):stop], flags=re.S)
+        preludes = re.findall(r"@media([^{]*)\{", body)
+        assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
+        assert body.lstrip().startswith(f"@media ({PHONE}) {{"), head
+        depth = 0
+        for ch in body:
+            depth += (ch == "{") - (ch == "}")
+            assert depth >= 0, f"{head}: a `}}` closes something outside the section"
+        assert depth == 0, f"{head}: unbalanced braces"
+
+    final = re.sub(r"/\*.*?\*/", "", raw[raw.index(_M_HIDE_FINAL):], flags=re.S)
+    assert re.match(rf"\s*@media \({PHONE}\) \{{\s*\.m-hide, \.m-tabs-desktop \{{ display: none !important; \}}\s*\}}",
+                    final), "the final m-hide block must follow the R2 sections"

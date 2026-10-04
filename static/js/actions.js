@@ -929,18 +929,21 @@
     if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
     window._timerBannerInterval = setInterval(window.styleTimerBanners, 1000);
 
-    /* ── Mobile expand-on-tap rows (mobile design §4.3) ──────────────────
-     *
-     * A row tagged class="m-row" data-click="toggleMRow" collapses to its
-     * data-m="key" cells on phones (CSS in site.css); a tap toggles
-     * `is-open`, which reveals its data-m-label cells. Rows that already
-     * expand via toggleExpanded keep that handler, and the CSS treats their
-     * `is-expanded` the same way, so one tap opens both.
-     *
-     * The dispatcher calls fn.call(row, e). A child with its own data-click
-     * (a button) is matched first by closest('[data-click]'), so this never
-     * runs for it. Plain links and form fields are filtered out here so they
-     * keep their own behaviour. */
+})();
+
+/* ── Mobile expand-on-tap rows (mobile design §4.3) ──────────────────
+ *
+ * A row tagged class="m-row" data-click="toggleMRow" collapses to its
+ * data-m="key" cells on phones (CSS in site.css); a tap toggles
+ * `is-open`, which reveals its data-m-label cells. Rows that already
+ * expand via toggleExpanded keep that handler, and the CSS treats their
+ * `is-expanded` the same way, so one tap opens both.
+ *
+ * The dispatcher calls fn.call(row, e). A child with its own data-click
+ * (a button) is matched first by closest('[data-click]'), so this never
+ * runs for it. Plain links and form fields are filtered out here so they
+ * keep their own behaviour. */
+(function () {
     var M_PHONE = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
     var M_INTERACTIVE = 'a, button, input, select, textarea, label, summary';
 
