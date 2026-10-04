@@ -74,11 +74,15 @@
 <div class="b-pad-md">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Producible commodities</span>
-        <span class="b-muted-sm">
+        {# Phones get the key without the hover hint. A copy rather than a
+           wrapper round the hint: a span boundary mid-line shifts the
+           desktop glyphs after it by a sub-pixel. #}
+        <span class="b-muted-sm m-hide">
             <span class="b-text">●</span> producible &nbsp;
-            <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; <span class="m-hide">· &nbsp;
-            hover to trace recipe</span>
+            <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs &nbsp; · &nbsp;
+            hover to trace recipe
         </span>
+        <span class="b-muted-sm m-only"><span class="b-text">●</span> producible &nbsp; <span style="color:var(--muted);opacity:0.55;">●</span> off-system inputs</span>
     </div>
 
     <div class="pi-tier-container" style="position:relative;">
@@ -128,8 +132,11 @@
         </div>
     </div>
 
-    <div style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
-        <span class="m-hide">Hover a commodity to see its recipe chain — green = ingredients (inputs), cyan = downstream uses.</span>
+    <div class="m-hide" style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
+        Hover a commodity to see its recipe chain — green = ingredients (inputs), cyan = downstream uses.
+        Click to open the Chain Explorer for full details.
+    </div>
+    <div class="m-only" style="margin-top:0.5rem;font-size:10px;color:var(--muted);">
         Click to open the Chain Explorer for full details.
     </div>
 </div>

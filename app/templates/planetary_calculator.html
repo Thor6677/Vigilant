@@ -376,14 +376,15 @@
 <div class="b-panel b-section">
     <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
         <span class="b-label">Production flow chart</span>
-        <span class="b-muted-sm">
+        {# m-hide: the legend describes the chart, which phones don't show. #}
+        <span class="b-muted-sm m-hide">
             {% set cross_count = 0 %}{% for e in character_plan.flow.edges %}{% if not e.intra %}{% set cross_count = cross_count + 1 %}{% endif %}{% endfor %}
             {{ cross_count }} cross-character handoff{{ 's' if cross_count != 1 else '' }}
-            <span class="m-hide">· <span style="color:var(--success);">green</span> = P1→P2,
+            · <span style="color:var(--success);">green</span> = P1→P2,
             <span style="color:var(--accent);">gold</span> = P2→P3,
             <span style="color:#7ec6ff;">cyan</span> = P3→P4,
             <span class="b-muted">dim</span> = intra-character
-            · hover to trace</span>
+            · hover to trace
         </span>
     </div>
 

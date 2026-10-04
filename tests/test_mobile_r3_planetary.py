@@ -312,10 +312,14 @@ def test_calculator_flow_chart_hides_on_phones_but_the_hand_off_summary_stays():
     (container,) = _with_class(html, "pi-flow-container")
     assert "m-hide" in container[1]
     assert "overflow-x:auto" in container[2]          # desktop still scrolls it
-    # The colour legend and the hover hint describe the chart: hidden with it.
-    legend = re.search(r'cross-character handoffs?\s*<span class="m-hide">(.*?)</span>\s*</span>',
-                       html, re.S)
-    assert legend and "hover to trace" in legend.group(1) and "green" in legend.group(1)
+    # The head's legend (handoff count, colour key, hover hint) describes the
+    # chart: hidden with it. Classed on its own span, never split by a new
+    # wrapper: a span boundary mid-line shifts the glyphs after it by a
+    # sub-pixel on desktop, which breaks D21's pixel-identical check.
+    legend = re.search(r'<span class="b-muted-sm m-hide">(.*?)</span>\s*</div>', html, re.S)
+    assert legend and "cross-character handoff" in legend.group(1)
+    assert "hover to trace" in legend.group(1) and "green" in legend.group(1)
+    assert 'class="m-hide">·' not in html
     foot = re.search(r'<div class="m-hide"[^>]*>\s*Each cell lists the items', html)
     assert foot
     summary = re.search(r'<div style="[^"]*">\s*<div [^>]*>Hand-off summary</div>', html)
@@ -526,12 +530,22 @@ def test_lookup_planets_are_tap_to_open_rows():
 
 
 def test_lookup_hover_hints_hide_on_phones():
+    """The desktop legend and footer are classed m-hide whole, with m-only
+    copies minus the hover wording. Wrapping just the hover words would
+    split a desktop text run: the glyphs after a mid-line span boundary move
+    by a sub-pixel, which breaks D21's pixel-identical check."""
     html = _lookup_system()
-    assert re.search(r'off-system inputs &nbsp; <span class="m-hide">· &nbsp;\s*'
-                     r'hover to trace recipe</span>', html)
-    foot = re.search(r'<span class="m-hide">(Hover a commodity[^<]*)</span>\s*'
-                     r'Click to open the Chain Explorer', html)
-    assert foot and "cyan = downstream uses." in foot.group(1)
+    legend = re.search(r'<span class="b-muted-sm m-hide">(.*?)</span>\s*'
+                       r'<span class="b-muted-sm m-only">(.*?)</span>\s*</div>', html, re.S)
+    assert legend
+    assert "hover to trace recipe" in legend.group(1)
+    assert "off-system inputs" in legend.group(2) and "hover" not in legend.group(2)
+    foot = re.search(r'<div class="m-hide" style="([^"]*)">\s*(Hover a commodity.*?)</div>\s*'
+                     r'<div class="m-only" style="([^"]*)">\s*(.*?)\s*</div>', html, re.S)
+    assert foot and foot.group(1) == foot.group(3)
+    assert "cyan = downstream uses." in foot.group(2)
+    assert foot.group(4) == "Click to open the Chain Explorer for full details."
+    assert 'class="m-hide">' not in html          # no new mid-line wrappers
 
 
 def test_lookup_page_inits_rows_after_injecting_the_fragment():
