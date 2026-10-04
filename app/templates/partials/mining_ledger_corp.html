@@ -26,27 +26,39 @@
 </div>
 
 {# ── Per-character rows ───────────────────────────────────────────────────── #}
+{# Phones (mobile R3, D12 A): each row is an expand-on-tap row. The lead is
+   the checkbox, inside a <label> that site.css makes a 40px tap target: a
+   tap there ticks the box, and toggleMRow ignores taps on labels and
+   inputs, so ticking never opens the row. Key 1 is the name, key 2 the ISK
+   value. An opened row lists Name, Units, Days active and Ledger (View).
+   The portrait is untagged, so phones hide it. So are the desktop units
+   and days cells: their m-only twins carry the bare numbers, since the
+   open row's labels say "units" and "days". (Splitting the suffix into an
+   m-hide span instead would shift desktop glyph anti-aliasing.) #}
 {% for c in char_stats %}
-<div class="b-table-row" style="padding:0.4rem 0.75rem;align-items:center;">
-    <span style="flex:0 0 20px;">
+<div class="b-table-row m-row ml-char-row" data-click="toggleMRow" style="padding:0.4rem 0.75rem;align-items:center;">
+    <label data-m="lead" style="flex:0 0 20px;">
         <input type="checkbox" class="ml-check" data-charid="{{ c.character_id }}"
                data-click="toggleChar" data-char-id="{{ c.character_id }}"
                style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
-    </span>
+    </label>
     <span style="flex:0 0 24px;">
         <img src="https://images.evetech.net/characters/{{ c.character_id }}/portrait?size=32"
              style="width:20px;height:20px;border:1px solid var(--border);" alt=""
              data-on-error="hide">
     </span>
-    <span style="flex:2;font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.character_name }}</span>
-    <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(c.value) }}</span>
+    <span data-m="key" style="flex:2;font-size:11px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.character_name }}</span>
+    <span class="m-only" data-m-label="Name">{{ c.character_name }}</span>
+    <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(c.value) }}</span>
     <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(c.quantity) }} units</span>
+    <span class="m-only" data-m-label="Units" style="color:var(--muted);">{{ "{:,.0f}".format(c.quantity) }}</span>
     <span style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ c.days }}d</span>
-    <span style="flex:0 0 40px;text-align:right;">
+    <span class="m-only" data-m-label="Days active" style="color:var(--muted);">{{ c.days }}</span>
+    <span data-m-label="Ledger" style="flex:0 0 40px;text-align:right;">
         <button data-click="viewLedger"
                 data-char-ids="{{ c.character_id }}"
                 data-stop
-                class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
+                class="b-btn m-tap" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
             View
         </button>
     </span>

@@ -1384,6 +1384,44 @@
 
 /* ── R3 T5 · mining ledger ── */
 @media (max-width: 640px) {
+    /* Corp card character rows (D12 A). The lead is the .ml-check checkbox
+       inside a <label>: a 40px tap target that ticks the box (toggleMRow
+       ignores taps on labels and inputs, so the row stays shut). Its
+       negative margins reach into the row's padding, so the row stays one
+       40px line and the target starts at the card's edge. min-width is
+       !important to beat `.m-row > *`. The box grows from 14px to 20px;
+       !important beats its inline size, and min-height:0 the global 44px
+       input height, which would stretch it. */
+    .m-row.ml-char-row > [data-m="lead"] {
+        min-width: 40px !important; min-height: 40px; justify-content: center;
+        margin: -0.6rem 0.4rem -0.6rem -0.75rem;
+    }
+    .ml-char-row .ml-check { width: 20px !important; height: 20px !important; min-height: 0; margin: 0; }
+    /* View (the Ledger line): .b-btn's flex:1 would stretch the 40px
+       button across the open row. */
+    .ml-char-row > [data-m-label] > .m-tap { flex: none; }
+
+    /* Combined ledger lists, as R2 T4's mining.html: the ore key (By Ore
+       Type, Full Detail) stays a flex line, so its icon keeps its size
+       beside an ellipsised name; "Show all" is inset inside its panel. */
+    .m-row > [data-m="key"].ml-ore { display: flex !important; align-items: center; }
+    .m-row > .ml-ore > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ml-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* Chart: a fixed box, which the chart fills on phones (the page script
+       drops maintainAspectRatio there). With no chart data the script marks
+       it is-empty, so no blank 220px box sits under "No chart data". */
+    .ml-chart-box { position: relative; height: 220px; }
+    .ml-chart-box.is-empty { display: none; }
+
+    /* Selection bar ("N character(s) selected", Clear, View Combined
+       Ledger): the buttons are m-tap; when they don't fit beside the count
+       they wrap to a line of their own, on the right, and on a very narrow
+       screen onto two. flex:none: .b-btn's flex:1 would split the line
+       evenly and wrap "View Combined Ledger" onto three lines. */
+    .ml-selection-bar { flex-wrap: wrap; gap: 0.5rem; }
+    .ml-selection-bar > div { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+    .ml-selection-bar .b-btn { flex: none; }
 }
 /* ── end R3 T5 ── */
 

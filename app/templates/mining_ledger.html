@@ -75,7 +75,10 @@
             <div id="chart-empty" style="display:none;text-align:center;padding:2rem;color:var(--muted);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;">
                 No chart data available
             </div>
-            <canvas id="mining-chart" height="220"></canvas>
+            {# Chart.js sizes the canvas from its parent, so the canvas has a
+               box of its own: 220px tall on phones (site.css, R3 T5), where
+               the chart fills it; above 640px it is as tall as the canvas. #}
+            <div class="ml-chart-box"><canvas id="mining-chart" height="220"></canvas></div>
         </div>
     </div>
 </div>
@@ -138,8 +141,8 @@
         <span id="sel-count">0</span> character(s) selected
     </span>
     <div style="display:flex;gap:0.5rem;">
-        <button data-click="clearSelection" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--border);font-size:10px;">Clear</button>
-        <button data-click="viewCombined" class="b-btn" style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">View Combined Ledger</button>
+        <button data-click="clearSelection" class="b-btn m-tap" style="padding:0.3rem 0.6rem;border:1px solid var(--border);font-size:10px;">Clear</button>
+        <button data-click="viewCombined" class="b-btn m-tap" style="padding:0.3rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">View Combined Ledger</button>
     </div>
 </div>
 
@@ -243,15 +246,21 @@
 
     function buildMiningChart(data, days) {
         var canvas = document.getElementById('mining-chart');
+        var box = canvas.parentNode;   /* .ml-chart-box */
         var empty = document.getElementById('chart-empty');
 
+        /* is-empty hides the box on phones (site.css, R3 T5), where it is
+           220px tall even with no chart in it. Above 640px it does
+           nothing. */
         if (!data.dates || data.dates.length === 0) {
             canvas.style.display = 'none';
+            box.classList.add('is-empty');
             empty.style.display = 'block';
             if (miningChart) { miningChart.destroy(); miningChart = null; }
             return;
         }
         canvas.style.display = 'block';
+        box.classList.remove('is-empty');
         empty.style.display = 'none';
 
         /* Filter to dates within the requested day range from today */
@@ -302,12 +311,27 @@
             miningChart = null;
         }
 
+        /* Phones, read once per build (as the corp wallet chart does): the
+           chart fills its 220px box instead of keeping the canvas's aspect
+           ratio, and shows at most 5 dates, unrotated. Above 640px the
+           options are as before. */
+        var phone = !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+        var xTicks = {
+            color: '#474747',
+            font: { family: "'JetBrains Mono', monospace", size: 9 },
+            maxTicksLimit: 10,
+        };
+        if (phone) {
+            xTicks.maxTicksLimit = 5;
+            xTicks.maxRotation = 0;
+        }
+
         miningChart = new Chart(canvas, {
             type: 'bar',
             data: { labels: dates, datasets: datasets },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
+                maintainAspectRatio: !phone,
                 animation: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
@@ -346,11 +370,7 @@
                         time: { unit: 'day', tooltipFormat: 'MMM d, yyyy' },
                         stacked: true,
                         grid: { color: '#191919' },
-                        ticks: {
-                            color: '#474747',
-                            font: { family: "'JetBrains Mono', monospace", size: 9 },
-                            maxTicksLimit: 10,
-                        },
+                        ticks: xTicks,
                         border: { color: '#191919' },
                     },
                     y: {
