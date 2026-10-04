@@ -93,7 +93,9 @@
 .ij-picker-row input { accent-color:var(--accent); cursor:pointer; }
 .ij-picker-row .pcount { color:var(--muted); font-size:9px; margin-left:auto; }
 
-@media (max-width:900px) {
+/* Tablets only: below 641px each job is an m-row (site.css, R3 T3), which
+   shows Installer and Location when a row is opened. */
+@media (min-width:641px) and (max-width:900px) {
     .ij-table thead th:nth-child(5), .ij-table tbody td:nth-child(5),  /* installer */
     .ij-table thead th:nth-child(6), .ij-table tbody td:nth-child(6) { /* location */
         display:none;
@@ -203,9 +205,9 @@
 
 {% if rows %}
 <div class="b-panel">
-    <table class="ij-table">
+    <table class="ij-table m-table">
         <thead>
-            <tr>
+            <tr class="m-head">
                 <th style="width:28%;">Product</th>
                 <th>Activity</th>
                 <th style="text-align:right;">Runs</th>
@@ -218,7 +220,8 @@
         </thead>
         <tbody>
             {% for r in rows %}
-            <tr data-activity="{{ r.activity_label }}"
+            <tr class="m-row" data-click="toggleMRow"
+                data-activity="{{ r.activity_label }}"
                 data-source="{{ r.source_kind }}"
                 data-installer-id="{{ r.installer_id or '' }}"
                 data-corp-id="{{ r.source_id if r.source_kind == 'corporation' else '' }}">
@@ -246,6 +249,21 @@
                 <td title="{{ r.location_id or '' }}">{{ r.location_name or '—' }}</td>
                 <td class="ij-time-{{ r.urgency }}" title="{{ r.end_iso or '' }}">{{ r.time_remaining }}</td>
                 <td><span class="ij-status is-{{ r.status }}">{{ r.status }}</span></td>
+                {# Phone cells (D7 A). m-only <td>s after the eight desktop
+                   cells: hidden above 640px, and the tablet rule's
+                   nth-child(5)/(6) still finds Installer and Location. The
+                   time's colour class sits on a span because the page's
+                   `.ij-table tbody td` colour outranks it on a cell. #}
+                <td class="m-only" data-m="lead">{% if r.product_id %}<img src="https://images.evetech.net/types/{{ r.product_id }}/icon?size=32" width="24" height="24" loading="lazy" data-on-error="hide" alt="">{% endif %}</td>
+                <td class="m-only" data-m="key">{{ r.product_name }}</td>
+                <td class="m-only" data-m="key"><span class="ij-time-{{ r.urgency }}">{{ r.time_remaining }}</span></td>
+                <td class="m-only" data-m-label="Name"><span>{{ r.product_name }}{% if r.blueprint_name and r.blueprint_name != r.product_name %} <span class="ij-sub">from {{ r.blueprint_name }}</span>{% endif %}</span></td>
+                <td class="m-only" data-m-label="Activity">{{ r.activity_short }}</td>
+                <td class="m-only" data-m-label="Runs">{{ r.runs }}</td>
+                <td class="m-only" data-m-label="Source"><span><span class="ij-source-kind">{{ r.source_kind|capitalize }}</span> {{ r.source_name }}</span></td>
+                <td class="m-only" data-m-label="Installer">{{ r.installer_name or '—' }}</td>
+                <td class="m-only" data-m-label="Location">{{ r.location_name or '—' }}</td>
+                <td class="m-only" data-m-label="Status"><span class="ij-status is-{{ r.status }}">{{ r.status }}</span></td>
             </tr>
             {% endfor %}
         </tbody>
@@ -282,7 +300,10 @@
             /* Corp-filter special case: if corpSet filters any corps, char-source rows
                (no corpId) fall through — user probably wants them hidden too. */
             if (corpSet !== null && !tr.dataset.corpId) okC = false;
-            tr.style.display = (okA && okS && okI && okC) ? '' : 'none';
+            /* The hidden attribute, not an inline display: on phones each
+               row is an m-row, whose display:grid !important would beat an
+               inline none (site.css, R3 T3, hides an m-row[hidden]). */
+            tr.hidden = !(okA && okS && okI && okC);
         });
     }
 

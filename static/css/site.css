@@ -1188,6 +1188,43 @@
 
 /* ── R3 T3 · active jobs ── */
 @media (max-width: 640px) {
+    /* Jobs the filters leave out carry the `hidden` attribute. R1's
+       `.m-row { display: grid !important }` would beat it; between two
+       !important rules the more specific one wins, (0,3,1) over (0,1,0). */
+    .ij-table tr.m-row[hidden] { display: none !important; }
+
+    /* One divider per job, drawn by the row. The page's
+       `.ij-table tbody td` pads and underlines every cell, which as grid
+       items would rule a line under each shown cell. Its <style> loads
+       after this file, so the reset needs the extra class. */
+    .ij-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .ij-table tr.m-row > td { padding: 0; border-bottom: none; }
+
+    /* Both keys at 12px, as on other phone rows (the table is 11px). */
+    .ij-table tr.m-row > [data-m="key"] { font-size: 12px; }
+
+    /* The product icon keeps its 24px slot when a job has none, or it
+       fails and data-on-error hides it, so key 1 lines up with its
+       neighbours. min-width beats `.m-row > * { min-width: 0 !important }`.
+       The border matches the desktop icon's. */
+    .ij-table tr.m-row > [data-m="lead"] { min-width: 24px !important; min-height: 24px; }
+    .ij-table tr.m-row > [data-m="lead"] > img { border: 1px solid var(--border); }
+
+    /* Name: "from <blueprint>" on its own line under the product, as in
+       the desktop product cell. */
+    .ij-table tr.m-row > [data-m-label] .ij-sub { display: block; }
+
+    /* Character and Corp pickers. The panel (220px wide, anchored to its
+       button's left edge) could run off the right of the screen when its
+       button wraps to the right. Here it spans the filter row instead,
+       just below it. Option rows are 40px targets at 12px; the global
+       `input { min-height: 44px }` would otherwise size each row by its
+       checkbox. */
+    .ij-filters { position: relative; }
+    .ij-filters .ij-picker { position: static; }
+    .ij-filters .ij-picker-panel { left: 0; right: 0; min-width: 0; }
+    .ij-picker-panel .ij-picker-row { min-height: 40px; font-size: 12px; }
+    .ij-picker-panel .ij-picker-row input { min-height: 0; }
 }
 /* ── end R3 T3 ── */
 
