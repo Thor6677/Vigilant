@@ -145,7 +145,7 @@
         <span style="flex:0 0 40px;text-align:center;font-size:11px;{% if bp.te_maxed %}color:var(--success);font-weight:600;{% elif bp.te > 0 %}color:var(--text);{% else %}color:var(--muted);{% endif %}">
             {{ bp.te }}
         </span>
-        <span data-m="key" class="m-only" style="font-size:11px;{% if bp.me_maxed and bp.te_maxed %}color:var(--success);font-weight:600;{% else %}color:var(--text);{% endif %}">{{ bp.me }}/{{ bp.te }}</span>
+        <span data-m="key" class="m-only" title="ME {{ bp.me }} / TE {{ bp.te }}" aria-label="ME {{ bp.me }} / TE {{ bp.te }}" style="font-size:11px;{% if bp.me_maxed and bp.te_maxed %}color:var(--success);font-weight:600;{% elif bp.me > 0 or bp.te > 0 %}color:var(--text);{% else %}color:var(--muted);{% endif %}">{{ bp.me }}/{{ bp.te }}</span>
         <span data-m-label="Runs" style="flex:0 0 60px;text-align:center;font-size:11px;{% if bp.runs %}color:var(--text);{% else %}color:var(--muted);{% endif %}">
             {% if bp.runs %}{{ "{:,}".format(bp.runs) }}{% elif bp.is_bpo %}∞{% else %}—{% endif %}
         </span>

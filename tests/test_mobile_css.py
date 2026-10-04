@@ -283,3 +283,44 @@ def test_open_row_full_value_rules_are_phone_only():
     sel = f"> [data-m-label] {_NOT_CONTROLS}"
     assert css.count(sel) == _phone().count(sel) == 3
     assert "[data-m-label] *" not in css
+
+
+def test_link_rows_have_no_chevron_track():
+    """No chevron, no 14px track: key 2 reaches the row's right padding."""
+    body = _rules(_phone(), ".m-row.m-row--link")
+    m = re.search(r"grid-template-columns:\s*([^;!]+?)\s*!important", body)
+    assert m and m.group(1) == "auto minmax(0, 1fr) auto"
+
+
+def test_dashboard_phone_reverse_sort_looks_disabled():
+    body = _rules(_phone(), ".dash-phone-toolbar .b-btn:disabled")
+    assert re.search(r"opacity:\s*0?\.4\b", body)
+    assert re.search(r"cursor:\s*default", body)
+
+
+def test_tab_dropdown_in_a_page_header_drops_its_margin():
+    phone = _phone()
+    assert re.search(r"margin-bottom:\s*0\s*;", _rules(phone, ".b-page-header > details.m-tabs"))
+    # Character pages' dropdown (not in a page header) keeps its spacing.
+    assert re.search(r"margin-bottom:\s*1rem", _rules(phone, "details.m-tabs"))
+
+
+def test_show_all_is_inset_inside_asset_lists():
+    body = _rules(_phone(), ".asset-list .m-showall")
+    assert re.search(r"width:\s*calc\(100% - 1\.5rem\)", body)
+    assert re.search(r"margin:\s*0\.4rem 0\.75rem 0\.6rem", body)
+
+
+def test_journal_type_badge_is_centred_and_uncapped_on_phones():
+    body = _rules(_phone(), '.m-row > [data-m="key"] > .journal-type')
+    assert re.search(r"vertical-align:\s*middle", body)
+    assert re.search(r"max-width:\s*100%\s*!important", body)
+
+
+def test_polish_b_classes_have_no_desktop_rules():
+    """The Calc link's m-tap and the journal badge's class only act on
+    phones, so desktop renders exactly as before."""
+    css = _css()
+    phone = _phone()
+    for cls in (".m-tap", ".journal-type"):
+        assert css.count(cls) == phone.count(cls), cls

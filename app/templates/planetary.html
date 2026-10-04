@@ -138,6 +138,12 @@
     @media (min-width: 641px) {
         .pi-filter .m-pair { display: inline-flex; align-items: center; gap: 0.5rem; }
     }
+    /* Phones: the planet detail's 5-column pin grid is wider than a phone.
+       It scrolls inside the detail, so the colony rows above stay put
+       (otherwise site.css's panel safety net scrolls the whole panel). */
+    @media (max-width: 640px) {
+        .pi-row-detail { overflow-x: auto; }
+    }
 </style>
 
 <div class="b-section" style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);">

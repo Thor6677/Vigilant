@@ -943,3 +943,44 @@ def test_polish_b_blueprint_calc_link_is_a_tap_target():
         (link,) = _labelled(row)["Calc"]["kids"]
         assert link["class"] == "m-tap"
         assert "font-size:9px" in link["style"]
+
+
+def test_polish_b_blueprint_me_te_key_is_labelled():
+    """The ME and TE headers are hidden on phones, so the combined key
+    names itself."""
+    rows = _render_blueprints_pb()
+    for name, want in (("Sample Alpha Blueprint", "ME 10 / TE 20"),
+                       ("Sample Bravo Blueprint", "ME 0 / TE 0"),
+                       ("Sample Charlie Blueprint", "ME 0 / TE 4")):
+        mete = _keys(rows[name])[1]
+        assert mete["attrs"]["title"] == want
+        assert mete["attrs"]["aria-label"] == want
+
+
+def test_polish_b_blueprint_unresearched_me_te_is_muted():
+    """0/0 is muted like the desktop ME and TE cells' zeros; any research
+    shows in text colour; fully researched stays green."""
+    rows = _render_blueprints_pb()
+    styles = {n: _keys(r)[1]["attrs"]["style"] for n, r in rows.items()}
+    assert "color:var(--success)" in styles["Sample Alpha Blueprint"]
+    assert "color:var(--muted)" in styles["Sample Bravo Blueprint"]
+    assert "color:var(--text)" in styles["Sample Charlie Blueprint"]
+    assert "color:var(--success)" not in styles["Sample Charlie Blueprint"]
+
+
+def test_polish_b_journal_type_badge_is_classed_for_phones():
+    """Phone CSS centres the badge and lifts its 120px cap through this
+    class; the inline desktop styles stay as they were."""
+    gain = _rows(_render_journal())[0]
+    (badge,) = _keys(gain)[0]["kids"]
+    assert badge["class"] == "journal-type"
+    assert "max-width:120px" in badge["style"]
+    assert "display:inline-block" in badge["style"]
+
+
+def test_polish_b_planet_detail_scrolls_inside_itself_on_phones():
+    html = _render_planetary()
+    (style,) = [b for b in re.findall(r"<style[^>]*>(.*?)</style>", html, re.S) if ".pi-row-detail" in b]
+    phone = re.search(r"@media \(max-width: 640px\) \{(.*?)\n    \}", style, re.S)
+    assert phone, "planetary.html needs a phone block in its own <style>"
+    assert re.search(r"\.pi-row-detail\s*\{\s*overflow-x:\s*auto;?\s*\}", phone.group(1))

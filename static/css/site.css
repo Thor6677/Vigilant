@@ -851,4 +851,26 @@
         font-size: inherit !important;
         white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
     }
+
+    /* Link rows never show a chevron, so they drop its 14px track and key 2
+       reaches the row's right padding. */
+    .m-row.m-row--link { grid-template-columns: auto minmax(0, 1fr) auto !important; }
+
+    /* Dashboard Table phone toolbar: reverse is disabled while the sort
+       column is hidden; make that visible. */
+    .dash-phone-toolbar .b-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* A tab dropdown inside a page header (the four Planetary pages): the
+       header's own padding already spaces it from the content below. */
+    .b-page-header > details.m-tabs { margin-bottom: 0; }
+
+    /* "Show all" inside an asset location card: inset, so its border doesn't
+       double against the card's own sides and bottom. */
+    .asset-list .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* Wallet journal type badge (key 1): centred on the amount (as an
+       overflow:hidden inline-block its baseline is its bottom edge, so it
+       sat high), and as wide as the key cell rather than the desktop 120px;
+       a long type still ellipsises inside the badge. */
+    .m-row > [data-m="key"] > .journal-type { vertical-align: middle; max-width: 100% !important; }
 }
