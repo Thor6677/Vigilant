@@ -19,7 +19,7 @@ Helpers, one line each:
   VOID                           the void HTML elements (no end tag), for a test's own HTMLParser
   css_section(task, css=None, release="R2")
                                  a task's site.css section, comments stripped: R2 "T1"…"T6" or "P",
-                                 R3 "T1"…"T7" (release="R3")
+                                 R3 "T1"…"T7", R4 "T1"…"T4", R5 "T1"…"T5", R6 "T1"…"T7"
   phone_block(section)           a css_section's phone @media body (brace-matched) and what follows it
   selectors(prelude)             split a CSS selector list on its top-level commas (not inside :not())
   rule_bodies(css, selector)     joined bodies of every rule whose selector list contains `selector`
@@ -339,7 +339,8 @@ def css_section(task, css=None, release="R2"):
     """The text of task `task`'s section of site.css for `release`: what lies
     between `/* ── <release> <task> · … ── */` and `/* ── end <release>
     <task> ── */`, with comments stripped. R2's tasks are "T1"…"T6" and "P"
-    (the polish pass); R3's are "T1"…"T7". The release keeps R2 T1 and R3 T1
+    (the polish pass); R3's are "T1"…"T7", R4's "T1"…"T4", R5's "T1"…"T5"
+    and R6's "T1"…"T7". The release keeps same-named tasks (R2 T1, R3 T1, …)
     apart. Reads SITE_CSS unless `css` is given. Fails (AssertionError,
     naming the release) unless the header and end marker each appear exactly
     once, header first."""
