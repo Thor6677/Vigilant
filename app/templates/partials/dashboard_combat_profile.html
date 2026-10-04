@@ -20,8 +20,10 @@
 {% set has_data = ships or weapons or systems or gang_total > 0 or untouchable or autopsy_total > 0 %}
 
 <div class="b-section">
+    {# Mobile design §5.6: "Combat Profile · your pilots · 90d" is the
+       collapse bar in dashboard.html. The counts come from this response,
+       so they stay here. #}
     <div class="b-section-head">
-        <span class="b-label">Your Pilots Combat Profile · 90d</span>
         <span class="b-label" style="color:var(--muted)">
             {{ char_count }} char{{ 's' if char_count != 1 else '' }} · {{ summary['kills'] }} kills · {{ summary['losses'] }} losses
         </span>

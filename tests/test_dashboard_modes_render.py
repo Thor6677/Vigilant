@@ -21,15 +21,34 @@ def test_default_mode_is_cards():
     assert 'class="b-card"' in html
 
 
-def test_cards_default_loads_every_game_wide_section():
-    """Positive control for the "no hx-get" assertions below: with the
-    feature flags on and nothing collapsed/hidden, Cards fires all four
-    lazy loads on `load` — proves the *absence* of hx-get elsewhere is
-    deliberate deferral, not just the flags being off."""
+_LAZY = {
+    "dashboard-recent-battles": "/dashboard/recent-battles",
+    "dashboard-activity": "/dashboard/activity?window=24h",
+    "dashboard-kill-pulse": "/dashboard/kill-pulse",
+    "dashboard-combat-profile": "/dashboard/combat-profile",
+}
+
+
+def _open_tag(html, needle):
+    """The full opening tag containing `needle` (attributes may span lines)."""
+    at = html.index(needle)
+    return html[html.rfind("<", 0, at):html.index(">", at) + 1]
+
+
+def test_cards_default_autoloads_every_lazy_section():
+    """Positive control for the deferral assertions below (mobile design
+    §5.5). The four lazy sections always render deferred (data-dash-src),
+    never with hx-trigger="load". In Cards with nothing collapsed or hidden,
+    each one carries the data-dash-autoload marker that the page's init
+    activates on DOMContentLoaded (desktop). That proves the marker's
+    absence elsewhere is deliberate deferral, not the flags being off."""
     html = render_full("custom", killmails_enabled=True, battles_enabled=True)
-    for needle in _GAME_WIDE_LOAD_HX_GETS:
-        assert needle in html, f"expected {needle} in default Cards render"
-    assert _COMBAT_PROFILE_HX_GET in html
+    for el_id, src in _LAZY.items():
+        tag = _open_tag(html, f'id="{el_id}"')
+        assert f'data-dash-src="{src}"' in tag, el_id
+        assert 'data-dash-autoload="1"' in tag, el_id
+    for needle in _GAME_WIDE_LOAD_HX_GETS + (_COMBAT_PROFILE_HX_GET,):
+        assert needle not in html, needle
 
 
 def test_compact_renders_one_row_per_pilot():
@@ -61,7 +80,8 @@ def test_compact_starts_with_pilot_sections_collapsed():
 
 def test_cards_mode_never_forces_pilot_sections_collapsed():
     html = render_full("custom", dash_mode="cards", killmails_enabled=True)
-    assert _COMBAT_PROFILE_HX_GET in html
+    assert 'data-dash-autoload="1"' in _open_tag(html, 'id="dashboard-combat-profile"')
+    assert "display:none" not in _open_tag(html, 'data-dash-body="combat_profile"')
 
 
 def test_a_collapsed_section_has_no_load_trigger_hx_get():
@@ -296,3 +316,67 @@ def test_remove_is_hidden_on_phones_in_cards_and_detailed():
         forms = re.findall(r'<form method="POST" action="/auth/remove/\d+"([^>]*)>', html)
         assert len(forms) == len(CHARACTERS), mode
         assert all(f.startswith(' class="m-hide" data-confirm=') for f in forms), mode
+
+
+# ── Mobile R1: heavy sections and titles (mobile design §5.5 / §5.6) ──────
+
+import os
+
+_PARTIALS = os.path.join(os.path.dirname(__file__), "..", "app", "templates", "partials")
+
+
+def _partial_source(name):
+    with open(os.path.join(_PARTIALS, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_compact_and_collapsed_sections_get_no_autoload_marker():
+    html = render_full("custom", dash_mode="compact", killmails_enabled=True, battles_enabled=True)
+    for el_id in _LAZY:
+        assert "data-dash-autoload" not in _open_tag(html, f'id="{el_id}"'), el_id
+    html = render_full("custom", killmails_enabled=True,
+                       prefs_patch={"collapsed_sections": ["activity"]})
+    assert "data-dash-autoload" not in _open_tag(html, 'id="dashboard-activity"')
+    assert 'data-dash-autoload="1"' in _open_tag(html, 'id="dashboard-kill-pulse"')
+
+
+def test_phone_init_uses_a_per_device_open_set():
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    assert "var DASH_PHONE_OPEN_KEY = 'vigilant.dash.phoneOpen';" in html
+    assert ("var DASH_PHONE_COLLAPSED = ['wealth', 'battles', 'activity', "
+            "'kill_pulse', 'combat_profile'];") in html
+    assert "document.querySelectorAll('[data-dash-autoload]')" in html
+    read = html.split("function dashPhoneOpenRead()")[1].split("function dashPhoneOpenWrite(")[0]
+    write = html.split("function dashPhoneOpenWrite(")[1].split("function dashSectionsInit()")[0]
+    assert "try {" in read and "catch (e)" in read
+    assert "try {" in write and "catch (e)" in write
+    toggle = html.split("function toggleDashSection()")[1].split("function hideDashSection()")[0]
+    phone = toggle.index("if (dashIsPhone())")
+    assert toggle.index("dashPhoneOpenWrite(", phone) < toggle.index("return;", phone) \
+        < toggle.index("persistSectionState()")
+
+
+def test_each_lazy_section_title_appears_once():
+    html = render_full("custom", killmails_enabled=True, battles_enabled=True)
+    for title in ("Major Fleet Battles", "Activity", "Pilot Pulse", "Combat Profile"):
+        assert html.count(f">{title}<") == 1, (title, html.count(f">{title}<"))
+    assert "Major Fleet Battles in New Eden" not in html
+    assert "Your Pilots Combat Profile" not in html
+    for meta in ("New Eden &middot; last 7 days",
+                 "30d &middot; all your characters &middot; stored killmails",
+                 "your pilots &middot; 90d"):
+        assert meta in html, meta
+
+
+def test_lazy_partials_drop_their_title_lines_but_keep_data_meta():
+    assert "Major Fleet Battles" not in _partial_source("dashboard_recent_battles.html")
+    activity = _partial_source("dashboard_activity.html")
+    assert "Activity · New Eden" not in activity
+    assert "peak {{ fmt_pcu(peak_pcu) }} online" in activity
+    assert "{% for w, label in [('1h','1H')" in activity  # window buttons stay
+    pulse = _partial_source("dashboard_kill_pulse.html")
+    assert "Pilot Pulse · {{ days }}d" not in pulse
+    assert "all your characters · stored killmails" not in pulse
+    profile = _partial_source("dashboard_combat_profile.html")
+    assert "Your Pilots Combat Profile" not in profile
+    assert "{{ char_count }} char" in profile

@@ -33,9 +33,8 @@
 </style>
 
 <div class="b-section">
-  <div class="b-section-head">
-    <span class="b-label">Major Fleet Battles in New Eden — last 7 days</span>
-  </div>
+  {# Mobile design §5.6: the name and "New Eden · last 7 days" are the
+     section's collapse bar in dashboard.html; no second title here. #}
   <div class="b-pad-md">
     {% if not rollup and not top10 %}
     <div style="font-size:11px;color:var(--muted);">No battles in the last 7 days. Discovery runs every 15 min.</div>

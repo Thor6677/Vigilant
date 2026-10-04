@@ -19,9 +19,13 @@
 
 <div id="dashboard-activity" style="margin-bottom:0.75rem;">
 <div class="b-section">
+    {# Mobile design §5.6: the section name and "New Eden" are the collapse
+       bar in dashboard.html. The peak/ISK figures depend on this window's
+       data, which the bar (rendered before this loads) can't know, so they
+       stay here as a muted line beside the window buttons. #}
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
-        <span class="b-label">
-            Activity · New Eden · peak {{ fmt_pcu(peak_pcu) }} online · {{ fmt_isk(total_isk) }} ISK destroyed
+        <span class="b-label" style="color:var(--muted);">
+            peak {{ fmt_pcu(peak_pcu) }} online · {{ fmt_isk(total_isk) }} ISK destroyed
         </span>
         <div style="display:flex;gap:0.25rem;">
             {% for w, label in [('1h','1H'),('24h','24H'),('week','Week'),('month','Month')] %}

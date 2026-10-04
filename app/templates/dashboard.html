@@ -566,15 +566,22 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Major Fleet Battles</span>
+        {# §5.6: the section's only title. Its meta text lives here too. #}
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Major Fleet Battles</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">New Eden &middot; last 7 days</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
+    {# §5.5: always deferred. data-dash-autoload marks what loads straight
+       away on desktop (exactly the old not-sec_defer case); the init at
+       the end of this page's script fires it, or on phones may hold it
+       collapsed. #}
     <div id="dashboard-recent-battles"
-         {% if not sec_defer %}hx-get="/dashboard/recent-battles" hx-trigger="load"{% else %}data-dash-src="/dashboard/recent-battles" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/recent-battles" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Major Fleet Battles in New Eden · 7d</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -590,15 +597,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Activity</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Activity</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">New Eden</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-activity"
-         {% if not sec_defer %}hx-get="/dashboard/activity?window=24h" hx-trigger="load"{% else %}data-dash-src="/dashboard/activity?window=24h" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/activity?window=24h" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="outerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Activity</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -614,15 +623,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Pilot Pulse</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Pilot Pulse</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">30d &middot; all your characters &middot; stored killmails</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-kill-pulse"
-         {% if not sec_defer %}hx-get="/dashboard/kill-pulse" hx-trigger="load"{% else %}data-dash-src="/dashboard/kill-pulse" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/kill-pulse" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Pilot Pulse</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -641,15 +652,17 @@
 {% if sec_present[sec] %}
 <div class="dash-section-wrap" data-dash-section="{{ sec }}" style="{% if sec_hidden %}display:none;{% endif %}margin-bottom:0.75rem;">
     <div class="b-table-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px;">
-        <span class="b-label" style="font-size:9px;color:var(--muted);">Combat Profile</span>
+        <span style="display:flex;align-items:baseline;flex-wrap:wrap;column-gap:0.5rem;min-width:0;">
+            <span class="b-label" style="font-size:9px;color:var(--muted);">Combat Profile</span>
+            <span class="b-subtitle" style="font-size:9px;color:var(--muted);opacity:0.7;">your pilots &middot; 90d</span>
+        </span>
         <div style="display:flex;gap:0.35rem;">{{ section_toolbar(sec, section_labels[sec], sec_collapsed, sec_hidden) }}</div>
     </div>
     <div class="dash-section-body" data-dash-body="{{ sec }}" style="{% if sec_collapsed %}display:none;{% endif %}">
     <div id="dashboard-combat-profile"
-         {% if not sec_defer %}hx-get="/dashboard/combat-profile" hx-trigger="load"{% else %}data-dash-src="/dashboard/combat-profile" data-dash-trigger="load"{% endif %}
+         data-dash-src="/dashboard/combat-profile" data-dash-trigger="load"{% if not sec_defer %} data-dash-autoload="1"{% endif %}
          hx-swap="innerHTML">
         <div class="b-section">
-            <div class="b-section-head"><span class="b-label">Your Pilots Combat Profile</span></div>
             <div style="padding:0.75rem;color:var(--muted);font-size:11px;">Loading…</div>
         </div>
     </div>
@@ -980,9 +993,37 @@ function activateLazy(body) {
     var trigger = el.getAttribute('data-dash-trigger') || 'load';
     el.removeAttribute('data-dash-src');
     el.removeAttribute('data-dash-trigger');
+    el.removeAttribute('data-dash-autoload');
     el.setAttribute('hx-get', src);
     el.setAttribute('hx-trigger', trigger);
     if (window.htmx) window.htmx.process(el);
+}
+
+// ── Mobile design §5.5: heavy sections on phones ───────────────────────────
+// Phones start these collapsed (body hidden, data not fetched) unless this
+// device opened them before. The set lives in localStorage, never in
+// server prefs, and every access is guarded: with storage unavailable
+// (private mode) they simply start collapsed on every visit.
+var DASH_PHONE_OPEN_KEY = 'vigilant.dash.phoneOpen';
+var DASH_PHONE_COLLAPSED = ['wealth', 'battles', 'activity', 'kill_pulse', 'combat_profile'];
+
+function dashIsPhone() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+}
+
+function dashPhoneOpenRead() {
+    try {
+        var v = JSON.parse(window.localStorage.getItem(DASH_PHONE_OPEN_KEY) || '[]');
+        return Array.isArray(v) ? v.filter(function (k) { return typeof k === 'string'; }) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function dashPhoneOpenWrite(keys) {
+    try {
+        window.localStorage.setItem(DASH_PHONE_OPEN_KEY, JSON.stringify(keys));
+    } catch (e) { /* storage unavailable: next visit starts collapsed */ }
 }
 
 function _arrAdd(arr, key) { if (arr.indexOf(key) === -1) arr.push(key); }
@@ -1035,8 +1076,17 @@ function toggleDashSection() {
     var willExpand = body.style.display === 'none';
     body.style.display = willExpand ? '' : 'none';
     this.textContent = willExpand ? '▾' : '▸';
+    if (willExpand) activateLazy(body);
+    if (dashIsPhone()) {
+        // Phones (§5.5): per-device state only. dashCollapsedSections, which
+        // a later ✕ posts, is never touched, so nothing here reaches server
+        // prefs.
+        var open = dashPhoneOpenRead();
+        if (willExpand) _arrAdd(open, key); else _arrRemove(open, key);
+        dashPhoneOpenWrite(open);
+        return;
+    }
     if (willExpand) {
-        activateLazy(body);
         _arrRemove(dashCollapsedSections, key);
     } else {
         _arrAdd(dashCollapsedSections, key);
@@ -1107,6 +1157,37 @@ function toggleDashGroup() {
     if (summary) summary.style.display = willCollapse ? '' : 'none';
     this.textContent = willCollapse ? '▸' : '▾';
     persistGroupState();
+}
+
+// §5.5 init. Phones: collapse the heavy sections this device hasn't opened.
+// Server-collapsed or server-hidden ones are left exactly as rendered (this
+// only ever collapses). Then, at every width, load each section the server
+// marked data-dash-autoload whose body is still visible: on desktop that is
+// exactly the set that used to load via hx-trigger="load".
+function dashSectionsInit() {
+    if (dashIsPhone()) {
+        var open = dashPhoneOpenRead();
+        DASH_PHONE_COLLAPSED.forEach(function (key) {
+            if (open.indexOf(key) !== -1) return;
+            var wrap = document.querySelector('[data-dash-section="' + key + '"]');
+            if (!wrap) return;
+            var body = wrap.querySelector('[data-dash-body="' + key + '"]');
+            if (!body || body.style.display === 'none') return;
+            body.style.display = 'none';
+            var btn = wrap.querySelector('.dash-sec-toggle');
+            if (btn) btn.textContent = '▸';
+        });
+    }
+    document.querySelectorAll('[data-dash-autoload]').forEach(function (el) {
+        var body = el.closest('[data-dash-body]');
+        if (body && body.style.display === 'none') return;
+        activateLazy(el);
+    });
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', dashSectionsInit);
+} else {
+    dashSectionsInit();
 }
 </script>
 
