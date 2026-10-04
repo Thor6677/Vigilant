@@ -1176,6 +1176,41 @@
 }
 /* ── end R2 P ── */
 
+/* ── R3 T1 · landing/manufacturing ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T1 ── */
+
+/* ── R3 T2 · build finder ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T2 ── */
+
+/* ── R3 T3 · active jobs ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T3 ── */
+
+/* ── R3 T4 · compression/hauling ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T4 ── */
+
+/* ── R3 T5 · mining ledger ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T5 ── */
+
+/* ── R3 T6 · planetary tools ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T6 ── */
+
+/* ── R3 T7 · stockpiles/farm/appraisal ── */
+@media (max-width: 640px) {
+}
+/* ── end R3 T7 ── */
+
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {
     .m-hide, .m-tabs-desktop { display: none !important; }
