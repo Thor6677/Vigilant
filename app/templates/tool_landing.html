@@ -87,7 +87,7 @@
     <div>
         <h1 class="b-page-title" style="font-size:16px;">{{ page_title }}</h1>
         {% if page_subtitle %}
-        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-top:4px;">{{ page_subtitle }}</div>
+        <div class="tl-subtitle" style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-top:4px;">{{ page_subtitle }}</div>
         {% endif %}
     </div>
 </div>
@@ -102,8 +102,10 @@
             <span class="tl-card-url">{{ tool.url_label or tool.url }}</span>
         </div>
         <div class="tl-card-desc">{{ tool.desc }}</div>
+        {# Phones (D1 A): title and description only; the features list is
+           desktop-only. Layout and text sizes are in site.css (R3 T1). #}
         {% if tool.features %}
-        <div class="tl-card-features">
+        <div class="tl-card-features m-hide">
             <div class="tl-card-features-label">Features</div>
             <ul>
                 {% for f in tool.features %}<li>{{ f }}</li>{% endfor %}

@@ -1178,6 +1178,64 @@
 
 /* ── R3 T1 · landing/manufacturing ── */
 @media (max-width: 640px) {
+    /* Tool landings, /industry /intel /tools (D1 A): compact cards in one
+       column; the desktop 320px minimum is wider than a 320px phone. The
+       features list is m-hide in the markup, so the description's bottom
+       margin goes too. The URL label, subtitle and external arrow go from
+       9–10px to 11px. !important: the page's own <style> loads after this
+       file, and the subtitle's size is inline. */
+    .tl-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 0.5rem !important; }
+    .tl-card { padding: 0.75rem !important; }
+    .tl-card-title { flex-wrap: wrap; }
+    .tl-card-desc { margin-bottom: 0 !important; }
+    .tl-card-url, .tl-subtitle { font-size: 11px !important; }
+    .tl-card-external::after { font-size: 11px !important; }
+
+    /* Manufacturing controls stack (m-stack); Runs and the ME/TE sliders,
+       and a component panel's ME slider, go full width over their inline
+       70/120/90px. */
+    .mfg-fill { width: 100% !important; }
+    /* Blueprint search results: 40px tap targets at 12px. */
+    .mfg-pick { min-height: 40px; }
+    .mfg-pick > span { font-size: 12px !important; }
+
+    /* Build time (D3 A): one label · value line per box, its caption on a
+       second line under the label. The boxes join into one bordered block:
+       no 1px gap, no doubled border between them. */
+    .mfg-tiles { flex-direction: column; gap: 0 !important; }
+    .mfg-tiles > .mfg-tile {
+        display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 0.75rem;
+        flex: none !important; padding: 0.5rem 0.75rem !important; text-align: left !important;
+    }
+    .mfg-tiles > .mfg-tile + .mfg-tile { border-top: none !important; }
+    .mfg-tile > .mfg-tile-label { flex: none; margin: 0 !important; }
+    .mfg-tile > .mfg-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+    .mfg-tile > .mfg-tile-sub { flex-basis: 100%; margin-top: 0 !important; }
+
+    /* Material rows (bill of materials and component panels, D2 A) and
+       shopping-list rows (D4 A). Both keys at 12px: key 1's outer cell has
+       no size of its own and would take the 16px phone body line box beside
+       an 11px key 2. The icon lead keeps a 20px slot when the icon fails to
+       load (data-on-error hides it), so names stay in line. */
+    .mfg-mat.m-row > [data-m="lead"] { min-width: 20px !important; min-height: 20px; }
+    .mfg-mat > [data-m="key"],
+    .mfg-mat > [data-m="key"] > * { font-size: 12px !important; }
+    .mfg-shop > [data-m="key"] { font-size: 12px !important; }
+
+    /* Nested component panels and the Build/Buy lines under a material
+       indent 0.75rem instead of 2.25–3rem, so a build three levels deep
+       still fits. */
+    .mfg-comp { margin-left: 0.75rem !important; }
+    .mfg-build { padding-left: 0.75rem !important; }
+
+    /* Total rows: label · value. The spacer columns are m-hide; the label
+       takes the spare width and wraps, values keep their own width. */
+    .mfg-total { align-items: baseline; }
+    .mfg-total > :first-child { flex: 1 1 auto !important; min-width: 0; }
+    .mfg-total > :not(:first-child) { flex: none !important; }
+
+    /* Shopping list: Copy / Send Minerals / Send to Hauling wrap. */
+    .mfg-shop-actions { flex-wrap: wrap; }
 }
 /* ── end R3 T1 ── */
 

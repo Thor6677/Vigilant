@@ -99,10 +99,12 @@ async def industry_search(request: Request, q: str = Query(""), db: AsyncSession
     if not valid:
         return HTMLResponse('<div class="b-empty">No blueprints found</div>')
 
+    # mfg-pick: a 40px tap target on phones (site.css R3 T1). A pick, so not
+    # an expand-on-tap m-row.
     html_parts = []
     for r in valid:
         html_parts.append(
-            f'<div class="b-table-row" style="cursor:pointer;" '
+            f'<div class="b-table-row mfg-pick" style="cursor:pointer;" '
             f'data-type-id="{r["type_id"]}" data-click="selectBlueprintFromEl">'
             f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
             f'style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" '

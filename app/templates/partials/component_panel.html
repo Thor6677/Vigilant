@@ -1,8 +1,11 @@
-{# Sub-component Build panel — inline expansion for a buildable material #}
-<div style="margin:0 0 0.5rem 2.25rem;border:1px solid var(--border);border-top:none;background:var(--surface);">
+{# Sub-component Build panel — inline expansion for a buildable material.
+   Phones (site.css R3 T1): each nested panel indents 0.75rem rather than
+   2.25rem (mfg-comp), the settings stack with a full-width ME slider, and
+   the materials are the same expand-on-tap rows as calc_results.html. #}
+<div class="mfg-comp" style="margin:0 0 0.5rem 2.25rem;border:1px solid var(--border);border-top:none;background:var(--surface);">
 
     {# Component header with settings #}
-    <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+    <div class="m-stack" style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
         <div style="display:flex;align-items:center;gap:0.4rem;">
             <img src="https://images.evetech.net/types/{{ type_id }}/icon?size=32"
                  style="width:20px;height:20px;border:1px solid var(--border);"
@@ -14,7 +17,7 @@
         {# ME slider #}
         <div style="display:flex;flex-direction:column;gap:2px;">
             <label style="font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">ME <span id="sub-me-val-{{ type_id }}" class="b-text">{{ me }}</span></label>
-            <input type="range" id="sub-me-{{ type_id }}" value="{{ me }}" min="0" max="10" step="1"
+            <input type="range" id="sub-me-{{ type_id }}" class="mfg-fill" value="{{ me }}" min="0" max="10" step="1"
                    data-input="subMeSlide" data-type-id="{{ type_id }}" data-needed="{{ needed }}"
                    style="width:90px;accent-color:var(--accent);">
         </div>
@@ -53,7 +56,7 @@
         </div>
 
         {# Copy parent settings button #}
-        <button data-click="copyParentSettings" data-type-id="{{ type_id }}" data-needed="{{ needed }}" class="b-btn"
+        <button data-click="copyParentSettings" data-type-id="{{ type_id }}" data-needed="{{ needed }}" class="b-btn m-tap"
                 style="padding:2px 6px;font-size:9px;border:1px solid var(--accent);color:var(--accent);flex:none;align-self:flex-end;">
             ↓ Parent
         </button>
@@ -89,35 +92,41 @@
         </div>
     </div>
 
-    {# Sub-material BOM #}
+    {# Sub-material BOM. Phones: lead = icon, key 1 = name, key 2 = needed;
+       Name, Base, Saved, Unit and Total when opened, as in calc_results.html.
+       The nested Build button must never carry .build-toggle-btn: Build All
+       collects every one on the page. #}
     {% for row in sub_rows %}
     <div>
-        <div class="b-table-row" style="padding-left:1rem;{% if row.buildable %}border-bottom:none;{% endif %}">
-            <span style="flex:3;display:flex;align-items:center;gap:0.35rem;">
-                <img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+        <div class="b-table-row m-row mfg-mat" data-click="toggleMRow" style="padding-left:1rem;{% if row.buildable %}border-bottom:none;{% endif %}">
+            <span class="m-only" data-m="lead"><img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+                 alt="" width="20" height="20" style="border:1px solid var(--border);" data-on-error="hide"></span>
+            <span data-m="key" style="flex:3;display:flex;align-items:center;gap:0.35rem;">
+                <img class="m-hide" src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
                      style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
                      data-on-error="hide">
                 <span style="font-size:10px;color:var(--text);">{{ row.name }}</span>
             </span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(row.base_qty) }}</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--text);font-weight:{% if row.adjusted_qty < row.base_qty %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
+            <span class="m-only" data-m-label="Name">{{ row.name }}</span>
+            <span data-m-label="Base" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(row.base_qty) }}</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:10px;color:var(--text);font-weight:{% if row.adjusted_qty < row.base_qty %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
             {% if row.adjusted_qty < row.base_qty %}
-            <span style="flex:1;text-align:right;font-size:9px;color:var(--success);">-{{ "{:,}".format(row.base_qty - row.adjusted_qty) }}</span>
+            <span data-m-label="Saved" style="flex:1;text-align:right;font-size:9px;color:var(--success);">-{{ "{:,}".format(row.base_qty - row.adjusted_qty) }}</span>
             {% else %}
-            <span style="flex:1;text-align:right;font-size:9px;color:var(--muted);">—</span>
+            <span data-m-label="Saved" style="flex:1;text-align:right;font-size:9px;color:var(--muted);">—</span>
             {% endif %}
             {% if row.unit_price > 0 %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
+            <span data-m-label="Unit" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
+            <span data-m-label="Total" style="flex:1;text-align:right;font-size:10px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
             {% else %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            <span data-m-label="Unit" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            <span data-m-label="Total" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
             {% endif %}
         </div>
         {% if row.buildable %}
-        <div style="padding:0 0.75rem 0.3rem 3rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
+        <div class="mfg-build" style="padding:0 0.75rem 0.3rem 3rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
             <button data-click="toggleSubComponent" data-type-id="{{ row.type_id }}" data-qty="{{ row.adjusted_qty }}"
-                    class="b-btn" style="padding:1px 6px;font-size:8px;border:1px solid var(--border);flex:none;">
+                    class="b-btn m-tap" style="padding:1px 6px;font-size:8px;border:1px solid var(--border);flex:none;">
                 Build ▸
             </button>
             <span style="font-size:8px;color:var(--muted);">has blueprint</span>

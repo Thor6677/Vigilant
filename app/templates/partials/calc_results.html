@@ -10,28 +10,29 @@
     </div>
     {% endif %}
 
-    {# Build time summary #}
+    {# Build time summary. Phones (D3 A): one label · value line per box,
+       with its caption under the label (mfg-tile*, site.css R3 T1). #}
     {% if main_time_secs or parallel_time_str %}
-    <div style="display:flex;gap:1px;margin-bottom:0.5rem;">
+    <div class="mfg-tiles" style="display:flex;gap:1px;margin-bottom:0.5rem;">
         {% if parallel_time_str %}
-        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
-            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Parallel Build</div>
-            <div style="font-size:14px;font-weight:300;color:var(--success);">{{ parallel_time_str }}</div>
-            <div style="font-size:8px;color:var(--muted);margin-top:1px;">components + final</div>
+        <div class="mfg-tile" style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div class="mfg-tile-label" style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Parallel Build</div>
+            <div class="mfg-tile-value" style="font-size:14px;font-weight:300;color:var(--success);">{{ parallel_time_str }}</div>
+            <div class="mfg-tile-sub" style="font-size:8px;color:var(--muted);margin-top:1px;">components + final</div>
         </div>
         {% endif %}
         {% if sequential_time_str %}
-        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
-            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Sequential Build</div>
-            <div style="font-size:14px;font-weight:300;color:var(--text);">{{ sequential_time_str }}</div>
-            <div style="font-size:8px;color:var(--muted);margin-top:1px;">one at a time</div>
+        <div class="mfg-tile" style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div class="mfg-tile-label" style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Sequential Build</div>
+            <div class="mfg-tile-value" style="font-size:14px;font-weight:300;color:var(--text);">{{ sequential_time_str }}</div>
+            <div class="mfg-tile-sub" style="font-size:8px;color:var(--muted);margin-top:1px;">one at a time</div>
         </div>
         {% endif %}
         {% if main_time_str %}
-        <div style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
-            <div style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Final Assembly</div>
-            <div style="font-size:14px;font-weight:300;color:var(--accent);">{{ main_time_str }}</div>
-            <div style="font-size:8px;color:var(--muted);margin-top:1px;">after components</div>
+        <div class="mfg-tile" style="flex:1;padding:0.5rem;text-align:center;border:1px solid var(--border);background:var(--surface);">
+            <div class="mfg-tile-label" style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Final Assembly</div>
+            <div class="mfg-tile-value" style="font-size:14px;font-weight:300;color:var(--accent);">{{ main_time_str }}</div>
+            <div class="mfg-tile-sub" style="font-size:8px;color:var(--muted);margin-top:1px;">after components</div>
         </div>
         {% endif %}
     </div>
@@ -45,7 +46,7 @@
                 {% set buildable_rows = rows | selectattr('buildable') | list %}
                 {% if buildable_rows %}
                 <button id="build-all-btn" data-click="toggleBuildAll"
-                        class="b-btn" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
+                        class="b-btn m-tap" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
                     Build All
                 </button>
                 {% endif %}
@@ -53,7 +54,7 @@
         </div>
 
         {# Header #}
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
             <span style="flex:3;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Material</span>
             <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Base</span>
             <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Needed</span>
@@ -62,37 +63,47 @@
             <span style="flex:1;text-align:right;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Total</span>
         </div>
 
+        {# Phones (D2 A): lead = icon, key 1 = name, key 2 = needed; Name,
+           Base, Saved, Unit and Total when opened. The icon sits inside the
+           name cell on desktop, so phones get their own copy as an m-only
+           lead and the in-cell one is m-hide. The lead is a wrapper, not the
+           img: data-on-error="hide" sets display inline, which the phone
+           rules on a tagged cell would beat. The Build/Buy line and the
+           component panel stay outside the row, always visible. #}
         {% for row in rows %}
         <div>
             {# Main material row #}
-            <div class="b-table-row" style="border-bottom:{% if row.buildable %}none{% else %}1px solid var(--border){% endif %};">
-                <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
-                    <img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+            <div class="b-table-row m-row mfg-mat" data-click="toggleMRow" style="border-bottom:{% if row.buildable %}none{% else %}1px solid var(--border){% endif %};">
+                <span class="m-only" data-m="lead"><img src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
+                     alt="" width="20" height="20" style="border:1px solid var(--border);" data-on-error="hide"></span>
+                <span data-m="key" style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                    <img class="m-hide" src="https://images.evetech.net/types/{{ row.type_id }}/icon?size=32"
                          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
                          data-on-error="hide">
                     <span style="font-size:11px;color:var(--text);">{{ row.name }}</span>
                 </span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,}".format(row.base_qty * runs) }}</span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:{% if row.saved > 0 %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
+                <span class="m-only" data-m-label="Name">{{ row.name }}</span>
+                <span data-m-label="Base" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,}".format(row.base_qty * runs) }}</span>
+                <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:{% if row.saved > 0 %}600{% else %}400{% endif %};">{{ "{:,}".format(row.adjusted_qty) }}</span>
                 {% if row.saved > 0 %}
-                <span style="flex:1;text-align:right;font-size:10px;color:var(--success);">-{{ "{:,}".format(row.saved) }}</span>
+                <span data-m-label="Saved" style="flex:1;text-align:right;font-size:10px;color:var(--success);">-{{ "{:,}".format(row.saved) }}</span>
                 {% else %}
-                <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+                <span data-m-label="Saved" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
                 {% endif %}
                 {% if row.unit_price > 0 %}
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
+                <span data-m-label="Unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.0f}".format(row.unit_price) }}</span>
+                <span data-m-label="Total" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ "{:,.0f}".format(row.line_cost) }}</span>
                 {% else %}
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
+                <span data-m-label="Unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
+                <span data-m-label="Total" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">—</span>
                 {% endif %}
             </div>
 
             {# Build/Buy toggle for buildable materials #}
             {% if row.buildable %}
-            <div style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
+            <div class="mfg-build" style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
                 <button data-click="toggleComponentFromEl" data-type-id="{{ row.type_id }}" data-qty="{{ row.adjusted_qty }}"
-                        class="b-btn build-toggle-btn" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
+                        class="b-btn build-toggle-btn m-tap" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
                         style="padding:1px 6px;font-size:9px;border:1px solid var(--border);flex:none;">
                     Build ▸
                 </button>
@@ -103,13 +114,14 @@
         </div>
         {% endfor %}
 
-        {# Total row #}
-        <div class="b-table-row" style="border-top:2px solid var(--border);">
+        {# Total rows. Phones: a label · value line; the empty spacer columns
+           are desktop-only (mfg-total, site.css R3 T1). #}
+        <div class="b-table-row mfg-total" style="border-top:2px solid var(--border);">
             <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Total Material Cost (Buy All)</span>
-            <span style="flex:1;"></span>
-            <span style="flex:1;"></span>
-            <span style="flex:1;"></span>
-            <span style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
             <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">
                 {% if total_cost >= 1000000000 %}{{ "%.2f"|format(total_cost / 1000000000) }}B ISK
                 {% elif total_cost >= 1000000 %}{{ "%.2f"|format(total_cost / 1000000) }}M ISK
@@ -118,9 +130,9 @@
         </div>
 
         {% if total_saved_cost > 0 %}
-        <div class="b-table-row" style="border-top:1px solid var(--border);">
+        <div class="b-table-row mfg-total" style="border-top:1px solid var(--border);">
             <span style="flex:3;font-size:10px;color:var(--success);">Material savings from bonuses</span>
-            <span style="flex:1;"></span><span style="flex:1;"></span><span style="flex:1;"></span><span style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span><span class="m-hide" style="flex:1;"></span><span class="m-hide" style="flex:1;"></span><span class="m-hide" style="flex:1;"></span>
             <span style="flex:1;text-align:right;font-size:11px;color:var(--success);">
                 -{% if total_saved_cost >= 1000000000 %}{{ "%.2f"|format(total_saved_cost / 1000000000) }}B{% elif total_saved_cost >= 1000000 %}{{ "%.2f"|format(total_saved_cost / 1000000) }}M{% else %}{{ "{:,.0f}".format(total_saved_cost) }}{% endif %} ISK
             </span>
