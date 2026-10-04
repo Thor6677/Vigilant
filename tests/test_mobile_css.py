@@ -354,14 +354,21 @@ def _raw_css() -> str:
         return fh.read()
 
 
+# Any width cap, however it's spelled: `(max-width:640px)`, `(max-width: 480px)`,
+# `screen and (max-width: 640px)`, range syntax `(width <= 640px)`.
+_NARROW = re.compile(r"max-width|\bwidth\s*<|>=?\s*width\b", re.I)
+
+
 def _assert_sections(raw, release, sections):
     """`release`'s section headers and end markers each appear once, in
     `sections` order, without overlapping. Between each header and its end
-    marker sits exactly one phone @media block, first, closed by
-    phone_block's brace matching; a desktop rule, if a task truly needs one,
-    goes after that block's `}` and before the end marker. Braces balance
-    inside each section. Returns the offsets of the first header and the
-    last end marker."""
+    marker sits exactly one width-capped @media block, however it's spelled
+    (`max-width`, range syntax): the phone block, first, closed by
+    phone_block's brace matching. Nested @supports, `(hover: …)` or a
+    `(min-width: …)` desktop wrapper are fine. A desktop rule, if a task
+    truly needs one, goes after that block's `}` and before the end marker.
+    Braces balance inside each section. Returns the offsets of the first
+    header and the last end marker."""
     marks = []
     for task, page in sections:
         head, end = f"/* ── {release} {task} · {page} ── */", f"/* ── end {release} {task} ── */"
@@ -373,8 +380,9 @@ def _assert_sections(raw, release, sections):
 
     for (task, _), (_, _, head) in zip(sections, marks):
         body = css_section(task, raw, release=release)
-        preludes = re.findall(r"@media([^{]*)\{", body)
-        assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
+        preludes = re.findall(r"@media([^{]*)\{", body, flags=re.I)
+        narrow = [p for p in preludes if _NARROW.search(p)]
+        assert narrow == [f" ({PHONE}) "], f"{head}: one phone @media block per section, found {narrow}"
         try:
             phone_block(body)   # opens with its phone block, and that block closes
         except AssertionError as e:
@@ -445,6 +453,14 @@ def test_r3_sections_are_seeded_in_order_after_r2_and_before_the_final_m_hide():
     assert raw.index(_R2_LAST_END) < first, "R3 sections must come after the end of R2 P"
     assert raw.count(_M_HIDE_FINAL) == 1
     assert last < raw.index(_M_HIDE_FINAL), "R3 sections must come before the final m-hide block"
+    # Nothing lives between the sections: every R3 rule belongs to a task.
+    bounds = [raw.index(_R2_LAST_END) + len(_R2_LAST_END)]
+    for task, page in _R3_SECTIONS:
+        end = f"/* ── end R3 {task} ── */"
+        bounds += [raw.index(f"/* ── R3 {task} · {page} ── */"), raw.index(end) + len(end)]
+    bounds.append(raw.index("/* ── ", bounds[-1]))   # next header: R4's, or the final m-hide
+    gaps = [raw[a:b] for a, b in zip(bounds[::2], bounds[1::2])]
+    assert gaps == ["\n\n"] * len(gaps), f"only a blank line between R3 sections: {gaps}"
 
 
 def test_css_section_reads_an_r3_section():
