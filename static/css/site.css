@@ -784,3 +784,9 @@
     /* ≥8px between the two 40px buttons (each wrapper's gap is 0.35rem). */
     .dash-sec-toggle + .dash-sec-hide { margin-left: 4px; }
 }
+
+/* Shared utility: a flex line inside key 1 whose children should each
+   ellipsise rather than clip (the plain key-1 ellipsis can't reach them). */
+@media (max-width: 640px) {
+    .m-row > [data-m="key"] > .m-trunc > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+}

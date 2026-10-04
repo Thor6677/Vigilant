@@ -189,5 +189,18 @@ def test_skill_plans_phone_line_carries_skills_and_sp():
     meta = [k for k in name["kids"] if "m-only" in k.get("class", "").split()]
     assert len(meta) == 1 and "display:block" in meta[0]["style"]
     assert "3 skills · 1,234,567 SP" in name["text"]
+    html = _render_skill_plans()
+    assert re.search(r'<span class="m-only"[^>]*>\s*3 skills · 1,234,567 SP\s*</span>', html)
+    assert re.search(r'<span class="m-only"[^>]*>\s*1 skill\s*</span>', html)
     shared_name = _keys(shared)[0]["text"]
     assert "1 skill" in shared_name and " SP" not in shared_name
+
+
+def test_skill_plans_badge_line_ellipsises_on_phones():
+    html = _render_skill_plans()
+    assert re.search(r'<span class="m-trunc"[^>]*>\s*<span[^>]*>Alpha Doctrine', html)
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        css = fh.read()
+    phone = css[css.rindex("@media (max-width: 640px)"):]
+    assert '.m-row > [data-m="key"] > .m-trunc > *' in phone
+    assert "text-overflow: ellipsis" in phone and "min-width: 0" in phone
