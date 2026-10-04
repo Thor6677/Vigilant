@@ -114,6 +114,8 @@
     </div>
 
     {% for bp in items %}
+    {%- set icon_src = "https://images.evetech.net/types/" ~ bp.type_id ~ "/" ~ ("bp" if bp.is_bpo else "bpc") ~ "?size=32" %}
+    {%- set icon_fallback = "https://images.evetech.net/types/" ~ bp.type_id ~ "/icon?size=32" %}
     {# Phones (mobile design §6.3): lead = icon, key 1 = name, key 2 = ME/TE.
        The icon sits inside the name cell on desktop, so phones get their own
        copy as a direct child (m-only) and the in-cell one is m-hide. ME and
@@ -121,13 +123,13 @@
        carries "ME/TE" as key 2. #}
     <div class="b-table-row m-row" data-click="toggleMRow">
         <img data-m="lead" class="m-only" loading="lazy" alt="" width="24" height="24"
-             src="https://images.evetech.net/types/{{ bp.type_id }}/{% if bp.is_bpo %}bp{% else %}bpc{% endif %}?size=32"
+             src="{{ icon_src }}"
              style="width:24px;height:24px;border:1px solid var(--border);"
-             data-on-error="imgFallback" data-fallback-src="https://images.evetech.net/types/{{ bp.type_id }}/icon?size=32">
+             data-on-error="imgFallback" data-fallback-src="{{ icon_fallback }}">
         <span data-m="key" style="flex:3;min-width:0;display:flex;align-items:center;gap:0.4rem;">
-            <img class="m-hide" src="https://images.evetech.net/types/{{ bp.type_id }}/{% if bp.is_bpo %}bp{% else %}bpc{% endif %}?size=32"
+            <img class="m-hide" src="{{ icon_src }}"
                  style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
-                 data-on-error="imgFallback" data-fallback-src="https://images.evetech.net/types/{{ bp.type_id }}/icon?size=32">
+                 data-on-error="imgFallback" data-fallback-src="{{ icon_fallback }}">
             <span style="min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 {{ bp.name }}
             </span>

@@ -47,7 +47,16 @@ def _norm(s):
 
 class _Cells(HTMLParser):
     """For every .m-row: its attrs, and each direct child's attrs, text and
-    element children (attrs of the child's own direct children)."""
+    element children (attrs of the child's own direct children).
+
+    Limits, all acceptable for the hand-written templates it reads:
+    - No implied end tags. An unclosed <td>, <li> or <p> stays open, so the
+      next sibling is read as its child rather than as another cell.
+    - An end tag closes the nearest open element with that name, so a stray
+      end tag can close a row early. Cells after it are dropped, which could
+      hide a third key from assert_mrow.
+    - `_labelled` keys cells by label, so two cells with the same label merge
+      into the last one."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -110,9 +119,11 @@ def _labelled(row):
 
 
 def _assert_single_value_child(row):
-    """An open row lays a labelled cell out as a flex row (label · value).
-    More than one visible element child would spread across that row, so
-    multi-part values need exactly one wrapper. m-hide children don't count."""
+    """An open row lays a labelled cell out as label · value, with the value
+    pieces grouped on the right (justify-content:flex-end; flex-wrap:wrap),
+    so several element children would still render. This helper is stricter
+    than the CSS on purpose: one wrapper per value keeps each value laid out
+    as a unit, the way its desktop cell is. m-hide children don't count."""
     for label, c in _labelled(row).items():
         shown = [k for k in c["kids"] if "m-hide" not in k.get("class", "").split()]
         assert len(shown) <= 1, f"labelled cell {label!r} has {len(shown)} element children"
@@ -352,14 +363,20 @@ from app.routes import blueprints as blueprints_mod  # noqa: E402
 _LONG_BP = "Sample Capital Construction Component With A Very Long Name Blueprint"
 
 
-def _render_blueprints():
+def _render_blueprints(extra=()):
+    """A BPO (10/20) and a BPC (2/4). `extra` adds (raw row, name) pairs; the
+    default render stays these two rows, which other tests index."""
     raw = [
         {"type_id": 691, "item_id": 1, "quantity": -1, "material_efficiency": 10,
          "time_efficiency": 20, "runs": -1, "location_flag": "Hangar", "location_id": 60000001},
         {"type_id": 692, "item_id": 2, "quantity": -2, "material_efficiency": 2,
          "time_efficiency": 4, "runs": 5, "location_flag": "Hangar", "location_id": 60000001},
     ]
-    bps = blueprints_mod._process_blueprints(raw, {691: "Sample Frigate Blueprint", 692: _LONG_BP})
+    names = {691: "Sample Frigate Blueprint", 692: _LONG_BP}
+    for row, name in extra:
+        raw.append(row)
+        names[row["type_id"]] = name
+    bps = blueprints_mod._process_blueprints(raw, names)
     char = {"character_id": 90000001, "character_name": "Pilot Alpha",
             "corporation_id": None, "corporation_name": None}
     return _render(blueprints_mod, "blueprints.html", "/character/90000001/blueprints",
@@ -381,6 +398,7 @@ def test_blueprints_rows_key_on_name_and_me_te():
     # Phone CSS forces width:auto on row children, so without intrinsic size the
     # lead collapses to ~2px until (or unless) the image loads.
     assert lead[0]["attrs"]["width"] == "24" and lead[0]["attrs"]["height"] == "24"
+    assert lead[0]["attrs"].get("loading") == "lazy"            # hidden on desktop: never fetched there
     name, mete = _keys(bpo)
     assert name["text"] == "Sample Frigate Blueprint"
     assert mete["text"] == "10/20"
@@ -402,6 +420,21 @@ def test_blueprints_rows_key_on_name_and_me_te():
     assert plain == ["10", "20"]
 
 
+def test_blueprints_me_te_key_is_green_only_when_both_are_maxed():
+    """10/14: ME is maxed, TE isn't. An `or` in the template's colour test
+    would turn this key green."""
+    half = {"type_id": 693, "item_id": 3, "quantity": -1, "material_efficiency": 10,
+            "time_efficiency": 14, "runs": -1, "location_flag": "Hangar", "location_id": 60000001}
+    rows = _rows(_render_blueprints([(half, "Sample Half Researched Blueprint")]))
+    row = next(r for r in rows if _keys(r)[0]["text"] == "Sample Half Researched Blueprint")
+    mete = _keys(row)[1]
+    assert mete["text"] == "10/14"
+    assert "var(--success)" not in mete["attrs"]["style"]
+    # The desktop ME cell alone is maxed, so it stays green.
+    me, te = [c for c in row["cells"] if "data-m" not in c["attrs"] and "data-m-label" not in c["attrs"]]
+    assert "var(--success)" in me["attrs"]["style"] and "var(--success)" not in te["attrs"]["style"]
+
+
 def test_blueprints_header_hides_on_phones():
     html = _render_blueprints()
     assert html.count('<div class="b-table-row m-head"') == 2      # one per group
@@ -420,13 +453,15 @@ def test_blueprints_long_names_truncate_on_desktop():
         assert prop in text["style"], prop
     head = re.search(r'<div class="b-table-row m-head"[^>]*>\s*<span style="([^"]*)">Blueprint</span>', html)
     assert head, "Blueprint header cell not found"
-    for prop in ("min-width:0", "overflow:hidden", "text-overflow:ellipsis"):
+    for prop in ("min-width:0", "overflow:hidden", "text-overflow:ellipsis", "white-space:nowrap"):
         assert prop in head.group(1), prop
 
 
 # ── Task 16: Wallet journal (§6.4) ───────────────────────────────────
 
 from datetime import datetime  # noqa: E402
+
+import pytest  # noqa: E402
 
 from app.routes import character_detail as overview_mod  # noqa: E402
 from app.routes import journal as journal_mod  # noqa: E402
@@ -436,8 +471,8 @@ _PILOT = _NS(character_id=90000001, character_name="Pilot Alpha",
              security_status=1.5, birthday=None)
 
 
-def _render_journal():
-    entries = [
+def _render_journal(entries=None):
+    entries = entries or [
         {"id": 1, "date": "2026-10-01T12:00:00Z", "ref_type": "bounty_prizes",
          "ref_type_label": "Bounty Prizes", "category": "pve", "amount": 1500000.0,
          "balance": 9000000000.0, "description": "Bounty prize for clearing a sample site",
@@ -500,6 +535,43 @@ def test_journal_page_rows_key_on_type_and_amount():
     assert _labelled(loss)["Balance after"]["text"] == "—"
     for r in (gain, loss):
         _assert_single_value_child(r)
+
+
+_BARE_ENTRY = {"id": 3, "date": "2026-10-01T14:00:00Z", "ref_type": "player_donation",
+               "ref_type_label": "Player Donation", "category": "transfer", "amount": 100.0,
+               "balance": None, "description": "", "reason": "", "first_party": "",
+               "second_party": "", "tax": None}
+
+
+@pytest.mark.parametrize("fields, text", [
+    ({"reason": "Sample reason"}, "Sample reason"),
+    ({"tax": 1500.0}, "Tax: 1.5K ISK"),
+    ({"first_party": "Sample Agency"}, "Sample Agency"),
+    ({"second_party": "Pilot Alpha"}, "Pilot Alpha"),
+], ids=["reason-only", "tax-only", "first-party-only", "second-party-only"])
+def test_journal_any_single_detail_opens_onto_a_description(fields, text):
+    """has_details is an `or` of five fields: any one alone labels the cell,
+    and its value sits in the single display:block wrapper."""
+    row = _rows(_render_journal([{**_BARE_ENTRY, **fields}]))[0]
+    assert list(_labelled(row)) == ["Date", "Description", "Balance after"]
+    desc = _labelled(row)["Description"]
+    assert desc["text"] == text
+    assert len(desc["kids"]) == 1 and "display:block" in desc["kids"][0]["style"]
+    _assert_single_value_child(row)
+
+
+def test_journal_zero_tax_alone_is_not_a_detail():
+    row = _rows(_render_journal([{**_BARE_ENTRY, "tax": 0}]))[0]
+    assert list(_labelled(row)) == ["Date", "Balance after"]
+
+
+def test_journal_details_wrapper_is_a_plain_block():
+    """§6.4: the parties, description, reason and tax share one block
+    wrapper: desktop lays it out as the cell did, phones see one flex item
+    whose min-width:0 lets the description ellipsize."""
+    gain = _rows(_render_journal())[0]
+    (wrapper,) = _labelled(gain)["Description"]["kids"]
+    assert wrapper["style"] == "display:block;min-width:0;"
 
 
 def test_journal_page_header_hides_on_phones():
@@ -682,11 +754,19 @@ def _long_overview(n):
     )
 
 
-def _render_assets_partial(*sizes):
+def _render_assets_partial(*sizes, docked_at=None):
     locations = [{"location": f"Sample Station {n}", "items": [{"name": f"Item {i}", "quantity": i + 1} for i in range(size)]}
                  for n, size in enumerate(sizes)]
     tmpl = overview_mod.templates.env.get_template("partials/assets_partial.html")
-    return tmpl.render(locations=locations, docked_at=None)
+    return tmpl.render(locations=locations, docked_at=docked_at)
+
+
+_ASSETS_LOADING = '<div style="color: var(--muted); font-size: 10px; padding: 1rem 0.75rem;">Loading…</div>'
+
+
+def _overview_with_assets(n, *sizes):
+    """The overview with the assets partial swapped in where htmx would put it."""
+    return _long_overview(n).replace(_ASSETS_LOADING, _render_assets_partial(*sizes))
 
 
 def test_unclamp_overview_scroll_boxes_on_phones():
@@ -727,13 +807,64 @@ def test_unclamp_asset_lists_clamp_per_location():
 def test_unclamp_clamp_wraps_never_nest():
     """Task 1's clamp rules use descendant selectors: a wrap inside a wrap
     would clamp the inner list from outside and hide its Show all button."""
-    html = _long_overview(12).replace(
-        '<div style="color: var(--muted); font-size: 10px; padding: 1rem 0.75rem;">Loading…</div>',
-        _render_assets_partial(12, 12))
+    html = _overview_with_assets(12, 12, 12)
     assert "Sample Station 1" in html
     c = _clamps(html)
     assert c.wraps == 5                # queue, completed, corp history, 2 asset lists
     assert c.nested_wraps == 0
+
+
+def test_unclamp_eleven_rows_is_the_first_to_offer_show_all():
+    """Show all appears past the 10th row: n=11 is the edge (n=10 has none)."""
+    c = _clamps(_long_overview(11))
+    assert [k["children"] for k in c.clamps] == [11, 11, 11]
+    assert [b["text"] for b in c.showall] == ["Show all 11"] * 3
+    assets = _clamps(_render_assets_partial(11, 10))
+    assert [b["text"] for b in assets.showall] == ["Show all 11"]
+
+
+def test_unclamp_current_location_list_starts_open():
+    """The docked-at location renders open; its list keeps the clamp and
+    its Show all button inside the same wrap."""
+    html = _render_assets_partial(12, 3, docked_at="Sample Station 0")
+    wraps = re.findall(r'<div class="(asset-list [^"]*)">', html)
+    assert wraps == ["asset-list m-unclamp m-clamp-wrap open", "asset-list m-unclamp m-clamp-wrap"]
+    assert "▸ Sample Station 0" in html and "▸ Sample Station 1" not in html
+    c = _clamps(html)
+    assert [k["children"] for k in c.clamps] == [12, 3]
+    assert [b["text"] for b in c.showall] == ["Show all 12"] and c.showall[0]["in_wrap"]
+
+
+class _Styled(HTMLParser):
+    """Every start tag's name, classes and inline style."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tags = []
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v if v is not None else "") for k, v in attrs}
+        self.tags.append((tag, a.get("class", "").split(), a.get("style", "")))
+
+
+def test_unclamp_every_inline_scroll_box_in_the_overview():
+    """Any element of the overview whose inline style makes it a scroll box
+    (max-height plus overflow-y:auto) traps touch scrolling on phones unless
+    it carries m-unclamp. Scoped to <main>: base.html's own dropdowns are
+    meant to scroll."""
+    html = _overview_with_assets(12, 12, 12)
+    main = html.split('<main class="b-main">', 1)[1].split("</main>", 1)[0]
+    p = _Styled()
+    p.feed(main)
+    p.close()
+    boxes = []
+    for tag, cls, style in p.tags:
+        flat = re.sub(r"\s+", "", style)
+        if "max-height:" in flat and re.search(r"overflow(-y)?:(auto|scroll)", flat):
+            boxes.append((tag, cls, style))
+    assert len(boxes) >= 3, boxes      # queue, recently completed, corp history
+    for tag, cls, style in boxes:
+        assert "m-unclamp" in cls, (tag, cls, style)
 
 
 def test_unclamp_show_all_button_is_styled_in_site_css():

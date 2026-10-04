@@ -75,6 +75,9 @@
 {% macro plan_row(plan) %}
     {% set stats = plan_stats.get(plan.id, {}) %}
     {% set n_skills = plan.entries | length %}
+    {#- Each value once: the phone line and the desktop cells share them. #}
+    {%- set skills_text = n_skills ~ ' skill' ~ ('s' if n_skills != 1 else '') %}
+    {%- set sp_text = "{:,.0f}".format(stats['total_sp']) ~ ' SP' if stats.get('total_sp', 0) > 0 else '' %}
     <a href="/skill-plans/{{ plan.id }}" class="b-table-row m-row m-row--link" style="text-decoration:none;cursor:pointer;">
         <span data-m="key" style="flex:3;display:flex;flex-direction:column;gap:2px;">
             <span class="m-trunc" style="display:flex;align-items:baseline;gap:0.4rem;flex-wrap:wrap;">
@@ -87,16 +90,16 @@
             {% if plan.description %}
             <span style="font-size:9px;color:var(--muted);">{{ plan.description[:60] }}</span>
             {% endif %}
-            <span class="m-only" style="display:block;font-size:9px;color:var(--muted);">{{ n_skills }} skill{{ 's' if n_skills != 1 else '' }}{% if stats.get('total_sp', 0) > 0 %} · {{ "{:,.0f}".format(stats['total_sp']) }} SP{% endif %}</span>
+            <span class="m-only" style="display:block;font-size:9px;color:var(--muted);">{{ skills_text }}{% if sp_text %} · {{ sp_text }}{% endif %}</span>
         </span>
         <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--accent);">
-            {{ n_skills }} skill{{ 's' if n_skills != 1 else '' }}
+            {{ skills_text }}
         </span>
         <span style="flex:0 0 80px;text-align:right;font-size:9px;color:var(--text);">
-            {% if stats.get('total_sp', 0) > 0 %}{{ "{:,.0f}".format(stats['total_sp']) }} SP{% endif %}
+            {{ sp_text }}
         </span>
         <span data-m="key" style="flex:0 0 70px;text-align:right;font-size:9px;color:var(--muted);">
-            {% if stats.get('total_sp', 0) > 0 %}{{ stats['time_str'] }}{% endif %}
+            {% if sp_text %}{{ stats['time_str'] }}{% endif %}
         </span>
     </a>
 {% endmacro %}
