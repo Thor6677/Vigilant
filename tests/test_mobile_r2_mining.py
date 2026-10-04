@@ -132,7 +132,8 @@ def test_by_ore_type_rows(variant):
         assert "mining-ore" in k1["attrs"]["class"].split()
         assert k2["text"] == _isk(ore["value"])
         labelled = row_labelled(row)
-        assert list(labelled) == ["Units", "Share"]
+        assert list(labelled) == ["Name", "Units", "Share"]
+        assert labelled["Name"]["text"] == ore["name"]
         assert labelled["Units"]["text"] == f"{ore['quantity']:,.0f}"
         assert labelled["Share"]["text"] == _pct(ore["value"], total)
         assert not _untagged(row)
@@ -148,7 +149,8 @@ def test_by_system_rows(variant):
         assert k1["text"] == sys["name"]
         assert k2["text"] == _isk(sys["value"])
         labelled = row_labelled(row)
-        assert list(labelled) == ["Units", "Share"]
+        assert list(labelled) == ["Name", "Units", "Share"]
+        assert labelled["Name"]["text"] == sys["name"]
         assert labelled["Units"]["text"] == f"{sys['quantity']:,.0f}"
         assert labelled["Share"]["text"] == _pct(sys["value"], total)
         assert not _untagged(row)
@@ -185,7 +187,8 @@ def test_full_detail_rows(variant):
         assert "mining-ore" in k1["attrs"]["class"].split()
         assert k2["text"] == _isk(e["value"])
         labelled = row_labelled(row)
-        assert list(labelled) == ["Date", "System", "Quantity"]
+        assert list(labelled) == ["Name", "Date", "System", "Quantity"]
+        assert labelled["Name"]["text"] == e["ore_name"]
         assert labelled["Date"]["text"] == e["date"]
         assert labelled["System"]["text"] == e["system_name"]
         assert labelled["Quantity"]["text"] == f"{e['quantity']:,.0f}"

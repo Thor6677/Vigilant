@@ -6,8 +6,10 @@ covers the rest:
     stretched link, Show all past 10.
   * Can Fly → Missing skills: m-rows whose key 2 is the fit's total training
     time (D2 B), built from phone-only cells so the desktop card is untouched.
-  * Corporation History: key 2 is tenure, Joined under the row, and a sized
-    phone-only logo lead (D3 A).
+  * Corporation History: key 2 is tenure, the full Name and Joined under the
+    row, and a sized phone-only logo lead (D3 A).
+  * Both opened lists start with a full "Name" line (R2 polish A; its own
+    tests are in test_mobile_r2_polish_a.py).
   * Combat Profile: the ISK row as label/value lines (D6 A), the charts grid
     minmax, and legends below the doughnut and stream charts.
   * 40px tap targets for the summary toggles and location headers.
@@ -35,7 +37,7 @@ from app.db.models import Base
 from app.routes import character_detail as cd
 from tests._mobile import (SITE_CSS, VOID, assert_mrow, assert_single_value_child, cells_rows,
                            clamps, css_section, norm, render_page, row_keys, row_labelled, row_lead,
-                           rule_bodies, selectors, source)
+                           rule_bodies)
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _ACTIONS_JS = os.path.join(_ROOT, "static", "js", "actions.js")
@@ -268,7 +270,9 @@ def test_missing_cards_label_each_skill_and_the_folder():
     assert len(rows) == 2
     for f, r in zip(fits, rows):
         labelled = row_labelled(r)
-        assert list(labelled) == ["Sample Gunnery", "Sample Navigation", "Folder"]
+        # The full "ship — fit" Name line comes first (R2 polish A).
+        assert list(labelled) == ["Name", "Sample Gunnery", "Sample Navigation", "Folder"]
+        assert labelled["Name"]["text"] == f"Sample Cruiser — {f['name']}"
         assert labelled["Sample Gunnery"]["text"] == "0 → 3 · 1h 2m approx."
         assert labelled["Sample Navigation"]["text"] == "2 → 4 · 1d 3h 4m approx."
         assert labelled["Folder"]["text"] == (f["folder"] or "—")
@@ -287,12 +291,12 @@ def test_missing_cards_keep_the_desktop_markup_untagged():
         for c in desktop:
             assert "data-m" not in c["attrs"] and "data-m-label" not in c["attrs"]
         assert all("data-m" in c["attrs"] or "data-m-label" in c["attrs"] for c in phone)
-        assert len(phone) == 2 + 2 + 1      # two keys, two skills, Folder
+        assert len(phone) == 2 + 1 + 2 + 1  # two keys, Name, two skills, Folder
 
 
 def test_missing_card_phone_copies_match_the_desktop_card():
-    """Key 1 and Folder render from the same values as the desktop head
-    row, so the two copies can't drift apart (escaping included)."""
+    """Key 1, Name and Folder render from the same values as the desktop
+    head row, so the copies can't drift apart (escaping included)."""
     fits = _missing(2) + [dict(_missing(1)[0], id=7, name="R&D <Fit>", folder="A & B")]
     html = _render_can_fly(0, missing_fits=fits)
     rows = _miss_rows(html)
@@ -302,7 +306,8 @@ def test_missing_card_phone_copies_match_the_desktop_card():
         key1, folder = row_keys(r)[0], row_labelled(r)["Folder"]
         assert head["kids"][0]["href"] == key1["kids"][0]["href"]
         assert head["text"] == f"{key1['text']} {folder['text']}"
-    assert html.count("R&amp;D &lt;Fit&gt;") == 2 and html.count("A &amp; B") == 2
+        assert row_labelled(r)["Name"]["text"] == key1["text"]
+    assert html.count("R&amp;D &lt;Fit&gt;") == 3 and html.count("A &amp; B") == 2
 
 
 def test_missing_card_without_a_training_str_still_renders():
@@ -445,12 +450,13 @@ def test_corp_history_keys_on_name_and_tenure():
                     ["Sample Corp Unknown"], ["Sample Corp Brief", "<1d"]]
 
 
-def test_corp_history_labels_the_start_date_joined():
+def test_corp_history_labels_the_full_name_and_the_start_date():
     rows = _corp_rows(_render_overview())
     assert len(rows) == len(_HISTORY)
     for h, r in zip(_HISTORY, rows):
         labelled = row_labelled(r)
-        assert list(labelled) == ["Joined"]
+        assert list(labelled) == ["Name", "Joined"]
+        assert labelled["Name"]["text"] == h["corporation_name"]
         assert labelled["Joined"]["text"] == h["start_date"]
         assert_single_value_child(r)
 
@@ -619,7 +625,7 @@ def _phone_block(sec):
     return sec[m.end():i - 1], sec[i:]
 
 
-_HOOKS = (".cf-fly", ".cf-miss", ".ov-toggle", ".ov-corp", ".ks-isk", ".ks-stream")
+_HOOKS = (".cf-fly", ".ov-toggle", ".ov-corp", ".ks-isk", ".ks-stream")
 
 
 def test_css_new_class_hooks_have_no_desktop_rules():
@@ -631,39 +637,6 @@ def test_css_new_class_hooks_have_no_desktop_rules():
         assert re.search(re.escape(cls) + r"\b", phone), cls
         assert len(re.findall(re.escape(cls) + r"\b", css)) == len(re.findall(re.escape(cls) + r"\b", phone)), (
             f"{cls} is styled outside the R2 T1 phone block")
-
-
-def test_css_long_skill_labels_wrap_instead_of_clipping():
-    """A missing card's labels are skill names, the first data-driven
-    labels: R1's `.m-row > [data-m-label]::before { flex: none }` would hold
-    a long one at full width and push its start out of the card. Letting the
-    label shrink (it wraps) keeps it inside; the value stays right-aligned.
-    (0,3,1) beats R1's (0,2,1)."""
-    body = _flat(rule_bodies(_sec(), ".cf-miss.m-row > [data-m-label]::before"))
-    assert "flex: 0 1 auto" in body
-    assert "min-width: 0" in body
-
-
-def test_css_label_shrink_targets_the_missing_cards_only():
-    """Every ::before rule in this section is scoped to .cf-miss, and only
-    the missing-skills card carries that class, so no other R1/R2 list's
-    labels change."""
-    labels = [sel for m in re.finditer(r"([^{}]+)\{[^{}]*\}", _phone_block(_sec())[0])
-              for sel in selectors(m.group(1)) if "::before" in sel]
-    assert labels == [".cf-miss.m-row > [data-m-label]::before"]
-    users = []
-    for dirpath, _, files in os.walk(os.path.join(_ROOT, "app")):
-        for name in files:
-            with open(os.path.join(dirpath, name), encoding="utf-8", errors="ignore") as fh:
-                if re.search(r"\bcf-miss\b", fh.read()):
-                    users.append(os.path.relpath(os.path.join(dirpath, name), _ROOT))
-    assert users == [os.path.join("app", "templates", "partials", "character_can_fly.html")]
-    markup = re.sub(r"\{#.*?#\}", "", source("partials/character_can_fly.html"), flags=re.S)
-    assert len(re.findall(r"\bcf-miss\b", markup)) == 1
-    fits = _missing(3)
-    hooked = _elements(_render_can_fly(4, missing_fits=fits), _with_class("cf-miss"))
-    assert len(hooked) == len(fits)
-    assert all({"b-card", "m-row"} <= set(_classes(el["attrs"])) for el in hooked)
 
 
 def test_css_stream_chart_box_is_taller_on_phones():

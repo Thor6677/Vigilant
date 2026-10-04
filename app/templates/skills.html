@@ -169,7 +169,8 @@
         </div>
 
         {# Phones (D4 B): key 1 = skill + level (the name ellipsises, the
-           level stays: skills-key in site.css), key 2 = time. The queue holds
+           level stays: skills-key in site.css), key 2 = time; open, the
+           full Name (an m-only copy) comes first. The queue holds
            up to 150 skills, so phones show 10 plus "Show all N". The rows sit
            directly in .m-clamp (Show all expands the wrap, which must not
            open them) and the button follows it, so the last row stays its
@@ -183,6 +184,7 @@
                         <span style="font-size:11px;color:var(--text);">{{ q.name }}</span>
                         <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][q.level] }}</span>
                     </span>
+                    <span class="m-only" data-m-label="Name">{{ q.name }} {{ ['', 'I', 'II', 'III', 'IV', 'V'][q.level] }}</span>
                     <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">
                         <span>{{ q.primary_name[:3] }}/{{ q.secondary_name[:3] }}
                         <span class="skills-rank" style="color:var(--border);">×{{ q.rank }}</span></span>

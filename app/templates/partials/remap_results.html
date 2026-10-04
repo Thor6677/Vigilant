@@ -45,13 +45,15 @@
 
         {# Phones (D5 A): key 1 = skill + level (the name ellipsises, the
            level stays: skills-key in site.css), key 2 = the Diff in its own
-           colour. R1's mRowInit runs on htmx:afterSwap, so these swapped-in
-           rows need nothing extra. #}
+           colour; open, the full Name (an m-only copy) comes first. R1's
+           mRowInit runs on htmx:afterSwap, so these swapped-in rows need
+           nothing extra. #}
         {% for row in rows %}
         <div class="b-table-row m-row" data-click="toggleMRow">
             <span data-m="key" class="skills-key" style="flex:3;font-size:11px;color:var(--text);">
                 <span>{{ row.name }}</span> <span style="color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][row.level] }}</span>
             </span>
+            <span class="m-only" data-m-label="Name">{{ row.name }} {{ ['', 'I', 'II', 'III', 'IV', 'V'][row.level] }}</span>
             <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">{{ row.primary_name[:3] }}/{{ row.secondary_name[:3] }}</span>
             <span data-m-label="Current" style="flex:0 0 80px;text-align:right;font-size:10px;color:var(--muted);">{{ row.current_time }}</span>
             <span data-m-label="Remapped" style="flex:0 0 80px;text-align:right;font-size:10px;color:{% if row.faster %}var(--success){% else %}var(--text){% endif %};">{{ row.proposed_time }}</span>

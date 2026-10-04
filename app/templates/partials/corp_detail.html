@@ -163,7 +163,8 @@
         {% if corp_jobs %}
         {# Phones (D11 A): each tile is an m-row. Its desktop lines stay
            untagged (so phones hide them); m-only cells carry the phone
-           layout: key 1 product, key 2 time left, then Activity and Runs.
+           layout: key 1 product, key 2 time left, then the full product as
+           Name, Activity and Runs.
            The tile grid is the clamp: past 10 jobs, "Show all N". #}
         <div class="m-clamp-wrap">
         <div class="m-clamp corp-jobs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--border);border:1px solid var(--border)">
@@ -185,6 +186,7 @@
             {% if job.time_remaining %}
             <span class="m-only b-label" data-m="key"{% if job.time_remaining == 'Ready' %} style="color:var(--success)"{% endif %}>{{ job.time_remaining }}</span>
             {% endif %}
+            <span class="m-only" data-m-label="Name">{{ job.product_name or '—' }}</span>
             <span class="m-only" data-m-label="Activity">{{ job.activity_name }}</span>
             <span class="m-only" data-m-label="Runs">{{ job.runs }}</span>
         </div>
@@ -238,7 +240,8 @@
            untagged (so phones hide them); m-only cells carry the phone
            layout. Key 1 is the name, plus the state badge only off the
            normal online state (the state with no colour class); key 2 is
-           the fuel left, coloured by the same fuel_level as desktop. #}
+           the fuel left, coloured by the same fuel_level as desktop. Open,
+           the full Name comes first, then the details. #}
         {% for struct in corp_structures %}
         {% set fuel_lvl = struct.fuel_remaining | fuel_level %}
         {# Text the phone cells share; the desktop lines keep their own. #}
@@ -288,6 +291,7 @@
             {% if struct.fuel_remaining %}
             <span class="m-only b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}" data-m="key">{{ struct.fuel_remaining }}</span>
             {% endif %}
+            <span class="m-only" data-m-label="Name">{{ struct.name }}</span>
             <span class="m-only" data-m-label="State"><span class="b-badge {{ struct.state_class }}">{{ state_txt }}</span></span>
             <span class="m-only" data-m-label="Type">{{ struct.type_name }}</span>
             <span class="m-only" data-m-label="System">{{ sys_txt }}</span>

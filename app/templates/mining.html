@@ -99,7 +99,10 @@
     {# Phones (mobile R2): each list below is an expand-on-tap row, key 1 the
        name or date, key 2 the ISK value; the rest opens as labelled lines.
        The ore icon stays inline in key 1 (mining-ore keeps it a flex line on
-       phones). Daily Summary and Full Detail show 10 rows plus "Show all N". #}
+       phones). Daily Summary and Full Detail show 10 rows plus "Show all N".
+       An opened ore or system row starts with its full Name (an m-only
+       copy, first labelled cell); Daily Summary's key 1 is a date, so it
+       has none. #}
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">By Ore Type</span>
@@ -113,6 +116,7 @@
                      data-on-error="hide">
                 <span style="font-size:11px;color:var(--text);">{{ ore.name }}</span>
             </span>
+            <span class="m-only" data-m-label="Name">{{ ore.name }}</span>
             <span data-m-label="Units" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(ore.quantity) }}</span>
             <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(ore.value) }}</span>
             <span data-m-label="Share" style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
@@ -129,6 +133,7 @@
         {% set pct = (sys.value / data.total_value * 100) if data.total_value > 0 else 0 %}
         <div class="b-table-row m-row" data-click="toggleMRow">
             <span data-m="key" style="flex:2;font-size:11px;color:var(--text);">{{ sys.name }}</span>
+            <span class="m-only" data-m-label="Name">{{ sys.name }}</span>
             <span data-m-label="Units" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(sys.quantity) }}</span>
             <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(sys.value) }}</span>
             <span data-m-label="Share" style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
@@ -203,6 +208,7 @@
                 <div class="m-clamp">
                     {% for e in data.entries %}
                     <div class="b-table-row m-row" data-click="toggleMRow">
+                        <span class="m-only" data-m-label="Name">{{ e.ore_name }}</span>
                         <span data-m-label="Date" style="flex:0 0 90px;font-size:10px;color:var(--muted);">{{ e.date }}</span>
                         <span data-m="key" class="mining-ore" style="flex:2;display:flex;align-items:center;gap:0.35rem;">
                             <img src="https://images.evetech.net/types/{{ e.type_id }}/icon?size=32"

@@ -390,7 +390,7 @@ def test_structure_labelled_cells():
     rows = _struct_rows(_render_detail())
     for s in _STRUCTS:
         lab = row_labelled(rows[s["name"]])
-        want = {"State", "Type", "System"}
+        want = {"Name", "State", "Type", "System"}
         if s["reinforce_hour"] is not None:
             want.add("Reinforce")
         if s["state_timer_end"]:
@@ -398,6 +398,7 @@ def test_structure_labelled_cells():
         if s["services"]:
             want.add("Services")
         assert set(lab) == want, s["name"]
+        assert lab["Name"]["text"] == s["name"]
         assert lab["Type"]["text"] == "Sample Citadel"
         assert lab["System"]["text"] == "Sample System — Sample Region"
         state = lab["State"]
@@ -456,7 +457,8 @@ def test_job_rows_keys_and_labels():
         else:
             assert len(keys) == 1
         lab = row_labelled(r)
-        assert set(lab) == {"Activity", "Runs"}
+        assert set(lab) == {"Name", "Activity", "Runs"}
+        assert lab["Name"]["text"] == (job["product_name"] or "—")
         assert lab["Activity"]["text"] == job["activity_name"]
         assert lab["Runs"]["text"] == str(job["runs"])
 

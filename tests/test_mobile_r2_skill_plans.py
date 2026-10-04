@@ -131,7 +131,8 @@ def test_editable_plan_rows_key_on_name_and_target_level():
         assert "m-only" in _classes(k1["attrs"]) and "m-only" in _classes(k2["attrs"])
         assert not row_lead(row)
         labelled = row_labelled(row)
-        assert list(labelled) == ["Attributes", "Remove"]
+        assert list(labelled) == ["Name", "Attributes", "Remove"]
+        assert labelled["Name"]["text"] == name
         assert_single_value_child(row)
         assert labelled["Remove"]["tag"] == "form"
         assert "/remove-skill/" in labelled["Remove"]["attrs"]["action"]
@@ -174,7 +175,7 @@ def test_read_only_plan_rows_have_only_the_attributes_cell():
     for row, (name, lvl, *_rest) in zip(rows, _SKILLS):
         assert "draggable" not in row["attrs"]
         assert [k["text"] for k in row_keys(row)] == [name, _ROMAN[lvl]]
-        assert list(row_labelled(row)) == ["Attributes"]
+        assert list(row_labelled(row)) == ["Name", "Attributes"]
         assert_single_value_child(row)
     assert "/remove-skill/" not in html
 
@@ -203,7 +204,8 @@ def test_acl_rows_key_on_name_and_short_type():
         first = row["cells"][0]
         assert "data-m" not in first["attrs"] and "data-m-label" not in first["attrs"]
         labelled = row_labelled(row)
-        assert list(labelled) == ["Permission", "Remove"]
+        assert list(labelled) == ["Name", "Permission", "Remove"]
+        assert labelled["Name"]["text"] == name
         assert_single_value_child(row)
         (select,) = labelled["Permission"]["kids"]
         assert select["data-change"] == "submitForm"
@@ -273,12 +275,13 @@ def test_gap_rows_lead_with_status_and_key_on_time():
                 ("● Sample Hull Upgrades IV", "1d 4h", "2 → 4"),
                 ("● Sample Drone Operation III", "9h 12m", "0 → 3")]
     for row, (k1_text, k2_text, level) in zip(rows, expected):
+        name = k1_text[2:]          # the full "skill level" Name line, without the status icon
         assert row["attrs"]["data-click"] == "toggleMRow"
         assert "skp-gap-row" in _classes(row["attrs"])
         k1, k2 = row_keys(row)
         assert k1["text"] == k1_text
         assert k2["text"] == k2_text
-        assert {lbl: c["text"] for lbl, c in row_labelled(row).items()} == {"Level": level}
+        assert {lbl: c["text"] for lbl, c in row_labelled(row).items()} == {"Name": name, "Level": level}
         assert_single_value_child(row)
         # Every cell is tagged: nothing is hidden on phones.
         assert all("data-m" in c["attrs"] or "data-m-label" in c["attrs"] for c in row["cells"])

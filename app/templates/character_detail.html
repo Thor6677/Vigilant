@@ -403,8 +403,9 @@
                     Corporation History ({{ corp_history|length }})
                 </summary>
                 {# Phones (mobile R2, D3): key 1 corporation, key 2 tenure
-                   (absent when unknown), Joined when open. The desktop logo
-                   stays untagged, so phones hide it: its data-on-error="hide"
+                   (absent when unknown); open, the full Name (an m-only
+                   copy) and Joined. The desktop logo stays untagged, so
+                   phones hide it: its data-on-error="hide"
                    sets an inline display:none that a tagged cell's display
                    !important would override. The phone-only lead wraps its
                    own sized copy instead, and keeps an 18px slot if that copy
@@ -429,6 +430,7 @@
                             {% else %}&lt;1d{% endif %}
                         </span>
                         {% endif %}
+                        <span class="m-only" data-m-label="Name">{{ h.corporation_name }}</span>
                         <span data-m-label="Joined" style="color: var(--muted); white-space: nowrap; min-width: 5.5rem; text-align: right;">{{ h.start_date }}</span>
                     </div>
                     {% endfor %}

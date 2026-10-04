@@ -740,7 +740,7 @@
         font-size: 12px !important; text-align: right; white-space: normal; word-break: break-word;
     }
     .m-row > [data-m-label]::before {
-        content: attr(data-m-label); flex: none; text-align: left; margin-right: auto; padding-right: 0.6rem;
+        content: attr(data-m-label); flex: 0 1 auto; min-width: 0; text-align: left; margin-right: auto; padding-right: 0.6rem;
         color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
     }
 
@@ -889,12 +889,6 @@
     .cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"] {
         max-width: 40vw !important; overflow: hidden; text-overflow: ellipsis;
     }
-    /* Missing skills: a card's labels are skill names, the first labels that
-       come from data. R1's `[data-m-label]::before { flex: none }` would hold
-       a long one at full width, and justify-content:flex-end would push its
-       start out of the card's left edge. Here the label may shrink, so it
-       wraps; the value stays right-aligned. (0,3,1) beats R1's (0,2,1). */
-    .cf-miss.m-row > [data-m-label]::before { flex: 0 1 auto; min-width: 0; }
 
     /* Corporation History: when the phone logo fails too, data-on-error hides
        it; the lead keeps its 18px slot so key 1 stays in line with its
@@ -1084,6 +1078,9 @@
        colour, which all but vanishes on an open row; the open row is the
        only place a phone shows it, so give it the cell's muted colour. */
     .skill-row > [data-m-label="Attributes"] span span { color: var(--muted) !important; }
+    /* The shared view's rows aren't m-rows (a public page), so its rank is
+       always on show; on phones it takes the muted colour too. */
+    .skp-shared-rank { color: var(--muted) !important; }
 
     /* Remove (plan and ACL rows): .b-btn's flex:1 would stretch the 40px ×
        across the whole open row. */

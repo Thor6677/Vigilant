@@ -141,7 +141,8 @@
         {% if acl_entries %}
         {# Phones (D14 A): key 1 the name, key 2 an m-only short type (the
            desktop Type column comes before Name in the DOM, so it stays
-           untagged); Permission and Remove open under the row. #}
+           untagged); the full Name, Permission and Remove open under the
+           row. #}
         <div class="m-head" style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.4rem 0.75rem;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border);">
             <span>Type</span>
             <span>Name</span>
@@ -153,6 +154,7 @@
             <span style="color:var(--muted);text-transform:capitalize;">{{ e.subject_type }}</span>
             <span data-m="key" style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
             <span class="m-only" data-m="key" style="color:var(--muted);">{{ {'character': 'Char', 'corporation': 'Corp', 'alliance': 'Alliance'}.get(e.subject_type, e.subject_type | capitalize) }}</span>
+            <span class="m-only" data-m-label="Name">{{ e.subject_name }}</span>
             <form data-m-label="Permission" method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
                 <select name="permission" data-change="submitForm"
                         style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
@@ -261,8 +263,9 @@
         {# Phones (D13 A): each row is an m-row keyed on the skill name and its
            Roman target level. The desktop name + level cell holds both in
            nested spans, so it stays untagged (hidden on phones) and two m-only
-           copies carry the keys. The drag handle is untagged too: on phones
-           the Sort buttons are the only way to reorder. Keep `skill-row`,
+           copies carry the keys; open, the full skill Name comes first. The
+           drag handle is untagged too: on phones the Sort buttons are the
+           only way to reorder. Keep `skill-row`,
            draggable and data-id on the row; the drag IIFE below reads them. #}
         <div id="skill-list">
         {% for e in entries %}
@@ -280,6 +283,7 @@
             </span>
             <span class="m-only" data-m="key" style="font-size:12px;color:var(--text);">{{ e.skill_name }}</span>
             <span class="m-only" data-m="key" style="font-size:12px;color:var(--accent);">{{ roman }}</span>
+            <span class="m-only" data-m-label="Name">{{ e.skill_name }}</span>
             <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">
                 <span>{{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
                 <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span></span>

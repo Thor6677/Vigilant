@@ -83,7 +83,8 @@
     {% endif %}
 
     {# Skill rows. Phones (D15 A): key 1 is the status icon + name + level
-       cell as is, key 2 the time (or "done"); Level opens under the row. #}
+       cell as is, key 2 the time (or "done"); the full Name (an m-only
+       copy) and Level open under the row. #}
     {% for row in rows %}
     {% set roman = ['', 'I', 'II', 'III', 'IV', 'V'][row.target_level] %}
     <div class="b-table-row m-row skp-gap-row" data-click="toggleMRow" style="{% if row.completed %}opacity:0.5;{% endif %}">
@@ -96,6 +97,7 @@
             <span style="font-size:11px;color:var(--text);">{{ row.skill_name }}</span>
             <span style="font-size:10px;color:var(--accent);">{{ roman }}</span>
         </span>
+        <span class="m-only" data-m-label="Name">{{ row.skill_name }} {{ roman }}</span>
         <span data-m-label="Level" style="flex:0 0 60px;text-align:center;font-size:9px;color:var(--muted);">
             {{ row.current_level }} &rarr; {{ row.target_level }}
         </span>

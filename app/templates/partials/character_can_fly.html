@@ -29,8 +29,9 @@
     is the fit's total training time. Key 1 holds the fit link: a tap on
     the name opens the fit, and with a typical name the link fills key 1,
     so the row opens from a tap on the training time, the chevron or the
-    card's padding. Skill-name labels can be long, so they may wrap
-    (.cf-miss in site.css R2 T1).
+    card's padding. Open, the card's first line is the full "ship — fit"
+    Name, then one line per missing skill. Skill-name labels can be long,
+    so they may wrap (R1's label rule lets every label shrink).
 #}
 <div class="b-section">
     <div class="b-section-head"><span class="b-label">Can Fly</span></div>
@@ -104,6 +105,7 @@
             {% if total_str %}
             <span class="m-only" data-m="key" style="font-size:11px;color:var(--accent);">{{ total_str }}</span>
             {% endif %}
+            <span class="m-only" data-m-label="Name">{{ fit_label }}</span>
             {% for m in f.missing %}
             <div class="m-only" data-m-label="{{ m.skill_name }}"><span>{{ m.have }} &rarr; {{ m.need }} &middot; {{ m.time_str }} approx.</span></div>
             {% endfor %}

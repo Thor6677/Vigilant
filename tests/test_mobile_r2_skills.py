@@ -186,7 +186,8 @@ def test_queue_rows_follow_the_contract(n):
         assert k1["text"] == f"{q['name']} {_ROMAN[q['level']]}"
         assert k2["text"] == q["time_str"]
         labelled = row_labelled(row)
-        assert set(labelled) == {"Attributes", "SP"}
+        assert set(labelled) == {"Name", "Attributes", "SP"}
+        assert labelled["Name"]["text"] == f"{q['name']} {_ROMAN[q['level']]}"
         assert labelled["Attributes"]["text"] == (
             f"{q['primary_name'][:3]}/{q['secondary_name'][:3]} ×{q['rank']}")
         assert labelled["SP"]["text"] == "{:,}".format(q["sp_needed"])
@@ -279,7 +280,8 @@ def test_remap_rows_follow_the_contract():
         assert k2["text"] == diff_text
         assert f"color:{diff_colour}" in k2["attrs"]["style"].replace(" ", "")
         labelled = row_labelled(row)
-        assert set(labelled) == {"Attributes", "Current", "Remapped"}
+        assert set(labelled) == {"Name", "Attributes", "Current", "Remapped"}
+        assert labelled["Name"]["text"] == f"{r['name']} {_ROMAN[r['level']]}"
         assert labelled["Attributes"]["text"] == (
             f"{r['primary_name'][:3]}/{r['secondary_name'][:3]}")
         assert labelled["Current"]["text"] == r["current_time"]
