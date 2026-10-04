@@ -1138,6 +1138,11 @@
 }
 /* ── end R2 T6 ── */
 
+/* ── R2 P · polish B ── */
+@media (max-width: 640px) {
+}
+/* ── end R2 P ── */
+
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {
     .m-hide, .m-tabs-desktop { display: none !important; }
