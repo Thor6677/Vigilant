@@ -3,11 +3,16 @@
 `assert_mrow(html)` parses rendered HTML and checks every element with class
 `m-row`:
   * 1–2 direct children with data-m="key"
-  * at most 1 direct child with data-m="lead"
+  * at most 1 direct child with data-m="lead"; an <img> lead carries
+    width and height attributes (matching any inline px size). The phone CSS
+    forces width:auto !important on row children, so without them an
+    unloaded or broken image collapses to ~2px and the row jumps when it
+    arrives.
   * every data-m-label is non-empty
   * a non-link row is toggled by toggleMRow or by its own toggleExpanded;
     a link row (m-row--link) is never toggled by toggleMRow
 It returns the parsed rows so a test can make page-specific checks too."""
+import re
 from html.parser import HTMLParser
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
@@ -18,15 +23,17 @@ class _Collector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.stack = []   # (tag, row_index_or_None)
-        self.rows = []    # {"tag", "attrs", "children": [attrs...]}
+        self.rows = []    # {"tag", "attrs", "children": [attrs...], "child_tags": [tag...]}
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v if v is not None else "") for k, v in attrs}
         if self.stack and self.stack[-1][1] is not None:
-            self.rows[self.stack[-1][1]]["children"].append(a)
+            row = self.rows[self.stack[-1][1]]
+            row["children"].append(a)
+            row["child_tags"].append(tag)
         idx = None
         if "m-row" in a.get("class", "").split():
-            self.rows.append({"tag": tag, "attrs": a, "children": []})
+            self.rows.append({"tag": tag, "attrs": a, "children": [], "child_tags": []})
             idx = len(self.rows) - 1
         if tag not in _VOID:
             self.stack.append((tag, idx))
@@ -36,6 +43,16 @@ class _Collector(HTMLParser):
             if self.stack[i][0] == tag:
                 del self.stack[i:]
                 return
+
+
+def _assert_img_size(where: str, img: dict) -> None:
+    for dim in ("width", "height"):
+        val = img.get(dim, "").strip()
+        assert val.isdigit() and int(val) > 0, (
+            f"{where}: an <img data-m=lead> needs a positive {dim} attribute, got {img.get(dim)!r}")
+        inline = re.search(rf"(?:^|;)\s*{dim}\s*:\s*(\d+)px", img.get("style", ""))
+        assert not inline or inline.group(1) == val, (
+            f"{where}: <img data-m=lead> {dim}={val!r} doesn't match its inline {dim}:{inline.group(1)}px")
 
 
 def mrows(html: str) -> list[dict]:
@@ -55,6 +72,9 @@ def assert_mrow(html: str, min_rows: int = 1) -> list[dict]:
         leads = [k for k in kids if k.get("data-m") == "lead"]
         assert 1 <= len(keys) <= 2, f"{where}: needs 1–2 data-m=key children, has {len(keys)}"
         assert len(leads) <= 1, f"{where}: at most 1 data-m=lead child, has {len(leads)}"
+        for tag, k in zip(r["child_tags"], kids):
+            if tag == "img" and k.get("data-m") == "lead":
+                _assert_img_size(where, k)
         for k in kids:
             assert not ("data-m" in k and "data-m-label" in k), (
                 f"{where}: a cell can't be both data-m and data-m-label")

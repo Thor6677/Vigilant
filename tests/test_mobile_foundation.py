@@ -19,7 +19,7 @@ def _js() -> str:
 # ── assert_mrow helper ────────────────────────────────────────────────
 
 GOOD = ('<div class="m-row" data-click="toggleMRow">'
-        '<img data-m="lead" src="x"><span data-m="key">Name</span>'
+        '<img data-m="lead" src="x" width="24" height="24"><span data-m="key">Name</span>'
         '<span data-m-label="Planet">Gas</span><span data-m="key">3h</span></div>')
 
 

@@ -871,3 +871,46 @@ def test_unclamp_show_all_button_is_styled_in_site_css():
     with open(_SITE_CSS, encoding="utf-8") as fh:
         css = fh.read()
     assert re.search(r"\.m-showall\s*\{[^}]*width:\s*100%", css)
+
+
+# ── Polish B ──────────────────────────────────────────────────────────
+
+import pytest  # noqa: E402
+
+
+def _row_html(lead):
+    return f'<div class="m-row" data-click="toggleMRow">{lead}<span data-m="key">Name</span></div>'
+
+
+@pytest.mark.parametrize("lead, msg", [
+    ('<img data-m="lead" src="x">', "positive width"),
+    ('<img data-m="lead" src="x" height="24">', "positive width"),
+    ('<img data-m="lead" src="x" width="24">', "positive height"),
+    ('<img data-m="lead" src="x" width="" height="24">', "positive width"),
+    ('<img data-m="lead" src="x" width="0" height="24">', "positive width"),
+    ('<img data-m="lead" src="x" width="24" height="24" style="width:32px;height:32px;">', "doesn't match"),
+])
+def test_polish_b_helper_rejects_image_leads_without_a_size(lead, msg):
+    """Phone CSS forces width:auto !important on row children, so an image
+    lead without width/height collapses to ~2px until (or unless) it loads."""
+    with pytest.raises(AssertionError, match=msg):
+        assert_mrow(_row_html(lead))
+
+
+@pytest.mark.parametrize("lead", [
+    '<img data-m="lead" src="x" width="28" height="28" style="width:28px;height:28px;border-radius:2px;">',
+    '<img data-m="lead" src="x" width="32" height="32" style="min-width:0;max-width:40px;">',
+    '<td data-m="lead"><span class="b-dot" style="width:7px;height:7px;"></span></td>',
+    '<span data-m="lead"><img src="x"></span>',
+])
+def test_polish_b_helper_accepts_sized_image_leads_and_other_leads(lead):
+    """A dot or a wrapper isn't an image lead (the dashboard's online dot),
+    and min-/max-width aren't the img's own inline size."""
+    assert_mrow(_row_html(lead))
+
+
+def test_polish_b_every_r1_image_lead_carries_its_size():
+    pages = (_render_planetary(), _render_blueprints(), _render_asset_results())
+    for html in pages:
+        rows = assert_mrow(html, min_rows=2)
+        assert any(t == "img" for r in rows for t in r["child_tags"])
