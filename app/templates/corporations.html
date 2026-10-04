@@ -89,9 +89,16 @@
     <div id="player-corps" class="corp-sortable">
     {% for corp in corps %}
     <details class="corp-accordion" id="corp-{{ corp.corp_id }}" data-corp-id="{{ corp.corp_id }}">
+        {# Phones (D9 B): one line. The drag handle and the scope line
+           (corp-scopes) are hidden, "N of our chars" reads "N chars", and the
+           side block's gap shrinks, so the name gets the width and
+           ellipsises. The summary stays a native accordion, not an m-row.
+           The count is two whole copies with no whitespace between them:
+           hiding just "of our " splits the text into runs, which moved the
+           right-aligned desktop text by a sub-pixel. #}
         <summary>
-            <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
-                <span class="corp-drag-handle" title="Drag to reorder">☰</span>
+            <div class="corp-sum-main" style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
+                <span class="corp-drag-handle m-hide" title="Drag to reorder">☰</span>
                 <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
                      alt="" class="corp-logo-sm">
                 <div style="min-width:0">
@@ -105,16 +112,17 @@
                     </div>
                 </div>
             </div>
-            <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
+            <div class="corp-sum-side" style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
                 <div style="text-align:right">
-                    <div class="b-label">{{ corp.characters | length }} of our char{{ 's' if corp.characters | length != 1 else '' }}</div>
+                    {% set n_chars = corp.characters | length %}
+                    <div class="b-label"><span class="m-hide">{{ n_chars }} of our char{{ 's' if n_chars != 1 else '' }}</span><span class="m-only">{{ n_chars }} char{{ 's' if n_chars != 1 else '' }}</span></div>
                     {% if corp.available_scopes %}
-                    <div style="margin-top:2px">
+                    <div class="corp-scopes" style="margin-top:2px">
                         {% for _ in corp.available_scopes %}<span class="scope-pip"></span>{% endfor %}
                         <span class="b-label" style="color:var(--accent)">{{ corp.available_scopes | length }} corp scope{{ 's' if corp.available_scopes | length != 1 else '' }}</span>
                     </div>
                     {% else %}
-                    <div class="b-label" style="margin-top:2px">Public only</div>
+                    <div class="b-label corp-scopes" style="margin-top:2px">Public only</div>
                     {% endif %}
                 </div>
                 <span class="corp-chevron">▼</span>
@@ -146,7 +154,7 @@
     {% for corp in npc_corps %}
     <details class="corp-accordion" id="corp-{{ corp.corp_id }}">
         <summary>
-            <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
+            <div class="corp-sum-main" style="display:flex;align-items:center;gap:0.75rem;min-width:0;flex:1">
                 <img src="https://images.evetech.net/corporations/{{ corp.corp_id }}/logo?size=64"
                      alt="" class="corp-logo-sm">
                 <div style="min-width:0">
@@ -154,7 +162,7 @@
                     <div class="b-card-sub is-muted">NPC Corporation</div>
                 </div>
             </div>
-            <div style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
+            <div class="corp-sum-side" style="display:flex;align-items:center;gap:1.5rem;flex-shrink:0">
                 <div style="text-align:right">
                     <div class="b-label">{{ corp.characters | length }} char{{ 's' if corp.characters | length != 1 else '' }}</div>
                 </div>
@@ -214,6 +222,10 @@
                 pointRadius: 0, tension: 0.15, spanGaps: false, hidden: Object.keys(data.series).length > 3,
             });
         });
+        var legend = { labels: { color: '#8a8a8a', font: { size: 9 }, boxWidth: 8 } };
+        /* Phones: the legend goes under the plot, so a wrapped legend
+           doesn't eat the top of its 160px. Read once, at build time. */
+        if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) legend.position = 'bottom';
         charts[key] = new Chart(canvas, {
             type: 'line',
             data: { labels: data.labels, datasets: datasets },
@@ -221,7 +233,7 @@
                 responsive: true, maintainAspectRatio: false, animation: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { labels: { color: '#8a8a8a', font: { size: 9 }, boxWidth: 8 } },
+                    legend: legend,
                     tooltip: { callbacks: { label: function(c) {
                         return c.dataset.label + ': ' + (c.parsed.y === null ? 'no data' : fmtISK(c.parsed.y) + ' ISK');
                     } } },

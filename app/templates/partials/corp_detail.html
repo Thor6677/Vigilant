@@ -67,8 +67,9 @@
                 <span class="b-label">Our Characters</span>
                 <span class="b-label is-accent">{{ corp_chars | length }}</span>
             </div>
+            {# Phones: both links are 40px tall tap targets (corp-char-row). #}
             {% for char in corp_chars %}
-            <div class="b-table-row">
+            <div class="b-table-row corp-char-row">
                 <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
                      alt="" class="b-portrait-sm">
                 <a href="/character/{{ char.character_id }}" class="b-link" style="font-size:11px;color:var(--text)">{{ char.character_name }}</a>
@@ -91,8 +92,9 @@
     {{ corp_permission_summary(corp_chars, corp_perm_keys, corp_roles, what="that data is not shown") }}
 
     <!-- Corp Navigation -->
+    {# Phones (D12 A): a two-column grid of 40px links (corp-subnav). #}
     <div class="b-section" style="margin-bottom:0.75rem;">
-        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;padding:0.5rem 0.75rem;border:1px solid var(--border);background:var(--surface);">
+        <div class="corp-subnav" style="display:flex;gap:0.75rem;flex-wrap:wrap;padding:0.5rem 0.75rem;border:1px solid var(--border);background:var(--surface);">
             <a href="/corporations/{{ corp_id }}/journal" class="b-link" style="font-size:10px;">Journal →</a>
             <a href="/corporations/{{ corp_id }}/blueprints" class="b-link" style="font-size:10px;">Blueprints →</a>
             <a href="/corporations/{{ corp_id }}/mining" class="b-link" style="font-size:10px;">Mining →</a>
@@ -128,8 +130,10 @@
            names need a Director-role call the balances do not. #}
         {% if wallet_history is not none %}
         <div class="corp-wallet-history" data-corp-id="{{ corp_id }}" style="margin-top:0.75rem;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.35rem;">
-                <span style="font-size:10px;color:var(--muted);">Balance history &middot; hourly &middot; gaps are periods no linked character could read the wallet</span>
+            {# Phones: the header wraps and the caption takes its own line
+               under the range buttons (corp-wallet-head). #}
+            <div class="corp-wallet-head" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.35rem;">
+                <span class="corp-wallet-caption" style="font-size:10px;color:var(--muted);">Balance history &middot; hourly &middot; gaps are periods no linked character could read the wallet</span>
                 <span style="display:flex;gap:0.25rem;">
                     {% for key, label in [('1w','1W'),('1m','1M'),('3m','3M'),('1y','1Y')] %}
                     <button type="button" class="b-btn range-btn corp-wallet-range{% if key == '1m' %} is-active{% endif %}"
@@ -157,9 +161,14 @@
             <span class="b-label is-accent">{{ corp_jobs | length }} active job{{ 's' if corp_jobs | length != 1 else '' }}</span>
         </div>
         {% if corp_jobs %}
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--border);border:1px solid var(--border)">
+        {# Phones (D11 A): each tile is an m-row. Its desktop lines stay
+           untagged (so phones hide them); m-only cells carry the phone
+           layout: key 1 product, key 2 time left, then Activity and Runs.
+           The tile grid is the clamp: past 10 jobs, "Show all N". #}
+        <div class="m-clamp-wrap">
+        <div class="m-clamp corp-jobs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--border);border:1px solid var(--border)">
         {% for job in corp_jobs %}
-        <div style="background:var(--surface);padding:0.5rem 0.75rem">
+        <div class="m-row" data-click="toggleMRow" style="background:var(--surface);padding:0.5rem 0.75rem">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
                 <span class="b-label" style="color:var(--accent)">{{ job.activity_name }}</span>
                 <span class="b-label">{{ job.runs }}x</span>
@@ -172,8 +181,18 @@
                 {{ job.time_remaining }}
             </div>
             {% endif %}
+            <span class="m-only corp-job-product" data-m="key">{{ job.product_name or '—' }}</span>
+            {% if job.time_remaining %}
+            <span class="m-only b-label" data-m="key"{% if job.time_remaining == 'Ready' %} style="color:var(--success)"{% endif %}>{{ job.time_remaining }}</span>
+            {% endif %}
+            <span class="m-only" data-m-label="Activity">{{ job.activity_name }}</span>
+            <span class="m-only" data-m-label="Runs">{{ job.runs }}</span>
         </div>
         {% endfor %}
+        </div>
+        {% if corp_jobs | length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ corp_jobs | length }}</button>
+        {% endif %}
         </div>
         {% else %}
         <div class="b-empty">No active industry jobs.</div>
@@ -215,8 +234,14 @@
             <span class="b-label is-accent">{{ corp_structures | length }}</span>
         </div>
         {% if corp_structures %}
+        {# Phones (D10 A): each structure is an m-row. Its desktop lines stay
+           untagged (so phones hide them); m-only cells carry the phone
+           layout. Key 1 is the name, plus the state badge only off the
+           normal online state (the state with no colour class); key 2 is
+           the fuel left, coloured by the same fuel_level as desktop. #}
         {% for struct in corp_structures %}
-        <div style="padding:0.65rem 0.75rem;border-bottom:1px solid var(--border)">
+        {% set fuel_lvl = struct.fuel_remaining | fuel_level %}
+        <div class="m-row" data-click="toggleMRow" style="padding:0.65rem 0.75rem;border-bottom:1px solid var(--border)">
             <!-- Name + state badge -->
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:4px">
                 <span style="font-size:11px;color:var(--text);font-weight:500">{{ struct.name }}</span>
@@ -237,7 +262,7 @@
             <!-- Fuel + timer -->
             <div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-bottom:4px">
                 {% if struct.fuel_remaining %}
-                <span class="b-row-label {{ 'is-danger' if struct.fuel_remaining == 'EXPIRED' else 'is-warn' if struct.fuel_remaining.startswith('0d') or struct.fuel_remaining.startswith('1d') else '' }}">
+                <span class="b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}">
                     Fuel: {{ struct.fuel_remaining }}
                 </span>
                 {% endif %}
@@ -254,6 +279,22 @@
                 </span>
                 {% endfor %}
             </div>
+            {% endif %}
+            <span class="m-only corp-struct-key" data-m="key"><span class="corp-struct-name">{{ struct.name }}</span>{% if struct.state_class %}<span class="b-badge {{ struct.state_class }}">{{ struct.state | replace('_', ' ') | upper }}</span>{% endif %}</span>
+            {% if struct.fuel_remaining %}
+            <span class="m-only b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}" data-m="key">{{ struct.fuel_remaining }}</span>
+            {% endif %}
+            <span class="m-only" data-m-label="State"><span class="b-badge {{ struct.state_class }}">{{ struct.state | replace('_', ' ') | upper }}</span></span>
+            <span class="m-only" data-m-label="Type">{{ struct.type_name }}</span>
+            <span class="m-only" data-m-label="System">{{ struct.system_name }}{% if struct.region %} — {{ struct.region }}{% endif %}</span>
+            {% if struct.reinforce_hour is not none %}
+            <span class="m-only" data-m-label="Reinforce">{{ '%02d:00' % struct.reinforce_hour }} EVE</span>
+            {% endif %}
+            {% if struct.state_timer_end %}
+            <span class="m-only" data-m-label="Timer"><span class="is-danger">{{ struct.state_timer_end }}</span></span>
+            {% endif %}
+            {% if struct.services %}
+            <span class="m-only" data-m-label="Services"><span class="corp-struct-svcs">{% for svc in struct.services %}<span class="b-badge {{ '' if svc.state == 'online' else 'is-danger' }}">{{ svc.name }}</span>{% endfor %}</span></span>
             {% endif %}
         </div>
         {% endfor %}

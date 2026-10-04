@@ -979,6 +979,52 @@
 
 /* ── R2 T5 · corporations ── */
 @media (max-width: 640px) {
+    /* Corp header (D9 B): one line. With the scope line hidden and the side
+       block's gap shrunk, the name (.b-card-name, which already ellipsises)
+       gets the width. Child combinators only: the detail body has its own
+       <details><summary>. !important: the page's <style> loads after this
+       file, and the side block's gap is inline. */
+    .corp-accordion > summary .corp-scopes { display: none !important; }
+    .corp-accordion > summary > .corp-sum-side { gap: 0.5rem !important; }
+
+    /* Our Characters: the name and permissions links are 40px tap targets,
+       which also sets the row's height. */
+    .corp-char-row { padding-top: 0; padding-bottom: 0; }
+    .corp-char-row > a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Corp page links (D12 A): a two-column grid of 40px links. The 1px gap
+       over the border colour draws the dividers; an odd last link spans
+       both columns. !important beats the inline flex line. */
+    .corp-subnav {
+        display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px !important; padding: 0 !important; background: var(--border) !important;
+    }
+    .corp-subnav > a {
+        display: flex; align-items: center; justify-content: center; gap: 0.35rem;
+        min-height: 40px; padding: 0 0.5rem; background: var(--surface);
+        font-size: 12px !important; text-align: center;
+    }
+    .corp-subnav > a:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+    /* Wallet chart header: the caption drops to its own line under the
+       range buttons. */
+    .corp-wallet-head { flex-wrap: wrap; }
+    .corp-wallet-head > .corp-wallet-caption { order: 1; flex-basis: 100%; }
+
+    /* Industry jobs (D11 A): the tile grid becomes one column, so its 1px
+       gaps read as dividers between rows. Key 1 (product) is 12px, as other
+       phone rows' names, so both keys share one line box. */
+    .corp-jobs { grid-template-columns: minmax(0, 1fr) !important; }
+    .corp-jobs > .m-row > .corp-job-product { font-size: 12px; }
+
+    /* Structures (D10 A): key 1 is the name plus, off the normal state, a
+       badge. Only the name ellipsises, so the badge is never cut off.
+       Beats R1's display:block on key cells. The badge's line-height keeps
+       key 1 no taller than its 12px name. */
+    .m-row > .corp-struct-key[data-m="key"] { display: flex !important; align-items: center; gap: 0.4rem; font-size: 12px; }
+    .corp-struct-key > .corp-struct-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .corp-struct-key > .b-badge { flex: none; line-height: 1.3; }
+    .corp-struct-svcs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
 }
 /* ── end R2 T5 ── */
 
