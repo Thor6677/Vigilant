@@ -75,14 +75,14 @@
 
 {# ── Filters ───────────────────────────────────────────────────────────────── #}
 {% set base = "/corporations/" ~ corp_id ~ "/blueprints" if is_corp else "/character/" ~ char.character_id ~ "/blueprints" %}
-<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:0.5rem;">
+<div class="bp-filters" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:0.5rem;">
     {% for key, label in [("all", "All"), ("bpo", "BPO Only"), ("bpc", "BPC Only"), ("unresearched", "Unresearched")] %}
     <a href="{{ base }}?filter={{ key }}&group_by={{ group_by }}"
        class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if filter == key %}var(--accent){% else %}var(--border){% endif %};{% if filter == key %}color:var(--accent);{% endif %}">
         {{ label }}
     </a>
     {% endfor %}
-    <span style="color:var(--border);margin:0 4px;">|</span>
+    <span class="bp-filter-sep" style="color:var(--border);margin:0 4px;">|</span>
     {% for key, label in [("type", "By Type"), ("location", "By Location")] %}
     <a href="{{ base }}?filter={{ filter }}&group_by={{ key }}"
        class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid {% if group_by == key %}var(--accent){% else %}var(--border){% endif %};{% if group_by == key %}color:var(--accent);{% endif %}">

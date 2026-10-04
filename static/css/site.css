@@ -921,6 +921,41 @@
 
 /* ── R2 T3 · fittings/stats/filters ── */
 @media (max-width: 640px) {
+    /* Fittings header: "Save all to my fits" first, then its status on a
+       full-width line below it, then the failure list saveAllToMyFits
+       appends to this same row. The DOM keeps the status first; `order`
+       moves it. The group stretches across the stacked page header, so that
+       line doesn't resize as text arrives. The button keeps its own width
+       (.b-btn is flex:1). row-gap 0 beats the inline gap, so the empty status
+       adds no space; it stays displayed because it is an aria-live region. */
+    .fit-saveall { flex-wrap: wrap; align-self: stretch; row-gap: 0 !important; }
+    .fit-saveall > .b-btn { flex: none; }
+    .fit-saveall > .fit-saveall-status { order: 1; flex-basis: 100%; }
+    .fit-saveall > .fit-saveall-status:not(:empty) { margin-top: 0.35rem; }
+    .fit-saveall > ul { order: 2; flex-basis: 100%; }
+
+    /* Fit head (tap to open): a 44px target with a 12px arrow. R1 wraps
+       every .b-panel-head on phones, which would push the arrow onto its own
+       line under a long fit name; this head stays on one line and its title
+       side shrinks, dropping the module count below the name instead. */
+    .b-panel-head.fit-head { min-height: 44px; flex-wrap: nowrap; gap: 0.5rem; }
+    .fit-head > .fit-title { min-width: 0; flex-wrap: wrap; }
+    .fit-head .fit-arrow { flex: none; font-size: 12px; }
+
+    /* Stats: the zKillboard chip is an m-tap target. As an inline-flex box
+       its ::after arrow is a flex item and loses the space in its content. */
+    .ent-zkb { gap: 0.3em; }
+
+    /* Blueprint filter row (ISS-111): two buttons per line, each on one
+       line. The separator becomes an empty spacer row between the filter
+       and group-by buttons. Inline display, gap and font-size need the
+       !important. The active button's accent border is inline and stays. */
+    .bp-filters { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
+    .bp-filters > .b-btn {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 40px; font-size: 12px !important; white-space: nowrap;
+    }
+    .bp-filters > .bp-filter-sep { grid-column: 1 / -1; height: 0; overflow: hidden; }
 }
 /* ── end R2 T3 ── */
 
