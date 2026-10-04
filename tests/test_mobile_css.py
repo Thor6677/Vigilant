@@ -213,3 +213,9 @@ def test_mobile_logout_lines_up_with_menu_links():
     for decl in ("width: 100%", "background: none", "border: none", "font-family: inherit",
                  "line-height: inherit", "text-align: left"):
         assert _has_decl(logout, decl), decl
+
+
+def test_hamburger_focus_ring_stays_on_screen():
+    """Closing the menu puts focus on the Menu button, which fills the bar's
+    height; an outside ring would lose its top edge off-screen."""
+    assert _has_decl(_rule(_css(), ".b-hamburger:focus-visible"), "outline-offset: -2px")

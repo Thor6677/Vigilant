@@ -229,21 +229,21 @@
         {% if not group['admin'] or request.session.get('is_admin') %}
             {% set _one_tap = group['items']|length == 1 and group['items'][0]['url'] == group['url'] and not group['items'][0]['external'] %}
             {% if not group['items'] or _one_tap %}
-    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+    <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}"{% if nav_group_active(group, _path) %} aria-current="page"{% endif %}>{{ group['label'] }}</a>
             {% else %}
     <details class="b-mobile-group"{% if nav_group_active(group, _path) %} open{% endif %}>
         <summary>{{ group['label'] }}</summary>
                 {% if group['landing'] %}
-        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}">{{ group['label'] }} Overview</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_item_active(group['items'][0], _path) }}"{% if nav_item_active(group['items'][0], _path) %} aria-current="page"{% endif %}>{{ group['label'] }} Overview</a>
                 {% elif group['url'] != group['items'][0]['url'] %}
-        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
+        <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}"{% if nav_group_active(group, _path) %} aria-current="page"{% endif %}>{{ group['label'] }}</a>
                 {% endif %}
                 {% for item in group['items'] %}
                     {% if not (group['landing'] and item['url'] == group['url']) %}
                         {% if item['external'] %}
         <a href="{{ item['url'] }}" target="_blank" rel="noopener">{{ item['label'] }}</a>
                         {% else %}
-        <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}">{{ item['label'] }}</a>
+        <a href="{{ item['url'] }}" class="{{ 'is-active' if nav_item_active(item, _path) }}"{% if nav_item_active(item, _path) %} aria-current="page"{% endif %}>{{ item['label'] }}</a>
                         {% endif %}
                     {% endif %}
                 {% endfor %}

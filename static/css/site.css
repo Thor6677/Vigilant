@@ -114,6 +114,9 @@
     padding: 0.25rem 0;
 }
 .b-hamburger:hover { color: var(--text); }
+/* The button fills the bar's height, so a ring drawn outside it loses its
+   top edge off-screen (focus lands here when the menu closes). */
+.b-hamburger:focus-visible { outline-offset: -2px; }
 .b-hamburger svg { flex-shrink: 0; }
 .b-mobile-menu {
     display: none;

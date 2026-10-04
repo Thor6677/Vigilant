@@ -296,8 +296,8 @@ def test_one_tap_links_keep_their_active_state(path, is_admin, active):
     menu = _mobile_menu(_render_base(path, is_admin=is_admin))
     for g in _visible_groups(is_admin):
         if _one_tap(g):
-            cls = "is-active" if g["label"] == active else ""
-            assert f'<a href="{g["url"]}" class="{cls}">{g["label"]}</a>' in menu, (path, g["label"])
+            attrs = 'class="is-active" aria-current="page"' if g["label"] == active else 'class=""'
+            assert f'<a href="{g["url"]}" {attrs}>{g["label"]}</a>' in menu, (path, g["label"])
 
 
 def test_admin_menu_link_only_for_admins():
@@ -403,3 +403,23 @@ def test_tab_dropdown_list_is_not_a_landmark():
         assert "<nav" not in details
         assert '<div class="m-tabs-list">' in details
         assert '<div class="m-tabs-sep"></div>' in details
+
+
+@pytest.mark.parametrize("path, href, label", [
+    ("/account", "/account", "Account"),                                  # one-tap link
+    ("/industry/planetary", "/industry/planetary", "Planetary Industry"),  # in-group item
+    ("/industry", "/industry", "Industry Overview"),                       # landing overview
+])
+def test_current_menu_link_carries_aria_current(path, href, label):
+    menu = _mobile_menu(_render_base(path))
+    assert f'<a href="{href}" class="is-active" aria-current="page">{label}</a>' in menu
+
+
+@pytest.mark.parametrize("path", ["/account", "/admin", "/industry", "/industry/planetary",
+                                  "/intel/kills/search", "/dashboard", "/character/90000001"])
+def test_aria_current_tracks_the_active_class_in_the_menu(path):
+    menu = _mobile_menu(_render_base(path, is_admin=True))
+    tags = re.findall(r"<a [^>]*>", menu)
+    assert tags
+    for tag in tags:
+        assert ('class="is-active"' in tag) == ('aria-current="page"' in tag), tag
