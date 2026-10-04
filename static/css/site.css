@@ -790,3 +790,15 @@
 @media (max-width: 640px) {
     .m-row > [data-m="key"] > .m-trunc > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* "Show all N" under a list clamped to 10 rows on phones (.m-clamp-wrap,
+   mobile design §4.6). Always rendered with m-only, so it never shows
+   above 640px. */
+@media (max-width: 640px) {
+    .m-showall {
+        display: block; width: 100%; margin-top: 0.4rem; padding: 0.5rem 0.75rem;
+        background: none; border: 1px solid var(--border); color: var(--accent);
+        font-family: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+        cursor: pointer;
+    }
+}

@@ -591,3 +591,141 @@ def test_assets_search_bar_stacks_on_phones():
     assert re.search(r"\.asset-controls-right \{ flex-direction: column; align-items: stretch;", css)
     assert re.search(r"\.asset-select \{ width: 100%; max-width: 100%; \}", css)
     assert re.search(r'\.m-row > \[data-m-label="Location"\] \{ white-space: normal !important; padding-left: 0 !important; \}', css)
+
+
+# ── Task 18: Character overview scroll boxes (§4.6, ISS-104) ─────────
+
+class _Clamps(HTMLParser):
+    """Collects every .m-clamp (with its direct-child count), every
+    .m-showall button (with whether a .m-clamp-wrap encloses it), every
+    .m-unclamp element's classes, and counts .m-clamp-wraps, including any
+    nested in another."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []        # [tag, classes, clamp_ref]
+        self.clamps = []
+        self.showall = []
+        self.unclamped = []
+        self.wraps = 0
+        self.nested_wraps = 0
+        self._btn = None
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v if v is not None else "") for k, v in attrs}
+        cls = a.get("class", "").split()
+        if self.stack and self.stack[-1][2] is not None:
+            self.stack[-1][2]["children"] += 1
+        in_wrap = any("m-clamp-wrap" in e[1] for e in self.stack)
+        if "m-clamp-wrap" in cls:
+            self.wraps += 1
+            self.nested_wraps += in_wrap
+        ref = None
+        if "m-clamp" in cls:
+            ref = {"children": 0, "classes": cls}
+            self.clamps.append(ref)
+        if "m-unclamp" in cls:
+            self.unclamped.append(cls)
+        if "m-showall" in cls:
+            self._btn = {"in_wrap": in_wrap, "attrs": a, "text": ""}
+            self.showall.append(self._btn)
+        if tag not in _VOID:
+            self.stack.append([tag, cls, ref])
+
+    def handle_endtag(self, tag):
+        if tag == "button":
+            self._btn = None
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        if self._btn is not None:
+            self._btn["text"] += data
+
+
+def _clamps(html):
+    p = _Clamps()
+    p.feed(html)
+    p.close()
+    for b in p.showall:
+        b["text"] = _norm(b["text"])
+    return p
+
+
+def _queue(n):
+    return [{"skill_name": f"Sample Skill {i}", "finished_level": 3, "remaining_seconds": 3600 * (i + 1)}
+            for i in range(n)]
+
+
+def _long_overview(n):
+    return _render_overview(
+        active_skill=_queue(1)[0], skillqueue=_queue(n), queue_remaining=3600 * n,
+        completed_skills=[{"skill_name": f"Done Skill {i}", "finished_level": 4, "completed_ago": 7200}
+                          for i in range(n)],
+        corp_history=[{"corporation_id": 98000000 + i, "corporation_name": f"Sample Corp {i}",
+                       "start_date": "2020-01-01", "days_in": 30, "is_current": i == 0}
+                      for i in range(n)],
+        jump_clones=[{"location": "Sample Station", "implants": []}],
+    )
+
+
+def _render_assets_partial(*sizes):
+    locations = [{"location": f"Sample Station {n}", "items": [{"name": f"Item {i}", "quantity": i + 1} for i in range(size)]}
+                 for n, size in enumerate(sizes)]
+    tmpl = overview_mod.templates.env.get_template("partials/assets_partial.html")
+    return tmpl.render(locations=locations, docked_at=None)
+
+
+def test_unclamp_overview_scroll_boxes_on_phones():
+    c = _clamps(_long_overview(12))
+    # queue, recently completed, corp history, the assets container, and the
+    # jump clone's implant list
+    assert len(c.unclamped) == 5, c.unclamped
+    assert ["assets-container", "m-unclamp"] in c.unclamped
+    assert ["asset-list", "m-unclamp"] in c.unclamped
+
+
+def test_unclamp_long_lists_offer_show_all():
+    c = _clamps(_long_overview(12))
+    assert [k["children"] for k in c.clamps] == [12, 12, 12]
+    assert [b["text"] for b in c.showall] == ["Show all 12"] * 3
+    for b in c.showall:
+        assert b["in_wrap"]
+        assert b["attrs"]["data-click"] == "toggleExpanded"
+        assert b["attrs"]["data-toggle-target"] == ".m-clamp-wrap"
+        assert b["attrs"]["type"] == "button"
+        assert "m-only" in b["attrs"]["class"].split()
+
+
+def test_unclamp_short_lists_have_no_show_all():
+    c = _clamps(_long_overview(10))
+    assert c.showall == []
+    assert len(c.clamps) == 3          # the clamp is inert at ten rows or fewer
+
+
+def test_unclamp_asset_lists_clamp_per_location():
+    c = _clamps(_render_assets_partial(12, 3))
+    assert [k["children"] for k in c.clamps] == [12, 3]
+    assert [b["text"] for b in c.showall] == ["Show all 12"]
+    assert c.showall[0]["in_wrap"]
+    assert len(c.unclamped) == 2
+
+
+def test_unclamp_clamp_wraps_never_nest():
+    """Task 1's clamp rules use descendant selectors: a wrap inside a wrap
+    would clamp the inner list from outside and hide its Show all button."""
+    html = _long_overview(12).replace(
+        '<div style="color: var(--muted); font-size: 10px; padding: 1rem 0.75rem;">Loading…</div>',
+        _render_assets_partial(12, 12))
+    assert "Sample Station 1" in html
+    c = _clamps(html)
+    assert c.wraps == 5                # queue, completed, corp history, 2 asset lists
+    assert c.nested_wraps == 0
+
+
+def test_unclamp_show_all_button_is_styled_in_site_css():
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        css = fh.read()
+    assert re.search(r"\.m-showall\s*\{[^}]*width:\s*100%", css)

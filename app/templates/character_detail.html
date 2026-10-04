@@ -324,13 +324,18 @@
                 {% endif %}
             </div>
 
-            {# Full skill queue list #}
+            {# Full skill queue list. Phones (mobile design §4.6, ISS-104): the
+               box loses its own scroll (m-unclamp) so it can't trap touch
+               scrolling, and shows its first 10 rows (m-clamp) plus a
+               "Show all N" button. Same for Recently Completed and Corporation
+               History below. A clamp wrap must never contain another: the
+               clamp rules use descendant selectors. #}
             {% if skillqueue|length > 1 %}
-            <div style="margin-top: 0.75rem;">
+            <div class="m-clamp-wrap" style="margin-top: 0.75rem;">
                 <div style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem;">
                     Queue ({{ skillqueue|length }} skills)
                 </div>
-                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
+                <div class="m-unclamp m-clamp" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border);">
                     {% for entry in skillqueue %}
                     <div style="display: flex; justify-content: space-between; align-items: center;
                                 padding: 0.35rem 0.6rem; font-size: 10px;
@@ -350,16 +355,19 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if skillqueue|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ skillqueue|length }}</button>
+                {% endif %}
             </div>
             {% endif %}
 
             {# Recently completed skills #}
             {% if completed_skills %}
-            <details style="margin-top: 0.75rem;">
+            <details class="m-clamp-wrap" style="margin-top: 0.75rem;">
                 <summary style="font-size: 9px; color: var(--success); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     &#10003; Recently Completed ({{ completed_skills|length }})
                 </summary>
-                <div style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                <div class="m-unclamp m-clamp" style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
                     {% for entry in completed_skills %}
                     <div style="display: flex; justify-content: space-between; align-items: center;
                                 padding: 0.35rem 0.6rem; font-size: 10px; opacity: 0.6;
@@ -379,6 +387,9 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if completed_skills|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ completed_skills|length }}</button>
+                {% endif %}
             </details>
             {% endif %}
         </div>
@@ -387,11 +398,11 @@
         {# Corporation History #}
         {% if corp_history %}
         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(200, 169, 81, 0.2);">
-            <details>
+            <details class="m-clamp-wrap">
                 <summary style="font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;">
                     Corporation History ({{ corp_history|length }})
                 </summary>
-                <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
+                <div class="m-unclamp m-clamp" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); margin-top: 0.4rem;">
                     {% for h in corp_history %}
                     <div style="display: flex; align-items: center; gap: 0.5rem;
                                 padding: 0.35rem 0.6rem; font-size: 10px;
@@ -413,6 +424,9 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if corp_history|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ corp_history|length }}</button>
+                {% endif %}
             </details>
         </div>
         {% endif %}
@@ -487,8 +501,11 @@
                 </span>
             </div>
 
-            {# Assets Section — auto-loaded on page load #}
-            <div class="assets-container" id="assets-container">
+            {# Assets Section — auto-loaded on page load. m-unclamp: no inner
+               scroll box on phones. Each location's item list clamps itself
+               (partials/assets_partial.html); this container must not become
+               a clamp wrap, or it would clamp those lists from outside. #}
+            <div class="assets-container m-unclamp" id="assets-container">
                 <span class="card-title" style="margin: 0.75rem 0 0.5rem 0;">Assets by Location</span>
                 <div id="assets-inner"
                      hx-get="/character/{{ char.character_id }}/assets-partial"
@@ -536,7 +553,7 @@
                     <span class="expand-icon">▼</span>
                 </div>
             </div>
-            <div class="asset-list">
+            <div class="asset-list m-unclamp">
                 {% if clone.implants %}
                     {% set attr_imps  = clone.implants | selectattr("is_attr") | list %}
                     {% set hard_imps  = clone.implants | rejectattr("is_attr") | list %}
