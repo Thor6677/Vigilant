@@ -118,8 +118,10 @@
             {% endif %}
             {% endfor %}
 
-            {# Actions #}
-            <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">
+            {# Actions. Phones: a status message takes its own line under the
+               buttons (.fit-actions in site.css R2 P). saveOneToMyFits finds
+               the status through the button's parent: keep both in here. #}
+            <div class="fit-actions" style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">
                 <button data-click="copyEFT" data-char-id="{{ char.character_id }}" data-fit-id="{{ fit.fitting_id }}"
                         class="b-btn" style="padding:3px 10px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">
                     Copy EFT

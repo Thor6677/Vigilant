@@ -325,10 +325,12 @@
        for header clicks, through the same sortDashTable(). `?sort=` only
        breaks ties under table_sort here, so it isn't offered. When the
        saved sort column is hidden, a disabled placeholder names it (the rows
-       are still sorted by it) and reverse is off, as no header exists. #}
+       are still sorted by it) and reverse is off, as no header exists.
+       dash-phone-tsort gives this group more of the row than View, so long
+       column names fit in the closed select (site.css R2 P). #}
     {% set dash_tsort = dash_prefs.table_sort %}
     {% set dash_tsort_shown = dash_tsort.key in dash_prefs.table_columns %}
-    <div style="flex:1 1 0;min-width:0;display:flex;align-items:flex-end;gap:0.3rem;">
+    <div class="dash-phone-tsort" style="flex:1 1 0;min-width:0;display:flex;align-items:flex-end;gap:0.3rem;">
         <label style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:0.2rem;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
             Sort
             <select data-change="dashTableSortSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:0 0.5rem;font-family:inherit;">
@@ -1157,6 +1159,17 @@ function persistGroupState() {
     postDashPrefs({ collapsed_groups: collapsed });
 }
 
+// A group toggle's glyph, title and aria-expanded follow its body, as a
+// section toggle's do. Every path that shows or hides a group body sets all
+// three through here: the toggle itself, Edit's force-expand and its
+// restore, a group added by + Add Account, and a rename (the title carries
+// the group's name).
+function dashSetGroupToggle(btn, expanded) {
+    btn.textContent = expanded ? '▾' : '▸';
+    btn.title = (expanded ? 'Collapse ' : 'Expand ') + btn.dataset.group;
+    btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function toggleDashGroup() {
     if (editMode) return;  // label click means rename while editing; leave layout alone
     var section = this.closest('.group-section');
@@ -1167,7 +1180,7 @@ function toggleDashGroup() {
     var willCollapse = body.style.display !== 'none';
     body.style.display = willCollapse ? 'none' : '';
     if (summary) summary.style.display = willCollapse ? '' : 'none';
-    this.textContent = willCollapse ? '▸' : '▾';
+    dashSetGroupToggle(this, !willCollapse);
     persistGroupState();
 }
 
@@ -1443,7 +1456,7 @@ function toggleEditMode() {
                 var summary = sec.querySelector('.dash-group-summary');
                 if (summary) summary.style.display = 'none';
                 var toggleBtn = sec.querySelector('.dash-group-toggle');
-                if (toggleBtn) toggleBtn.textContent = '▾';
+                if (toggleBtn) dashSetGroupToggle(toggleBtn, true);
             }
         });
     } else {
@@ -1464,7 +1477,7 @@ function toggleEditMode() {
             var summary = sec.querySelector('.dash-group-summary');
             if (summary) summary.style.display = '';
             var toggleBtn = sec.querySelector('.dash-group-toggle');
-            if (toggleBtn) toggleBtn.textContent = '▸';
+            if (toggleBtn) dashSetGroupToggle(toggleBtn, false);
         });
         forceExpandedGroups = [];
     }
@@ -1564,9 +1577,8 @@ document.addEventListener('DOMContentLoaded', function() {
         toggleBtn.className = 'dash-group-toggle b-btn m-tap';  // as the partial: phone tap target
         toggleBtn.dataset.click = 'toggleDashGroup';
         toggleBtn.dataset.group = name;
-        toggleBtn.title = 'Collapse ' + name;
         toggleBtn.style.cssText = 'flex:none;padding:2px 6px;font-size:9px;border:1px solid var(--border);line-height:1;';
-        toggleBtn.textContent = '▾';
+        dashSetGroupToggle(toggleBtn, true);  // a new group starts expanded
 
         var label = document.createElement('span');
         label.className = 'group-label b-label';
@@ -1633,6 +1645,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     section.dataset.group = newName;
                     section.querySelectorAll('[data-group]').forEach(function(el){el.dataset.group = newName;});
                     label.textContent = newName; label.dataset.group = newName; input.dataset.original = newName;
+                    // The toggle's title names the group: refresh it.
+                    var groupToggle = section.querySelector('.dash-group-toggle');
+                    var groupBody = section.querySelector('.sortable-group');
+                    if (groupToggle && groupBody) dashSetGroupToggle(groupToggle, groupBody.style.display !== 'none');
                     fetch('/characters/rename-group', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_name: oldName, new_name: newName})});
                     scheduleSave();
                 }

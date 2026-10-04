@@ -273,6 +273,24 @@
     // Chart.js must be loaded by the PAGE — for the same nonce reason, a
     // library tag inside a fragment is refused too. Both parents already
     // load it.
+
+    // Phones (mobile R2): a bottom legend gets at most half the chart's
+    // height, and ten 29-character ship names sit one per row there, so only
+    // seven of ten showed. Cut to 20 characters, two fit per row. Only the
+    // legend text changes: each item keeps its datasetIndex (a tap still
+    // hides the right series), and tooltips read the dataset's full label.
+    // Chart.js's own generator is looked up when the legend is built.
+    var _LEGEND_MAX_CHARS = 20;
+    function _shortLegendLabels(chart) {
+        var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+        items.forEach(function (item) {
+            if (item.text && item.text.length > _LEGEND_MAX_CHARS) {
+                item.text = item.text.slice(0, _LEGEND_MAX_CHARS - 1) + '\u2026';
+            }
+        });
+        return items;
+    }
+
     function _combatChart(canvas, kind, d) {
         var palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7',
                        '#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
@@ -383,6 +401,8 @@
             var weeks = d.weeks || 0;
             var wLabels = [];
             for (var i = 0; i < weeks; i++) wLabels.push('W' + (i - weeks + 1));
+            var streamLegendLabels = { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 };
+            if (legendSide === 'bottom') streamLegendLabels.generateLabels = _shortLegendLabels;
             return new Chart(canvas, {
                 type: 'line',
                 data: { labels: wLabels, datasets: datasets },
@@ -393,7 +413,7 @@
                         x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
                         y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     },
-                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: legendSide } }
+                    plugins: { legend: { labels: streamLegendLabels, position: legendSide } }
                 }
             });
         }

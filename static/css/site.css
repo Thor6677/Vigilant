@@ -1138,6 +1138,42 @@
 
 /* ── R2 P · polish B ── */
 @media (max-width: 640px) {
+    /* Wallet journal rows (journal.html and the overview's Recent
+       Transactions). Key 1 holds only a 9px type badge, but as an inline box
+       the badge sat in a line box of the cell's inherited 16px / 26.4px. The
+       cell stood 8px taller than key 2 (11px) and, centred in the row,
+       started 4px higher. On the overview the badge also sat on that 16px
+       baseline, 2px low. As a shrink-wrapped block the badge leaves the cell
+       no line box of its own, so the cell is the badge's height and both
+       keys centre on one line. A long type ellipsises inside its border.
+       !important beats the journal badge's inline display and 120px cap. */
+    .m-row > [data-m="key"] > .journal-type,
+    .m-row > [data-m="key"] > .ref-type {
+        display: block !important; width: fit-content; max-width: 100% !important;
+        overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Dashboard Combat Profile, Ship Usage Stream: as on the character
+       overview (R2 T1), the legend sits below the plot on phones and would
+       take half of the desktop 200px box. !important beats the inline
+       height. */
+    .dash-cp-stream { height: 280px !important; }
+
+    /* Dashboard phone toolbar, Table view: the Sort group (the select plus
+       the 40px reverse button) takes 1.5 shares of the row to View's 1, so
+       the longest column name ("Corporation") fits in the closed select at
+       360px. View's longest option is 8 characters. !important beats the
+       inline flex shorthand. */
+    .dash-phone-toolbar > .dash-phone-tsort { flex-grow: 1.5 !important; }
+
+    /* Fittings, a fit's actions row: a status message ("Save failed — try
+       again.") takes its own full-width line under the buttons instead of
+       squeezing them, as the Save all group does (R2 T3). row-gap 0 beats
+       the inline gap, so the empty status, an aria-live region that stays
+       displayed, adds no height. */
+    .fit-actions { flex-wrap: wrap; row-gap: 0 !important; }
+    .fit-actions > .save-one-status { flex-basis: 100%; }
+    .fit-actions > .save-one-status:not(:empty) { margin-top: 0.35rem; }
 }
 /* ── end R2 P ── */
 
