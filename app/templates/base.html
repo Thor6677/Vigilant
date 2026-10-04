@@ -221,11 +221,14 @@
        Landing groups (Industry/Intel/Tools) show a "<Label> Overview" parent
        link that stands in for the Overview item (so that item is skipped in the
        loop). Non-landing groups whose url equals their first item's url
-       (Dashboard/Map/Admin) suppress the parent to avoid a duplicate link.
-       Mobile groups are <details> (mobile design §4.5): the group for the current page opens, the rest collapse to one row each. No JS. divider_before is desktop-only. #}
+       (Dashboard/Market) suppress the parent to avoid a duplicate link.
+       Mobile groups are <details> (mobile design §4.5): the group for the current page opens, the rest collapse to one row each. No JS. divider_before is desktop-only.
+       A group whose only item is its own url (Account, Admin) would open onto
+       that one link, so it renders as a plain link instead: one tap. #}
     {% for group in nav_groups %}
         {% if not group['admin'] or request.session.get('is_admin') %}
-            {% if not group['items'] %}
+            {% set _one_tap = group['items']|length == 1 and group['items'][0]['url'] == group['url'] and not group['items'][0]['external'] %}
+            {% if not group['items'] or _one_tap %}
     <a href="{{ group['url'] }}" class="{{ 'is-active' if nav_group_active(group, _path) }}">{{ group['label'] }}</a>
             {% else %}
     <details class="b-mobile-group"{% if nav_group_active(group, _path) %} open{% endif %}>

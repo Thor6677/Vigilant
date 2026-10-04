@@ -175,7 +175,9 @@ def _mobile_menu(html):
 def test_menu_groups_are_details_with_only_the_active_one_open():
     menu = _mobile_menu(_render_base("/industry/planetary"))
     groups = re.findall(r'<details class="b-mobile-group"( open)?>\s*<summary>([^<]+)</summary>', menu)
-    with_items = [g["label"] for g in NAV_GROUPS if g["items"] and (not g["admin"])]
+    # Single-link groups (Account, Admin) are plain links since Polish A.
+    with_items = [g["label"] for g in NAV_GROUPS
+                  if g["items"] and not g["admin"] and not _one_tap(g)]
     labels = [label.strip() for _, label in groups]
     for label in with_items:
         assert label in labels, (label, labels)
@@ -221,3 +223,84 @@ def test_mobile_audit_script_exists_and_restores_width():
     assert "'OK'" in src
     assert "forced ? document.body.scrollWidth : h.scrollWidth" in src
     assert "verdict" in src
+
+
+# ── Polish A ─────────────────────────────────────────────────────────
+# Menu: single-link groups are one tap; tab macro fixes; Escape focus.
+
+_BASE_HTML = os.path.join(_TEMPLATES, "base.html")
+
+
+def _one_tap(g):
+    """Same predicate as base.html: a group whose only item is its own url
+    renders as a plain menu link, not a <details>."""
+    items = g["items"]
+    return len(items) == 1 and items[0]["url"] == g["url"] and not items[0]["external"]
+
+
+def _visible_groups(is_admin):
+    return [g for g in NAV_GROUPS if not g["admin"] or is_admin]
+
+
+def _details_groups(is_admin):
+    return [g for g in _visible_groups(is_admin) if g["items"] and not _one_tap(g)]
+
+
+def test_account_and_admin_are_the_single_link_groups():
+    assert [g["label"] for g in NAV_GROUPS if _one_tap(g)] == ["Account", "Admin"]
+
+
+@pytest.mark.parametrize("is_admin", [True, False])
+def test_menu_details_count_matches_multi_link_groups(is_admin):
+    menu = _mobile_menu(_render_base("/dashboard", is_admin=is_admin))
+    expected = [g["label"] for g in _details_groups(is_admin)]
+    assert menu.count("<details") == len(expected)
+    assert re.findall(r"<summary>([^<]+)</summary>", menu) == expected
+
+
+@pytest.mark.parametrize("is_admin", [True, False])
+def test_single_link_groups_are_one_tap_links(is_admin):
+    menu = _mobile_menu(_render_base("/dashboard", is_admin=is_admin))
+    after_groups = menu.rsplit("</details>", 1)[1]
+    for g in _visible_groups(is_admin):
+        if not _one_tap(g):
+            continue
+        assert f"<summary>{g['label']}</summary>" not in menu
+        # Outside every <details>, same markup as a top-level menu link.
+        assert re.search(rf'<a href="{g["url"]}" class="">{g["label"]}</a>', after_groups), g["label"]
+
+
+@pytest.mark.parametrize("is_admin", [True, False])
+def test_menu_links_stay_inside_their_own_group(is_admin):
+    menu = _mobile_menu(_render_base("/dashboard", is_admin=is_admin))
+    chunks = menu.split("<details")[1:]
+    groups = _details_groups(is_admin)
+    assert len(chunks) == len(groups)
+    for g, chunk in zip(groups, chunks):
+        inside, rest = chunk.split("</details>", 1)
+        expected = {g["url"]} | {item["url"] for item in g["items"]}
+        assert set(re.findall(r'href="([^"]+)"', inside)) == expected, g["label"]
+    # After the last group: the one-tap links, then Add Character.
+    tail = menu.rsplit("</details>", 1)[1]
+    one_tap = [g["url"] for g in _visible_groups(is_admin) if _one_tap(g)]
+    assert re.findall(r'href="([^"]+)"', tail) == one_tap + ["/auth/connect"]
+
+
+@pytest.mark.parametrize("path, is_admin, active", [
+    ("/account", True, "Account"),
+    ("/admin", True, "Admin"),
+    ("/account", False, "Account"),
+    ("/dashboard", True, None),
+])
+def test_one_tap_links_keep_their_active_state(path, is_admin, active):
+    menu = _mobile_menu(_render_base(path, is_admin=is_admin))
+    for g in _visible_groups(is_admin):
+        if _one_tap(g):
+            cls = "is-active" if g["label"] == active else ""
+            assert f'<a href="{g["url"]}" class="{cls}">{g["label"]}</a>' in menu, (path, g["label"])
+
+
+def test_admin_menu_link_only_for_admins():
+    assert 'href="/admin"' in _mobile_menu(_render_base("/dashboard", is_admin=True))
+    assert 'href="/admin"' not in _mobile_menu(_render_base("/dashboard", is_admin=False))
+
