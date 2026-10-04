@@ -1030,6 +1030,54 @@
 
 /* ── R2 T6 · skill plans ── */
 @media (max-width: 640px) {
+    /* ACL rows (D14 A): the row's inline 10px is too small for the keys. */
+    .skp-acl-row > [data-m="key"] { font-size: 12px; }
+
+    /* Attributes (plan rows): the rank multiplier is drawn in the border
+       colour, which all but vanishes on an open row; the open row is the
+       only place a phone shows it, so give it the cell's muted colour. */
+    .skill-row > [data-m-label="Attributes"] span span { color: var(--muted) !important; }
+
+    /* Remove (plan and ACL rows): .b-btn's flex:1 would stretch the 40px ×
+       across the whole open row. */
+    .skill-row > [data-m-label] > .m-tap,
+    .skp-acl-row > [data-m-label] > .m-tap { flex: none; }
+
+    /* Gap rows (D15 A): both keys at 12px. Their desktop spans carry 10–11px
+       inline, and key 1 also takes the 16px phone body size as its line
+       height, so without this the two keys sit at different heights. */
+    .skp-gap-row > [data-m="key"],
+    .skp-gap-row > [data-m="key"] > * { font-size: 12px !important; }
+
+    /* Gap check summary, its totals and the Large-only / Small-only line
+       wrap between phrases instead of overflowing or breaking inside one.
+       row-gap is !important: the inline `gap: 1rem` would space the wrapped
+       lines a full rem apart. */
+    .skp-gap-sum { flex-wrap: wrap; gap: 0.35rem 0.75rem; }
+    .skp-gap-totals, .skp-gap-alt { flex-wrap: wrap; row-gap: 0.2rem !important; }
+
+    /* "Check your character" (gap check on the detail and shared pages): the
+       select takes its own line and Analyze wraps below it. A 16px select is
+       as wide as its longest character name; min-width:0 lets it shrink, and
+       width:100% stops it widening the page column (a form control with a
+       percentage width adds nothing to its column's min-content). */
+    .skp-gap-pick { flex-wrap: wrap; }
+    .skp-gap-pick > select { flex: 1 1 100% !important; min-width: 0; width: 100%; }
+
+    /* The share link is far longer than a phone is wide: end it with an
+       ellipsis rather than cutting it off (Copy still copies all of it). */
+    #share-url { white-space: nowrap; text-overflow: ellipsis; }
+
+    /* Add Skill / Add from Ship typeahead: 40px rows at 12px. The dropdown
+       is absolutely positioned inside a panel that clips (overflow:hidden,
+       and the phone safety net's overflow-x:auto), so it would be cut off
+       at the panel's bottom edge; on phones it sits in the flow instead and
+       pushes the controls below it down. */
+    .skp-results { position: static !important; }
+    .skp-ta-row {
+        display: flex; align-items: center; min-height: 40px;
+        font-size: 12px !important; text-align: left;
+    }
 }
 /* ── end R2 T6 ── */
 

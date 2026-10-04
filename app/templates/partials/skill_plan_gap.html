@@ -1,12 +1,14 @@
 {# Gap analysis results for a skill plan vs a character #}
 <div style="border-top:1px solid var(--border);">
-    <div style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;">
+    {# Phones: the summary and the Large/Small-only line wrap between
+       phrases (skp-gap-* in site.css) rather than inside one. #}
+    <div class="skp-gap-sum" style="padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;align-items:center;gap:0.5rem;">
             <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=32"
                  style="width:18px;height:18px;border:1px solid var(--border);" alt="">
             <span style="font-size:10px;color:var(--text);">{{ char.character_name }}</span>
         </div>
-        <div style="display:flex;gap:1rem;font-size:10px;">
+        <div class="skp-gap-totals" style="display:flex;gap:1rem;font-size:10px;">
             <span style="color:var(--success);">{{ completed }}/{{ total }} complete</span>
             {% if total_sp > 0 %}
             <span class="b-muted">{{ "{:,.0f}".format(total_sp) }} SP needed</span>
@@ -57,7 +59,7 @@
         {% endif %}
 
         {# Large-only and Small-only as secondary options #}
-        <div style="display:flex;gap:1rem;color:var(--muted);font-size:9px;">
+        <div class="skp-gap-alt" style="display:flex;gap:1rem;color:var(--muted);font-size:9px;">
             {% if lo['cost'] > 0 %}
             <span>
                 <span class="b-text">{{ lo['large'] }}</span> Large only:
@@ -80,10 +82,11 @@
     </div>
     {% endif %}
 
-    {# Skill rows #}
+    {# Skill rows. Phones (D15 A): key 1 is the status icon + name + level
+       cell as is, key 2 the time (or "done"); Level opens under the row. #}
     {% for row in rows %}
-    <div class="b-table-row" style="{% if row.completed %}opacity:0.5;{% endif %}">
-        <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+    <div class="b-table-row m-row skp-gap-row" data-click="toggleMRow" style="{% if row.completed %}opacity:0.5;{% endif %}">
+        <span data-m="key" style="flex:3;display:flex;align-items:center;gap:0.4rem;">
             {% if row.completed %}
             <span style="color:var(--success);font-size:10px;">&#10003;</span>
             {% else %}
@@ -92,10 +95,10 @@
             <span style="font-size:11px;color:var(--text);">{{ row.skill_name }}</span>
             <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][row.target_level] }}</span>
         </span>
-        <span style="flex:0 0 60px;text-align:center;font-size:9px;color:var(--muted);">
+        <span data-m-label="Level" style="flex:0 0 60px;text-align:center;font-size:9px;color:var(--muted);">
             {{ row.current_level }} &rarr; {{ row.target_level }}
         </span>
-        <span style="flex:0 0 70px;text-align:right;font-size:10px;color:{% if row.completed %}var(--success){% else %}var(--text){% endif %};">
+        <span data-m="key" style="flex:0 0 70px;text-align:right;font-size:10px;color:{% if row.completed %}var(--success){% else %}var(--text){% endif %};">
             {% if row.completed %}done{% else %}{{ row.time_str }}{% endif %}
         </span>
     </div>

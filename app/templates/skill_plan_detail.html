@@ -65,12 +65,14 @@
 
 {# Promote / Demote scope controls — admin only #}
 {% if can_admin %}
+{# Phones: the bar and each promote form stack, so a form spans the panel
+   with its select full width and the Move button below it. #}
 <div class="b-section">
-    <div class="b-panel" style="padding:0.4rem 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <div class="b-panel skp-scope m-stack" style="padding:0.4rem 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         <span class="b-muted-sm">Scope:</span>
         {% if vis == 'personal' %}
             {% if eligible_corps %}
-            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" class="m-stack" style="display:inline-flex;gap:0.3rem;align-items:center;">
                 <input type="hidden" name="visibility" value="corporation">
                 <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                     {% for c in eligible_corps %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
@@ -79,7 +81,7 @@
             </form>
             {% endif %}
             {% if eligible_alliances %}
-            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" style="display:inline-flex;gap:0.3rem;align-items:center;">
+            <form method="POST" action="/skill-plans/{{ plan.id }}/promote" class="m-stack" style="display:inline-flex;gap:0.3rem;align-items:center;">
                 <input type="hidden" name="visibility" value="alliance">
                 <select name="target_id" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                     {% for a in eligible_alliances %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
@@ -137,17 +139,21 @@
         {% endif %}
 
         {% if acl_entries %}
-        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.4rem 0.75rem;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border);">
+        {# Phones (D14 A): key 1 the name, key 2 an m-only short type (the
+           desktop Type column comes before Name in the DOM, so it stays
+           untagged); Permission and Remove open under the row. #}
+        <div class="m-head" style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.4rem 0.75rem;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border);">
             <span>Type</span>
             <span>Name</span>
             <span>Permission</span>
             <span></span>
         </div>
         {% for e in acl_entries %}
-        <div style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.3rem 0.75rem;align-items:center;border-top:1px solid var(--border);font-size:10px;">
+        <div class="m-row skp-acl-row" data-click="toggleMRow" style="display:grid;grid-template-columns:90px 1fr 110px 60px;gap:0.4rem;padding:0.3rem 0.75rem;align-items:center;border-top:1px solid var(--border);font-size:10px;">
             <span style="color:var(--muted);text-transform:capitalize;">{{ e.subject_type }}</span>
-            <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
-            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
+            <span data-m="key" style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="ID {{ e.subject_id }}">{{ e.subject_name }}</span>
+            <span class="m-only" data-m="key" style="color:var(--muted);">{{ {'character': 'Char', 'corporation': 'Corp', 'alliance': 'Alliance'}.get(e.subject_type, e.subject_type | capitalize) }}</span>
+            <form data-m-label="Permission" method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/permission" style="display:inline;">
                 <select name="permission" data-change="submitForm"
                         style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
                     <option value="view"  {% if e.permission == 'view' %}selected{% endif %}>View</option>
@@ -155,9 +161,9 @@
                     <option value="admin" {% if e.permission == 'admin' %}selected{% endif %}>Admin</option>
                 </select>
             </form>
-            <form method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
+            <form data-m-label="Remove" method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
                   data-confirm="Remove {{ e.subject_name | e }} from the ACL?">
-                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>
         {% endfor %}
@@ -167,7 +173,7 @@
         </div>
         {% endif %}
 
-        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add"
+        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add" class="m-stack"
               style="display:grid;grid-template-columns:110px 1fr 110px auto;gap:0.4rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);align-items:center;">
             <select name="subject_type"
                     style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
@@ -249,9 +255,16 @@
         </div>
 
         {% if entries %}
+        {# Phones (D13 A): each row is an m-row keyed on the skill name and its
+           Roman target level. The desktop name + level cell holds both in
+           nested spans, so it stays untagged (hidden on phones) and two m-only
+           copies carry the keys. The drag handle is untagged too: on phones
+           the Sort buttons are the only way to reorder. Keep `skill-row`,
+           draggable and data-id on the row; the drag IIFE below reads them. #}
         <div id="skill-list">
         {% for e in entries %}
-        <div class="b-table-row skill-row" {% if can_edit %}draggable="true"{% endif %} data-id="{{ e.id }}"
+        {% set roman = ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] %}
+        <div class="b-table-row skill-row m-row" data-click="toggleMRow" {% if can_edit %}draggable="true"{% endif %} data-id="{{ e.id }}"
              style="cursor:{% if can_edit %}grab{% else %}default{% endif %};">
             {% if can_edit %}
             <span style="flex:0 0 16px;color:var(--border);font-size:10px;cursor:grab;" title="Drag to reorder">&#9776;</span>
@@ -260,15 +273,17 @@
             {% endif %}
             <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
                 <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
-                <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
+                <span style="font-size:10px;color:var(--accent);">{{ roman }}</span>
             </span>
-            <span style="flex:1;font-size:9px;color:var(--muted);">
-                {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
-                <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
+            <span class="m-only" data-m="key" style="font-size:12px;color:var(--text);">{{ e.skill_name }}</span>
+            <span class="m-only" data-m="key" style="font-size:12px;color:var(--accent);">{{ roman }}</span>
+            <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">
+                <span>{{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
+                <span style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span></span>
             </span>
             {% if can_edit %}
-            <form method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
-                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            <form data-m-label="Remove" method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
+                <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
             {% endif %}
         </div>
@@ -289,7 +304,7 @@
         <div class="b-panel-head">
             <span class="b-label">Gap Analysis</span>
         </div>
-        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+        <div class="skp-gap-pick" style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
             <select id="gap-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 <option value="">Select character…</option>
                 {% for c in characters %}
@@ -323,7 +338,7 @@
                 <input type="text" id="skill-search" placeholder="Search skill name…" autocomplete="off"
                        data-input="searchSkills"
                        style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                <div id="skill-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                <div id="skill-results" class="skp-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
             </div>
             <div style="display:flex;gap:0.5rem;align-items:center;">
                 <input type="hidden" id="skill-id" value="">
@@ -354,7 +369,7 @@
                 <input type="text" id="ship-search" placeholder="Search ship name…" autocomplete="off"
                        data-input="searchShips"
                        style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                <div id="ship-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
+                <div id="ship-results" class="skp-results" style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--bg);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;display:none;"></div>
             </div>
             <input type="hidden" id="ship-id" value="">
             <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">

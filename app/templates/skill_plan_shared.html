@@ -48,7 +48,10 @@
         <div class="b-panel-head">
             <span class="b-label">Check Your Character</span>
         </div>
-        <div style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
+        {# Phones: wraps, select on its own line (skp-gap-pick in site.css).
+           Logged-in only; the rest of this public page stays free of m-rows
+           and data-click for anonymous visitors. #}
+        <div class="skp-gap-pick" style="padding:0.5rem 0.75rem;display:flex;gap:0.5rem;align-items:center;">
             <select id="gap-char" style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 <option value="">Select character…</option>
                 {% for c in characters %}
