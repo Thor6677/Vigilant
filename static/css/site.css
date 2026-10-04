@@ -1230,6 +1230,43 @@
 
 /* ── R3 T4 · compression/hauling ── */
 @media (max-width: 640px) {
+    /* Compression: the character skill chips (built in app/routes/industry.py,
+       compression_skills) become 40px tap targets with a 12px label, like
+       m-tap. !important beats their inline 10px. */
+    .comp-skill-chip {
+        display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+        min-height: 40px; min-width: 40px; font-size: 12px !important;
+    }
+    /* Compression results head: Copy for Multibuy and Send to Hauling wrap
+       as whole buttons instead of squeezing. .b-btn is flex:1 (basis 0%),
+       which shares the line out equally and breaks a label inside its
+       button; a content basis and nowrap wrap the pair instead. The head
+       itself already wraps; the inline 6px gap spaces a wrapped line too. */
+    .comp-head-actions { flex-wrap: wrap; }
+    .comp-head-actions > .b-btn { flex: 1 1 auto; white-space: nowrap; }
+    /* Ore total row (not an m-row): its two spacer cells are m-hide, and the
+       figures take their own width so ISK and volume stay on one line.
+       !important beats the inline flex. */
+    .comp-ore-total > * { flex: 0 0 auto !important; }
+    .comp-ore-total > :first-child { flex: 1 1 auto !important; }
+    /* Ore name (key 1): its 11px name is an inner span, so the cell's own
+       line box would be the page's 16px one and sit 4px off key 2. */
+    .comp-ore-key { font-size: 11px; }
+
+    /* Hauling ship entry: the eight fields go two to a row. !important beats
+       the inline flex, the 50/140/160px minimums and the 50px inputs. */
+    .haul-entry-fields { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .haul-entry-fields > * { min-width: 0 !important; }
+    .haul-entry-fields input, .haul-entry-fields select { width: 100% !important; }
+
+    /* Hauling trip breakdown (built as a string in hauling.html's
+       recalcTrips): the ship and its m³/trip share line 1, m³/trip at its
+       own width rather than a third of the row, and the bay detail wraps
+       onto its own line below. !important beats the inline flex. 1-3 ships,
+       so no tap-to-open. */
+    .haul-breakdown-row { flex-wrap: wrap; row-gap: 0.2rem; }
+    .haul-breakdown-row > .haul-breakdown-trip { flex: 0 0 auto !important; white-space: nowrap; }
+    .haul-breakdown-row > .haul-breakdown-bays { order: 1; flex: 1 1 100% !important; text-align: left !important; }
 }
 /* ── end R3 T4 ── */
 

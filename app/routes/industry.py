@@ -830,7 +830,8 @@ async def compression_skills(
         html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label><input type="number" name="eff_level" value="{eff}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
         for sid, label in SKILL_LABELS.items():
             lv = skills_by_id.get(sid, 0)
-            html += f'<span style="font-size:10px;color:var(--text);border:1px solid var(--border);padding:2px 6px;">{label} <strong>{lv}</strong></span>'
+            # comp-skill-chip: the 40px phone tap target (site.css, R3 T4).
+            html += f'<span class="comp-skill-chip" style="font-size:10px;color:var(--text);border:1px solid var(--border);padding:2px 6px;">{label} <strong>{lv}</strong></span>'
         html += f'<span style="font-size:9px;color:var(--success);align-self:flex-end;padding-bottom:4px;">Loaded</span>'
         html += '</div>'
 
