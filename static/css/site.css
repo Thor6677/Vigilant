@@ -1433,6 +1433,17 @@
 
 /* ── R3 T6 · planetary tools ── */
 @media (max-width: 640px) {
+    /* Calculator form (ISS-111 part 2). Row 1's inline grid was ~724px
+       wide: it stacks (system, target, cycles, then Calculate and Reset
+       sharing the last line). The advanced row goes two up, its note
+       across both. !important beats the inline grid templates. */
+    .pi-calc-row1 { grid-template-columns: minmax(0, 1fr) !important; }
+    .pi-calc-row2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .pi-calc-row1 > *, .pi-calc-row2 > *,
+    .pi-calc-row1 input, .pi-calc-row1 select,
+    .pi-calc-row2 input, .pi-calc-row2 select { min-width: 0; }
+    .pi-calc-row2 > .pi-calc-note { grid-column: 1 / -1; }
+    .pi-calc-actions > .b-btn { flex: 1 1 0; }
 }
 /* ── end R3 T6 ── */
 
