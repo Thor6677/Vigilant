@@ -369,7 +369,8 @@ spec.rows.forEach((r, i) => {
     locals.push(Object.assign(e, { row: i, mOnly: c.mOnly }));
   });
 });
-const buttons = ['all', 'hostile', 'friendly', 'critical'].map(f => el({ filter: f }));
+// 'all' runs last, so it must bring back the rows the others hid.
+const buttons = ['hostile', 'friendly', 'critical', 'all'].map(f => el({ filter: f }));
 const unknown = [];
 const document = {
   querySelectorAll(sel) {
@@ -481,7 +482,7 @@ def test_page_script_filters_copies_and_ticks_through_the_real_markup():
     assert f["critical"]["hidden"] == [False, True, True]
     for name, res in f.items():
         assert res["styleDisplay"] == [None, None, None], name
-        assert res["active"] == [n == name for n in ("all", "hostile", "friendly", "critical")]
+        assert res["active"] == [n == name for n in ("hostile", "friendly", "critical", "all")]
 
     a, b, c = ACTIVE
     assert f["all"]["clip"] == "\n".join([_line(a), _line(b), _line(c)])
@@ -797,3 +798,12 @@ def test_new_hook_classes_have_no_desktop_rules():
     assert ".timer-row" not in outside
     # the only rule after the phone block is the [hidden] one
     assert norm(_after()) == ".timer-row[hidden] { display: none !important; }"
+
+
+def test_archived_delete_has_a_name_and_the_filter_separator_hides_on_phones():
+    src = open("app/templates/structure_timers.html", encoding="utf-8").read()
+    arch = src[src.index('action="/structure-timers/{{ t.id }}/delete" data-m-label="Delete"'):]
+    assert 'aria-label="Delete timer"' in arch[:arch.index("</form>")]
+    assert '<span class="st-sep"' in src
+    body, _ = phone_block(_section("T2"))
+    assert "display: none" in rule_bodies(body, ".st-sep")

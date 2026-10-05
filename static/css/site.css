@@ -1875,10 +1875,14 @@
        its label's text. */
     .st-form label { min-height: 40px; font-size: 12px !important; }
     .st-form input[type="radio"] { min-height: 0; margin: 0 0.35rem 0 0; }
+    /* The | between the side and Critical filters ends up alone at the end
+       of a wrapped line; the buttons' gap separates them on phones. */
+    .st-sep { display: none; }
 }
-/* Every width: the filter hides rows with `hidden`. On desktop
-   .b-table-row's display:flex beats the browser's own [hidden]; on phones
-   this (0,2,0) beats .m-row's display:grid !important (0,1,0). */
+/* Every width: the filter hides rows with `hidden`. On phones this (0,2,0)
+   beats .m-row's display:grid !important (0,1,0). On desktop Tailwind's
+   preflight [hidden] already hides them; without it, .b-table-row's
+   display:flex would beat the browser's own [hidden]. */
 .timer-row[hidden] { display: none !important; }
 /* ── end R6 T2 ── */
 
