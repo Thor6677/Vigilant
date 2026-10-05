@@ -385,6 +385,8 @@ const fs = require('fs');
 const vm = require('vm');
 const src = fs.readFileSync(process.argv[2], 'utf8');
 const DATA = JSON.parse(process.argv[3]);
+// Optional: the data a later reload returns (the networthSnapshot step).
+const LATER = process.argv[4] ? JSON.parse(process.argv[4]) : null;
 
 function run(startPhone) {
   const state = { phone: startPhone };
@@ -408,13 +410,16 @@ function run(startPhone) {
   }
   Chart.prototype.destroy = function () { this.destroyed = true; delete live[this.canvas.id]; };
   const els = {};
-  const el = id => els[id] || (els[id] = { id, style: {}, textContent: '',
-    addEventListener() {}, querySelectorAll: () => [] });
+  // Elements record their listeners, so a step can fire one (networthSnapshot).
+  const el = id => els[id] || (els[id] = { id, style: {}, textContent: '', ls: {},
+    addEventListener(t, fn) { (this.ls[t] = this.ls[t] || []).push(fn); },
+    querySelectorAll: () => [] });
   const document = { getElementById: el, body: el('#body'), addEventListener() {},
                      querySelectorAll: () => [], querySelector: () => null };
   const fetched = [];
+  let current = DATA;
   const fetch = url => { fetched.push(url);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(JSON.parse(JSON.stringify(DATA))) }); };
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(JSON.parse(JSON.stringify(current))) }); };
   const sandbox = { window: { matchMedia, location: {} }, document, console, Chart, fetch, Number };
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
@@ -429,12 +434,25 @@ function run(startPhone) {
     mqls.forEach(m => m.ls.slice().forEach(fn => fn({ matches: m.matches, media: m.media })));
     return { charts: snap(made), oldDestroyed: before.every(c => c.destroyed), live: Object.keys(live) };
   };
-  return new Promise(resolve => setImmediate(() => {
+  return new Promise(resolve => setImmediate(async () => {
     const out = { first: snap(made), fetched: fetched.slice() };
     out.same = fire(startPhone);               // a change event on the same side
     out.flip = fire(!startPhone);
     out.sameAfterFlip = fire(!startPhone);
     out.back = fire(startPhone);
+    if (LATER) {
+      // A Snapshot-now reload (HX-Trigger networthSnapshot on the body)
+      // returns LATER; then the breakpoint is crossed and crossed back.
+      current = LATER;
+      const hs = (els['#body'].ls.networthSnapshot || []).slice();
+      out.snapshotListeners = hs.length;
+      made = [];
+      hs.forEach(fn => fn({ type: 'networthSnapshot' }));
+      await new Promise(r => setImmediate(r));   // the fetch chain settles
+      out.reload = { charts: snap(made), live: Object.keys(live), fetched: fetched.slice() };
+      out.laterFlip = fire(!startPhone);
+      out.laterBack = fire(startPhone);
+    }
     resolve(out);
   }));
 }
@@ -482,14 +500,15 @@ def _phone_nw():
     return o
 
 
-def _run_harness(tmp_path, js, data):
+def _run_harness(tmp_path, js, data, later=None):
     if not shutil.which("node"):
         pytest.skip("node not installed")
     harness = tmp_path / "harness.js"
     harness.write_text(_HARNESS)
     script = tmp_path / "page.js"
     script.write_text(js)
-    run = subprocess.run(["node", str(harness), str(script), json.dumps(data)],
+    args = [json.dumps(data)] + ([json.dumps(later)] if later is not None else [])
+    run = subprocess.run(["node", str(harness), str(script), *args],
                          capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     return json.loads(run.stdout)
@@ -562,6 +581,24 @@ def test_networth_breakpoint_change_without_a_chart_draws_nothing(tmp_path):
         assert out[side]["first"] == []
         for step in ("same", "flip", "sameAfterFlip", "back"):
             assert out[side][step]["charts"] == [] and out[side][step]["live"] == [], (side, step)
+
+
+def test_networth_crossing_after_a_reload_empties_the_chart_draws_nothing(tmp_path):
+    """A chart was built, then a Snapshot-now reload came back with no
+    dates: the page destroys the chart and shows its empty state, but keeps
+    the earlier data in lastData. A crossing after that must not rebuild
+    the stale chart from it (relayout's `chart &&` check)."""
+    empty = dict(_NW_DATA, dates=[], characters=[], total=[])
+    out = _run_harness(tmp_path, _script(_render_nw(), "nw-chart"), _NW_DATA, later=empty)
+    for side in ("desktop", "phone"):
+        o = out[side]
+        assert len(o["first"]) == 1 and o["back"]["live"] == ["nw-chart"], side  # a chart was live
+        assert o["snapshotListeners"] == 1, side
+        assert o["reload"]["fetched"][-1] == "/tools/networth/data.json?range=90d", side
+        assert len(o["reload"]["fetched"]) == len(o["fetched"]) + 1, side      # the reload ran
+        assert o["reload"]["charts"] == [] and o["reload"]["live"] == [], side  # and emptied it
+        for step in ("laterFlip", "laterBack"):
+            assert o[step]["charts"] == [] and o[step]["live"] == [], (side, step)
 
 
 # ── CSS: R4 T3 section ────────────────────────────────────────────────
