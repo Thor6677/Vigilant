@@ -1518,6 +1518,53 @@
 
 /* ── R4 T3 · pnl/net worth ── */
 @media (max-width: 640px) {
+    /* Stat cards on both pages (R2 T2's Queue Summary pattern): each card
+       becomes one label · value line, and a row of cards becomes one list
+       with a rule between lines. Each page's own <style> loads after
+       site.css, and P&L's second row carries an inline 2-column grid, so the
+       container rules need !important; the card rules win on specificity.
+       The label leads (the value comes first in the markup) at 11px, the
+       size of an open row's labels. The value keeps its colour and size, and
+       wraps inside itself rather than past the edge. */
+    .pnl-stats, .nw-stats { grid-template-columns: minmax(0, 1fr) !important; gap: 0 !important; }
+    .pnl-stats > .pnl-stat, .nw-stats > .nw-stat {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+    }
+    .pnl-stats > .pnl-stat + .pnl-stat, .nw-stats > .nw-stat + .nw-stat { border-top: none; }
+    .pnl-stat > .pnl-stat-label, .nw-stat > .nw-stat-label {
+        order: -1; flex: none; margin: 0; text-align: left; font-size: 11px;
+    }
+    .pnl-stat > .pnl-stat-val, .nw-stat > .nw-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* P&L items (D7 A): every cell carries the table's 5px 10px padding and
+       a bottom border. As m-row grid items those would draw a rule under
+       each cell, so the row draws one line instead. Cells start left-aligned
+       (the table right-aligns its numbers); key 2 and open values keep R1's
+       right alignment, which outranks this. */
+    .pnl-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .pnl-table tr.m-row > td { padding: 0; border-bottom: none; text-align: left; }
+
+    /* Net Worth range buttons and Snapshot now: 40px tap targets with 12px
+       text. The element plus two classes outrank the page's own
+       .nw-ranges .b-btn (which loads after site.css) and R1's 44px button
+       floor. Snapshot now has no border on desktop; here it gets one so it
+       reads as a button without hover, and keeps its own width. */
+    .nw-ranges > button.b-btn { min-height: 40px; min-width: 40px; font-size: 12px; }
+    .nw-snap > button.b-btn {
+        flex: none; min-height: 40px; padding: 0 0.85rem; font-size: 12px; border: 1px solid var(--border);
+    }
+    /* The Snapshot status goes on its own full-width line under the button
+       and wraps there (R2 T3's Save all pattern): the DOM keeps it first,
+       `order` moves it. The group stretches across the stacked page header,
+       so the line doesn't resize as text arrives. row-gap 0 beats the inline
+       gap, so the empty status adds no space. */
+    .nw-snap { align-self: stretch; row-gap: 0 !important; }
+    .nw-snap > #nw-status { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+    .nw-snap > #nw-status:not(:empty) { margin-top: 0.35rem; }
+
+    /* The P&L assumptions and the Net Worth explanation stay, at 12px. The
+       element plus class outranks each page's own 10px rule. */
+    p.pnl-note, p.nw-note { font-size: 12px; }
 }
 /* ── end R4 T3 ── */
 
