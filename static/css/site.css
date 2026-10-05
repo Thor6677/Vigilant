@@ -1858,11 +1858,21 @@
     /* The violent list already pads its sides; its m-rows keep only their
        vertical padding, so rows and borders line up as on desktop. */
     #violent-list > .m-row { padding-left: 0 !important; padding-right: 0 !important; }
+    /* Two-digit ranks would push key 1 right of the one-digit rows' names;
+       a fixed, right-aligned rank keeps the names in one column. */
+    #violent-list > .m-row > .b-trending-rank { min-width: 2ch !important; justify-content: flex-end; }
 
-    /* WH Tracker: thumb-sized character picker (Refresh now is m-tap), and
-       the 28px system name wraps rather than overflowing. Scoped to the
-       tracker panel: .ws-* also styles the wormhole system page. */
+    /* Watchlist × and zkb: buttons and a.b-btn get 44px height from the
+       global floor (m-tap would force 40px); a 44px width keeps × square,
+       and inline-flex centres the label in the box. .w-row is only here. */
+    .w-row .b-btn { min-width: 44px; font-size: 12px !important; display: inline-flex; align-items: center; justify-content: center; }
+
+    /* WH Tracker: thumb-sized character picker, Refresh now at 12px (its
+       44px height is the global button floor), and the 28px system name
+       wraps rather than overflowing. Scoped to the tracker panel: .ws-*
+       also styles the wormhole system page. */
     label.wht-pick { min-height: 40px; }
+    #wht-refresh { font-size: 12px !important; }
     #wht-panel .ws-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 }
 /* ── end R5 T3 ── */

@@ -74,7 +74,7 @@
                 {% if s.label %}<div style="color:var(--muted);font-size:10px;">{{ s.label }}</div>{% endif %}
             </div>
             <form method="POST" action="/intel/watch/system/remove/{{ s.id }}" data-confirm="Remove {{ s.system_name }}?">
-                <button type="submit" class="b-btn is-danger m-tap" style="font-size:9px;padding:2px 8px;">×</button>
+                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
             </form>
         </div>
         {% endfor %}
@@ -106,9 +106,9 @@
                 </div>
                 {% if h.notes %}<div style="color:var(--muted);font-size:10px;">{{ h.notes }}</div>{% endif %}
             </div>
-            <a href="https://zkillboard.com/{{ h.kind }}/{{ h.entity_id }}/" target="_blank" rel="noopener" class="b-btn m-tap" style="font-size:9px;padding:2px 8px;">zkb ↗</a>
+            <a href="https://zkillboard.com/{{ h.kind }}/{{ h.entity_id }}/" target="_blank" rel="noopener" class="b-btn" style="font-size:9px;padding:2px 8px;">zkb ↗</a>
             <form method="POST" action="/intel/watch/hunter/remove/{{ h.id }}" data-confirm="Remove {{ h.label or h.entity_id }}?">
-                <button type="submit" class="b-btn is-danger m-tap" style="font-size:9px;padding:2px 8px;">×</button>
+                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
             </form>
         </div>
         {% endfor %}

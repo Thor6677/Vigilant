@@ -354,9 +354,9 @@ def test_watch_lists_get_tap_sized_buttons_and_stacked_forms():
     tags = _tags(html)
     removes = [a for t, a in tags if t == "button" and a.get("class", "").split()[:2] == ["b-btn", "is-danger"]]
     assert len(removes) == 4, "two systems and two hunters"
-    assert all("m-tap" in a["class"].split() for a in removes)
+    assert not any("m-tap" in a["class"].split() for a in removes), "m-tap would force 40px"
     zkb = [a for t, a in tags if t == "a" and re.match(r"https://zkillboard\.com/(corporation|character)/", a.get("href", ""))]
-    assert len(zkb) == 2 and all("m-tap" in a["class"].split() for a in zkb)
+    assert len(zkb) == 2 and not any("m-tap" in a["class"].split() for a in zkb)
     forms = [a for t, a in tags if t == "form" and "w-form" in a.get("class", "").split()]
     assert len(forms) == 2 and all("m-stack" in a["class"].split() for a in forms)
 
@@ -460,7 +460,7 @@ def test_tracker_picker_labels_and_refresh_carry_their_hooks():
     labels = [a for t, a in tags if t == "label" and "wht-pick" in a.get("class", "").split()]
     assert len(labels) == 2
     refresh = [a for t, a in tags if a.get("id") == "wht-refresh"]
-    assert len(refresh) == 1 and "m-tap" in refresh[0]["class"].split()
+    assert len(refresh) == 1 and "m-tap" not in refresh[0].get("class", "").split()
 
 
 # ── site.css: this task's phone section ───────────────────────────────
@@ -544,3 +544,38 @@ def test_shared_class_rules_are_scoped_to_these_pages():
                 assert sel.startswith("#wht-panel "), sel
             if ".b-trending" in sel:
                 assert sel.startswith(("#sov-gained ", "#sov-lost ", "#violent-list ")), sel
+
+
+def test_no_button_on_these_pages_carries_m_tap():
+    """The shared .m-tap rule forces 40px !important, under the 44px floor
+    that every button and .b-btn already gets; none of this task's pages
+    may put it on one."""
+    chars = [{"id": 90000001, "name": "Pilot Sample", "has_scope": True}]
+    pages = {
+        "gatecheck": _render_gatecheck(),
+        "route": _render_route(),
+        "watch": _render_watch(),
+        "trending": render_page(starmap_mod, "trending.html", "/trending"),
+        "tracker": render_page(tracker_mod, "wh_tracker.html", "/intel/tracker", chars=chars),
+    }
+    for name, html in pages.items():
+        for tag, attrs in _tags(html):
+            cls = attrs.get("class", "").split()
+            if tag == "button" or "b-btn" in cls:
+                assert "m-tap" not in cls, f"{name}: <{tag} class={cls}>"
+
+
+def test_watch_buttons_and_tracker_refresh_are_sized_without_m_tap():
+    body, _ = _phone()
+    w = rule_bodies(body, ".w-row .b-btn")
+    assert "min-width: 44px" in w and "font-size: 12px !important" in w
+    assert "display: inline-flex" in w and "align-items: center" in w
+    assert "min-height" not in w and "height:" not in w, "the 44px floor sets the height"
+    r = rule_bodies(body, "#wht-refresh")
+    assert "font-size: 12px !important" in r and "height" not in r
+
+
+def test_violent_ranks_hold_one_width_so_names_line_up():
+    body, _ = _phone()
+    rank = rule_bodies(body, "#violent-list > .m-row > .b-trending-rank")
+    assert "min-width: 2ch !important" in rank and "justify-content: flex-end" in rank
