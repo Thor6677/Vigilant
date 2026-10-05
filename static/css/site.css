@@ -2522,6 +2522,13 @@
        used to run under the glyph). */
     .fit-modal-x { min-width: 44px; top: 0 !important; right: 0 !important; }
     #info-modal-body > div:first-child { padding-right: 1.75rem; }
+
+    /* Charge selector (showChargeDropdown): Clear becomes a 44px square
+       (height from the global button rule; it was 27px wide) with a 12px
+       label over its inline 9px, and each charge row a 40px target (31px
+       before). */
+    .fit-charge-modal [data-click="clearCharge"] { min-width: 44px; font-size: 12px !important; }
+    .fit-charge-modal [data-click="selectCharge"] { min-height: 40px; }
 }
 /* ── end R6 T4 ── */
 

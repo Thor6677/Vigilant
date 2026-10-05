@@ -1987,6 +1987,8 @@ function showChargeDropdown(itemIndex, charges) {
     overlay.onclick = closeChargeDropdown;
 
     var modal = document.createElement('div');
+    /* fit-charge-modal: the phone CSS hook (site.css R6 T4). */
+    modal.className = 'fit-charge-modal';
     modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--surface);border:1px solid var(--border);max-height:400px;width:300px;display:flex;flex-direction:column;';
 
     var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +

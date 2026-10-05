@@ -548,14 +548,16 @@ def test_no_button_carries_m_tap(page):
 def test_phone_block_sets_no_height_under_44px_except_on_div_rows():
     # A class or id selector outranks the global `button { min-height: 44px }`,
     # so a smaller height here would shrink a button. Only the browser's
-    # tree and item rows (divs, which the floor doesn't reach) go to 40px.
+    # tree and item rows and the charge selector's rows (divs, which the
+    # floor doesn't reach) go to 40px.
     small = []
     for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _phone()[0]):
         for prop, val in re.findall(r"(?:^|;)\s*((?:min-)?height)\s*:\s*([^;]+)", m.group(2)):
             n = re.fullmatch(r"(\d+(?:\.\d+)?)(px|rem)(?:\s*!important)?", val.strip())
             if n and float(n.group(1)) * (16 if n.group(2) == "rem" else 1) < 44:
                 small.append((norm(m.group(1)), prop, val.strip()))
-    assert small == [("#browser-panel .fit-brow", "min-height", "40px")], small
+    assert small == [("#browser-panel .fit-brow", "min-height", "40px"),
+                     ('.fit-charge-modal [data-click="selectCharge"]', "min-height", "40px")], small
 
 
 # ── Section shape ───────────────────────────────────────────────────
@@ -563,3 +565,15 @@ def test_phone_block_sets_no_height_under_44px_except_on_div_rows():
 def test_section_is_phone_only():
     _, after = _phone()
     assert not after.strip(), "desktop renders identically: no rule outside the phone block"
+
+
+def test_charge_selector_has_its_phone_hook(script):
+    show = _fn(script, "showChargeDropdown")
+    assert "modal.className = 'fit-charge-modal';" in show
+    assert 'data-click="clearCharge"' in show and 'data-click="selectCharge"' in show
+
+
+def test_charge_selector_clear_and_rows_reach_the_tap_floor():
+    clear = _decls('.fit-charge-modal [data-click="clearCharge"]')
+    assert clear == {"min-width": "44px", "font-size": "12px !important"}, "no height: 44px from the button rule"
+    assert _decls('.fit-charge-modal [data-click="selectCharge"]') == {"min-height": "40px"}
