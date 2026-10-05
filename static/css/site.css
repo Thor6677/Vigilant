@@ -2006,7 +2006,9 @@
         mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
     }
     .wm-scroll > .wm-table { border-collapse: separate; border-spacing: 0; }
-    .wm-scroll > .wm-table th, .wm-scroll > .wm-table td { border-width: 0 1px 1px 0; }
+    /* Whole-pixel padding keeps every row a whole number of pixels tall, so
+       the sticky From cells don't drop a hairline at fractional offsets. */
+    .wm-scroll > .wm-table th, .wm-scroll > .wm-table td { border-width: 0 1px 1px 0; padding: 3px 5px; }
     .wm-scroll > .wm-table tr > :first-child { border-left-width: 1px; }
     .wm-scroll > .wm-table thead th { border-top-width: 1px; }
     .wm-table th:first-child, .wm-table td.wm-from { position: sticky; left: 0; z-index: 1; }
@@ -2017,10 +2019,16 @@
     }
     .wm-table td br { display: none; }
     #wh-type-detail { scroll-margin-top: 4rem; }
+    /* The structure-age card's "Full tool" link sits in a sentence; give it
+       the 40px link floor. */
+    .wsp-fulltool { display: inline-flex; align-items: center; min-height: 40px; }
 
     /* Effect tables (D14 A): the C1–C6 values swipe sideways inside
        .we-scroll; the Modifier column is pinned and wraps at 8.5rem. */
     .we-table th, .we-table td { white-space: nowrap; }
+    /* Separate borders, as on the types matrix: collapsed borders under a
+       sticky column drop some row lines at fractional row heights. */
+    .we-scroll > .we-table { border-collapse: separate; border-spacing: 0; }
     .we-table th:first-child, .we-table td:first-child {
         position: sticky; left: 0; z-index: 1;
         width: 8.5rem; min-width: 8.5rem; white-space: normal;

@@ -21,7 +21,8 @@ from html.parser import HTMLParser
 
 from app.routes import wormholes as wh_mod
 from tests._mobile import (VOID, assert_mrow, cells_rows, css_section, norm, phone_block,
-                           render_page, row_keys, row_lead, row_labelled, rule_bodies)
+                           render_page, row_keys, row_lead, row_labelled, rule_bodies,
+                           source)
 
 _section = functools.partial(css_section, release="R5")
 
@@ -435,7 +436,7 @@ def test_css_buttons_keep_the_44px_phone_floor():
                 ".wsp-zoom > button", ".wf-fold-toggle"):
         rules = rule_bodies(body, sel)
         assert rules, sel
-        heights = re.findall(r"min-height\s*:\s*(\d+)px", rules)
+        heights = re.findall(r"(?:min-|max-)?height\s*:\s*(\d+)px", rules)
         assert all(int(h) >= 44 for h in heights), (sel, heights)
 
 
@@ -496,3 +497,22 @@ def test_css_system_page_tap_targets_are_scoped_to_the_system_page():
         for s in sel.split(","):
             if ".ws-" in s:
                 assert ".wsp-" in s, f"unscoped system-page selector: {s.strip()}"
+
+
+def test_css_pinned_tables_keep_every_hairline():
+    """Sticky first columns drop row lines at fractional row heights: the
+    matrix cells get whole-pixel padding, and the effect tables use separate
+    borders like the matrix."""
+    body = _phone()
+    for sel in (".wm-scroll > .wm-table th", ".wm-scroll > .wm-table td"):
+        assert "padding: 3px 5px" in rule_bodies(body, sel), sel
+    eff = rule_bodies(body, ".we-scroll > .we-table")
+    assert "border-collapse: separate" in eff and "border-spacing: 0" in eff
+
+
+def test_full_tool_link_meets_the_link_floor():
+    src = source("wormhole_system.html")
+    assert 'href="/tools/structure-age" class="wsp-fulltool"' in src
+    body = _phone()
+    rule = rule_bodies(body, ".wsp-fulltool")
+    assert "min-height: 40px" in rule and "display: inline-flex" in rule
