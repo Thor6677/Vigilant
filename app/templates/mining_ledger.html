@@ -153,6 +153,11 @@
     var selectedChars = new Set();
     var miningChart = null;
     var fullChartData = null;
+    /* The range on show, in days, so a rebuild on crossing 640px keeps it. */
+    var currentDays = 30;
+    /* Phones: the chart's options follow this query (buildMiningChart), and
+       crossing it rebuilds the chart (below). */
+    var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
     /* ── Selection management ──────────────────────────────────────────────── */
     function loadSelection() {
@@ -246,7 +251,7 @@
 
     function buildMiningChart(data, days) {
         var canvas = document.getElementById('mining-chart');
-        var box = canvas.parentNode;   /* .ml-chart-box */
+        var box = canvas.closest('.ml-chart-box');
         var empty = document.getElementById('chart-empty');
 
         /* is-empty hides the box on phones (site.css, R3 T5), where it is
@@ -311,19 +316,30 @@
             miningChart = null;
         }
 
-        /* Phones, read once per build (as the corp wallet chart does): the
-           chart fills its 220px box instead of keeping the canvas's aspect
-           ratio, and shows at most 5 dates, unrotated. Above 640px the
-           options are as before. */
-        var phone = !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+        /* Phones, read per build (crossing 640px rebuilds): the chart fills
+           its 220px box instead of keeping the canvas's aspect ratio, and
+           shows at most 5 dates, unrotated. Its legend is compact: 10px
+           text and 6px padding (boxWidth stays 10), since Chart.js gives a
+           legend at most half the chart. Above 640px the options are as
+           before. */
+        var phone = !!(phoneMq && phoneMq.matches);
         var xTicks = {
             color: '#474747',
             font: { family: "'JetBrains Mono', monospace", size: 9 },
             maxTicksLimit: 10,
         };
+        var legendLabels = {
+            color: '#474747',
+            font: { family: "'JetBrains Mono', monospace", size: 9 },
+            boxWidth: 10,
+            padding: 8,
+            usePointStyle: true,
+        };
         if (phone) {
             xTicks.maxTicksLimit = 5;
             xTicks.maxRotation = 0;
+            legendLabels.font.size = 10;
+            legendLabels.padding = 6;
         }
 
         miningChart = new Chart(canvas, {
@@ -338,13 +354,7 @@
                     legend: {
                         display: true,
                         position: 'top',
-                        labels: {
-                            color: '#474747',
-                            font: { family: "'JetBrains Mono', monospace", size: 9 },
-                            boxWidth: 10,
-                            padding: 8,
-                            usePointStyle: true,
-                        }
+                        labels: legendLabels,
                     },
                     tooltip: {
                         backgroundColor: '#0e0e0e',
@@ -416,10 +426,11 @@
     window.filterRange = function() {
         var days = parseInt(this.dataset.days, 10);
         var btn = this;
+        currentDays = days;
         document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
         if (btn) btn.classList.add('is-active');
         if (fullChartData) {
-            buildMiningChart(fullChartData, days);
+            buildMiningChart(fullChartData, currentDays);
         }
     };
 
@@ -445,8 +456,9 @@
         if (!el) return;
         try {
             fullChartData = JSON.parse(el.dataset.chart);
-            setActiveRange(30);
-            buildMiningChart(fullChartData, 30);
+            currentDays = 30;
+            setActiveRange(currentDays);
+            buildMiningChart(fullChartData, currentDays);
         } catch(e) { console.error('Chart data parse error:', e); }
     }
     document.addEventListener('htmx:afterSettle', function(evt) {
@@ -454,6 +466,17 @@
             tryLoadChartData();
         }
     });
+
+    /* Crossing 640px (a phone rotated, a window resized) rebuilds the chart
+       with that width's options, at the range on show. With no ledger
+       loaded there is no chart to rebuild. */
+    function rebuildForWidth() {
+        if (fullChartData) buildMiningChart(fullChartData, currentDays);
+    }
+    if (phoneMq) {
+        if (phoneMq.addEventListener) phoneMq.addEventListener('change', rebuildForWidth);
+        else if (phoneMq.addListener) phoneMq.addListener(rebuildForWidth);
+    }
 
     /* Init */
     loadSelection();

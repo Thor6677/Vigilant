@@ -1387,14 +1387,17 @@
     /* Corp card character rows (D12 A). The lead is the .ml-check checkbox
        inside a <label>: a 40px tap target that ticks the box (toggleMRow
        ignores taps on labels and inputs, so the row stays shut). Its
-       negative margins reach into the row's padding, so the row stays one
-       40px line and the target starts at the card's edge. min-width is
+       negative margins cancel R1's `.m-row { padding: 0.6rem 0.75rem }`
+       (the m-row block above), so the row stays one 40px line and the
+       target starts at the card's edge. In an open row the bottom margin
+       takes the label 5px into the Name line below; z-index keeps it on
+       top there, so a tap in that strip still ticks the box. min-width is
        !important to beat `.m-row > *`. The box grows from 14px to 20px;
        !important beats its inline size, and min-height:0 the global 44px
        input height, which would stretch it. */
     .m-row.ml-char-row > [data-m="lead"] {
         min-width: 40px !important; min-height: 40px; justify-content: center;
-        margin: -0.6rem 0.4rem -0.6rem -0.75rem;
+        margin: -0.6rem 0.4rem -0.6rem -0.75rem; z-index: 1;
     }
     .ml-char-row .ml-check { width: 20px !important; height: 20px !important; min-height: 0; margin: 0; }
     /* View (the Ledger line): .b-btn's flex:1 would stretch the 40px

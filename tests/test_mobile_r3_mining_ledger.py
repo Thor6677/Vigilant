@@ -18,6 +18,8 @@ Desktop renders as before (D21). Names and ids are invented."""
 import functools
 import json
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
 
 import pytest
@@ -148,6 +150,7 @@ def test_lead_is_the_checkbox_inside_a_label():
         assert box.get("data-charid") == box.get("data-char-id") == str(c["character_id"])
         assert box.get("data-click") == "toggleChar"
         assert "width:14px;height:14px" in box.get("style", "")
+        assert box.get("aria-label") == f"Select {c['character_name']}", "the label has no text"
 
 
 def test_keys_are_the_name_and_the_isk_value():
@@ -442,20 +445,143 @@ def test_chart_canvas_sits_in_its_own_box():
     assert inside == ["canvas"], "the box holds only the canvas"
 
 
-def test_chart_options_follow_the_phone_width():
-    """Read once per build, as the corp wallet chart does: on phones the
-    chart fills its box and shows at most 5 unrotated dates. The desktop
-    branch keeps the old options. With no data the box is marked is-empty,
-    which hides it on phones only, so a phone doesn't keep an empty 220px
-    box under the message."""
+def test_empty_chart_box_is_marked_for_phones():
+    """With no data the box is marked is-empty, which hides it on phones
+    only, so a phone doesn't keep an empty 220px box under the message."""
     s = _script(_render_page())
-    assert "window.matchMedia('(max-width: 640px)')" in s
-    assert re.search(r"maintainAspectRatio:\s*!phone,", s)
-    assert re.search(r"maxTicksLimit:\s*10,", s), "desktop keeps 10 dates"
-    assert re.search(r"if \(phone\) \{\s*xTicks\.maxTicksLimit = 5;\s*xTicks\.maxRotation = 0;\s*\}", s)
-    assert re.search(r"ticks:\s*xTicks,", s)
+    assert "var box = canvas.closest('.ml-chart-box');" in s
     assert "box.classList.add('is-empty');" in s
     assert "box.classList.remove('is-empty');" in s
+
+
+# The page's own script, run under node against a stub Chart, a stub DOM and
+# a matchMedia whose `change` listeners the harness fires. It records every
+# chart the script builds: the options and how many dates it shows.
+_CHART_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[process.argv.length - 1], 'utf8');
+
+const state = { phone: false };
+const mqls = [];
+function matchMedia(q) {
+  const m = { media: q, ls: [],
+    get matches() { return state.phone && q === '(max-width: 640px)'; },
+    addEventListener(t, fn) { if (t === 'change') this.ls.push(fn); },
+    addListener(fn) { this.ls.push(fn); } };
+  mqls.push(m);
+  return m;
+}
+const made = [];
+function Chart(canvas, cfg) { this.cfg = cfg; made.push(this); }
+Chart.prototype.destroy = function () { this.destroyed = true; };
+
+const DAY = 86400000;
+const dates = [];
+for (let i = 59; i >= 0; i--) dates.push(new Date(Date.now() - i * DAY).toISOString().slice(0, 10));
+const chartData = { dates, ores: ['Sample Ore A', 'Other'],
+  stacks: { 'Sample Ore A': dates.map(() => 5), 'Other': dates.map(() => 1) },
+  isk_values: dates.map(() => 100), ore_colors: { 'Sample Ore A': '#123456', 'Other': '#654321' } };
+
+const cls = () => ({ add() {}, remove() {} });
+const box = { classList: cls() };
+const els = {
+  'mining-chart': { style: {}, closest: sel => (sel === '.ml-chart-box' ? box : null) },
+  'chart-empty': { style: {} }, 'chart-section': { style: {} },
+  'selection-bar': { style: {} }, 'sel-count': {},
+  'mining-chart-data': { dataset: { chart: JSON.stringify(chartData) } },
+};
+const buttons = ['7', '14', '30', '90', '180', '365'].map(d =>
+  ({ dataset: { days: d }, textContent: d === '180' ? '6m' : d === '365' ? '1y' : d + 'd', classList: cls() }));
+const docLs = {};
+const document = {
+  getElementById: id => els[id] || null,
+  querySelectorAll: sel => (sel === '.range-btn' ? buttons : []),
+  addEventListener(t, fn) { (docLs[t] = docLs[t] || []).push(fn); },
+};
+const sandbox = { document, console, Date, JSON, Set, Array, parseInt, Chart,
+  localStorage: { getItem: () => null, setItem() {} } };
+sandbox.window = sandbox;
+sandbox.matchMedia = matchMedia;
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox);
+
+const last = () => {
+  const c = made[made.length - 1];
+  const o = c.cfg.options;
+  return JSON.parse(JSON.stringify({ maintainAspectRatio: o.maintainAspectRatio,
+    xticks: o.scales.x.ticks, legend: o.plugins.legend.labels, dates: c.cfg.data.labels.length }));
+};
+const fire = phone => { state.phone = phone; mqls.forEach(m => m.ls.forEach(fn => fn({ matches: m.matches, media: m.media }))); };
+const settle = () => (docLs['htmx:afterSettle'] || []).forEach(fn => fn({ detail: { target: { id: 'ledger-data' } } }));
+
+const out = { mqls: mqls.map(m => m.media) };
+fire(true); out.beforeData = made.length;            // no ledger yet: nothing to rebuild
+fire(false);
+settle(); out.desktop30 = last(); out.builds = [made.length];
+sandbox.window.filterRange.call(buttons[0]); out.desktop7 = last();
+fire(true); out.phone7 = last(); out.builds.push(made.length);
+fire(false); out.back7 = last(); out.builds.push(made.length);
+fire(true); settle(); out.phoneNewLedger = last();   // a new ledger starts at 30 days again
+out.destroyed = made.slice(0, -1).every(c => c.destroyed);
+process.stdout.write(JSON.stringify(out));
+"""
+
+_DESKTOP_X = {"color": "#474747", "font": {"family": "'JetBrains Mono', monospace", "size": 9},
+              "maxTicksLimit": 10}
+_DESKTOP_LEGEND = {"color": "#474747", "font": {"family": "'JetBrains Mono', monospace", "size": 9},
+                   "boxWidth": 10, "padding": 8, "usePointStyle": True}
+
+
+@pytest.fixture(scope="module")
+def chart_run(tmp_path_factory):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    m = re.search(r'<script nonce="test-nonce">\s*(\(function\(\) \{\s*var SEL_KEY.*?)</script>',
+                  _render_page(), re.S)
+    assert m, "the page script"
+    d = tmp_path_factory.mktemp("r3-t5-chart")
+    (d / "page.js").write_text(m.group(1))
+    (d / "harness.js").write_text(_CHART_HARNESS)
+    run = subprocess.run(["node", str(d / "harness.js"), str(d / "page.js")],
+                         capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_desktop_chart_options_are_unchanged(chart_run):
+    """Above 640px the chart keeps the canvas's aspect ratio, 10 dates and
+    the 9px legend, exactly as before (D21), and so after a round trip
+    through a phone width."""
+    for key in ("desktop30", "desktop7", "back7"):
+        run = chart_run[key]
+        assert run["maintainAspectRatio"] is True, key
+        assert run["xticks"] == _DESKTOP_X, key
+        assert run["legend"] == _DESKTOP_LEGEND, key
+
+
+def test_phone_chart_fills_its_box_with_fewer_dates_and_a_compact_legend(chart_run):
+    """On phones the chart fills its 220px box, shows at most 5 unrotated
+    dates, and its legend is 10px text with 6px padding, so more of the ore
+    list fits in the half of the chart Chart.js allows a legend."""
+    run = chart_run["phone7"]
+    assert run["maintainAspectRatio"] is False
+    assert run["xticks"] == dict(_DESKTOP_X, maxTicksLimit=5, maxRotation=0)
+    assert run["legend"] == dict(_DESKTOP_LEGEND, font=dict(_DESKTOP_LEGEND["font"], size=10), padding=6)
+
+
+def test_crossing_640px_rebuilds_the_chart_at_the_range_on_show(chart_run):
+    """The script listens on one (max-width: 640px) query. Crossing it
+    rebuilds the chart with that width's options, keeping the range the
+    viewer picked (7 days here); a new ledger starts at 30 days. With no
+    ledger loaded there is nothing to rebuild."""
+    assert chart_run["mqls"] == ["(max-width: 640px)"]
+    assert chart_run["beforeData"] == 0
+    assert chart_run["builds"] == [1, 3, 4]
+    assert chart_run["desktop7"]["dates"] < chart_run["desktop30"]["dates"]
+    assert chart_run["phone7"]["dates"] == chart_run["back7"]["dates"] == chart_run["desktop7"]["dates"]
+    assert chart_run["phoneNewLedger"]["dates"] == chart_run["desktop30"]["dates"]
+    assert chart_run["destroyed"], "each rebuild destroys the chart it replaces"
 
 
 def test_selection_bar_keeps_its_hooks_with_40px_buttons():
@@ -497,6 +623,9 @@ def test_checkbox_lead_is_a_40px_tap_target():
     assert "min-height: 40px" in lead
     assert "justify-content: center" in lead
     assert "margin: -0.6rem 0.4rem -0.6rem -0.75rem" in lead
+    # In an open row the margins take it 5px into the Name line below; it
+    # stays on top there, so a tap in that strip still ticks the box.
+    assert "z-index: 1" in lead
     box = rule_bodies(css, ".ml-char-row .ml-check")
     for decl in ("width: 20px !important", "height: 20px !important", "min-height: 0"):
         assert decl in box, decl
@@ -549,5 +678,6 @@ def test_ledger_classes_have_no_desktop_rules():
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
     body, desktop = _phone()
     assert not desktop.strip(), "T5's desktop slot holds no rules"
-    for cls in (".ml-char-row", ".ml-ore", ".ml-clamp", ".ml-chart-box"):
+    for cls in (".ml-char-row", ".ml-ore", ".ml-clamp", ".ml-chart-box", ".is-empty",
+                ".ml-selection-bar", ".ml-check"):
         assert css.count(cls) == body.count(cls) > 0, cls
