@@ -1546,6 +1546,44 @@
 
 /* ── R4 T2 · lp store ── */
 @media (max-width: 640px) {
+    /* Offers (D5 A): both keys at 12px, as other phone rows' names. The
+       page's own <style> sets .lp-row to 11px and loads after this file. */
+    .lp-row.m-row > [data-m="key"] { font-size: 12px; }
+
+    /* Corp picker (D6 A). market_lp.html's script adds .is-folded on phones
+       once a corp is picked: the body (filter and tree) hides and the
+       one-line Picked button shows, label on the left and the corp on the
+       right; tapping it unfolds the tree. The button is m-only, so it never
+       shows above 640px; here it hides until the section folds. */
+    .lp-picked { display: none; }
+    .lp-corp-sec.is-folded > .lp-corp-body { display: none; }
+    .lp-corp-sec.is-folded > .lp-picked {
+        display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px;
+        padding: 0 0.75rem; background: none; border: none; border-bottom: 1px solid var(--border);
+        color: var(--text); font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .lp-picked > .lp-picked-label {
+        flex: none; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .lp-picked > .lp-picked-name {
+        flex: 1 1 auto; min-width: 0; text-align: right; color: var(--accent);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .lp-picked::after { content: "▾"; content: "▾" / ""; flex: none; color: var(--muted); font-size: 11px; }
+
+    /* The Offers heading names the picked corp; the span is empty (and so
+       draws no separator) until a pick. */
+    .lp-offers-corp { color: var(--accent); }
+    .lp-offers-corp:not(:empty)::before { content: "·"; margin: 0 0.5em; color: var(--muted); }
+    /* The scroll to the offers stops clear of the sticky 46px nav. */
+    #lp-offers-sec { scroll-margin-top: 56px; }
+
+    /* Faction tree: faction and corp buttons stay 44px tap targets (the
+       global phone button rule, pinned here) with 12px text. The ID outranks
+       the tree fragment's own <style>, which loads after this file. display
+       is left alone: the filter hides buttons with an inline display:none,
+       and display:flex would drop the space before a faction's "(N)". */
+    #lp-corp-tree .lpt-fac, #lp-corp-tree .lpt-corp { min-height: 44px; font-size: 12px; }
 }
 /* ── end R4 T2 ── */
 
