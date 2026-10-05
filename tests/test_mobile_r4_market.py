@@ -282,6 +282,19 @@ def test_chart_phone_branch_drops_volume_and_thins_dates():
         < script.index("chart = new Chart(")
 
 
+def test_chart_phone_price_axis_fits_the_data():
+    """D4 A drew a zoomed price axis. The chart's top-level type is 'bar',
+    whose defaults start y at zero, which squashes the band into the top of
+    a phone's plot; on phones y fits the data, with a little grace."""
+    script = _chart_script(_render_type())
+    body = re.search(r"if \(phoneMq && phoneMq\.matches\) \{(.*?)\n        \}", script, re.S).group(1)
+    assert "cfg.options.scales.y.beginAtZero = false;" in body
+    assert "cfg.options.scales.y.grace = '5%';" in body
+    # Desktop's y axis is exactly as it was: no beginAtZero or grace of its own.
+    desk_y = re.search(r"\n                    y: \{ position: 'left',.*?grid: \{ color: '#1a1a1a' \} \},", script, re.S)
+    assert desk_y and "beginAtZero" not in desk_y.group(0) and "grace" not in desk_y.group(0)
+
+
 def test_chart_rebuilds_when_the_breakpoint_changes():
     script = _chart_script(_render_type())
     assert "lastData = data;" in script

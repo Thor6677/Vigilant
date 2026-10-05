@@ -157,6 +157,11 @@
             cfg.data.datasets = cfg.data.datasets.filter(function (d) { return d.yAxisID !== 'y1'; });
             delete cfg.options.scales.y1;
             cfg.options.scales.x.ticks.maxTicksLimit = 3;
+            /* The 'bar' type's defaults start y at zero, which would squash
+               the price band into the top of a phone's plot; fit the data,
+               with 5% of its range as headroom above and below. */
+            cfg.options.scales.y.beginAtZero = false;
+            cfg.options.scales.y.grace = '5%';
         }
         if (chart) { chart.destroy(); }
         chart = new Chart(document.getElementById('mk-chart'), cfg);
