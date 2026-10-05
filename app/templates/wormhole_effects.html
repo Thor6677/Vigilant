@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_tab_nav.html" import tab_dropdown %}
 {% block title %}System Effects — VIGILANT{% endblock %}
 
 {% block breadcrumbs %}
@@ -40,11 +41,17 @@
     <h1 class="b-page-title">System Effects</h1>
 </div>
 
-<div class="wh-tabs">
+{# Phones: the strip becomes the "Section ▾" dropdown. #}
+<div class="wh-tabs m-tabs-desktop">
     <a href="/wormholes" class="wh-tab">Systems</a>
     <a href="/wormholes/types" class="wh-tab">Wormhole Types</a>
     <a href="/wormholes/effects" class="wh-tab is-active">System Effects</a>
 </div>
+{{ tab_dropdown([
+    {'key': 'systems', 'label': 'Systems', 'url': '/wormholes'},
+    {'key': 'types', 'label': 'Wormhole Types', 'url': '/wormholes/types'},
+    {'key': 'effects', 'label': 'System Effects', 'url': '/wormholes/effects'},
+], 'effects') }}
 
 <p style="font-size:11px;color:var(--muted);margin-bottom:1rem;">
     Some wormhole systems have a persistent environmental effect that modifies ship and module stats.
@@ -60,7 +67,9 @@
 {% for key, info in effects.items() %}
 <div id="{{ key }}" class="we-section">
     <div class="we-section-title">{{ info['name'] }}</div>
-    <div class="b-panel" style="padding:0;overflow-x:auto;">
+    {# Phones (D14 A): the C1–C6 values swipe sideways inside .we-scroll
+       with the Modifier column pinned. #}
+    <div class="b-panel we-scroll" style="padding:0;overflow-x:auto;">
         <table class="we-table">
             <thead>
                 <tr>

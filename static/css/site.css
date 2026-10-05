@@ -1947,6 +1947,108 @@
 
 /* ── R5 T4 · wormholes ── */
 @media (max-width: 640px) {
+    /* The phone layer already makes every <button> at least 44px tall, so
+       the buttons below only get a 40px minimum width and a 12px glyph. A
+       min-height here would outrank `button` and shrink them. */
+
+    /* System finder results (D12 A): link rows of class badge · system ·
+       statics. min-width beats .m-row > *'s reset so the badges line up. */
+    .wh-sys-list > .m-row > .wh-sys-class {
+        justify-content: center; min-width: 2.75rem !important;
+        padding: 1px 5px; border: 1px solid currentColor;
+        font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .wh-sys-list > .m-row > .wh-sys-statics,
+    .wh-sys-list > .m-row > .wh-sys-statics > span { color: var(--muted) !important; }
+    .wh-sys-list > .m-row > .wh-sys-statics { font-size: 12px !important; }
+    /* One line height for both keys, so the 16px name and the 12px statics
+       share a top edge as well as a centre line. */
+    .wh-sys-list > .m-row > [data-m="key"] { line-height: 1.5rem; }
+
+    /* Paging sits outside the panel, so it wraps instead of widening the page. */
+    .wh-pager { flex-wrap: wrap; row-gap: 0.4rem; }
+    .wh-pager > button { min-width: 40px; font-size: 12px !important; }
+    .wh-pager > span {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px; font-size: 12px !important;
+    }
+
+    /* Finder filters (D13 A): the toggle rows fold behind one Filters
+       button that names the active filters; the search row stays. */
+    .wf-panel:not(.is-expanded) > .wf-fold { display: none !important; }
+    .wf-fold-toggle {
+        display: flex; align-items: center; gap: 0.75rem; width: 100%; min-height: 44px;
+        margin: 0.25rem 0 0; padding: 0.7rem 0.85rem;
+        background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer;
+        font-family: inherit; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; text-align: left;
+    }
+    .wf-fold-toggle .wf-fold-label { flex: none; color: var(--muted); }
+    .wf-fold-toggle .wf-fold-current {
+        flex: 1 1 auto; min-width: 0; text-align: right; color: var(--accent);
+        overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    }
+    .wf-fold-toggle::after { content: "▾"; content: "▾" / ""; flex: none; color: var(--muted); }
+    .wf-panel.is-expanded > .wf-fold-toggle { margin-bottom: 0.6rem; }
+    .wf-panel.is-expanded > .wf-fold-toggle::after { content: "▴"; content: "▴" / ""; }
+    .wf-panel .wf-toggles { gap: 6px; }
+    .wf-panel .wf-btn { min-width: 40px; font-size: 12px; }
+
+    /* Types matrix: swipes inside .wm-scroll with the From column pinned
+       and opaque. The page script sets is-more while there is more to the
+       right. Codes become 40px tap targets, one per line without the <br>s.
+       Collapsed borders are painted by the table and scroll away from a
+       sticky cell, so the codes showed through its edge: separate borders
+       belong to each cell instead (right and bottom; left on the first
+       column, top on the header row, so every line stays 1px). The
+       template's <style> loads after site.css, hence .wm-scroll >. */
+    .wm-scroll.is-more {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    }
+    .wm-scroll > .wm-table { border-collapse: separate; border-spacing: 0; }
+    .wm-scroll > .wm-table th, .wm-scroll > .wm-table td { border-width: 0 1px 1px 0; }
+    .wm-scroll > .wm-table tr > :first-child { border-left-width: 1px; }
+    .wm-scroll > .wm-table thead th { border-top-width: 1px; }
+    .wm-table th:first-child, .wm-table td.wm-from { position: sticky; left: 0; z-index: 1; }
+    .wm-table td.wm-from { background: var(--bg); }
+    .wm-table td a {
+        display: flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px; font-size: 12px;
+    }
+    .wm-table td br { display: none; }
+    #wh-type-detail { scroll-margin-top: 4rem; }
+
+    /* Effect tables (D14 A): the C1–C6 values swipe sideways inside
+       .we-scroll; the Modifier column is pinned and wraps at 8.5rem. */
+    .we-table th, .we-table td { white-space: nowrap; }
+    .we-table th:first-child, .we-table td:first-child {
+        position: sticky; left: 0; z-index: 1;
+        width: 8.5rem; min-width: 8.5rem; white-space: normal;
+        box-shadow: inset -1px 0 0 var(--border);
+    }
+    .we-table td:first-child { background: var(--surface-2); }
+    .we-nav a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Kill activity (wormhole_kills.html, also in the WH Tracker): the
+       heatmap keeps its own sideways scroll (D15 A); the range buttons and
+       Most Active rows become 40px. */
+    .whk-range > button { min-width: 40px; font-size: 12px !important; }
+    .whk-active > a { min-height: 40px; }
+    /* The panel's min-content width (the ~540px heatmap table, the recent
+       kills' nowrap pilot lines) would widen the grid column it sits in
+       (the system page's and the tracker's .ws-grid): the page would scroll
+       sideways and the heatmap's own box never would. The panel always sits
+       in block flow, so it still fills its column. */
+    .whk { contain: inline-size; }
+
+    /* System page tap targets, scoped by its own wsp-* hooks (the WH
+       Tracker reuses the ws-* classes). */
+    .wsp-conns .ws-conn a { display: inline-flex; align-items: center; min-width: 40px; min-height: 40px; }
+    .wsp-links a { display: inline-flex; align-items: center; min-height: 40px; }
+    .wsp-zoom > button { min-width: 40px; font-size: 12px !important; }
+
+    /* Type page: the back link. */
+    .wh-back { display: inline-flex; align-items: center; min-height: 40px; }
 }
 /* ── end R5 T4 ── */
 

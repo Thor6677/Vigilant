@@ -56,8 +56,10 @@
 </div>
 <div style="margin-bottom:1.25rem;">{{ entity_links("system", system['system_id'], system['system_name'], current="wh", jspace=True) }}</div>
 
+{# The wsp-* classes are phone tap-target hooks for this page only: the WH
+   Tracker panel reuses the ws-* classes. #}
 <!-- Connections -->
-<div class="ws-section">
+<div class="ws-section wsp-conns">
     <div class="ws-section-title">Connections</div>
     <div style="margin-bottom:0.5rem;">
         {% if statics %}
@@ -136,7 +138,7 @@
         <div class="ws-section">
             <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
                 System Diagram
-                <div style="display:flex;gap:2px;">
+                <div class="wsp-zoom" style="display:flex;gap:2px;">
                     <button id="zoom-full" data-click="drawDiagramFromEl" data-mode="full" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
                     <button id="zoom-dscan" data-click="drawDiagramFromEl" data-mode="dscan" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
                 </div>
@@ -330,7 +332,7 @@
         <!-- External Links -->
         <div class="ws-section">
             <div class="ws-section-title">External Links</div>
-            <div class="ws-links">
+            <div class="ws-links wsp-links">
                 <a href="https://zkillboard.com/system/{{ system['system_id'] }}/" target="_blank" rel="noopener">zKillboard</a>
                 <a href="https://evemaps.dotlan.net/system/{{ system['system_name'] }}" target="_blank" rel="noopener">DOTLAN</a>
                 <a href="https://anoik.is/systems/{{ system['system_name'] }}" target="_blank" rel="noopener">Anoik.is</a>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_tab_nav.html" import tab_dropdown %}
 {% block title %}Wormhole Types — VIGILANT{% endblock %}
 
 {% block breadcrumbs %}
@@ -38,15 +39,23 @@
     <h1 class="b-page-title">Wormhole Types</h1>
 </div>
 
-<div class="wh-tabs">
+{# Phones: the strip becomes the "Section ▾" dropdown. #}
+<div class="wh-tabs m-tabs-desktop">
     <a href="/wormholes" class="wh-tab">Systems</a>
     <a href="/wormholes/types" class="wh-tab is-active">Wormhole Types</a>
     <a href="/wormholes/effects" class="wh-tab">System Effects</a>
 </div>
+{{ tab_dropdown([
+    {'key': 'systems', 'label': 'Systems', 'url': '/wormholes'},
+    {'key': 'types', 'label': 'Wormhole Types', 'url': '/wormholes/types'},
+    {'key': 'effects', 'label': 'System Effects', 'url': '/wormholes/effects'},
+], 'types') }}
 
 <div class="ws-section-title" style="font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:var(--muted);margin-bottom:0.5rem;border-bottom:1px solid var(--border);padding-bottom:0.3rem;">Connection Matrix</div>
 
-<div style="overflow-x:auto;margin-bottom:1rem;">
+{# Phones: the matrix swipes sideways inside .wm-scroll with the From column
+   pinned, and fades on the right while there is more (is-more, set below). #}
+<div class="wm-scroll" style="overflow-x:auto;margin-bottom:1rem;">
 <table class="wm-table">
     <thead>
         <tr>
@@ -93,6 +102,30 @@ document.querySelectorAll('.wm-table td').forEach(function(td) {
     td.addEventListener('mouseleave', function() {
         td.style.background = '';
     });
+});
+
+// Phones: the right-edge fade shows while the matrix has more to scroll
+// (the class does nothing above 640px). Re-checked on load, since the web
+// font changes the table's width.
+(function() {
+    var box = document.querySelector('.wm-scroll');
+    if (!box) return;
+    function edge() {
+        box.classList.toggle('is-more', box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
+    }
+    box.addEventListener('scroll', edge, {passive: true});
+    window.addEventListener('resize', edge);
+    window.addEventListener('load', edge);
+    edge();
+})();
+
+// Phones: a tapped code's detail loads below the matrix, off screen, so
+// bring it into view.
+document.getElementById('wh-type-detail').addEventListener('htmx:afterSwap', function(e) {
+    if (e.target !== this) return;
+    if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+        this.scrollIntoView({block: 'start', behavior: 'smooth'});
+    }
 });
 </script>
 {% endblock %}
