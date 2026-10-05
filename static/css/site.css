@@ -1752,6 +1752,73 @@
 
 /* ── R6 T1 · server activity ── */
 @media (max-width: 640px) {
+    /* The page's own <style> loads after site.css and wins ties, so every
+       .ta-* override here is more specific (IDs, child combinators) or
+       beats an inline value with !important. */
+
+    /* "Window ▾" dropdown (tab_dropdown) in the main section head: the
+       head's own padding already spaces it. Its open list floats over the
+       page: the page script closes it on an outside pointerdown, and an
+       in-flow list would pull the page up under the finger before that
+       tap's click landed. left/right -1px line it up with the summary's
+       border; z-index keeps it under the sticky nav bar. */
+    .ta-windows ~ details.m-tabs { margin-bottom: 0; position: relative; }
+    .ta-windows ~ details.m-tabs > .m-tabs-list {
+        position: absolute; top: 100%; left: -1px; right: -1px; z-index: calc(var(--z-nav) - 1);
+        background: var(--bg); border: 1px solid var(--border);
+    }
+
+    /* Stat tiles 2×2; beats the inline repeat(4,1fr). */
+    .b-pad-md > .ta-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+    /* The PvP and security-zone chart pairs stack. minmax(0,1fr), so a
+       canvas can't push its column wider than the screen. Two classes beat
+       the global inline-1fr-1fr rule without relying on source order. */
+    .b-section > .ta-pair { grid-template-columns: minmax(0, 1fr) !important; }
+
+    /* Weekly heatmap fits the screen (ISS-103). The grid, its hour labels,
+       the presence strip and the band overlay share one track template, so
+       the bands stay aligned. Cells drop the 14px floor, which aspect-ratio
+       also carried over to their width. */
+    #pcu-heatmap, #ta-hm-col-labels, #ta-presence-strip, #ta-hm-bands {
+        grid-template-columns: 30px repeat(24, minmax(0, 1fr));
+    }
+    /* cursor: iOS fires click on a plain div only when it looks clickable. */
+    #pcu-heatmap > .ta-heatmap-cell { min-width: 0; min-height: 0; cursor: pointer; }
+    #pcu-heatmap > .ta-heatmap-cell.is-picked { outline: 2px solid var(--text); outline-offset: -1px; }
+    /* Every 3rd hour keeps its label (hours 0, 3 … 21: child 1 is the empty
+       gutter, so hour h is child h+2). visibility keeps each label's track. */
+    #ta-hm-col-labels > div[data-hr]:not(:nth-child(3n+2)) { visibility: hidden; }
+    .ta-hm-readout { margin-top: 0.5rem; min-height: 1.5em; font-size: 12px; color: var(--text); }
+
+    /* Tap targets. Every .b-btn here is already 44px tall (the global
+       phone floor), so nothing sets a height and nothing uses m-tap, whose
+       40px !important would shrink them. The live delta buttons and the
+       clock toggle widen to 44px; their inline 9px/10px needs !important. */
+    #ta-delta-btns > .ta-delta-btn, #ta-tz-toggle { min-width: 44px; font-size: 12px !important; }
+
+    /* Heatmap controls: one group per line, the region select on a line of
+       its own under the label and filter box. */
+    .ta-hm-controls > .ta-hm-group { flex: 1 1 100%; }
+    /* Measure and space pills. An <a class="b-btn"> is display:block, so
+       its label would sit at the top of the 44px box: inline-flex centres
+       it. They wrap whole: .b-btn's flex:1 (basis 0) would squeeze every
+       pill onto one line and break "PILOTS ONLINE" inside its button; each
+       still grows to fill its line. (0,2,1) beats the page's own
+       .ta-hm-group .b-btn, which loads later. */
+    .ta-hm-group > a.b-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        flex: 1 1 auto; min-width: 44px; white-space: nowrap; font-size: 12px;
+    }
+    #ta-region-form > #ta-region-filter { flex: 1 1 0; width: auto; min-width: 0; }
+    #ta-region-form > #ta-region-select { flex: 1 1 100%; width: 100%; max-width: none; }
+
+    /* History browser: ‹ year · slider · year › on one line, the date span
+       below. The buttons keep their own width (.b-btn is flex:1), so the
+       slider gets the rest. */
+    .ta-hist-nav { flex-wrap: wrap; }
+    .ta-hist-nav > .b-btn { flex: none; }
+    .ta-hist-nav > #hist-span { flex: 1 1 100%; min-width: 0 !important; }
 }
 /* ── end R6 T1 ── */
 
