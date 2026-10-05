@@ -570,6 +570,13 @@ def test_new_pill_margin_cancels_its_44px_phone_height():
     assert '<button type="button" id="kf-new-pill"' in src
 
 
+def test_small_text_is_11px_on_phones():
+    phone, _ = phone_block(_section("T1"))
+    for sel in ("span.kf-live", "div.kf-top-section-label", "div.kf-top-type", "div.kf-top-meta",
+                "div.kf-top-corp", ".kf-meta-line > .kf-npc-badge"):
+        assert re.search(r"font-size:\s*11px", rule_bodies(phone, sel)), sel
+
+
 # ── desktop stays identical ───────────────────────────────────────────
 
 def test_section_has_no_desktop_rule():

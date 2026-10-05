@@ -1861,6 +1861,14 @@
        outranks the page's own #kf-new-pill rule, which loads after this
        file. */
     button#kf-new-pill { margin-bottom: -44px; }
+
+    /* 8-9px text at 11px: the feed's LIVE status, the Most Valuable
+       section labels and each card's corp line (with the card's 10px type
+       and system lines, so the corp doesn't outsize them), and the NPC
+       badge on a phone row's line. Element plus class outranks the page's
+       own rules (and the shared 8px badge rule). */
+    span.kf-live, div.kf-top-section-label, div.kf-top-type, div.kf-top-meta, div.kf-top-corp,
+    .kf-meta-line > .kf-npc-badge { font-size: 11px; }
 }
 /* ── end R5 T1 ── */
 
