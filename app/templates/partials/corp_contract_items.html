@@ -49,7 +49,8 @@
             hx-post="/corporations/{{ corp_id }}/contracts/threshold/{{ t.id }}/delete"
             hx-target="#contract-items"
             hx-swap="innerHTML"
-            hx-confirm="Remove {{ t.match_label }} from tracking?">
+            hx-confirm="Remove {{ t.match_label }} from tracking?"
+            aria-label="Remove {{ t.match_label }}">
         &times;
     </button></span>
 </div>

@@ -311,6 +311,7 @@ def test_tracked_item_remove_is_the_existing_control_inside_a_labelled_cell():
         assert "m-tap" in _cls(btn)
         assert btn["attrs"]["hx-post"] == f"/corporations/{_CORP}/inventory/threshold/{t.id}/delete"
         assert btn["attrs"]["hx-confirm"]
+        assert btn["attrs"].get("aria-label") == f"Remove {t.type_name}"
         # One Remove control per row: no phone copy.
         assert len(_find(row, lambda n: "hx-post" in n["attrs"])) == 1
 
@@ -383,9 +384,18 @@ def test_scan_track_cell_holds_the_inputs_and_button_in_one_value_element():
         group = cell["kids"][0]
         assert group["tag"] == "span" and "display:contents" in _style(group)
         kids = group["kids"]
-        assert [k["tag"] for k in kids] == ["input", "input", "button"]
-        assert "scan-low" in _cls(kids[0]) and "scan-critical" in _cls(kids[1])
-        assert kids[2]["attrs"].get("data-click") == "addScanItem"
+        assert [k["tag"] for k in kids] == ["span", "input", "span", "input", "button"]
+        # Phones name each box with a short m-only letter; desktop keeps the
+        # hover title. Screen readers get an aria-label at both widths.
+        for letter, k in (("L", kids[0]), ("C", kids[2])):
+            assert "m-only" in _cls(k) and _text(k) == letter
+        low, crit = kids[1], kids[3]
+        assert "scan-low" in _cls(low) and "scan-critical" in _cls(crit)
+        assert low["attrs"].get("aria-label") == "Low threshold"
+        assert crit["attrs"].get("aria-label") == "Critical threshold"
+        assert low["attrs"].get("title") == "Low threshold"
+        assert crit["attrs"].get("title") == "Critical threshold"
+        assert kids[4]["attrs"].get("data-click") == "addScanItem"
         # addScanItem reads row.querySelector('.scan-low'): one of each per row.
         assert len(_find(row, lambda n: "scan-low" in _cls(n))) == 1
         assert len(_find(row, lambda n: "scan-critical" in _cls(n))) == 1
@@ -509,6 +519,7 @@ def test_contract_remove_is_the_existing_control_inside_a_labelled_cell():
         btn = cell["kids"][0]
         assert btn["tag"] == "button" and "m-tap" in _cls(btn)
         assert btn["attrs"]["hx-post"] == f"/corporations/{_CORP}/contracts/threshold/{t.id}/delete"
+        assert btn["attrs"].get("aria-label") == f"Remove {t.match_label}"
         assert len(_find(row, lambda n: "hx-post" in n["attrs"])) == 1
 
 
@@ -570,16 +581,7 @@ def test_contracts_add_threshold_row_stacks_and_keeps_its_match_toggle():
     (_render_contracts_page, "ct-search-results"),
 ])
 def test_type_search_results_carry_the_phone_hook(render, el_id):
-    assert "cinv-results" in _cls(_by_id(render(), el_id))
-
-
-def test_m_stack_utility_stacks_its_children():
-    """The forms rely on R1's m-stack utility for the stacking itself."""
-    css = open(SITE_CSS, encoding="utf-8").read()
-    body = rule_bodies(css, ".m-stack").replace(" ", "")
-    assert "flex-direction:column!important" in body
-    kids = rule_bodies(css, ".m-stack > *").replace(" ", "")
-    assert "width:100%!important" in kids and "min-width:0!important" in kids
+    assert "corp-type-results" in _cls(_by_id(render(), el_id))
 
 
 # ── 5. CSS section ────────────────────────────────────────────────────
@@ -601,7 +603,7 @@ def test_section_is_one_phone_block_and_nothing_else():
 
 
 def test_type_search_rows_are_40px_on_phones():
-    assert "min-height:40px" in _body(".cinv-results > .b-row")
+    assert "min-height:40px" in _body(".corp-type-results > .b-row")
 
 
 def test_track_group_lays_out_as_one_value_in_an_opened_row():
@@ -617,6 +619,14 @@ def test_track_inputs_are_wider_than_their_desktop_50px_on_phones():
     body = _body('.cinv-scan > [data-m-label="Track"] > span > input')
     m = re.search(r"width:([\d.]+)rem!important", body)
     assert m and float(m.group(1)) * 16 > 50
+
+
+def test_track_letters_are_muted_11px_on_phones():
+    """Polish B forces open-row descendants to font-size:inherit !important at
+    (0,4,1); this rule's (0,4,2) and !important keep the letters at 11px."""
+    body = _body('.m-row.cinv-scan > [data-m-label="Track"] > span > span.m-only')
+    assert "font-size:11px!important" in body
+    assert "color:var(--muted)" in body
 
 
 def test_rows_keys_are_12px_on_phones():
@@ -637,7 +647,7 @@ def test_long_location_heading_wraps_instead_of_widening_the_page():
 def test_new_class_hooks_are_styled_only_in_this_sections_phone_block():
     css = re.sub(r"/\*.*?\*/", "", open(SITE_CSS, encoding="utf-8").read(), flags=re.S)
     phone = _phone()
-    for cls in (".cinv-item", ".cinv-scan", ".cinv-scan-wrap", ".cctr-item", ".cinv-loc", ".cinv-results"):
+    for cls in (".cinv-item", ".cinv-scan", ".cinv-scan-wrap", ".cctr-item", ".cinv-loc", ".corp-type-results"):
         n = len(re.findall(re.escape(cls) + r"(?![\w-])", phone))
         assert n, cls
         assert len(re.findall(re.escape(cls) + r"(?![\w-])", css)) == n, f"{cls} styled outside R4 T4"

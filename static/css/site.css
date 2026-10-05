@@ -1501,6 +1501,12 @@
        height. The inputs widen from the desktop 50px to fit 16px digits. */
     .cinv-scan > [data-m-label="Track"] > span { display: inline-flex !important; align-items: stretch; gap: 6px; }
     .cinv-scan > [data-m-label="Track"] > span > input { width: 4.5rem !important; }
+    /* The m-only "L" and "C" before each input, centred on it. Polish B sets
+       open-row descendants to font-size:inherit !important at (0,4,1); this
+       selector is (0,4,2), so the letters keep their 11px. */
+    .m-row.cinv-scan > [data-m-label="Track"] > span > span.m-only {
+        align-self: center; color: var(--muted); font-size: 11px !important;
+    }
 
     /* "Show all" inside the bordered scan box: inset, so its border doesn't
        double against the box's sides. */
@@ -1508,8 +1514,8 @@
 
     /* Item type search results (Add Item, Add Threshold): 40px rows at
        12px. The rows come from the shared type-search route. */
-    .cinv-results > .b-row { min-height: 40px; }
-    .cinv-results > .b-row > .b-row-val { font-size: 12px; }
+    .corp-type-results > .b-row { min-height: 40px; }
+    .corp-type-results > .b-row > .b-row-val { font-size: 12px; }
 }
 /* ── end R4 T4 ── */
 
