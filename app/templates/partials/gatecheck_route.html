@@ -46,19 +46,19 @@
         {% if s.pvp_kills > 0 %}
         {# Expandable row with kill details #}
         <details>
-            <summary style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.75rem;cursor:pointer;font-size:11px;list-style:none;">
+            <summary class="gc-wp gc-wp--jump" style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.75rem;cursor:pointer;font-size:11px;list-style:none;">
                 <span style="color:var(--muted);min-width:22px;text-align:right;font-size:10px;">{{ s.waypoint }}</span>
                 <span style="color:{{ s.sec_color }};min-width:30px;font-size:10px;">{{ "%.1f"|format(s.security) }}</span>
-                <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener"
+                <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener" class="gc-wp-name"
                    style="flex:1;color:var(--text);text-decoration:none;" data-mousedown="noop" data-stop>
                     {{ s.system_name }}
                 </a>
-                <span style="color:var(--muted);font-size:10px;min-width:80px;">{{ s.region }}</span>
+                <span class="gc-wp-l2 gc-wp-region" style="color:var(--muted);font-size:10px;min-width:80px;">{{ s.region }}</span>
 
                 {# Threat badges #}
-                {% if s.has_dictors %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">DICTOR</span>{% endif %}
-                {% if s.has_hics %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">HIC</span>{% endif %}
-                {% if s.has_smartbombs %}<span style="color:#b44dff;font-size:8px;padding:1px 4px;border:1px solid #b44dff;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
+                {% if s.has_dictors %}<span class="gc-wp-l2 gc-flag" style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">DICTOR</span>{% endif %}
+                {% if s.has_hics %}<span class="gc-wp-l2 gc-flag" style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">HIC</span>{% endif %}
+                {% if s.has_smartbombs %}<span class="gc-wp-l2 gc-flag" style="color:#b44dff;font-size:8px;padding:1px 4px;border:1px solid #b44dff;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
 
                 <span style="{% if s.threat in ('dangerous','smartbomb') %}color:var(--danger);{% elif s.threat == 'caution' %}color:var(--accent);{% endif %}min-width:55px;text-align:right;font-size:10px;">
                     {{ s.pvp_kills }} kill{{ 's' if s.pvp_kills != 1 }}
@@ -85,14 +85,14 @@
 
         {% else %}
         {# Safe row — no kills #}
-        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.75rem;font-size:11px;">
+        <div class="gc-wp gc-wp--jump" style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.75rem;font-size:11px;">
             <span style="color:var(--muted);min-width:22px;text-align:right;font-size:10px;">{{ s.waypoint }}</span>
             <span style="color:{{ s.sec_color }};min-width:30px;font-size:10px;">{{ "%.1f"|format(s.security) }}</span>
-            <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener"
+            <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener" class="gc-wp-name"
                style="flex:1;color:var(--text);text-decoration:none;">
                 {{ s.system_name }}
             </a>
-            <span style="color:var(--muted);font-size:10px;min-width:80px;">{{ s.region }}</span>
+            <span class="gc-wp-l2 gc-wp-region" style="color:var(--muted);font-size:10px;min-width:80px;">{{ s.region }}</span>
             <span style="color:var(--success);min-width:55px;text-align:right;font-size:10px;">✓</span>
             <span style="width:10px;"></span>
         </div>

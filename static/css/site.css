@@ -1814,6 +1814,54 @@
 
 /* ── R5 T3 · gatecheck/watch/trending ── */
 @media (max-width: 640px) {
+    /* Gate Check's tabs (D9 A): an equal-width 44px bar. Selectors outrank
+       the page's own .gc-tabs/.gc-tab head rules, which load after this
+       file; colour and border stay with them, so .gc-tab.is-active still
+       marks the active tab. Long labels wrap inside their third. */
+    div.gc-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; }
+    div.gc-tabs > .gc-tab {
+        min-height: 44px; padding: 0.25rem 0.4rem; line-height: 1.25;
+        display: flex; align-items: center; justify-content: center; text-align: center;
+    }
+
+    /* Common Routes buttons and the system autocomplete rows: 40px targets. */
+    #tab-checker .gc-route-btn { min-height: 40px; font-size: 12px; }
+    .gc-dropdown > .gc-dd-item { min-height: 40px; font-size: 12px; }
+
+    /* Waypoints, gatecamps and war-target systems fold into two lines
+       (D8 A): number, security, system and kills (or ✓) first; region and
+       danger flags below, under the system name. The empty ::after is a
+       full-width break ordered between the two. The inline gap sets both
+       gaps, so these need !important. */
+    .gc-wp { flex-wrap: wrap; row-gap: 0.15rem !important; column-gap: 0.5rem !important; }
+    .gc-wp::after { content: ""; flex-basis: 100%; order: 1; }
+    .gc-wp > .gc-wp-l2 { order: 2; }
+    .gc-wp > .gc-wp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Line 2 starts under the name: past the 30px security cell, and on a
+       route past the 22px jump number too. The region grows from zero to
+       its own width, so it ellipsises rather than pushing a flag onto a
+       third line. */
+    .gc-wp > .gc-wp-region {
+        margin-left: calc(30px + 0.5rem);
+        flex: 1 1 0; max-width: max-content; min-width: 0 !important;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .gc-wp--jump > .gc-wp-region { margin-left: calc(52px + 1rem); }
+
+    /* Trending's Gained and Lost lists stay plain rows: 40px tall, and the
+       alliance name truncates (a grid item won't shrink below its content
+       without min-width:0). */
+    #sov-gained > .b-trending-row, #sov-lost > .b-trending-row { min-height: 40px; }
+    #sov-gained .b-trending-name, #sov-lost .b-trending-name { min-width: 0; }
+    /* The violent list already pads its sides; its m-rows keep only their
+       vertical padding, so rows and borders line up as on desktop. */
+    #violent-list > .m-row { padding-left: 0 !important; padding-right: 0 !important; }
+
+    /* WH Tracker: thumb-sized character picker (Refresh now is m-tap), and
+       the 28px system name wraps rather than overflowing. Scoped to the
+       tracker panel: .ws-* also styles the wormhole system page. */
+    label.wht-pick { min-height: 40px; }
+    #wht-panel .ws-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 }
 /* ── end R5 T3 ── */
 

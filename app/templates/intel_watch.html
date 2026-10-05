@@ -74,13 +74,13 @@
                 {% if s.label %}<div style="color:var(--muted);font-size:10px;">{{ s.label }}</div>{% endif %}
             </div>
             <form method="POST" action="/intel/watch/system/remove/{{ s.id }}" data-confirm="Remove {{ s.system_name }}?">
-                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
+                <button type="submit" class="b-btn is-danger m-tap" style="font-size:9px;padding:2px 8px;">×</button>
             </form>
         </div>
         {% endfor %}
         {% endif %}
 
-        <form class="w-form" method="POST" action="/intel/watch/system/add">
+        <form class="w-form m-stack" method="POST" action="/intel/watch/system/add">
             <input class="w-input" name="system" placeholder="System name or ID" required style="flex:2;min-width:140px;">
             <input class="w-input" name="label" placeholder="Label (optional)" style="flex:2;min-width:120px;">
             <button type="submit" class="b-btn" style="flex:none;">Add</button>
@@ -106,15 +106,15 @@
                 </div>
                 {% if h.notes %}<div style="color:var(--muted);font-size:10px;">{{ h.notes }}</div>{% endif %}
             </div>
-            <a href="https://zkillboard.com/{{ h.kind }}/{{ h.entity_id }}/" target="_blank" rel="noopener" class="b-btn" style="font-size:9px;padding:2px 8px;">zkb ↗</a>
+            <a href="https://zkillboard.com/{{ h.kind }}/{{ h.entity_id }}/" target="_blank" rel="noopener" class="b-btn m-tap" style="font-size:9px;padding:2px 8px;">zkb ↗</a>
             <form method="POST" action="/intel/watch/hunter/remove/{{ h.id }}" data-confirm="Remove {{ h.label or h.entity_id }}?">
-                <button type="submit" class="b-btn is-danger" style="font-size:9px;padding:2px 8px;">×</button>
+                <button type="submit" class="b-btn is-danger m-tap" style="font-size:9px;padding:2px 8px;">×</button>
             </form>
         </div>
         {% endfor %}
         {% endif %}
 
-        <form class="w-form" method="POST" action="/intel/watch/hunter/add">
+        <form class="w-form m-stack" method="POST" action="/intel/watch/hunter/add">
             <select class="w-select" name="kind" style="flex:none;">
                 <option value="character">Character</option>
                 <option value="corporation">Corporation</option>
@@ -138,7 +138,17 @@
     <div class="w-empty">No alerts yet. Fires will appear here as they happen.</div>
     {% else %}
     {% for a in alerts %}
-    <div class="w-row">
+    {% set kind = 'system' if a.kind == 'system_watch' else 'hunter' %}
+    {# Phones (D10 A): kind tag · system · HH:MM; the m-only cells carry
+       the row, and the desktop cells below are hidden there. #}
+    <div class="w-row m-row" data-click="toggleMRow">
+        <span class="m-only alert-kind-{{ kind }}" data-m="lead" style="font-size:9px;text-transform:uppercase;">{{ kind | upper }}</span>
+        <span class="m-only" data-m="key">{{ a.system_name }}</span>
+        <span class="m-only b-muted" data-m="key">{{ a.triggered_at.strftime('%H:%M') }}</span>
+        <span class="m-only" data-m-label="Name">{{ a.system_name }}</span>
+        <span class="m-only" data-m-label="Matched">{{ a.matched_label or '—' }}</span>
+        <span class="m-only" data-m-label="Time">{{ a.triggered_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>
+        <span class="m-only" data-m-label="Kill"><a href="https://zkillboard.com/kill/{{ a.killmail_id }}/" target="_blank" rel="noopener" class="m-tap" style="color:var(--accent);text-decoration:none;">Open kill ↗</a></span>
         <div style="flex:1;min-width:0;">
             <div style="font-weight:600;">
                 <span class="alert-kind-{{ 'system' if a.kind == 'system_watch' else 'hunter' }}" style="font-size:9px;text-transform:uppercase;">
