@@ -65,6 +65,10 @@ _LOCAL_BIND_ALL = {
     ("js-filter-corp", "click", "filterByCorp"),
     ("js-filter-alliance", "click", "filterByAlliance"),
 }
+# Merging needs a login (POST /intel/{id}/merge sends a stranger to /), so
+# the Add Scan button and its form render only for a logged-in viewer. Its
+# bind() stays in the script, which skips an id that isn't on the page.
+_LOGGED_IN_ONLY = {"add-scan-btn"}
 _VIEWS = {"dscan": ("intel_dscan.html", _DSCAN_BINDS, set()),
           "local": ("intel_local.html", _LOCAL_BINDS, _LOCAL_BIND_ALL)}
 
@@ -264,9 +268,11 @@ def test_anonymous_view_binds_every_control_itself(view):
     assert set(_BIND.findall(script.text)) == binds
     assert set(_BIND_ALL.findall(script.text)) == bind_all
     assert "addEventListener(type, fn)" in script.text
+    assert "if (el) el.addEventListener" in script.text, "bind() must skip a control that isn't rendered"
     for hook, _, fn in binds:
         # A duplicate id would bind only the first element.
-        assert len(root.by_id(hook)) == 1, f"#{hook} should appear exactly once"
+        want = 0 if hook in _LOGGED_IN_ONLY else 1
+        assert len(root.by_id(hook)) == want, f"#{hook} should appear {want} time(s) for a stranger"
         assert re.search(rf"\bfunction {fn}\(", script.text), f"{fn} isn't defined in the page script"
     for cls, _, fn in bind_all:
         assert root.by_class(cls), f"no .{cls} element to bind"
@@ -282,6 +288,8 @@ def test_logged_in_view_binds_nothing_twice(view):
     assert _ACTIONS_SCRIPT.search(html)
     root = _dom(html)
     _, binds, bind_all = _VIEWS[view]
+    for hook, _, _ in binds:
+        assert len(root.by_id(hook)) == 1, f"#{hook} should appear exactly once"
     controls = [n for hook, _, _ in binds for n in root.by_id(hook)]
     controls += [n for cls, _, _ in bind_all for n in root.by_class(cls)]
     assert len(controls) >= len(binds) + len(bind_all)
@@ -348,16 +356,50 @@ def test_local_corp_rows_put_the_alliance_on_a_hooked_second_line():
         assert "js-filter-alliance" in row.classes and row.attrs["data-alliance-name"]
 
 
-def test_header_buttons_and_merge_row_have_phone_hooks():
-    for view in _VIEWS:
-        root = _dom(_render_view(view, anon=True))
-        actions = root.by_class("intel-actions")
-        assert len(actions) == 1 and len(actions[0].children) == 4
-        assert all("b-btn" in c.classes for c in actions[0].children)
-        meta = root.by_class("intel-meta")
-        assert len(meta) == 1 and "Expires in 2d 4h" in meta[0].text
+def _merge_forms(root):
+    return root.find_all(lambda n: n.tag == "form" and n.attrs.get("action") == f"/intel/{_SCAN_ID}/merge")
+
+
+def test_add_scan_is_hidden_from_logged_out_viewers():
+    """A stranger's merge POST is redirected to / and the paste is lost, so
+    neither the button nor the form renders for them."""
     root = _dom(_render_view("dscan", anon=True))
+    assert not root.by_id("add-scan-btn") and not root.by_id("add-scan-section")
+    assert not _merge_forms(root) and not root.by_class("intel-merge-row")
+    assert "Add Scan" not in root.text and "Merge Additional D-Scan" not in root.text
+    # Keep-for (extend) is out of scope and still renders for everyone.
+    assert root.find_all(lambda n: n.tag == "form" and n.attrs.get("action", "").endswith("/extend"))
+
+
+def test_add_scan_still_renders_for_logged_in_viewers():
+    root = _dom(_render_view("dscan", anon=False))
+    btn = root.by_id("add-scan-btn")
+    assert len(btn) == 1 and btn[0].tag == "button" and btn[0].text == "Add Scan"
+    section = root.by_id("add-scan-section")
+    assert len(section) == 1 and "display:none" in section[0].attrs["style"].replace(" ", "")
+    forms = _merge_forms(root)
+    assert len(forms) == 1 and forms[0] in section[0].walk()
+    assert forms[0].find_all(lambda n: n.tag == "textarea" and n.attrs.get("name") == "paste_text")
     assert len(root.by_class("intel-merge-row")) == 1
+
+
+@pytest.mark.parametrize("view, anon, buttons", [
+    ("dscan", True, ["Copy Link", "Raw Paste", "New Intel"]),
+    ("dscan", False, ["Copy Link", "Add Scan", "Raw Paste", "New Intel"]),
+    ("local", True, ["Copy Link", "Copy Summary", "Raw Paste", "New Intel"]),
+    ("local", False, ["Copy Link", "Copy Summary", "Raw Paste", "New Intel"]),
+])
+def test_header_buttons_have_phone_hooks(view, anon, buttons):
+    root = _dom(_render_view(view, anon=anon))
+    actions = root.by_class("intel-actions")
+    assert len(actions) == 1 and [c.text for c in actions[0].children] == buttons
+    assert all("b-btn" in c.classes for c in actions[0].children)
+    meta = root.by_class("intel-meta")
+    assert len(meta) == 1 and "Expires in 2d 4h" in meta[0].text
+
+
+def test_by_type_rows_have_phone_hooks():
+    root = _dom(_render_view("dscan", anon=True))
     groups, ships = root.by_class("dscan-group-row"), root.by_class("dscan-ship-row")
     assert [g.text for g in groups] == ["1 Cruisers", "2 Frigates"]
     assert len(ships) == 2

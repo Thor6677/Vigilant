@@ -17,7 +17,11 @@
     </div>
     <div class="intel-actions" style="display:flex;gap:0.5rem;align-items:center;">
         <button id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        {# Merging needs a login: a stranger's merge POST is sent to / and the
+           paste is lost, so Add Scan and its form are for logged-in viewers. #}
+        {% if request.session.get('user_id') %}
         <button id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
+        {% endif %}
         <button id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
@@ -38,7 +42,8 @@
     </div>
 </div>
 
-{# ── Add Scan (hidden by default) ─────────────────────────────────────────── #}
+{# ── Add Scan (hidden by default; logged-in viewers only, like its button) ── #}
+{% if request.session.get('user_id') %}
 <div id="add-scan-section" style="display:none;margin-bottom:1rem;">
     <form method="POST" action="/intel/{{ scan_id }}/merge">
         <div class="b-panel">
@@ -61,6 +66,7 @@
         </div>
     </form>
 </div>
+{% endif %}
 
 {# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
 <div class="b-grid-2" style="gap:1rem;align-items:start;">
