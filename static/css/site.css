@@ -881,6 +881,22 @@
     .m-row > [data-m="key"] > .journal-type { max-width: 100% !important; }
 }
 
+/* ═══ v1.9.0 polish A — shared phone-layer fixes ═════════════════════════
+   Central rules every page gets; page sections (R2 T1 onwards) still win
+   where they set their own. All phone-only. */
+@media (max-width: 640px) {
+    /* A .b-btn that isn't a <button> (<a class="b-btn">, mostly) is a block
+       or inline-block box, so the 44px phone floor leaves its label at the
+       top. align-content centres the label without touching the box's
+       display: a block one stays full width, an inline one keeps its width,
+       and a label made of text plus a span stays one line of text (flex
+       would split it into items). Buttons centre their content natively,
+       and boxes a page already made flex are unaffected (one flex line).
+       Chrome 123 / Safari 17.4 and later; older engines keep the label at
+       the top, as before. */
+    .b-btn:not(button) { align-content: center; }
+}
+
 /* ── R2 T1 · character overview ── */
 @media (max-width: 640px) {
     /* Can Fly → Can fly now (D1): link rows with no data-click. The fit link

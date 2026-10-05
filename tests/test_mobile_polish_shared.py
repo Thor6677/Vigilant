@@ -7,7 +7,10 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
 
 1. m-tap no longer shrinks buttons: the shared .m-tap rule forces
    min-height 40px !important, but every <button> and .b-btn already has the
-   44px phone floor. `button.m-tap, .b-btn.m-tap` keeps them at 44px."""
+   44px phone floor. `button.m-tap, .b-btn.m-tap` keeps them at 44px.
+2. A non-button .b-btn (mostly <a class="b-btn">) centres its label in the
+   44px phone box with `align-content: center`, which leaves the box's
+   display, and so its width, exactly as it was."""
 import re
 
 from tests._mobile import SITE_CSS, selectors
@@ -101,3 +104,41 @@ def test_the_shared_m_tap_rule_still_gives_links_40px():
 def test_the_button_rule_is_phone_only():
     assert "button.m-tap" not in _outside_phone(_strip(_raw()))
     assert ".b-btn.m-tap" not in _outside_phone(_strip(_raw()))
+
+
+# ── 2. a.b-btn labels sit in the middle of their 44px box ─────────────
+
+_POLISH_HEAD = "/* ═══ v1.9.0 polish A — shared phone-layer fixes"
+
+
+def _polish_block() -> str:
+    """The polish-A phone block: after its header, before R2 T1."""
+    raw = _raw()
+    assert raw.count(_POLISH_HEAD) == 1
+    start, stop = raw.index(_POLISH_HEAD), raw.index(_R2_FIRST)
+    assert start < stop, "the polish-A block belongs to the R1 layer, before R2 T1"
+    blocks = _media_bodies(_strip(raw[start:stop]), PHONE)
+    assert len(blocks) == 1, "one phone @media block"
+    return blocks[0]
+
+
+def _polish_rule(sel_list: list[str]) -> str:
+    bodies = [body for sels, body in _rules(_polish_block()) if sels == sel_list]
+    assert len(bodies) == 1, f"expected one polish-A rule for {sel_list}, found {len(bodies)}"
+    return bodies[0]
+
+
+def test_non_button_b_btn_labels_are_centred_without_a_display_change():
+    body = _polish_rule([".b-btn:not(button)"])
+    assert _decl(body, "align-content") == "center"
+    # No display (block stays full width, inline-block keeps its width), no
+    # sizes, no !important: a page section that makes one flex still wins.
+    for prop in ("display", "width", "min-width", "height", "min-height", "justify-content"):
+        assert _decl(body, prop) is None, prop
+    assert "!important" not in body
+
+
+def test_the_polish_block_is_phone_only():
+    raw = _raw()
+    block = _strip(raw[raw.index(_POLISH_HEAD):raw.index(_R2_FIRST)])
+    assert _outside_phone(block).strip() == "", "every polish-A rule sits in the phone block"
