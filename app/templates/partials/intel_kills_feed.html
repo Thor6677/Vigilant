@@ -19,8 +19,11 @@
       {% if k['top_attacker_corp'] %}[{{ k['top_attacker_corp'] }}]{% endif %}
       · {% if k['gang_size'] == 1 %}solo{% else %}gang of {{ k['gang_size'] }}{% endif %}
     </div>
-    {# Phones: one truncating line, victim · ship (the rest is in the detail panel) #}
-    <div class="kf-meta-line m-only"><span class="kf-meta-victim">{{ k['victim_pilot'] }}</span> <span class="kf-meta-ship">· {{ k['victim_ship'] }}</span></div>
+    {# Phones: one truncating line, victim · ship (the rest is in the detail panel).
+       Structures and NPC victims have no pilot ("?" / "NPC"), so they show the
+       owner corp as the desktop line does. The NPC badge sits outside the
+       truncating text so a long name can't clip it. #}
+    <div class="kf-meta-line m-only"><span class="kf-meta-text"><span class="kf-meta-victim">{% if k['victim_pilot'] in ('?', 'NPC') and k['victim_corp'] %}[{{ k['victim_corp'] }}]{% else %}{{ k['victim_pilot'] }}{% endif %}</span> <span class="kf-meta-ship">· {{ k['victim_ship'] }}</span></span>{% if k.get('is_npc') %}<span class="kf-npc-badge">NPC</span>{% endif %}</div>
   </div>
   <div class="kf-isk">
     {{ "%.1f"|format(k['isk']/1e9) }}B

@@ -1734,8 +1734,12 @@
        100-row cap (inline display:none) keeps hiding rows. */
     .kf-row { grid-template-columns: 36px minmax(0, 1fr) auto; font-size: 12px; }
     .kf-row > .kf-meta { min-width: 0; }
-    .kf-meta-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .kf-meta-line > .kf-meta-ship { color: var(--muted); }
+    .kf-meta-line { display: flex; align-items: center; }
+    .kf-meta-line > .kf-meta-text {
+        min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .kf-meta-text > .kf-meta-ship { color: var(--muted); }
+    .kf-meta-line > .kf-npc-badge { flex: none; }
     .kf-row > .kf-isk { white-space: nowrap; }
     .kf-row .kf-ago { display: none; }
 
@@ -1786,6 +1790,9 @@
     /* Most valuable · last 7 days: two cards a row, smaller renders. */
     .kf-top-section > .kf-top-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .kf-top-card > .kf-top-img { width: 64px; height: 64px; }
+    /* A tapped card's detail opens below both grids, so the page scrolls it
+       up; the scroll stops clear of the sticky 46px nav. */
+    #kf-top-detail-slot { scroll-margin-top: 56px; }
 }
 /* ── end R5 T1 ── */
 

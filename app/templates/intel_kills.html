@@ -807,7 +807,16 @@
               var panel = slot.querySelector('.kf-detail');
               if (panel) {
                 void panel.offsetHeight;
-                requestAnimationFrame(function() { panel.classList.add('shown'); });
+                requestAnimationFrame(function() {
+                  panel.classList.add('shown');
+                  // Phones: the slot sits below both card grids, far under
+                  // the tapped card, so bring the detail up (site.css keeps
+                  // it clear of the sticky nav). Desktop never scrolls.
+                  if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+                    slot.scrollIntoView({ block: 'start',
+                      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+                  }
+                });
               }
             })
             .catch(function() { card.classList.remove('open'); });

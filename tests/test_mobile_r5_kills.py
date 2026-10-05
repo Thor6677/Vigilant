@@ -191,9 +191,71 @@ def test_kill_rows_carry_a_phone_only_victim_ship_line(render):
         assert line.parent.tag == "div" and "kf-meta" in line.parent.classes
         assert line.find("kf-meta-victim").all_text() == k["victim_pilot"]
         assert line.find("kf-meta-ship").all_text() == f"· {k['victim_ship']}"
-        # The corp is not on the phone line; it stays in the detail panel.
+        # A named pilot's corp is not on the phone line; it stays in the
+        # detail panel.
         if k["victim_corp"]:
             assert k["victim_corp"] not in line.all_text()
+
+
+# Structures have no pilot: the feed's enrich emits "?" and Kill Search's
+# emits "NPC". NPC-ship victims read the same. Kill Search has no row
+# template of its own; it includes the feed partial, so both renders cover it.
+_NO_PILOT = [
+    _kill(3, victim_pilot="?", victim_corp="Sample Structure Owners", victim_ship="Astrahus"),
+    _kill(4, victim_pilot="NPC", victim_corp="Sample Pirate Faction", victim_ship="Sample Frigate",
+          is_npc=True),
+    _kill(5, victim_pilot="?", victim_corp="", victim_ship="Astrahus"),
+    _kill(6, victim_pilot="NPC", victim_corp="", victim_ship="Sample Frigate", is_npc=True),
+]
+
+
+@pytest.mark.parametrize("render", [_feed, _search_results], ids=["feed", "search"])
+@pytest.mark.parametrize("i,victim", [
+    (0, "[Sample Structure Owners]"),   # structure: the owner corp, as desktop shows it
+    (1, "[Sample Pirate Faction]"),     # NPC victim with a corp
+    (2, "?"),                           # no corp to show: same bare "?" as desktop
+    (3, "NPC"),
+])
+def test_phone_line_shows_the_owner_corp_when_there_is_no_pilot(render, i, victim):
+    k = _NO_PILOT[i]
+    row = _dom(render(kills=_NO_PILOT)).find_all("kf-row")[i]
+    assert row.attrs["data-kid"] == str(k["killmail_id"])
+    line = row.find("kf-meta-line")
+    assert line.find("kf-meta-victim").all_text() == victim
+    assert line.find("kf-meta-ship").all_text() == f"· {k['victim_ship']}"
+    # Desktop still reads pilot [corp] · ship.
+    top = row.find("kf-meta-top")
+    assert top.find(tag="strong").all_text() == k["victim_pilot"]
+    if k["victim_corp"]:
+        assert f"[{k['victim_corp']}]" in top.all_text()
+
+
+@pytest.mark.parametrize("render", [_feed, _search_results], ids=["feed", "search"])
+def test_phone_line_carries_the_npc_badge(render):
+    kills = [_kill(0), _kill(1, is_npc=True), _NO_PILOT[0], _NO_PILOT[1]]
+    for k, row in zip(kills, _dom(render(kills=kills)).find_all("kf-row")):
+        line = row.find("kf-meta-line")
+        top = row.find("kf-meta-top")
+        want = 1 if k["is_npc"] else 0
+        assert len(top.find_all("kf-npc-badge")) == want, "desktop keeps its badge"
+        badges = line.find_all("kf-npc-badge")
+        assert len(badges) == want
+        if want:
+            b = badges[0]
+            assert b.tag == "span" and b.all_text() == "NPC"
+            # The badge sits beside the truncating text, not inside it, so a
+            # long name's ellipsis can't clip it.
+            assert b.parent is line
+            assert not line.find("kf-meta-text").find_all("kf-npc-badge")
+
+
+@pytest.mark.parametrize("render", [_feed, _search_results], ids=["feed", "search"])
+def test_phone_line_text_is_one_truncating_span(render):
+    for row in _dom(render()).find_all("kf-row"):
+        line = row.find("kf-meta-line")
+        texts = [c for c in line.children if "kf-meta-text" in c.classes]
+        assert len(texts) == 1, "victim and ship share one truncating span"
+        assert texts[0].find("kf-meta-victim") and texts[0].find("kf-meta-ship")
 
 
 @pytest.mark.parametrize("render", [_feed, _search_results], ids=["feed", "search"])
@@ -238,9 +300,15 @@ def test_row_css_is_one_truncating_line():
     row = rule_bodies(phone, ".kf-row")
     assert re.search(r"grid-template-columns:\s*36px minmax\(0, ?1fr\) auto", row)
     assert re.search(r"min-width:\s*0", rule_bodies(phone, ".kf-row > .kf-meta"))
+    # The line is a flex row: the text truncates, the NPC badge never shrinks.
     line = rule_bodies(phone, ".kf-meta-line")
-    for decl in (r"white-space:\s*nowrap", r"overflow:\s*hidden", r"text-overflow:\s*ellipsis"):
-        assert re.search(decl, line), decl
+    assert re.search(r"display:\s*flex", line)
+    assert re.search(r"align-items:\s*center", line)
+    text = rule_bodies(phone, ".kf-meta-line > .kf-meta-text")
+    for decl in (r"min-width:\s*0", r"white-space:\s*nowrap", r"overflow:\s*hidden",
+                 r"text-overflow:\s*ellipsis"):
+        assert re.search(decl, text), decl
+    assert re.search(r"flex:\s*none", rule_bodies(phone, ".kf-meta-line > .kf-npc-badge"))
     assert re.search(r"display:\s*none", rule_bodies(phone, ".kf-row .kf-ago"))
 
 
@@ -332,8 +400,29 @@ def test_filter_count_is_kept_in_step_with_the_filter_state(name, fn):
     assert "updateFilterCount();" in body
     persist = src.split("function persist()", 1)[1].split("\n    }\n", 1)[0]
     assert "updateFilterCount();" in persist
-    # The toggle's aria-expanded follows the fold.
-    assert "aria-expanded" in src.split("function updateFilterCount()", 1)[1]
+
+
+def _fold_observer(name):
+    """The IIFE that keeps the fold toggle's aria-expanded in step, and only
+    that: the rest of intel_kills.html also sets aria-expanded (the top-strip
+    toggle), which would let a broken observer pass."""
+    src = source(name)
+    marker = "// The toggle's aria-expanded follows the fold's is-expanded class"
+    assert src.count(marker) == 1
+    return src.split(marker, 1)[1].split("})();", 1)[0]
+
+
+@pytest.mark.parametrize("name", ["intel_kills.html", "intel_kills_search.html"],
+                         ids=["feed", "search"])
+def test_fold_toggle_aria_expanded_follows_the_fold(name):
+    """toggleExpanded (actions.js) flips .is-expanded on the fold; a
+    MutationObserver on the fold's class mirrors it onto the toggle."""
+    body = _fold_observer(name)
+    assert "document.querySelector('.kf-fold')" in body
+    assert "fold.querySelector('.kf-fold-toggle')" in body
+    assert "new MutationObserver(" in body
+    assert "btn.setAttribute('aria-expanded', fold.classList.contains('is-expanded') ? 'true' : 'false')" in body
+    assert ".observe(fold, { attributes: true, attributeFilter: ['class'] })" in body
 
 
 def test_search_filter_count_leaves_out_sort_and_modes():
@@ -405,6 +494,37 @@ def test_top_cards_keep_their_image_size_attributes():
     assert len(imgs) == 12
     for img in imgs:
         assert img.attrs.get("width") == "96" and img.attrs.get("height") == "96"
+
+
+def _top_card_fetch():
+    """bindTopCards' fetch handler: from the fetch to its .catch."""
+    src = source("intel_kills.html")
+    body = src.split("function bindTopCards()", 1)[1]
+    return body.split("fetch('/intel/kills/' + kid + '/detail')", 1)[1].split(".catch(", 1)[0]
+
+
+def test_top_card_detail_scrolls_into_view_on_phones_only():
+    """The detail slot sits below both card grids, far under a top card on a
+    phone, so a tap there would seem to do nothing. Phones scroll the slot
+    to the top once the panel is in; desktop never scrolls."""
+    body = _top_card_fetch()
+    assert body.index("slot.innerHTML = html;") < body.index("slot.scrollIntoView(")
+    assert body.count("scrollIntoView(") == 1
+    gate = "if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {"
+    assert body.count(gate) == 1
+    # The scroll is the gate's whole body.
+    inside = body.split(gate, 1)[1].split("\n                  }", 1)[0]
+    assert "slot.scrollIntoView(" in inside
+    assert "block: 'start'" in inside
+    assert "window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'" in inside
+    assert "scrollIntoView(" not in body.replace(inside, "")
+
+
+def test_top_card_detail_scroll_clears_the_sticky_nav():
+    """The 46px nav is sticky; the scroll stops 56px down, as R4's LP offers
+    and R6's fitting stats do."""
+    phone, _ = phone_block(_section("T1"))
+    assert re.search(r"scroll-margin-top:\s*56px", rule_bodies(phone, "#kf-top-detail-slot"))
 
 
 def test_top_cards_css_two_columns_smaller_render():
