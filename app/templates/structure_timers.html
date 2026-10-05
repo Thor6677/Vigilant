@@ -117,7 +117,7 @@
                 </div>
             </div>
 
-            <button type="submit" class="b-btn m-tap" style="align-self:flex-start;padding:0.3rem 1rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">
+            <button type="submit" class="b-btn st-tap" style="align-self:flex-start;padding:0.3rem 1rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">
                 Add Timer
             </button>
         </form>
@@ -136,7 +136,7 @@
             <form method="POST" action="/structure-timers/acl/create" class="st-form m-stack" style="display:flex;gap:0.5rem;flex:1;align-items:center;">
                 <input type="text" name="name" placeholder="New group name…" required
                        style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                <button type="submit" class="b-btn m-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Create</button>
+                <button type="submit" class="b-btn st-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Create</button>
             </form>
         </div>
 
@@ -147,7 +147,7 @@
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/delete"
                       data-confirm="Delete this ACL group? Timers using it will become visible to everyone.">
-                    <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                    <button class="b-btn st-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
 
@@ -164,7 +164,7 @@
                 <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
                 <span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/remove/{{ entry.id }}" style="display:inline;">
-                    <button class="b-btn m-tap" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                    <button class="b-btn st-tap" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
             {% endfor %}
@@ -185,7 +185,7 @@
                 </div>
                 <input type="hidden" id="acl-id-{{ group.id }}" value="">
                 <input type="hidden" id="acl-name-{{ group.id }}" value="">
-                <button class="b-btn m-tap" data-click="addACLEntry" data-group-id="{{ group.id }}"
+                <button class="b-btn st-tap" data-click="addACLEntry" data-group-id="{{ group.id }}"
                         style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Add</button>
             </div>
         </div>
@@ -200,11 +200,11 @@
 {% if active_timers %}
 <div class="b-section st-filters" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
     <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Filter:</span>
-    <button class="range-btn m-tap is-active" data-click="filterTimers" data-filter="all">All</button>
-    <button class="range-btn m-tap" data-click="filterTimers" data-filter="hostile">Hostile</button>
-    <button class="range-btn m-tap" data-click="filterTimers" data-filter="friendly">Friendly</button>
+    <button class="range-btn st-tap is-active" data-click="filterTimers" data-filter="all">All</button>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="hostile">Hostile</button>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="friendly">Friendly</button>
     <span style="color:var(--border);">|</span>
-    <button class="range-btn m-tap" data-click="filterTimers" data-filter="critical">Critical</button>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="critical">Critical</button>
 </div>
 {% endif %}
 
@@ -214,7 +214,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Active Timers</span>
-            <button data-click="copyAllTimers" class="b-btn m-tap" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
+            <button data-click="copyAllTimers" class="b-btn st-tap" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
         </div>
 
         {% for t in active_timers %}
@@ -307,15 +307,15 @@
             <div class="m-only" data-m-label="Actions">
                 <div class="st-actions">
                     {% if can_edit %}
-                    <button type="button" class="b-btn m-tap" data-click="editTimer" data-timer-id="{{ t.id }}"
+                    <button type="button" class="b-btn st-tap" data-click="editTimer" data-timer-id="{{ t.id }}"
                             style="padding:0 0.6rem;border:1px solid var(--muted);color:var(--muted);">Edit</button>
                     {% endif %}
-                    <a href="/tools/discordtime#t={{ t.timer_expires.timestamp() | int }}" class="b-btn m-tap"
+                    <a href="/tools/discordtime#t={{ t.timer_expires.timestamp() | int }}" class="b-btn st-tap"
                        style="padding:0 0.6rem;border:1px solid var(--muted);color:var(--muted);text-decoration:none;"
                        title="Generate Discord timestamp">Discord</a>
                     {% if can_edit %}
                     <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-confirm="Delete this timer?">
-                        <button class="b-btn m-tap" aria-label="Delete timer"
+                        <button class="b-btn st-tap" aria-label="Delete timer"
                                 style="padding:0 0.6rem;border:1px solid var(--danger);color:var(--danger);">&times;</button>
                     </form>
                     {% endif %}
@@ -382,8 +382,8 @@
                     </div>
                 </div>
                 <div style="display:flex;gap:0.5rem;">
-                    <button type="submit" class="b-btn m-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
-                    <button type="button" class="b-btn m-tap" data-click="editTimer" data-timer-id="{{ t.id }}" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
+                    <button type="submit" class="b-btn st-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
+                    <button type="button" class="b-btn st-tap" data-click="editTimer" data-timer-id="{{ t.id }}" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
                 </div>
             </form>
         </div>
@@ -418,7 +418,7 @@
             </span>
             <span class="m-only" data-m="key" style="color:var(--muted);">{{ t.timer_expires.strftime('%m-%d') }}</span>
             <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-m-label="Delete" style="flex:none;">
-                <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                <button class="b-btn st-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>
         {% endfor %}

@@ -1839,6 +1839,16 @@
     .timer-row > .st-name { font-weight: 600; color: var(--text); }
     .timer-row > .st-cd { font-variant-numeric: tabular-nums; }
 
+    /* The page's small buttons (and the a.b-btn Discord link): wider, 12px
+       and centred. No height here: every button and .b-btn already gets the
+       phone layer's 44px min-height, and the shared .m-tap would force it
+       down to 40px !important. inline-flex centres the link's text, since
+       .b-btn is display:block. */
+    .st-tap {
+        min-width: 44px; font-size: 12px !important;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+
     /* Actions (D4 A): Edit, Discord and × side by side. .b-btn's flex:1
        would stretch each across the open row. */
     .timer-row > [data-m-label] > .st-actions {
@@ -1848,11 +1858,11 @@
     .st-actions > form { display: flex; margin: 0; }
 
     /* Archived rows (D5 A): both keys at 12px; the name is the desktop cell,
-       inline 10px. Delete is a 40px × that mustn't stretch either. */
+       inline 10px. Delete is a 44px × that mustn't stretch either. */
     .st-arch > [data-m="key"] { font-size: 12px !important; }
-    .st-arch > [data-m-label] > .m-tap { flex: none; }
+    .st-arch > [data-m-label] > .st-tap { flex: none; }
 
-    /* Filter buttons are m-tap (12px); less tracking than the desktop
+    /* Filter buttons are st-tap (12px); less tracking than the desktop
        0.18em keeps the 12px labels compact. */
     .st-filters > .range-btn { letter-spacing: 0.1em; }
 

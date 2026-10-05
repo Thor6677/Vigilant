@@ -6,16 +6,18 @@ user decisions D3 A, D4 A, D5 A).
   phone-only .timer-countdown copy that the page's 1s ticker already
   reaches. The open row lists Name, System, Type, Phase, Priority, EVE time,
   Local, Owner, Notes and Source (when present), then Actions.
-- Actions sit inside the opened row (D4 A): 40px Edit, Discord and ×. The
-  delete keeps its form and data-confirm.
+- Actions sit inside the opened row (D4 A): Edit, Discord and × at the
+  phone layer's 44px floor. The delete keeps its form and data-confirm.
 - The filter and Copy for Discord hide and skip rows through the `hidden`
   property. The phone grid's display:grid !important beats an inline
   display:none, so the old style.display writes would stop filtering on
   phones. One !important rule hides a [hidden] row at every width.
 - Archived timers are m-rows keyed on name and a short MM-DD date (D5 A),
   clamped to 10 with "Show all N".
-- The Add Timer, Edit and ACL forms stack to one column with 16px fields;
-  the small buttons become 40px tap targets.
+- The Add Timer, Edit and ACL forms stack to one column with 16px fields.
+  The small buttons become tap targets through the page's own `st-tap`, not
+  the shared `m-tap`: m-tap forces 40px !important, which would shrink a
+  button below the 44px every button and .b-btn already gets on phones.
 
 Desktop must render exactly as before (D21): every phone-only cell is
 m-only, the desktop blocks keep their markup, and every new hook class has
@@ -255,7 +257,8 @@ def test_actions_cell_holds_edit_discord_and_the_delete_form():
     buttons = [a for t, a in own if t in ("button", "a")]
     assert len(buttons) == 3
     for a in buttons:
-        assert "m-tap" in _cls(a) and "b-btn" in _cls(a)
+        assert "st-tap" in _cls(a) and "b-btn" in _cls(a)
+        assert "m-tap" not in _cls(a)
     # Someone else's timer, viewer not privileged: Discord only.
     assert [t for t, _ in other if t in ("button", "a", "form")] == ["a"]
 
@@ -515,7 +518,7 @@ def test_archived_row_labels_and_delete():
     assert delete["tag"] == "form"
     assert delete["attrs"]["action"] == f"/structure-timers/{t.id}/delete"
     (btn,) = delete["kids"]
-    assert "m-tap" in _cls(btn)
+    assert "st-tap" in _cls(btn) and "m-tap" not in _cls(btn)
 
 
 def test_archived_list_shows_all_past_ten():
@@ -616,7 +619,7 @@ def test_small_controls_are_tap_targets(text, count):
     got = [a for t, a in _buttons(_render()) if t == text]
     assert len(got) == count
     for a in got:
-        assert "m-tap" in _cls(a), a
+        assert "st-tap" in _cls(a), a
 
 
 def test_every_x_a_phone_can_see_is_a_tap_target():
@@ -625,7 +628,7 @@ def test_every_x_a_phone_can_see_is_a_tap_target():
     keeps its markup."""
     xs = [a for t, a in _buttons(_render()) if t == "×"]
     assert len(xs) == 1 + 1 + 2 + 2 + 12
-    desktop = [a for a in xs if "m-tap" not in _cls(a)]
+    desktop = [a for a in xs if "st-tap" not in _cls(a)]
     assert len(desktop) == 2
     for a in desktop:
         assert a["style"].startswith("padding:0.15rem 0.35rem;")
@@ -638,6 +641,20 @@ def test_desktop_row_controls_keep_their_markup():
     assert html.count('<button class="b-btn" data-click="editTimer" data-timer-id="11"') == 1
     assert html.count('<button class="b-btn" style="padding:0.15rem 0.35rem;'
                       'border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>') == 2
+
+
+def test_no_button_or_b_btn_carries_m_tap():
+    """The shared .m-tap rule forces min-height 40px !important, which beats
+    the phone layer's 44px floor on button and .b-btn. Nothing on this page
+    may carry it on a button or a .b-btn (the Discord link is an
+    a.b-btn)."""
+    html = _render(is_privileged=True)
+    content = html[html.index('<h1 class="b-page-title">Structure Timers</h1>'):]
+    tagged = [(t, a) for t, a in _tags(content) if "m-tap" in _cls(a)
+              and (t == "button" or "b-btn" in _cls(a))]
+    assert tagged == []
+    # ...and the page's own tap class reaches every one the phone shows.
+    assert len([a for t, a in _tags(content) if "st-tap" in _cls(a)]) > 0
 
 
 def test_forms_stack_on_phones():
@@ -709,16 +726,38 @@ def test_action_buttons_have_a_visible_border():
     assert "border:1px solid var(--danger)" in delete["style"]
 
 
-def test_css_tap_targets_are_40px():
-    """m-tap (the contract's 40px tap target) sizes the controls; open rows
-    keep them 40px and stop .b-btn's flex:1 stretching them."""
-    with open(SITE_CSS, encoding="utf-8") as fh:
-        css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
-    shared = rule_bodies(css, ".m-tap")
-    assert "min-width: 40px !important" in shared and "min-height: 40px !important" in shared
+def test_css_tap_class_keeps_the_44px_floor():
+    """st-tap widens and enlarges the small buttons but sets no height of its
+    own, so every button and .b-btn keeps the phone layer's 44px
+    min-height. inline-flex centres the Discord link's text (.b-btn is
+    display:block). Open rows stop .b-btn's flex:1 stretching them."""
+    body = rule_bodies(_phone(), ".st-tap")
+    assert "min-width: 44px" in body
+    assert "font-size: 12px !important" in body
+    assert "display: inline-flex" in body
+    assert "align-items: center" in body and "justify-content: center" in body
+    assert "height" not in body
     assert "flex: none" in rule_bodies(_phone(), ".st-actions > .b-btn")
     assert "flex: none" in rule_bodies(_phone(), ".st-actions > form > .b-btn")
-    assert "flex: none" in rule_bodies(_phone(), ".st-arch > [data-m-label] > .m-tap")
+    assert "flex: none" in rule_bodies(_phone(), ".st-arch > [data-m-label] > .st-tap")
+
+
+def test_css_sets_no_height_under_44px_on_a_control():
+    """No rule in the section lowers a button, .b-btn, input or select below
+    the 44px floor. The one exception is the Side radio, whose label is the
+    tap target (test_css_side_radios_sit_on_40px_labels)."""
+    phone = _phone()
+    for prelude, body in re.findall(r"([^{}]+)\{([^{}]*)\}", phone):
+        for m in re.finditer(r"(?<![\w-])(min-height|height)\s*:\s*(\d+(?:\.\d+)?)(px)?", body):
+            if float(m.group(2)) >= 44:
+                continue
+            for sel in selectors(prelude):
+                if sel == '.st-form input[type="radio"]':
+                    continue
+                last = re.split(r"[\s>+~]+", sel.strip())[-1]
+                assert not re.match(r"(button|input|select|textarea)\b", last), (sel, m.group(0))
+                assert ".b-btn" not in last and ".st-tap" not in last and ".range-btn" not in last, \
+                    (sel, m.group(0))
 
 
 def test_css_row_keys_and_lead():
