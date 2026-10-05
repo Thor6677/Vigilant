@@ -570,6 +570,7 @@ def test_watch_buttons_and_tracker_refresh_are_sized_without_m_tap():
     w = rule_bodies(body, ".w-row .b-btn")
     assert "min-width: 44px" in w and "font-size: 12px !important" in w
     assert "display: inline-flex" in w and "align-items: center" in w
+    assert "flex: none" in w, ".b-btn's flex:1 would stretch zkb and squeeze the name"
     assert "min-height" not in w and "height:" not in w, "the 44px floor sets the height"
     r = rule_bodies(body, "#wht-refresh")
     assert "font-size: 12px !important" in r and "height" not in r

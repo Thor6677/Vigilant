@@ -1864,8 +1864,10 @@
 
     /* Watchlist × and zkb: buttons and a.b-btn get 44px height from the
        global floor (m-tap would force 40px); a 44px width keeps × square,
-       and inline-flex centres the label in the box. .w-row is only here. */
-    .w-row .b-btn { min-width: 44px; font-size: 12px !important; display: inline-flex; align-items: center; justify-content: center; }
+       and inline-flex centres the label in the box. flex:none stops .b-btn's
+       flex:1 stretching zkb across the row and squeezing the hunter's name.
+       .w-row is only here. */
+    .w-row .b-btn { flex: none; min-width: 44px; font-size: 12px !important; display: inline-flex; align-items: center; justify-content: center; }
 
     /* WH Tracker: thumb-sized character picker, Refresh now at 12px (its
        44px height is the global button floor), and the 28px system name
