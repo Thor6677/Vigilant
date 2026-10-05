@@ -436,7 +436,7 @@ def test_css_buttons_keep_the_44px_phone_floor():
                 ".wsp-zoom > button", ".wf-fold-toggle"):
         rules = rule_bodies(body, sel)
         assert rules, sel
-        heights = re.findall(r"(?:min-|max-)?height\s*:\s*(\d+)px", rules)
+        heights = re.findall(r"(?<![\w-])(?:min-|max-)?height\s*:\s*(\d+)px", rules)
         assert all(int(h) >= 44 for h in heights), (sel, heights)
 
 
@@ -508,6 +508,13 @@ def test_css_pinned_tables_keep_every_hairline():
         assert "padding: 3px 5px" in rule_bodies(body, sel), sel
     eff = rule_bodies(body, ".we-scroll > .we-table")
     assert "border-collapse: separate" in eff and "border-spacing: 0" in eff
+    # Whole-pixel row heights everywhere a sticky column sits (verified on a
+    # fresh load: an injected <style> forces a repaint that hides the gaps).
+    assert "line-height: 15px" in rule_bodies(body, ".wm-scroll > .wm-table thead th")
+    th = rule_bodies(body, ".we-scroll > .we-table th")
+    td = rule_bodies(body, ".we-scroll > .we-table td")
+    assert "padding: 6px 8px" in th and "line-height: 15px" in th
+    assert "padding: 6px 8px" in td and "line-height: 18px" in td
 
 
 def test_full_tool_link_meets_the_link_floor():

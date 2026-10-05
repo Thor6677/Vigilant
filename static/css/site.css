@@ -2010,7 +2010,9 @@
        the sticky From cells don't drop a hairline at fractional offsets. */
     .wm-scroll > .wm-table th, .wm-scroll > .wm-table td { border-width: 0 1px 1px 0; padding: 3px 5px; }
     .wm-scroll > .wm-table tr > :first-child { border-left-width: 1px; }
-    .wm-scroll > .wm-table thead th { border-top-width: 1px; }
+    /* A whole 23px header row (9px text at line-height 15px), so the line
+       under the sticky corner isn't lost either. */
+    .wm-scroll > .wm-table thead th { border-top-width: 1px; line-height: 15px; }
     .wm-table th:first-child, .wm-table td.wm-from { position: sticky; left: 0; z-index: 1; }
     .wm-table td.wm-from { background: var(--bg); }
     .wm-table td a {
@@ -2029,6 +2031,10 @@
     /* Separate borders, as on the types matrix: collapsed borders under a
        sticky column drop some row lines at fractional row heights. */
     .we-scroll > .we-table { border-collapse: separate; border-spacing: 0; }
+    /* Whole-pixel padding and line-heights: with rem padding and 1.65 line
+       heights some rows still landed on fractional offsets. */
+    .we-scroll > .we-table th { padding: 6px 8px; line-height: 15px; }
+    .we-scroll > .we-table td { padding: 6px 8px; line-height: 18px; }
     .we-table th:first-child, .we-table td:first-child {
         position: sticky; left: 0; z-index: 1;
         width: 8.5rem; min-width: 8.5rem; white-space: normal;
