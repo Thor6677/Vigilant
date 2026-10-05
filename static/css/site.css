@@ -1183,9 +1183,9 @@
        card is its title and a one-line description ending in an ellipsis
        (the full text is on the tool's own page). The features list is
        m-hide in the markup, so the description's bottom margin goes too.
-       The URL label, subtitle and external arrow go from 9–10px to 11px.
-       !important: the page's own <style> loads after this file, and the
-       subtitle's size is inline. */
+       The URL label and subtitle go from 9–10px to 11px. !important: the
+       page's own <style> loads after this file, and the subtitle's size is
+       inline. */
     .tl-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 0.5rem !important; }
     .tl-card { padding: 0.75rem !important; }
     .tl-card-title { flex-wrap: wrap; }
@@ -1194,7 +1194,6 @@
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
     }
     .tl-card-url, .tl-subtitle { font-size: 11px !important; }
-    .tl-card-external::after { font-size: 11px !important; }
 
     /* Manufacturing controls stack (m-stack); Runs and the ME/TE sliders,
        and a component panel's ME slider, go full width over their inline
@@ -1231,6 +1230,8 @@
        indent 0.75rem instead of 2.25–3rem, so a build three levels deep
        still fits. */
     .mfg-comp { margin-left: 0.75rem !important; }
+    /* A component panel's "× N" stays whole beside a long product name. */
+    .mfg-comp-qty { white-space: nowrap; flex: none; }
     .mfg-build { padding-left: 0.75rem !important; }
 
     /* Total rows: label · value. The spacer columns are m-hide; the label
@@ -1239,8 +1240,9 @@
     .mfg-total > :first-child { flex: 1 1 auto !important; min-width: 0; }
     .mfg-total > :not(:first-child) { flex: none !important; }
 
-    /* Shopping list: Copy / Send Minerals / Send to Hauling wrap. */
-    .mfg-shop-actions { flex-wrap: wrap; }
+    /* Shopping list: Copy / Send Minerals / Send to Hauling wrap, at least
+       8px apart (the inline gap is 6px). */
+    .mfg-shop-actions { flex-wrap: wrap; gap: 0.5rem !important; }
 }
 /* ── end R3 T1 ── */
 

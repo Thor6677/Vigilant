@@ -329,6 +329,9 @@ def test_component_panel_phone_hooks():
     settings = panel.children[0]
     assert "m-stack" in settings.classes, "the settings stack on phones"
     assert settings.find("mfg-fill") == [root.by_id("sub-me-2002")]
+    # "× N" stays whole beside a long product name.
+    qty, = settings.find("mfg-comp-qty")
+    assert qty.full_text() == f"× {_NEEDED:,}" and "b-muted-sm" in qty.classes
     parent_btn, = [n for n in settings.all() if n.attrs.get("data-click") == "copyParentSettings"]
     assert "m-tap" in parent_btn.classes
     sub_btn, = [n for n in root.all() if n.attrs.get("data-click") == "toggleSubComponent"]
@@ -475,9 +478,14 @@ def test_t1_css_landing_grid_is_one_column():
     css = _phone()
     # !important: the landing page's own <style> loads after site.css.
     assert _decl(rule_bodies(css, ".tl-grid"), "grid-template-columns", "minmax(0, 1fr) !important")
-    for sel in (".tl-card-url", ".tl-subtitle", ".tl-card-external::after"):
+    for sel in (".tl-card-url", ".tl-subtitle"):
         assert _decl(rule_bodies(css, sel), "font-size", "11px !important"), sel
     assert _decl(rule_bodies(css, ".tl-card-title"), "flex-wrap", "wrap")
+    # Compact cards: the desktop padding is 1rem 1.1rem.
+    assert _decl(rule_bodies(css, ".tl-card"), "padding", "0.75rem !important")
+    # No landing card is external (_landing_cards never sets it), so no rule
+    # for its arrow.
+    assert not rule_bodies(css, ".tl-card-external::after")
 
 
 def test_t1_css_landing_description_is_one_line():
@@ -494,11 +502,14 @@ def test_t1_css_controls_go_full_width():
     assert _decl(rule_bodies(css, ".mfg-fill"), "width", "100% !important")
     pick = rule_bodies(css, ".mfg-pick")
     assert _decl(pick, "min-height", "40px")
+    assert _decl(rule_bodies(css, ".mfg-pick > span"), "font-size", "12px !important")
 
 
 def test_t1_css_nested_panels_indent_less():
     css = _phone()
     assert _decl(rule_bodies(css, ".mfg-comp"), "margin-left", "0.75rem !important")
+    qty = rule_bodies(css, ".mfg-comp-qty")
+    assert _decl(qty, "white-space", "nowrap") and _decl(qty, "flex", "none")
     assert _decl(rule_bodies(css, ".mfg-build"), "padding-left", "0.75rem !important")
 
 
@@ -531,4 +542,7 @@ def test_t1_css_total_rows_and_shopping_buttons():
     css = _phone()
     assert _decl(rule_bodies(css, ".mfg-total > :first-child"), "flex", "1 1 auto !important")
     assert _decl(rule_bodies(css, ".mfg-total > :not(:first-child)"), "flex", "none !important")
-    assert _decl(rule_bodies(css, ".mfg-shop-actions"), "flex-wrap", "wrap")
+    actions = rule_bodies(css, ".mfg-shop-actions")
+    assert _decl(actions, "flex-wrap", "wrap")
+    # At least 8px between the wrapped 44px buttons; the inline gap is 6px.
+    assert _decl(actions, "gap", "0.5rem !important")
