@@ -190,7 +190,8 @@ def test_stockpile_remove_sits_inside_the_opened_row():
         assert btn["hx-delete"] == f"/tools/stockpiles/{data['id']}"
         assert btn["hx-target"] == "#sp-rows" and btn["hx-swap"] == "innerHTML"
         assert btn["hx-confirm"] == "Remove this stockpile target?"
-        assert {"b-btn", "sp-del", "m-tap"} <= set(_classes(btn)), "a 40px tap target"
+        assert {"b-btn", "sp-del"} <= set(_classes(btn))
+        assert "m-tap" not in _classes(btn), "m-tap's 40px would shrink the 44px button"
 
 
 def test_stockpile_table_is_an_m_table_with_an_m_head():
@@ -403,7 +404,8 @@ def test_farm_remove_sits_inside_the_opened_row():
         assert btn["hx-delete"] == f"/tools/skill-farm/pilots/{data['id']}"
         assert btn["hx-target"] == "#skill-farm-content"
         assert btn["hx-confirm"] == "Remove this farm pilot?"
-        assert {"b-btn", "sf-del", "m-tap"} <= set(_classes(btn))
+        assert {"b-btn", "sf-del"} <= set(_classes(btn))
+        assert "m-tap" not in _classes(btn), "m-tap's 40px would shrink the 44px button"
 
 
 @pytest.mark.parametrize("status,message", [("no_scope", "Needs the skills permission"),
@@ -639,9 +641,14 @@ def test_css_stockpile_tint_moves_to_the_row_and_covered_dash_is_muted():
 
 @pytest.mark.parametrize("sel", [".sp-table tr.m-row > td > .sp-del",
                                  f"{_FARM} tr.m-row > td > .sf-del"])
-def test_css_remove_keeps_its_40px_in_an_open_row(sel):
-    """.b-btn is flex:1, which would stretch the × across the open row."""
-    assert _decls(rule_bodies(_phone(), sel))["flex"] == "none"
+def test_css_remove_is_a_44px_square_in_an_open_row(sel):
+    """.b-btn is flex:1, which would stretch the × across the open row. The
+    global phone button rule gives the height; this rule only sets the
+    width, so nothing caps it under 44px."""
+    body = _decls(rule_bodies(_phone(), sel))
+    assert body["flex"] == "none"
+    assert body["min-width"] == "44px"
+    assert "min-height" not in body and "height" not in body
 
 
 def test_css_base_sp_input_is_wider_in_an_opened_row():

@@ -116,7 +116,7 @@
                     <td class="m-only sf-note" data-m-label="Note">{{ r.notes|join(" · ") }}</td>
                     {% endif %}
                     <td data-m-label="Remove">
-                        <button type="button" class="b-btn sf-del m-tap"
+                        <button type="button" class="b-btn sf-del"
                                 hx-delete="/tools/skill-farm/pilots/{{ r.id }}"
                                 hx-target="#skill-farm-content" hx-swap="innerHTML"
                                 hx-confirm="Remove this farm pilot?"

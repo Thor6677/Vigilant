@@ -1500,10 +1500,11 @@
     .sp-table tr.m-row.is-under > td { background: none; }
     .sp-table tr.m-row:not(.is-under) > .sp-deficit { color: var(--muted); }
 
-    /* Remove (both tables): .b-btn's flex:1 would stretch the 40px ×
-       across the whole open row. */
+    /* Remove (both tables): a 44px square ×. The height is the global
+       phone button rule's (no m-tap, whose 40px would shrink it); .b-btn's
+       flex:1 would stretch it across the whole open row. */
     .sp-table tr.m-row > td > .sp-del,
-    #skill-farm-content .sf-table tr.m-row > td > .sf-del { flex: none; }
+    #skill-farm-content .sf-table tr.m-row > td > .sf-del { flex: none; min-width: 44px; }
 
     /* Skill Farm, Base SP in an open row: the desktop 100px box holds 7
        digits at 12px. Phones force inputs to 16px, so it widens to hold

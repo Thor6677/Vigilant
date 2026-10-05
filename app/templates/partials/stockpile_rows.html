@@ -37,7 +37,7 @@
             </td>
             <td class="sp-note"{% if r.note %} data-m-label="Note"{% endif %}>{{ r.note }}</td>
             <td style="text-align:right;" data-m-label="Remove">
-                <button type="button" class="b-btn sp-del m-tap"
+                <button type="button" class="b-btn sp-del"
                         hx-delete="/tools/stockpiles/{{ r.id }}"
                         hx-target="#sp-rows" hx-swap="innerHTML"
                         hx-confirm="Remove this stockpile target?"
