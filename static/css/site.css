@@ -2617,11 +2617,13 @@
     .fit-added-note.is-shown { opacity: 1; }
 
     /* Slot, drone, implant and booster controls (D11 A), and the stats
-       %/EHP toggles: square 44px targets with a 12px glyph. The global phone
-       button rule supplies the 44px height; no min-height here, since a
-       class would outrank that floor. */
+       %/EHP toggles: 40px wide, 44px tall, with a 12px glyph. The global
+       phone button rule supplies the 44px height; no min-height here, since
+       a class would outrank that floor. 40px rather than 44px leaves a high
+       slot's name 146px at 360px, enough for "200mm AutoCannon II" whole
+       (at 44px it was 134px and lost the "II"). */
     .fit-ctl {
-        min-width: 44px; display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; display: inline-flex; align-items: center; justify-content: center;
         vertical-align: middle; font-size: 12px !important;
     }
     /* The m-only name copy: the module name truncates, and a loaded charge
@@ -2638,19 +2640,23 @@
     /* Pinned summary bar (D10 A). Below the nav (z 50) and the browser
        backdrop (49); it is hidden anyway while those layers are open.
        The gap is only a minimum: space-between spreads ordinary values
-       exactly as before, and the tighter floor lets spool DPS beside a
-       capital's EHP fit on one line from 375px up. Past that, each value
-       gives up its tail to an ellipsis instead of pushing Cap off-screen. */
+       across the bar. Values are 12px and keys 11px. Measured with the
+       JetBrains Mono webfont: a capital's spool DPS, EHP and cap time
+       ("12,345 / 23,456", "12,345,678", "12m34s") need 371px, so they fit
+       whole from 375px up (at 13px they needed 384px); the largest values
+       ("98,765 / 187,654", "123,456,789") need 385px and fit from 390px.
+       Below that, each value gives up its tail to an ellipsis instead of
+       pushing Cap off-screen. Ordinary values fit at every width. */
     .fit-sumbar {
         position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
         display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
         width: 100%; min-height: 44px; margin: 0; padding: 0 1rem env(safe-area-inset-bottom, 0px);
         border: 0; border-top: 1px solid var(--accent); background: var(--surface);
-        color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+        color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
     }
     .fit-sumbar[hidden], .fit-sumbar.is-covered { display: none !important; }
     .fit-sumbar-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fit-sumbar-k { margin-right: 0.35rem; color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .fit-sumbar-k { margin-right: 0.35rem; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
     .fit-sumbar-v { color: var(--accent); font-weight: 600; }
     .fit-sumbar-v[data-sumbar="cap"] { color: var(--success); }
     .fit-sumbar-v[data-sumbar="cap"].is-bad { color: var(--danger); }

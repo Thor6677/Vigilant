@@ -12,13 +12,14 @@
      refreshed on every #stats-panel write, including the error path, and
      tapping it scrolls to #stats-panel. It hides while the browser overlay,
      a modal or the charge selector is open, and the page gets bottom
-     padding so the bar never covers the last controls. Extreme values
-     (spool DPS, a capital's EHP) truncate with an ellipsis rather than
-     push the bar past the screen edge.
+     padding so the bar never covers the last controls. Values are 12px
+     and keys 11px; extreme values (spool DPS, a capital's EHP) truncate
+     with an ellipsis rather than push the bar past the screen edge.
   3. Slot rows (D11 A). The state dot, charge button and remove × are
-     square 44px targets: the global phone button rule gives the height and
-     .fit-ctl the width (it never sets a height, which would outrank that
-     44px floor). The `i` button is m-hide, since the module icon opens
+     40px wide and 44px tall: the global phone button rule gives the height
+     and .fit-ctl the 40px width (it never sets a height, which would
+     outrank that 44px floor). 40px rather than 44px leaves a high slot's
+     name room for "200mm AutoCannon II" at 360px. The `i` button is m-hide, since the module icon opens
      info. A phone-only copy of the name truncates, with the loaded charge
      as a muted second line. The desktop name span is m-hide, untouched.
      Drones, implants and boosters get the same controls.
@@ -44,7 +45,7 @@ import pytest
 import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.routes import fitting as fitting_mod
 from tests._mobile import (SITE_CSS, VOID, css_section, norm, phone_block,
-                           render_page, rule_bodies)
+                           render_page, rule_bodies, selectors)
 
 _section = functools.partial(css_section, release="R6")
 
@@ -321,6 +322,11 @@ def test_summary_bar_css():
     bar = _decls(".fit-sumbar")
     assert bar["position"] == "fixed" and bar["bottom"] == "0"
     assert bar["display"] == "flex"
+    # 12px values and 11px keys: a capital's spool DPS, EHP and cap time fit
+    # whole from 375px (at 13px they needed 390px), and no text in the bar
+    # is under the 11px phone floor.
+    assert bar["font-size"] == "12px"
+    assert _decls(".fit-sumbar-k")["font-size"] == "11px"
     # Long values (spool DPS beside a capital's EHP) once pushed Cap past a
     # 320px screen. The gap is a floor under space-between, so ordinary
     # values sit where they did; each item truncates rather than overflow.
@@ -380,10 +386,11 @@ def test_stats_summary_line_wraps_on_phones():
     assert v["flex-wrap"] == "wrap" and v["row-gap"].endswith("!important")
 
 
-def test_stats_unit_toggles_are_44px_tap_targets():
+def test_stats_unit_toggles_share_the_slot_control_hook():
     _, nodes = _summary()
     for id_ in ("fr-toggle", "def-toggle"):
-        # m-tap's 40px !important would shrink these buttons below the floor.
+        # .fit-ctl: 40px wide, 44px tall from the button floor. m-tap's 40px
+        # !important height would shrink these buttons below that floor.
         assert _by_id(nodes, id_)["cls"] == ["fit-ctl"], id_
 
 
@@ -446,10 +453,26 @@ def test_implant_and_booster_remove_carry_the_tap_hook(script):
     assert "fit-ctl" in _classes_in(boo, 'data-click="removeBooster"')
 
 
+def _global_phone_button_floor():
+    """min-height of the global phone rule for `button` (outside every task
+    section): the floor .fit-ctl relies on for its 44px height."""
+    with open(SITE_CSS, encoding="utf-8") as fh:
+        css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+    m = re.search(r"@media \(max-width: 640px\) \{", css)
+    floors = [b for sel, b in re.findall(r"([^{}]+)\{([^{}]*)\}", css[m.start():])
+              if "button" in selectors(sel) and "min-height" in b]
+    assert floors, "no phone rule gives every button a min-height"
+    return norm(floors[0].split("min-height:", 1)[1].split(";", 1)[0])
+
+
 def test_slot_control_css():
     ctl = _decls(".fit-ctl")
-    assert ctl["min-width"] == "44px"
-    assert "min-height" not in ctl, "the global button rule gives 44px; a class would outrank it"
+    # 40px wide (D11 A) so a high slot keeps "200mm AutoCannon II" whole at
+    # 360px; 44px tall from the global button floor, which a class-level
+    # min-height would outrank.
+    assert ctl["min-width"] == "40px"
+    assert "min-height" not in ctl and "height" not in ctl, "the global button rule gives 44px; a class would outrank it"
+    assert _global_phone_button_floor() == "44px"
     assert ctl["display"] == "inline-flex"
     name = _decls(".fit-name")
     assert name["min-width"] == "0" and name["flex-direction"] == "column"
