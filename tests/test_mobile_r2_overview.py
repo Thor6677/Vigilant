@@ -616,6 +616,18 @@ def test_css_isk_row_becomes_label_value_lines():
     assert label.strip() == "font-size: 11px !important;"
 
 
+def test_css_small_text_is_11px():
+    sec = _sec()
+    for sel in ("span.card-title", "div.card-title", "span.sec-status", "div.skill-time",
+                "span.asset-location-count"):
+        assert "font-size: 11px" in _flat(rule_bodies(sec, sel)), sel
+    assert "font-size: 11px !important" in _flat(rule_bodies(sec, ".cf-note"))
+    toggle = _flat(rule_bodies(sec, "summary.ov-toggle"))
+    assert "min-height: 40px" in toggle and "font-size: 11px !important" in toggle
+    with open("app/templates/partials/character_can_fly.html", encoding="utf-8") as fh:
+        assert fh.read().count('<div class="cf-note"') == 1
+
+
 def test_css_wallet_range_buttons_match_the_other_range_buttons():
     """44px tall from the global button rule (no height here), at least 40px
     wide with 12px labels, as Market's and Net Worth's."""

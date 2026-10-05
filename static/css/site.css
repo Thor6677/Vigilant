@@ -896,9 +896,10 @@
     .ov-corp.m-row > [data-m="lead"] { min-width: 18px !important; min-height: 18px; }
 
     /* 40px tap targets: the Can Fly, Recently Completed and Corporation
-       History toggles. line-height centres the text and keeps the summary a
-       list item, so its native disclosure marker stays. */
-    summary.ov-toggle { min-height: 40px; line-height: 40px; }
+       History toggles, at 11px over their inline 9-10px. line-height
+       centres the text and keeps the summary a list item, so its native
+       disclosure marker stays. */
+    summary.ov-toggle { min-height: 40px; line-height: 40px; font-size: 11px !important; }
     /* Asset-location and jump-clone headers (already flex, align-items
        centre); the class is only used on the character overview. */
     .asset-location-header { min-height: 40px; }
@@ -918,6 +919,14 @@
     /* The label (each tile's last line) at 11px over its inline 9px: the
        size every label · value line's label has on phones. */
     .ks-isk > .ks-isk-tile > :last-child { font-size: 11px !important; }
+    /* 9px text at 11px (the toggles' is in their rule above): the card
+       titles, the security status, the skill training times, the asset
+       location type counts and Can Fly's sort note. Element plus class
+       outranks the page's own rules; !important beats the note's inline
+       size. */
+    span.card-title, div.card-title, span.sec-status, div.skill-time,
+    span.asset-location-count { font-size: 11px; }
+    .cf-note { font-size: 11px !important; }
     /* Wallet History range buttons: 44px tall from the global button rule;
        here at least 40px wide (35px before) with 12px labels over the
        shared 9px, as Market's and Net Worth's range buttons. The ID beats
