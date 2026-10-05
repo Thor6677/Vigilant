@@ -258,7 +258,7 @@
                 <td class="m-only" data-m="key">{{ r.product_name }}</td>
                 <td class="m-only" data-m="key"><span class="ij-time-{{ r.urgency }}">{{ r.time_remaining }}</span></td>
                 <td class="m-only" data-m-label="Name"><span>{{ r.product_name }}{% if r.blueprint_name and r.blueprint_name != r.product_name %} <span class="ij-sub">from {{ r.blueprint_name }}</span>{% endif %}</span></td>
-                <td class="m-only" data-m-label="Activity">{{ r.activity_short }}</td>
+                <td class="m-only" data-m-label="Activity">{{ r.activity_label }}</td>
                 <td class="m-only" data-m-label="Runs">{{ r.runs }}</td>
                 <td class="m-only" data-m-label="Source"><span><span class="ij-source-kind">{{ r.source_kind|capitalize }}</span> {{ r.source_name }}</span></td>
                 <td class="m-only" data-m-label="Installer">{{ r.installer_name or '—' }}</td>

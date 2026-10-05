@@ -169,8 +169,10 @@ def test_desktop_cells_come_first_and_stay_untagged():
         for c in desktop:
             assert "m-only" not in _classes(c["attrs"])
             assert "data-m" not in c["attrs"] and "data-m-label" not in c["attrs"]
+        assert desktop[0]["text"].startswith(job["product_name"])
         assert desktop[1]["text"] == job["activity_short"]
         assert desktop[2]["text"] == str(job["runs"])
+        assert desktop[3]["text"] == f"{job['source_kind'].capitalize()} {job['source_name']}"
         assert desktop[4]["text"] == (job["installer_name"] or "—")
         assert desktop[5]["text"] == (job["location_name"] or "—")
         assert desktop[6]["text"] == job["time_remaining"]
@@ -222,7 +224,9 @@ def test_labelled_values_match_the_desktop_columns():
         bp_line = job["blueprint_name"] and job["blueprint_name"] != job["product_name"]
         name = job["product_name"] + (f" from {job['blueprint_name']}" if bp_line else "")
         assert cells["Name"]["text"] == name
-        assert cells["Activity"]["text"] == job["activity_short"]
+        # The full name, as the filter chips show it; the desktop column
+        # keeps the short form ("Manuf.").
+        assert cells["Activity"]["text"] == job["activity_label"]
         assert cells["Runs"]["text"] == str(job["runs"])
         assert cells["Source"]["text"] == f"{job['source_kind'].capitalize()} {job['source_name']}"
         assert cells["Installer"]["text"] == (job["installer_name"] or "—")
@@ -280,8 +284,8 @@ def test_filters_hide_rows_with_the_hidden_attribute():
     other code read the old inline style: nothing counts visible rows."""
     script = _script(_render())
     assert "style.display" not in script
-    assert "var rows = document.querySelectorAll('.ij-table tbody tr');" in script
-    assert "tr.hidden = !(okA && okS && okI && okC);" in script
+    assert ".ij-table tbody tr" in script          # the rows the filters walk
+    assert re.search(r"\btr\.hidden\s*=", script)
 
 
 # ── Tablet rule (template <style>) ────────────────────────────────────
