@@ -113,7 +113,7 @@
                     <td data-m-label="Units">{{ r.qty_flipped_str }}</td>
                     <td data-m-label="Avg margin">{{ r.margin_pct_str }}</td>
                     {% if r.split_note %}<td class="m-only" data-m-label="Split">{{ r.split_note }}</td>{% endif %}
-                    <td class="m-only" data-m-label="Market"><a href="/market/type/{{ r.type_id }}" class="m-tap" style="color:var(--accent);">Open market page →</a></td>
+                    <td class="m-only" data-m-label="Market"><a href="/market/type/{{ r.type_id }}" class="m-tap" style="color:var(--accent);" aria-label="Open market page for {{ r.type_name }}">Open market page →</a></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -169,10 +169,12 @@
     // Phones (≤640px, mobile R4): at most 4 month labels under the bars.
     // The breakpoint is read each time the chart is drawn, and crossing it
     // (a rotation, a resized window) redraws the chart, so desktop always
-    // gets the options below as they are.
+    // gets the options below as they are. A change event that leaves the
+    // page on the side it was drawn for redraws nothing.
     var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
-    var chart = null;
+    var chart = null, drawnPhone = false;
     function drawChart() {
+        drawnPhone = !!(phoneMq && phoneMq.matches);
         var cfg = {
             type: 'bar',
             data: {
@@ -199,14 +201,15 @@
                 }
             }
         };
-        if (phoneMq && phoneMq.matches) cfg.options.scales.x.ticks.maxTicksLimit = 4;
+        if (drawnPhone) cfg.options.scales.x.ticks.maxTicksLimit = 4;
         if (chart) chart.destroy();
         chart = new Chart(document.getElementById('pnl-chart'), cfg);
     }
     drawChart();
     if (phoneMq) {
-        if (phoneMq.addEventListener) phoneMq.addEventListener('change', drawChart);
-        else if (phoneMq.addListener) phoneMq.addListener(drawChart);
+        var redraw = function () { if (phoneMq.matches !== drawnPhone) drawChart(); };
+        if (phoneMq.addEventListener) phoneMq.addEventListener('change', redraw);
+        else if (phoneMq.addListener) phoneMq.addListener(redraw);
     }
     {% endif %}
 })();

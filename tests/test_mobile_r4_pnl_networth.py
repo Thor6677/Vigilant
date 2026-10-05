@@ -10,9 +10,10 @@ User decisions (R4 picks):
         date labels.
 Also: the stat cards on both pages become label · value lines (R2 T2's
 Queue Summary pattern); the P&L chart shows fewer month labels on phones;
-the Net Worth range buttons and Snapshot now are 40px; the Snapshot status
-wraps on its own line; the two long notes are 12px. The picks page told the
-user the P&L list shows "Show all past 10 on phones", so it is clamped.
+the Net Worth range buttons and Snapshot now get 12px text and keep the
+global 44px floor; the Snapshot status wraps on its own line; the two long
+notes are 12px. The picks page told the user the P&L list shows "Show all
+past 10 on phones", so it is clamped.
 
 Desktop (>640px) renders as before: every cell added for phones is m-only,
 and each chart's desktop options are unchanged (checked by running the
@@ -209,6 +210,7 @@ def test_pnl_market_line_is_phone_only_with_the_desktop_href():
         assert "m-only" in market["attrs"]["class"].split()
         link, = market["kids"]
         assert link["href"] == href
+        assert link["aria-label"] == f"Open market page for {src['type_name']}"
         assert "m-tap" in link.get("class", "").split()
         assert market["text"] == "Open market page →"
         # The desktop link cell: untagged (so phones hide it), still a link
@@ -312,7 +314,7 @@ def test_networth_snapshot_group_has_its_hook():
     snap, = root.find("nw-snap")
     assert snap.attrs["style"] == "display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;"
     status, btn = snap.children
-    assert status.tag == "span" and status.attrs == {"id": "nw-status"}
+    assert status.tag == "span" and status.attrs == {"id": "nw-status", "role": "status"}
     assert btn.tag == "button" and btn.attrs["id"] == "nw-snapshot-btn"
     assert btn.classes == ["b-btn"]
     assert btn.attrs["hx-post"] == "/tools/networth/snapshot"
@@ -350,16 +352,21 @@ def _script(html, marker):
 def test_pnl_chart_script_has_a_phone_branch_for_fewer_month_labels():
     js = _script(_render_pnl(), "pnl-chart")
     assert f"window.{PHONE_MQ}" in js
-    assert re.search(r"if \(phoneMq && phoneMq\.matches\) cfg\.options\.scales\.x\.ticks\.maxTicksLimit = 4;", js)
+    assert "drawnPhone = !!(phoneMq && phoneMq.matches);" in js
+    assert "if (drawnPhone) cfg.options.scales.x.ticks.maxTicksLimit = 4;" in js
     # Desktop's x ticks stay as they were.
     assert "x: { stacked: true, ticks: { color: '#888' }, grid: { color: '#1a1a1a' } }," in js
-    assert re.search(r"phoneMq\.addEventListener\('change', drawChart\)", js)
+    # Redraw only when the side actually changes, through a wrapper.
+    assert "if (phoneMq.matches !== drawnPhone) drawChart();" in js
+    assert re.search(r"phoneMq\.addEventListener\('change', redraw\)", js)
+    assert "addEventListener('change', drawChart)" not in js
 
 
 def test_networth_chart_script_has_a_phone_branch_for_legend_and_dates():
     js = _script(_render_nw(), "nw-chart")
     assert f"window.{PHONE_MQ}" in js
-    branch = re.search(r"if \(phoneMq && phoneMq\.matches\) \{(.*?)\}", js, flags=re.S)
+    assert "builtPhone = !!(phoneMq && phoneMq.matches);" in js
+    branch = re.search(r"if \(builtPhone\) \{(.*?)\}", js, flags=re.S)
     assert branch
     assert "cfg.options.plugins.legend.position = 'bottom';" in branch.group(1)
     assert "cfg.options.scales.x.ticks.maxTicksLimit = 4;" in branch.group(1)
@@ -367,7 +374,8 @@ def test_networth_chart_script_has_a_phone_branch_for_legend_and_dates():
     assert "'top'" not in js
     assert "x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } }," in js
     assert "legend: { labels: { color: '#ccc', boxWidth: 12 } }," in js
-    assert re.search(r"phoneMq\.addEventListener\('change', \w+\)", js)
+    assert "if (chart && lastData && phoneMq.matches !== builtPhone) build(lastData);" in js
+    assert re.search(r"phoneMq\.addEventListener\('change', relayout\)", js)
 
 
 # ── chart scripts: behaviour (node, stub Chart) ───────────────────────
@@ -390,8 +398,15 @@ function run(startPhone) {
     return m;
   }
   let made = [];
-  function Chart(canvas, cfg) { this.canvas = canvas; this.cfg = cfg; made.push(this); }
-  Chart.prototype.destroy = function () { this.destroyed = true; };
+  const all = [];
+  // Like Chart.js, refuse a canvas that still has a live chart.
+  const live = {};
+  function Chart(canvas, cfg) {
+    if (live[canvas.id]) throw new Error('Canvas is already in use');
+    live[canvas.id] = this;
+    this.canvas = canvas; this.cfg = cfg; made.push(this); all.push(this);
+  }
+  Chart.prototype.destroy = function () { this.destroyed = true; delete live[this.canvas.id]; };
   const els = {};
   const el = id => els[id] || (els[id] = { id, style: {}, textContent: '',
     addEventListener() {}, querySelectorAll: () => [] });
@@ -405,16 +420,20 @@ function run(startPhone) {
   vm.runInContext(src, sandbox);
   const snap = cs => cs.map(c => ({ type: c.cfg.type, options: JSON.parse(JSON.stringify(c.cfg.options)),
     data: JSON.parse(JSON.stringify(c.cfg.data)), canvas: c.canvas.id }));
+  // oldDestroyed: every chart built before this event has been destroyed
+  // (all of them, not just the last event's, which may have built none).
   const fire = phone => {
-    const before = made.slice();
+    const before = all.slice();
     state.phone = phone;
     made = [];
     mqls.forEach(m => m.ls.slice().forEach(fn => fn({ matches: m.matches, media: m.media })));
-    return { charts: snap(made), oldDestroyed: before.every(c => c.destroyed) };
+    return { charts: snap(made), oldDestroyed: before.every(c => c.destroyed), live: Object.keys(live) };
   };
   return new Promise(resolve => setImmediate(() => {
     const out = { first: snap(made), fetched: fetched.slice() };
+    out.same = fire(startPhone);               // a change event on the same side
     out.flip = fire(!startPhone);
+    out.sameAfterFlip = fire(!startPhone);
     out.back = fire(startPhone);
     resolve(out);
   }));
@@ -480,6 +499,18 @@ def _opts(run_part):
     return [c["options"] for c in run_part]
 
 
+def _assert_same_side_draws_nothing(out, canvas):
+    """A change event that leaves the page on the same side of 640px (before
+    and after a real crossing) builds no chart and destroys none; each real
+    crossing leaves exactly one live chart on the canvas."""
+    for side in ("desktop", "phone"):
+        for step in ("same", "sameAfterFlip"):
+            assert out[side][step]["charts"] == [], (side, step)
+            assert out[side][step]["oldDestroyed"] is False, (side, step)
+        for step in ("same", "flip", "sameAfterFlip", "back"):
+            assert out[side][step]["live"] == [canvas], (side, step)
+
+
 def test_pnl_chart_options_follow_the_breakpoint(tmp_path):
     """Desktop draws the base options exactly; a phone draw adds only the
     4-label cap; crossing the breakpoint either way redraws once with the
@@ -492,7 +523,9 @@ def test_pnl_chart_options_follow_the_breakpoint(tmp_path):
     assert _opts(d["flip"]["charts"]) == [_phone_pnl()] and d["flip"]["oldDestroyed"]
     assert _opts(d["back"]["charts"]) == [_PNL_DESKTOP] and d["back"]["oldDestroyed"]
     assert _opts(p["first"]) == [_phone_pnl()]
-    assert _opts(p["flip"]["charts"]) == [_PNL_DESKTOP]
+    assert _opts(p["flip"]["charts"]) == [_PNL_DESKTOP] and p["flip"]["oldDestroyed"]
+    assert _opts(p["back"]["charts"]) == [_phone_pnl()] and p["back"]["oldDestroyed"]
+    _assert_same_side_draws_nothing(out, "pnl-chart")
     # The data is the same on both sides.
     ds = d["first"][0]["data"]
     assert ds["labels"] == ["2026-07", "2026-08", "2026-09"]
@@ -512,7 +545,9 @@ def test_networth_chart_options_follow_the_breakpoint(tmp_path):
     assert _opts(d["flip"]["charts"]) == [_phone_nw()] and d["flip"]["oldDestroyed"]
     assert _opts(d["back"]["charts"]) == [_NW_DESKTOP] and d["back"]["oldDestroyed"]
     assert _opts(p["first"]) == [_phone_nw()]
-    assert _opts(p["flip"]["charts"]) == [_NW_DESKTOP]
+    assert _opts(p["flip"]["charts"]) == [_NW_DESKTOP] and p["flip"]["oldDestroyed"]
+    assert _opts(p["back"]["charts"]) == [_phone_nw()] and p["back"]["oldDestroyed"]
+    _assert_same_side_draws_nothing(out, "nw-chart")
     assert p["fetched"] == d["fetched"]                 # a rebuild doesn't refetch
     data = d["first"][0]["data"]
     assert data["labels"] == _NW_DATA["dates"]
@@ -525,7 +560,8 @@ def test_networth_breakpoint_change_without_a_chart_draws_nothing(tmp_path):
     out = _run_harness(tmp_path, _script(_render_nw(), "nw-chart"), empty)
     for side in ("desktop", "phone"):
         assert out[side]["first"] == []
-        assert out[side]["flip"]["charts"] == [] and out[side]["back"]["charts"] == []
+        for step in ("same", "flip", "sameAfterFlip", "back"):
+            assert out[side][step]["charts"] == [] and out[side][step]["live"] == [], (side, step)
 
 
 # ── CSS: R4 T3 section ────────────────────────────────────────────────
@@ -546,14 +582,26 @@ def test_t3_section_is_one_phone_block():
     assert _phone().strip()
 
 
+def test_t3_css_uses_important_only_against_inline_styles():
+    """P&L's second stat row has an inline grid; the Snapshot group has an
+    inline gap. Everything else wins on specificity."""
+    css = _phone()
+    assert css.count("!important") == 2
+    assert _decl(rule_bodies(css, "div.pnl-stats"), "grid-template-columns", "minmax(0, 1fr) !important")
+    assert _decl(rule_bodies(css, ".nw-snap"), "row-gap", "0 !important")
+
+
 def test_t3_css_turns_stat_cards_into_lines():
     css = _phone()
     for p in ("pnl", "nw"):
-        row = rule_bodies(css, f".{p}-stats")
-        # The page's own <style> loads after site.css, and P&L's second row
-        # has an inline 2-column grid: both must lose.
-        assert _decl(row, "grid-template-columns", "minmax(0, 1fr) !important")
-        assert _decl(row, "gap", "0 !important")
+        # The page's own <style> loads after site.css: div.<class> outranks
+        # it. Only P&L's grid needs !important, against its second row's
+        # inline 2-column grid.
+        assert rule_bodies(css, f".{p}-stats") == ""
+        row = rule_bodies(css, f"div.{p}-stats")
+        grid = "minmax(0, 1fr) !important" if p == "pnl" else "minmax(0, 1fr)"
+        assert _decl(row, "grid-template-columns", grid), p
+        assert _decl(row, "gap", "0"), p
         tile = rule_bodies(css, f".{p}-stats > .{p}-stat")
         for prop, value in (("display", "flex"), ("justify-content", "space-between"),
                             ("align-items", "baseline")):
@@ -576,13 +624,17 @@ def test_t3_css_draws_one_rule_per_pnl_row():
         assert _decl(cell, prop, value), (prop, value)
 
 
-def test_t3_css_makes_range_and_snapshot_buttons_40px():
+def test_t3_css_keeps_range_and_snapshot_buttons_at_the_44px_floor():
+    """R1's phone rule gives every button 44px. This section sets 12px text
+    and Snapshot now's border, and no height of its own, so it never
+    undercuts that floor (a 40px rule here would, on specificity)."""
     css = _phone()
+    assert not re.search(r"(?:^|[;{\s])(?:min-)?height\s*:", css), "no heights in R4 T3"
     rng = rule_bodies(css, ".nw-ranges > button.b-btn")
-    for prop, value in (("min-height", "40px"), ("min-width", "40px"), ("font-size", "12px")):
+    for prop, value in (("min-width", "40px"), ("font-size", "12px")):
         assert _decl(rng, prop, value), (prop, value)
     snap = rule_bodies(css, ".nw-snap > button.b-btn")
-    for prop, value in (("flex", "none"), ("min-height", "40px"), ("font-size", "12px"),
+    for prop, value in (("flex", "none"), ("padding", "0 0.85rem"), ("font-size", "12px"),
                         ("border", "1px solid var(--border)")):
         assert _decl(snap, prop, value), (prop, value)
 

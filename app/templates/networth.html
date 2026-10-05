@@ -31,10 +31,10 @@
             Daily valuation across all your characters — wallet balance plus assets priced at EVE's global average reference price. One snapshot is taken automatically each day.
         </p>
     </div>
-    {# Phones: Snapshot now is a 40px button with its status on its own
+    {# Phones: Snapshot now is a 44px button with its status on its own
        full-width line below it (R4 T3 in site.css). #}
     <div class="nw-snap" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-        <span id="nw-status"></span>
+        <span id="nw-status" role="status"></span>
         <button type="button" class="b-btn" id="nw-snapshot-btn"
                 hx-post="/tools/networth/snapshot"
                 hx-target="#nw-status"
@@ -71,7 +71,7 @@
 
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
-    var range = '90d', chart = null, lastData = null;
+    var range = '90d', chart = null, lastData = null, builtPhone = false;
     var emptyEl = document.getElementById('nw-empty');
     var PALETTE = ['#c8a951','#6fa8dc','#93c47d','#e06666','#b48ead',
                    '#76c7c0','#e6a15c','#8fce00','#d98cb3','#7fa6ff'];
@@ -106,11 +106,13 @@
     // Phones (≤640px, mobile R4 D9 A): the legend goes under the plot, where
     // a long list of characters wraps without squeezing it from above, and
     // the x axis shows at most 4 dates. Read each time the chart is built,
-    // so desktop always gets the options below as they are.
+    // so desktop always gets the options below as they are; builtPhone
+    // records which side the current chart was built for.
     var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
     function build(data) {
         lastData = data;
+        builtPhone = !!(phoneMq && phoneMq.matches);
         emptyEl.style.display = 'none';
         var datasets = (data.characters || []).map(function (c, i) {
             var col = PALETTE[i % PALETTE.length];
@@ -141,7 +143,7 @@
                 }
             }
         };
-        if (phoneMq && phoneMq.matches) {
+        if (builtPhone) {
             cfg.options.plugins.legend.position = 'bottom';
             cfg.options.scales.x.ticks.maxTicksLimit = 4;
         }
@@ -183,9 +185,10 @@
 
     // Crossing the breakpoint (a rotation, a resized window) rebuilds the
     // chart from the last data with the other side's options. No chart (no
-    // snapshots yet, or the feed failed): nothing to redraw.
+    // snapshots yet, or the feed failed), or a change event that leaves the
+    // page on the side the chart was built for: nothing to redraw.
     if (phoneMq) {
-        var relayout = function () { if (chart && lastData) build(lastData); };
+        var relayout = function () { if (chart && lastData && phoneMq.matches !== builtPhone) build(lastData); };
         if (phoneMq.addEventListener) phoneMq.addEventListener('change', relayout);
         else if (phoneMq.addListener) phoneMq.addListener(relayout);
     }
