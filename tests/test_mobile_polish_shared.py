@@ -10,12 +10,23 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
    44px phone floor. `button.m-tap, .b-btn.m-tap` keeps them at 44px.
 2. A non-button .b-btn (mostly <a class="b-btn">) centres its label in the
    44px phone box with `align-content: center`, which leaves the box's
-   display, and so its width, exactly as it was."""
+   display, and so its width, exactly as it was.
+3. toggleExpanded (actions.js) keeps its trigger's aria-expanded in step with
+   the target's is-expanded, sets it once on load and after htmx swaps, and
+   moves focus to the first revealed row when a Show all hides itself. Run
+   in Node against a stub DOM (as test_details_keep_open.py does)."""
+import json
+import os
 import re
+import shutil
+import subprocess
+
+import pytest
 
 from tests._mobile import SITE_CSS, selectors
 
 PHONE = "max-width: 640px"
+ACTIONS = os.path.join(os.path.dirname(SITE_CSS), "..", "js", "actions.js")
 _R2_FIRST = "/* ── R2 T1 · character overview ── */"
 
 
@@ -142,3 +153,176 @@ def test_the_polish_block_is_phone_only():
     raw = _raw()
     block = _strip(raw[raw.index(_POLISH_HEAD):raw.index(_R2_FIRST)])
     assert _outside_phone(block).strip() == "", "every polish-A rule sits in the phone block"
+
+
+# ── 3. toggleExpanded: aria-expanded and focus after Show all ─────────
+
+_TOGGLE_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[process.argv.length - 1], 'utf8');
+
+const docListeners = {};
+let focused = null;
+function el(tag, opts) {
+  opts = opts || {};
+  const cls = new Set(opts.cls || []);
+  const attrs = Object.assign({}, opts.attrs || {});
+  const e = {
+    tagName: tag, dataset: Object.assign({}, opts.dataset || {}), children: [], parent: null,
+    classList: { contains: c => cls.has(c), add: c => cls.add(c), remove: c => cls.delete(c),
+                 toggle: c => (cls.has(c) ? (cls.delete(c), false) : (cls.add(c), true)) },
+    getAttribute: a => (a in attrs ? attrs[a] : null),
+    setAttribute: (a, v) => { attrs[a] = String(v); },
+    hasAttribute: a => a in attrs,
+    attrs,
+    // Rendered unless the stub says otherwise (a Show all hides once its target opens).
+    getClientRects: () => (opts.hiddenWhen && opts.hiddenWhen() ? [] : [{}]),
+    focus() { focused = e.name; },
+    name: opts.name || tag,
+  };
+  e.matches = sel => {
+    if (sel === '[data-click="toggleExpanded"]') return e.getAttribute('data-click') === 'toggleExpanded';
+    if (sel.indexOf('[tabindex]') >= 0) return 'tabindex' in attrs || /^(A|BUTTON|INPUT|SELECT|TEXTAREA)$/.test(tag);
+    if (sel[0] === '.') return cls.has(sel.slice(1));
+    return false;
+  };
+  e.closest = sel => { for (let n = e; n; n = n.parent) if (n.matches(sel)) return n; return null; };
+  e.querySelectorAll = sel => { const out = []; const walk = n => n.children.forEach(k => { if (k.matches(sel)) out.push(k); walk(k); }); walk(e); return out; };
+  e.querySelector = sel => e.querySelectorAll(sel)[0] || null;
+  e.add = k => { k.parent = e; e.children.push(k); return k; };
+  return e;
+}
+const root = el('DIV', { name: 'root' });
+const sandbox = {
+  window: {}, console, Date,
+  document: {
+    querySelectorAll: sel => root.querySelectorAll(sel), querySelector: () => null,
+    getElementById: () => null,
+    body: { addEventListener() {} },
+    addEventListener(type, fn) { (docListeners[type] = docListeners[type] || []).push(fn); },
+  },
+  localStorage: { getItem: () => null, setItem() {} },
+  setInterval: () => 0, clearInterval() {}, setTimeout: () => 0,
+};
+sandbox.window.document = sandbox.document;
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox);
+const W = sandbox.window;
+const fire = (type, ev) => (docListeners[type] || []).forEach(fn => fn(ev || {}));
+const TE = { 'data-click': 'toggleExpanded' };
+const out = {};
+
+// A disclosure button whose card starts closed, and one whose card starts open.
+const card = root.add(el('DIV', { cls: ['acct-char'] }));
+const btn = card.add(el('BUTTON', { attrs: TE, dataset: { toggleTarget: '.acct-char' }, name: 'btn' }));
+const openCard = root.add(el('DIV', { cls: ['acct-char', 'is-expanded'] }));
+const openBtn = openCard.add(el('BUTTON', { attrs: TE, dataset: { toggleTarget: '.acct-char' } }));
+// An m-row trigger (mSyncAria's), a plain div trigger, a role=button div.
+const piRow = root.add(el('DIV', { cls: ['pi-row'] }));
+const mrow = piRow.add(el('DIV', { cls: ['m-row'], attrs: TE, dataset: { toggleTarget: '.pi-row' } }));
+const corp = root.add(el('DIV', { cls: ['ml-corp-card'] }));
+const div = corp.add(el('DIV', { attrs: TE, dataset: { toggleTarget: '.ml-corp-card' } }));
+const roleCard = root.add(el('DIV', { cls: ['x-card'] }));
+const roleDiv = roleCard.add(el('DIV', { attrs: Object.assign({ role: 'button' }, TE), dataset: { toggleTarget: '.x-card' } }));
+
+fire('DOMContentLoaded');
+out.init = { btn: btn.attrs['aria-expanded'], open: openBtn.attrs['aria-expanded'],
+             mrow: mrow.attrs['aria-expanded'] || null, div: div.attrs['aria-expanded'] || null,
+             role: roleDiv.attrs['aria-expanded'] };
+W.toggleExpanded.call(btn); out.afterOpen = btn.attrs['aria-expanded'];
+W.toggleExpanded.call(btn); out.afterClose = btn.attrs['aria-expanded'];
+W.toggleExpanded.call(mrow); W.toggleExpanded.call(div);
+out.mrowAfter = mrow.attrs['aria-expanded'] || null;
+out.divAfter = div.attrs['aria-expanded'] || null;
+out.visibleTriggerKeepsFocus = focused;
+
+// Show all over a 13-row clamp: rows are divs (no tabindex) except the 11th's own.
+function clamp(n, rowTabindex) {
+  const wrap = root.add(el('DIV', { cls: ['m-clamp-wrap'] }));
+  const list = wrap.add(el('DIV', { cls: ['m-clamp'], name: 'list' }));
+  for (let i = 0; i < n; i++) list.add(el('DIV', { name: 'row' + (i + 1), attrs: rowTabindex ? { tabindex: '0' } : {} }));
+  const all = wrap.add(el('BUTTON', { cls: ['m-showall'], attrs: TE, dataset: { toggleTarget: '.m-clamp-wrap' },
+                                     hiddenWhen: () => wrap.classList.contains('is-expanded') }));
+  return { wrap, list, all };
+}
+focused = null;
+const a = clamp(13, false);
+W.toggleExpanded.call(a.all);
+out.showAll = { focused, tabindex: a.list.children[10].attrs.tabindex, aria: a.all.attrs['aria-expanded'] };
+focused = null;
+const b = clamp(13, true);
+W.toggleExpanded.call(b.all);
+out.showAllMrows = { focused, tabindex: b.list.children[10].attrs.tabindex };
+focused = null;
+const c = clamp(10, false);
+W.toggleExpanded.call(c.all);
+out.showAllShort = { focused, tabindex: c.list.attrs.tabindex };
+// Closing with a hidden trigger never moves focus.
+focused = null;
+W.toggleExpanded.call(a.all);
+out.closeHidden = focused;
+
+// htmx:afterSettle initialises triggers inside the swapped subtree only.
+const swapped = root.add(el('DIV', { name: 'swapped' }));
+const late = swapped.add(el('DIV', { cls: ['acct-char', 'is-expanded'] })).add(
+  el('BUTTON', { attrs: TE, dataset: { toggleTarget: '.acct-char' } }));
+const outside = root.add(el('DIV', { cls: ['acct-char'] })).add(
+  el('BUTTON', { attrs: TE, dataset: { toggleTarget: '.acct-char' } }));
+fire('htmx:afterSettle', { target: swapped });
+out.settle = { late: late.attrs['aria-expanded'] || null, outside: outside.attrs['aria-expanded'] || null };
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.fixture(scope="module")
+def toggle(tmp_path_factory):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    harness = tmp_path_factory.mktemp("toggle") / "harness.js"
+    harness.write_text(_TOGGLE_HARNESS)
+    run = subprocess.run(["node", str(harness), ACTIONS], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_toggle_expanded_initialises_aria_on_load(toggle):
+    """Templates needn't render aria-expanded: the load pass reads each
+    target's starting state."""
+    assert toggle["init"]["btn"] == "false"
+    assert toggle["init"]["open"] == "true"
+    assert toggle["init"]["role"] == "false"
+
+
+def test_toggle_expanded_keeps_aria_in_step(toggle):
+    assert toggle["afterOpen"] == "true"
+    assert toggle["afterClose"] == "false"
+
+
+def test_toggle_expanded_leaves_m_rows_and_plain_divs_alone(toggle):
+    """m-rows are mSyncAria's (phone-only, removed on desktop); aria-expanded
+    isn't allowed on a plain div with no role."""
+    assert toggle["init"]["mrow"] is None and toggle["mrowAfter"] is None
+    assert toggle["init"]["div"] is None and toggle["divAfter"] is None
+
+
+def test_a_trigger_that_stays_visible_keeps_focus_where_it_is(toggle):
+    assert toggle["visibleTriggerKeepsFocus"] is None
+
+
+def test_show_all_moves_focus_to_the_first_revealed_row(toggle):
+    assert toggle["showAll"] == {"focused": "row11", "tabindex": "-1", "aria": "true"}
+    # A row that is already focusable (a phone m-row's tabindex 0) keeps it.
+    assert toggle["showAllMrows"] == {"focused": "row11", "tabindex": "0"}
+
+
+def test_show_all_with_nothing_past_ten_focuses_the_list(toggle):
+    assert toggle["showAllShort"] == {"focused": "list", "tabindex": "-1"}
+
+
+def test_closing_never_moves_focus(toggle):
+    assert toggle["closeHidden"] is None
+
+
+def test_htmx_settle_initialises_the_swapped_subtree_only(toggle):
+    assert toggle["settle"] == {"late": "true", "outside": None}
