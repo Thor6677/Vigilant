@@ -1782,6 +1782,40 @@
 
 /* ── R6 T7 · account ── */
 @media (max-width: 640px) {
+    /* Account (ISS-101): each card's 25 chips and their legend fold behind
+       the m-only "N of 25 shared" button, which toggles is-expanded on the
+       card (toggleExpanded). The template opens a card when anything isn't
+       shared. The head's own count is m-hide, so it isn't shown twice. */
+    .acct-char:not(.is-expanded) > .acct-perms,
+    .acct-char:not(.is-expanded) > .acct-legend { display: none; }
+    .acct-perms-toggle {
+        display: flex; align-items: center; gap: 0.5rem; width: 100%;
+        margin: 0; padding: 0 0.8rem; background: none; border: none;
+        font-family: inherit; font-size: var(--fs-sm); letter-spacing: var(--ls-wider);
+        text-transform: uppercase; color: var(--muted); text-align: left; cursor: pointer;
+    }
+    .acct-perms-toggle b { color: var(--accent); font-weight: 600; }
+    .acct-perms-toggle::after { content: "▸"; content: "▸" / ""; margin-left: auto; color: var(--muted); }
+    .acct-char.is-expanded > .acct-perms-toggle::after { content: "▾"; content: "▾" / ""; }
+    /* Change permissions / Renew: a link styled as a button, which the 44px
+       rule makes taller; centre its text in that height. */
+    .acct-char-stat > .b-btn { display: inline-flex; align-items: center; }
+
+    /* Permission picker (D18 A): every card stays, the "unlocks" chips go.
+       CSS only: the picker also serves the logged-out sign-up flow, where
+       actions.js isn't loaded. The chips were also what made it scroll
+       sideways at 360px. */
+    .perm-card .perm-powers { display: none; }
+    /* The ESI scope summary, the footer's Cancel link and each group's
+       All / None reach 44px. line-height keeps the summary a list item, so
+       its marker stays. */
+    .perm-scopes > summary { line-height: 44px; }
+    .perm-footer > a { display: inline-flex; align-items: center; min-height: 44px; }
+    .perm-group-actions > button { min-width: 44px; }
+    /* The footer's Continue button is flex:none (.b-btn.is-primary), so with
+       Cancel beside it the count was pushed off the left edge at 360px.
+       Letting the button shrink wraps its label instead. */
+    .perm-footer > .b-btn { flex: 0 1 auto; }
 }
 /* ── end R6 T7 ── */
 

@@ -28,7 +28,11 @@
 
 <div class="acct-list">
   {% for c in characters %}
-    <div class="b-panel acct-char">
+    {# ISS-101: on phones the chips fold behind the "N of 25 shared" button
+       below (toggleExpanded on this card). A card starts open when anything
+       isn't shared. Desktop ignores is-expanded and always shows the chips. #}
+    {% set unshared = c['granted'] | length < total_permissions %}
+    <div class="b-panel acct-char{% if unshared %} is-expanded{% endif %}">
       <div class="acct-char-head">
         <img class="acct-portrait" alt="" src="https://images.evetech.net/characters/{{ c['character_id'] }}/portrait?size=64">
         <div class="acct-char-id">
@@ -39,11 +43,13 @@
           {% if c['token_failed'] %}
             <span class="b-badge is-danger" title="EVE rejected this character's authorization — nothing can be read until it is renewed">authorization expired</span>
           {% else %}
-            <span class="acct-count"><b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared</span>
+            <span class="acct-count m-hide"><b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared</span>
           {% endif %}
           <a href="/account/permissions/{{ c['character_id'] }}" class="b-btn is-ghost">{% if c['token_failed'] %}Renew{% else %}Change permissions{% endif %}</a>
         </div>
       </div>
+
+      <button type="button" class="m-only acct-perms-toggle" data-click="toggleExpanded" data-toggle-target=".acct-char"><span><b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared</span></button>
 
       <div class="acct-perms">
         {% for p in perms.PERMISSIONS %}
