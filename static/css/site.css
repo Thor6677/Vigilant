@@ -915,6 +915,15 @@
     }
     .ks-isk > .ks-isk-tile:last-child { border-bottom: none; }
     .ks-isk > .ks-isk-tile > * { margin-top: 0 !important; }
+    /* The label (each tile's last line) at 11px over its inline 9px: the
+       size every label · value line's label has on phones. */
+    .ks-isk > .ks-isk-tile > :last-child { font-size: 11px !important; }
+    /* Wallet History range buttons: 44px tall from the global button rule;
+       here at least 40px wide (35px before) with 12px labels over the
+       shared 9px, as Market's and Net Worth's range buttons. The ID beats
+       the shared .range-btn rule; the Mining Ledger reuses the ID, so the
+       section head scopes it to this page. */
+    .b-section-head > #range-buttons > .range-btn { min-width: 40px; font-size: 12px; }
     /* Ship Usage Stream: its legend moves below the plot on phones and would
        take half of the desktop 200px box, so the box grows. !important beats
        the inline height. */
@@ -929,15 +938,17 @@
        border. Lines are separated by a bottom border, with none under the
        last: it would double against the "saves …" line's top border or the
        remap box's own border. The label leads whatever its DOM position (the
-       queue's tiles put the value first). The value keeps its inline colour
-       and weight, and wraps inside itself rather than past the edge. */
+       queue's tiles put the value first), at 11px over its inline 9px: the
+       size every label · value line's label has on phones. The value keeps
+       its inline colour and weight, and wraps inside itself rather than
+       past the edge. */
     .skills-tiles { flex-direction: column; }
     .skills-tiles > .skills-tile {
         display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
         flex: none !important; border-right: none !important; border-bottom: 1px solid var(--border);
     }
     .skills-tiles > .skills-tile:last-child { border-bottom: none; }
-    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; }
+    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; font-size: 11px !important; }
     .skills-tile > .skills-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 
     /* Key 1 of the queue and remap rows (D4 B, D5 A): the skill name
@@ -1450,6 +1461,11 @@
        data". */
     .ml-chart-box { position: relative; height: 280px; }
     .ml-chart-box.is-empty { display: none; }
+    /* Chart range buttons: 44px tall from the global button rule; here at
+       least 40px wide with 12px labels over the shared 9px, as Market's
+       and Net Worth's range buttons. The character overview reuses the
+       ID, so the panel head scopes it to this page. */
+    .b-panel-head > #range-buttons > .range-btn { min-width: 40px; font-size: 12px; }
 
     /* Selection bar ("N character(s) selected", Clear, View Combined
        Ledger): when the buttons don't fit beside the count they wrap to a
@@ -1610,13 +1626,15 @@
     /* Stat cards (D3 A; both the Latest strip and the order book's): one
        label · value line per card, as R2 T2's Queue Summary. Each card
        keeps its own border and the cards close up into one box. The label
-       leads although each card puts its value first; the value keeps its
-       colour and size and wraps inside itself. The page's <style> loads
-       after this file, so the strip's rule takes a second class to win. */
+       leads although each card puts its value first, at 11px over the
+       page's 9px (the size every label · value line's label has on
+       phones); the value keeps its colour and size and wraps inside
+       itself. The page's <style> loads after this file, so the strip's
+       rule takes a second class to win. */
     .b-main .mk-stats { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .mk-stats > .mk-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
     .mk-stats > .mk-stat + .mk-stat { border-top: none; }
-    .mk-stat > .mk-stat-label { order: -1; flex: none; margin: 0; text-align: left; }
+    .mk-stat > .mk-stat-label { order: -1; flex: none; margin: 0; text-align: left; font-size: 11px; }
     .mk-stat > .mk-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 
     /* Price-history range buttons: the global phone rule already makes

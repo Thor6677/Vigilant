@@ -610,6 +610,18 @@ def test_css_isk_row_becomes_label_value_lines():
     assert "margin-top: 0 !important" in kids
     # The value keeps its colour: nothing here sets one.
     assert "color" not in tile + kids
+    # The label (each tile's last child) at 11px over its inline 9px: every
+    # label · value line's label size.
+    label = _flat(rule_bodies(sec, ".ks-isk > .ks-isk-tile > :last-child"))
+    assert label.strip() == "font-size: 11px !important;"
+
+
+def test_css_wallet_range_buttons_match_the_other_range_buttons():
+    """44px tall from the global button rule (no height here), at least 40px
+    wide with 12px labels, as Market's and Net Worth's."""
+    body = _flat(rule_bodies(_sec(), ".b-section-head > #range-buttons > .range-btn"))
+    assert "min-width: 40px" in body and "font-size: 12px" in body
+    assert "height" not in body
 
 
 def _phone_block(sec):

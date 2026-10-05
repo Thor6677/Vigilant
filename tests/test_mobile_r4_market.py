@@ -503,8 +503,10 @@ def test_t1_css_turns_stat_cards_into_lines():
         assert _decl(card, prop, value), (prop, value)
     assert _decl(rule_bodies(css, ".mk-stats > .mk-stat + .mk-stat"), "border-top", "none")
     label = rule_bodies(css, ".mk-stat > .mk-stat-label")
-    # The label leads, although each card puts its value first.
-    for prop, value in (("order", "-1"), ("flex", "none"), ("margin", "0"), ("text-align", "left")):
+    # The label leads, although each card puts its value first, at 11px over
+    # the page's 9px: every label · value line's label size.
+    for prop, value in (("order", "-1"), ("flex", "none"), ("margin", "0"), ("text-align", "left"),
+                        ("font-size", "11px")):
         assert _decl(label, prop, value), (prop, value)
     value = rule_bodies(css, ".mk-stat > .mk-stat-val")
     for prop, val in (("min-width", "0"), ("overflow-wrap", "anywhere"), ("text-align", "right")):

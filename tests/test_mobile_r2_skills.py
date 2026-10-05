@@ -391,8 +391,9 @@ def test_t2_css_turns_summary_tiles_into_lines():
     label = rule_bodies(css, ".skills-tile > .skills-tile-label")
     # The label leads whichever DOM order a tile uses (the queue's tiles
     # put the value first).
+    # 11px over the inline 9px: every label · value line's label size.
     for prop, value in (("order", "-1"), ("flex", "none"), ("margin", "0 !important"),
-                        ("text-align", "left")):
+                        ("text-align", "left"), ("font-size", "11px !important")):
         assert _decl(label, prop, value), (prop, value)
     value = rule_bodies(css, ".skills-tile > .skills-tile-value")
     for prop, val in (("min-width", "0"), ("overflow-wrap", "anywhere"),

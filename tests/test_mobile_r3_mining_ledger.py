@@ -715,6 +715,13 @@ def test_selection_bar_and_corp_ledger_buttons_have_12px_labels():
     assert "font-size: 12px !important" in rule_bodies(css, ".ml-corp-view")
 
 
+def test_chart_range_buttons_match_the_other_range_buttons():
+    css, _ = _phone()
+    body = rule_bodies(css, ".b-panel-head > #range-buttons > .range-btn")
+    assert "min-width: 40px" in body and "font-size: 12px" in body
+    assert "height" not in body, "the global phone button rule gives 44px"
+
+
 def test_ore_key_keeps_its_icon_beside_an_ellipsised_name():
     css, _ = _phone()
     cell = rule_bodies(css, '.m-row > [data-m="key"].ml-ore')
