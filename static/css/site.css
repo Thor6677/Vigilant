@@ -1972,12 +1972,20 @@
 
     /* Trending's Gained and Lost lists stay plain rows: 40px tall, and the
        alliance name truncates (a grid item won't shrink below its content
-       without min-width:0). */
-    #sov-gained > .b-trending-row, #sov-lost > .b-trending-row { min-height: 40px; }
+       without min-width:0). The alliance link is a 40px line filling the
+       name cell (the row drops its 4px padding for it), so the whole cell
+       is the tap target, and the link itself ellipsises. */
+    #sov-gained > .b-trending-row, #sov-lost > .b-trending-row { min-height: 40px; padding-top: 0; padding-bottom: 0; }
     #sov-gained .b-trending-name, #sov-lost .b-trending-name { min-width: 0; }
+    #sov-gained .b-trending-name > a, #sov-lost .b-trending-name > a {
+        display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis;
+    }
     /* The violent list already pads its sides; its m-rows keep only their
-       vertical padding, so rows and borders line up as on desktop. */
+       vertical padding, so rows and borders line up as on desktop. Its rows
+       and the Watchlist's alert rows take 11px text, which left them 37-38px
+       tall: they are tapped open, so at least 40px. */
     #violent-list > .m-row { padding-left: 0 !important; padding-right: 0 !important; }
+    #violent-list > .m-row, .w-row.m-row { min-height: 40px; }
     /* Two-digit ranks would push key 1 right of the one-digit rows' names;
        a fixed, right-aligned rank keeps the names in one column. */
     #violent-list > .m-row > .b-trending-rank { min-width: 2ch !important; justify-content: flex-end; }
@@ -1996,6 +2004,20 @@
     label.wht-pick { min-height: 40px; }
     #wht-refresh { font-size: 12px !important; }
     #wht-panel .ws-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+
+    /* Small links raised to the 40px tap floor (R5 T4 does the same on the
+       wormhole system page): on the WH Tracker panel the static and
+       wandering codes (also at least 40px wide), "full page →" and the
+       resident corps; on Gate Check the "Avoid systems" toggle, its text
+       at 12px (line-height keeps the summary a list item, so its marker
+       stays), and "Open in Star Map". !important beats the link's inline
+       display:inline-block. */
+    #wht-panel .ws-conn a, #wht-panel .wht-full, #wht-panel .wht-res > a {
+        display: inline-flex; align-items: center; min-height: 40px;
+    }
+    #wht-panel .ws-conn a { min-width: 40px; }
+    .gc-avoid > summary { min-height: 40px; line-height: 40px; font-size: 12px !important; }
+    .gc-starmap { display: inline-flex !important; align-items: center; min-height: 40px; }
 }
 /* ── end R5 T3 ── */
 

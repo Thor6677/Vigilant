@@ -528,6 +528,46 @@ def test_trending_alliance_rows_truncate_and_grow():
         assert "min-width: 0" in rule_bodies(body, f"{list_id} .b-trending-name")
 
 
+def test_trending_alliance_links_fill_their_40px_rows():
+    body, _ = _phone()
+    for list_id in ("#sov-gained", "#sov-lost"):
+        row = rule_bodies(body, f"{list_id} > .b-trending-row")
+        assert "padding-top: 0" in row and "padding-bottom: 0" in row
+        link = rule_bodies(body, f"{list_id} .b-trending-name > a")
+        for decl in ("display: block", "line-height: 40px", "overflow: hidden", "text-overflow: ellipsis"):
+            assert decl in link, (list_id, decl)
+
+
+def test_tapped_rows_are_at_least_40px():
+    """The violent list's and the Watchlist's m-rows carry 11px text, which
+    left them 37-38px tall."""
+    body, _ = _phone()
+    for sel in ("#violent-list > .m-row", ".w-row.m-row"):
+        assert "min-height: 40px" in rule_bodies(body, sel), sel
+
+
+def test_small_links_reach_the_40px_floor():
+    body, _ = _phone()
+    for sel in ("#wht-panel .ws-conn a", "#wht-panel .wht-full", "#wht-panel .wht-res > a"):
+        d = rule_bodies(body, sel)
+        assert "display: inline-flex" in d and "min-height: 40px" in d, sel
+    assert "min-width: 40px" in rule_bodies(body, "#wht-panel .ws-conn a")
+    avoid = rule_bodies(body, ".gc-avoid > summary")
+    assert "min-height: 40px" in avoid and "line-height: 40px" in avoid
+    assert "font-size: 12px !important" in avoid
+    star = rule_bodies(body, ".gc-starmap")
+    assert "display: inline-flex !important" in star and "min-height: 40px" in star
+
+
+def test_small_link_hooks_are_in_the_markup():
+    assert '<details class="gc-avoid">' in source("gatecheck.html")
+    route = _render_route()
+    assert re.search(r'<a class="gc-starmap" href="/map\?origin=', route)
+    panel = source("partials/wh_tracker_panel.html")
+    assert re.search(r'<a class="wht-full" href="/wormholes/system/[^"]*"[^>]*>full page →</a>', panel)
+    assert re.search(r'<div class="wht-res"[^>]*>\s*<a href="/intel/entity/corporation/', panel)
+
+
 def test_tracker_system_name_wraps():
     body, _ = _phone()
     assert "overflow-wrap: anywhere" in rule_bodies(body, "#wht-panel .ws-name")

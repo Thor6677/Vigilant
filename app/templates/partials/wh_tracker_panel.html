@@ -38,7 +38,7 @@
     <span class="ws-name b-page-title">{{ system['system_name'] }}</span>
     <span class="ws-class-badge" style="color:{{ class_color(wh_class) }};border-color:{{ class_color(wh_class) }};">{{ class_label(wh_class) }} System</span>
     {% if effect %}<span style="font-size:12px;color:var(--text);">{{ effect['name'] }}</span>{% endif %}
-    <a href="/wormholes/system/{{ system['system_name'] }}" style="font-size:10px;color:var(--accent);margin-left:auto;">full page →</a>
+    <a class="wht-full" href="/wormholes/system/{{ system['system_name'] }}" style="font-size:10px;color:var(--accent);margin-left:auto;">full page →</a>
 </div>
 <div class="b-muted-sm" style="margin-bottom:0.75rem;">
     {{ char_name }} is here{% if prev_system_name %} · came from <span style="color:var(--text);">{{ prev_system_name }}</span>{% endif %}
@@ -120,7 +120,7 @@
                 <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.25rem;">Who lives here (90d)</div>
                 {% if intel.residents %}
                 {% for r in intel.residents %}
-                <div style="font-size:11px;padding:1px 0;">
+                <div class="wht-res" style="font-size:11px;padding:1px 0;">
                     <a href="/intel/entity/corporation/{{ r.corp_id }}" style="color:var(--accent);">{{ r.corp_name }}</a>
                     {% if r.alliance_name %}<span style="color:var(--muted);"> [{{ r.alliance_name }}]</span>{% endif %}
                     <span style="color:var(--muted);"> — {{ r.kills }} kill{{ 's' if r.kills != 1 }}</span>
