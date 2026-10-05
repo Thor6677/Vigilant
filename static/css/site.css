@@ -1231,12 +1231,10 @@
 /* ── R3 T4 · compression/hauling ── */
 @media (max-width: 640px) {
     /* Compression: the character skill chips (built in app/routes/industry.py,
-       compression_skills) become 40px tap targets with a 12px label, like
-       m-tap. !important beats their inline 10px. */
-    .comp-skill-chip {
-        display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
-        min-height: 40px; min-width: 40px; font-size: 12px !important;
-    }
+       compression_skills) are read-only spans, so they keep their natural
+       height; only the label grows to 12px for legibility. !important beats
+       their inline 10px. */
+    .comp-skill-chip { font-size: 12px !important; }
     /* Compression results head: Copy for Multibuy and Send to Hauling wrap
        as whole buttons instead of squeezing. .b-btn is flex:1 (basis 0%),
        which shares the line out equally and breaks a label inside its
@@ -1254,10 +1252,17 @@
     .comp-ore-key { font-size: 11px; }
 
     /* Hauling ship entry: the eight fields go two to a row. !important beats
-       the inline flex, the 50/140/160px minimums and the 50px inputs. */
+       the inline flex, the 50/140/160px minimums and the 50px inputs (the
+       selects have no inline width). */
     .haul-entry-fields { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .haul-entry-fields > * { min-width: 0 !important; }
-    .haul-entry-fields input, .haul-entry-fields select { width: 100% !important; }
+    .haul-entry-fields input { width: 100% !important; }
+    .haul-entry-fields select { width: 100%; }
+    /* The remove ✕ stays a 44px square at the start of its column instead
+       of stretching across it like an empty field. !important beats the
+       inline 11px glyph. */
+    .haul-entry-fields > .haul-entry-remove { align-items: flex-start; }
+    .haul-entry-remove > button { min-width: 44px; font-size: 14px !important; }
 
     /* Hauling trip breakdown (built as a string in hauling.html's
        recalcTrips): the ship and its m³/trip share line 1, m³/trip at its

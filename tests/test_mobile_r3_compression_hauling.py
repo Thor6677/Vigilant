@@ -477,7 +477,12 @@ def test_ship_entry_fields_get_a_two_up_hook():
     # The fields JS reads are all still there.
     data_fields = {a.get("data-field") for _, a, _ in els if a.get("data-field")}
     assert data_fields == {"qty", "ship", "mod", "modCount", "rig", "rigCount", "skill"}
-    assert any(a.get("data-click") == "removeShipEntry" for _, a, _ in els)
+    # The remove control: its wrapper is the last field, and the button has
+    # an accessible name (its only text is the ✕ glyph).
+    (btn,) = [i for i, (_, a, _) in enumerate(els) if a.get("data-click") == "removeShipEntry"]
+    wrap = els[btn][2]
+    assert wrap == fields[-1] and "haul-entry-remove" in _classes(els[wrap][1])
+    assert els[btn][1].get("aria-label") == "Remove ship"
 
 
 def test_trip_breakdown_wraps_but_is_not_tap_to_open():
@@ -513,10 +518,13 @@ def _decls(css, selector):
     return re.sub(r"\s+", " ", body)
 
 
-def test_css_skill_chips_are_40px_tap_targets():
+def test_css_skill_chips_stay_compact():
+    """The chips are read-only spans with no handler, so they keep their
+    natural height on phones (a 40px tap size only added height). Only the
+    label grows, from the inline 10px to 12px, for legibility."""
     d = _decls(_phone(), ".comp-skill-chip")
-    assert "min-height: 40px" in d and "min-width: 40px" in d
-    assert "display: inline-flex" in d and "align-items: center" in d
+    assert "font-size: 12px !important" in d
+    assert "min-height" not in d and "min-width" not in d and "display" not in d
 
 
 def test_css_ore_key_one_lines_up_with_key_two():
@@ -549,8 +557,20 @@ def test_css_ship_entry_fields_go_two_up():
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in d
     kids = _decls(css, ".haul-entry-fields > *")
     assert "min-width: 0 !important" in kids, "beats the inline 50/140/160px minimums"
-    ctl = _decls(css, ".haul-entry-fields input") + _decls(css, ".haul-entry-fields select")
-    assert ctl.count("width: 100% !important") >= 2, "beats the inline 50px inputs"
+    assert "width: 100% !important" in _decls(css, ".haul-entry-fields input"), (
+        "beats the inline 50px inputs")
+    sel = _decls(css, ".haul-entry-fields select")
+    assert "width: 100%" in sel and "!important" not in sel, "the selects have no inline width"
+
+
+def test_css_remove_button_is_content_width():
+    """In the two-up grid the ✕ would stretch to a whole column (about
+    149px) and read like an empty field; it stays a 44px square."""
+    css = _phone()
+    assert "align-items: flex-start" in _decls(css, ".haul-entry-fields > .haul-entry-remove")
+    btn = _decls(css, ".haul-entry-remove > button")
+    assert "min-width: 44px" in btn
+    assert "font-size: 14px !important" in btn, "beats the inline 11px"
 
 
 def test_css_trip_breakdown_wraps():
