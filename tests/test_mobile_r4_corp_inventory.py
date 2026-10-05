@@ -661,3 +661,51 @@ def test_new_class_hooks_are_styled_only_in_this_sections_phone_block():
         n = len(re.findall(re.escape(cls) + r"(?![\w-])", phone))
         assert n, cls
         assert len(re.findall(re.escape(cls) + r"(?![\w-])", css)) == n, f"{cls} styled outside R4 T4"
+
+
+def test_form_labels_and_contracts_hint_are_11px_on_phones():
+    assert "font-size:11px!important" in _body(".cinv-form label")
+    assert "font-size:11px!important" in _body(".cctr-hint")
+
+
+class _Labels(HTMLParser):
+    """Every <label>'s text, whether it sits inside a .cinv-form, and
+    whether it carries the inline 9px."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack, self.labels, self.cur = [], [], None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "label":
+            inside = any("cinv-form" in (c or "").split() for c in self.stack)
+            self.cur = [inside, "", "font-size:9px" in (a.get("style") or "").replace(" ", "")]
+            self.labels.append(self.cur)
+        if tag not in VOID:
+            self.stack.append(a.get("class") or "")
+
+    def handle_endtag(self, tag):
+        if tag == "label":
+            self.cur = None
+        if self.stack:
+            self.stack.pop()
+
+    def handle_data(self, data):
+        if self.cur is not None:
+            self.cur[1] += data
+
+
+@pytest.mark.parametrize("render, labels", [
+    (_render_inventory_page, ["Structure", "Item", "Structure", "Hangar", "Low", "Critical"]),
+    (_render_contracts_page, ["Match By", "Keyword", "Item Type", "Low", "Critical"]),
+])
+def test_every_form_label_sits_in_a_cinv_form(render, labels):
+    """The phone rule reaches the 9px labels through .cinv-form."""
+    p = _Labels()
+    p.feed(render())
+    form = [" ".join(t.split()) for inside, t, _ in p.labels if inside]
+    assert form == labels
+    small = [(inside, t) for inside, t, nine in p.labels if nine]
+    assert len(small) == len(labels) and all(inside for inside, _ in small), \
+        "every 9px label is inside a .cinv-form"

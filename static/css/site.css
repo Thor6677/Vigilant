@@ -1761,6 +1761,11 @@
        double against the box's sides. */
     .cinv-scan-wrap .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 
+    /* The forms' field labels (Structure, Item, Hangar, Low, Critical,
+       Match By, Keyword, Item Type) and the contracts hint: 11px over their
+       inline 9px. */
+    .cinv-form label, .cctr-hint { font-size: 11px !important; }
+
     /* Item type search results (Add Item, Add Threshold): 40px rows at
        12px. The rows come from the shared type-search route. */
     .corp-type-results > .b-row { min-height: 40px; }
