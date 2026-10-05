@@ -800,6 +800,14 @@ def test_css_wallet_caption_takes_its_own_line_under_the_buttons():
     assert _decl(cap, "flex-basis") == "100%"
 
 
+def test_css_wallet_range_buttons_match_the_other_range_buttons():
+    """44px tall from the global button rule (no height here), at least
+    40px wide with 12px labels, as Market's and Net Worth's."""
+    body = rule_bodies(_phone_block(), ".b-btn.corp-wallet-range")
+    assert _decl(body, "min-width") == "40px" and _decl(body, "font-size") == "12px !important"
+    assert "height" not in body
+
+
 def test_css_jobs_are_one_column_and_structure_key_one_truncates_the_name():
     css = _phone_block()
     jobs = rule_bodies(css, ".corp-jobs")

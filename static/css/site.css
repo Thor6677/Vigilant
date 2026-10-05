@@ -1070,6 +1070,10 @@
        range buttons. */
     .corp-wallet-head { flex-wrap: wrap; }
     .corp-wallet-head > .corp-wallet-caption { order: 1; flex-basis: 100%; }
+    /* The range buttons: 44px tall from the global button rule; here at
+       least 40px wide (30px before) with 12px labels over their inline 9px,
+       as Market's and Net Worth's range buttons. */
+    .b-btn.corp-wallet-range { min-width: 40px; font-size: 12px !important; }
 
     /* Industry jobs (D11 A): the tile grid becomes one column, so its 1px
        gaps read as dividers between rows. Key 1 (product) is 12px, as other
