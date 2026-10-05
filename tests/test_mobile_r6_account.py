@@ -153,13 +153,16 @@ def _toggles(card):
 def test_each_card_has_one_phone_summary_with_its_shared_count():
     cards = _cards(_account([MAIN, ALT, LAPSED]))
     assert len(cards) == 3
-    for card, want in zip(cards, (TOTAL, TOTAL - 2, TOTAL)):
+    # A rejected token's head shows only "authorization expired", so its
+    # button names the chips instead of a count nothing can read.
+    for card, want in zip(cards, (f"{TOTAL} of {TOTAL} shared", f"{TOTAL - 2} of {TOTAL} shared",
+                                  "Permissions")):
         toggles = _toggles(card)
         assert len(toggles) == 1, "one summary button, a direct child of the card"
         btn = toggles[0]
         assert btn["tag"] == "button" and btn["attrs"].get("type") == "button"
         assert "m-only" in _cls(btn), "desktop keeps the chips and never shows the button"
-        assert norm(btn["text"]) == f"{want} of {TOTAL} shared"
+        assert norm(btn["text"]) == want
 
 
 def test_the_summary_sits_between_the_head_and_the_chips():

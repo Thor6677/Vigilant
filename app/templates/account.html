@@ -49,7 +49,9 @@
         </div>
       </div>
 
-      <button type="button" class="m-only acct-perms-toggle" data-click="toggleExpanded" data-toggle-target=".acct-char"><span><b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared</span></button>
+      {# A rejected token shows only its badge in the head, as on desktop, so
+         the button names the chips rather than a count nothing can read. #}
+      <button type="button" class="m-only acct-perms-toggle" data-click="toggleExpanded" data-toggle-target=".acct-char"><span>{% if c['token_failed'] %}Permissions{% else %}<b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared{% endif %}</span></button>
 
       <div class="acct-perms">
         {% for p in perms.PERMISSIONS %}

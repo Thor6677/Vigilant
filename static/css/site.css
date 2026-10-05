@@ -1812,7 +1812,8 @@
     .perm-scopes > summary { line-height: 44px; }
     .perm-footer > a { display: inline-flex; align-items: center; min-height: 44px; }
     .perm-group-actions > button { min-width: 44px; }
-    /* The footer's Continue button is flex:none (.b-btn.is-primary), so with
+    /* The footer's Continue button is flex:none (.b-btn.is-primary in
+       design-system/css/components.css), so with
        Cancel beside it the count was pushed off the left edge at 360px.
        Letting the button shrink wraps its label instead. */
     .perm-footer > .b-btn { flex: 0 1 auto; }
