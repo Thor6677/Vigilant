@@ -156,7 +156,8 @@ def test_editable_plan_remove_button_is_a_tap_target_keeping_its_x():
     for row in rows:
         cell = row_labelled(row)["Remove"]
         (button,) = cell["kids"]
-        assert "m-tap" in _classes(button)
+        assert "b-btn" in _classes(button)
+        assert "m-tap" not in _classes(button), "m-tap's 40px would shrink the 44px button"
         assert cell["text"] == "×"
 
 
@@ -213,7 +214,8 @@ def test_acl_rows_key_on_name_and_short_type():
         remove = labelled["Remove"]["attrs"]
         assert remove["data-confirm"] == f"Remove {name} from the ACL?"
         (button,) = labelled["Remove"]["kids"]
-        assert "m-tap" in _classes(button)
+        assert "b-btn" in _classes(button)
+        assert "m-tap" not in _classes(button), "m-tap's 40px would shrink the 44px button"
 
 
 def test_acl_header_is_m_head_and_add_form_stacks():
@@ -427,7 +429,8 @@ def test_css_share_link_rule_is_scoped_to_this_page():
 
 def test_sort_toolbar_buttons_are_tap_targets():
     """With the drag handle hidden on phones, Export and the three Sort
-    buttons are the only list controls: each is an m-tap (40px, 12px)."""
+    buttons are the only list controls: each keeps the 44px phone button
+    height (no m-tap, whose 40px would shrink it); the CSS widens them."""
     tags = _tags(_render_detail(can_edit=True))
     i = next(n for n, (t, a) in enumerate(tags) if "skp-sortbar" in _classes(a))
     buttons = []
@@ -438,19 +441,22 @@ def test_sort_toolbar_buttons_are_tap_targets():
             break
     assert buttons[0].get("data-click") == "exportPlan"
     for b in buttons:
-        assert "m-tap" in _classes(b), b
+        assert "m-tap" not in _classes(b), b
 
 
 def test_read_only_sort_toolbar_keeps_export_tappable():
     tags = _tags(_render_detail(can_edit=False))
     (export,) = [a for t, a in tags if a.get("data-click") == "exportPlan"]
-    assert "m-tap" in _classes(export)
+    assert "m-tap" not in _classes(export)
 
 
 def test_css_sort_toolbar_wraps_centred_at_12px():
     d = _decls(".skp-sortbar")
     assert "flex-wrap: wrap" in d and "align-items: center" in d
     assert "font-size: 12px !important" in d
+    b = _decls(".skp-sortbar button")
+    assert "min-width: 40px" in b and "font-size: 12px !important" in b
+    assert "height" not in b, "the global phone button rule gives 44px"
 
 
 def test_css_typeahead_rows_are_40px_12px_left_aligned():
@@ -475,11 +481,14 @@ def test_css_attributes_rank_is_legible_when_open():
     assert "color: var(--muted) !important" in _decls('.skill-row > [data-m-label="Attributes"] span span')
 
 
-def test_css_remove_buttons_stay_40px_in_an_open_row():
+def test_css_remove_buttons_are_44px_squares_in_an_open_row():
     """.b-btn carries flex:1, which stretched the × across the open row
-    (250px at 360) once its form became the open row's flex value."""
-    for sel in (".skill-row > [data-m-label] > .m-tap", ".skp-acl-row > [data-m-label] > .m-tap"):
-        assert "flex: none" in _decls(sel), sel
+    (250px at 360) once its form became the open row's flex value. The
+    global phone button rule gives the 44px height; this widens it."""
+    for sel in (".skill-row > [data-m-label] > .b-btn", ".skp-acl-row > [data-m-label] > .b-btn"):
+        d = _decls(sel)
+        assert "flex: none" in d and "min-width: 44px" in d, sel
+        assert "height" not in d, sel
 
 
 def test_css_gap_row_keys_share_one_size():

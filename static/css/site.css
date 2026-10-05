@@ -1082,10 +1082,11 @@
        always on show; on phones it takes the muted colour too. */
     .skp-shared-rank { color: var(--muted) !important; }
 
-    /* Remove (plan and ACL rows): .b-btn's flex:1 would stretch the 40px ×
-       across the whole open row. */
-    .skill-row > [data-m-label] > .m-tap,
-    .skp-acl-row > [data-m-label] > .m-tap { flex: none; }
+    /* Remove (plan and ACL rows): a 44px square ×. The height is the global
+       phone button rule's (no m-tap, whose 40px would shrink it); .b-btn's
+       flex:1 would stretch it across the whole open row. */
+    .skill-row > [data-m-label] > .b-btn,
+    .skp-acl-row > [data-m-label] > .b-btn { flex: none; min-width: 44px; }
 
     /* Gap rows (D15 A): both keys at 12px. Their desktop spans carry 10–11px
        inline, and key 1 also takes the 16px phone body size as its line
@@ -1117,10 +1118,13 @@
         white-space: nowrap; text-overflow: ellipsis;
     }
 
-    /* Skills toolbar (Export, Sort: Name / Optimal / Level): its buttons are
-       m-tap; the toolbar wraps and centres "Sort:" on them, at 12px rather
-       than the inline 9px. */
+    /* Skills toolbar (Export, Sort: Name / Optimal / Level): the toolbar
+       wraps and centres "Sort:" on its buttons, at 12px rather than the
+       inline 9px. The buttons keep the global 44px phone button height (no
+       m-tap, whose 40px would shrink them), are at least 40px wide and
+       take 12px labels over their inline 9px. */
     .skp-sortbar { flex-wrap: wrap; align-items: center; font-size: 12px !important; }
+    .skp-sortbar button { min-width: 40px; font-size: 12px !important; }
 
     /* Add Skill / Add from Ship typeahead: 40px rows at 12px. The dropdown
        is absolutely positioned inside a panel that clips (overflow:hidden,
