@@ -25,7 +25,9 @@
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
 </div>
-<input type="text" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+{# The link Copy Link copies. Only its .value is read (copyText uses its own
+   textarea), so it's a hidden input: no unlabelled Tab stop, nothing off-screen. #}
+<input type="hidden" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}">
 
 {# ── Raw Paste (hidden by default) ───────────────────────────────────────── #}
 <div id="raw-paste-section" style="display:none;margin-bottom:1rem;">
@@ -128,7 +130,7 @@
 
 {# ── Pilot List (collapsed) ────────────────────────────────────────────────── #}
 <details style="margin-top:0.5rem;" id="pilot-details">
-    <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
+    <summary class="intel-toggle" style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
         <span class="b-eyebrow">All Pilots</span>
         <span class="b-muted-sm" id="pilot-count">{{ items | length }}</span>
         <span class="b-muted-sm">▼</span>

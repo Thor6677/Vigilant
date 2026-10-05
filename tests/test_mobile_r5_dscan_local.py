@@ -28,8 +28,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.routes import dscan as dscan_mod
-from tests._mobile import (VOID, assert_mrow, cells_rows, css_section, norm, phone_block,
-                           render_page, request, row_keys, row_lead, rule_bodies, selectors)
+from tests._mobile import (SITE_CSS, VOID, assert_mrow, cells_rows, css_section, norm,
+                           phone_block, render_page, request, row_keys, row_lead, rule_bodies,
+                           selectors)
 
 _section = functools.partial(css_section, release="R5")
 _NS = types.SimpleNamespace
@@ -300,16 +301,85 @@ def test_logged_in_view_binds_nothing_twice(view):
         assert f'="{fn}"' not in html, f"something still dispatches {fn} through actions.js"
 
 
+def _func_body(script, name):
+    """The body of `function <name>(…) { … }` in a page script, found by
+    counting braces from its opening one. The copy functions hold no brace
+    inside a string or comment, which this would miscount."""
+    m = re.search(rf"\bfunction {name}\([^)]*\)\s*\{{", script)
+    assert m, f"no function {name} in the page script"
+    depth, i = 1, m.end()
+    while depth:
+        depth += {"{": 1, "}": -1}.get(script[i], 0)
+        i += 1
+    return script[m.end():i - 1]
+
+
+# The handlers behind each view's copy buttons.
+_COPY_HANDLERS = {"dscan": ("copyShareUrl", "copyRawPaste", "copyShipClasses", "copyByType"),
+                  "local": ("copyShareUrl", "copyRawPaste", "copyLocalComp")}
+
+
 def test_copy_writes_inside_the_click_with_a_fallback():
     """iOS only lets a page write the clipboard during the tap, so writeText
     is called straight from the handler; execCommand('copy') covers a
-    context with no clipboard API."""
+    context with no clipboard API. Both are gesture-bound, so neither the
+    handler, nor copyText, nor the fallback may put the write behind a
+    timer or a fetch."""
     for view in _VIEWS:
         script = _page_script(_dom(_render_view(view, anon=True))).text
-        assert "navigator.clipboard.writeText(text)" in script
-        assert "document.execCommand('copy')" in script
-        # Never deferred behind a timer or a fetch before the write.
-        assert "fetch(" not in script
+        copy, legacy = _func_body(script, "copyText"), _func_body(script, "legacyCopy")
+        assert "navigator.clipboard.writeText(text)" in copy and "legacyCopy(text)" in copy
+        assert "document.execCommand('copy')" in legacy
+        # Control: the "Copied!" flash restores the label on a timer, so a
+        # check over the whole script couldn't tell a deferred write apart.
+        assert "setTimeout(" in _func_body(script, "flashCopied")
+        bodies = {"copyText": copy, "legacyCopy": legacy}
+        bodies.update((fn, _func_body(script, fn)) for fn in _COPY_HANDLERS[view])
+        for fn, body in bodies.items():
+            assert "setTimeout(" not in body, f"{view}: {fn} defers the copy behind a timer"
+            assert "fetch(" not in body, f"{view}: {fn} fetches before the copy"
+        for fn in _COPY_HANDLERS[view]:
+            assert "copyText(" in bodies[fn], f"{view}: {fn} doesn't copy through copyText"
+
+
+@pytest.mark.parametrize("view, anon", [(v, a) for v in sorted(_VIEWS) for a in (True, False)])
+def test_share_url_is_a_hidden_input_read_only_by_copy_link(view, anon):
+    """Copy Link copies #share-url's value. It used to be a text input moved
+    off-screen: an unlabelled Tab stop that the phone audit flags as
+    clipped. A hidden input still has the value and nothing else. The
+    fallback copies through a textarea of its own, never this input."""
+    root = _dom(_render_view(view, anon=anon))
+    found = root.by_id("share-url")
+    assert len(found) == 1
+    inp = found[0]
+    assert inp.tag == "input" and inp.attrs.get("type") == "hidden"
+    assert inp.attrs["value"] == f"https://example.test/intel/{_SCAN_ID}"
+    assert "style" not in inp.attrs, "a hidden input needs no off-screen positioning"
+    script = _page_script(root).text
+    assert "getElementById('share-url').value" in _func_body(script, "copyShareUrl")
+    assert script.count("share-url") == 1, "only copyShareUrl reads the input"
+    legacy = _func_body(script, "legacyCopy")
+    assert "createElement('textarea')" in legacy and "share-url" not in legacy
+
+
+@pytest.mark.parametrize("view, anon", [(v, a) for v in sorted(_VIEWS) for a in (True, False)])
+def test_fold_out_toggles_have_the_tap_height_hook(view, anon):
+    """D-Scan's Other on Scan and Local's All Pilots (the only way into the
+    pilot list) are <summary> toggles. Each carries .intel-toggle for the
+    phone rule's 40px; its inline display:flex and ▼ marker are unchanged."""
+    root = _dom(_render_view(view, anon=anon))
+    main = root.find_all(lambda n: n.tag == "main")
+    assert len(main) == 1
+    summaries = main[0].find_all(lambda n: n.tag == "summary")
+    assert len(summaries) == 1
+    toggle = summaries[0]
+    assert toggle.classes == ["intel-toggle"] and toggle.parent.tag == "details"
+    if view == "local":
+        assert toggle.parent.attrs.get("id") == "pilot-details"
+    assert toggle.text.startswith("Other on Scan" if view == "dscan" else "All Pilots")
+    style = toggle.attrs["style"].replace(" ", "")
+    assert "display:flex" in style and "min-height" not in style
+    assert toggle.children[-1].tag == "span" and toggle.children[-1].text == "▼"
 
 
 # ── 3–5. Local: filter, pilot lines, corp rows ───────────────────────
@@ -447,6 +517,26 @@ def test_css_corp_alliance_line_truncates():
                  "text-overflow: ellipsis", "white-space: nowrap"):
         assert decl in ally, f"{decl!r} missing from the corp alliance line"
     assert "min-height: 40px" in _flat(rule_bodies(phone, ".intel-alliance-row"))
+
+
+def test_css_fold_out_toggles_are_40px_on_phones_only():
+    """The Other on Scan / All Pilots summaries were 32.5px. Only their
+    height changes: a display here would replace the inline display:flex
+    (and with it how the summary and its ▼ marker lay out)."""
+    body = _flat(rule_bodies(_phone(), ".intel-toggle"))
+    assert "min-height: 40px" in body
+    assert "display" not in body and "!important" not in body
+    # Nothing outside this phone block reaches the toggles, so desktop keeps
+    # its 32.5px row.
+    with open(SITE_CSS, encoding="utf-8") as fh:
+        css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+    assert css.count("intel-toggle") == _phone().count("intel-toggle") == 1
+
+
+def test_css_section_leaves_share_url_alone():
+    """#share-url is now a hidden input and needs no rule. R6 T3's image
+    page shows an input with the same id, so a rule here would restyle it."""
+    assert "share-url" not in _section("T2")
 
 
 def test_css_never_forces_display_on_filtered_rows():

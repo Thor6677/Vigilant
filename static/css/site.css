@@ -1771,6 +1771,12 @@
     .dscan-group-row > span + span, .dscan-ship-row > span + span { padding-left: 0.4rem !important; }
     .dscan-ship-row { min-height: 26px; padding-left: 1.25rem !important; }
 
+    /* Scan views, the fold-out toggles: D-Scan's Other on Scan and Local's
+       All Pilots, the only way into the pilot list. Their inline padding
+       made them 32.5px tall; a tap target is at least 40px. Only the height
+       changes: the summary keeps its inline display:flex and ▼ marker. */
+    .intel-toggle { min-height: 40px; }
+
     /* Local, All Pilots (D5 A): line 1 is the portrait and name, line 2 the
        m-only "corporation · alliance" copy, muted and truncating. Pilot,
        corp and alliance rows never get a display with !important here:
