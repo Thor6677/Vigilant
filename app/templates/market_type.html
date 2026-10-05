@@ -42,7 +42,7 @@
 </div>
 
 {# Phones (R4 T1 in site.css): the stat cards become label · value lines
-   (D3 A) and the range buttons centred tap targets. #}
+   (D3 A), and the range buttons get 12px labels and a 40px minimum width. #}
 <div class="mk-stats">
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-avg">—</div><div class="mk-stat-label">Latest avg</div></div>
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-high">—</div><div class="mk-stat-label">Latest high</div></div>
@@ -84,8 +84,8 @@
     var errEl = document.getElementById('mk-error');
     /* Phones (≤640px, D4 A): price only. The volume bars and their
        right-hand axis would take ~50px of a 360px screen, so they go, and
-       at most 3 date labels fit. Read when the chart is built; crossing the
-       breakpoint rebuilds it (below). Desktop options are untouched. */
+       at most 3 date labels fit. Read when the chart is drawn; crossing the
+       breakpoint redraws it (below). Desktop options are untouched. */
     var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
     function fmtIsk(v) {
@@ -108,13 +108,18 @@
     }
 
     function build(data) {
-        lastData = data;
         errEl.style.display = 'none';
         document.getElementById('mk-latest-avg').textContent = fmtIsk(last(data.average));
         document.getElementById('mk-latest-high').textContent = fmtIsk(last(data.highest));
         document.getElementById('mk-latest-low').textContent = fmtIsk(last(data.lowest));
         document.getElementById('mk-latest-vol').textContent = fmtNum(last(data.volume));
+        drawChart(data);
+    }
 
+    /* The chart alone, so a breakpoint redraw (below) leaves the stat
+       cards and any error message as they are. */
+    function drawChart(data) {
+        lastData = data;
         var cfg = {
             type: 'bar',
             data: {
@@ -183,6 +188,7 @@
             }
             build(data);
         }).catch(function () {
+            lastData = null;  // never redraw a range that failed to load
             errEl.textContent = 'Market history unavailable — try another range or refresh.';
             errEl.style.display = '';
         });
@@ -199,7 +205,7 @@
     });
 
     if (phoneMq) {
-        var onBreakpoint = function () { if (chart && lastData) build(lastData); };
+        var onBreakpoint = function () { if (chart && lastData) drawChart(lastData); };
         if (phoneMq.addEventListener) phoneMq.addEventListener('change', onBreakpoint);
         else if (phoneMq.addListener) phoneMq.addListener(onBreakpoint);
     }

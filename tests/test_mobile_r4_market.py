@@ -11,8 +11,9 @@ User decisions (all the recommended option):
         book's Best sell/buy and Spread) become label · value lines.
   D4 A  The price-history chart on phones: price only (no volume bars and no
         second axis) and at most 3 date labels. Desktop options are untouched.
-The 30D / 90D / 1Y / ALL range buttons become centred tap targets, and the
-search box doesn't autofocus on phones (desktop keeps the attribute).
+The 30D / 90D / 1Y / ALL range buttons get 12px labels and a 40px minimum
+width (the global phone rule already makes them 44px tall), and the search
+box doesn't autofocus on phones (desktop keeps the attribute).
 
 Every route here redirects (or 401s) anonymous visitors, so data-click is
 safe. Templates are rendered through the market route module's own
@@ -90,13 +91,6 @@ def test_search_key_one_holds_the_name_then_the_group():
         assert key2["attrs"].get("aria-hidden") == "true"
         assert "m-only" in key2["attrs"]["class"].split()
         assert not row_labelled(row)
-
-
-def test_search_key_one_lines_are_name_then_group():
-    html = _render_search()
-    for res in _RESULTS:
-        assert (f'<span class="m-only mk-row-key" data-m="key"><span class="mk-row-name">'
-                f'{res["type_name"]}</span><span class="mk-row-group">{res["group"]}</span></span>') in html
 
 
 def test_search_rows_keep_the_desktop_spans():
@@ -217,10 +211,25 @@ def test_empty_order_book_renders_no_rows():
 
 # ── D3 A: stat cards ──────────────────────────────────────────────────
 
+_DIV_TAG = re.compile(r"<div\b|</div>")
+
+
+def _div_inner(html, start):
+    """The inner HTML of the <div ...> whose opening tag ends at `start`,
+    up to its own matching </div>."""
+    depth = 1
+    for t in _DIV_TAG.finditer(html, start):
+        depth += 1 if t.group() == "<div" else -1
+        if not depth:
+            return html[start:t.start()]
+    raise AssertionError("unclosed <div>")
+
+
 def _stat_strips(html):
     """Each .mk-stats strip as [(label, value, value id)]."""
     out = []
-    for strip in re.findall(r'<div class="mk-stats"[^>]*>(.*?)\n</div>', html, re.S):
+    for m in re.finditer(r'<div class="mk-stats"[^>]*>', html):
+        strip = _div_inner(html, m.end())
         cards = re.findall(
             r'<div class="mk-stat"><div class="mk-stat-val"(?: id="([^"]*)")?>([^<]*)</div>'
             r'<div class="mk-stat-label">([^<]*)</div></div>', strip)
@@ -259,8 +268,76 @@ def _chart_script(html):
     return html[start:html.index("</script>", start)]
 
 
+def _between(text, start, stop):
+    """The text from the token `start` up to the next `stop` after it."""
+    i = text.index(start)
+    return text[i:text.index(stop, i + len(start))]
+
+
+def _phone_branch(script):
+    return _between(script, "if (phoneMq && phoneMq.matches) {", "if (chart)")
+
+
+def _build(script):
+    return _between(script, "function build(data) {", "function drawChart(data) {")
+
+
+def _draw(script):
+    return _between(script, "function drawChart(data) {", "function load() {")
+
+
+def _ws(text):
+    """Whitespace collapsed to single spaces, so a check reads the tokens
+    and not the indentation."""
+    return " ".join(text.split())
+
+
+# BASE's (10474ed) desktop chart config, token for token (compared through
+# _ws, so re-indenting it is not a change).
+_DESKTOP_CFG = """        var cfg = {
+            type: 'bar',
+            data: {
+                labels: data.dates,
+                datasets: [
+                    { type: 'line', label: 'Average', data: data.average,
+                      borderColor: '#c8a951', backgroundColor: 'transparent',
+                      pointRadius: 0, borderWidth: 1.6, yAxisID: 'y', order: 0 },
+                    { type: 'line', label: 'High', data: data.highest,
+                      borderColor: 'rgba(120,170,120,0.5)', backgroundColor: 'rgba(120,170,120,0.10)',
+                      pointRadius: 0, borderWidth: 0.8, yAxisID: 'y', fill: '+1', order: 1 },
+                    { type: 'line', label: 'Low', data: data.lowest,
+                      borderColor: 'rgba(170,120,120,0.5)', backgroundColor: 'transparent',
+                      pointRadius: 0, borderWidth: 0.8, yAxisID: 'y', order: 2 },
+                    { type: 'bar', label: 'Volume', data: data.volume,
+                      backgroundColor: 'rgba(136,153,170,0.35)', yAxisID: 'y1', order: 3 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                    y: { position: 'left', ticks: { color: '#c8a951',
+                          callback: function (v) { return fmtIsk(v); } }, grid: { color: '#1a1a1a' } },
+                    y1: { position: 'right', beginAtZero: true,
+                          ticks: { color: '#8899aa', callback: function (v) { return fmtIsk(v); } },
+                          grid: { drawOnChartArea: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ccc', boxWidth: 12 } },
+                    tooltip: { callbacks: { label: function (ctx) {
+                        if (ctx.dataset.label === 'Volume') return 'Volume: ' + fmtNum(ctx.parsed.y);
+                        return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                    } } }
+                }
+            }
+        };
+"""
+
+
 def test_chart_keeps_the_desktop_options():
     script = _chart_script(_render_type())
+    assert _ws(script).count(_ws(_DESKTOP_CFG)) == 1
     assert "x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } }," in script
     assert re.search(r"\{ type: 'bar', label: 'Volume', data: data\.volume,\s+"
                      r"backgroundColor: 'rgba\(136,153,170,0\.35\)', yAxisID: 'y1', order: 3 \},", script)
@@ -271,9 +348,7 @@ def test_chart_phone_branch_drops_volume_and_thins_dates():
     script = _chart_script(_render_type())
     assert re.search(r"var phoneMq = window\.matchMedia \? window\.matchMedia\('\(max-width: 640px\)'\) : null;",
                      script)
-    branch = re.search(r"if \(phoneMq && phoneMq\.matches\) \{(.*?)\n        \}", script, re.S)
-    assert branch, "build() has a phone branch"
-    body = branch.group(1)
+    body = _phone_branch(script)
     assert "cfg.data.datasets = cfg.data.datasets.filter(function (d) { return d.yAxisID !== 'y1'; });" in body
     assert "delete cfg.options.scales.y1;" in body
     assert "cfg.options.scales.x.ticks.maxTicksLimit = 3;" in body
@@ -287,18 +362,49 @@ def test_chart_phone_price_axis_fits_the_data():
     whose defaults start y at zero, which squashes the band into the top of
     a phone's plot; on phones y fits the data, with a little grace."""
     script = _chart_script(_render_type())
-    body = re.search(r"if \(phoneMq && phoneMq\.matches\) \{(.*?)\n        \}", script, re.S).group(1)
+    body = _phone_branch(script)
     assert "cfg.options.scales.y.beginAtZero = false;" in body
     assert "cfg.options.scales.y.grace = '5%';" in body
     # Desktop's y axis is exactly as it was: no beginAtZero or grace of its own.
-    desk_y = re.search(r"\n                    y: \{ position: 'left',.*?grid: \{ color: '#1a1a1a' \} \},", script, re.S)
-    assert desk_y and "beginAtZero" not in desk_y.group(0) and "grace" not in desk_y.group(0)
+    desk_y = _between(script, "y: { position: 'left',", "y1:")
+    assert "beginAtZero" not in desk_y and "grace" not in desk_y
+
+
+def test_chart_drawing_is_split_from_the_stats_and_error_handling():
+    """A breakpoint redraw must only redraw: build() (stat cards, hiding
+    the error) runs for fresh data, and drawChart() holds everything
+    Chart.js."""
+    script = _chart_script(_render_type())
+    build, draw = _build(script), _draw(script)
+    assert "errEl.style.display = 'none';" in build
+    for stat in ("mk-latest-avg", "mk-latest-high", "mk-latest-low", "mk-latest-vol"):
+        assert stat in build and stat not in draw
+    assert "drawChart(data);" in build
+    assert "new Chart(" not in build and "var cfg" not in build and "lastData" not in build
+    assert "errEl" not in draw
+    draw = _ws(draw)
+    assert draw.count(_ws(_DESKTOP_CFG)) == 1
+    assert "lastData = data;" in draw
+    assert draw.index(_ws(_DESKTOP_CFG)) < draw.index("if (phoneMq && phoneMq.matches) {") \
+        < draw.index("if (chart) { chart.destroy(); }") < draw.index("chart = new Chart(")
+
+
+def test_a_failed_range_is_never_redrawn():
+    script = _chart_script(_render_type())
+    catch = _between(script, ".catch(function () {", "});")
+    assert "lastData = null;" in catch
+    assert "errEl.style.display = '';" in catch
 
 
 def test_chart_rebuilds_when_the_breakpoint_changes():
     script = _chart_script(_render_type())
-    assert "lastData = data;" in script
-    assert re.search(r"if \(chart && lastData\) build\(lastData\);", script)
+    assert re.search(r"if \(chart && lastData\) drawChart\(lastData\);", script)
+    assert "build(lastData)" not in script
+    # One listener, registered once, outside build() and drawChart().
+    assert script.count("addEventListener('change'") == 1
+    assert "addEventListener" not in _build(script)
+    assert "addEventListener" not in _draw(script)
+    assert script.index("addEventListener('change'") > script.index("chart = new Chart(")
     assert "phoneMq.addEventListener('change', onBreakpoint)" in script
     assert "phoneMq.addListener(onBreakpoint)" in script
 
@@ -320,6 +426,16 @@ def test_search_box_keeps_autofocus_in_the_markup():
     inputs = re.findall(r"<input\b[^>]*>", html)
     box = [i for i in inputs if 'class="mk-input"' in i]
     assert len(box) == 1 and re.search(r"\sautofocus\s", box[0])
+
+
+def test_search_box_debounces_its_requests():
+    """htmx's modifier syntax is delay:<time>. The old delay=300ms was an
+    htmx:syntax:error that dropped the delay, so every keyup that changed
+    the value sent its own request instead of one after a 300ms pause."""
+    html = _render_market()
+    box = [i for i in re.findall(r"<input\b[^>]*>", html) if 'class="mk-input"' in i]
+    assert len(box) == 1
+    assert 'hx-trigger="keyup changed delay:300ms"' in box[0]
 
 
 def test_search_box_autofocus_is_dropped_on_phones_only():
@@ -368,9 +484,13 @@ def test_t1_css_stacks_the_order_book():
 
 def test_t1_css_turns_stat_cards_into_lines():
     css = _phone()
-    strip = rule_bodies(css, ".mk-stats")
-    assert _decl(strip, "grid-template-columns", "minmax(0, 1fr) !important")
-    assert _decl(strip, "gap", "0 !important")
+    # The page's <style> (.mk-stats, one class) loads after site.css; two
+    # classes win on specificity, so no !important is needed.
+    assert not rule_bodies(css, ".mk-stats")
+    strip = rule_bodies(css, ".b-main .mk-stats")
+    assert _decl(strip, "grid-template-columns", "minmax(0, 1fr)")
+    assert _decl(strip, "gap", "0")
+    assert "!important" not in strip
     card = rule_bodies(css, ".mk-stats > .mk-stat")
     for prop, value in (("display", "flex"), ("justify-content", "space-between"),
                         ("align-items", "baseline")):
@@ -385,7 +505,7 @@ def test_t1_css_turns_stat_cards_into_lines():
         assert _decl(value, prop, val), (prop, val)
 
 
-def test_t1_css_range_buttons_are_centred_tap_targets():
+def test_t1_css_range_buttons_are_40px_wide_tap_targets():
     css = _phone()
     btn = rule_bodies(css, "#mk-ranges > .b-btn")
     for prop, value in (("display", "flex"), ("align-items", "center"),

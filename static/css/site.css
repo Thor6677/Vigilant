@@ -1527,17 +1527,19 @@
        label · value line per card, as R2 T2's Queue Summary. Each card
        keeps its own border and the cards close up into one box. The label
        leads although each card puts its value first; the value keeps its
-       colour and size and wraps inside itself. !important: the page's
-       <style> loads after this file. */
-    .mk-stats { grid-template-columns: minmax(0, 1fr) !important; gap: 0 !important; }
+       colour and size and wraps inside itself. The page's <style> loads
+       after this file, so the strip's rule takes a second class to win. */
+    .b-main .mk-stats { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .mk-stats > .mk-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
     .mk-stats > .mk-stat + .mk-stat { border-top: none; }
     .mk-stat > .mk-stat-label { order: -1; flex: none; margin: 0; text-align: left; }
     .mk-stat > .mk-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 
-    /* Price-history range buttons: the global phone rule makes them 44px
-       tall, but their 10px label sat at the top of that block box. Centre
-       a 12px label in a box at least 40px wide; the 44px height stays. */
+    /* Price-history range buttons: the global phone rule already makes
+       them 44px tall, and a <button> already centres its label. Here the
+       label grows from 10px to 12px and each button is at least 40px
+       wide; the flex centring only restates what the button does. The
+       44px height stays. */
     #mk-ranges > .b-btn { display: flex; align-items: center; justify-content: center; min-width: 40px; font-size: 12px; }
 }
 /* ── end R4 T1 ── */
