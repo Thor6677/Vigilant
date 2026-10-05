@@ -1762,6 +1762,56 @@
 
 /* ── R6 T3 · images/discord/age ── */
 @media (max-width: 640px) {
+    /* Image Host uploads (D6 A): key 1 the label or file name, key 2 the
+       expiry, muted. The m-only copies have no size of their own, so they
+       would otherwise take the phone body's 16px. */
+    .img-up-row > [data-m="key"] { font-size: 12px; }
+    .img-up-row > .img-up-exp { font-size: 11px; color: var(--muted); }
+    /* The open row's Actions line: the View link (a 40px m-tap) and Delete
+       side by side. Delete is a button, so the global rule makes it 44px.
+       .b-btn is flex:1 with only a right border on desktop. */
+    .img-up-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .img-up-actions > form { margin: 0; }
+    .img-up-actions > .b-link { color: var(--accent); }
+    .img-up-actions .b-btn { flex: none; padding: 0 0.75rem; border: 1px solid var(--danger); }
+    /* The image page's share fields: a live URL is wider than a phone at
+       the 16px input size, so each one ends in an ellipsis rather than a
+       silent cut. Copy still copies the whole value. */
+    .img-share-url { white-space: nowrap; text-overflow: ellipsis; }
+    /* The image page's owner Back (a block a.b-btn) and Delete, both 44px
+       from the global rule. At 360px "Back to Image Host" wraps to two
+       lines: Back centres its text in the taller box, and Delete's form
+       stretches its button to the same height. */
+    .img-owner-actions > a { display: flex; align-items: center; justify-content: center; }
+    .img-owner-actions > form { display: flex; }
+
+    /* Discord Time formats (D8 A): two lines, label + Copy, then the full
+       preview wrapping. The <t:…> tag is hidden but stays in the row: Copy
+       copies it, and dtCopy finds its button through #dt-tag-X's parent.
+       The page's own <style> loads after site.css, so every selector here
+       outranks its single-class rule. */
+    #dt-output > .dt-format-row {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "label copy" "preview preview";
+        align-items: center; gap: 0.15rem 0.75rem;
+    }
+    .dt-format-row > .dt-fmt-label { grid-area: label; width: auto; min-width: 0; font-size: 11px; }
+    .dt-format-row > .dt-tag { display: none; }
+    .dt-format-row > .dt-preview {
+        grid-area: preview; font-size: 12px;
+        white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+    }
+    .dt-format-row > .dt-copy-btn { grid-area: copy; }
+    /* Every Copy, plus Copy All and Share Link: the global button rule makes
+       them 44px tall; this only widens them and lifts the 9px label. Never
+       set display here: Copy All and Share Link start inline display:none
+       until a time exists. */
+    button.dt-copy-btn { min-width: 40px; padding: 0 0.75rem; font-size: 11px; }
+    /* UTC / Local / From Now: a 44px bar in three equal parts. */
+    .dt-tabs > .dt-tab { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0.25rem 0.4rem; }
+
+    /* Structure Age: the help text's long in-game link wraps. */
+    .sa-showinfo { overflow-wrap: anywhere; }
 }
 /* ── end R6 T3 ── */
 

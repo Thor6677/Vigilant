@@ -58,10 +58,16 @@
         <span class="b-label b-muted">{{ images|length }}</span>
     </div>
     <div class="b-panel">
+        {# Phones (D6 A): a tap-to-open row. The thumbnail link is the lead; its
+           img keeps the inline 48x48 box (a direct-child img would take the
+           upload's own aspect ratio). The keys and the Name / Size / Views /
+           Actions lines are m-only copies, so desktop is unchanged and the
+           desktop text block, View and Delete stay untagged (hidden on
+           phones). #}
         {% for img in images %}
-        <div class="b-table-row" style="gap:0.75rem;">
-            <a href="/i/{{ img.id }}" style="flex-shrink:0;">
-                <img src="/i/{{ img.id }}.jpg" alt="" style="width:48px;height:48px;object-fit:cover;border:1px solid var(--border);display:block;">
+        <div class="b-table-row m-row img-up-row" data-click="toggleMRow" style="gap:0.75rem;">
+            <a href="/i/{{ img.id }}" data-m="lead" style="flex-shrink:0;">
+                <img src="/i/{{ img.id }}.jpg" alt="" width="48" height="48" style="width:48px;height:48px;object-fit:cover;border:1px solid var(--border);display:block;">
             </a>
             <div style="flex:1;min-width:0;">
                 <div style="font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
@@ -80,6 +86,20 @@
                 <button type="submit" class="b-btn is-danger"
                         style="border:1px solid var(--border);padding:0.25rem 0.5rem;font-size:9px;">Delete</button>
             </form>
+            {% set up_name = img.label or img.original_filename or img.id %}
+            <span class="m-only" data-m="key">{% if img.label %}{{ img.label }}{% else %}<span class="is-muted">{{ up_name }}</span>{% endif %}</span>
+            <span class="m-only img-up-exp" data-m="key">{% if img.expires_at %}{{ img.expires_at.strftime('%Y-%m-%d') }}{% else %}permanent{% endif %}</span>
+            <span class="m-only" data-m-label="Name">{{ up_name }}</span>
+            <span class="m-only" data-m-label="Size">{{ img.width }}×{{ img.height }} · {{ '%.0f'|format(img.size_bytes / 1024) }} KB</span>
+            <span class="m-only" data-m-label="Views">{{ img.view_count }}</span>
+            <div class="m-only" data-m-label="Actions">
+                <div class="img-up-actions">
+                    <a href="/i/{{ img.id }}" class="b-link m-tap">View</a>
+                    <form method="POST" action="/tools/images/{{ img.id }}/delete" data-confirm="Delete this image?">
+                        <button type="submit" class="b-btn is-danger">Delete</button>
+                    </form>
+                </div>
+            </div>
         </div>
         {% endfor %}
     </div>
