@@ -570,12 +570,13 @@ def test_a_queued_earlier_pick_neither_scrolls_nor_names_the_corp(picker_run):
     """Pick a slow corp, then another: htmx queues the second request, so
     the first one's offers settle first. Only the latest pick's settle
     names the corp in the heading and scrolls; the response URL alone is
-    enough to tell them apart."""
+    enough to tell them apart. The stale offers clear the name rather
+    than sit under the corp named before."""
     before = picker_run["unfold"]["scrolls"]
     assert picker_run["queuedPick"]["pickedName"] == "Sample Navy Corp"
     first = picker_run["queuedFirst"]
     assert first["scrolls"] == before, "the slow pick's offers don't scroll"
-    assert first["offersCorp"] == "Sample Trade Guild", "nor rename the heading"
+    assert first["offersCorp"] == "", "nor name a corp in the heading"
     last = picker_run["queuedLast"]
     assert last["scrolls"] == before + 1
     assert last["offersCorp"] == "Sample Navy Corp"
@@ -583,16 +584,16 @@ def test_a_queued_earlier_pick_neither_scrolls_nor_names_the_corp(picker_run):
 
 def test_a_slow_pick_landing_last_neither_scrolls_nor_names_the_corp(picker_run):
     """Slow pick C, then B, whose offers land; then pick A. C's offers
-    land now, while A is waiting: they mustn't scroll or rename the
-    heading. A's settle, with only the request parameters to go on,
-    still does both."""
+    land now, while A is waiting: they mustn't scroll, and they clear the
+    heading's name rather than leave B's over C's offers. A's settle, with
+    only the request parameters to go on, still scrolls and names A."""
     b = picker_run["lateB"]
     assert b["offersCorp"] == "Sample Trade Guild"
     a_pick = picker_run["lateAPick"]
     assert a_pick["folded"] is True and a_pick["scrolls"] == b["scrolls"]
     c = picker_run["lateC"]
     assert c["scrolls"] == b["scrolls"], "the stale settle doesn't scroll"
-    assert c["offersCorp"] == "Sample Trade Guild", "nor rename the heading"
+    assert c["offersCorp"] == "", "nor leave B's name over C's offers"
     a = picker_run["lateA"]
     assert a["scrolls"] == b["scrolls"] + 1
     assert a["offersCorp"] == "Sample Navy Corp"

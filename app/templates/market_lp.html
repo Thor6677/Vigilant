@@ -180,11 +180,15 @@
 
     // htmx fires afterSettle on the swap target once the offers are laid
     // out; one that bubbles up from a swap inside the panel isn't ours.
-    // Only the latest pick's offers rename the heading and scroll. One
+    // Only the latest pick's offers name the corp in the heading and
+    // scroll; an earlier pick's offers landing first clear the name, since
+    // they belong to neither the corp named before nor the one picked. One
     // scroll per pick; none if the tree was unfolded first.
     document.getElementById('lp-offers-panel').addEventListener('htmx:afterSettle', function (e) {
-        if (e.target !== this || pendingId === null || settledCorpId(e) !== pendingId) return;
-        document.getElementById('lp-offers-corp').textContent = pendingName;
+        if (e.target !== this || pendingId === null) return;
+        var corpLbl = document.getElementById('lp-offers-corp');
+        if (settledCorpId(e) !== pendingId) { corpLbl.textContent = ''; return; }
+        corpLbl.textContent = pendingName;
         if (!scrollPending) return;
         scrollPending = false;
         var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
