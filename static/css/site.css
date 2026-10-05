@@ -1891,6 +1891,12 @@
     .dscan-group-row > span + span, .dscan-ship-row > span + span { padding-left: 0.4rem !important; }
     .dscan-ship-row { min-height: 26px; padding-left: 1.25rem !important; }
 
+    /* D-Scan, Raw Paste: its Copy sits straight in the panel head, where
+       .b-btn's flex:1 stretched it across the free width (229px at 360).
+       It keeps its own width, as the Ships and By Type Copy buttons do
+       inside their wrappers. */
+    #copy-raw-btn { flex: none; }
+
     /* Scan views, the fold-out toggles: D-Scan's Other on Scan and Local's
        All Pilots, the only way into the pilot list. Their inline padding
        made them 32.5px tall; a tap target is at least 40px. Only the height

@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from app.routes import dscan as dscan_mod
 from tests._mobile import (SITE_CSS, VOID, assert_mrow, cells_rows, css_section, norm,
                            phone_block, render_page, request, row_keys, row_lead, rule_bodies,
-                           selectors)
+                           selectors, source)
 
 _section = functools.partial(css_section, release="R5")
 _NS = types.SimpleNamespace
@@ -517,6 +517,17 @@ def test_css_corp_alliance_line_truncates():
                  "text-overflow: ellipsis", "white-space: nowrap"):
         assert decl in ally, f"{decl!r} missing from the corp alliance line"
     assert "min-height: 40px" in _flat(rule_bodies(phone, ".intel-alliance-row"))
+
+
+def test_css_raw_paste_copy_keeps_its_own_width():
+    """It sits straight in the panel head, where .b-btn's flex:1 stretched
+    it to 229px at 360; the other Copy buttons sit in wrappers."""
+    body = _flat(rule_bodies(_phone(), "#copy-raw-btn"))
+    assert body == "flex: none;"
+    src = source("intel_dscan.html")
+    head = src[src.index('id="raw-paste-section"'):src.index('id="raw-paste-text"')]
+    assert re.search(r'<div class="b-panel-head"[^>]*>\s*<span class="b-label">Raw Paste</span>\s*'
+                     r'<button id="copy-raw-btn" class="b-btn"', head)
 
 
 def test_css_fold_out_toggles_are_40px_on_phones_only():
