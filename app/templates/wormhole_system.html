@@ -105,7 +105,7 @@
     </div>
 </div>
 
-<div class="ws-grid">
+<div class="ws-grid wsp-grid">
     <div>
         <!-- Effect -->
         {% if effect %}
@@ -146,7 +146,7 @@
             <div class="ws-diagram-wrap">
                 <svg id="sys-diagram" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:400px;">
                 </svg>
-                <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
+                <div class="wsp-legend" style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
                     <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(100,180,255,0.6);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
                     <span>{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }}</span>
                 </div>

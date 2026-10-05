@@ -499,6 +499,18 @@ def test_css_system_page_tap_targets_are_scoped_to_the_system_page():
                 assert ".wsp-" in s, f"unscoped system-page selector: {s.strip()}"
 
 
+def test_css_system_page_small_text_is_11px():
+    body = _phone()
+    for sel in (".wsp-conns .ws-section-title", ".wsp-grid .ws-section-title",
+                ".wsp-grid .ws-effect-table th"):
+        assert _decl(body, sel, "font-size") == "11px", sel
+    for sel in (".wsp-grid .ws-section-title > span", ".wsp-legend"):
+        assert _decl(body, sel, "font-size") == "11px !important", sel
+    src = source("wormhole_system.html")
+    assert src.count('class="ws-grid wsp-grid"') == 1
+    assert src.count('class="wsp-legend"') == 1
+
+
 def test_css_pinned_tables_keep_every_hairline():
     """Sticky first columns drop row lines at fractional row heights: the
     matrix cells get whole-pixel padding, and the effect tables use separate

@@ -2150,6 +2150,13 @@
     .wsp-conns .ws-conn a { display: inline-flex; align-items: center; min-width: 40px; min-height: 40px; }
     .wsp-links a { display: inline-flex; align-items: center; min-height: 40px; }
     .wsp-zoom > button { min-width: 40px; font-size: 12px !important; }
+    /* System page text at 11px over its 9px: the section titles (and the
+       Celestials count beside its title), the effect table heads and the
+       diagram legend. Two classes outrank the page's own rules, which load
+       after this file; !important beats inline sizes. */
+    .wsp-conns .ws-section-title, .wsp-grid .ws-section-title,
+    .wsp-grid .ws-effect-table th { font-size: 11px; }
+    .wsp-grid .ws-section-title > span, .wsp-legend { font-size: 11px !important; }
 
     /* Type page: the back link. */
     .wh-back { display: inline-flex; align-items: center; min-height: 40px; }
