@@ -24,7 +24,11 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
    shows at most 3 unrotated x labels on phones, follows the 640px
    breakpoint in place, and builds desktop with exactly its old options.
 7. assert_mrow (tests/_mobile.py) fails a row, or a tagged cell (data-m or
-   data-m-label), hidden inline with `hidden` or style display:none."""
+   data-m-label), hidden inline with `hidden` or style display:none.
+8. scripts/mobile-audit.js also reports content cut off by the LEFT edge
+   (nothing can scroll there), ignoring wholly off-screen elements,
+   visually-hidden text and content a scroller has scrolled past. Checked
+   against real pages in the browser; these tests pin the source."""
 import json
 import os
 import re
@@ -542,3 +546,39 @@ def test_assert_mrow_rejects_inline_hiding(where, attrs):
 @pytest.mark.parametrize("style", ["display:contents", "display:flex", "--display:none", "visibility:hidden"])
 def test_assert_mrow_allows_other_inline_display(style):
     assert_mrow(_row(key_attrs=f'style="{style}"'))
+
+
+# ── 8. the phone audit catches overflow past the left edge ────────────
+
+_AUDIT = os.path.join(os.path.dirname(SITE_CSS), "..", "..", "scripts", "mobile-audit.js")
+
+
+def _audit() -> str:
+    with open(_AUDIT, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_audit_reports_left_edge_overflow_and_counts_it_as_an_issue():
+    src = _audit()
+    assert "leftEdge: uniq(leftEdge)" in src
+    bad = re.search(r"const bad = p => ([^;]+);", src).group(1)
+    for key in ("p.pageWide", "p.overflow.length", "p.leftEdge.length", "p.clipped.length"):
+        assert key in bad, key
+
+
+def test_left_edge_check_skips_intentional_off_screen_content():
+    src = _audit()
+    # Partly past the left edge only: wholly off-screen (a skip link, an
+    # off-canvas panel) has right <= 0. Document coordinates (+ scrollX).
+    assert "r.left + scrollX < -1 && r.right + scrollX > 0" in src
+    check = re.search(r"if \(pastLeft\(e, r\)([^{]*)\{", src).group(1)
+    assert "!visuallyHidden(r, cs)" in check and "!scrolledAway(e)" in check
+    # visually-hidden: 1px boxes and clip / clip-path hiding.
+    vh = re.search(r"const visuallyHidden = [^;]+;", src, re.S).group(0)
+    assert "r.width <= 1 && r.height <= 1" in vh and "rect" in vh and "inset(50%)" in vh
+    assert "scrollLeft > 0" in re.search(r"const scrolledAway = [^}]+\}", src, re.S).group(0)
+
+
+def test_left_edge_check_lists_only_the_outermost_offender():
+    src = _audit()
+    assert re.search(r"if \(!\(pastLeft\(p, pr\) && pr\.width && pr\.height\)\) leftEdge\.push", src)
