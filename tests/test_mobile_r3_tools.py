@@ -232,6 +232,36 @@ def test_empty_watchlist_has_no_rows():
     assert "No stockpile targets yet" in html
 
 
+def test_stockpile_search_is_debounced():
+    """htmx's modifier is `delay:`. `delay=300ms` is a syntax error in the
+    console and drops the debounce, so every keyup fired a search."""
+    html = render_page(stock_mod, "stockpiles.html", "/tools/stockpiles", rows=_stock_rows())
+    tag = re.search(r'<input[^>]*id="sp-search"[^>]*>', html, re.S).group(0)
+    assert 'hx-trigger="keyup changed delay:300ms"' in tag
+
+
+_HX_MODIFIER_TYPO = re.compile(r"\b(delay|throttle|queue|from|target)=")
+
+
+def test_no_hx_trigger_modifier_is_written_with_an_equals_sign():
+    """Sweep-wide: every hx-trigger in a template or script spells its
+    modifiers `name:value` (the polish pass found `delay=300ms` here)."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    files = sorted((root / "app" / "templates").rglob("*.html")) + sorted((root / "static" / "js").rglob("*.js"))
+    assert len(files) > 100, "the sweep must actually reach the templates"
+    triggers, bad = 0, []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"""hx-trigger\s*=\s*(["'])(.*?)\1|['"]hx-trigger['"]\s*,\s*(["'])(.*?)\3""", text, re.S):
+            value = m.group(2) if m.group(2) is not None else m.group(4)
+            triggers += 1
+            if _HX_MODIFIER_TYPO.search(value):
+                bad.append(f"{path.relative_to(root)}: {value!r}")
+    assert triggers > 10, "the sweep must find the pages' hx-triggers"
+    assert not bad, bad
+
+
 # ── Skill Farm ────────────────────────────────────────────────────────
 
 _NOW = datetime.now(timezone.utc)
