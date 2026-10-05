@@ -99,7 +99,8 @@
    called straight from the tap. With no clipboard API (an insecure
    context) it throws, and execCommand('copy') copies the selection. A
    rejected writeText retries that outside the tap, so on iOS the retry is
-   best-effort; the field stays selected for a manual copy either way. */
+   best-effort; if it fails too, the button says so briefly and the field
+   stays selected for a manual copy. */
 (function () {
     function legacyCopy() {
         try { return document.execCommand('copy'); } catch (e) { return false; }
@@ -110,12 +111,11 @@
         if (!el) return;
         el.select();
         el.setSelectionRange(0, 99999);
+        function fallback() { flash(legacyCopy() ? 'Copied' : 'Select & copy'); }
         try {
-            navigator.clipboard.writeText(el.value).then(flash, function () {
-                if (legacyCopy()) flash();
-            });
+            navigator.clipboard.writeText(el.value).then(function () { flash('Copied'); }, fallback);
         } catch (e) {
-            if (legacyCopy()) flash();
+            fallback();
         }
     }
 
@@ -125,9 +125,9 @@
         /* Read once, so a second tap inside the "Copied" window can't make
            "Copied" the label it restores. */
         var label = btn.textContent, timer = null;
-        function flash() {
+        function flash(text) {
             clearTimeout(timer);
-            btn.textContent = 'Copied';
+            btn.textContent = text;
             timer = setTimeout(function () { btn.textContent = label; }, 1200);
         }
         btn.addEventListener('click', function () { copyField(btn, flash); });

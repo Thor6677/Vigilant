@@ -162,6 +162,9 @@ def test_upload_lead_is_the_48px_thumbnail_link():
         lead = row_lead(row)
         assert len(lead) == 1
         assert lead[0]["tag"] == "a" and lead[0]["attrs"].get("href") == f"/i/{img.id}"
+        # Its only content is an alt="" image, so the link carries the name.
+        name = img.label or img.original_filename or img.id
+        assert lead[0]["attrs"].get("aria-label") == f"View {name}"
         kids = lead[0]["kids"]
         assert len(kids) == 1
         thumb = kids[0]
@@ -291,9 +294,13 @@ def test_page_script_binds_both_copy_buttons():
     assert "addEventListener('click'" in script
     # Gesture-safe: select the field, then write synchronously in the tap,
     # falling back to execCommand('copy') on the selection.
-    assert ".select()" in script and "setSelectionRange" in script
-    assert "navigator.clipboard.writeText" in script
-    assert "execCommand('copy')" in script
+    # Checked on the comment-stripped body: a comment naming the fallback
+    # must not stand in for the code.
+    assert ".select()" in body and "setSelectionRange" in body
+    assert "navigator.clipboard.writeText" in body
+    assert "execCommand('copy')" in body
+    # When both paths fail the button says so, rather than nothing.
+    assert "'Select & copy'" in body
     # A second tap inside the "Copied" window must not make "Copied" the
     # label it restores: the label is read once, at bind time.
     assert "clearTimeout" in script
