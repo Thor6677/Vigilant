@@ -161,7 +161,12 @@ const fx = JSON.parse(fs.readFileSync(fxPath, 'utf8'));
 const els = {};
 const el = id => (els[id] = els[id] || { id, textContent: '', innerHTML: '', src: '' });
 const calls = [];
-const window = { mRowInit(root) { calls.push({ id: root && root.id, html: root && root.innerHTML }); } };
+const aria = [];
+const seq = [];
+const window = {
+  mRowInit(root) { seq.push('mRowInit'); calls.push({ id: root && root.id, html: root && root.innerHTML }); },
+  initToggleExpandedAria(root) { seq.push('aria'); aria.push({ id: root && root.id, html: root && root.innerHTML }); },
+};
 const ok = body => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
 function fetch(url) {
   if (url.startsWith('/api/map/alliance/')) return ok(fx.detail);
@@ -172,7 +177,7 @@ function fetch(url) {
 const sandbox = { window, document: { getElementById: el }, fetch, console };
 vm.createContext(sandbox);
 Promise.resolve(vm.runInContext(src, sandbox)).then(() => {
-  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML, calls }));
+  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML, calls, aria, seq }));
 }, err => { console.error(err); process.exit(1); });
 """
 
@@ -297,6 +302,23 @@ def test_desktop_cells_are_unchanged(run_page):
             "color:var(--accent);", "color:var(--muted);font-size:9px;margin-left:0.5rem;"]
         assert side["attrs"]["style"] == "color:var(--muted);font-size:10px;"
         assert when["attrs"]["style"] == "color:var(--muted);font-size:9px;"
+
+
+@pytest.mark.parametrize("n", [10, 11])
+def test_show_all_gets_aria_expanded_once_the_list_is_written(run_page, n):
+    """The list is written by this script, not htmx, so actions.js's
+    DOMContentLoaded / htmx:afterSettle pass never reaches its Show all:
+    without this call the button has no aria-expanded until its first tap.
+    It runs once, on the list, after the rows are written (and after
+    mRowInit), so it sees the button."""
+    out = run_page(n)
+    assert out["aria"] == [{"id": "changes-list", "html": out["html"]}]
+    assert out["seq"] == ["mRowInit", "aria"]
+
+
+def test_empty_list_needs_no_aria_pass(run_page):
+    out = run_page(0)
+    assert out["aria"] == [] and out["seq"] == []
 
 
 @pytest.mark.parametrize("n,button", [(10, None), (11, "Show all 11")])

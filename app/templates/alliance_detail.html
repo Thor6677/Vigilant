@@ -145,6 +145,9 @@
             (n > 10 ? `<button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all ${n}</button>` : '') +
             `</div>`;
         if (window.mRowInit) window.mRowInit(cl);
+        // Written outside htmx, so actions.js's load/afterSettle pass never
+        // sees the Show all button: give it aria-expanded now.
+        if (window.initToggleExpandedAria) window.initToggleExpandedAria(cl);
     }
 })();
 </script>
