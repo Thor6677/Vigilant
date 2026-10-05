@@ -906,6 +906,17 @@
         display: inline-flex; align-items: center; justify-content: center; gap: 0.3em;
         min-height: 40px; min-width: 40px; padding: 0 10px; font-size: 12px;
     }
+
+    /* .b-switch and .b-check are drawn (appearance: none) at 30x16 and
+       14x14. The 44px min-height every phone input gets stretched them: a
+       30x44 switch with its knob at the top, a 14x44 box whose checked fill
+       barely showed. They keep their drawn size, and the label around them,
+       which is the tap target, keeps the 44px instead. Native checkboxes and
+       radios are left alone: Chrome draws them at their own size in the
+       middle of the 44px box, and that box is all that makes several labels
+       (notification settings, the dashboard column picker) 44px tall. */
+    input.b-switch, input.b-check { min-height: 0; }
+    label:has(> input.b-switch), label:has(> input.b-check) { min-height: 44px; }
 }
 
 /* ── R2 T1 · character overview ── */

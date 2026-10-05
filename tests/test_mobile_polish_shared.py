@@ -15,7 +15,11 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
    the target's is-expanded, sets it once on load and after htmx swaps, and
    moves focus to the first revealed row when a Show all hides itself. Run
    in Node against a stub DOM (as test_details_keep_open.py does).
-4. Entity-link chips (_entity_links.html) are 40px phone targets, 8px apart."""
+4. Entity-link chips (_entity_links.html) are 40px phone targets, 8px apart.
+5. The drawn .b-switch / .b-check keep their own size instead of the 44px
+   every phone input gets; the label around them keeps 44px. Native
+   checkboxes and radios keep the 44px box (Chrome draws them centred in it,
+   and it is what gives their labels a 44px tap height)."""
 import json
 import os
 import re
@@ -352,3 +356,26 @@ def test_entity_link_chip_desktop_rule_is_untouched():
     assert len(base) == 1
     assert _decl(base[0], "font-size") == "10px"
     assert _decl(base[0], "padding") == "2px 7px"
+
+
+# ── 5. drawn switches and checkboxes keep their size ──────────────────
+
+def test_drawn_switches_and_checks_are_exempt_from_the_44px_input_height():
+    assert _decl(_polish_rule(["input.b-switch", "input.b-check"]), "min-height") == "0"
+
+
+def test_their_labels_keep_the_44px_tap_target():
+    body = _polish_rule(["label:has(> input.b-switch)", "label:has(> input.b-check)"])
+    assert _decl(body, "min-height") == "44px"
+
+
+def test_native_checkboxes_and_radios_keep_the_44px_box():
+    """Only the drawn controls are exempt. A blanket input[type=checkbox] /
+    [type=radio] exemption would drop labels whose only height is that box
+    (notification settings, the dashboard column picker, the D-Scan dedup
+    toggle) under the 40px floor; pages that size their own natives (R3 T3,
+    R3 T5, R6 T2, R6 T5) already do it in their sections."""
+    block = _polish_block()
+    assert not re.search(r"\[type=[\"']?(?:checkbox|radio)", block)
+    r1 = "\n".join(_media_bodies(_r1_layer(), PHONE))
+    assert not re.search(r"input\[type=[\"']?(?:checkbox|radio)[^{]*\{[^}]*min-height:\s*0", r1)
