@@ -45,7 +45,7 @@
         L:{{ t.threshold_low }} C:{{ t.threshold_critical }}
     </span>
     {{ badge }}
-    <span data-m-label="Remove" style="display:contents;"><button class="b-btn m-tap" style="flex:none;padding:0.2rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--danger);"
+    <span data-m-label="Remove" style="display:contents;"><button class="b-btn" style="flex:none;padding:0.2rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--danger);"
             hx-post="/corporations/{{ corp_id }}/contracts/threshold/{{ t.id }}/delete"
             hx-target="#contract-items"
             hx-swap="innerHTML"

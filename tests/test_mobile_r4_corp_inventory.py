@@ -308,7 +308,7 @@ def test_tracked_item_remove_is_the_existing_control_inside_a_labelled_cell():
         assert len(cell["kids"]) == 1
         btn = cell["kids"][0]
         assert btn["tag"] == "button"
-        assert "m-tap" in _cls(btn)
+        assert "m-tap" not in _cls(btn), "m-tap's 40px would shrink the 44px button"
         assert btn["attrs"]["hx-post"] == f"/corporations/{_CORP}/inventory/threshold/{t.id}/delete"
         assert btn["attrs"]["hx-confirm"]
         assert btn["attrs"].get("aria-label") == f"Remove {t.type_name}"
@@ -519,7 +519,7 @@ def test_contract_remove_is_the_existing_control_inside_a_labelled_cell():
         assert "display:contents" in _style(cell)
         assert len(cell["kids"]) == 1
         btn = cell["kids"][0]
-        assert btn["tag"] == "button" and "m-tap" in _cls(btn)
+        assert btn["tag"] == "button" and "m-tap" not in _cls(btn)
         assert btn["attrs"]["hx-post"] == f"/corporations/{_CORP}/contracts/threshold/{t.id}/delete"
         assert btn["attrs"].get("aria-label") == f"Remove {t.match_label}"
         assert len(_find(row, lambda n: "hx-post" in n["attrs"])) == 1
@@ -602,6 +602,14 @@ def test_section_is_one_phone_block_and_nothing_else():
     assert phone.strip()
     assert after.strip() == "", f"rules after the phone block: {after.strip()[:80]!r}"
     assert "@media" not in phone
+
+
+@pytest.mark.parametrize("row", ["cinv-item", "cctr-item"])
+def test_remove_is_a_44px_square_on_phones(row):
+    """The global phone button rule gives the 44px height; this widens it."""
+    body = _body(f'.{row} > [data-m-label="Remove"] > .b-btn')
+    assert "min-width:44px" in body
+    assert "height" not in body
 
 
 def test_type_search_rows_are_40px_on_phones():

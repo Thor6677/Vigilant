@@ -45,7 +45,7 @@
         </span>
         {{ badge }}
         {% if t.location_flag %}<span class="m-only" data-m-label="Hangar">{{ HANGAR_LABELS.get(t.location_flag, t.location_flag) }}</span>{% endif %}
-        <span data-m-label="Remove" style="display:contents;"><button class="b-btn m-tap" style="flex:none;padding:0.2rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--danger);"
+        <span data-m-label="Remove" style="display:contents;"><button class="b-btn" style="flex:none;padding:0.2rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--danger);"
                 hx-post="/corporations/{{ corp_id }}/inventory/threshold/{{ t.id }}/delete"
                 hx-target="#inventory-items"
                 hx-swap="innerHTML"

@@ -1751,6 +1751,12 @@
         align-self: center; color: var(--muted); font-size: 11px !important;
     }
 
+    /* Remove × in an opened tracked-item or contract row: a 44px square.
+       The height is the global phone button rule's (no m-tap, whose 40px
+       would shrink it). */
+    .cinv-item > [data-m-label="Remove"] > .b-btn,
+    .cctr-item > [data-m-label="Remove"] > .b-btn { min-width: 44px; }
+
     /* "Show all" inside the bordered scan box: inset, so its border doesn't
        double against the box's sides. */
     .cinv-scan-wrap .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
