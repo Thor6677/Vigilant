@@ -679,17 +679,17 @@ def test_css_total_row_becomes_label_value_lines():
 
 
 def test_css_skill_farm_rules_are_scoped_to_the_page():
-    """fitting_saved.html also has a .sf-table, which R6 turns into m-rows
-    in the same release. Every Skill Farm selector here starts at this
-    page's swap target, so neither page's phone rules reach the other.
-    The ID also outranks the page's later <style>, so nothing needs
-    !important."""
+    """fitting_saved.html also has a .sf-table (and .sf-* classes), which R6
+    turns into m-rows in the same release. Every Skill Farm selector here
+    starts at this page's swap target, so neither page's phone rules reach
+    the other. The ID also outranks the page's later <style>, so nothing
+    needs !important."""
     section = _section("T7")
     sels = [s for m in re.finditer(r"([^{}]+)\{[^{}]*\}", _phone()) for s in selectors(m.group(1))]
     farm = [s for s in sels if "sf-" in s]
     assert len(farm) >= 10
     for s in farm:
-        assert s.startswith(_FARM + " "), s
+        assert s.startswith("#skill-farm-content "), s
     assert "!important" not in section
 
 
@@ -700,3 +700,14 @@ def test_css_appraisal_total_values_stay_on_one_line():
 def test_css_appraisal_show_all_is_inset_in_its_panel():
     body = _decls(rule_bodies(_phone(), ".apr-clamp > .m-showall"))
     assert body["width"] == "calc(100% - 1.5rem)"
+
+
+def test_css_form_field_labels_are_11px():
+    """Stockpiles' and Skill Farm's 9px field labels; element plus class
+    outranks each page's own `.sp-field-label` / `.sf-field-label`."""
+    for sel in ("span.sp-field-label", "#skill-farm-content .sf-field-label"):
+        assert _decls(rule_bodies(_phone(), sel))["font-size"] == "11px", sel
+    for page, cls in (("stockpiles.html", "sp-field-label"),
+                      ("partials/skill_farm_content.html", "sf-field-label")):
+        src = open(f"app/templates/{page}", encoding="utf-8").read()
+        assert f'<span class="{cls}">' in src, page

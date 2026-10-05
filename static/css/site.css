@@ -1569,6 +1569,12 @@
        of breaking "ISK" and "m³" onto a second line. Their inline flex:1
        still shares the width; a value's own text width is its minimum. */
     .apr-total > span { white-space: nowrap; }
+
+    /* The form field labels on Stockpiles and Skill Farm ("Find an item",
+       "Sales tax %", …) are 11px rather than the pages' 9px. The element
+       and class (or the ID) outrank each page's own rule, which loads
+       after site.css. */
+    span.sp-field-label, #skill-farm-content .sf-field-label { font-size: 11px; }
 }
 /* ── end R3 T7 ── */
 
