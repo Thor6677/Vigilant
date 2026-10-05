@@ -56,7 +56,7 @@
         </div>
 
         {# Copy parent settings button #}
-        <button data-click="copyParentSettings" data-type-id="{{ type_id }}" data-needed="{{ needed }}" class="b-btn m-tap"
+        <button data-click="copyParentSettings" data-type-id="{{ type_id }}" data-needed="{{ needed }}" class="b-btn"
                 style="padding:2px 6px;font-size:9px;border:1px solid var(--accent);color:var(--accent);flex:none;align-self:flex-end;">
             ↓ Parent
         </button>
@@ -126,7 +126,7 @@
         {% if row.buildable %}
         <div class="mfg-build" style="padding:0 0.75rem 0.3rem 3rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
             <button data-click="toggleSubComponent" data-type-id="{{ row.type_id }}" data-qty="{{ row.adjusted_qty }}"
-                    class="b-btn m-tap" style="padding:1px 6px;font-size:8px;border:1px solid var(--border);flex:none;">
+                    class="b-btn" style="padding:1px 6px;font-size:8px;border:1px solid var(--border);flex:none;">
                 Build ▸
             </button>
             <span style="font-size:8px;color:var(--muted);">has blueprint</span>

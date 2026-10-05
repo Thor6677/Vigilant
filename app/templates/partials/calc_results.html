@@ -46,7 +46,7 @@
                 {% set buildable_rows = rows | selectattr('buildable') | list %}
                 {% if buildable_rows %}
                 <button id="build-all-btn" data-click="toggleBuildAll"
-                        class="b-btn m-tap" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
+                        class="b-btn" style="padding:2px 8px;font-size:9px;border:1px solid var(--accent);color:var(--accent);">
                     Build All
                 </button>
                 {% endif %}
@@ -103,7 +103,7 @@
             {% if row.buildable %}
             <div class="mfg-build" style="padding:0 0.75rem 0.4rem 2.75rem;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);">
                 <button data-click="toggleComponentFromEl" data-type-id="{{ row.type_id }}" data-qty="{{ row.adjusted_qty }}"
-                        class="b-btn build-toggle-btn m-tap" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
+                        class="b-btn build-toggle-btn" data-type-id="{{ row.type_id }}" data-needed="{{ row.adjusted_qty }}"
                         style="padding:1px 6px;font-size:9px;border:1px solid var(--border);flex:none;">
                     Build ▸
                 </button>

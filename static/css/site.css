@@ -1243,6 +1243,17 @@
     /* Shopping list: Copy / Send Minerals / Send to Hauling wrap, at least
        8px apart (the inline gap is 6px). */
     .mfg-shop-actions { flex-wrap: wrap; gap: 0.5rem !important; }
+
+    /* Build ▸ (bill of materials and component panels), Build All and
+       ↓ Parent: 12px labels over their inline 8–9px, and at least 40px
+       wide. No height here and no m-tap (whose 40px would shrink them):
+       the global phone button rule makes them 44px tall. Build All keeps
+       its own width in the panel head, where .b-btn's flex:1 would stretch
+       it; ↓ Parent is a full-width line in the stacked settings. */
+    .mfg-build > .b-btn,
+    #build-all-btn,
+    .mfg-comp > .m-stack > .b-btn { min-width: 40px; font-size: 12px !important; }
+    #build-all-btn { flex: none; }
 }
 /* ── end R3 T1 ── */
 

@@ -13,7 +13,8 @@ The Manufacturing calculator (`industry.html` and its htmx fragments):
 - the shopping list rows key on name and quantity (D4 A) and keep the
   data-haul-* attributes Send to Hauling reads;
 - the controls stack, sliders go full width, and the Build/Buy, Build All,
-  ↓ Parent and blueprint-search rows are 40px tap targets.
+  ↓ Parent buttons keep the 44px phone button height (no m-tap) and the
+  blueprint-search rows are 40px tap targets.
 
 Desktop renders as before (D21): phone-only cells are m-only, and the rest
 is CSS inside the R3 T1 section of site.css. Names and ids are invented."""
@@ -246,7 +247,7 @@ def test_bill_of_materials_build_toggles_keep_their_hooks():
     assert len(btns) == len(buildable)
     for btn, m in zip(btns, buildable):
         assert btn.tag == "button"
-        assert "m-tap" in btn.classes, "a 40px tap target on phones"
+        assert "m-tap" not in btn.classes, "m-tap's 40px would shrink the 44px button"
         assert btn.attrs["data-click"] == "toggleComponentFromEl"
         assert btn.attrs["data-type-id"] == str(m["type_id"])
         assert btn.attrs["data-needed"] == str(m["adjusted_qty"])
@@ -257,7 +258,7 @@ def test_bill_of_materials_build_toggles_keep_their_hooks():
         assert panel.attrs["style"].replace(" ", "") == "display:none;"
         assert not panel.classes, "JS shows and hides the panel inline"
     build_all = root.by_id("build-all-btn")
-    assert "m-tap" in build_all.classes
+    assert "m-tap" not in build_all.classes
     assert build_all.attrs["data-click"] == "toggleBuildAll"
 
 
@@ -333,9 +334,9 @@ def test_component_panel_phone_hooks():
     qty, = settings.find("mfg-comp-qty")
     assert qty.full_text() == f"× {_NEEDED:,}" and "b-muted-sm" in qty.classes
     parent_btn, = [n for n in settings.all() if n.attrs.get("data-click") == "copyParentSettings"]
-    assert "m-tap" in parent_btn.classes
+    assert "m-tap" not in parent_btn.classes
     sub_btn, = [n for n in root.all() if n.attrs.get("data-click") == "toggleSubComponent"]
-    assert "m-tap" in sub_btn.classes
+    assert "m-tap" not in sub_btn.classes
     # toggleBuildAll collects every .build-toggle-btn on the page: a nested
     # Build button must never join them.
     assert "build-toggle-btn" not in sub_btn.classes
@@ -546,3 +547,16 @@ def test_t1_css_total_rows_and_shopping_buttons():
     assert _decl(actions, "flex-wrap", "wrap")
     # At least 8px between the wrapped 44px buttons; the inline gap is 6px.
     assert _decl(actions, "gap", "0.5rem !important")
+
+
+def test_t1_css_buttons_keep_the_44px_floor_with_12px_labels():
+    """Build ▸, Build All and ↓ Parent: no m-tap, so the global phone button
+    rule's 44px height applies; this section only widens them to 40px and
+    lifts their inline 8–9px labels to 12px."""
+    css = _phone()
+    for sel in (".mfg-build > .b-btn", "#build-all-btn", ".mfg-comp > .m-stack > .b-btn"):
+        body = rule_bodies(css, sel)
+        assert _decl(body, "min-width", "40px"), sel
+        assert _decl(body, "font-size", "12px !important"), sel
+        assert "min-height" not in body and not re.search(r"(?<![-\w])height\s*:", body), sel
+    assert _decl(rule_bodies(css, "#build-all-btn"), "flex", "none")
