@@ -1767,6 +1767,80 @@
 
 /* ── R6 T4 · fitting tool ── */
 @media (max-width: 640px) {
+    /* Header toolbar. The global phone rule already makes these 44px tall
+       and the row wraps; .b-btn is display:block, which pins the Saved
+       Fits link's label to the top of that box, so centre every label. */
+    .fit-toolbar > .b-btn { display: inline-flex; align-items: center; justify-content: center; }
+    /* Custom damage weights: a 2x2 grid instead of a ~380px row. The class
+       is set only while the sliders are shown (the inline display:none
+       hides them otherwise). */
+    #dmg-custom-sliders.fit-dmg-on {
+        display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.25rem 0.75rem !important; flex: 1 1 100%; padding: 0.25rem 0.5rem !important; font-size: 12px !important;
+    }
+    #dmg-custom-sliders.fit-dmg-on > label { gap: 0.4rem !important; min-width: 0; }
+    #dmg-custom-sliders.fit-dmg-on input[type="range"] { flex: 1 1 auto; width: auto !important; min-width: 0; }
+
+    /* Module browser overlay (D9 A). ID-level, since the template's own
+       #browser-close display rule outranks a class; the global button rule
+       already gives it 44px of height. */
+    #browser-panel #browser-close { min-width: 40px; }
+    #browser-panel .fit-brow { min-height: 40px; }
+    .fit-nofit-why { display: block; font-size: 11px; color: var(--danger); }
+    .fit-added-note {
+        position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.5rem; z-index: 1;
+        padding: 0.6rem 0.75rem; border: 1px solid var(--accent); background: var(--surface);
+        color: var(--text); font-size: 12px; line-height: 1.4;
+        opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    }
+    .fit-added-note.is-shown { opacity: 1; }
+
+    /* Slot, drone, implant and booster controls (D11 A): 40px targets with
+       a 12px glyph. min-height deliberately 40px, as m-tap. */
+    .fit-ctl {
+        min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center;
+        vertical-align: middle; font-size: 12px !important;
+    }
+    /* The m-only name copy: the module name truncates, and a loaded charge
+       is a muted second line under it. */
+    .fit-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-size: 12px; line-height: 1.3; }
+    .fit-name-text, .fit-charge-name, .fit-dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fit-name-text { color: var(--text); }
+    .fit-charge-name { color: var(--muted); font-size: 11px; cursor: pointer; }
+
+    /* Stats panel: the summary line wraps. */
+    .fit-sum { flex-wrap: wrap; row-gap: 0.25rem; }
+    .fit-sum-vals { flex-wrap: wrap; row-gap: 0.25rem !important; }
+
+    /* Pinned summary bar (D10 A). Below the nav (z 50) and the browser
+       backdrop (49); it is hidden anyway while those layers are open. */
+    .fit-sumbar {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+        display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+        width: 100%; min-height: 44px; margin: 0; padding: 0 1rem env(safe-area-inset-bottom, 0px);
+        border: 0; border-top: 1px solid var(--accent); background: var(--surface);
+        color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+    }
+    .fit-sumbar[hidden], .fit-sumbar.is-covered { display: none !important; }
+    .fit-sumbar-item { white-space: nowrap; }
+    .fit-sumbar-k { margin-right: 0.35rem; color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .fit-sumbar-v { color: var(--accent); font-weight: 600; }
+    .fit-sumbar-v[data-sumbar="cap"] { color: var(--success); }
+    .fit-sumbar-v[data-sumbar="cap"].is-bad { color: var(--danger); }
+    .fit-sumbar-go { color: var(--muted); }
+    body:has(#fit-sumbar:not([hidden])) { padding-bottom: calc(44px + env(safe-area-inset-bottom, 0px)); }
+    #stats-panel { scroll-margin-top: 56px; }
+
+    /* EFT import: the box sits at the top, so Import and Cancel stay above
+       the on-screen keyboard, and it scrolls inside the screen with the
+       buttons in a sticky row. */
+    #import-modal { align-items: flex-start !important; }
+    .fit-import-box {
+        top: 0 !important; margin: 1rem auto !important; padding: 1rem !important;
+        max-height: calc(100% - 2rem); overflow-y: auto;
+    }
+    .fit-import-box textarea { height: 140px !important; }
+    .fit-import-actions { position: sticky; bottom: 0; padding: 0.5rem 0; background: var(--surface); }
 }
 /* ── end R6 T4 ── */
 

@@ -1,6 +1,15 @@
 {# ── Summary Bar ──────────────────────────────────────────────────────────── #}
-<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
-    <div style="display:flex;gap:1rem;font-size:10px;">
+{# data-sum-*: the values fitting_tool.html's phone summary bar copies after
+   each render (mobile R6 T4). DPS is always given, even at 0, and Cap
+   follows the Capacitor section's Stability row (stable %, time left while
+   draining, or 100% with no drain), so the bar never contradicts the panel. #}
+<div class="fit-sum" data-fit-sum
+     data-sum-dps="{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %} / {{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}"
+     data-sum-ehp="{{ "{:,.0f}".format(stats.total_ehp) }}"
+     data-sum-cap="{% if stats.cap_stable %}{{ stats.cap_stable_pct }}%{% elif stats.cap_drain_rate > 0 %}{% if stats.cap_lasts_s >= 60 %}{{ (stats.cap_lasts_s // 60)|int }}m{{ (stats.cap_lasts_s % 60)|int }}s{% else %}{{ stats.cap_lasts_s }}s{% endif %}{% else %}100%{% endif %}"
+     data-sum-cap-ok="{{ 0 if (not stats.cap_stable and stats.cap_drain_rate > 0) else 1 }}"
+     style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.75rem;border:1px solid var(--border);background:var(--surface);margin-bottom:0.5rem;">
+    <div class="fit-sum-vals" style="display:flex;gap:1rem;font-size:10px;">
         {% if stats.total_dps > 0 %}
         <span><span class="b-muted">DPS</span> <span style="color:var(--accent);font-weight:600;">{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %}<span style="color:var(--muted);font-weight:400;"> / </span>{{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}</span></span>
         {% endif %}
@@ -40,7 +49,7 @@
 <div class="b-section">
     <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Fitting Resources</span>
-        <button id="fr-toggle"
+        <button id="fr-toggle" class="m-tap"
                 data-click="toggleResourceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">%</button>
     </div>
@@ -121,7 +130,7 @@
         <span class="b-label">Defense
             <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
         </span>
-        <button id="def-toggle"
+        <button id="def-toggle" class="m-tap"
                 data-click="toggleDefenceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
     </div>
