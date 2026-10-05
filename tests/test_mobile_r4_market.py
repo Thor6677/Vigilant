@@ -389,11 +389,17 @@ def test_chart_drawing_is_split_from_the_stats_and_error_handling():
         < draw.index("if (chart) { chart.destroy(); }") < draw.index("chart = new Chart(")
 
 
-def test_a_failed_range_is_never_redrawn():
+def test_a_failed_range_keeps_the_chart_on_screen_for_the_breakpoint():
+    """lastData always holds the data of the chart on screen: only
+    drawChart() sets it. A failed fetch shows the error and leaves it, so
+    a breakpoint crossing still redraws that chart in the new width's
+    form, as BASE shows it, while the error stays visible."""
     script = _chart_script(_render_type())
     catch = _between(script, ".catch(function () {", "});")
-    assert "lastData = null;" in catch
+    assert "lastData" not in catch
     assert "errEl.style.display = '';" in catch
+    assert script.count("lastData =") == 2
+    assert "lastData = data;" in _draw(script)
 
 
 def test_chart_rebuilds_when_the_breakpoint_changes():

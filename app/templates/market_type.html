@@ -188,7 +188,6 @@
             }
             build(data);
         }).catch(function () {
-            lastData = null;  // never redraw a range that failed to load
             errEl.textContent = 'Market history unavailable — try another range or refresh.';
             errEl.style.display = '';
         });
