@@ -525,3 +525,21 @@ def test_css_section_is_phone_only():
     phone block, and only whitespace follows it up to the end marker."""
     rest = _after_phone_block(css_section("T6"))
     assert rest.strip() == "", f"the R2 T6 section has a rule outside its phone block: {rest.strip()[:80]!r}"
+
+
+_SMALL_TEXT = (".skp-meta > span", ".skp-actions .b-btn", ".skp-scope .b-btn", ".skp-scope > span",
+               ".skp-acl-count", ".skp-acl-add > .b-btn", ".skp-acl-hint", ".skp-share > span",
+               ".skp-share > .b-btn", ".skp-tools .b-btn", "#ship-link", ".skp-hint")
+
+
+def test_css_small_text_is_11px():
+    for sel in _SMALL_TEXT:
+        assert "font-size: 11px !important" in _decls(sel), sel
+
+
+def test_small_text_hooks_are_in_the_markup():
+    html = _render_detail(can_admin=True, can_edit=True, visibility="custom", acl_entries=_ACL)
+    for cls in ("skp-meta", "skp-actions", "skp-acl-count", "skp-acl-hint", "skp-hint"):
+        assert re.search(rf'class="{cls}"', html), cls
+    assert 'class="m-stack skp-acl-add"' in html
+    assert 'class="b-grid-2 skp-tools"' in html

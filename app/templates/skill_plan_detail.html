@@ -14,7 +14,7 @@
 <div class="b-page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;">
     <div>
         <h1 class="b-page-title" id="plan-title">{{ plan.name }}</h1>
-        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <div class="skp-meta" style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
             <span>{{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}</span>
             {# Scope badge #}
             {% if vis == 'personal' %}
@@ -29,7 +29,7 @@
             {% if not can_edit %}<span style="color:var(--warn);">🔒 view-only</span>{% endif %}
         </div>
     </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <div class="skp-actions" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         {# Duplicate-to-personal: always available to any viewer #}
         <form method="POST" action="/skill-plans/{{ plan.id }}/duplicate" style="display:inline;">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;"
@@ -122,7 +122,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
             <span class="b-label">Access Control List</span>
-            <span style="font-size:9px;color:var(--muted);">
+            <span class="skp-acl-count" style="font-size:9px;color:var(--muted);">
                 {{ (acl_entries or []) | length }} entr{{ 'ies' if (acl_entries or [])|length != 1 else 'y' }}
                 · owner always has admin
             </span>
@@ -175,7 +175,7 @@
         </div>
         {% endif %}
 
-        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add" class="m-stack"
+        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add" class="m-stack skp-acl-add"
               style="display:grid;grid-template-columns:110px 1fr 110px auto;gap:0.4rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);align-items:center;">
             <select name="subject_type"
                     style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
@@ -195,7 +195,7 @@
                 Add
             </button>
         </form>
-        <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
+        <div class="skp-acl-hint" style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
             Names are resolved via EVE ESI so they must match exactly. Permissions:
             <span class="b-text">View</span> = read-only,
             <span class="b-text">Edit</span> = can modify skills,
@@ -226,7 +226,7 @@
 </div>
 {% endif %}
 
-<div class="b-grid-2">
+<div class="b-grid-2 skp-tools">
 
 {# ── Left Column: Skills in Plan ─────────────────────────────────────────── #}
 <div>
@@ -420,7 +420,7 @@
                 </button>
                 <div id="fitting-result" style="flex:1;"></div>
             </div>
-            <div style="font-size:9px;color:var(--muted);">
+            <div class="skp-hint" style="font-size:9px;color:var(--muted);">
                 Adds all skill requirements for ship + every module, rig, drone, etc.
             </div>
         </div>

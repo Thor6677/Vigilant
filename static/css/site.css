@@ -1159,6 +1159,16 @@
         display: flex; align-items: center; min-height: 40px;
         font-size: 12px !important; text-align: left;
     }
+
+    /* 8-9px text at 11px: the skill count and scope badge under the title,
+       every action and form button (header, scope bar, ACL, share, Gap
+       Analysis, Add Skill, Add from Ship, the imports), the scope bar's
+       note, the ACL count and hint, the share label, View Ship and the
+       fitting import's hint. !important beats the inline sizes; an open
+       row's Remove keeps the open row's 12px (its rule outranks this). */
+    .skp-meta > span, .skp-actions .b-btn, .skp-scope .b-btn, .skp-scope > span,
+    .skp-acl-count, .skp-acl-add > .b-btn, .skp-acl-hint, .skp-share > span, .skp-share > .b-btn,
+    .skp-tools .b-btn, #ship-link, .skp-hint { font-size: 11px !important; }
 }
 /* ── end R2 T6 ── */
 
