@@ -76,7 +76,7 @@
                 No chart data available
             </div>
             {# Chart.js sizes the canvas from its parent, so the canvas has a
-               box of its own: 220px tall on phones (site.css, R3 T5), where
+               box of its own: 280px tall on phones (site.css, R3 T5), where
                the chart fills it; above 640px it is as tall as the canvas. #}
             <div class="ml-chart-box"><canvas id="mining-chart" height="220"></canvas></div>
         </div>
@@ -158,6 +158,9 @@
     /* Phones: the chart's options follow this query (buildMiningChart), and
        crossing it rebuilds the chart (below). */
     var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    /* Whether the chart on show was built with the phone options (null
+       before the first build); the listener below compares it. */
+    var lastBuiltSide = null;
 
     /* ── Selection management ──────────────────────────────────────────────── */
     function loadSelection() {
@@ -249,13 +252,31 @@
         return v.toFixed(0);
     }
 
+    /* Phones (mobile R3, as R2's combat stream legend in actions.js): a
+       legend gets at most half the chart's height, and up to twelve ore
+       names of 25 characters and more sit one per row there, so some never
+       showed. Cut to 20 characters, two fit per row. Only the legend text
+       changes: each item keeps its datasetIndex (a tap still hides the
+       right series), and the tooltip reads the dataset's full name.
+       Chart.js's own generator is looked up when the legend is built. */
+    var LEGEND_MAX_CHARS = 20;
+    function shortLegendLabels(chart) {
+        var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+        items.forEach(function(item) {
+            if (item.text && item.text.length > LEGEND_MAX_CHARS) {
+                item.text = item.text.slice(0, LEGEND_MAX_CHARS - 1).trimEnd() + '\u2026';
+            }
+        });
+        return items;
+    }
+
     function buildMiningChart(data, days) {
         var canvas = document.getElementById('mining-chart');
         var box = canvas.closest('.ml-chart-box');
         var empty = document.getElementById('chart-empty');
 
         /* is-empty hides the box on phones (site.css, R3 T5), where it is
-           220px tall even with no chart in it. Above 640px it does
+           280px tall even with no chart in it. Above 640px it does
            nothing. */
         if (!data.dates || data.dates.length === 0) {
             canvas.style.display = 'none';
@@ -317,12 +338,14 @@
         }
 
         /* Phones, read per build (crossing 640px rebuilds): the chart fills
-           its 220px box instead of keeping the canvas's aspect ratio, and
+           its 280px box instead of keeping the canvas's aspect ratio, and
            shows at most 5 dates, unrotated. Its legend is compact: 10px
-           text and 6px padding (boxWidth stays 10), since Chart.js gives a
-           legend at most half the chart. Above 640px the options are as
-           before. */
+           text, 6px padding (boxWidth stays 10) and names cut to 20
+           characters (shortLegendLabels), so at 360px twelve items fit in
+           the half of the chart Chart.js gives a legend. Above 640px the
+           options are as before. */
         var phone = !!(phoneMq && phoneMq.matches);
+        lastBuiltSide = phone;
         var xTicks = {
             color: '#474747',
             font: { family: "'JetBrains Mono', monospace", size: 9 },
@@ -340,6 +363,7 @@
             xTicks.maxRotation = 0;
             legendLabels.font.size = 10;
             legendLabels.padding = 6;
+            legendLabels.generateLabels = shortLegendLabels;
         }
 
         miningChart = new Chart(canvas, {
@@ -469,9 +493,15 @@
 
     /* Crossing 640px (a phone rotated, a window resized) rebuilds the chart
        with that width's options, at the range on show. With no ledger
-       loaded there is no chart to rebuild. */
+       loaded there is no chart to rebuild. The query is read when the
+       event is handled, not from the event: a change that has already
+       flipped back by then (a headless full-page capture shrinks the
+       window and restores it) leaves the chart on the side it was built
+       for, and it is kept. */
     function rebuildForWidth() {
-        if (fullChartData) buildMiningChart(fullChartData, currentDays);
+        if (fullChartData && phoneMq.matches !== lastBuiltSide) {
+            buildMiningChart(fullChartData, currentDays);
+        }
     }
     if (phoneMq) {
         if (phoneMq.addEventListener) phoneMq.addEventListener('change', rebuildForWidth);

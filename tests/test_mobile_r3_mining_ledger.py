@@ -10,9 +10,9 @@ Three templates:
 - `partials/mining_ledger_data.html`, the combined ledger: the same four
   lists as R2 T4's `mining.html`, converted the same way (key 2 the ISK
   value; Daily Summary and Full Detail show 10 rows plus "Show all N").
-- `mining_ledger.html`: the chart sits in a box that is 220px tall on
-  phones, where the chart fills it and shows fewer dates; the selection bar
-  wraps, with 40px buttons.
+- `mining_ledger.html`: the chart sits in a box that is 280px tall on
+  phones, where the chart fills it, shows fewer dates and cuts legend names
+  to 20 characters; the selection bar wraps, with 40px buttons.
 
 Desktop renders as before (D21). Names and ids are invented."""
 import functools
@@ -447,7 +447,7 @@ def test_chart_canvas_sits_in_its_own_box():
 
 def test_empty_chart_box_is_marked_for_phones():
     """With no data the box is marked is-empty, which hides it on phones
-    only, so a phone doesn't keep an empty 220px box under the message."""
+    only, so a phone doesn't keep an empty 280px box under the message."""
     s = _script(_render_page())
     assert "var box = canvas.closest('.ml-chart-box');" in s
     assert "box.classList.add('is-empty');" in s
@@ -475,13 +475,19 @@ function matchMedia(q) {
 const made = [];
 function Chart(canvas, cfg) { this.cfg = cfg; made.push(this); }
 Chart.prototype.destroy = function () { this.destroyed = true; };
+// Chart.js's default legend generator: one item per dataset.
+Chart.defaults = { plugins: { legend: { labels: { generateLabels: chart =>
+  chart.data.datasets.map((ds, i) => ({ text: ds.label, datasetIndex: i, hidden: false })) } } } };
 
 const DAY = 86400000;
 const dates = [];
 for (let i = 59; i >= 0; i--) dates.push(new Date(Date.now() - i * DAY).toISOString().slice(0, 10));
-const chartData = { dates, ores: ['Sample Ore A', 'Other'],
-  stacks: { 'Sample Ore A': dates.map(() => 5), 'Other': dates.map(() => 1) },
-  isk_values: dates.map(() => 100), ore_colors: { 'Sample Ore A': '#123456', 'Other': '#654321' } };
+const ORES = ['Compressed Sample Ore With A Long Name',   // 37 characters
+              'Twenty Character Ore',                     // 20 characters
+              'Compressed Samples Kernite',               // a space at character 19
+              'Other'];
+const chartData = { dates, ores: ORES, stacks: {}, ore_colors: {}, isk_values: dates.map(() => 100) };
+ORES.forEach((o, i) => { chartData.stacks[o] = dates.map(() => i + 1); chartData.ore_colors[o] = '#12345' + i; });
 
 const cls = () => ({ add() {}, remove() {} });
 const box = { classList: cls() };
@@ -509,8 +515,12 @@ vm.runInContext(src, sandbox);
 const last = () => {
   const c = made[made.length - 1];
   const o = c.cfg.options;
+  const labels = o.plugins.legend.labels;
+  const gen = typeof labels.generateLabels === 'function'
+    ? labels.generateLabels({ data: c.cfg.data }).map(i => [i.text, i.datasetIndex]) : null;
   return JSON.parse(JSON.stringify({ maintainAspectRatio: o.maintainAspectRatio,
-    xticks: o.scales.x.ticks, legend: o.plugins.legend.labels, dates: c.cfg.data.labels.length }));
+    xticks: o.scales.x.ticks, legend: labels, legendKeys: Object.keys(labels), gen,
+    datasetLabels: c.cfg.data.datasets.map(d => d.label), dates: c.cfg.data.labels.length }));
 };
 const fire = phone => { state.phone = phone; mqls.forEach(m => m.ls.forEach(fn => fn({ matches: m.matches, media: m.media }))); };
 const settle = () => (docLs['htmx:afterSettle'] || []).forEach(fn => fn({ detail: { target: { id: 'ledger-data' } } }));
@@ -523,6 +533,11 @@ sandbox.window.filterRange.call(buttons[0]); out.desktop7 = last();
 fire(true); out.phone7 = last(); out.builds.push(made.length);
 fire(false); out.back7 = last(); out.builds.push(made.length);
 fire(true); settle(); out.phoneNewLedger = last();   // a new ledger starts at 30 days again
+// A change event that leaves the chart on the side it was built for (fired
+// here by hand) builds nothing; only a real crossing rebuilds.
+let n = made.length; fire(true); out.samePhone = made.length - n;
+n = made.length; fire(false); out.toDesktop = made.length - n;
+n = made.length; fire(false); out.sameDesktop = made.length - n;
 out.destroyed = made.slice(0, -1).every(c => c.destroyed);
 process.stdout.write(JSON.stringify(out));
 """
@@ -558,16 +573,52 @@ def test_desktop_chart_options_are_unchanged(chart_run):
         assert run["maintainAspectRatio"] is True, key
         assert run["xticks"] == _DESKTOP_X, key
         assert run["legend"] == _DESKTOP_LEGEND, key
+        assert run["legendKeys"] == list(_DESKTOP_LEGEND), "no generateLabels: Chart.js's default runs"
+        assert run["gen"] is None, key
+
+
+_ORE_LONG, _ORE_EXACT, _ORE_SPACED = ("Compressed Sample Ore With A Long Name",
+                                      "Twenty Character Ore", "Compressed Samples Kernite")
 
 
 def test_phone_chart_fills_its_box_with_fewer_dates_and_a_compact_legend(chart_run):
-    """On phones the chart fills its 220px box, shows at most 5 unrotated
-    dates, and its legend is 10px text with 6px padding, so more of the ore
-    list fits in the half of the chart Chart.js allows a legend."""
+    """On phones the chart fills its 280px box and shows at most 5 unrotated
+    dates. Its legend is 10px text with 6px padding (boxWidth stays 10) and
+    names cut to 20 characters (below), so at 360px all twelve items fit in
+    the half of the chart Chart.js allows a legend."""
+    for key in ("phone7", "phoneNewLedger"):
+        run = chart_run[key]
+        assert run["maintainAspectRatio"] is False, key
+        assert run["xticks"] == dict(_DESKTOP_X, maxTicksLimit=5, maxRotation=0), key
+        assert run["legend"] == dict(_DESKTOP_LEGEND, font=dict(_DESKTOP_LEGEND["font"], size=10),
+                                     padding=6), key
+        assert run["legendKeys"] == list(_DESKTOP_LEGEND) + ["generateLabels"], key
+
+
+def test_phone_legend_cuts_names_to_twenty_characters(chart_run):
+    """As R2's combat stream legend does (actions.js _shortLegendLabels): a
+    name over 20 characters becomes its first 19, less any trailing space,
+    plus an ellipsis, so two fit per legend row and all twelve items show.
+    Items keep their datasetIndex, so a tap still hides the right series,
+    and the datasets keep their full names, which the tooltip reads."""
+    assert _ORE_SPACED[18] == " " and len(_ORE_EXACT) == 20
     run = chart_run["phone7"]
-    assert run["maintainAspectRatio"] is False
-    assert run["xticks"] == dict(_DESKTOP_X, maxTicksLimit=5, maxRotation=0)
-    assert run["legend"] == dict(_DESKTOP_LEGEND, font=dict(_DESKTOP_LEGEND["font"], size=10), padding=6)
+    assert run["gen"] == [[_ORE_LONG[:19] + "…", 0], [_ORE_EXACT, 1], ["Compressed Samples…", 2],
+                          ["Other", 3], ["ISK Value", 4]]
+    assert len(run["gen"][0][0]) == 20
+    assert run["datasetLabels"] == [_ORE_LONG, _ORE_EXACT, _ORE_SPACED, "Other", "ISK Value"]
+    assert chart_run["back7"]["gen"] is None, "back above 640px, no cut"
+
+
+def test_phone_legend_cut_reads_the_default_generator_lazily():
+    """Chart.js's own generator is looked up when the legend is built, never
+    when the script runs or a chart is configured, and the tooltip label
+    still reads the dataset's full name."""
+    s = _script(_render_page())
+    assert s.count("Chart.defaults.plugins.legend.labels.generateLabels(chart)") == 1
+    assert "Chart.defaults" not in s.replace("Chart.defaults.plugins.legend.labels.generateLabels(chart)", "")
+    assert "if (phone) {" in s and "legendLabels.generateLabels = shortLegendLabels;" in s
+    assert "item.dataset.label + ': ' + formatQty(item.parsed.y)" in s
 
 
 def test_crossing_640px_rebuilds_the_chart_at_the_range_on_show(chart_run):
@@ -582,6 +633,19 @@ def test_crossing_640px_rebuilds_the_chart_at_the_range_on_show(chart_run):
     assert chart_run["phone7"]["dates"] == chart_run["back7"]["dates"] == chart_run["desktop7"]["dates"]
     assert chart_run["phoneNewLedger"]["dates"] == chart_run["desktop30"]["dates"]
     assert chart_run["destroyed"], "each rebuild destroys the chart it replaces"
+
+
+def test_a_media_change_on_the_same_side_never_rebuilds_the_chart(chart_run):
+    """The listener rebuilds only when the query's answer differs from the
+    side the chart was last built for (lastBuiltSide). A change event that
+    leaves it on the same side, as a headless full-page capture's resize
+    can, keeps the chart it has."""
+    assert chart_run["samePhone"] == 0
+    assert chart_run["toDesktop"] == 1
+    assert chart_run["sameDesktop"] == 0
+    s = _script(_render_page())
+    assert s.count("phoneMq.matches !== lastBuiltSide") == 1
+    assert s.count("lastBuiltSide = phone;") == 1
 
 
 def test_selection_bar_keeps_its_hooks_with_40px_buttons():
@@ -652,10 +716,12 @@ def test_show_all_is_inset_inside_its_panel():
     assert "margin: 0.4rem 0.75rem 0.6rem" in body
 
 
-def test_chart_box_is_220px_on_phones():
+def test_chart_box_is_280px_on_phones():
+    """280px: with legend names cut to 20 characters all twelve items fit in
+    the half Chart.js allows a legend, and the plot keeps over 120px."""
     css, _ = _phone()
     body = rule_bodies(css, ".ml-chart-box")
-    assert "height: 220px" in body and "position: relative" in body
+    assert "height: 280px" in body and "position: relative" in body
     assert "display: none" in rule_bodies(css, ".ml-chart-box.is-empty")
 
 

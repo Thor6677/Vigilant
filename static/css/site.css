@@ -1412,9 +1412,12 @@
     .ml-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 
     /* Chart: a fixed box, which the chart fills on phones (the page script
-       drops maintainAspectRatio there). With no chart data the script marks
-       it is-empty, so no blank 220px box sits under "No chart data". */
-    .ml-chart-box { position: relative; height: 220px; }
+       drops maintainAspectRatio there). 280px: with legend names cut to 20
+       characters, twelve items fit in the half of the chart Chart.js allows
+       a legend and the plot keeps about 150px. With no chart data the
+       script marks it is-empty, so no blank box sits under "No chart
+       data". */
+    .ml-chart-box { position: relative; height: 280px; }
     .ml-chart-box.is-empty { display: none; }
 
     /* Selection bar ("N character(s) selected", Clear, View Combined
