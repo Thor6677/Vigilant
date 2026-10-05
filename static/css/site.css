@@ -2018,6 +2018,20 @@
     #wht-panel .ws-conn a { min-width: 40px; }
     .gc-avoid > summary { min-height: 40px; line-height: 40px; font-size: 12px !important; }
     .gc-starmap { display: inline-flex !important; align-items: center; min-height: 40px; }
+
+    /* 8-9px text at 11px: the Watchlist's counts, hunter kinds and alert
+       kind leads; Gate Check's field labels, legend note, jump count and
+       danger flags; Trending's ranks; the WH Tracker's "(no location
+       scope)", section titles (and the System Intelligence subtitle) and
+       effect table heads. !important beats inline sizes; the element or ID
+       selectors outrank the pages' own rules, which load after this file. */
+    .w-count, .w-kind, .w-row.m-row > [data-m="lead"] { font-size: 11px !important; }
+    label.gc-lbl { font-size: 11px; }
+    .gc-legend > span, .gc-jumps, .gc-wp > .gc-flag { font-size: 11px !important; }
+    #sov-gained .b-trending-rank, #sov-lost .b-trending-rank, #violent-list .b-trending-rank { font-size: 11px; }
+    label.wht-pick > span { font-size: 11px !important; }
+    #wht-panel .ws-section-title, #wht-panel .ws-effect-table th { font-size: 11px; }
+    #wht-panel .ws-section-title > span { font-size: 11px !important; }
 }
 /* ── end R5 T3 ── */
 

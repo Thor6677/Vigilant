@@ -568,6 +568,25 @@ def test_small_link_hooks_are_in_the_markup():
     assert re.search(r'<div class="wht-res"[^>]*>\s*<a href="/intel/entity/corporation/', panel)
 
 
+def test_small_text_is_11px_on_phones():
+    body, _ = _phone()
+    for sel in (".w-count", ".w-kind", '.w-row.m-row > [data-m="lead"]', ".gc-legend > span",
+                ".gc-jumps", ".gc-wp > .gc-flag", "label.wht-pick > span",
+                "#wht-panel .ws-section-title > span"):
+        assert "font-size: 11px !important" in rule_bodies(body, sel), sel
+    for sel in ("label.gc-lbl", "#sov-gained .b-trending-rank", "#sov-lost .b-trending-rank",
+                "#violent-list .b-trending-rank", "#wht-panel .ws-section-title",
+                "#wht-panel .ws-effect-table th"):
+        assert "font-size: 11px" in rule_bodies(body, sel), sel
+
+
+def test_small_text_hooks_are_in_the_markup():
+    watch = _render_watch()
+    assert len(re.findall(r'<span class="b-label w-count"', watch)) == 3
+    assert '<span class="w-kind"' in source("intel_watch.html")
+    assert re.search(r'<span class="gc-jumps"[^>]*>4 jumps</span>', _render_route())
+
+
 def test_tracker_system_name_wraps():
     body, _ = _phone()
     assert "overflow-wrap: anywhere" in rule_bodies(body, "#wht-panel .ws-name")

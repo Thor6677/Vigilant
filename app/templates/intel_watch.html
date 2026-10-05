@@ -47,7 +47,7 @@
     <div class="b-section">
         <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
             <span class="b-label">Watched Systems</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ systems | length }} watched</span>
+            <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ systems | length }} watched</span>
         </div>
 
         {% if asset_system_count > 0 %}
@@ -91,7 +91,7 @@
     <div class="b-section">
         <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
             <span class="b-label">Watched Hunters</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ hunters | length }} watched</span>
+            <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ hunters | length }} watched</span>
         </div>
 
         {% if not hunters %}
@@ -101,7 +101,7 @@
         <div class="w-row">
             <div style="flex:1;min-width:0;">
                 <div style="font-weight:600;">
-                    <span style="color:var(--muted);font-size:9px;text-transform:uppercase;">{{ h.kind }}</span>
+                    <span class="w-kind" style="color:var(--muted);font-size:9px;text-transform:uppercase;">{{ h.kind }}</span>
                     {{ h.label or h.entity_id }}
                 </div>
                 {% if h.notes %}<div style="color:var(--muted);font-size:10px;">{{ h.notes }}</div>{% endif %}
@@ -132,7 +132,7 @@
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Recent Alerts · last 72h</span>
-        <span class="b-label" style="color:var(--muted);font-size:9px;">{{ alerts | length }} event(s)</span>
+        <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ alerts | length }} event(s)</span>
     </div>
     {% if not alerts %}
     <div class="w-empty">No alerts yet. Fires will appear here as they happen.</div>
