@@ -366,25 +366,17 @@ def _page_script(html=None):
     return scripts[0].text
 
 
-def test_script_folds_and_scrolls_on_phones_only():
+def test_script_reads_the_640px_query_and_keeps_its_hooks():
+    """Stable tokens only. The behaviour (the fold, focus, scroll and
+    heading, and that only the 640px query turns them on: the stub's
+    matchMedia matches nothing else) runs against a stub DOM below."""
     js = _flat(_page_script())
-    # One 640px query gates the fold and the scroll.
-    m = re.search(r"var (\w+) = window\.matchMedia \? window\.matchMedia\('\(max-width: 640px\)'\) : null;", js)
-    assert m, "the phone check comes from the 640px media query"
-    assert re.search(rf"function isPhone\(\) {{ return !!\({m.group(1)} && {m.group(1)}\.matches\); }}", js)
-    # A pick: names the corp in the Picked line and the Offers heading; folds on phones.
-    assert "getElementById('lp-picked-name').textContent = name;" in js
-    assert "getElementById('lp-offers-corp').textContent = name;" in js
-    assert re.search(r"if \(isPhone\(\)\) { corpSec\.classList\.add\('is-folded'\); scrollPending = true; }", js)
-    # The Picked line unfolds the tree.
-    assert re.search(r"picked\.addEventListener\('click', function \(\) { "
-                     r"corpSec\.classList\.remove\('is-folded'\); scrollPending = false;", js)
-    # The scroll waits for the offers, on the panel itself.
-    assert "getElementById('lp-offers-panel').addEventListener('htmx:afterSettle'" in js
-    assert re.search(r"if \(isPhone\(\)\) offersSec\.scrollIntoView\(", js)
-    # Every existing hook is still read.
+    assert "'(max-width: 640px)'" in js
+    assert "'htmx:afterSettle'" in js
+    # Every hook, old and new, is still read.
     for hook in (".lpt-fac", ".lpt-corp", "data-corp-id", "data-fac", "'lp-corp-id'",
-                 "inp.dispatchEvent(new Event('change'))", "style.display"):
+                 "inp.dispatchEvent(new Event('change'))", "style.display", "'lp-offers-panel'",
+                 "'lp-corp-sec'", "'lp-picked'", "'lp-picked-name'", "'lp-offers-corp'", "'lp-offers-sec'"):
         assert hook in js, hook
     assert "onclick" not in _render_page()
 
@@ -426,7 +418,9 @@ function el(id, cls, attrs, kids) {
     },
     querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
     getClientRects() { return this.parentNode && this.parentNode.style.display === 'none' ? [] : [{}]; },
-    focus(o) { log.focus.push([this.id, o || null]); },
+    // Third field: was the tree folded? The Picked line only shows (so can
+    // only take focus) once it is.
+    focus(o) { log.focus.push([this.id, o || null, sec.cls.has('is-folded')]); },
     scrollIntoView(o) { log.scrolls.push([this.id, o || null]); },
   };
   n.classList = { add: c => n.cls.add(c), remove: c => n.cls.delete(c), contains: c => n.cls.has(c),
@@ -441,7 +435,9 @@ const corpA = el('corpA', ['lpt-corp'], { 'data-corp-id': '1000001' });
 corpA.textContent = 'Sample Navy Corp';
 const corpB = el('corpB', ['lpt-corp'], { 'data-corp-id': '1000002' });
 corpB.textContent = ' Sample Trade Guild ';
-const corps = el('corps1', ['lpt-corps'], { 'data-fac': '1' }, [corpA, corpB]);
+const corpC = el('corpC', ['lpt-corp'], { 'data-corp-id': '1000003' });
+corpC.textContent = 'Sample Research Bureau';
+const corps = el('corps1', ['lpt-corps'], { 'data-fac': '1' }, [corpA, corpB, corpC]);
 corps.style.display = 'none';
 const tree = el('lp-corp-tree', [], {}, [fac, corps]);
 const input = el('lp-corp-id');
@@ -449,17 +445,24 @@ input.addEventListener('change', () => log.changes.push(input.value));
 const body = el('lp-corp-body', ['lp-corp-body'], {}, [input, el('lp-corp-filter'), tree]);
 const picked = el('lp-picked', ['m-only', 'lp-picked'], {}, [el('lp-picked-name')]);
 const sec = el('lp-corp-sec', ['b-section', 'lp-corp-sec'], {}, [el('', ['b-section-head']), picked, body]);
-const panel = el('lp-offers-panel');
+const rowInPanel = el('offer-row', ['lp-row', 'm-row']);
+const panel = el('lp-offers-panel', [], {}, [rowInPanel]);
 el('lp-offers-sec', ['b-section'], {}, [el('lp-offers-corp', ['m-only', 'lp-offers-corp']), panel]);
 const document = { getElementById: id => byId[id] || null, addEventListener() {}, body: { addEventListener() {} } };
 
 vm.runInContext(src, vm.createContext({ window, document, Event, console }));
 
 const click = n => n.dispatchEvent({ type: 'click', target: n });
-const settle = () => panel.dispatchEvent({ type: 'htmx:afterSettle', target: panel });
+// htmx 1.9.12's afterSettle detail carries both the request's parameters and
+// the XHR. how = 'url' or 'params' sends only that one, so each way of
+// telling which corp a settle was for is exercised on its own.
+const settle = (id, how, from) => (from || panel).dispatchEvent({ type: 'htmx:afterSettle', target: from || panel,
+  detail: Object.assign({},
+    how === 'params' ? {} : { xhr: { responseURL: 'http://x/market/lp/offers?corporation_id=' + id } },
+    how === 'url' ? {} : { requestConfig: { parameters: { corporation_id: id } } }) });
 const snap = () => ({ folded: sec.cls.has('is-folded'), changes: log.changes.slice(),
-  scrolls: log.scrolls.length, focus: log.focus.length, value: input.value,
-  selected: [corpA, corpB].filter(c => c.cls.has('is-selected')).map(c => c.id),
+  scrolls: log.scrolls.length, focus: log.focus.length, lastFocus: log.focus[log.focus.length - 1] || null,
+  value: input.value, selected: [corpA, corpB, corpC].filter(c => c.cls.has('is-selected')).map(c => c.id),
   pickedName: byId['lp-picked-name'].textContent, offersCorp: byId['lp-offers-corp'].textContent });
 const out = {};
 
@@ -467,19 +470,40 @@ click(fac);                                  // the tree's own expand logic
 out.facOpen = corps.style.display;
 
 click(corpA); out.deskPick = snap();         // desktop: today's behaviour only
-settle(); out.deskSettle = snap();
+settle('1000001'); out.deskSettle = snap();
 
 state.phone = true;
-click(corpB); out.phonePick = snap();        // phone: fold, wait for the offers
-settle(); out.phoneSettle = snap(); out.scrollTo = log.scrolls[0];
-settle(); out.secondSettle = snap();         // one scroll per pick
+click(corpB); out.phonePick = snap();        // phone: fold, focus the Picked line, wait for the offers
+// The same corp's settle, bubbling up from a node inside the panel.
+rowInPanel.dispatchEvent({ type: 'htmx:afterSettle', target: rowInPanel,
+  detail: { xhr: { responseURL: 'http://x/market/lp/offers?corporation_id=1000002' },
+            requestConfig: { parameters: { corporation_id: '1000002' } } } });
+out.childSettle = snap();
+settle('1000002'); out.phoneSettle = snap(); out.scrollTo = log.scrolls[0];
+settle('1000002'); out.secondSettle = snap(); // one scroll per pick
 
-click(picked); out.unfold = snap(); out.focusTo = log.focus[0];
+click(picked); out.unfold = snap();
 
-click(corpA); click(picked); settle();       // unfolded before the offers came: no scroll
+// What htmx does: C is slow, so A's request queues behind it and C's
+// offers settle first, while A is the current pick.
+click(corpC); click(picked); click(corpA);
+out.queuedPick = snap();
+settle('1000003'); out.queuedFirst = snap();
+settle('1000001', 'url'); out.queuedLast = snap();
+
+// Synthetic (htmx's queue can't do it): slow C lands last, after B's offers
+// and while a newer pick, A, is still waiting for its own.
+click(picked); click(corpC);
+click(picked); click(corpB); settle('1000002'); out.lateB = snap();
+click(picked); click(corpA); out.lateAPick = snap();
+settle('1000003'); out.lateC = snap();
+settle('1000001', 'params'); out.lateA = snap();
+
+click(picked);
+click(corpB); click(picked); settle('1000002'); // unfolded before the offers came: no scroll
 out.unfoldFirst = snap();
 
-click(corpB); state.phone = false; settle(); // crossed to desktop meanwhile: no scroll
+click(corpA); state.phone = false; settle('1000001'); // crossed to desktop meanwhile: no scroll
 out.crossed = snap();
 process.stdout.write(JSON.stringify(out));
 """
@@ -502,39 +526,91 @@ def picker_run(tmp_path_factory):
 def test_picker_desktop_behaviour_is_unchanged(picker_run):
     """Behaviour, with the page script run against a stub DOM: on desktop
     a pick selects the corp and loads its offers exactly as before; nothing
-    folds and nothing scrolls. The faction button still opens its corps."""
+    folds, takes focus or scrolls. The faction button still opens its
+    corps. (The hidden phone-only heading name is still kept current.)"""
     assert picker_run["facOpen"] == "block"
     pick = picker_run["deskPick"]
     assert pick["value"] == "1000001" and pick["changes"] == ["1000001"]
     assert pick["selected"] == ["corpA"]
     assert pick["folded"] is False
-    assert picker_run["deskSettle"]["scrolls"] == 0
-    assert picker_run["deskSettle"]["folded"] is False
+    assert pick["focus"] == 0, "a desktop pick leaves focus where it was"
+    settled = picker_run["deskSettle"]
+    assert settled["scrolls"] == 0 and settled["folded"] is False and settled["focus"] == 0
+    assert settled["offersCorp"] == "Sample Navy Corp"
 
 
-def test_picker_folds_names_and_scrolls_on_phones(picker_run):
+def test_picker_folds_focuses_names_and_scrolls_on_phones(picker_run):
     pick = picker_run["phonePick"]
     assert pick["changes"] == ["1000001", "1000002"] and pick["selected"] == ["corpB"]
     assert pick["folded"] is True
     assert pick["pickedName"] == "Sample Trade Guild"
-    assert pick["offersCorp"] == "Sample Trade Guild"
+    assert pick["lastFocus"] == ["lp-picked", {"preventScroll": True}, True], (
+        "the tapped corp just hid with the tree: focus moves to the Picked line, once it shows")
+    assert pick["focus"] == 1
+    assert pick["offersCorp"] == "Sample Navy Corp", "the heading changes with the offers, not before"
     assert pick["scrolls"] == 0, "the scroll waits for the offers"
-    assert picker_run["phoneSettle"]["scrolls"] == 1
+    settled = picker_run["phoneSettle"]
+    assert settled["scrolls"] == 1
+    assert settled["offersCorp"] == "Sample Trade Guild"
     target, opts = picker_run["scrollTo"]
     assert target == "lp-offers-sec" and opts["block"] == "start"
     assert picker_run["secondSettle"]["scrolls"] == 1, "a later swap doesn't scroll again"
 
 
+def test_a_settle_bubbling_up_from_inside_the_panel_is_ignored(picker_run):
+    """The current pick's own settle, fired on a node inside the panel and
+    bubbling up: the `e.target !== this` guard drops it."""
+    child = picker_run["childSettle"]
+    assert child["scrolls"] == 0
+    assert child["offersCorp"] == "Sample Navy Corp"
+    assert picker_run["phoneSettle"]["scrolls"] == 1, "the panel's own settle still scrolls"
+
+
+def test_a_queued_earlier_pick_neither_scrolls_nor_names_the_corp(picker_run):
+    """Pick a slow corp, then another: htmx queues the second request, so
+    the first one's offers settle first. Only the latest pick's settle
+    names the corp in the heading and scrolls; the response URL alone is
+    enough to tell them apart."""
+    before = picker_run["unfold"]["scrolls"]
+    assert picker_run["queuedPick"]["pickedName"] == "Sample Navy Corp"
+    first = picker_run["queuedFirst"]
+    assert first["scrolls"] == before, "the slow pick's offers don't scroll"
+    assert first["offersCorp"] == "Sample Trade Guild", "nor rename the heading"
+    last = picker_run["queuedLast"]
+    assert last["scrolls"] == before + 1
+    assert last["offersCorp"] == "Sample Navy Corp"
+
+
+def test_a_slow_pick_landing_last_neither_scrolls_nor_names_the_corp(picker_run):
+    """Slow pick C, then B, whose offers land; then pick A. C's offers
+    land now, while A is waiting: they mustn't scroll or rename the
+    heading. A's settle, with only the request parameters to go on,
+    still does both."""
+    b = picker_run["lateB"]
+    assert b["offersCorp"] == "Sample Trade Guild"
+    a_pick = picker_run["lateAPick"]
+    assert a_pick["folded"] is True and a_pick["scrolls"] == b["scrolls"]
+    c = picker_run["lateC"]
+    assert c["scrolls"] == b["scrolls"], "the stale settle doesn't scroll"
+    assert c["offersCorp"] == "Sample Trade Guild", "nor rename the heading"
+    a = picker_run["lateA"]
+    assert a["scrolls"] == b["scrolls"] + 1
+    assert a["offersCorp"] == "Sample Navy Corp"
+
+
 def test_picked_line_unfolds_the_tree(picker_run):
     un = picker_run["unfold"]
     assert un["folded"] is False
-    target, opts = picker_run["focusTo"]
-    assert target == "corpB", "focus moves to the picked corp, not to the page"
-    assert opts == {"preventScroll": True}
+    assert un["lastFocus"] == ["corpB", {"preventScroll": True}, False], (
+        "focus moves to the picked corp, not to the page")
+    before = picker_run["lateA"]["scrolls"]
     first = picker_run["unfoldFirst"]
     assert first["folded"] is False
-    assert first["scrolls"] == 1, "unfolding before the offers arrive cancels the scroll"
-    assert picker_run["crossed"]["scrolls"] == 1, "no scroll once the viewport is desktop-wide"
+    assert first["scrolls"] == before, "unfolding before the offers arrive cancels the scroll"
+    assert first["offersCorp"] == "Sample Trade Guild", "the heading still follows the offers"
+    crossed = picker_run["crossed"]
+    assert crossed["scrolls"] == before, "no scroll once the viewport is desktop-wide"
+    assert crossed["offersCorp"] == "Sample Navy Corp"
 
 
 # ── CSS ───────────────────────────────────────────────────────────────

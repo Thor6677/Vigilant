@@ -110,6 +110,10 @@
     var picked = document.getElementById('lp-picked');
     var offersSec = document.getElementById('lp-offers-sec');
     var scrollPending = false;
+    // The latest pick. Its offers alone name the corp in the heading and
+    // scroll: an earlier pick's request, queued ahead of it, can land first.
+    var pendingId = null;
+    var pendingName = '';
 
     function isPhone() { return !!(phone && phone.matches); }
 
@@ -142,11 +146,15 @@
             inp.value = corpBtn.getAttribute('data-corp-id');
             inp.dispatchEvent(new Event('change'));
             var name = corpBtn.textContent.trim();
+            pendingId = corpBtn.getAttribute('data-corp-id');
+            pendingName = name;
             document.getElementById('lp-picked-name').textContent = name;
-            document.getElementById('lp-offers-corp').textContent = name;
             if (isPhone()) {
                 corpSec.classList.add('is-folded');
                 scrollPending = true;
+                // The tapped corp has just hidden with the tree: keep focus
+                // on the line that replaced it rather than dropping it.
+                picked.focus({ preventScroll: true });
             }
         }
     });
@@ -160,10 +168,24 @@
         if (sel && sel.getClientRects().length) sel.focus({ preventScroll: true });
     });
 
-    // htmx fires afterSettle on the swap target, once the offers are laid
-    // out. One scroll per pick; none if the tree was unfolded first.
+    // Which corp a settled offers request was for: htmx 1.9 hands over the
+    // request's parameters, and the XHR's final URL carries the same id.
+    function settledCorpId(e) {
+        var d = e.detail || {};
+        var params = d.requestConfig && d.requestConfig.parameters;
+        if (params && params.corporation_id != null) return String(params.corporation_id);
+        var m = /[?&]corporation_id=(\d+)/.exec((d.xhr && d.xhr.responseURL) || '');
+        return m ? m[1] : null;
+    }
+
+    // htmx fires afterSettle on the swap target once the offers are laid
+    // out; one that bubbles up from a swap inside the panel isn't ours.
+    // Only the latest pick's offers rename the heading and scroll. One
+    // scroll per pick; none if the tree was unfolded first.
     document.getElementById('lp-offers-panel').addEventListener('htmx:afterSettle', function (e) {
-        if (e.target !== this || !scrollPending) return;
+        if (e.target !== this || pendingId === null || settledCorpId(e) !== pendingId) return;
+        document.getElementById('lp-offers-corp').textContent = pendingName;
+        if (!scrollPending) return;
         scrollPending = false;
         var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         if (isPhone()) offersSec.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
