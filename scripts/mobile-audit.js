@@ -16,9 +16,10 @@
  *   leftEdge  — elements cut off by the LEFT edge of the page. Nothing can
  *               scroll there, so it is lost wherever it sits. Ignored:
  *               anything wholly off-screen (a skip link, an off-canvas
- *               panel), visually-hidden 1px/clipped text, and content a
- *               horizontal scroller has scrolled past. Only the outermost
- *               offender is listed.
+ *               panel), visually-hidden 1px/clipped text, content a
+ *               horizontal scroller has scrolled past, and the shapes
+ *               inside an <svg> (its own box clips them; the <svg> itself is
+ *               checked). Only the outermost offender is listed.
  *   clipped   — overflow-x:hidden/clip containers whose content is wider than
  *               they are (content silently cut off)
  *   scrollers — horizontal scroll boxes (allowed, but listed for review)
@@ -71,7 +72,7 @@
         const pr = e.parentElement.getBoundingClientRect();
         if (!(pr.right > vw + 1)) overflow.push(path(e) + ' right=' + Math.round(r.right));
       }
-      if (pastLeft(e, r) && !visuallyHidden(r, cs) && !scrolledAway(e)) {
+      if (pastLeft(e, r) && !e.ownerSVGElement && !visuallyHidden(r, cs) && !scrolledAway(e)) {
         const p = e.parentElement, pr = p.getBoundingClientRect();
         if (!(pastLeft(p, pr) && pr.width && pr.height)) leftEdge.push(path(e) + ' left=' + Math.round(r.left + scrollX));
       }

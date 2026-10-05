@@ -577,6 +577,9 @@ def test_left_edge_check_skips_intentional_off_screen_content():
     vh = re.search(r"const visuallyHidden = [^;]+;", src, re.S).group(0)
     assert "r.width <= 1 && r.height <= 1" in vh and "rect" in vh and "inset(50%)" in vh
     assert "scrollLeft > 0" in re.search(r"const scrolledAway = [^}]+\}", src, re.S).group(0)
+    # Shapes inside an <svg> are clipped by its own box (the wormhole system
+    # diagram's orbit circles); the <svg> element itself is still checked.
+    assert "!e.ownerSVGElement" in check
 
 
 def test_left_edge_check_lists_only_the_outermost_offender():
