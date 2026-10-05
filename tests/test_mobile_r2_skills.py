@@ -424,3 +424,16 @@ def test_t2_css_insets_show_all_inside_the_queue_panel():
     css = css_section("T2")
     body = rule_bodies(css, ".skills-queue .m-showall")
     assert _decl(body, "width", "calc(100% - 1.5rem)")
+
+
+def test_css_remap_attribute_text_is_11px():
+    """The Optimal Remap names and ± lines and the What-If slider labels
+    were 9px inline; the value (an attribute's second line) keeps 18px."""
+    css = css_section("T2")
+    for sel in (".skills-opt > div > div:not(:nth-child(2))", ".skills-whatif label"):
+        assert _decl(rule_bodies(css, sel), "font-size", "11px !important"), sel
+    with open("app/templates/skills.html", encoding="utf-8") as fh:
+        src = fh.read()
+    assert src.count('class="skills-opt"') == 1 and src.count('class="m-stack skills-whatif"') == 1
+    opt = src[src.index('class="skills-opt"'):src.index("What-If Remap")]
+    assert opt.index("{{ attr_names[i] }}") < opt.index("font-size:18px") < opt.index("optimal_attrs[i] - attributes[i]")

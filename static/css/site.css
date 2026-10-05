@@ -968,6 +968,12 @@
        row is the only place a phone shows it, so it takes the muted colour.
        !important beats the inline desktop colour. */
     .skills-queue .skills-rank { color: var(--muted) !important; }
+
+    /* 9px text at 11px: the Optimal Remap attribute names and their ± lines
+       (every line of an attribute but its value), and the What-If Remap
+       slider labels (their value spans inherit). !important beats the
+       inline sizes. */
+    .skills-opt > div > div:not(:nth-child(2)), .skills-whatif label { font-size: 11px !important; }
 }
 /* ── end R2 T2 ── */
 
