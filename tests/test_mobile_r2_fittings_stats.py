@@ -255,6 +255,16 @@ def _render_blueprints(is_corp, filter="all", group_by="type"):
                        corp_id=corp_id, filter=filter, group_by=group_by)
 
 
+@pytest.mark.parametrize("is_corp", [False, True])
+def test_blueprint_calc_links_name_their_blueprint(is_corp):
+    """Every row's link reads "Calc →"; a screen reader's link list needs
+    the blueprint in each name."""
+    html = _render_blueprints(is_corp, "all", "type")
+    links = re.findall(r'<a href="/industry\?type_id=(\d+)" class="m-tap" aria-label="([^"]*)"', html)
+    assert sorted(links) == [("691", "Open Sample Frigate Blueprint in the calculator"),
+                             ("692", "Open Sample Cruiser Blueprint in the calculator")]
+
+
 @pytest.mark.parametrize("is_corp,filter,group_by", [
     (False, "all", "type"), (True, "all", "type"),
     (False, "unresearched", "location"), (True, "bpc", "location"),
