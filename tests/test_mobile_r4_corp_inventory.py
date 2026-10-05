@@ -389,6 +389,8 @@ def test_scan_track_cell_holds_the_inputs_and_button_in_one_value_element():
         # hover title. Screen readers get an aria-label at both widths.
         for letter, k in (("L", kids[0]), ("C", kids[2])):
             assert "m-only" in _cls(k) and _text(k) == letter
+            # The inputs' aria-labels name them; the letter isn't read twice.
+            assert k["attrs"].get("aria-hidden") == "true"
         low, crit = kids[1], kids[3]
         assert "scan-low" in _cls(low) and "scan-critical" in _cls(crit)
         assert low["attrs"].get("aria-label") == "Low threshold"

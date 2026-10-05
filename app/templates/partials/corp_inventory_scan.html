@@ -7,7 +7,8 @@
     row), so both widths share one set. Show all past 10. The lead icon is
     an m-only copy with no data-on-error (its inline hide loses to the
     phone CSS); desktop keeps its own icon. Phones label the inputs L and C
-    (desktop keeps the hover title). #}
+    (desktop keeps the hover title); the letters are aria-hidden, since the
+    inputs' aria-labels already name them. #}
 <div class="m-clamp-wrap cinv-scan-wrap">
 <div class="m-clamp">
 {% for item in items %}
@@ -35,10 +36,10 @@
     <span data-m-label="Track" style="font-size:9px;color:var(--success);min-width:60px;text-align:center;">Tracked</span>
     {% else %}
     <span data-m-label="Track" style="display:contents;"><span style="display:contents;">
-    <span class="m-only">L</span>
+    <span class="m-only" aria-hidden="true">L</span>
     <input type="number" class="scan-low" value="10" min="0" title="Low threshold" aria-label="Low threshold"
            style="width:50px;padding:0.2rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;text-align:center;">
-    <span class="m-only">C</span>
+    <span class="m-only" aria-hidden="true">C</span>
     <input type="number" class="scan-critical" value="5" min="0" title="Critical threshold" aria-label="Critical threshold"
            style="width:50px;padding:0.2rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;text-align:center;">
     <button data-click="addScanItem" class="b-btn" style="flex:none;padding:0.2rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">
