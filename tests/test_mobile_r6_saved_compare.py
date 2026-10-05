@@ -248,6 +248,9 @@ def test_saved_actions_cell_holds_one_wrapper_with_every_control():
         assert checks[0]["attrs"]["type"] == "checkbox"
         assert checks[0]["attrs"]["value"] == str(fit["id"])
         assert checks[0]["attrs"]["data-click"] == "noop" and "data-stop" in checks[0]["attrs"]
+        # A label with no text names the checkbox "" in Chrome, which then
+        # ignores title; aria-label keeps BASE's "Select for compare".
+        assert checks[0]["attrs"].get("aria-label") == "Select for compare"
         buttons = [n for n in inner if n["tag"] == "button"]
         assert [b["attrs"]["data-click"] for b in buttons] == ["moveFit", "deleteFit"]
         for b in buttons:

@@ -57,7 +57,7 @@
 .sf-actions button:hover { color:var(--danger); }
 /* The compare checkbox's label generates no box here, so the checkbox lays
    out as if unwrapped. On phones (site.css, R6 T5) it becomes the
-   checkbox's 40px tap target. */
+   checkbox's 44px tap target. */
 .sf-actions .sf-cmp { display:contents; }
 
 .sf-empty {
@@ -162,7 +162,7 @@
                    lives in its checkbox. One wrapper holds the value. #}
                 <td class="sf-actions" data-m-label="Actions">
                     <span class="sf-act"><label class="sf-cmp"><input type="checkbox" class="sf-compare-check" value="{{ r.id }}"
-                           data-click="noop" data-stop title="Select for compare"></label>
+                           data-click="noop" data-stop title="Select for compare" aria-label="Select for compare"></label>
                     <button data-click="moveFit" data-fit-id="{{ r.id }}" data-stop title="Move to folder">&#8644;</button>
                     <button data-click="deleteFit" data-fit-id="{{ r.id }}" data-stop title="Delete">&times;</button></span>
                 </td>
