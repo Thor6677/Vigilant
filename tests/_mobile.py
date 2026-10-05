@@ -35,6 +35,11 @@ Helpers, one line each:
   * every data-m-label is non-empty
   * a non-link row is toggled by toggleMRow or by its own toggleExpanded;
     a link row (m-row--link) is never toggled by toggleMRow
+  * neither the row nor any tagged cell (data-m or data-m-label) is hidden
+    inline: no `hidden` attribute, no inline `display: none`. The phone
+    rules' display:… !important (grid on the row, block/flex on its cells)
+    beats both, so the element would show on phones anyway; hide a wrapper
+    instead (contract caveat, R1 Task 1 review)
 It returns the parsed rows so a test can make page-specific checks too."""
 import os
 import re
@@ -81,6 +86,20 @@ def _assert_img_size(where: str, img: dict) -> None:
             f"{where}: <img data-m=lead> {dim}={val!r} doesn't match its inline {dim}:{inline.group(1)}px")
 
 
+_INLINE_NONE = re.compile(r"(?:^|;)\s*display\s*:\s*none\s*(?:!\s*important\s*)?(?:;|$)", re.I)
+
+
+def _hidden_inline(attrs: dict) -> str | None:
+    """How `attrs` hide their element inline, or None: the `hidden`
+    attribute (any value, including HTMLParser's "" for a bare one) or an
+    inline display:none in any case or spacing, with or without !important."""
+    if "hidden" in attrs:
+        return "the hidden attribute"
+    if _INLINE_NONE.search(attrs.get("style", "")):
+        return "an inline display:none"
+    return None
+
+
 def mrows(html: str) -> list[dict]:
     c = _Collector()
     c.feed(html)
@@ -106,6 +125,17 @@ def assert_mrow(html: str, min_rows: int = 1) -> list[dict]:
                 f"{where}: a cell can't be both data-m and data-m-label")
             if "data-m-label" in k:
                 assert k["data-m-label"].strip(), f"{where}: empty data-m-label"
+        how = _hidden_inline(r["attrs"])
+        assert not how, (
+            f"{where}: hidden with {how}; the phone grid's display:grid !important shows "
+            "it anyway, so hide a wrapper instead")
+        for tag, k in zip(r["child_tags"], kids):
+            if "data-m" in k or "data-m-label" in k:
+                how = _hidden_inline(k)
+                cell = k.get("data-m") or f"data-m-label={k.get('data-m-label')!r}"
+                assert not how, (
+                    f"{where}: tagged cell <{tag} {cell}> is hidden with {how}; the phone rules' "
+                    "display !important show it anyway, so hide a wrapper instead")
         is_link = "m-row--link" in r["attrs"].get("class", "").split()
         click = r["attrs"].get("data-click", "")
         if is_link:

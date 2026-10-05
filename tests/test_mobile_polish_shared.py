@@ -22,7 +22,9 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
    and it is what gives their labels a 44px tap height).
 6. The Server Activity history chart (initActivityHistory in actions.js)
    shows at most 3 unrotated x labels on phones, follows the 640px
-   breakpoint in place, and builds desktop with exactly its old options."""
+   breakpoint in place, and builds desktop with exactly its old options.
+7. assert_mrow (tests/_mobile.py) fails a row, or a tagged cell (data-m or
+   data-m-label), hidden inline with `hidden` or style display:none."""
 import json
 import os
 import re
@@ -31,7 +33,7 @@ import subprocess
 
 import pytest
 
-from tests._mobile import SITE_CSS, selectors
+from tests._mobile import SITE_CSS, assert_mrow, selectors
 
 PHONE = "max-width: 640px"
 ACTIONS = os.path.join(os.path.dirname(SITE_CSS), "..", "js", "actions.js")
@@ -505,3 +507,38 @@ def test_history_chart_swaps_add_no_listener_and_skip_the_old_chart(hist_desk):
     assert hist_desk["afterSecond"]["oldTouched"] == 0
     assert hist_desk["afterSecond"]["newUpdated"] == 1
     assert hist_desk["afterSecond"]["newTicks"] == _PHONE_TICKS
+
+
+# ── 7. assert_mrow rejects rows and tagged cells hidden inline ────────
+
+def _row(row_attrs="", key_attrs="", label_attrs="", lead_attrs=""):
+    return (f'<div class="m-row" data-click="toggleMRow" {row_attrs}>'
+            f'<span data-m="lead" {lead_attrs}>•</span>'
+            f'<span data-m="key" {key_attrs}>Name</span>'
+            f'<span data-m-label="Planet" {label_attrs}>Gas</span>'
+            '<span style="display:none">untagged, fine</span></div>')
+
+
+def test_assert_mrow_still_accepts_a_clean_row():
+    assert len(assert_mrow(_row())) == 1
+
+
+@pytest.mark.parametrize("where, attrs", [
+    ("row_attrs", "hidden"),
+    ("row_attrs", 'hidden="hidden"'),
+    ("row_attrs", 'style="display:none"'),
+    ("row_attrs", 'style="padding:2px; DISPLAY : None !important;"'),
+    ("key_attrs", 'style="color:red;display: none"'),
+    ("key_attrs", "hidden"),
+    ("lead_attrs", 'style="display:none;"'),
+    ("label_attrs", "hidden"),
+    ("label_attrs", 'style="display:none"'),
+])
+def test_assert_mrow_rejects_inline_hiding(where, attrs):
+    with pytest.raises(AssertionError, match=r"hidden with (the hidden attribute|an inline display:none)"):
+        assert_mrow(_row(**{where: attrs}))
+
+
+@pytest.mark.parametrize("style", ["display:contents", "display:flex", "--display:none", "visibility:hidden"])
+def test_assert_mrow_allows_other_inline_display(style):
+    assert_mrow(_row(key_attrs=f'style="{style}"'))
