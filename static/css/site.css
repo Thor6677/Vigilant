@@ -1424,9 +1424,10 @@
         margin: -0.6rem 0.4rem -0.6rem -0.75rem; z-index: 1;
     }
     .ml-char-row .ml-check { width: 20px !important; height: 20px !important; min-height: 0; margin: 0; }
-    /* View (the Ledger line): .b-btn's flex:1 would stretch the 40px
-       button across the open row. */
-    .ml-char-row > [data-m-label] > .m-tap { flex: none; }
+    /* View (the Ledger line): .b-btn's flex:1 would stretch the button
+       across the open row. It keeps the global 44px phone button height
+       (no m-tap, whose 40px would shrink it) and is at least 40px wide. */
+    .ml-char-row > [data-m-label] > .b-btn { flex: none; min-width: 40px; }
 
     /* Combined ledger lists, as R2 T4's mining.html: the ore key (By Ore
        Type, Full Detail) stays a flex line, so its icon keeps its size
@@ -1445,13 +1446,18 @@
     .ml-chart-box.is-empty { display: none; }
 
     /* Selection bar ("N character(s) selected", Clear, View Combined
-       Ledger): the buttons are m-tap; when they don't fit beside the count
-       they wrap to a line of their own, on the right, and on a very narrow
-       screen onto two. flex:none: .b-btn's flex:1 would split the line
-       evenly and wrap "View Combined Ledger" onto three lines. */
+       Ledger): when the buttons don't fit beside the count they wrap to a
+       line of their own, on the right, and on a very narrow screen onto
+       two. flex:none: .b-btn's flex:1 would split the line evenly and wrap
+       "View Combined Ledger" onto three lines. The buttons keep the global
+       44px phone button height (no m-tap, whose 40px would shrink them),
+       are at least 40px wide and take 12px labels over their inline 10px. */
     .ml-selection-bar { flex-wrap: wrap; gap: 0.5rem; }
     .ml-selection-bar > div { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-    .ml-selection-bar .b-btn { flex: none; }
+    .ml-selection-bar .b-btn { flex: none; min-width: 40px; font-size: 12px !important; }
+    /* A corp card's View Corp Ledger: 12px over its inline 9px, as the
+       selection bar's buttons. */
+    .ml-corp-view { font-size: 12px !important; }
 }
 /* ── end R3 T5 ── */
 

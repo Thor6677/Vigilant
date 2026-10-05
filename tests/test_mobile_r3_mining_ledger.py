@@ -190,7 +190,8 @@ def test_view_button_sits_in_the_ledger_cell():
         assert btn.get("data-click") == "viewLedger"
         assert btn.get("data-char-ids") == str(c["character_id"])
         assert "data-stop" in btn
-        assert {"b-btn", "m-tap"} <= set(_cls(btn)), "a 40px target on phones"
+        assert "b-btn" in _cls(btn)
+        assert "m-tap" not in _cls(btn), "m-tap's 40px would shrink the 44px button"
         assert cell["text"] == "View"
 
 
@@ -214,6 +215,8 @@ def test_corp_summary_and_empty_states_have_no_rows():
     html = _render_corp()
     assert "View Corp Ledger" in html
     assert 'data-char-ids="90000011,90000012,90000013"' in html
+    # The phone CSS lifts its 9px label to 12px by this class.
+    assert re.search(r'class="b-btn ml-corp-view"[^>]*>\s*View Corp Ledger', html)
     assert mrows(_render_corp(chars=[])) == []
     assert mrows(_render_corp(chars=[], error="boom")) == []
 
@@ -657,7 +660,8 @@ def test_selection_bar_keeps_its_hooks_with_40px_buttons():
             if t == "button" and any(x.get("id") == "selection-bar" for x in anc)}
     assert set(btns) == {"clearSelection", "viewCombined"}
     for a in btns.values():
-        assert {"b-btn", "m-tap"} <= set(_cls(a))
+        assert "b-btn" in _cls(a)
+        assert "m-tap" not in _cls(a), "m-tap's 40px would shrink the 44px button"
 
 
 def test_corp_card_head_is_not_an_m_row():
@@ -697,7 +701,18 @@ def test_checkbox_lead_is_a_40px_tap_target():
 
 def test_view_button_does_not_stretch_across_the_open_row():
     css, _ = _phone()
-    assert "flex: none" in rule_bodies(css, ".ml-char-row > [data-m-label] > .m-tap")
+    body = rule_bodies(css, ".ml-char-row > [data-m-label] > .b-btn")
+    assert "flex: none" in body and "min-width: 40px" in body
+    assert "height" not in body, "the global phone button rule gives 44px"
+
+
+def test_selection_bar_and_corp_ledger_buttons_have_12px_labels():
+    css, _ = _phone()
+    bar = rule_bodies(css, ".ml-selection-bar .b-btn")
+    for decl in ("flex: none", "min-width: 40px", "font-size: 12px !important"):
+        assert decl in bar, decl
+    assert "height" not in bar
+    assert "font-size: 12px !important" in rule_bodies(css, ".ml-corp-view")
 
 
 def test_ore_key_keeps_its_icon_beside_an_ellipsised_name():

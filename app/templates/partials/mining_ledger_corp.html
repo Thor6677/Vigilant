@@ -20,7 +20,7 @@
     <span class="b-muted-sm">{{ corp_days }} days active</span>
     <button data-click="viewLedger"
             data-char-ids="{{ char_stats | map(attribute='character_id') | join(',') }}"
-            class="b-btn" style="margin-left:auto;padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
+            class="b-btn ml-corp-view" style="margin-left:auto;padding:0.25rem 0.6rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
         View Corp Ledger
     </button>
 </div>
@@ -59,7 +59,7 @@
         <button data-click="viewLedger"
                 data-char-ids="{{ c.character_id }}"
                 data-stop
-                class="b-btn m-tap" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
+                class="b-btn" style="padding:0.15rem 0.4rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">
             View
         </button>
     </span>
