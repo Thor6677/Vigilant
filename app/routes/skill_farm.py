@@ -11,10 +11,13 @@
 Every mutating endpoint re-renders and returns the same
 `partials/skill_farm_content.html` fragment, which the page swaps as one
 unit (`#skill-farm-content`) — settings, table and add-form all come back
-server-fresh together, so there is no client-side state to reset after a
-submit and this page needs no `<script>` of its own (htmx fragments render
-without the page's CSP nonce, so any interactivity has to be plain `hx-*`
+server-fresh together, so there is no form state to reset after a submit.
+The fragment itself carries no `<script>` (htmx fragments render without
+the page's CSP nonce, so its interactivity has to be plain `hx-*`
 attributes rather than inline JS — see the partial's own header comment).
+The page has one small nonced script of its own: on phones a swap would
+close the pilot rows that were open, so it re-opens them by pilot id after
+each swap.
 
 CSRF: every mutation here is htmx; base.html's `htmx:configRequest` wiring
 attaches `X-CSRF-Token` to it automatically, so an unauthenticated caller is
