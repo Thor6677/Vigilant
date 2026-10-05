@@ -1451,7 +1451,8 @@
        view after a load; the margin clears the 46px sticky nav plus a gap. */
     .pi-chain-grid { grid-template-columns: minmax(0, 1fr) !important; }
     .pi-chain-detail-panel { position: static !important; scroll-margin-top: 52px; }
-    /* The script then focuses #chain-detail (tabindex=-1, not a control);
+    /* The script then focuses #chain-detail (a tabindex=-1 it drops on
+       blur; not a control);
        after a tap on a tile, which can't take focus, that counts as
        focus-visible and would draw a stray accent bar under the head. */
     #chain-detail:focus-visible { outline: none; }

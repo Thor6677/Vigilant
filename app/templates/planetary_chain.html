@@ -79,7 +79,7 @@
     <div>
         <div class="b-panel pi-chain-detail-panel" style="position:sticky;top:1rem;">
             <div class="b-panel-head"><span class="b-label">Detail</span></div>
-            <div id="chain-detail" tabindex="-1">
+            <div id="chain-detail">
                 <div class="b-empty" style="padding:1rem;">Click a commodity on the left to see its details.</div>
             </div>
         </div>
@@ -98,7 +98,10 @@
  * clears the sticky nav) into view, then move focus to the detail so a
  * screen reader follows. Desktop keeps it beside the list: no scroll, no
  * focus change. Called from every load path: a tile (htmx), piLoadNode and
- * the deep link. */
+ * the deep link.
+ * The detail is focusable (tabindex=-1) only from here until it loses
+ * focus: a static tabindex would let a desktop click inside it take focus,
+ * and the next key press would draw the global focus ring. */
 function piShowChainDetail() {
     if (!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) return;
     var el = document.getElementById('chain-detail');
@@ -106,6 +109,10 @@ function piShowChainDetail() {
     (el.closest('.b-panel') || el).scrollIntoView({
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
         block: 'start' });
+    if (!el.hasAttribute('tabindex')) {
+        el.setAttribute('tabindex', '-1');
+        el.addEventListener('blur', function() { el.removeAttribute('tabindex'); }, { once: true });
+    }
     el.focus({ preventScroll: true });
 }
 /* A tile loads its detail through htmx (hx-target="#chain-detail"). */

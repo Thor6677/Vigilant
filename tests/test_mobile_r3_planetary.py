@@ -22,6 +22,8 @@ import functools
 import re
 from html.parser import HTMLParser
 
+import pytest
+
 from app.pi import constants as pi_const
 from app.routes import pi as pi_mod
 from tests._mobile import (VOID, Styled, assert_mrow, assert_single_value_child, cells_rows,
@@ -410,10 +412,13 @@ def test_chain_grid_stacks_and_the_detail_panel_stops_sticking_via_hooks():
     (panel,) = _with_class(html, "pi-chain-detail-panel")
     assert "b-panel" in panel[1]
     assert panel[2] == "position:sticky;top:1rem;"          # desktop keeps it sticky
-    # tabindex=-1: the phone scroll moves focus to the loaded detail.
+    # No static tabindex: on desktop a click inside the detail would focus it,
+    # and the next key press would draw the global focus ring (D21). The phone
+    # script adds tabindex=-1 only while it moves focus there.
     assert re.search(r'class="b-panel pi-chain-detail-panel"[^>]*>\s*'
-                     r'<div class="b-panel-head">.*?<div id="chain-detail" tabindex="-1">',
+                     r'<div class="b-panel-head">.*?<div id="chain-detail">',
                      html, re.S)
+    assert not re.search(r'<div id="chain-detail"[^>]*tabindex', html)
 
 
 def test_css_chain_stacks_unsticks_and_clears_the_sticky_nav():
@@ -426,7 +431,8 @@ def test_css_chain_stacks_unsticks_and_clears_the_sticky_nav():
     # 46px sticky nav plus a gap.
     assert "scroll-margin-top: 52px" in panel
     assert rule_bodies(css, "#chain-detail") == ""
-    # The script then focuses the detail (tabindex=-1, not a control). After
+    # The script then focuses the detail (a transient tabindex=-1; it isn't a
+    # control). After
     # a tap on a tile, which can't take focus, Chrome treats that as
     # focus-visible and draws the 2px accent ring: a stray bar under the
     # Detail head. Phones drop it; desktop never focuses it programmatically.
@@ -442,8 +448,15 @@ def test_chain_script_scrolls_a_loaded_detail_into_view_on_phones_only():
     assert "return" in body[gate:body.index("scrollIntoView")], "desktop returns before scrolling"
     get = body.index("document.getElementById('chain-detail')")
     scroll = body.index("(el.closest('.b-panel') || el).scrollIntoView(")
+    # The detail only becomes focusable here, after the phone gate, and gives
+    # that up on blur, so desktop never has a focusable #chain-detail.
+    tabindex = body.index("el.setAttribute('tabindex', '-1');")
     focus = body.index("el.focus({ preventScroll: true });")
-    assert gate < get < scroll < focus
+    assert gate < get < scroll < tabindex < focus
+    guard = body.index("if (!el.hasAttribute('tabindex')) {")
+    assert gate < guard < tabindex
+    assert re.search(r"el\.addEventListener\('blur', function\(\) \{ el\.removeAttribute\('tabindex'\); \}, "
+                     r"\{ once: true \}\);", body[tabindex:focus])
     assert ("behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches "
             "? 'auto' : 'smooth'") in body
     # Every way a detail loads: a tile (htmx), a link inside the detail, a deep link.
@@ -713,6 +726,26 @@ def test_planet_detail_long_contents_show_all_past_ten():
     assert len(n.rows) == len(pins)
     assert not any("m-clamp-wrap" in anc or "is-expanded" in anc for anc in n.rows)
     assert_mrow(html, min_rows=len(pins))
+
+
+@pytest.mark.parametrize("n", [10, 11])
+def test_planet_detail_show_all_starts_past_exactly_ten(n):
+    """The clamp hides children past the 10th, so a list of exactly 10 shows
+    in full and gets no button; the 11th item is the first one hidden."""
+    pins = [{"type_id": 80004, "_kind": "storage", "_type_name": "Sample Storage Facility",
+             "contents": [{"type_id": 91001, "amount": 100 + i} for i in range(n)]}]
+    html = render_page(
+        pi_mod, "partials/planetary_planet_detail.html", "/industry/planetary/planet/1/2",
+        planet={"upgrade_level": 4, "last_update": None}, pins=pins, type_names=_TYPE_NAMES,
+        pin_group_names=pi_const.PIN_GROUP_NAMES)
+    c = clamps(html)
+    assert [k["children"] for k in c.clamps] == [n]
+    if n == 10:
+        assert not c.showall
+        assert "m-showall" not in html
+    else:
+        (button,) = c.showall
+        assert button["in_wrap"] and button["text"] == "Show all 11"
 
 
 def test_planet_detail_column_header_hides_on_phones():
