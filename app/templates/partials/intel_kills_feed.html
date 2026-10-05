@@ -7,18 +7,20 @@
        src="https://images.evetech.net/types/{{ k['victim_ship_type_id'] }}/icon?size=64"
        alt="{{ k['victim_ship'] }}">
   <div class="kf-meta">
-    <div class="kf-meta-top">
+    <div class="kf-meta-top m-hide">
       <strong>{{ k['victim_pilot'] }}</strong>
       {% if k['victim_corp'] %}[{{ k['victim_corp'] }}]{% endif %}
       · {{ k['victim_ship'] }}
       {% if k.get('is_npc') %}<span class="kf-npc-badge">NPC</span>{% endif %}
     </div>
-    <div class="kf-meta-bot">
+    <div class="kf-meta-bot m-hide">
       <span class="kf-sys-{{ k['system_band'] }}">{{ k['system_name'] }}{% if k['system_class_label'] %} ({{ k['system_class_label'] }}){% endif %}</span>
       · killed by <strong>{{ k['top_attacker_pilot'] }}</strong>
       {% if k['top_attacker_corp'] %}[{{ k['top_attacker_corp'] }}]{% endif %}
       · {% if k['gang_size'] == 1 %}solo{% else %}gang of {{ k['gang_size'] }}{% endif %}
     </div>
+    {# Phones: one truncating line, victim · ship (the rest is in the detail panel) #}
+    <div class="kf-meta-line m-only"><span class="kf-meta-victim">{{ k['victim_pilot'] }}</span> <span class="kf-meta-ship">· {{ k['victim_ship'] }}</span></div>
   </div>
   <div class="kf-isk">
     {{ "%.1f"|format(k['isk']/1e9) }}B

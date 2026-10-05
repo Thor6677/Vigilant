@@ -62,7 +62,10 @@
     </div>
   </div>
 
-  <div class="kfs-filters">
+  {# Phones fold the filter rows behind one toggle (the fold is phone CSS
+     only; the toggle is m-only, so desktop keeps every row visible). #}
+  <div class="kfs-filters kf-fold">
+    <button type="button" class="m-only kf-fold-toggle" data-click="toggleExpanded" data-toggle-target=".kf-fold" aria-expanded="false"><span class="kf-fold-label">Filters</span><span class="kf-fold-count" id="kfs-filter-count"></span></button>
     <div class="kfs-filter-row">
       <span class="kfs-glabel">Time</span>
       <span class="kfs-chip" data-time="24h">24h</span>
@@ -282,8 +285,33 @@
 
     function persist() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      updateFilterCount();
       history.replaceState(null, '', '/intel/kills/search' + buildQS());
     }
+
+    // Phones: the "Filters" toggle shows how many filter values are on
+    // (each chip, date bound and picked entity counts once). Sort, direction,
+    // Live and the Or/And/In modes shape the results but filter nothing.
+    function updateFilterCount() {
+      var n = (state.time ? 1 : 0) + (state.time_start ? 1 : 0) + (state.time_end ? 1 : 0)
+        + state.space.length + state.wh_class.length + (state.shattered ? 1 : 0)
+        + state.category.length + state.count.length + (state.isk ? 1 : 0)
+        + state.primetime.length + state.flags.length + state.ship_ids.length
+        + state.attacker_items.length + state.either_items.length + state.victim_items.length;
+      var el = document.getElementById('kfs-filter-count');
+      if (el) el.textContent = n ? n + ' active' : '';
+    }
+
+    // The toggle's aria-expanded follows the fold's is-expanded class
+    // (toggleExpanded in actions.js flips the class).
+    (function() {
+      var fold = document.querySelector('.kf-fold');
+      var btn = fold && fold.querySelector('.kf-fold-toggle');
+      if (!btn || !window.MutationObserver) return;
+      new MutationObserver(function() {
+        btn.setAttribute('aria-expanded', fold.classList.contains('is-expanded') ? 'true' : 'false');
+      }).observe(fold, { attributes: true, attributeFilter: ['class'] });
+    })();
 
     function applyChipsToDom() {
       // Single-select rows
@@ -335,6 +363,7 @@
         lt.textContent = (state.live && liveEnabled) ? '● Live' : '☐ Live';
         if (!liveEnabled) state.live = false;
       }
+      updateFilterCount();
     }
 
     function toggleListMember(list, value) {

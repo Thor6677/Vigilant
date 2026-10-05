@@ -72,7 +72,7 @@
 <div class="b-section">
   <div class="b-section-head kf-head">
     <h1 class="kf-title">KILL FEED</h1>
-    <a href="/intel/kills/search" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
+    <a href="/intel/kills/search" class="m-tap" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
     <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
   </div>
 
@@ -81,7 +81,10 @@
        hx-trigger="load"
        hx-swap="innerHTML"></div>
 
-  <div class="kf-filters">
+  {# Phones fold the filter rows behind one toggle (the fold is phone CSS
+     only; the toggle is m-only, so desktop keeps every row visible). #}
+  <div class="kf-filters kf-fold">
+    <button type="button" class="m-only kf-fold-toggle" data-click="toggleExpanded" data-toggle-target=".kf-fold" aria-expanded="false"><span class="kf-fold-label">Filters</span><span class="kf-fold-count" id="kf-filter-count"></span></button>
     <div class="kf-filter-row">
       <span class="kf-glabel">Space</span>
       <span class="kf-chip" data-space="hs">HS</span>
@@ -191,7 +194,28 @@
       });
       var whRow = document.getElementById('kf-wh-subclasses');
       if (whRow) whRow.style.display = (state.space.indexOf('wh') !== -1) ? 'flex' : 'none';
+      updateFilterCount();
     }
+
+    // Phones: the "Filters" toggle shows how many filter values are on
+    // (each chip and each picked ship / attacker / victim counts once).
+    function updateFilterCount() {
+      var n = state.space.length + state.wh_class.length + (state.shattered ? 1 : 0)
+        + state.ship_ids.length + state.attacker_ids.length + state.victim_ids.length;
+      var el = document.getElementById('kf-filter-count');
+      if (el) el.textContent = n ? n + ' active' : '';
+    }
+
+    // The toggle's aria-expanded follows the fold's is-expanded class
+    // (toggleExpanded in actions.js flips the class).
+    (function() {
+      var fold = document.querySelector('.kf-fold');
+      var btn = fold && fold.querySelector('.kf-fold-toggle');
+      if (!btn || !window.MutationObserver) return;
+      new MutationObserver(function() {
+        btn.setAttribute('aria-expanded', fold.classList.contains('is-expanded') ? 'true' : 'false');
+      }).observe(fold, { attributes: true, attributeFilter: ['class'] });
+    })();
 
     function entitySplit(arr) {
       var by = {character: [], corporation: [], alliance: []};
@@ -261,6 +285,7 @@
 
     function persist() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      updateFilterCount();
       var newQS = buildQS();
       history.replaceState(null, '', '/intel/kills' + newQS);
       var feed = document.getElementById('kf-feed');

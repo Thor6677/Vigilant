@@ -23,7 +23,7 @@
       <div class="kf-isk-block">
         <h4>ISK destroyed</h4>
         <div class="kf-isk-value">{{ "%.2f"|format(total_destroyed/1e6) }}M ISK</div>
-        <a class="kf-zkb-link" href="https://zkillboard.com/kill/{{ kid }}/" target="_blank" rel="noopener">View on zKillboard ↗</a>
+        <a class="kf-zkb-link m-tap" href="https://zkillboard.com/kill/{{ kid }}/" target="_blank" rel="noopener">View on zKillboard ↗</a>
       </div>
     </div>
 
@@ -49,8 +49,10 @@
       {% endif %}
     </div>
 
-    <div class="kf-detail-right">
+    {# Phones: no inner scroll box; the first 10 attackers, then Show all. #}
+    <div class="kf-detail-right m-clamp-wrap">
       <h4>Attackers · {{ attacker_count }} · {{ total_damage }} dmg</h4>
+      <div class="m-clamp">
       {% for a in attackers %}
       <div class="kf-attacker-compact {% if a.final_blow %}fb{% endif %}">
         <img src="https://images.evetech.net/types/{{ a.ship_id or 670 }}/icon?size=64" width="28" height="28" alt="{{ a.ship }}">
@@ -82,6 +84,10 @@
         </div>
       </div>
       {% endfor %}
+      </div>
+      {% if attackers|length > 10 %}
+      <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ attackers|length }}</button>
+      {% endif %}
     </div>
 
   </div>

@@ -1727,6 +1727,65 @@
 
 /* ── R5 T1 · kills ── */
 @media (max-width: 640px) {
+    /* Kill rows (Kill Feed and Kill Search share the row partial): ship
+       thumb, one truncating "victim · ship" line (m-only), ISK. They are not
+       m-rows: a tap still loads the full detail below (bindRowClicks), and
+       nothing here sets display on .kf-row or .kf-detail, so the feed's
+       100-row cap (inline display:none) keeps hiding rows. */
+    .kf-row { grid-template-columns: 36px minmax(0, 1fr) auto; font-size: 12px; }
+    .kf-row > .kf-meta { min-width: 0; }
+    .kf-meta-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kf-meta-line > .kf-meta-ship { color: var(--muted); }
+    .kf-row > .kf-isk { white-space: nowrap; }
+    .kf-row .kf-ago { display: none; }
+
+    /* Detail panel: victim, fitting, attackers stack in one column. The
+       open animation's 2400px cap would clip the stacked panel, and the
+       attackers lose their inner scroll box (Show all past 10 instead). */
+    .kf-detail-grid { grid-template-columns: minmax(0, 1fr); }
+    .kf-detail.shown { max-height: none; }
+    .kf-detail-right { max-height: none; overflow: visible; padding-right: 0; }
+
+    /* Filters fold behind one 44px toggle (m-only); without .is-expanded
+       every other child of the fold is hidden. Desktop never folds. */
+    .kf-fold > .kf-fold-toggle {
+        display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px;
+        padding: 0 0.85rem; background: none; border: 1px solid var(--border);
+        color: var(--text); font-family: inherit; font-size: 12px;
+        letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+    }
+    .kf-fold-toggle > .kf-fold-label { flex: 1; text-align: left; color: var(--muted); }
+    .kf-fold-toggle > .kf-fold-count { color: var(--accent); }
+    .kf-fold-toggle::after { content: "▾"; content: "▾" / ""; color: var(--muted); }
+    .kf-fold.is-expanded > .kf-fold-toggle::after { content: "▴"; content: "▴" / ""; }
+    .kf-fold:not(.is-expanded) > :not(.kf-fold-toggle) { display: none !important; }
+
+    /* Inside the fold: a row's label heads it, and chips, picked-entity
+       chips and autocomplete results are 40px. Two classes beat the pages'
+       own <style> blocks, which load after this file. */
+    .kf-fold .kf-glabel, .kf-fold .kfs-glabel { flex-basis: 100%; min-width: 0; margin: 4px 0 0; }
+    .kf-fold .kf-chip, .kf-fold .kfs-chip {
+        display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; font-size: 12px;
+    }
+    .kf-fold .kf-chip-removable, .kf-fold .kfs-chip-removable {
+        min-height: 40px; padding: 0 0 0 10px; font-size: 12px;
+    }
+    .kf-fold .kf-chip-removable .x, .kf-fold .kfs-chip-removable .x {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px;
+    }
+    .kf-fold .kfs-mode-btn { min-width: 40px; font-size: 11px; }
+    .kf-fold .kf-ac, .kf-fold .kfs-ac { flex: 1 1 100%; }
+    .kf-fold .kf-ac-input, .kf-fold .kfs-ac-input { width: 100%; }
+    .kf-fold .kf-ac-results, .kf-fold .kfs-ac-results { min-width: 0; right: 0; }
+    .kf-fold .kf-ac-result, .kf-fold .kfs-ac-result {
+        min-height: 40px; padding: 10px 12px; line-height: 20px; font-size: 12px;
+    }
+    .kf-fold .kfs-date-input { flex: 1 1 100%; width: auto; }
+
+    /* Most valuable · last 7 days: two cards a row, smaller renders. */
+    .kf-top-section > .kf-top-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kf-top-card > .kf-top-img { width: 64px; height: 64px; }
 }
 /* ── end R5 T1 ── */
 
