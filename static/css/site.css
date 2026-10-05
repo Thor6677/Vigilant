@@ -1215,6 +1215,9 @@
     .mfg-tile > .mfg-tile-label { flex: none; margin: 0 !important; }
     .mfg-tile > .mfg-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
     .mfg-tile > .mfg-tile-sub { flex-basis: 100%; margin-top: 0 !important; }
+    /* Their inline 9px labels and 8px captions are 11px, the size of the
+       other label · value lines' labels. */
+    .mfg-tile > .mfg-tile-label, .mfg-tile > .mfg-tile-sub { font-size: 11px !important; }
 
     /* Material rows (bill of materials and component panels, D2 A) and
        shopping-list rows (D4 A). Both keys at 12px: key 1's outer cell has
@@ -1254,6 +1257,16 @@
     #build-all-btn,
     .mfg-comp > .m-stack > .b-btn { min-width: 40px; font-size: 12px !important; }
     #build-all-btn { flex: none; }
+
+    /* Small text at 11px over its inline 8–9px: "has blueprint" beside each
+       Build ▸, a component panel's ME / Structure / Rig / Security labels,
+       its Build Cost / Buy Cost labels and their Save / each captions
+       (every line of the comparison but the value), and the Multibuy hint
+       under the shopping list's text box. */
+    .mfg-build > span,
+    .mfg-comp > .m-stack label,
+    .mfg-cmp > div > div:not(:nth-child(2)),
+    #multibuy-text + div { font-size: 11px !important; }
 }
 /* ── end R3 T1 ── */
 

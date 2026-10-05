@@ -560,3 +560,25 @@ def test_t1_css_buttons_keep_the_44px_floor_with_12px_labels():
         assert _decl(body, "font-size", "12px !important"), sel
         assert "min-height" not in body and not re.search(r"(?<![-\w])height\s*:", body), sel
     assert _decl(rule_bodies(css, "#build-all-btn"), "flex", "none")
+
+
+def test_component_panel_build_buy_comparison_has_its_hook():
+    """Phones lift the comparison's 9px labels and captions to 11px; the
+    value (each column's second line) keeps its 13px."""
+    root = _tree(_render_component())
+    cmp_, = root.find("mfg-cmp")
+    cols = cmp_.children
+    assert [c.children[0].full_text() for c in cols] == ["Build Cost", "Buy Cost"]
+    for col in cols:
+        assert "font-size:13px" in col.children[1].attrs["style"].replace(" ", "")
+
+
+def test_t1_css_small_text_is_11px():
+    """Inline 8–9px text on the calculator: tile labels and captions, "has
+    blueprint", a component panel's setting labels, its Build/Buy Cost
+    labels and captions, and the Multibuy hint. !important beats inline."""
+    css = _phone()
+    for sel in (".mfg-tile > .mfg-tile-label", ".mfg-tile > .mfg-tile-sub", ".mfg-build > span",
+                ".mfg-comp > .m-stack label", ".mfg-cmp > div > div:not(:nth-child(2))",
+                "#multibuy-text + div"):
+        assert _decl(rule_bodies(css, sel), "font-size", "11px !important"), sel

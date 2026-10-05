@@ -62,8 +62,9 @@
         </button>
     </div>
 
-    {# Build vs Buy comparison #}
-    <div style="display:flex;border-bottom:1px solid var(--border);">
+    {# Build vs Buy comparison. Phones: its 9px labels and captions are
+       11px (mfg-cmp, site.css R3 T1). #}
+    <div class="mfg-cmp" style="display:flex;border-bottom:1px solid var(--border);">
         <div style="flex:1;padding:0.5rem 0.75rem;text-align:center;border-right:1px solid var(--border);">
             <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;">Build Cost</div>
             <div style="font-size:13px;font-weight:600;color:{% if total_build_cost < total_buy_cost and total_buy_cost > 0 %}var(--success){% else %}var(--text){% endif %};">
