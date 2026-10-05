@@ -292,7 +292,9 @@ def test_blueprint_css_filter_row_is_a_two_column_grid():
     btn = _decls(".bp-filters > .b-btn")
     assert btn["white-space"] == "nowrap"
     assert btn["font-size"] == "12px !important"            # beats the inline 10px
-    assert btn["min-height"] == "40px"
+    # No height: the global phone .b-btn rule's 44px applies (a 40px
+    # min-height here outranked it and shrank the links).
+    assert "min-height" not in btn and "height" not in btn
     assert btn["display"] == "flex" and btn["align-items"] == "center"
     sep = _decls(".bp-filters > .bp-filter-sep")
     assert sep["grid-column"] == "1 / -1"                   # a spacer row between the two groups

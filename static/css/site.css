@@ -993,11 +993,13 @@
     /* Blueprint filter row (ISS-111): two buttons per line, each on one
        line. The separator becomes an empty spacer row between the filter
        and group-by buttons. Inline display, gap and font-size need the
-       !important. The active button's accent border is inline and stays. */
+       !important. The active button's accent border is inline and stays.
+       The buttons keep the global phone .b-btn height of 44px (no height
+       here); flex centres each label in it. */
     .bp-filters { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
     .bp-filters > .b-btn {
         display: flex; align-items: center; justify-content: center;
-        min-height: 40px; font-size: 12px !important; white-space: nowrap;
+        font-size: 12px !important; white-space: nowrap;
     }
     .bp-filters > .bp-filter-sep { grid-column: 1 / -1; height: 0; overflow: hidden; }
 }
