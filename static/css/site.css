@@ -2081,6 +2081,9 @@
     #changes-list .m-row {
         grid-template-columns: auto minmax(0, 1fr) fit-content(60%) 14px !important;
         padding-left: 0 !important; padding-right: 0 !important;
+        /* The page drops the last row's bottom border, which left it at
+           38.98px; hold every row at the 40px floor. */
+        min-height: 40px;
     }
     #changes-list .m-row > [data-m="key"] ~ [data-m="key"] { overflow: hidden; text-overflow: ellipsis; }
     /* No labelled line repeats the counterparty, so an open row wraps key 2
@@ -2094,8 +2097,10 @@
     /* The counterparty link is the phone's only way to that alliance. In an
        open row key 2 stops clipping (above), and padding with a matching
        negative margin gives the link a 40px+ hit area without moving its
-       text. */
-    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] > a { padding: 14px 0; margin: -14px 0; }
+       text. The text sits about 11px below the row's top, so the area grows
+       10px up and 18px down: it stays inside its own row instead of
+       catching a tap meant for the row above. */
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] > a { padding: 10px 0 18px; margin: -10px 0 -18px; }
 }
 /* ── end R5 T5 ── */
 

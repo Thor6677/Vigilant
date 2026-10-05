@@ -355,4 +355,7 @@ def test_alliance_keys_reach_12px_and_the_open_link_gets_a_tap_area():
     open_k2 = '#changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"]'
     assert "overflow: visible" in rule_bodies(phone, open_k2), "a clipped key 2 would cut the hit area"
     link = rule_bodies(phone, open_k2 + " > a")
-    assert "padding: 14px 0" in link and "margin: -14px 0" in link
+    # 10px up, 18px down: the text sits ~11px below the row top, so a larger
+    # top pad would reach into the row above and steal its tap.
+    assert "padding: 10px 0 18px" in link and "margin: -10px 0 -18px" in link
+    assert "min-height: 40px" in rule_bodies(phone, "#changes-list .m-row"), "the borderless last row"
