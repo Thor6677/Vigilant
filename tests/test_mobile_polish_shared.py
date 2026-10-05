@@ -14,7 +14,8 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
 3. toggleExpanded (actions.js) keeps its trigger's aria-expanded in step with
    the target's is-expanded, sets it once on load and after htmx swaps, and
    moves focus to the first revealed row when a Show all hides itself. Run
-   in Node against a stub DOM (as test_details_keep_open.py does)."""
+   in Node against a stub DOM (as test_details_keep_open.py does).
+4. Entity-link chips (_entity_links.html) are 40px phone targets, 8px apart."""
 import json
 import os
 import re
@@ -326,3 +327,28 @@ def test_closing_never_moves_focus(toggle):
 
 def test_htmx_settle_initialises_the_swapped_subtree_only(toggle):
     assert toggle["settle"] == {"late": "true", "outside": None}
+
+
+# ── 4. entity-link chips are tap targets on phones ────────────────────
+
+def test_entity_link_chips_are_40px_targets():
+    body = _polish_rule([".el-chip"])
+    for prop, value in (("display", "inline-flex"), ("align-items", "center"),
+                        ("justify-content", "center"), ("min-height", "40px"),
+                        ("min-width", "40px"), ("font-size", "12px")):
+        assert _decl(body, prop) == value, prop
+    # The is-ext arrow is a flex item now; the gap keeps the space before it.
+    assert _decl(body, "gap") == "0.3em"
+
+
+def test_entity_link_chips_are_8px_apart():
+    assert _decl(_polish_rule([".el-chips"]), "gap") == "8px"
+
+
+def test_entity_link_chip_desktop_rule_is_untouched():
+    """Desktop keeps the small muted chip: the base rule is outside every
+    media query and still 10px with 2px 7px padding."""
+    base = [body for sels, body in _rules(_outside_phone(_strip(_raw()))) if sels == [".el-chip"]]
+    assert len(base) == 1
+    assert _decl(base[0], "font-size") == "10px"
+    assert _decl(base[0], "padding") == "2px 7px"

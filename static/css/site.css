@@ -895,6 +895,17 @@
        Chrome 123 / Safari 17.4 and later; older engines keep the label at
        the top, as before. */
     .b-btn:not(button) { align-content: center; }
+
+    /* Entity-link chips (partials/_entity_links.html: the kill detail panel,
+       the wormhole system page) were 20px tall on phones. 40px targets, 8px
+       apart (mobile design §4.6). inline-flex makes an .is-ext chip's ↗
+       (::after) a flex item, which drops the space in its content, so the
+       gap stands in for it, as R2 T3's .ent-zkb does. */
+    .el-chips { gap: 8px; }
+    .el-chip {
+        display: inline-flex; align-items: center; justify-content: center; gap: 0.3em;
+        min-height: 40px; min-width: 40px; padding: 0 10px; font-size: 12px;
+    }
 }
 
 /* ── R2 T1 · character overview ── */
