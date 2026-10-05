@@ -1828,7 +1828,48 @@
 
 /* ── R6 T2 · structure timers ── */
 @media (max-width: 640px) {
+    /* Active rows (D3 A). Lead: the phase code on its desktop chip colour,
+       one width for S and AN alike so names line up. min-width beats
+       `.m-row > * { min-width: 0 !important }`. */
+    .timer-row > .st-lead {
+        justify-content: center; min-width: 22px !important; height: 18px; padding: 0 3px;
+        border-radius: 2px; color: #000; font-size: 10px; font-weight: 700; line-height: 1;
+    }
+    .timer-row > [data-m="key"] { font-size: 12px; }
+    .timer-row > .st-name { font-weight: 600; color: var(--text); }
+    .timer-row > .st-cd { font-variant-numeric: tabular-nums; }
+
+    /* Actions (D4 A): Edit, Discord and × side by side. .b-btn's flex:1
+       would stretch each across the open row. */
+    .timer-row > [data-m-label] > .st-actions {
+        display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.5rem;
+    }
+    .st-actions > .b-btn, .st-actions > form > .b-btn { flex: none; }
+    .st-actions > form { display: flex; margin: 0; }
+
+    /* Archived rows (D5 A): both keys at 12px; the name is the desktop cell,
+       inline 10px. Delete is a 40px × that mustn't stretch either. */
+    .st-arch > [data-m="key"] { font-size: 12px !important; }
+    .st-arch > [data-m-label] > .m-tap { flex: none; }
+
+    /* Filter buttons are m-tap (12px); less tracking than the desktop
+       0.18em keeps the 12px labels compact. */
+    .st-filters > .range-btn { letter-spacing: 0.1em; }
+
+    /* Add Timer, Edit and the ACL rows: the fields' inline 10px and tight
+       padding need !important (16px also stops iOS zooming in). */
+    .st-form input:not([type="radio"]):not([type="hidden"]),
+    .st-form select, .st-form textarea { font-size: 16px !important; padding: 0.45rem 0.6rem !important; }
+    /* Hostile / Friendly: the label is the 40px target, at 12px. The radio
+       drops the phone layer's 44px input min-height, which sat it below
+       its label's text. */
+    .st-form label { min-height: 40px; font-size: 12px !important; }
+    .st-form input[type="radio"] { min-height: 0; margin: 0 0.35rem 0 0; }
 }
+/* Every width: the filter hides rows with `hidden`. On desktop
+   .b-table-row's display:flex beats the browser's own [hidden]; on phones
+   this (0,2,0) beats .m-row's display:grid !important (0,1,0). */
+.timer-row[hidden] { display: none !important; }
 /* ── end R6 T2 ── */
 
 /* ── R6 T3 · images/discord/age ── */
