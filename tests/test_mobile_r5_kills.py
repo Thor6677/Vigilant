@@ -423,6 +423,10 @@ def test_fold_toggle_aria_expanded_follows_the_fold(name):
     assert "new MutationObserver(" in body
     assert "btn.setAttribute('aria-expanded', fold.classList.contains('is-expanded') ? 'true' : 'false')" in body
     assert ".observe(fold, { attributes: true, attributeFilter: ['class'] })" in body
+    # A misspelt feature check would return early every time, and a missing
+    # trailing () would leave the observer never set up.
+    assert "if (!btn || !window.MutationObserver) return;" in body
+    assert body.rstrip().endswith("attributeFilter: ['class'] });")
 
 
 def test_search_filter_count_leaves_out_sort_and_modes():
