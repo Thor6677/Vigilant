@@ -1886,6 +1886,26 @@
 
 /* ── R5 T5 · maps/alliance ── */
 @media (max-width: 640px) {
+    /* Star Map / Wormhole Map: 100vh includes iOS's collapsing URL bar, which
+       covered the bottom of the map. dvh is the visible height; the vh line
+       stays as the fallback. The id outranks the template's own #map-root
+       rule, which loads after this file. */
+    #map-root.map-fill { height: calc(100vh - 48px); height: calc(100dvh - 48px); }
+
+    /* Alliance, Recent Changes rows. The list keeps its own side padding, as
+       on desktop, so the rows drop theirs. Key 2 ("from X") can hold a
+       50-character alliance name: its column stops at 60% of the row and
+       ellipsises, so the system in key 1 keeps its room. */
+    #changes-list .m-row {
+        grid-template-columns: auto minmax(0, 1fr) fit-content(60%) 14px !important;
+        padding-left: 0 !important; padding-right: 0 !important;
+    }
+    #changes-list .m-row > [data-m="key"] ~ [data-m="key"] { overflow: hidden; text-overflow: ellipsis; }
+    /* No labelled line repeats the counterparty, so an open row wraps key 2
+       to show the whole name, with the arrow, system and chevron on its
+       first line. */
+    #changes-list .m-row.is-open:not(.m-row--link) { align-items: start !important; }
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
 }
 /* ── end R5 T5 ── */
 

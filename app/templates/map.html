@@ -38,7 +38,9 @@
 {% endblock %}
 
 {% block content %}
-<div id="map-root">
+{# map-fill: on phones site.css swaps 100vh for 100dvh, so iOS's URL bar
+   doesn't cover the bottom of the map. #}
+<div id="map-root" class="map-fill">
     <div id="map-loading">
         <div class="spinner"></div>
         Loading star map...

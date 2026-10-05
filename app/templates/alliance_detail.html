@@ -38,7 +38,9 @@
     <div class="b-panel-head">
         <span class="b-label">Recent Changes · 7d</span>
     </div>
-    <div id="changes-list" style="padding:0.5rem 0.75rem;font-size:11px;max-height:500px;overflow-y:auto;">
+    {# m-unclamp: on phones the list drops its inner scroll (it can't trap
+       touch scrolling) and shows 10 rows plus "Show all N" instead. #}
+    <div id="changes-list" class="m-unclamp" style="padding:0.5rem 0.75rem;font-size:11px;max-height:500px;overflow-y:auto;">
         <div class="b-muted">Loading…</div>
     </div>
 </div>
@@ -108,7 +110,12 @@
     if (!detail.recent_changes || !detail.recent_changes.length) {
         cl.innerHTML = '<div class="b-muted">No sovereignty changes in the last 7 days.</div>';
     } else {
-        cl.innerHTML = detail.recent_changes.map(c => {
+        // Phones (mobile R5, D16 A): each row is an expand-on-tap m-row.
+        // Lead is the arrow, key 1 the system, key 2 "from/to X"; opened,
+        // it shows Name, Region and When. The m-only cells are display:none
+        // above 640px, so desktop keeps its four grid cells. The list shows
+        // 10 rows plus "Show all N" on phones (m-clamp).
+        const rows = detail.recent_changes.map(c => {
             const sys = systemMap.get(c.system_id);
             const sysName = sys?.name || ('System ' + c.system_id);
             const regName = sys?.regName || '';
@@ -116,20 +123,28 @@
             const otherName = other ? (names[other] || ('Alliance ' + other)) : 'Unclaimed';
             const when = new Date(c.changed_at).toISOString().slice(0, 16).replace('T', ' ');
             return `
-                <div class="b-change-row">
-                    <span class="b-change-dir ${c.direction}">${c.direction === 'gain' ? '▲' : '▼'}</span>
+                <div class="b-change-row m-row" data-click="toggleMRow">
+                    <span class="b-change-dir ${c.direction}" data-m="lead">${c.direction === 'gain' ? '▲' : '▼'}</span>
+                    <span class="m-only" data-m="key" style="color:var(--accent);">${sysName}</span>
+                    <span class="m-only" data-m-label="Name">${sysName}</span>
                     <span>
                         <span style="color:var(--accent);">${sysName}</span>
                         <span style="color:var(--muted);font-size:9px;margin-left:0.5rem;">${regName}</span>
                     </span>
-                    <span style="color:var(--muted);font-size:10px;">
+                    ${regName ? `<span class="m-only" data-m-label="Region">${regName}</span>` : ''}
+                    <span style="color:var(--muted);font-size:10px;" data-m="key">
                         ${c.direction === 'gain' ? 'from' : 'to'}
                         ${other ? `<a class="b-text" href="/alliance/${other}">${otherName}</a>` : otherName}
                     </span>
-                    <span style="color:var(--muted);font-size:9px;">${when}</span>
+                    <span style="color:var(--muted);font-size:9px;" data-m-label="When">${when}</span>
                 </div>
             `;
         }).join('');
+        const n = detail.recent_changes.length;
+        cl.innerHTML = `<div class="m-clamp-wrap"><div class="m-clamp">${rows}</div>` +
+            (n > 10 ? `<button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all ${n}</button>` : '') +
+            `</div>`;
+        if (window.mRowInit) window.mRowInit(cl);
     }
 })();
 </script>
