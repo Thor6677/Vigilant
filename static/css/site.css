@@ -1479,6 +1479,37 @@
 
 /* ── R4 T4 · corp inventory/contracts ── */
 @media (max-width: 640px) {
+    /* Tracked items, hangar scan and contract thresholds (D10–D12 A): both
+       keys at 12px, as other phone rows' keys. Their desktop spans carry
+       11px inline. */
+    .cinv-item > [data-m="key"],
+    .cinv-scan > [data-m="key"],
+    .cctr-item > [data-m="key"] { font-size: 12px !important; }
+
+    /* Tracked items' location heading: .b-row-label doesn't shrink, so a
+       long structure name would widen the page. It wraps instead. */
+    .cinv-loc > .b-row-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+    /* Contract title matches: the "T" glyph lead keeps its 24px box.
+       `.m-row > *` sets width:auto, which would shrink it to the letter. */
+    .cctr-item > span[data-m="lead"] { width: 24px !important; }
+
+    /* Hangar scan, Track line of an opened row: the Low and Critical inputs
+       and the button are one group. Its inline display:contents (desktop
+       keeps them as row cells) would otherwise spill them into the cell as
+       separate items. stretch: the 44px inputs and the button share one
+       height. The inputs widen from the desktop 50px to fit 16px digits. */
+    .cinv-scan > [data-m-label="Track"] > span { display: inline-flex !important; align-items: stretch; gap: 6px; }
+    .cinv-scan > [data-m-label="Track"] > span > input { width: 4.5rem !important; }
+
+    /* "Show all" inside the bordered scan box: inset, so its border doesn't
+       double against the box's sides. */
+    .cinv-scan-wrap .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* Item type search results (Add Item, Add Threshold): 40px rows at
+       12px. The rows come from the shared type-search route. */
+    .cinv-results > .b-row { min-height: 40px; }
+    .cinv-results > .b-row > .b-row-val { font-size: 12px; }
 }
 /* ── end R4 T4 ── */
 
