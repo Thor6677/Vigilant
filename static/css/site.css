@@ -1789,13 +1789,17 @@
     /* Every 3rd hour keeps its label (hours 0, 3 … 21: child 1 is the empty
        gutter, so hour h is child h+2). visibility keeps each label's track. */
     #ta-hm-col-labels > div[data-hr]:not(:nth-child(3n+2)) { visibility: hidden; }
-    .ta-hm-readout { margin-top: 0.5rem; min-height: 1.5em; font-size: 12px; color: var(--text); }
+    /* Three lines held from the start (a per-capita title wraps to three at
+       360px), so the first tap doesn't push the legend down. */
+    .ta-hm-readout { margin-top: 0.5rem; min-height: 5em; font-size: 12px; color: var(--text); }
 
     /* Tap targets. Every .b-btn here is already 44px tall (the global
        phone floor), so nothing sets a height and nothing uses m-tap, whose
        40px !important would shrink them. The live delta buttons and the
        clock toggle widen to 44px; their inline 9px/10px needs !important. */
     #ta-delta-btns > .ta-delta-btn, #ta-tz-toggle { min-width: 44px; font-size: 12px !important; }
+    /* Compare carries the same inline 10px; it matches the page's 12px. */
+    #ta-compare-toggle { font-size: 12px !important; }
 
     /* Heatmap controls: one group per line, the region select on a line of
        its own under the label and filter box. */

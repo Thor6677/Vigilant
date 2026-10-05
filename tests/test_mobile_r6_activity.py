@@ -544,6 +544,16 @@ def test_readout_is_styled_on_phones():
     phone, _ = _phone()
     d = _decls(rule_bodies(phone, ".ta-hm-readout"))
     assert d.get("font-size") == "12px"
+    # A per-capita title wraps to three lines at 360px; holding that height
+    # from the start keeps the first tap from pushing the legend down.
+    assert d.get("min-height") == "5em"
+
+
+def test_compare_button_text_matches_the_page_on_phones():
+    phone, _ = _phone()
+    d = _decls(rule_bodies(phone, "#ta-compare-toggle"))
+    assert d.get("font-size") == "12px !important"
+    assert "min-height" not in d and "height" not in d
 
 
 def test_new_hook_classes_have_no_rules_outside_the_phone_block():
