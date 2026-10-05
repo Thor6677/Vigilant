@@ -494,10 +494,8 @@
     /* Crossing 640px (a phone rotated, a window resized) rebuilds the chart
        with that width's options, at the range on show. With no ledger
        loaded there is no chart to rebuild. The query is read when the
-       event is handled, not from the event: a change that has already
-       flipped back by then (a headless full-page capture shrinks the
-       window and restores it) leaves the chart on the side it was built
-       for, and it is kept. */
+       event is handled, not from the event, and a change whose answer
+       matches the side the chart was last built for is skipped. */
     function rebuildForWidth() {
         if (fullChartData && phoneMq.matches !== lastBuiltSide) {
             buildMiningChart(fullChartData, currentDays);

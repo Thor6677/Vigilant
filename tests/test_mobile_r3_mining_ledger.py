@@ -637,9 +637,9 @@ def test_crossing_640px_rebuilds_the_chart_at_the_range_on_show(chart_run):
 
 def test_a_media_change_on_the_same_side_never_rebuilds_the_chart(chart_run):
     """The listener rebuilds only when the query's answer differs from the
-    side the chart was last built for (lastBuiltSide). A change event that
-    leaves it on the same side, as a headless full-page capture's resize
-    can, keeps the chart it has."""
+    side the chart was last built for (lastBuiltSide). A change event whose
+    answer, read when it is handled, matches that side keeps the chart it
+    has."""
     assert chart_run["samePhone"] == 0
     assert chart_run["toDesktop"] == 1
     assert chart_run["sameDesktop"] == 0
