@@ -549,6 +549,27 @@ def test_advanced_search_link_is_a_tap_target():
     assert len(links) == 1 and "m-tap" in links[0].classes
 
 
+def test_search_back_link_centres_its_label_in_the_reset_height():
+    """The actions row stretches the link to the 44px Reset button's
+    height; flex centres its label there."""
+    phone, _ = phone_block(_section("T1"))
+    body = rule_bodies(phone, ".kfs-head-actions > a.kfs-btn")
+    assert re.search(r"display:\s*flex", body) and re.search(r"align-items:\s*center", body)
+    src = source("intel_kills_search.html")
+    assert re.search(r'<div class="kfs-head-actions">\s*<button type="button" class="kfs-btn" id="kfs-reset">'
+                     r'Reset</button>\s*<a class="kfs-btn" href="/intel/kills"', src)
+
+
+def test_new_pill_margin_cancels_its_44px_phone_height():
+    """The page's -28px fits its 28px desktop pill; the phone button rule
+    makes it 44px, so -28px pushed the feed down 16px when it showed."""
+    phone, _ = phone_block(_section("T1"))
+    assert re.search(r"margin-bottom:\s*-44px", rule_bodies(phone, "button#kf-new-pill"))
+    src = source("intel_kills.html")
+    assert "margin:8px auto -28px" in src, "the desktop rule this offsets"
+    assert '<button type="button" id="kf-new-pill"' in src
+
+
 # ── desktop stays identical ───────────────────────────────────────────
 
 def test_section_has_no_desktop_rule():

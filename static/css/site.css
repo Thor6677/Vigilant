@@ -1847,6 +1847,20 @@
     /* A tapped card's detail opens below both grids, so the page scrolls it
        up; the scroll stops clear of the sticky 46px nav. */
     #kf-top-detail-slot { scroll-margin-top: 56px; }
+
+    /* Kill Search's head: "← Back to live feed" is a link, stretched by
+       the actions row to the height of the 44px Reset button beside it;
+       flex centres its label in that height instead of leaving it at the
+       top. */
+    .kfs-head-actions > a.kfs-btn { display: flex; align-items: center; }
+    /* The Kill Feed's "↑ N new" pill floats over the feed's top: its
+       negative bottom margin cancels its height, so showing it doesn't push
+       the feed down (its top margin collapses into the line above). The
+       page's -28px fitted the 28px desktop pill; the global phone button
+       rule makes it 44px, which pushed the feed down 16px. The element
+       outranks the page's own #kf-new-pill rule, which loads after this
+       file. */
+    button#kf-new-pill { margin-bottom: -44px; }
 }
 /* ── end R5 T1 ── */
 
